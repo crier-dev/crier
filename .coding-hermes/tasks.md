@@ -2,7 +2,7 @@
 
 ## Open
 
-- [ ] **CI-002: Port mesh + peer connection from Hivemind**
+- [x] **CI-002: Port mesh + peer connection from Hivemind**
   - Port `PeerConnection` — gorilla/websocket dial, read loop, Send, Close, callbacks (~168 lines)
   - Port `Mesh` — connect, register, keepalive, SendRequest, handleMessage (~293 lines)
   - Port federation message types — Envelope, Register, Keepalive, Request, Response, Error (~146 lines)
