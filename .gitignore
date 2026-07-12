@@ -1,0 +1,40 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+!.env.example
+
+# Generated
+node_modules/
+dist/
+
+# Hilo
+.vfs/
+
+# GitReins history
+.gitreins/history/
+
+# OpenCode
+.opencode/
+.axiom/
