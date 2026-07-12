@@ -1,0 +1,11 @@
+tasks:
+- id: ci-005-openapi-spec
+  title: Seed OpenAPI 3.1 spec as single source of truth
+  criteria:
+  - OpenAPI spec exists at docs/openapi.yaml with version 0.1.0
+  - 'All five operation groups present: Health, Relay, Registry, Inbox, Ack'
+  - 'Relay: publish, subscribe (WebSocket upgrade), list topics endpoints defined'
+  - 'Registry: CRUD for agents with capabilities and public_key fields'
+  - 'Inbox: deliver, retrieve (with lease), ack endpoints defined per agent'
+  status: pending
+  created_at: '2026-07-12T01:53:21.840145+00:00'

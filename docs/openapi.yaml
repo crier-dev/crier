@@ -1,0 +1,225 @@
+openapi: "3.1.0"
+info:
+  title: Crier — Agent Message Bus
+  description: |
+    Communication backbone for the autonomous agent economy.
+    Four primitives: relay, mesh, registry, inboxes.
+  version: "0.1.0"
+servers:
+  - url: http://localhost:8767
+    description: Local development
+paths:
+  # ── Health ──
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ── Relay: Pub/Sub ──
+  /relay/publish:
+    post:
+      operationId: relayPublish
+      summary: Publish an event to a topic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, event]
+              properties:
+                topic:
+                  type: string
+                  description: Topic name (dot-separated, supports wildcard subscribers)
+                event:
+                  type: object
+                  description: Event payload
+      responses:
+        "202":
+          description: Event accepted for delivery
+        "429":
+          description: Rate limit exceeded
+
+  /relay/subscribe/{topic}:
+    get:
+      operationId: relaySubscribe
+      summary: Subscribe to topic via WebSocket
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade — events streamed as JSON frames
+
+  /relay/topics:
+    get:
+      operationId: relayListTopics
+      summary: List active topics
+      responses:
+        "200":
+          description: Active topics with subscriber counts
+
+  # ── Agent Registry ──
+  /agents:
+    get:
+      operationId: registryListAgents
+      summary: List registered agents
+      responses:
+        "200":
+          description: Array of registered agents with health status
+    post:
+      operationId: registryRegisterAgent
+      summary: Register a new agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, public_key]
+              properties:
+                id:
+                  type: string
+                  description: Agent identifier
+                public_key:
+                  type: string
+                  description: Ed25519 public key (hex-encoded)
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: Advertised capabilities
+      responses:
+        "201":
+          description: Agent registered
+        "409":
+          description: Agent ID already registered
+
+  /agents/{id}:
+    get:
+      operationId: registryGetAgent
+      summary: Get agent details and health
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent detail with health status
+        "404":
+          description: Agent not found
+    delete:
+      operationId: registryUnregisterAgent
+      summary: Unregister an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Agent unregistered
+
+  # ── Inboxes ──
+  /agents/{id}/inbox:
+    post:
+      operationId: inboxDeliver
+      summary: Deliver a message to an agent's inbox
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: object
+                  description: Message payload
+                priority:
+                  type: integer
+                  minimum: 0
+                  maximum: 9
+                  default: 0
+                ttl_seconds:
+                  type: integer
+                  description: Message expiry (0 = never)
+      responses:
+        "202":
+          description: Message queued
+        "404":
+          description: Agent not found
+    get:
+      operationId: inboxRetrieve
+      summary: Retrieve undelivered messages from inbox
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: lease_seconds
+          in: query
+          schema:
+            type: integer
+            default: 30
+            description: Duration to lease messages (prevents double delivery)
+      responses:
+        "200":
+          description: Array of leased messages
+        "404":
+          description: Agent not found
+
+  /agents/{id}/inbox/ack:
+    post:
+      operationId: inboxAck
+      summary: Acknowledge message delivery (release lease)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_ids]
+              properties:
+                message_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Messages acknowledged
