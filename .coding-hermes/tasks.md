@@ -2,12 +2,6 @@
 
 ## Open
 
-- [ ] **CI-001: Wire relay server** — HTTP endpoints for pub/sub with topic routing
-  - POST /publish — publish event to topic
-  - GET /subscribe/{topic} — WebSocket upgrade for topic subscription
-  - GET /topics — list active topics
-  - _Load: exhaustive-specification_
-
 - [ ] **CI-002: Wire agent registry** — agent registration, discovery, health
   - POST /agents/register — register agent with capabilities + public key
   - GET /agents — list registered agents
@@ -28,9 +22,9 @@
   - Request/response correlation
   - _Load: exhaustive-specification_
 
-- [ ] **CI-005: OpenAPI 3.1 spec** — single source of truth for all endpoints
-  - Covers relay, registry, inbox, mesh
-  - Auto-generates MCP tools
-  - _Load: exhaustive-specification_
-
 ## Done
+
+- [x] **CI-001: Wire relay server** — HTTP endpoints for pub/sub with topic routing (done 2026-07-11)
+  - POST /relay/publish, GET /relay/subscribe/{topic} (WebSocket), GET /relay/topics
+  - 87.4% coverage, 13 tests, 7/7 GitReins criteria PASS
+- [x] **CI-005: OpenAPI 3.1 spec** — single source of truth for all endpoints (done 2026-07-11)

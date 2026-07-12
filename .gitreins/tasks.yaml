@@ -7,5 +7,22 @@ tasks:
   - 'Relay: publish, subscribe (WebSocket upgrade), list topics endpoints defined'
   - 'Registry: CRUD for agents with capabilities and public_key fields'
   - 'Inbox: deliver, retrieve (with lease), ack endpoints defined per agent'
-  status: pending
+  status: complete
   created_at: '2026-07-12T01:53:21.840145+00:00'
+  completed_at: '2026-07-12T01:57:05.903962+00:00'
+- id: ci-001-relay-server
+  title: Wire relay server with HTTP pub/sub and WebSocket topic routing
+  criteria:
+  - POST /relay/publish endpoint exists and accepts JSON with topic and event fields
+    returning 202
+  - GET /relay/subscribe/{topic} endpoint exists with WebSocket upgrade returning
+    101
+  - GET /relay/topics endpoint exists returning 200 with active topics list
+  - internal/relay/ package has Relay struct with Publish, Subscribe, and Topics methods
+  - "internal/relay/ has in-memory topic routing with subscriber channels \u2014 no\
+    \ external dependencies"
+  - cmd/server/main.go registers all three relay routes on the mux.Router
+  - All relay code has unit tests in internal/relay/ with >80% coverage
+  status: complete
+  created_at: '2026-07-12T01:57:39.266387+00:00'
+  completed_at: '2026-07-12T02:08:34.415723+00:00'

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/totalwindupflightsystems/crier/internal/relay"
 )
 
 func main() {
@@ -25,11 +26,18 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
+	// Relay pub/sub
+	relaySvc := relay.New()
+	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
+	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
+	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		// WriteTimeout must be 0 for long-lived WebSocket subscriptions.
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
 
