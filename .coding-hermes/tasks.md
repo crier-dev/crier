@@ -2,13 +2,12 @@
 
 ## Open
 
-- [ ] **CI-003: Agent registry + persistent inboxes**
+- [x] **CI-003: Agent registry + persistent inboxes** (done 2026-07-14)
   - In-memory registry: register, list, get, unregister agents
   - Per-agent FIFO inbox with lease-based delivery
   - Lease prevents double-delivery (ACK confirms, un-ACKed return after TTL)
   - POST/GET/DELETE /agents, POST/GET /agents/{id}/inbox, POST .../ack, GET .../stats
-  - _Spec: docs/specs.md § CI-003_
-  - _Load: exhaustive-specification_
+  - 26 tests, 84.8% coverage, 8/8 GitReins PASS, commit 30c4aaa
 
 - [ ] **CI-004: Wire full HTTP API + tests**
   - Mount all handlers on gorilla/mux in cmd/server/main.go
