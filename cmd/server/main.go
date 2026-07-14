@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/totalwindupflightsystems/crier/internal/registry"
 	"github.com/totalwindupflightsystems/crier/internal/relay"
 )
 
@@ -32,6 +33,17 @@ func main() {
 	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
 	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")
 
+	// Agent registry + inboxes
+	regStore := registry.NewStore()
+	r.HandleFunc("/agents", regStore.HandleRegister).Methods("POST")
+	r.HandleFunc("/agents", regStore.HandleListAgents).Methods("GET")
+	r.HandleFunc("/agents/{id}", regStore.HandleGetAgent).Methods("GET")
+	r.HandleFunc("/agents/{id}", regStore.HandleUnregister).Methods("DELETE")
+	r.HandleFunc("/agents/{id}/inbox", regStore.HandleDeliver).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox", regStore.HandleRetrieve).Methods("GET")
+	r.HandleFunc("/agents/{id}/inbox/ack", regStore.HandleAck).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/stats", regStore.HandleStats).Methods("GET")
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      r,
@@ -50,6 +62,22 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
+	}()
+
+	// Periodic expired message purging
+	purgeCtx, purgeCancel := context.WithCancel(context.Background())
+	defer purgeCancel()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-purgeCtx.Done():
+				return
+			case <-ticker.C:
+				regStore.PurgeExpired()
+			}
+		}
 	}()
 
 	log.Printf("Crier relay starting on :%d", cfg.Port)

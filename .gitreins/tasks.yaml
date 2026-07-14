@@ -40,3 +40,22 @@ tasks:
   status: complete
   created_at: '2026-07-12T14:00:39.990133+00:00'
   completed_at: '2026-07-12T14:07:28.177942+00:00'
+- id: ci-003-agent-registry
+  title: 'CI-003: Agent registry + persistent inboxes with lease-based delivery'
+  criteria:
+  - POST /agents registers agent with ed25519 public key returning 201 and 409 for
+    duplicates
+  - GET /agents lists all registered agents, GET /agents/{id} returns detail with
+    health status
+  - DELETE /agents/{id} unregisters agent and cleans up its inbox
+  - POST /agents/{id}/inbox delivers a message to agent's FIFO inbox
+  - "GET /agents/{id}/inbox retrieves leased messages \u2014 only un-ACKed messages\
+    \ returned, concurrent retrievers get disjoint sets"
+  - POST /agents/{id}/inbox/ack acknowledges messages permanently removing them; un-ACKed
+    messages return to queue after lease TTL expires
+  - TTL-expired messages auto-purged from inbox
+  - internal/registry/ package has unit tests with >80% coverage covering all 8 acceptance
+    criteria from spec
+  status: complete
+  created_at: '2026-07-14T06:20:27.404197+00:00'
+  completed_at: '2026-07-14T06:45:15.143493+00:00'
