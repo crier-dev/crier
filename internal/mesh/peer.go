@@ -151,6 +151,36 @@ func (m *Mesh) ActivePeers() int {
 	return len(m.connections)
 }
 
+// AcceptPeer registers an already-connected peer and starts the keepalive loop.
+// Used by the server when accepting incoming WebSocket connections.
+func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
+	m.mu.Lock()
+	m.connections[agentID] = conn
+	m.mu.Unlock()
+
+	conn.OnMessage(func(data []byte) {
+		m.handleMessage(agentID, data)
+	})
+	conn.OnClose(func(err error) {
+		m.mu.Lock()
+		delete(m.connections, agentID)
+		m.mu.Unlock()
+	})
+
+	go m.keepaliveLoop(agentID, conn)
+}
+
+// PeerIDs returns the list of connected peer agent IDs.
+func (m *Mesh) PeerIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0, len(m.connections))
+	for id := range m.connections {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (m *Mesh) register(ctx context.Context, conn *PeerConnection) error {
 	reg := &Register{
 		Envelope: Envelope{

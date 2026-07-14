@@ -111,6 +111,21 @@ func (pc *PeerConnection) OnClose(fn func(error)) {
 	pc.onClose = fn
 }
 
+// NewAcceptedPeerConnection wraps an already-upgraded WebSocket connection.
+// Used by the server when accepting incoming peer connections.
+func NewAcceptedPeerConnection(peerID string, conn *websocket.Conn) *PeerConnection {
+	return &PeerConnection{
+		PeerID: peerID,
+		conn:   conn,
+		done:   make(chan struct{}),
+	}
+}
+
+// StartReadLoop begins the read pump for an accepted connection.
+func (pc *PeerConnection) StartReadLoop() {
+	go pc.readLoop()
+}
+
 func (pc *PeerConnection) readLoop() {
 	defer func() {
 		pc.mu.Lock()

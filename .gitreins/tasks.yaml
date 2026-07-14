@@ -59,3 +59,15 @@ tasks:
   status: complete
   created_at: '2026-07-14T06:20:27.404197+00:00'
   completed_at: '2026-07-14T06:45:15.143493+00:00'
+- id: ci-004-wire-api
+  title: Wire full HTTP API surface with middleware, mesh handler, and graceful shutdown
+  criteria:
+  - Mesh handler accepts WebSocket connections at /mesh/connect/{agentID}
+  - GET /mesh/peers returns connected peer list with count
+  - 'Middleware: Logging logs method, path, status, duration for every request'
+  - 'Middleware: Recovery catches panics and returns 500'
+  - main.go wires all 15+ endpoints across relay, mesh, registry, and inbox packages
+  - Graceful shutdown calls meshSvc.Stop() before server.Shutdown()
+  - Ticker-based PurgeExpired runs every 30s in background goroutine
+  status: pending
+  created_at: '2026-07-14T14:04:54.096317+00:00'

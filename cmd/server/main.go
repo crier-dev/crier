@@ -12,6 +12,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/totalwindupflightsystems/crier/internal/mesh"
+	"github.com/totalwindupflightsystems/crier/internal/middleware"
 	"github.com/totalwindupflightsystems/crier/internal/registry"
 	"github.com/totalwindupflightsystems/crier/internal/relay"
 )
@@ -20,6 +22,10 @@ func main() {
 	cfg := config.Load()
 
 	r := mux.NewRouter()
+
+	// Middleware
+	r.Use(middleware.Recovery)
+	r.Use(middleware.Logging)
 
 	// Health check
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +38,12 @@ func main() {
 	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
 	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
 	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")
+
+	// P2P mesh
+	meshCfg := mesh.DefaultMeshConfig("crier")
+	meshSvc := mesh.NewMesh(meshCfg)
+	r.HandleFunc("/mesh/connect/{agentID}", mesh.HandleConnect(meshSvc))
+	r.HandleFunc("/mesh/peers", mesh.HandlePeers(meshSvc)).Methods("GET")
 
 	// Agent registry + inboxes
 	regStore := registry.NewStore()
@@ -48,8 +60,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		// WriteTimeout must be 0 for long-lived WebSocket subscriptions.
-		WriteTimeout: 0,
+		WriteTimeout: 0, // Required for WebSocket connections.
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -61,6 +72,8 @@ func main() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		meshSvc.Stop()
 		srv.Shutdown(ctx)
 	}()
 
@@ -80,7 +93,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("Crier relay starting on :%d", cfg.Port)
+	log.Printf("Crier starting on :%d (relay + mesh + registry)", cfg.Port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server failed: %v", err)
 	}
