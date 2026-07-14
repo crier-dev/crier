@@ -26,3 +26,17 @@ tasks:
   status: complete
   created_at: '2026-07-12T01:57:39.266387+00:00'
   completed_at: '2026-07-12T02:08:34.415723+00:00'
+- id: ci-002-mesh
+  title: 'CI-002: Port mesh + peer connection from Hivemind'
+  criteria:
+  - PeerConnection.Connect() dials WebSocket, starts read loop
+  - PeerConnection.Send() writes with 10s deadline
+  - PeerConnection.Close() sends close frame, cleans up
+  - "Mesh.ConnectPeer() dials \u2192 registers \u2192 starts keepalive"
+  - "Mesh.SendRequest() marshals \u2192 sends \u2192 waits for response with timeout"
+  - Keepalive ticker fires every 30s, sends KEEPALIVE message
+  - handleMessage() dispatches RESPONSE to pending channel, ERROR to error channel
+  - Unit tests for message marshal/unmarshal round-trip
+  status: complete
+  created_at: '2026-07-12T14:00:39.990133+00:00'
+  completed_at: '2026-07-12T14:07:28.177942+00:00'
