@@ -2,7 +2,25 @@
 
 ## Open
 
-_All tasks complete._
+- [ ] **CI-006: Add GitHub Actions CI workflow**
+  - Go build + vet + test on push/PR to main
+  - Matrix: go 1.22.x, 1.23.x
+  - gate: all tests must pass before merge
+  - Files: .github/workflows/ci.yml (new)
+  - Verify: `gh run list -R crier-dev/crier` shows green CI after push
+
+- [ ] **DOC-001: Create README.md**
+  - Architecture overview (three primitives: Relay, Mesh, Registry)
+  - Build instructions: `make build`, `make test`, `make run`
+  - Link to docs/specs.md, docs/openapi.yaml, docs/architecture.md
+  - Badges: Go version, CI status (once CI exists)
+  - Files: README.md (new)
+
+- [ ] **DOC-002: Clarify PostgreSQL status in architecture.md**
+  - Current implementation is in-memory (CI-001, CI-002, CI-003)
+  - PostgreSQL is planned for CI-003b (not yet implemented)
+  - Update "Storage: PostgreSQL" → "Storage: in-memory (PostgreSQL planned via CI-003b)"
+  - Files: docs/architecture.md
 
 ## Done
 
