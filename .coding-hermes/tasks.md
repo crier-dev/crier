@@ -2,18 +2,12 @@
 
 ## Open
 
-- [ ] **DOC-001: Create README.md**
-  - Architecture overview (three primitives: Relay, Mesh, Registry)
-  - Build instructions: `make build`, `make test`, `make run`
-  - Link to docs/specs.md, docs/openapi.yaml, docs/architecture.md
-  - Badges: Go version, CI status (once CI exists)
-  - Files: README.md (new)
-
-- [ ] **DOC-002: Clarify PostgreSQL status in architecture.md**
-  - Current implementation is in-memory (CI-001, CI-002, CI-003)
-  - PostgreSQL is planned for CI-003b (not yet implemented)
-  - Update "Storage: PostgreSQL" → "Storage: in-memory (PostgreSQL planned via CI-003b)"
-  - Files: docs/architecture.md
+- [x] **DOC-001: Create README.md** (done 2026-07-15)
+  - README.md created: 133 lines, project overview, architecture, build/run/test, API table, docs links, badges, status/roadmap
+  - Commit 57b3746
+- [x] **DOC-002: Clarify PostgreSQL status in architecture.md** (done 2026-07-15)
+  - "Storage: PostgreSQL" → "Storage: In-memory (PostgreSQL planned via CI-003b)"
+  - Commit 57b3746
 
 ## Done
 
