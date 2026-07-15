@@ -2,13 +2,6 @@
 
 ## Open
 
-- [ ] **CI-006: Add GitHub Actions CI workflow**
-  - Go build + vet + test on push/PR to main
-  - Matrix: go 1.22.x, 1.23.x
-  - gate: all tests must pass before merge
-  - Files: .github/workflows/ci.yml (new)
-  - Verify: `gh run list -R crier-dev/crier` shows green CI after push
-
 - [ ] **DOC-001: Create README.md**
   - Architecture overview (three primitives: Relay, Mesh, Registry)
   - Build instructions: `make build`, `make test`, `make run`
@@ -24,6 +17,9 @@
 
 ## Done
 
+- [x] **CI-006: Add GitHub Actions CI workflow** (done 2026-07-15)
+  - `.github/workflows/ci.yml` — build/vet/test on push/PR, matrix go 1.22 + 1.23
+  - CI run 29429586342: conclusion=success, commit 7f5133f
 - [x] **CI-001: Wire relay server** (done 2026-07-11)
   - `internal/relay/` — thread-safe in-memory pub/sub, 140+109 lines
   - 13 tests, 87.4% coverage, 7/7 GitReins PASS
