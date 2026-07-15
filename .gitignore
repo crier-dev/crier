@@ -35,6 +35,9 @@ dist/
 # GitReins history
 .gitreins/history/
 
+# Stale build artifacts (from go build without -o)
+server
+
 # OpenCode
 .opencode/
 .axiom/

@@ -69,5 +69,6 @@ tasks:
   - main.go wires all 15+ endpoints across relay, mesh, registry, and inbox packages
   - Graceful shutdown calls meshSvc.Stop() before server.Shutdown()
   - Ticker-based PurgeExpired runs every 30s in background goroutine
-  status: pending
+  status: complete
   created_at: '2026-07-14T14:04:54.096317+00:00'
+  completed_at: '2026-07-15T22:20:50.628340+00:00'
