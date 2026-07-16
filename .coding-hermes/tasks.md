@@ -7,9 +7,9 @@
   - 1012 lines of new tests across 3 files, all pass, guard clean
   - Commit 683cdbc
 - [ ] **CI-003b: PostgreSQL persistence** (2026-07-15)
-  - Replace in-memory registry and inbox storage with PostgreSQL
-  - Requires: spec with exact DDL, migration strategy, connection management
-  - _Load: exhaustive-specification, ad-hoc-verification-bash-script_
+  - [x] SPEC: Axiom-level PostgreSQL spec — 983 lines, 10 sections, exact DDL, Store interface, pgxpool backend, migrations, connection mgmt, test strategy (commit 0566274, 2026-07-16)
+  - [ ] IMPLEMENT: Replace in-memory registry and inbox storage with PostgreSQL per spec
+  - _Load: ad-hoc-verification-bash-script_
 - [ ] **CI-007: MCP server** (2026-07-15)
   - MCP server exposing registry and inbox tools
   - Requires: spec defining tools (register agent, list agents, deliver message, retrieve inbox, ack)
