@@ -2,11 +2,10 @@
 
 ## Open
 
-- [ ] **CI-008: Add mesh test coverage** (2026-07-15)
-  - mesh coverage is 2.8% — dialer.go, peer.go, handler.go have zero tests
-  - message_test.go covers marshal/unmarshal (7 tests) but actual connection logic is untested
-  - Target: >60% mesh coverage with tests for peer connection lifecycle, keepalive, and handler
-  - _Load: ad-hoc-verification-bash-script_
+- [x] **CI-008: Add mesh test coverage** (done 2026-07-15)
+  - mesh coverage 2.8% → 90.5% — dialer_test.go (299 lines), peer_test.go (557 lines), handler_test.go (156 lines)
+  - 1012 lines of new tests across 3 files, all pass, guard clean
+  - Commit 683cdbc
 - [ ] **CI-003b: PostgreSQL persistence** (2026-07-15)
   - Replace in-memory registry and inbox storage with PostgreSQL
   - Requires: spec with exact DDL, migration strategy, connection management
