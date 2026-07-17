@@ -13,9 +13,9 @@
   - All 26 existing registry tests pass on MemoryStore, build+vet green, guard PASS
   - _Load: ad-hoc-verification-bash-script_
 - [ ] **CI-007: MCP server** (2026-07-15)
-  - MCP server exposing registry and inbox tools
-  - Requires: spec defining tools (register agent, list agents, deliver message, retrieve inbox, ack)
-  - _Load: exhaustive-specification, ad-hoc-verification-bash-script_
+  - [x] SPEC: axiom-level MCP server spec — 818 lines, 8 tools, error catalog, Mermaid diagram, test strategy (commit TBD, 2026-07-16)
+  - [ ] IMPLEMENT: MCP server wrapping registry.Store — stdio transport, 5 files (~1010 lines), per spec docs/specs/ci-007-mcp-server.md
+  - _Load: ad-hoc-verification-bash-script_
 
 ## Done
 
