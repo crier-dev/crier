@@ -6,9 +6,11 @@
   - mesh coverage 2.8% → 90.5% — dialer_test.go (299 lines), peer_test.go (557 lines), handler_test.go (156 lines)
   - 1012 lines of new tests across 3 files, all pass, guard clean
   - Commit 683cdbc
-- [ ] **CI-003b: PostgreSQL persistence** (2026-07-15)
+- [x] **CI-003b: PostgreSQL persistence** (done 2026-07-16)
   - [x] SPEC: Axiom-level PostgreSQL spec — 983 lines, 10 sections, exact DDL, Store interface, pgxpool backend, migrations, connection mgmt, test strategy (commit 0566274, 2026-07-16)
-  - [ ] IMPLEMENT: Replace in-memory registry and inbox storage with PostgreSQL per spec
+  - [x] IMPLEMENT: Replace in-memory registry and inbox storage with PostgreSQL per spec (commit fb4f896, 2026-07-16)
+  - 16 files changed, +1377/-507: postgres_store.go (600 lines, 9 methods), migrate.go, 4 migration SQL files, interface extraction, handler refactor, config extension, Makefile test-integration target
+  - All 26 existing registry tests pass on MemoryStore, build+vet green, guard PASS
   - _Load: ad-hoc-verification-bash-script_
 - [ ] **CI-007: MCP server** (2026-07-15)
   - MCP server exposing registry and inbox tools
