@@ -2,6 +2,12 @@
 
 ## Open
 
+- [ ] **INFRA-001: Upgrade Go from 1.26.0 to 1.26.5** — 3 stdlib CVEs
+  - GO-2026-5856: crypto/tls ECH privacy leak (fixed in go1.26.5)
+  - GO-2026-5039: net/textproto error escaping (fixed in go1.26.4)
+  - GO-2026-5037: crypto/x509 inefficient hostname parsing (fixed in go1.26.4)
+  - _Load: none (infrastructure — Go version upgrade by admin)_
+
 - [x] **CI-008: Add mesh test coverage** (done 2026-07-15)
   - mesh coverage 2.8% → 90.5% — dialer_test.go (299 lines), peer_test.go (557 lines), handler_test.go (156 lines)
   - 1012 lines of new tests across 3 files, all pass, guard clean
