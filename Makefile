@@ -9,6 +9,9 @@ test:
 test-short:
 	go test -short ./...
 
+test-integration:
+	go test -tags=integration -count=1 -timeout 5m ./internal/registry
+
 lint:
 	go vet ./...
 

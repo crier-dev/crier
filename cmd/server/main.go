@@ -19,7 +19,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("load configuration: %v", err)
+	}
 
 	r := mux.NewRouter()
 
@@ -46,36 +49,46 @@ func main() {
 	r.HandleFunc("/mesh/peers", mesh.HandlePeers(meshSvc)).Methods("GET")
 
 	// Agent registry + inboxes
-	regStore := registry.NewStore()
-	r.HandleFunc("/agents", regStore.HandleRegister).Methods("POST")
-	r.HandleFunc("/agents", regStore.HandleListAgents).Methods("GET")
-	r.HandleFunc("/agents/{id}", regStore.HandleGetAgent).Methods("GET")
-	r.HandleFunc("/agents/{id}", regStore.HandleUnregister).Methods("DELETE")
-	r.HandleFunc("/agents/{id}/inbox", regStore.HandleDeliver).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox", regStore.HandleRetrieve).Methods("GET")
-	r.HandleFunc("/agents/{id}/inbox/ack", regStore.HandleAck).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox/stats", regStore.HandleStats).Methods("GET")
+	var regStore registry.Store
+
+	if cfg.Database.URL != "" {
+		startupCtx, cancelStartup := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
+		defer cancelStartup()
+
+		pgStore, err := registry.NewPostgresStoreWithPoolConfig(startupCtx, cfg.Database.URL, registry.PoolConfig{
+			MaxConns:        cfg.Database.MaxConns,
+			MinConns:        cfg.Database.MinConns,
+			MaxConnLifetime: cfg.Database.MaxConnLifetime,
+			MaxConnIdleTime: cfg.Database.MaxConnIdleTime,
+		})
+		if err != nil {
+			log.Fatalf("initialize PostgreSQL registry store: %v", err)
+		}
+		defer pgStore.Close()
+		regStore = pgStore
+		log.Printf("Registry: PostgreSQL backend (max_conns=%d)", cfg.Database.MaxConns)
+	} else {
+		regStore = registry.NewMemoryStore()
+		log.Printf("Registry: in-memory backend (set CR_DATABASE_URL for PostgreSQL)")
+	}
+
+	registryHandler := registry.NewHandler(regStore)
+	r.HandleFunc("/agents", registryHandler.HandleRegister).Methods("POST")
+	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
+	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")
+	r.HandleFunc("/agents/{id}", registryHandler.HandleUnregister).Methods("DELETE")
+	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleDeliver).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
+	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 0, // Required for WebSocket connections.
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
-
-	// Graceful shutdown
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		meshSvc.Stop()
-		srv.Shutdown(ctx)
-	}()
 
 	// Periodic expired message purging
 	purgeCtx, purgeCancel := context.WithCancel(context.Background())
@@ -90,6 +103,25 @@ func main() {
 			case <-ticker.C:
 				regStore.PurgeExpired()
 			}
+		}
+	}()
+
+	// Graceful shutdown
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		purgeCancel()
+		meshSvc.Stop()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+		if closer, ok := regStore.(interface{ Close() }); ok {
+			closer.Close()
 		}
 	}()
 

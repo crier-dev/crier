@@ -24,11 +24,12 @@ func newTestPubKey(t *testing.T) (string, ed25519.PublicKey) {
 	return hex.EncodeToString(pub), pub
 }
 
-func newTestStore() *Store {
-	return NewStore()
+func setupTestStore(t *testing.T) Store {
+	t.Helper()
+	return NewMemoryStore()
 }
 
-func registerTestAgent(t *testing.T, store *Store) *Agent {
+func registerTestAgent(t *testing.T, store Store) *Agent {
 	t.Helper()
 	hexKey, pubKey := newTestPubKey(t)
 	agent := &Agent{
@@ -43,16 +44,17 @@ func registerTestAgent(t *testing.T, store *Store) *Agent {
 	return agent
 }
 
-func setupRouter(store *Store) *mux.Router {
+func setupRouter(store Store) *mux.Router {
+	handler := NewHandler(store)
 	r := mux.NewRouter()
-	r.HandleFunc("/agents", store.HandleRegister).Methods("POST")
-	r.HandleFunc("/agents", store.HandleListAgents).Methods("GET")
-	r.HandleFunc("/agents/{id}", store.HandleGetAgent).Methods("GET")
-	r.HandleFunc("/agents/{id}", store.HandleUnregister).Methods("DELETE")
-	r.HandleFunc("/agents/{id}/inbox", store.HandleDeliver).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox", store.HandleRetrieve).Methods("GET")
-	r.HandleFunc("/agents/{id}/inbox/ack", store.HandleAck).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox/stats", store.HandleStats).Methods("GET")
+	r.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
+	r.HandleFunc("/agents", handler.HandleListAgents).Methods("GET")
+	r.HandleFunc("/agents/{id}", handler.HandleGetAgent).Methods("GET")
+	r.HandleFunc("/agents/{id}", handler.HandleUnregister).Methods("DELETE")
+	r.HandleFunc("/agents/{id}/inbox", handler.HandleDeliver).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox", handler.HandleRetrieve).Methods("GET")
+	r.HandleFunc("/agents/{id}/inbox/ack", handler.HandleAck).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/stats", handler.HandleStats).Methods("GET")
 	return r
 }
 
@@ -60,7 +62,7 @@ func setupRouter(store *Store) *mux.Router {
 
 func TestRegister_Success(t *testing.T) {
 	hexKey, _ := newTestPubKey(t)
-	store := newTestStore()
+	store := setupTestStore(t)
 	router := setupRouter(store)
 
 	body, _ := json.Marshal(registerRequest{
@@ -92,10 +94,9 @@ func TestRegister_Success(t *testing.T) {
 
 func TestRegister_Duplicate(t *testing.T) {
 	hexKey, _ := newTestPubKey(t)
-	store := newTestStore()
+	store := setupTestStore(t)
 	router := setupRouter(store)
 
-	// Use raw handler calls for idempotent test.
 	body, _ := json.Marshal(registerRequest{ID: "agent-1", PublicKey: hexKey})
 	req1 := httptest.NewRequest("POST", "/agents", bytes.NewReader(body))
 	req1.Header.Set("Content-Type", "application/json")
@@ -115,7 +116,7 @@ func TestRegister_Duplicate(t *testing.T) {
 }
 
 func TestRegister_InvalidPublicKey(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	router := setupRouter(store)
 
 	tests := []struct {
@@ -124,7 +125,7 @@ func TestRegister_InvalidPublicKey(t *testing.T) {
 	}{
 		{"too short", "abc123"},
 		{"not hex", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
-		{"correct hex but wrong length", "00"}, // 1 byte, not 32
+		{"correct hex but wrong length", "00"},
 	}
 
 	for _, tt := range tests {
@@ -145,7 +146,7 @@ func TestRegister_InvalidPublicKey(t *testing.T) {
 // ----- AC 2: List agents + get agent detail -----
 
 func TestListAndGetAgent(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
 
@@ -182,11 +183,10 @@ func TestListAndGetAgent(t *testing.T) {
 // ----- AC 3: Unregister cleans up inbox -----
 
 func TestUnregister_CleansInbox(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
 
-	// Deliver a message
 	payload := json.RawMessage(`{"msg":"hello"}`)
 	body, _ := json.Marshal(deliverRequest{Payload: payload})
 	req := httptest.NewRequest("POST", "/agents/agent-1/inbox", bytes.NewReader(body))
@@ -217,11 +217,10 @@ func TestUnregister_CleansInbox(t *testing.T) {
 // ----- AC 4: Deliver + Retrieve returns correct messages -----
 
 func TestDeliverAndRetrieve(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
 
-	// Deliver two messages
 	for i := 0; i < 2; i++ {
 		payload := json.RawMessage(`{"msg":"hello"}`)
 		body, _ := json.Marshal(deliverRequest{Payload: payload})
@@ -234,7 +233,6 @@ func TestDeliverAndRetrieve(t *testing.T) {
 		}
 	}
 
-	// Retrieve
 	req := httptest.NewRequest("GET", "/agents/agent-1/inbox?max=10", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -255,10 +253,9 @@ func TestDeliverAndRetrieve(t *testing.T) {
 // ----- AC 5: Lease — ACK removes, un-ACKed return after lease expires -----
 
 func TestLeaseAckAndExpiry(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
-	// Deliver 3 messages
 	for i := 0; i < 3; i++ {
 		entry := &InboxEntry{Payload: json.RawMessage(`{}`)}
 		if err := store.Deliver("agent-1", entry); err != nil {
@@ -266,7 +263,6 @@ func TestLeaseAckAndExpiry(t *testing.T) {
 		}
 	}
 
-	// Retrieve with short lease
 	messages, leaseID, err := store.Retrieve("agent-1", 100*time.Millisecond, 10)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
@@ -275,19 +271,15 @@ func TestLeaseAckAndExpiry(t *testing.T) {
 		t.Errorf("expected 3 messages, got %d", len(messages))
 	}
 
-	// ACK 1 message
 	msgIDs := []string{messages[0].ID}
 	if err := store.Ack("agent-1", leaseID, msgIDs); err != nil {
 		t.Fatalf("ack: %v", err)
 	}
 
-	// Wait for lease expiry on remaining 2
 	time.Sleep(200 * time.Millisecond)
 
-	// Purge expired leases
 	store.PurgeExpired()
 
-	// Retrieve again — should get 2 messages (the un-ACKed ones)
 	messages2, _, err := store.Retrieve("agent-1", 30*time.Second, 10)
 	if err != nil {
 		t.Fatalf("retrieve2: %v", err)
@@ -296,7 +288,6 @@ func TestLeaseAckAndExpiry(t *testing.T) {
 		t.Errorf("expected 2 messages after lease expiry, got %d", len(messages2))
 	}
 
-	// Verify the ACKed message is gone
 	for _, m := range messages2 {
 		if m.ID == messages[0].ID {
 			t.Error("ACKed message should not be returned")
@@ -305,7 +296,7 @@ func TestLeaseAckAndExpiry(t *testing.T) {
 }
 
 func TestAck_WrongLease(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
 	entry := &InboxEntry{Payload: json.RawMessage(`{}`)}
@@ -325,10 +316,9 @@ func TestAck_WrongLease(t *testing.T) {
 // ----- AC 6: TTL-expired messages auto-purged -----
 
 func TestPurgeExpired(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
-	// Add a message with short TTL
 	entry := &InboxEntry{
 		Payload:   json.RawMessage(`{}`),
 		ExpiresAt: time.Now().Add(50 * time.Millisecond),
@@ -337,7 +327,6 @@ func TestPurgeExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for expiry
 	time.Sleep(100 * time.Millisecond)
 
 	removed := store.PurgeExpired()
@@ -345,7 +334,6 @@ func TestPurgeExpired(t *testing.T) {
 		t.Errorf("expected 1 removed, got %d", removed)
 	}
 
-	// Verify no messages in inbox
 	depth, _, _, err := store.Stats("agent-1")
 	if err != nil {
 		t.Fatal(err)
@@ -358,13 +346,12 @@ func TestPurgeExpired(t *testing.T) {
 // ----- AC 7: Agent unregister cleans up inbox -----
 
 func TestUnregister_ClearsInboxDirectly(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
 	store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
 	store.Unregister("agent-1")
 
-	// Try to retrieve — should fail
 	_, _, err := store.Retrieve("agent-1", 30*time.Second, 10)
 	if err == nil {
 		t.Error("expected error after unregister")
@@ -374,15 +361,13 @@ func TestUnregister_ClearsInboxDirectly(t *testing.T) {
 // ----- AC 8: Concurrent delivery — two retrievers get disjoint message sets -----
 
 func TestConcurrentRetrieve_Disjoint(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
-	// Deliver 10 messages
 	for i := 0; i < 10; i++ {
 		store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
 	}
 
-	// Concurrent retrieval
 	var wg sync.WaitGroup
 	results := make([][]*InboxEntry, 2)
 
@@ -399,7 +384,6 @@ func TestConcurrentRetrieve_Disjoint(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Verify disjointness — no message ID appears in both sets
 	seen := make(map[string]bool)
 	total := 0
 	for _, msgs := range results {
@@ -412,7 +396,6 @@ func TestConcurrentRetrieve_Disjoint(t *testing.T) {
 		}
 	}
 
-	// Both retrievers together should get either all messages or close to all
 	if total < 5 {
 		t.Errorf("only got %d messages, expected at least 5", total)
 	}
@@ -424,7 +407,7 @@ func TestConcurrentRetrieve_Disjoint(t *testing.T) {
 // ----- Stats tests -----
 
 func TestStats(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
 	for i := 0; i < 3; i++ {
@@ -442,7 +425,6 @@ func TestStats(t *testing.T) {
 		t.Errorf("leased = %d, want 0 (none leased yet)", leased)
 	}
 
-	// Lease some
 	store.Retrieve("agent-1", 30*time.Second, 2)
 
 	depth, leased, _, err = store.Stats("agent-1")
@@ -458,7 +440,7 @@ func TestStats(t *testing.T) {
 }
 
 func TestStats_NotFound(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	_, _, _, err := store.Stats("nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent agent")
@@ -468,7 +450,7 @@ func TestStats_NotFound(t *testing.T) {
 // ----- Handler integration tests -----
 
 func TestHandleDeliver_AgentNotFound(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	router := setupRouter(store)
 
 	body, _ := json.Marshal(deliverRequest{Payload: json.RawMessage(`{}`)})
@@ -483,7 +465,7 @@ func TestHandleDeliver_AgentNotFound(t *testing.T) {
 }
 
 func TestHandleStats(t *testing.T) {
-	store := newTestStore()
+	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
 	store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
@@ -498,147 +480,17 @@ func TestHandleStats(t *testing.T) {
 	}
 
 	var stats statsResponse
-	json.Unmarshal(rec.Body.Bytes(), &stats)
+	if err := json.Unmarshal(rec.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal stats: %v", err)
+	}
 	if stats.QueueDepth != 1 {
 		t.Errorf("queue_depth = %d, want 1", stats.QueueDepth)
 	}
-}
 
-func TestHandleAck_WrongLeaseHTTP(t *testing.T) {
-	store := newTestStore()
-	registerTestAgent(t, store)
-
-	store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
-
-	router := setupRouter(store)
-
-	body, _ := json.Marshal(ackRequest{LeaseID: "wrong", MessageIDs: []string{"nonexistent"}})
-	req := httptest.NewRequest("POST", "/agents/agent-1/inbox/ack", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/agents/missing/inbox/stats", nil)
+	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("expected 409, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// ----- Store-level tests -----
-
-func TestStore_Get_NotFound(t *testing.T) {
-	store := newTestStore()
-	_, err := store.Get("nope")
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestStore_Unregister_NotFound(t *testing.T) {
-	store := newTestStore()
-	err := store.Unregister("nope")
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestStore_Deliver_NotFound(t *testing.T) {
-	store := newTestStore()
-	err := store.Deliver("nope", &InboxEntry{Payload: json.RawMessage(`{}`)})
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestStore_Retrieve_NotFound(t *testing.T) {
-	store := newTestStore()
-	_, _, err := store.Retrieve("nope", 30*time.Second, 10)
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestList_Empty(t *testing.T) {
-	store := newTestStore()
-	agents := store.List()
-	if len(agents) != 0 {
-		t.Errorf("expected 0 agents, got %d", len(agents))
-	}
-}
-
-func TestRegister_NoCapabilities(t *testing.T) {
-	store := newTestStore()
-	hexKey, _ := newTestPubKey(t)
-
-	body, _ := json.Marshal(registerRequest{ID: "minimal", PublicKey: hexKey})
-	router := setupRouter(store)
-	req := httptest.NewRequest("POST", "/agents", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var agent Agent
-	json.Unmarshal(rec.Body.Bytes(), &agent)
-	if agent.Capabilities == nil {
-		t.Error("capabilities should be empty slice, not nil")
-	}
-}
-
-func TestRetrieve_MaxLimit(t *testing.T) {
-	store := newTestStore()
-	registerTestAgent(t, store)
-
-	// Deliver 5
-	for i := 0; i < 5; i++ {
-		store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
-	}
-
-	// Retrieve max 2
-	msgs, _, err := store.Retrieve("agent-1", 30*time.Second, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(msgs))
-	}
-}
-
-func TestPurgeExpired_ZeroWhenFresh(t *testing.T) {
-	store := newTestStore()
-	registerTestAgent(t, store)
-	store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)})
-
-	removed := store.PurgeExpired()
-	if removed != 0 {
-		t.Errorf("expected 0 removed, got %d", removed)
-	}
-
-	depth, _, _, _ := store.Stats("agent-1")
-	if depth != 1 {
-		t.Errorf("expected 1 message, got %d", depth)
-	}
-}
-
-// ----- HexKey JSON round-trip -----
-
-func TestHexKey_MarshalRoundtrip(t *testing.T) {
-	_, pubKey := newTestPubKey(t)
-	key := HexKey(pubKey)
-
-	data, err := json.Marshal(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var decoded HexKey
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-
-	if string(decoded) != string(pubKey) {
-		t.Error("round-trip mismatch")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rec.Code)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -54,7 +56,7 @@ type statsResponse struct {
 }
 
 // HandleRegister handles POST /agents — registers a new agent.
-func (s *Store) HandleRegister(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -84,8 +86,12 @@ func (s *Store) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		agent.Capabilities = []string{}
 	}
 
-	if err := s.Register(agent); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	if err := h.store.Register(agent); err != nil {
+		if errors.Is(err, ErrAgentExists) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 
@@ -93,8 +99,8 @@ func (s *Store) HandleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleListAgents handles GET /agents — lists all registered agents.
-func (s *Store) HandleListAgents(w http.ResponseWriter, r *http.Request) {
-	agents := s.List()
+func (h *Handler) HandleListAgents(w http.ResponseWriter, r *http.Request) {
+	agents := h.store.List()
 	if agents == nil {
 		agents = []*Agent{}
 	}
@@ -102,28 +108,36 @@ func (s *Store) HandleListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGetAgent handles GET /agents/{id} — returns agent detail.
-func (s *Store) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	agent, err := s.Get(id)
+	agent, err := h.store.Get(id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, agent)
 }
 
 // HandleUnregister handles DELETE /agents/{id} — removes an agent.
-func (s *Store) HandleUnregister(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	if err := s.Unregister(id); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+	if err := h.store.Unregister(id); err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleDeliver handles POST /agents/{id}/inbox — delivers a message to an agent.
-func (s *Store) HandleDeliver(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var req deliverRequest
@@ -140,8 +154,14 @@ func (s *Store) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		Payload: req.Payload,
 	}
 
-	if err := s.Deliver(id, entry); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+	if err := h.store.Deliver(id, entry); err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else if errors.Is(err, ErrInvalidStoreInput) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 
@@ -149,7 +169,7 @@ func (s *Store) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.
-func (s *Store) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	maxMsgs := 10
@@ -157,6 +177,11 @@ func (s *Store) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxMsgs = n
 		}
+	}
+	// Cap max at 100 per spec §9
+	if maxMsgs > 100 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "max must be <= 100"})
+		return
 	}
 
 	leaseSecs := 30 * time.Second
@@ -166,9 +191,15 @@ func (s *Store) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messages, leaseID, err := s.Retrieve(id, leaseSecs, maxMsgs)
+	messages, leaseID, err := h.store.Retrieve(id, leaseSecs, maxMsgs)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else if errors.Is(err, ErrInvalidStoreInput) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 	if messages == nil {
@@ -182,7 +213,7 @@ func (s *Store) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleAck handles POST /agents/{id}/inbox/ack — acknowledges messages.
-func (s *Store) HandleAck(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var req ackRequest
@@ -195,13 +226,17 @@ func (s *Store) HandleAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.Ack(id, req.LeaseID, req.MessageIDs); err != nil {
-		code := http.StatusConflict
-		// Check if it's a 404 (agent not found) vs 409 (lease mismatch)
-		if _, getErr := s.Get(id); getErr != nil {
-			code = http.StatusNotFound
+	if err := h.store.Ack(id, req.LeaseID, req.MessageIDs); err != nil {
+		switch {
+		case errors.Is(err, ErrAgentNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrLeaseConflict):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrInvalidStoreInput):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			writeStoreError(w, err)
 		}
-		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -209,12 +244,16 @@ func (s *Store) HandleAck(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleStats handles GET /agents/{id}/inbox/stats — returns queue stats.
-func (s *Store) HandleStats(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	depth, leased, age, err := s.Stats(id)
+	depth, leased, age, err := h.store.Stats(id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
 
@@ -222,6 +261,14 @@ func (s *Store) HandleStats(w http.ResponseWriter, r *http.Request) {
 		QueueDepth:  depth,
 		LeasedCount: leased,
 		OldestAgeMs: age.Milliseconds(),
+	})
+}
+
+// writeStoreError logs a store-level error and returns a generic 500 to the client.
+func writeStoreError(w http.ResponseWriter, err error) {
+	log.Printf("registry store error: %v", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error": "registry storage unavailable",
 	})
 }
 

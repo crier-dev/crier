@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 )
 
@@ -66,9 +65,4 @@ type InboxEntry struct {
 	ACKed         bool          `json:"acked"`
 }
 
-// Store is a thread-safe in-memory agent registry with persistent inboxes.
-type Store struct {
-	mu      sync.RWMutex
-	agents  map[string]*Agent
-	inboxes map[string][]*InboxEntry
-}
+
