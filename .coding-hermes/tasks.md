@@ -12,10 +12,7 @@
   - 16 files changed, +1377/-507: postgres_store.go (600 lines, 9 methods), migrate.go, 4 migration SQL files, interface extraction, handler refactor, config extension, Makefile test-integration target
   - All 26 existing registry tests pass on MemoryStore, build+vet green, guard PASS
   - _Load: ad-hoc-verification-bash-script_
-- [ ] **CI-007: MCP server** (2026-07-15)
-  - [x] SPEC: axiom-level MCP server spec — 818 lines, 8 tools, error catalog, Mermaid diagram, test strategy (commit f5b13a4, 2026-07-16)
-  - [ ] IMPLEMENT: MCP server wrapping registry.Store — stdio transport, 5 files (~1010 lines), per spec docs/specs/ci-007-mcp-server.md
-  - _Load: ad-hoc-verification-bash-script_
+- [x] **CI-007: MCP server** (2026-07-15)\n  - [x] SPEC: axiom-level MCP server spec — 818 lines, 8 tools, error catalog, Mermaid diagram, test strategy (commit f5b13a4, 2026-07-16)\n  - [x] IMPLEMENT: MCP server wrapping registry.Store — stdio transport, 5 files, +1424 lines, per spec docs/specs/ci-007-mcp-server.md (commit 862fe1c, 2026-07-17)\n  - 8 tools: register_agent, list_agents, get_agent, unregister_agent, deliver_message, retrieve_inbox, ack_messages, inbox_stats\n  - 27 tests (25 unit + 1 concurrent + 1 lease expiry), all pass. Build+vet green. Guard PASS.\n  - Foreman-direct-code from axiom-level spec — zero worker spawn. No new deps (stdlib only).\n  - _Load: ad-hoc-verification-bash-script_
 
 ## Done
 
