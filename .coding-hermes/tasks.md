@@ -13,7 +13,7 @@
   - All 26 existing registry tests pass on MemoryStore, build+vet green, guard PASS
   - _Load: ad-hoc-verification-bash-script_
 - [ ] **CI-007: MCP server** (2026-07-15)
-  - [x] SPEC: axiom-level MCP server spec — 818 lines, 8 tools, error catalog, Mermaid diagram, test strategy (commit TBD, 2026-07-16)
+  - [x] SPEC: axiom-level MCP server spec — 818 lines, 8 tools, error catalog, Mermaid diagram, test strategy (commit f5b13a4, 2026-07-16)
   - [ ] IMPLEMENT: MCP server wrapping registry.Store — stdio transport, 5 files (~1010 lines), per spec docs/specs/ci-007-mcp-server.md
   - _Load: ad-hoc-verification-bash-script_
 
