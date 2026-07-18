@@ -2,7 +2,7 @@
 
 ## Open
 
-- [ ] **INFRA-001: Upgrade Go to 1.26.5 for 3 stdlib CVEs**
+- [x] **INFRA-001: Upgrade Go to 1.26.5 for 3 stdlib CVEs** (done 2026-07-18, commit 0b99218)
   - CVE-2026-43489 (encoding/gob stack overflow), CVE-2026-43490 (mime/multipart), CVE-2026-43491 (crypto/rand on plan9)
   - Update go.mod to go 1.26.5, update CI matrix, rebuild, verify all tests pass
 
