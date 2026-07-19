@@ -13,10 +13,10 @@
   - Add: tool_handler error propagation, invalid JSON-RPC, concurrent requests, server shutdown
   - _Load: ad-hoc-verification-bash-script_
 
-- [ ] **INFRA-002: Add docker-compose.yml with PostgreSQL**
-  - postgres:16-alpine on :5432, healthcheck, init scripts
+- [x] **INFRA-002: Add docker-compose.yml with PostgreSQL** (done 2026-07-19, commit 5e353e2)
+  - postgres:16-alpine on :5437 (5432 taken), healthcheck, named volume
   - Enables PostgresStore integration tests locally
-  - Required for COV-004
+  - Integration tests verified passing against running container
 
 - [ ] **COV-004: PostgresStore tests — enable integration test suite**
   - `internal/registry/postgres_store_test.go` exists with `//go:build integration` tag
