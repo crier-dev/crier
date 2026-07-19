@@ -2,12 +2,17 @@
 
 ## Open
 
-- [x] **INFRA-001: Upgrade Go to 1.26.5 for 3 stdlib CVEs** (done 2026-07-18, commit 0b99218)
-  - CVE-2026-43489 (encoding/gob stack overflow), CVE-2026-43490 (mime/multipart), CVE-2026-43491 (crypto/rand on plan9)
-  - Update go.mod to go 1.26.5, update CI matrix, rebuild, verify all tests pass
+- [ ] **COV-001: PostgresStore integration tests — 0% → 80%+ coverage** (filed 2026-07-18)
+  - `postgres_store.go` (600 lines): Register, Get, List, Unregister, Deliver, Retrieve, Ack, Stats, PurgeExpired — all 0%
+  - `migrate.go`: RunMigrations 0%
+  - `handler.go`: HandleAck, writeStoreError 0% — these paths are exercised against MemoryStore but not PostgresStore
+  - Root cause: CI-003b added PostgresStore (600 lines) but tests only cover MemoryStore — store interface unchanged, but handler tests route through in-memory path
+  - Fix: add PostgresStore integration tests requiring a pg instance (testcontainers-go or docker-compose)
+  - Priority: medium | Weight: 4
 
 ## Done
 
+- [x] **INFRA-001: Upgrade Go to 1.26.5 for 3 stdlib CVEs** (done 2026-07-18, commit 0b99218)
 - [x] **CI-001: Wire relay server** (done 2026-07-11)
   - `internal/relay/` — thread-safe in-memory pub/sub, 140+109 lines
   - 13 tests, 87.4% coverage, 7/7 GitReins PASS
