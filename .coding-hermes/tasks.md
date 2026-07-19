@@ -2,6 +2,77 @@
 
 ## Open
 
+- [ ] **FEAT-002: Structured logging**
+  - Replace `log.Printf` across all packages with `log/slog`
+  - Structured fields: method, path, status, duration, agent_id, trace_id
+  - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
+  - JSON format for production, text for development
+
+- [ ] **DOC-003: Create CONTRIBUTING.md**
+  - Build/run/test commands, Docker setup, Go conventions, PR template
+  - Architecture overview, package map, testing strategy (short vs integration)
+
+- [ ] **COV-005: Entrypoint smoke tests**
+  - `cmd/server/main_test.go` — starts server, hits /health, verifies 200
+  - `cmd/crier-mcp/main_test.go` — starts MCP server, runs initialize handshake
+  - Catches wiring regressions early
+
+- [ ] **SPEC-001: Sync README/CI docs to reality**
+  - README Go badge says 1.22+ → update to 1.26+
+  - README CI matrix says 1.22+1.23 → actual is 1.25+1.26
+  - README mentions CRIER_JWT_SECRET → code uses CR_AUTH_TOKEN (Bearer, not JWT)
+  - Architecture doc mentions "persistent event log with replay" — not implemented (note as future)
+  - Architecture doc mentions "Mutual TLS + token auth" — no mTLS
+
+- [ ] **DOC-004: Add missing LICENSE file**
+  - README says MIT license but no LICENSE file exists
+  - Create LICENSE with MIT text
+
+- [ ] **TEST-001: Config package tests (0% coverage)**
+  - `config/config_test.go` — test Load() with env vars, defaults, invalid values
+  - Cover: port parsing, DB URL precedence, pool config validation, timeouts
+  - Target: 80%+ coverage
+
+- [ ] **TEST-002: PostgresStore unit tests with mock DB**
+  - `internal/registry/postgres_store_test.go` — unit tests (no Docker required)
+  - Use pgx mock or interface-based fake for SQL execution paths
+  - Cover: input validation, error mapping, edge cases
+  - Currently 0% in short tests (only tested via integration tag)
+
+- [ ] **TEST-003: Migrate package tests**
+  - `internal/registry/migrate_test.go` — verify embedded migrations are valid
+  - Test: RunMigrations with test DB, verify schema_migrations table
+  - Currently 0% coverage
+
+- [ ] **PITFALL-001: Implement rate limiting (stubbed)**
+  - `POST /relay/publish` always returns 202; spec says 429 after 100/min/agent
+  - Implement token-bucket or sliding-window rate limiter per agent
+  - Wire into relay handler
+
+- [ ] **PITFALL-002: Restrict WebSocket origin check**
+  - `CheckOrigin` returns true for all connections (open relay risk)
+  - Add configurable allowed origins or at minimum require same-origin
+  - Add `CR_WS_ALLOWED_ORIGINS` env var
+
+- [ ] **PERF-001: Add benchmarks for hot paths**
+  - `relay/relay_test.go`: BenchmarkPublish, BenchmarkSubscribe
+  - `registry/memory_store_test.go`: BenchmarkRetrieve, BenchmarkAck
+  - `mesh/message_test.go`: BenchmarkMarshal
+  - Establish baseline for regression detection
+
+- [ ] **CI-010: Add Dockerfile + Makefile fixes**
+  - Create `Dockerfile` for `cmd/server` (multi-stage, distroless or alpine)
+  - Create `Dockerfile.mcp` for `cmd/crier-mcp`
+  - Makefile: add `build-mcp` target for `cmd/crier-mcp`
+  - Makefile: add `docker-build` target
+
+- [ ] **CI-011: Add coverage reporting to CI**
+  - Upload `go test -coverprofile` output to coverage dashboard
+  - Set coverage thresholds in CI (fail below 70%)
+  - Track trends across runs
+
+## Done
+
 - [x] **COV-002: Middleware tests — 0% → 80%+** (now 100% via FEAT-001 auth tests + existing logging/recovery tests)
   - `internal/middleware/` — logging, recovery, auth all tested
   - Coverage: 100% of statements
@@ -29,23 +100,6 @@
   - Wired on all routes via `r.Use(middleware.Auth(cfg.AuthToken))` in cmd/server/main.go
   - Config: `CR_AUTH_TOKEN` env var loaded into Config.AuthToken
   - 10 tests, 100% middleware coverage
-
-- [ ] **FEAT-002: Structured logging**
-  - Replace `log.Printf` across all packages with `log/slog`
-  - Structured fields: method, path, status, duration, agent_id, trace_id
-  - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
-  - JSON format for production, text for development
-
-- [ ] **DOC-003: Create CONTRIBUTING.md**
-  - Build/run/test commands, Docker setup, Go conventions, PR template
-  - Architecture overview, package map, testing strategy (short vs integration)
-
-- [ ] **COV-005: Entrypoint smoke tests**
-  - `cmd/server/main_test.go` — starts server, hits /health, verifies 200
-  - `cmd/crier-mcp/main_test.go` — starts MCP server, runs initialize handshake
-  - Catches wiring regressions early
-
-## Done
 
 - [x] **INFRA-001: Upgrade Go to 1.26.5** (done 2026-07-18)
 - [x] **COV-001: PostgresStore integration tests** (done 2026-07-19)
