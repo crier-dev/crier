@@ -8,7 +8,7 @@
   - 5+ test cases. GIVEN/WHEN/THEN for each
   - _Load: ad-hoc-verification-bash-script_
 
-- [ ] **COV-003: MCP server tests — 67.5% → 80%+**
+- [x] **COV-003: MCP server tests — 67.5% → 80%+**
   - `internal/mcp/` — 27 tests exist but missing edge cases
   - Add: tool_handler error propagation, invalid JSON-RPC, concurrent requests, server shutdown
   - _Load: ad-hoc-verification-bash-script_
