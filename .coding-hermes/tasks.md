@@ -1,58 +1,54 @@
 # Crier tasks
 
-## [x] COV-001: PostgresStore integration tests — 0% → 80%+ coverage (done 2026-07-19, commit cad2df5)
-  - `postgres_store.go` (600 lines): Register, Get, List, Unregister, Deliver, Retrieve, Ack, Stats, PurgeExpired — all 0%
-  - `migrate.go`: RunMigrations 0%
-  - `handler.go`: HandleAck, writeStoreError 0% — these paths are exercised against MemoryStore but not PostgresStore
-  - Root cause: CI-003b added PostgresStore (600 lines) but tests only cover MemoryStore — store interface unchanged, but handler tests route through in-memory path
-  - Fix: add PostgresStore integration tests requiring a pg instance (testcontainers-go or docker-compose)
-  - Priority: medium | Weight: 4
+## Open
+
+- [ ] **COV-002: Middleware tests — 0% → 80%+**
+  - `internal/middleware/middleware.go` — Logging + Recovery, 40 lines, zero tests
+  - Test: request logging captures method/path/status/duration, recovery returns 500 on panic
+  - 5+ test cases. GIVEN/WHEN/THEN for each
+  - _Load: ad-hoc-verification-bash-script_
+
+- [ ] **COV-003: MCP server tests — 67.5% → 80%+**
+  - `internal/mcp/` — 27 tests exist but missing edge cases
+  - Add: tool_handler error propagation, invalid JSON-RPC, concurrent requests, server shutdown
+  - _Load: ad-hoc-verification-bash-script_
+
+- [ ] **INFRA-002: Add docker-compose.yml with PostgreSQL**
+  - postgres:16-alpine on :5432, healthcheck, init scripts
+  - Enables PostgresStore integration tests locally
+  - Required for COV-004
+
+- [ ] **COV-004: PostgresStore tests — enable integration test suite**
+  - `internal/registry/postgres_store_test.go` exists with `//go:build integration` tag
+  - Wire into CI: add PostgreSQL service container + `go test -tags=integration ./internal/registry`
+  - Target: registry package 36.4% → 80%+ (when PostgreSQL available)
+
+- [ ] **FEAT-001: Bearer auth middleware**
+  - OpenAPI spec § /relay/publish requires Bearer auth (401 on missing/invalid token)
+  - Add `internal/middleware/auth.go` — Bearer token validation
+  - Wire on /relay/*, /agents/*, /mesh/* endpoints
+  - Config: CR_AUTH_TOKEN env var or static shared secret for v0.1
+  - _Load: exhaustive-specification_
+
+- [ ] **FEAT-002: Structured logging**
+  - Replace `log.Printf` across all packages with `log/slog`
+  - Structured fields: method, path, status, duration, agent_id, trace_id
+  - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
+  - JSON format for production, text for development
+
+- [ ] **DOC-003: Create CONTRIBUTING.md**
+  - Build/run/test commands, Docker setup, Go conventions, PR template
+  - Architecture overview, package map, testing strategy (short vs integration)
+
+- [ ] **COV-005: Entrypoint smoke tests**
+  - `cmd/server/main_test.go` — starts server, hits /health, verifies 200
+  - `cmd/crier-mcp/main_test.go` — starts MCP server, runs initialize handshake
+  - Catches wiring regressions early
 
 ## Done
 
-- [x] **INFRA-001: Upgrade Go to 1.26.5 for 3 stdlib CVEs** (done 2026-07-18, commit 0b99218)
-- [x] **CI-001: Wire relay server** (done 2026-07-11)
-  - `internal/relay/` — thread-safe in-memory pub/sub, 140+109 lines
-  - 13 tests, 87.4% coverage, 7/7 GitReins PASS
-- [x] **CI-002: Port mesh + peer connection** (done 2026-07-12)
-  - `internal/mesh/` — dialer, message types, peer mesh — 744 lines
-  - Ported from Hivemind pkg/federation (607 lines)
-  - 8/8 GitReins judge PASS
-- [x] **CI-003: Agent registry + persistent inboxes** (done 2026-07-14)
-  - `internal/registry/` — store, handler, types — 587 lines
-  - FIFO inbox with lease-based delivery, TTL expiry
-  - 26 tests, 84.8% coverage, 8/8 GitReins PASS
-- [x] **CI-003b: PostgreSQL persistence** (done 2026-07-17)
-  - `internal/registry/postgres_store.go` — 600 lines, pgxpool-backed Store
-  - `internal/registry/migrate.go` — golang-migrate with embedded SQL
-  - DDL: agents + inbox_entries with FK cascade, CHECK constraints, indexes
-  - Atomic FIFO retrieve with SKIP LOCKED, lease-based ACK
-  - Wired in main.go and cmd/crier-mcp via CR_DATABASE_URL
-  - Commit: fb4f896
-- [x] **CI-004: Wire full HTTP API + tests** (done 2026-07-14)
-  - 17 endpoints across relay, mesh, registry, inbox
-  - Middleware: logging + recovery. Graceful shutdown drains Mesh
-  - 7/7 GitReins PASS
-- [x] **CI-005: OpenAPI 3.1 spec** (done 2026-07-11)
-  - 15 endpoints across 5 operation groups in docs/openapi.yaml
-- [x] **CI-006: GitHub Actions CI** (done 2026-07-15)
-  - `.github/workflows/ci.yml` — build/vet/test, go 1.22+1.23
-- [x] **CI-007: MCP server** (done 2026-07-17)
-  - `internal/mcp/` — stdio JSON-RPC server, 8 tools wrapping registry.Store
-  - `cmd/crier-mcp/main.go` — standalone binary
-  - 27 tests pass
-  - Commit: a0cd686
-- [x] **CI-008: Mesh test coverage** (done 2026-07-15)
-  - 2.8% → 90.5% — 1012 lines of new tests across 3 files
-- [x] **DOC-001: README.md** (done 2026-07-15)
-- [x] **DOC-002: PostgreSQL status in architecture.md** (done 2026-07-15)
-
-## [x] DEPS: upgrade Go deps — cel.dev/expr v0.24.0→v0.25.2, cloud.google.com/go v0.121.6→v0.123.0, cloud.google.com/go/auth v0.16.4→v0.22.0 (done 2026-07-19, commit f78586c)
-
-## [x] CI-009: Fix flaky TestNewAcceptedPeerConnectionStartReadLoop — CI-only timeout (done 2026-07-19, commit 433e293)
-
-  - `internal/mesh/dialer_test.go:264`: `t.Fatal("timed out waiting for OnClose")` — 2s timeout waiting for OnClose callback after clientConn.Close()
-  - Passes locally (0.00s) but fails in GitHub Actions CI (2.0s timeout)
-  - Root cause: websocket close propagation slower in CI runners — OnClose callback doesn't fire within 2s
-  - Fix options: increase timeout to 5s, or restructure test to not depend on close callback timing
-  - Priority: low | Weight: 1
+- [x] **INFRA-001: Upgrade Go to 1.26.5** (done 2026-07-18)
+- [x] **COV-001: PostgresStore integration tests** (done 2026-07-19)
+- [x] **CI-009: Fix flaky mesh test** (done 2026-07-19)
+- [x] **CI-001 through CI-008** (done 2026-07-11 to 2026-07-17)
+- [x] **DOC-001, DOC-002** (done 2026-07-15)
