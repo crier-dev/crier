@@ -1,10 +1,15 @@
 package mcp
 
 import (
+	"bufio"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -778,4 +783,214 @@ func TestLeaseExpiry_UnackedReturns(t *testing.T) {
 	if out2.Messages[0].ID != out.Messages[0].ID {
 		t.Errorf("expected same message ID after expiry")
 	}
+}
+
+// =============================================================================
+// coverage tests (COV-003)
+// =============================================================================
+
+func TestMcpErrorStorageUnavailable(t *testing.T) {
+	code, message := mcpError(fmt.Errorf("postgres storage is unavailable"))
+	if code != -32603 {
+		t.Errorf("expected code -32603, got %d", code)
+	}
+	if message != "registry storage unavailable" {
+		t.Errorf("expected 'registry storage unavailable', got: %s", message)
+	}
+}
+
+func TestMcpErrorDefaultPassThrough(t *testing.T) {
+	code, message := mcpError(fmt.Errorf("something weird happened"))
+	if code != -32602 {
+		t.Errorf("expected code -32602, got %d", code)
+	}
+	if message != "something weird happened" {
+		t.Errorf("expected passthrough message, got: %s", message)
+	}
+}
+
+func TestDispatchNotification(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	req := &jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  "notifications/initialized",
+		Params:  nil,
+		ID:      5,
+	}
+	resp := s.dispatch(t.Context(), req)
+	if resp != nil {
+		t.Fatalf("expected nil response for notification, got: %+v", resp)
+	}
+}
+
+func TestHandleToolsCallUnknownTool(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	args, _ := json.Marshal(toolsCallParams{Name: "nonexistent_tool", Arguments: json.RawMessage(`{}`)})
+	req := &jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  "tools/call",
+		Params:  args,
+		ID:      6,
+	}
+	resp := s.dispatch(t.Context(), req)
+	if resp.Error == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+	if resp.Error.Code != -32602 {
+		t.Errorf("expected code -32602, got %d", resp.Error.Code)
+	}
+	if !strings.Contains(resp.Error.Message, "unknown tool") {
+		t.Errorf("expected 'unknown tool' in error, got: %s", resp.Error.Message)
+	}
+}
+
+func TestRegisterAgentBlankID(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+	key := validTestKey(t)
+
+	resp := callTool(t, s, "register_agent", RegisterAgentInput{ID: "", PublicKey: key})
+	text, isErr := parseToolResult(t, resp)
+	if !isErr {
+		t.Fatal("expected error for blank id")
+	}
+	if !strings.Contains(text, "id is required") {
+		t.Errorf("expected 'id is required', got: %s", text)
+	}
+}
+
+func TestRegisterAgentTooShortKey(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	resp := callTool(t, s, "register_agent", RegisterAgentInput{ID: "agent-1", PublicKey: "aabbcc"})
+	text, isErr := parseToolResult(t, resp)
+	if !isErr {
+		t.Fatal("expected error for too short key")
+	}
+	if !strings.Contains(text, "64 hex characters") {
+		t.Errorf("expected '64 hex characters', got: %s", text)
+	}
+}
+
+func TestDeliverMessageBlankAgentID(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	resp := callTool(t, s, "deliver_message", DeliverMessageInput{
+		AgentID: "",
+		Payload: json.RawMessage(`{}`),
+	})
+	text, isErr := parseToolResult(t, resp)
+	if !isErr {
+		t.Fatal("expected error for blank agent_id")
+	}
+	if !strings.Contains(text, "agent_id is required") {
+		t.Errorf("expected 'agent_id is required', got: %s", text)
+	}
+}
+
+func TestDeliverMessageInvalidPayload(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	// Omit payload entirely to trigger the empty-payload validation path.
+	args, _ := json.Marshal(map[string]any{"agent_id": "agent-1"})
+	resp := callToolWithArgs(t, s, "deliver_message", args)
+	text, isErr := parseToolResult(t, resp)
+	if !isErr {
+		t.Fatal("expected error for invalid payload")
+	}
+	if !strings.Contains(text, "payload must be a JSON object") {
+		t.Errorf("expected 'payload must be a JSON object', got: %s", text)
+	}
+}
+
+func callToolWithArgs(t *testing.T, s *MCPServer, tool string, args json.RawMessage) *jsonRPCResponse {
+	t.Helper()
+	callParams, _ := json.Marshal(toolsCallParams{Name: tool, Arguments: args})
+	req := &jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  "tools/call",
+		Params:  callParams,
+		ID:      1,
+	}
+	return s.dispatch(t.Context(), req)
+}
+
+func TestServeHappyPath(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+
+	store := registry.NewMemoryStore()
+	s := New(store)
+	s.stdin = bufio.NewScanner(stdinR)
+	s.stdout = json.NewEncoder(stdoutW)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		defer stdinW.Close()
+		initReq, _ := json.Marshal(jsonRPCRequest{JSONRPC: "2.0", Method: "initialize", Params: mustMarshalJSON(t, initializeParams{ProtocolVersion: "2024-11-05"}), ID: 1})
+		listReq, _ := json.Marshal(jsonRPCRequest{JSONRPC: "2.0", Method: "tools/list", ID: 2})
+		fmt.Fprintln(stdinW, string(initReq))
+		fmt.Fprintln(stdinW, string(listReq))
+		// Give Serve time to process before EOF closes stdin.
+		time.Sleep(100 * time.Millisecond)
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.Serve(ctx)
+	}()
+
+	reader := bufio.NewReader(stdoutR)
+	responses := make([]jsonRPCResponse, 0, 2)
+	for len(responses) < 2 {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			break
+		}
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(line, &resp); err == nil {
+			responses = append(responses, resp)
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not stop after context cancel")
+	}
+
+	if len(responses) < 2 {
+		t.Fatalf("expected 2 responses, got %d", len(responses))
+	}
+	if responses[0].Error != nil {
+		t.Fatalf("initialize returned error: %+v", responses[0].Error)
+	}
+	if responses[1].Error != nil {
+		t.Fatalf("tools/list returned error: %+v", responses[1].Error)
+	}
+	if responses[1].Result == nil {
+		t.Fatal("tools/list returned nil result")
+	}
+}
+
+func mustMarshalJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
 }
