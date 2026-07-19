@@ -2,11 +2,11 @@
 
 ## Open
 
-- [x] **COV-002: Middleware tests — 0% → 80%+**
-  - `internal/middleware/middleware.go` — Logging + Recovery, 40 lines, zero tests
-  - Test: request logging captures method/path/status/duration, recovery returns 500 on panic
-  - 5+ test cases. GIVEN/WHEN/THEN for each
-  - _Load: ad-hoc-verification-bash-script_
+- [x] **COV-002: Middleware tests — 0% → 80%+** (now 100% via FEAT-001 auth tests + existing logging/recovery tests)
+  - `internal/middleware/` — logging, recovery, auth all tested
+  - Coverage: 100% of statements
+  - 10 auth tests covering no-token, health bypass, missing header, wrong scheme, wrong token, correct token, whitespace rejection, empty token
+  - _Done 2026-07-19, commit ee64882_
 
 - [x] **COV-003: MCP server tests — 67.5% → 80%+**
   - `internal/mcp/` — 27 tests exist but missing edge cases
@@ -23,12 +23,12 @@
   - Wired into CI: added integration job running `go test -tags=integration ./internal/registry/`
   - Registry coverage: 36.4% → 78.1% with integration tests. All 48 tests pass.
 
-- [ ] **FEAT-001: Bearer auth middleware**
+- [x] **FEAT-001: Bearer auth middleware** (done 2026-07-19, commit ee64882)
   - OpenAPI spec § /relay/publish requires Bearer auth (401 on missing/invalid token)
-  - Add `internal/middleware/auth.go` — Bearer token validation
-  - Wire on /relay/*, /agents/*, /mesh/* endpoints
-  - Config: CR_AUTH_TOKEN env var or static shared secret for v0.1
-  - _Load: exhaustive-specification_
+  - `internal/middleware/auth.go` — Bearer token validation, /health exempt, empty token = pass-through
+  - Wired on all routes via `r.Use(middleware.Auth(cfg.AuthToken))` in cmd/server/main.go
+  - Config: `CR_AUTH_TOKEN` env var loaded into Config.AuthToken
+  - 10 tests, 100% middleware coverage
 
 - [ ] **FEAT-002: Structured logging**
   - Replace `log.Printf` across all packages with `log/slog`
