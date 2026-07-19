@@ -18,10 +18,10 @@
   - Enables PostgresStore integration tests locally
   - Integration tests verified passing against running container
 
-- [ ] **COV-004: PostgresStore tests — enable integration test suite**
+- [x] **COV-004: PostgresStore tests — enable integration test suite** (done 2026-07-19, commit 02777e8)
   - `internal/registry/postgres_store_test.go` exists with `//go:build integration` tag
-  - Wire into CI: add PostgreSQL service container + `go test -tags=integration ./internal/registry`
-  - Target: registry package 36.4% → 80%+ (when PostgreSQL available)
+  - Wired into CI: added integration job running `go test -tags=integration ./internal/registry/`
+  - Registry coverage: 36.4% → 78.1% with integration tests. All 48 tests pass.
 
 - [ ] **FEAT-001: Bearer auth middleware**
   - OpenAPI spec § /relay/publish requires Bearer auth (401 on missing/invalid token)
