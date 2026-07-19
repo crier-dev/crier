@@ -27,6 +27,7 @@ func main() {
 	r := mux.NewRouter()
 
 	// Middleware
+	r.Use(middleware.Auth(cfg.AuthToken))
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 

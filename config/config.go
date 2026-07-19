@@ -19,14 +19,16 @@ type DatabaseConfig struct {
 
 // Config holds all Crier configuration.
 type Config struct {
-	Port     int
-	Database DatabaseConfig
+	Port      int
+	AuthToken string
+	Database  DatabaseConfig
 }
 
 // Load reads configuration from environment with defaults.
 func Load() (Config, error) {
 	cfg := Config{
-		Port: 8767,
+		Port:      8767,
+		AuthToken: os.Getenv("CR_AUTH_TOKEN"),
 		Database: DatabaseConfig{
 			MaxConns:        4,
 			MinConns:        0,
