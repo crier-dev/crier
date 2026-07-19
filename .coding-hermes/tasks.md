@@ -2,7 +2,7 @@
 
 ## Open
 
-- [ ] **COV-002: Middleware tests — 0% → 80%+**
+- [x] **COV-002: Middleware tests — 0% → 80%+**
   - `internal/middleware/middleware.go` — Logging + Recovery, 40 lines, zero tests
   - Test: request logging captures method/path/status/duration, recovery returns 500 on panic
   - 5+ test cases. GIVEN/WHEN/THEN for each
