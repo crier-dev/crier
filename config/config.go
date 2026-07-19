@@ -22,6 +22,8 @@ type Config struct {
 	Port      int
 	AuthToken string
 	Database  DatabaseConfig
+	LogLevel  string
+	LogFormat string
 }
 
 // Load reads configuration from environment with defaults.
@@ -29,6 +31,8 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:      8767,
 		AuthToken: os.Getenv("CR_AUTH_TOKEN"),
+		LogLevel:  "info",
+		LogFormat: "text",
 		Database: DatabaseConfig{
 			MaxConns:        4,
 			MinConns:        0,
@@ -36,6 +40,24 @@ func Load() (Config, error) {
 			MaxConnIdleTime: 5 * time.Minute,
 			ConnectTimeout:  10 * time.Second,
 		},
+	}
+
+	if v := os.Getenv("CR_LOG_LEVEL"); v != "" {
+		switch v {
+		case "debug", "info", "warn", "error":
+			cfg.LogLevel = v
+		default:
+			return cfg, fmt.Errorf("invalid CR_LOG_LEVEL: %q (want debug/info/warn/error)", v)
+		}
+	}
+
+	if v := os.Getenv("CR_LOG_FORMAT"); v != "" {
+		switch v {
+		case "text", "json":
+			cfg.LogFormat = v
+		default:
+			return cfg, fmt.Errorf("invalid CR_LOG_FORMAT: %q (want text/json)", v)
+		}
 	}
 
 	// Port

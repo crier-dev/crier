@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"time"
 
@@ -184,7 +184,7 @@ SELECT id, public_key, capabilities, status, registered_at, last_seen
 FROM agents
 ORDER BY registered_at ASC, id ASC;`)
 	if err != nil {
-		log.Printf("postgres list: %v", err)
+		slog.Error("postgres list", "error", err)
 		return []*Agent{}
 	}
 	defer rows.Close()
@@ -197,24 +197,24 @@ ORDER BY registered_at ASC, id ASC;`)
 			capabilitiesJSON []byte
 		)
 		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen); err != nil {
-			log.Printf("postgres list scan: %v", err)
+			slog.Error("postgres list scan", "error", err)
 			return []*Agent{}
 		}
 		if len(publicKey) != ed25519.PublicKeySize {
-			log.Printf("postgres list: public key length %d for %q", len(publicKey), agent.ID)
+			slog.Warn("postgres list: invalid public key", "len", len(publicKey), "agent_id", agent.ID)
 			return []*Agent{}
 		}
 		key := make(HexKey, ed25519.PublicKeySize)
 		copy(key, publicKey)
 		agent.PublicKey = key
 		if err := json.Unmarshal(capabilitiesJSON, &agent.Capabilities); err != nil {
-			log.Printf("postgres list: unmarshal capabilities: %v", err)
+			slog.Error("postgres list: unmarshal capabilities", "error", err)
 			return []*Agent{}
 		}
 		out = append(out, &agent)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("postgres list rows: %v", err)
+		slog.Error("postgres list rows", "error", err)
 		return []*Agent{}
 	}
 	return out
@@ -562,7 +562,7 @@ func (s *PostgresStore) PurgeExpired() int {
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		log.Printf("postgres purge expired: %v", err)
+		slog.Error("postgres purge expired", "error", err)
 		return 0
 	}
 	defer tx.Rollback(ctx)
@@ -573,7 +573,7 @@ func (s *PostgresStore) PurgeExpired() int {
 DELETE FROM inbox_entries
 WHERE expires_at <= $1;`, now)
 	if err != nil {
-		log.Printf("postgres purge expired: %v", err)
+		slog.Error("postgres purge expired", "error", err)
 		return 0
 	}
 	removed := int(tag.RowsAffected())
@@ -587,12 +587,12 @@ WHERE expires_at > $1
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at <= $1;`, now)
 	if err != nil {
-		log.Printf("postgres purge expired: %v", err)
+		slog.Error("postgres purge expired", "error", err)
 		return 0
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		log.Printf("postgres purge expired: %v", err)
+		slog.Error("postgres purge expired", "error", err)
 		return 0
 	}
 

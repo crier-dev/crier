@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,10 +19,19 @@ import (
 )
 
 func main() {
+	// Bootstrap with a default info-level text logger so any pre-config
+	// logging has a destination. Re-initialized with the user's choices
+	// after cfg.Load() below.
+	initLogger(config.Config{LogLevel: "info", LogFormat: "text"})
+
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load configuration: %v", err)
+		slog.Error("load configuration", "error", err)
+		os.Exit(1)
 	}
+
+	// Re-install the logger now that we know the user's level/format.
+	initLogger(cfg)
 
 	r := mux.NewRouter()
 
@@ -63,14 +72,15 @@ func main() {
 			MaxConnIdleTime: cfg.Database.MaxConnIdleTime,
 		})
 		if err != nil {
-			log.Fatalf("initialize PostgreSQL registry store: %v", err)
+			slog.Error("initialize PostgreSQL registry store", "error", err)
+			os.Exit(1)
 		}
 		defer pgStore.Close()
 		regStore = pgStore
-		log.Printf("Registry: PostgreSQL backend (max_conns=%d)", cfg.Database.MaxConns)
+		slog.Info("registry backend", "type", "postgres", "max_conns", cfg.Database.MaxConns)
 	} else {
 		regStore = registry.NewMemoryStore()
-		log.Printf("Registry: in-memory backend (set CR_DATABASE_URL for PostgreSQL)")
+		slog.Info("registry backend", "type", "memory", "hint", "set CR_DATABASE_URL for PostgreSQL")
 	}
 
 	registryHandler := registry.NewHandler(regStore)
@@ -119,15 +129,16 @@ func main() {
 		purgeCancel()
 		meshSvc.Stop()
 		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("http shutdown: %v", err)
+			slog.Warn("http shutdown", "error", err)
 		}
 		if closer, ok := regStore.(interface{ Close() }); ok {
 			closer.Close()
 		}
 	}()
 
-	log.Printf("Crier starting on :%d (relay + mesh + registry)", cfg.Port)
+	slog.Info("crier starting", "port", cfg.Port, "services", "relay+mesh+registry")
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server failed: %v", err)
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,24 +12,21 @@ import (
 	"time"
 )
 
+// captureLogs redirects slog default output into a buffer for the duration of
+// the test. Uses a TextHandler so log lines stay readable and assertion
+// substrings can match on key=value pairs.
 func captureLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
-	var logs bytes.Buffer
-	previousWriter := log.Writer()
-	previousFlags := log.Flags()
-	previousPrefix := log.Prefix()
-
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	log.SetPrefix("")
+	var buf bytes.Buffer
+	prev := slog.Default()
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(handler))
 	t.Cleanup(func() {
-		log.SetOutput(previousWriter)
-		log.SetFlags(previousFlags)
-		log.SetPrefix(previousPrefix)
+		slog.SetDefault(prev)
 	})
 
-	return &logs
+	return &buf
 }
 
 func TestLoggingLogsSuccessfulGET(t *testing.T) {
@@ -45,7 +42,7 @@ func TestLoggingLogsSuccessfulGET(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
-	if !strings.Contains(logs.String(), "GET /success 200 ") {
+	if !strings.Contains(logs.String(), "method=GET path=/success status=200") {
 		t.Fatalf("log = %q, want method, path, and status", logs.String())
 	}
 }
@@ -63,7 +60,7 @@ func TestLoggingCapturesNonOKStatus(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
-	if !strings.Contains(logs.String(), "GET /missing 404 ") {
+	if !strings.Contains(logs.String(), "method=GET path=/missing status=404") {
 		t.Fatalf("log = %q, want non-OK status", logs.String())
 	}
 }
@@ -79,13 +76,14 @@ func TestLoggingLogsRequestDuration(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	fields := strings.Fields(strings.TrimSpace(logs.String()))
-	if len(fields) != 4 {
-		t.Fatalf("log fields = %q, want method, path, status, and duration", fields)
+	// Verify duration field is present and parses as a positive Go duration <1s.
+	durStr, ok := extractAttr(logs.String(), "duration")
+	if !ok {
+		t.Fatalf("log = %q, want duration field", logs.String())
 	}
-	duration, err := time.ParseDuration(fields[3])
+	duration, err := time.ParseDuration(durStr)
 	if err != nil {
-		t.Fatalf("parse logged duration %q: %v", fields[3], err)
+		t.Fatalf("parse logged duration %q: %v", durStr, err)
 	}
 	if duration <= 0 {
 		t.Errorf("logged duration = %s, want > 0", duration)
@@ -138,7 +136,7 @@ func TestRecoveryCatchesPanicAndReturnsJSONError(t *testing.T) {
 	if body["error"] != "internal server error" {
 		t.Fatalf("error = %q, want %q", body["error"], "internal server error")
 	}
-	if !strings.Contains(logs.String(), "panic: boom") {
+	if !strings.Contains(logs.String(), `error=boom`) {
 		t.Fatalf("log = %q, want recovered panic", logs.String())
 	}
 }
@@ -227,4 +225,36 @@ func TestResponseWriterDefaultsToOKWhenWritingBody(t *testing.T) {
 	if recorder.Body.String() != "body" {
 		t.Fatalf("body = %q, want %q", recorder.Body.String(), "body")
 	}
+}
+
+// extractAttr pulls the value of a key from a slog text-encoded line.
+// Matches the textual form `<key>=<value>` followed by a space, end of line,
+// or a quote (since slog text format escapes values containing `=` or spaces).
+func extractAttr(line, key string) (string, bool) {
+	prefix := key + "="
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return "", false
+	}
+	rest := line[idx+len(prefix):]
+	if rest == "" {
+		return "", false
+	}
+	// Quoted value (slog text format escapes values containing `=`).
+	if rest[0] == '"' {
+		end := strings.IndexByte(rest[1:], '"')
+		if end < 0 {
+			return "", false
+		}
+		return rest[1 : 1+end], true
+	}
+	// Bare value up to the next space, newline, or end of line.
+	end := len(rest)
+	for i, r := range rest {
+		if r == ' ' || r == '\n' || r == '\r' {
+			end = i
+			break
+		}
+	}
+	return rest[:end], true
 }

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/totalwindupflightsystems/crier/config"
@@ -14,12 +14,14 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("load config", "error", err)
+		os.Exit(1)
 	}
 
 	store, cleanup, err := initStore(cfg)
 	if err != nil {
-		log.Fatalf("store: %v", err)
+		slog.Error("initialize store", "error", err)
+		os.Exit(1)
 	}
 	defer cleanup()
 

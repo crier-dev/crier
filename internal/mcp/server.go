@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -62,12 +62,12 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	log.Printf("crier-mcp %s starting on stdio", serverVersion)
+	slog.Info("crier-mcp starting", "version", serverVersion, "transport", "stdio")
 
 	for s.stdin.Scan() {
 		select {
 		case <-ctx.Done():
-			log.Println("shutting down")
+			slog.Info("shutting down")
 			return nil
 		default:
 		}
@@ -88,10 +88,10 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 			continue // notification, no response
 		}
 		if err := s.stdout.Encode(resp); err != nil {
-			log.Printf("write error: %v", err)
+			slog.Error("write error", "error", err)
 			return err
 		}
-	}
+		}
 
 	if err := s.stdin.Err(); err != nil {
 		return fmt.Errorf("stdin: %w", err)
@@ -236,7 +236,7 @@ func (s *MCPServer) errorResponse(id any, code int, message string) *jsonRPCResp
 func (s *MCPServer) writeError(id any, code int, message string) {
 	resp := s.errorResponse(id, code, message)
 	if err := s.stdout.Encode(resp); err != nil {
-		log.Printf("write error: %v", err)
+		slog.Error("write error", "error", err)
 	}
 }
 
@@ -259,7 +259,7 @@ func mcpError(err error) (code int, message string) {
 		// Store-level errors (DB unavailable, etc.) get -32603
 		// Validation errors (from tool handlers) get -32602 with the message
 		if strings.Contains(msg, "storage") || strings.Contains(msg, "unavailable") {
-			log.Printf("store error: %v", err)
+			slog.Warn("store error", "error", err)
 			return -32603, "registry storage unavailable"
 		}
 		return -32602, msg

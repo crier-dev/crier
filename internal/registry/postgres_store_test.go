@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"testing"
@@ -75,7 +74,7 @@ func TestMain(m *testing.M) {
 	termCtx, termCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer termCancel()
 	if err := ctr.Terminate(termCtx); err != nil {
-		log.Printf("postgres terminate: %v", err)
+		fmt.Fprintf(os.Stderr, "postgres terminate: %v\n", err)
 	}
 
 	os.Exit(code)

@@ -2,7 +2,7 @@ package mesh
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -34,7 +34,7 @@ func HandleConnect(m *Mesh) http.HandlerFunc {
 		pc.StartReadLoop()
 		m.AcceptPeer(agentID, pc)
 
-		log.Printf("mesh: peer %s connected", agentID)
+		slog.Info("mesh peer connected", "agent_id", agentID)
 	}
 }
 

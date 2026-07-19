@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -266,7 +266,7 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 // writeStoreError logs a store-level error and returns a generic 500 to the client.
 func writeStoreError(w http.ResponseWriter, err error) {
-	log.Printf("registry store error: %v", err)
+	slog.Error("registry store error", "error", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]string{
 		"error": "registry storage unavailable",
 	})
