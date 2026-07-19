@@ -48,3 +48,11 @@
 - [x] **DOC-002: PostgreSQL status in architecture.md** (done 2026-07-15)
 
 ## [x] DEPS: upgrade Go deps — cel.dev/expr v0.24.0→v0.25.2, cloud.google.com/go v0.121.6→v0.123.0, cloud.google.com/go/auth v0.16.4→v0.22.0 (done 2026-07-19, commit f78586c)
+
+## [ ] CI-009: Fix flaky TestNewAcceptedPeerConnectionStartReadLoop — CI-only timeout
+
+  - `internal/mesh/dialer_test.go:264`: `t.Fatal("timed out waiting for OnClose")` — 2s timeout waiting for OnClose callback after clientConn.Close()
+  - Passes locally (0.00s) but fails in GitHub Actions CI (2.0s timeout)
+  - Root cause: websocket close propagation slower in CI runners — OnClose callback doesn't fire within 2s
+  - Fix options: increase timeout to 5s, or restructure test to not depend on close callback timing
+  - Priority: low | Weight: 1

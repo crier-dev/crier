@@ -260,7 +260,7 @@ func TestNewAcceptedPeerConnectionStartReadLoop(t *testing.T) {
 	pc.OnClose(func(error) { close(closed) })
 	select {
 	case <-closed:
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for OnClose")
 	}
 }
