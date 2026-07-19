@@ -1,6 +1,6 @@
 # Crier tasks
 
-## [ ] COV-001: PostgresStore integration tests — 0% → 80%+ coverage (filed 2026-07-18)
+## [x] COV-001: PostgresStore integration tests — 0% → 80%+ coverage (done 2026-07-19, commit cad2df5)
   - `postgres_store.go` (600 lines): Register, Get, List, Unregister, Deliver, Retrieve, Ack, Stats, PurgeExpired — all 0%
   - `migrate.go`: RunMigrations 0%
   - `handler.go`: HandleAck, writeStoreError 0% — these paths are exercised against MemoryStore but not PostgresStore
