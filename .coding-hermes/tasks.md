@@ -6,10 +6,10 @@
   - Build/run/test commands, Docker setup, Go conventions, PR template
   - Architecture overview, package map, testing strategy (short vs integration)
 
-- [ ] **COV-005: Entrypoint smoke tests**
-  - `cmd/server/main_test.go` — starts server, hits /health, verifies 200
-  - `cmd/crier-mcp/main_test.go` — starts MCP server, runs initialize handshake
-  - Catches wiring regressions early
+- [x] **COV-005: Entrypoint smoke tests** (done 2026-07-19, commit c0b2667)
+  - `cmd/server/main_test.go` — TestServerHealth: starts server, hits /health, verifies 200, graceful shutdown
+  - `cmd/crier-mcp/main_test.go` — TestMCPServerInitialize: builds binary, runs JSON-RPC initialize handshake
+  - 2 tests, 213 lines, all passing. Catches wiring regressions early
 
 - [ ] **SPEC-001: Sync README/CI docs to reality**
   - README Go badge says 1.22+ → update to 1.26+
