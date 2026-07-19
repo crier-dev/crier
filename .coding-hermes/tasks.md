@@ -2,12 +2,6 @@
 
 ## Open
 
-- [x] **FEAT-002: Structured logging** (done 2026-07-19, commit b77c28a)
-  - Replace `log.Printf` across all packages with `log/slog`
-  - Structured fields: method, path, status, duration, agent_id, trace_id
-  - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
-  - JSON format for production, text for development
-
 - [ ] **DOC-003: Create CONTRIBUTING.md**
   - Build/run/test commands, Docker setup, Go conventions, PR template
   - Architecture overview, package map, testing strategy (short vs integration)
@@ -106,6 +100,12 @@
 - [x] **CI-009: Fix flaky mesh test** (done 2026-07-19)
 - [x] **CI-001 through CI-008** (done 2026-07-11 to 2026-07-17)
 - [x] **DOC-001, DOC-002** (done 2026-07-15)
+
+- [x] **FEAT-002: Structured logging** (done 2026-07-19, commit b77c28a)
+  - Replace `log.Printf` across all packages with `log/slog`
+  - Structured fields: method, path, status, duration, agent_id, trace_id
+  - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
+  - JSON format for production, text for development
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 

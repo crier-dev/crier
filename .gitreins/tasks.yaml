@@ -167,3 +167,23 @@ tasks:
   - Coverage trends visible across CI runs
   status: pending
   created_at: '2026-07-19T17:28:06.467235+00:00'
+- id: feat-002
+  title: 'FEAT-002: Structured logging with log/slog'
+  criteria:
+  - config/config.go has LogLevel and LogFormat fields parsed from CR_LOG_LEVEL/CR_LOG_FORMAT
+    env vars
+  - cmd/server/logger.go creates initLogger() that sets slog.SetDefault() with configurable
+    level and format
+  - cmd/server/main.go calls initLogger() and uses slog instead of log
+  - cmd/crier-mcp/main.go uses slog instead of log
+  - internal/middleware/middleware.go uses slog.Info/slog.Error with structured fields
+    for Logging and Recovery
+  - internal/mcp/server.go uses slog instead of log
+  - internal/mesh/handler.go uses sloig instead of log
+  - internal/registry/handler.go uses slog instead of log
+  - internal/registry/postgres_store.go uses slog instead of log
+  - go build ./... && go vet ./... && go test ./... -short all pass
+  - No log.Printf, log.Println, or log.Fatalf remain in source files (test files exempt)
+  status: complete
+  created_at: '2026-07-19T18:21:27.081751+00:00'
+  completed_at: '2026-07-19T18:23:57.702753+00:00'
