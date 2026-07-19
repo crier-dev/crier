@@ -2,7 +2,7 @@
 
 ## Open
 
-- [ ] **FEAT-002: Structured logging**
+- [x] **FEAT-002: Structured logging** (done 2026-07-19, commit b77c28a)
   - Replace `log.Printf` across all packages with `log/slog`
   - Structured fields: method, path, status, duration, agent_id, trace_id
   - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
@@ -106,3 +106,7 @@
 - [x] **CI-009: Fix flaky mesh test** (done 2026-07-19)
 - [x] **CI-001 through CI-008** (done 2026-07-11 to 2026-07-17)
 - [x] **DOC-001, DOC-002** (done 2026-07-15)
+
+## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
+
+Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
