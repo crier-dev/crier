@@ -49,4 +49,4 @@
 - [x] **DOC-001: README.md** (done 2026-07-15)
 - [x] **DOC-002: PostgreSQL status in architecture.md** (done 2026-07-15)
 
-## [ ] DEPS: upgrade Go deps — cel.dev/expr v0.24.0→v0.25.2, cloud.google.com/go v0.121.6→v0.123.0, cloud.google.com/go/auth v0.16.4→v0.22.0
+## [x] DEPS: upgrade Go deps — cel.dev/expr v0.24.0→v0.25.2, cloud.google.com/go v0.121.6→v0.123.0, cloud.google.com/go/auth v0.16.4→v0.22.0 (done 2026-07-19, commit f78586c)
