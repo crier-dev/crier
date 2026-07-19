@@ -2,7 +2,7 @@
 
 ## Open
 
-- [ ] **DOC-003: Create CONTRIBUTING.md**
+- [x] **DOC-003: Create CONTRIBUTING.md** (done 2026-07-19, commit e695ee9)
   - Build/run/test commands, Docker setup, Go conventions, PR template
   - Architecture overview, package map, testing strategy (short vs integration)
 
