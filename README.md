@@ -1,6 +1,6 @@
 # Crier — Agent-to-Agent Message Bus
 
-[![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev)
 [![CI](https://github.com/crier-dev/crier/actions/workflows/ci.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/ci.yml)
 
 Communication backbone for the autonomous agent economy. Extracted and generalized from Hivemind.
@@ -49,7 +49,7 @@ Persistent per-agent FIFO queues with lease-based delivery.
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.26 or later
 
 ### Build
 
@@ -91,7 +91,7 @@ All configuration is via environment variables (defaults shown):
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CRIER_DATABASE_URL` | `postgres://crier:crier@localhost:5432/crier?sslmode=disable` | PostgreSQL connection (planned, not yet used) |
-| `CRIER_JWT_SECRET` | `change-me-in-production` | JWT signing secret |
+| `CR_AUTH_TOKEN` | (required) | Bearer token for relay publish authentication |
 
 ## API
 
@@ -121,7 +121,7 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
 - **API** — 17 HTTP endpoints wired with middleware, graceful shutdown
-- **CI** — GitHub Actions, matrix build Go 1.22 + 1.23
+- **CI** — GitHub Actions, matrix build Go 1.25 + 1.26
 
 ### Roadmap
 

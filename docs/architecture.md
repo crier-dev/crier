@@ -11,12 +11,11 @@ Central message relay. Agents publish events to topics; subscribers receive them
 - HTTP + WebSocket transport
 - Topic-based routing with wildcards
 - Rate limiting per agent
-- Persistent event log with replay
 
 ### 2. WebSocket Mesh (peer-to-peer)
 Direct agent-to-agent communication layer.
 - Peer discovery via registry
-- Mutual TLS + token auth
+- Token auth
 - Keepalive + automatic reconnect
 - Request/response correlation
 
@@ -28,7 +27,7 @@ Every agent has a discoverable identity and persistent inbox.
 - Capability-based routing
 
 ## Stack
-- **Language:** Go 1.22+
+- **Language:** Go 1.26+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
 - **Storage:** In-memory (PostgreSQL planned via CI-003b — inboxes, registry, event log)
 - **Auth:** Agent tokens (HMAC-signed)
