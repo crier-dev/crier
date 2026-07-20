@@ -54,7 +54,7 @@
   - `config.BuildCheckOrigin()` helper with 9 tests
   - Wired into relay.SetWSCheckOrigin() + mesh.SetWSCheckOrigin() in main.go
 
-- [ ] **PERF-001: Add benchmarks for hot paths** (audit confirmed: 0 benchmarks)
+- [x] **PERF-001: Add benchmarks for hot paths** (done 2026-07-20, commit 02ad2e8)
   - `relay/relay_test.go`: BenchmarkPublish, BenchmarkSubscribe
   - `registry/memory_store_test.go`: BenchmarkRetrieve, BenchmarkAck
   - `mesh/message_test.go`: BenchmarkMarshal
