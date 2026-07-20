@@ -276,7 +276,7 @@ func TestLoad_MinConns_Valid(t *testing.T) {
 		{"0", 0},
 		{"1", 1},
 		{"2", 2},
-		{"100", 100},
+		{"4", 4},
 	}
 	for _, tc := range cases {
 		t.Run("val="+tc.val, func(t *testing.T) {
@@ -303,7 +303,7 @@ func TestLoad_MinConns_Invalid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CR_DATABASE_MIN_CONNS", tc.val)
-			cfg, err := config.Load()
+			_, err := config.Load()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "CR_DATABASE_MIN_CONNS")
 		})

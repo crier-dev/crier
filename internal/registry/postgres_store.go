@@ -35,9 +35,20 @@ func DefaultPoolConfig() PoolConfig {
 	}
 }
 
-// PostgresStore is a pgxpool-backed implementation of Store.
+// connPool is the subset of *pgxpool.Pool methods that PostgresStore needs.
+// Using an interface enables mock-based unit tests without a real database.
+type connPool interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Ping(ctx context.Context) error
+	Close()
+}
+
+// PostgresStore is a pgxpool-backeded implementation of Store.
 type PostgresStore struct {
-	pool *pgxpool.Pool
+	pool connPool
 }
 
 var _ Store = (*PostgresStore)(nil)
