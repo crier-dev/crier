@@ -16,6 +16,10 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
+// RunMigrations applies all embedded SQL migrations against the PostgreSQL
+// database identified by connString. It uses golang-migrate with an iofs
+// source to read migrations from the embedded migrations/ directory.
+// Returns nil on success or ErrNoChange when migrations are already current.
 func RunMigrations(ctx context.Context, connString string) error {
 	if connString == "" {
 		return fmt.Errorf("migrations: %w: database URL is empty", ErrInvalidStoreInput)

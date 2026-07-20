@@ -23,6 +23,9 @@ type PoolConfig struct {
 	MaxConnIdleTime time.Duration
 }
 
+// DefaultPoolConfig returns a PoolConfig with sensible defaults:
+// 4 max connections, no minimum, 30-minute connection lifetime,
+// 5-minute idle timeout.
 func DefaultPoolConfig() PoolConfig {
 	return PoolConfig{
 		MaxConns:        4,
@@ -39,10 +42,15 @@ type PostgresStore struct {
 
 var _ Store = (*PostgresStore)(nil)
 
+// NewPostgresStore opens a pgxpool, runs pending migrations, and returns
+// a ready-to-use PostgresStore. Uses DefaultPoolConfig for pool settings.
 func NewPostgresStore(ctx context.Context, connString string) (*PostgresStore, error) {
 	return NewPostgresStoreWithPoolConfig(ctx, connString, DefaultPoolConfig())
 }
 
+// NewPostgresStoreWithPoolConfig opens a pgxpool with the given pool
+// configuration, runs pending migrations, and returns a PostgresStore.
+// Validates the connection string and pool configuration before connecting.
 func NewPostgresStoreWithPoolConfig(ctx context.Context, connString string, poolConfig PoolConfig) (*PostgresStore, error) {
 	if connString == "" {
 		return nil, fmt.Errorf("postgres store: %w: connection string is empty", ErrInvalidStoreInput)

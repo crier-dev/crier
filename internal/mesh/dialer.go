@@ -18,6 +18,8 @@ type DialerConfig struct {
 	MaxRetries          int
 }
 
+// DefaultDialerConfig returns a DialerConfig with sensible defaults:
+// 10s handshake timeout, 1s→30s exponential reconnect backoff, 10 max retries.
 func DefaultDialerConfig() DialerConfig {
 	return DialerConfig{
 		HandshakeTimeout:    10 * time.Second,
@@ -39,6 +41,8 @@ type PeerConnection struct {
 	onClose func(error)
 }
 
+// NewPeerConnection creates a PeerConnection for the given peer URL.
+// Call Connect(ctx) to establish the actual WebSocket connection.
 func NewPeerConnection(peerID, rawURL string, config DialerConfig) *PeerConnection {
 	return &PeerConnection{
 		PeerID: peerID,

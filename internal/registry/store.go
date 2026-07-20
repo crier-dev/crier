@@ -27,6 +27,9 @@ type Handler struct {
 	store Store
 }
 
+// NewHandler creates a Handler that delegates store operations to the
+// provided Store implementation. The handler is safe for concurrent callers
+// if the underlying store is.
 func NewHandler(store Store) *Handler {
 	return &Handler{store: store}
 }
@@ -45,6 +48,8 @@ type MemoryStore struct {
 	inboxes map[string][]*InboxEntry
 }
 
+// NewMemoryStore returns an in-memory agent registry with inbox persistence.
+// Uses crypto/rand for lease IDs and sync.RWMutex for thread safety.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		agents:  make(map[string]*Agent),

@@ -66,13 +66,14 @@
   - Set coverage thresholds in CI (fail below 70%)
   - Track trends across runs
 
-- [ ] **QUALITY-001: Add doc comments to 11 undocumented exported functions** (found by audit check 2)
+- [x] **QUALITY-001: Add doc comments to 11 undocumented exported functions** (done 2026-07-20)
   - `internal/registry/store.go`: NewHandler, NewMemoryStore
   - `internal/registry/migrate.go`: RunMigrations
   - `internal/registry/postgres_store.go`: DefaultPoolConfig, NewPostgresStore, NewPostgresStoreWithPoolConfig
   - `internal/mesh/peer.go`: DefaultMeshConfig, NewMesh
   - `internal/mesh/message.go`: Marshal
   - `internal/mesh/dialer.go`: DefaultDialerConfig, NewPeerConnection
+  - All 11 functions now have Go-style doc comments describing purpose, defaults, and usage
 
 - [ ] **DUCKBRAIN-001: Populate project namespace** (found by audit check 9)
   - `/projects/crier/` namespace has 0 entries

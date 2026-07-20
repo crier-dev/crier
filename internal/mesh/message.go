@@ -102,6 +102,8 @@ const (
 	ErrCodeInternal          = "INTERNAL"
 )
 
+// Marshal encodes v as JSON and appends a newline delimiter.
+// This is the standard wire format for Crier mesh messages.
 func Marshal(v any) ([]byte, error) {
 	data, err := json.Marshal(v)
 	if err != nil {

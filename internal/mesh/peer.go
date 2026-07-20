@@ -27,6 +27,8 @@ type MeshConfig struct {
 	RequestTimeout     time.Duration
 }
 
+// DefaultMeshConfig returns a MeshConfig with sensible defaults:
+// 30s keepalive, 1h lease TTL, 50 max pending requests, 30s request timeout.
 func DefaultMeshConfig(agentID string) MeshConfig {
 	return MeshConfig{
 		AgentID:            agentID,
@@ -38,6 +40,8 @@ func DefaultMeshConfig(agentID string) MeshConfig {
 	}
 }
 
+// NewMesh creates a Mesh instance with the given configuration.
+// Use DefaultMeshConfig to obtain a configuration with sensible defaults.
 func NewMesh(config MeshConfig) *Mesh {
 	return &Mesh{
 		agentID:     config.AgentID,
