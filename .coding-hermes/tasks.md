@@ -48,10 +48,11 @@
   - Config: `CR_RATE_LIMIT_PER_MINUTE` env var (default 100, 0=disable)
   - 8 new tests: Allow, Blocks, Cleanup, Disabled, PerKey, 429 integration
 
-- [ ] **PITFALL-002: Restrict WebSocket origin check**
+- [x] **PITFALL-002: Restrict WebSocket origin check** (done 2026-07-20, commit f6ea945)
   - `CheckOrigin` returns true for all connections (open relay risk)
-  - Add configurable allowed origins or at minimum require same-origin
-  - Add `CR_WS_ALLOWED_ORIGINS` env var
+  - Added `CR_WS_ALLOWED_ORIGINS` env var (comma-separated, "*" = allow all, empty = allow all)
+  - `config.BuildCheckOrigin()` helper with 9 tests
+  - Wired into relay.SetWSCheckOrigin() + mesh.SetWSCheckOrigin() in main.go
 
 - [ ] **PERF-001: Add benchmarks for hot paths** (audit confirmed: 0 benchmarks)
   - `relay/relay_test.go`: BenchmarkPublish, BenchmarkSubscribe
