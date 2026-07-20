@@ -11,16 +11,17 @@
   - `cmd/crier-mcp/main_test.go` — TestMCPServerInitialize: builds binary, runs JSON-RPC initialize handshake
   - 2 tests, 213 lines, all passing. Catches wiring regressions early
 
-- [ ] **SPEC-001: Sync README/CI docs to reality**
-  - README Go badge says 1.22+ → update to 1.26+
-  - README CI matrix says 1.22+1.23 → actual is 1.25+1.26
-  - README mentions CRIER_JWT_SECRET → code uses CR_AUTH_TOKEN (Bearer, not JWT)
-  - Architecture doc mentions "persistent event log with replay" — not implemented (note as future)
-  - Architecture doc mentions "Mutual TLS + token auth" — no mTLS
+- [x] **SPEC-001: Sync README/CI docs to reality** (done 2026-07-19, commit c0190b9)
+  - README Go badge says 1.22+ → updated to 1.26+
+  - README CI matrix says 1.22+1.23 → updated to 1.25+1.26 (matches ci.yml)
+  - README mentions CRIER_JWT_SECRET → updated to CR_AUTH_TOKEN (Bearer, not JWT)
+  - Architecture doc mentions "persistent event log with replay" → removed (not implemented)
+  - Architecture doc mentions "Mutual TLS + token auth" → changed to "Token auth" (no mTLS)
+  - Architecture doc Go version 1.22+ → 1.26+
 
-- [ ] **DOC-004: Add missing LICENSE file**
-  - README says MIT license but no LICENSE file exists
-  - Create LICENSE with MIT text
+- [x] **DOC-004: Add missing LICENSE file** (done 2026-07-19, commit c0190b9)
+  - Created LICENSE with MIT text
+  - README referenced LICENSE file that didn't exist
 
 - [ ] **TEST-001: Config package tests (0% coverage)**
   - `config/config_test.go` — test Load() with env vars, defaults, invalid values
@@ -48,7 +49,7 @@
   - Add configurable allowed origins or at minimum require same-origin
   - Add `CR_WS_ALLOWED_ORIGINS` env var
 
-- [ ] **PERF-001: Add benchmarks for hot paths**
+- [ ] **PERF-001: Add benchmarks for hot paths** (audit confirmed: 0 benchmarks)
   - `relay/relay_test.go`: BenchmarkPublish, BenchmarkSubscribe
   - `registry/memory_store_test.go`: BenchmarkRetrieve, BenchmarkAck
   - `mesh/message_test.go`: BenchmarkMarshal
@@ -64,6 +65,18 @@
   - Upload `go test -coverprofile` output to coverage dashboard
   - Set coverage thresholds in CI (fail below 70%)
   - Track trends across runs
+
+- [ ] **QUALITY-001: Add doc comments to 11 undocumented exported functions** (found by audit check 2)
+  - `internal/registry/store.go`: NewHandler, NewMemoryStore
+  - `internal/registry/migrate.go`: RunMigrations
+  - `internal/registry/postgres_store.go`: DefaultPoolConfig, NewPostgresStore, NewPostgresStoreWithPoolConfig
+  - `internal/mesh/peer.go`: DefaultMeshConfig, NewMesh
+  - `internal/mesh/message.go`: Marshal
+  - `internal/mesh/dialer.go`: DefaultDialerConfig, NewPeerConnection
+
+- [ ] **DUCKBRAIN-001: Populate project namespace** (found by audit check 9)
+  - `/projects/crier/` namespace has 0 entries
+  - Store: architecture decisions, pitfalls (rate limit stub, WS origin), test patterns, Go 1.26 migration
 
 ## Done
 
