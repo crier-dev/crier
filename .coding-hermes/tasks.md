@@ -35,10 +35,10 @@
   - Cover: Register, Retrieve, Ack, Stats, PurgeExpired, Inbox, input validation, error mapping
   - Added `connPool` interface to PostgresStore for testability
 
-- [ ] **TEST-003: Migrate package tests**
-  - `internal/registry/migrate_test.go` — verify embedded migrations are valid
-  - Test: RunMigrations with test DB, verify schema_migrations table
-  - Currently 0% coverage
+- [x] **TEST-003: Migrate package tests** (done 2026-07-20, commit 216bbc1)
+  - `internal/registry/migrate_test.go` — 146 lines, 4 test functions
+  - TestRunMigrations_Success, _EmptyConnString, _InvalidConnString, TestEmbeddedMigrations_Exist
+  - Uses //go:build integration tag, docker-compose for test PostgreSQL
 
 - [ ] **PITFALL-001: Implement rate limiting (stubbed)**
   - `POST /relay/publish` always returns 202; spec says 429 after 100/min/agent
