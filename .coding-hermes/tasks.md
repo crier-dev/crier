@@ -41,10 +41,12 @@
   - Uses //go:build integration tag + testcontainers (reuses TestMain from postgres_store_test.go)
   - Guard: PASS — all 4 tiers green
 
-- [ ] **PITFALL-001: Implement rate limiting (stubbed)**
+- [x] **PITFALL-001: Implement rate limiting (stubbed)** (done 2026-07-20, commit 799c349)
   - `POST /relay/publish` always returns 202; spec says 429 after 100/min/agent
-  - Implement token-bucket or sliding-window rate limiter per agent
-  - Wire into relay handler
+  - Implement sliding-window rate limiter per agent (X-Agent-ID header, RemoteAddr fallback)
+  - `internal/relay/ratelimit.go` — 92 lines, RateLimiter with Allow(), background cleanup
+  - Config: `CR_RATE_LIMIT_PER_MINUTE` env var (default 100, 0=disable)
+  - 8 new tests: Allow, Blocks, Cleanup, Disabled, PerKey, 429 integration
 
 - [ ] **PITFALL-002: Restrict WebSocket origin check**
   - `CheckOrigin` returns true for all connections (open relay risk)
