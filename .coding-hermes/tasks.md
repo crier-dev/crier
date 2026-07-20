@@ -23,17 +23,17 @@
   - Created LICENSE with MIT text
   - README referenced LICENSE file that didn't exist
 
-- [x] **TEST-001: Config package tests (0%→~90% coverage)** (done 2026-07-20, commit 5d7c52d)
+- [x] **TEST-001: Config package tests (0%→~90% coverage)** (done 2026-07-20, commit 5d7c52d, fix d31bba9)
   - `config/config_test.go` — 523 lines, comprehensive test suite
   - Cover: defaults, log level (valid+invalid), port (bounds), DB URL precedence (3 vars), pool config (valid+invalid), durations, MinConns>MaxConns
   - Uses config_test package, t.Setenv(), testify
-  - [Note: go test verification pending — host thread exhaustion (ulimit)]
+  - All 14 tests passing. 2 fixes: unused cfg var + val=100 exceeding default MaxConns
 
-- [ ] **TEST-002: PostgresStore unit tests with mock DB**
-  - `internal/registry/postgres_store_test.go` — unit tests (no Docker required)
-  - Use pgx mock or interface-based fake for SQL execution paths
-  - Cover: input validation, error mapping, edge cases
-  - Currently 0% in short tests (only tested via integration tag)
+- [x] **TEST-002: PostgresStore unit tests with mock DB** (done 2026-07-20, commit d31bba9)
+  - `internal/registry/postgres_store_unit_test.go` — 50 tests, 708 lines
+  - Uses pgxmock/v5 for SQL mocking, no Docker required
+  - Cover: Register, Retrieve, Ack, Stats, PurgeExpired, Inbox, input validation, error mapping
+  - Added `connPool` interface to PostgresStore for testability
 
 - [ ] **TEST-003: Migrate package tests**
   - `internal/registry/migrate_test.go` — verify embedded migrations are valid
@@ -76,9 +76,9 @@
   - `internal/mesh/dialer.go`: DefaultDialerConfig, NewPeerConnection
   - All 11 functions now have Go-style doc comments describing purpose, defaults, and usage
 
-- [ ] **DUCKBRAIN-001: Populate project namespace** (found by audit check 9)
-  - `/projects/crier/` namespace has 0 entries
-  - Store: architecture decisions, pitfalls (rate limit stub, WS origin), test patterns, Go 1.26 migration
+- [x] **DUCKBRAIN-001: Populate project namespace** (done 2026-07-20)
+  - `/projects/crier/` namespace now has 7 entries (was 2)
+  - Stored: architecture, pitfalls (rate limit, WS origin), test patterns, Go config, CI-001/CI-002 history
 
 ## Done
 
