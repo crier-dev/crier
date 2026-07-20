@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -521,4 +522,60 @@ func parseInt32(s string) (int32, error) {
 		return 0, assert.AnError
 	}
 	return int32(n), nil
+}
+
+// --- BuildCheckOrigin tests ---
+
+func TestBuildCheckOrigin_EmptyAllowsAll(t *testing.T) {
+	fn := config.BuildCheckOrigin("")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://evil.com"}}}
+	assert.True(t, fn(req))
+}
+
+func TestBuildCheckOrigin_StarAllowsAll(t *testing.T) {
+	fn := config.BuildCheckOrigin("*")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://anywhere.net"}}}
+	assert.True(t, fn(req))
+}
+
+func TestBuildCheckOrigin_SingleOriginMatch(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://crier.example.com")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://crier.example.com"}}}
+	assert.True(t, fn(req))
+}
+
+func TestBuildCheckOrigin_SingleOriginMismatch(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://crier.example.com")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://evil.com"}}}
+	assert.False(t, fn(req))
+}
+
+func TestBuildCheckOrigin_MultipleOriginsMatch(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://a.com, https://b.com")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://b.com"}}}
+	assert.True(t, fn(req))
+}
+
+func TestBuildCheckOrigin_MultipleOriginsMismatch(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://a.com, https://b.com")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://evil.com"}}}
+	assert.False(t, fn(req))
+}
+
+func TestBuildCheckOrigin_NoOriginHeader(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://crier.example.com")
+	req := &http.Request{Header: http.Header{}}
+	assert.False(t, fn(req))
+}
+
+func TestBuildCheckOrigin_WhitespaceTrimmed(t *testing.T) {
+	fn := config.BuildCheckOrigin(" https://a.com ,  https://b.com ")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://b.com"}}}
+	assert.True(t, fn(req))
+}
+
+func TestBuildCheckOrigin_EmptyElementSkipped(t *testing.T) {
+	fn := config.BuildCheckOrigin("https://a.com,,")
+	req := &http.Request{Header: http.Header{"Origin": []string{"https://a.com"}}}
+	assert.True(t, fn(req))
 }

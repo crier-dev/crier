@@ -11,8 +11,13 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Agents may connect from any origin in v0.1.0.
+	// Default: allow all origins. Override with SetWSCheckOrigin.
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// SetWSCheckOrigin replaces the WebSocket upgrader's CheckOrigin for relay subscriptions.
+func SetWSCheckOrigin(fn func(r *http.Request) bool) {
+	upgrader.CheckOrigin = fn
 }
 
 // publishRequest is the JSON body for POST /relay/publish.

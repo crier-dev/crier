@@ -12,7 +12,13 @@ import (
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	// Default: allow all origins. Override with SetWSCheckOrigin.
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// SetWSCheckOrigin replaces the WebSocket upgrader's CheckOrigin for mesh connections.
+func SetWSCheckOrigin(fn func(r *http.Request) bool) {
+	wsUpgrader.CheckOrigin = fn
 }
 
 // HandleConnect upgrades an incoming WebSocket connection from a peer agent.

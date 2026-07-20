@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,6 +27,7 @@ type Config struct {
 	LogLevel           string
 	LogFormat          string
 	RateLimitPerMinute int
+	WSAllowedOrigins   string
 }
 
 // Load reads configuration from environment with defaults.
@@ -131,5 +134,41 @@ func Load() (Config, error) {
 		cfg.RateLimitPerMinute = n
 	}
 
+	// WebSocket allowed origins (comma-separated, "*" = allow all)
+	cfg.WSAllowedOrigins = os.Getenv("CR_WS_ALLOWED_ORIGINS")
+
 	return cfg, nil
+}
+
+// BuildCheckOrigin returns a CheckOrigin function for gorilla/websocket.
+// If allowed is empty or "*", all origins are permitted.
+// Otherwise, allowed is a comma-separated list of origins (scheme://host:port).
+// At least one origin in the list must match the request's Origin header.
+func BuildCheckOrigin(allowed string) func(r *http.Request) bool {
+	if allowed == "" || allowed == "*" {
+		return func(r *http.Request) bool { return true }
+	}
+	allowedSet := make(map[string]bool)
+	for _, origin := range splitTrim(allowed) {
+		allowedSet[origin] = true
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		return allowedSet[origin]
+	}
+}
+
+// splitTrim splits a comma-separated string and trims whitespace from each element.
+func splitTrim(s string) []string {
+	parts := make([]string, 0)
+	for _, part := range splitComma(s) {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+func splitComma(s string) []string {
+	return strings.Split(s, ",")
 }

@@ -33,6 +33,11 @@ func main() {
 	// Re-install the logger now that we know the user's level/format.
 	initLogger(cfg)
 
+	// Configure WebSocket origin check for relay and mesh.
+	wsCheck := config.BuildCheckOrigin(cfg.WSAllowedOrigins)
+	relay.SetWSCheckOrigin(wsCheck)
+	mesh.SetWSCheckOrigin(wsCheck)
+
 	r := mux.NewRouter()
 
 	// Middleware
