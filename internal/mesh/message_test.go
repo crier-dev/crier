@@ -8,6 +8,32 @@ import (
 	"time"
 )
 
+func BenchmarkMarshal(b *testing.B) {
+	reg := &Register{
+		Envelope: Envelope{
+			Type:      TypeRegister,
+			Version:   1,
+			MessageID: "bench-message-001",
+			Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		AgentID:    "bench-agent",
+		LeaseID:    "bench-lease",
+		LeaseTTLMs: 3600000,
+		Capabilities: Capabilities{
+			Version:               "0.1.0",
+			Topics:                []string{"metrics", "logs", "events"},
+			MaxConcurrentSessions: 10,
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Marshal(reg); err != nil {
+			b.Fatalf("Marshal: %v", err)
+		}
+	}
+}
+
 func TestRegisterRoundTrip(t *testing.T) {
 	reg := &Register{
 		Envelope: Envelope{

@@ -13,6 +13,40 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func BenchmarkPublish(b *testing.B) {
+	const N = 1000
+
+	r := New(0)
+	unsubscribes := make([]func(), 0, N)
+	for i := 0; i < N; i++ {
+		_, unsubscribe := r.Subscribe("bench.topic")
+		unsubscribes = append(unsubscribes, unsubscribe)
+	}
+	b.Cleanup(func() {
+		for _, unsubscribe := range unsubscribes {
+			unsubscribe()
+		}
+	})
+	event := json.RawMessage(`{"event":"benchmark"}`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := r.Publish("bench.topic", event); err != nil {
+			b.Fatalf("Publish: %v", err)
+		}
+	}
+}
+
+func BenchmarkSubscribe(b *testing.B) {
+	r := New(0)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, unsubscribe := r.Subscribe("bench.topic")
+		unsubscribe()
+	}
+}
+
 func TestPublishSubscribe(t *testing.T) {
 	r := New(0)
 	ch, unsub := r.Subscribe("agent.status")
