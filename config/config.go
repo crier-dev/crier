@@ -19,20 +19,22 @@ type DatabaseConfig struct {
 
 // Config holds all Crier configuration.
 type Config struct {
-	Port      int
-	AuthToken string
-	Database  DatabaseConfig
-	LogLevel  string
-	LogFormat string
+	Port               int
+	AuthToken          string
+	Database           DatabaseConfig
+	LogLevel           string
+	LogFormat          string
+	RateLimitPerMinute int
 }
 
 // Load reads configuration from environment with defaults.
 func Load() (Config, error) {
 	cfg := Config{
-		Port:      8767,
-		AuthToken: os.Getenv("CR_AUTH_TOKEN"),
-		LogLevel:  "info",
-		LogFormat: "text",
+		Port:               8767,
+		AuthToken:          os.Getenv("CR_AUTH_TOKEN"),
+		LogLevel:           "info",
+		LogFormat:          "text",
+		RateLimitPerMinute: 100,
 		Database: DatabaseConfig{
 			MaxConns:        4,
 			MinConns:        0,
@@ -118,6 +120,15 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_CONNECT_TIMEOUT: %q", v)
 		}
 		cfg.Database.ConnectTimeout = d
+	}
+
+	// Rate limit
+	if v := os.Getenv("CR_RATE_LIMIT_PER_MINUTE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_PER_MINUTE: %q (want non-negative integer)", v)
+		}
+		cfg.RateLimitPerMinute = n
 	}
 
 	return cfg, nil

@@ -47,7 +47,7 @@ func main() {
 	}).Methods("GET")
 
 	// Relay pub/sub
-	relaySvc := relay.New()
+	relaySvc := relay.New(cfg.RateLimitPerMinute)
 	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
 	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
 	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")

@@ -14,7 +14,7 @@ import (
 )
 
 func TestPublishSubscribe(t *testing.T) {
-	r := New()
+	r := New(0)
 	ch, unsub := r.Subscribe("agent.status")
 	defer unsub()
 
@@ -34,7 +34,7 @@ func TestPublishSubscribe(t *testing.T) {
 }
 
 func TestMultipleSubscribers(t *testing.T) {
-	r := New()
+	r := New(0)
 	ch1, unsub1 := r.Subscribe("agent.heartbeat")
 	defer unsub1()
 	ch2, unsub2 := r.Subscribe("agent.heartbeat")
@@ -58,14 +58,14 @@ func TestMultipleSubscribers(t *testing.T) {
 }
 
 func TestPublishNoSubscribers(t *testing.T) {
-	r := New()
+	r := New(0)
 	if err := r.Publish("agent.status", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("Publish with no subscribers should be no-op, got: %v", err)
 	}
 }
 
 func TestTopicsCounts(t *testing.T) {
-	r := New()
+	r := New(0)
 	_, unsub1 := r.Subscribe("a.one")
 	defer unsub1()
 	_, unsub2 := r.Subscribe("a.one")
@@ -91,7 +91,7 @@ func TestTopicsCounts(t *testing.T) {
 }
 
 func TestUnsubscribe(t *testing.T) {
-	r := New()
+	r := New(0)
 	ch, unsub := r.Subscribe("agent.status")
 
 	infos := r.Topics()
@@ -122,7 +122,7 @@ func TestUnsubscribe(t *testing.T) {
 }
 
 func TestInvalidTopic(t *testing.T) {
-	r := New()
+	r := New(0)
 	if err := r.Publish("", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("expected error for empty topic")
 	}
@@ -132,7 +132,7 @@ func TestInvalidTopic(t *testing.T) {
 }
 
 func TestConcurrentPublishSubscribe(t *testing.T) {
-	r := New()
+	r := New(0)
 	const (
 		nSubs = 20
 		nPubs = 50
@@ -183,7 +183,7 @@ func TestConcurrentPublishSubscribe(t *testing.T) {
 }
 
 func TestHandlePublishAndTopics(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 	router.HandleFunc("/relay/topics", rly.HandleTopics).Methods("GET")
@@ -218,7 +218,7 @@ func TestHandlePublishAndTopics(t *testing.T) {
 }
 
 func TestHandlePublishInvalidJSON(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 
@@ -232,7 +232,7 @@ func TestHandlePublishInvalidJSON(t *testing.T) {
 }
 
 func TestHandlePublishEmptyTopic(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 
@@ -248,7 +248,7 @@ func TestHandlePublishEmptyTopic(t *testing.T) {
 }
 
 func TestHandlePublishEmptyEvent(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 
@@ -264,7 +264,7 @@ func TestHandlePublishEmptyEvent(t *testing.T) {
 }
 
 func TestHandlePublishInvalidTopic(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 
@@ -280,7 +280,7 @@ func TestHandlePublishInvalidTopic(t *testing.T) {
 }
 
 func TestHandleSubscribeWebSocket(t *testing.T) {
-	rly := New()
+	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/subscribe/{topic}", rly.HandleSubscribe)
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
@@ -321,5 +321,188 @@ func TestHandleSubscribeWebSocket(t *testing.T) {
 	}
 	if !strings.Contains(string(msg), `"hello":"world"`) {
 		t.Fatalf("unexpected ws message: %s", msg)
+	}
+}
+
+// ---------- Rate Limiter Tests ----------
+
+func TestRateLimiterAllows(t *testing.T) {
+	rl := NewRateLimiter(time.Minute)
+	key := "agent-1"
+
+	// 5 requests within the limit of 10 should all pass.
+	for i := 0; i < 5; i++ {
+		if !rl.Allow(key, 10, time.Minute) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+}
+
+func TestRateLimiterBlocks(t *testing.T) {
+	rl := NewRateLimiter(time.Minute)
+	key := "agent-1"
+
+	// First 3 requests within limit of 3 should pass.
+	for i := 0; i < 3; i++ {
+		if !rl.Allow(key, 3, time.Minute) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+
+	// 4th request should be blocked.
+	if rl.Allow(key, 3, time.Minute) {
+		t.Fatal("4th request should be rate limited")
+	}
+}
+
+func TestRateLimiterCleanup(t *testing.T) {
+	rl := NewRateLimiter(50 * time.Millisecond)
+	key := "agent-1"
+
+	// Use up the limit.
+	for i := 0; i < 3; i++ {
+		if !rl.Allow(key, 3, time.Minute) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+
+	// Should be blocked now.
+	if rl.Allow(key, 3, time.Minute) {
+		t.Fatal("should be rate limited after hitting limit")
+	}
+
+	// Wait for cleanup to run (cleanup interval is 50ms, window is 2× that = 100ms).
+	// But the Allow window is 1 minute, so cleanup won't remove entries within the window.
+	// This test verifies cleanup doesn't panic or corrupt state.
+	time.Sleep(200 * time.Millisecond)
+
+	// Still blocked because the window is 1 minute.
+	if rl.Allow(key, 3, time.Minute) {
+		t.Fatal("should still be rate limited within the window")
+	}
+}
+
+func TestRateLimiterDisabled(t *testing.T) {
+	rl := NewRateLimiter(time.Minute)
+	key := "agent-1"
+
+	// limit=0 disables rate limiting — all requests pass.
+	for i := 0; i < 1000; i++ {
+		if !rl.Allow(key, 0, time.Minute) {
+			t.Fatalf("request %d should be allowed when limit=0", i)
+		}
+	}
+}
+
+func TestRateLimiterPerKey(t *testing.T) {
+	rl := NewRateLimiter(time.Minute)
+
+	// Agent 1 hits the limit.
+	for i := 0; i < 3; i++ {
+		if !rl.Allow("agent-1", 3, time.Minute) {
+			t.Fatalf("agent-1 request %d should be allowed", i)
+		}
+	}
+	if rl.Allow("agent-1", 3, time.Minute) {
+		t.Fatal("agent-1 should be rate limited")
+	}
+
+	// Agent 2 should still be allowed.
+	if !rl.Allow("agent-2", 3, time.Minute) {
+		t.Fatal("agent-2 should be allowed (different key)")
+	}
+}
+
+func TestHandlePublishRateLimited(t *testing.T) {
+	// Create a relay with rate limiting enabled (limit=3 per minute).
+	rly := New(3)
+	router := mux.NewRouter()
+	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
+
+	makeReq := func(agentID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/relay/publish", strings.NewReader(
+			`{"topic":"agent.status","event":{"ok":true}}`,
+		))
+		req.Header.Set("Content-Type", "application/json")
+		if agentID != "" {
+			req.Header.Set("X-Agent-ID", agentID)
+		}
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	// First 3 requests from agent-1 should succeed (202).
+	for i := 0; i < 3; i++ {
+		rr := makeReq("agent-1")
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("request %d: got %d, want 202", i, rr.Code)
+		}
+	}
+
+	// 4th request from agent-1 should be rate limited (429).
+	rr := makeReq("agent-1")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate-limited request: got %d, want 429", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "rate limit exceeded") {
+		t.Fatalf("rate limit body: got %q, want 'rate limit exceeded'", rr.Body.String())
+	}
+
+	// Agent-2 should still be allowed.
+	rr2 := makeReq("agent-2")
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("agent-2: got %d, want 202", rr2.Code)
+	}
+}
+
+func TestHandlePublishRateLimitDisabled(t *testing.T) {
+	// Rate limiting disabled (limit=0).
+	rly := New(0)
+	router := mux.NewRouter()
+	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
+
+	// Many requests should all pass.
+	for i := 0; i < 200; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/relay/publish", strings.NewReader(
+			`{"topic":"agent.status","event":{"n":1}}`,
+		))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Agent-ID", "agent-1")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("request %d: got %d, want 202 (rate limiting disabled)", i, rr.Code)
+		}
+	}
+}
+
+func TestHandlePublishRateLimitFallbackToRemoteAddr(t *testing.T) {
+	// Rate limiting with no X-Agent-ID header — falls back to RemoteAddr.
+	rly := New(1)
+	router := mux.NewRouter()
+	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
+
+	makeReq := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/relay/publish", strings.NewReader(
+			`{"topic":"agent.status","event":{"ok":true}}`,
+		))
+		req.Header.Set("Content-Type", "application/json")
+		// No X-Agent-ID header.
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	// First request passes.
+	rr := makeReq()
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("first request: got %d, want 202", rr.Code)
+	}
+
+	// Second request from same RemoteAddr should be rate limited.
+	rr2 := makeReq()
+	if rr2.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request: got %d, want 429", rr2.Code)
 	}
 }

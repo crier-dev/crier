@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 	"unicode"
 )
 
@@ -16,16 +17,40 @@ type TopicInfo struct {
 // Relay manages publish/subscribe topic routing.
 // Thread-safe, zero external dependencies (no Redis, no NATS).
 type Relay struct {
-	mu   sync.RWMutex
+	mu sync.RWMutex
 	// topic -> set of subscriber channels
 	subs map[string]map[chan []byte]struct{}
+
+	// RateLimiter tracks publish rates per agent.
+	// nil when rate limiting is disabled (limit=0).
+	RateLimiter        *RateLimiter
+	rateLimitPerMinute int
+	rateLimitWindow    time.Duration
 }
 
 // New creates a new Relay ready to serve.
-func New() *Relay {
-	return &Relay{
-		subs: make(map[string]map[chan []byte]struct{}),
+// rateLimitPerMinute is the max publishes per agent per minute.
+// Set to 0 to disable rate limiting entirely.
+func New(rateLimitPerMinute int) *Relay {
+	r := &Relay{
+		subs:               make(map[string]map[chan []byte]struct{}),
+		rateLimitPerMinute: rateLimitPerMinute,
+		rateLimitWindow:    time.Minute,
 	}
+	if rateLimitPerMinute > 0 {
+		r.RateLimiter = NewRateLimiter(5 * time.Minute)
+	}
+	return r
+}
+
+// CheckRateLimit checks whether the given agent ID is within the rate limit.
+// Returns true if the request is allowed, false if rate limited.
+// When rate limiting is disabled, always returns true.
+func (r *Relay) CheckRateLimit(agentID string) bool {
+	if r.RateLimiter == nil {
+		return true
+	}
+	return r.RateLimiter.Allow(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
 }
 
 // Publish sends an event to a topic. All subscribers receive it.

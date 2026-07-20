@@ -27,8 +27,22 @@ type topicsResponse struct {
 }
 
 // HandlePublish accepts {"topic": "...", "event": {...}} and fans out to subscribers.
-// Returns 202 on success. Rate limiting is stubbed (always 202 for now).
+// Returns 202 on success, 429 when rate limited.
 func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
+	// Rate limiting: check before parsing body to avoid wasted work.
+	if r.RateLimiter != nil {
+		agentID := req.Header.Get("X-Agent-ID")
+		if agentID == "" {
+			agentID = req.RemoteAddr
+		}
+		if !r.CheckRateLimit(agentID) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
+			return
+		}
+	}
+
 	var body publishRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
@@ -50,7 +64,6 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 429 is reserved for future rate limiting; always 202 for now.
 	w.WriteHeader(http.StatusAccepted)
 }
 
