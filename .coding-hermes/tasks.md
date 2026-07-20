@@ -60,11 +60,11 @@
   - `mesh/message_test.go`: BenchmarkMarshal
   - Establish baseline for regression detection
 
-- [ ] **CI-010: Add Dockerfile + Makefile fixes**
-  - Create `Dockerfile` for `cmd/server` (multi-stage, distroless or alpine)
-  - Create `Dockerfile.mcp` for `cmd/crier-mcp`
-  - Makefile: add `build-mcp` target for `cmd/crier-mcp`
-  - Makefile: add `docker-build` target
+- [x] **CI-010: Add Dockerfile + Makefile fixes** (done 2026-07-20)
+  - `Dockerfile` — multi-stage build for cmd/server (golang:1.26-alpine → alpine:3.21)
+  - `Dockerfile.mcp` — multi-stage build for cmd/crier-mcp
+  - Makefile: `build-mcp` target builds bin/crier-mcp
+  - Makefile: `docker-build` target builds both Docker images
 
 - [ ] **CI-011: Add coverage reporting to CI**
   - Upload `go test -coverprofile` output to coverage dashboard

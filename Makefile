@@ -1,7 +1,10 @@
-.PHONY: build test lint run clean
+.PHONY: build build-mcp test test-short test-integration lint run clean docker-build generate
 
 build:
 	go build -o bin/crier ./cmd/server
+
+build-mcp:
+	go build -o bin/crier-mcp ./cmd/crier-mcp
 
 test:
 	go test ./... -count=1 -timeout 60s
@@ -20,6 +23,10 @@ run: build
 
 clean:
 	rm -rf bin/
+
+docker-build:
+	docker build -t crier:latest .
+	docker build -f Dockerfile.mcp -t crier-mcp:latest .
 
 generate:
 	go generate ./...
