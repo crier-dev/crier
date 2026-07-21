@@ -8,13 +8,13 @@
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|-----|-----|------|------|-------|-----------|----------|
 | CI-011 | Coverage reporting to CI (.gitlab-ci.yml) | Medium | 3 | — | ci, infra | DeepSeek V4 Flash | Mechanical — add coverage upload step | Step 3.7 Flash |
-| DOC-005 | README says GitHub Actions, CI is GitLab | Low | 1 | — | doc | DeepSeek V4 Flash | Trivial fix | — |
 | QUALITY-003 | specs/AGENTS.md is DexDat doc, not Crier | Low | 1 | — | quality | DeepSeek V4 Flash | Remove or replace misplaced doc | — |
 
 ## Completed
 
 | ID | Task | Pri | Cpx | Commit | Model |
 |----|------|-----|-----|--------|-------|
+| DOC-005 | README says GitHub Actions, CI is GitLab | Low | 1 | ba748fd | DeepSeek V4 Pro |
 | COV-002 | Middleware tests — 0%→100% coverage | High | 3 | ee64882 | DeepSeek V4 Pro |
 | COV-003 | MCP server tests — 67.5%→80%+ | Medium | 3 | — | Step 3.7 Flash |
 | INFRA-002 | docker-compose.yml with PostgreSQL | Medium | 2 | 5e353e2 | DeepSeek V4 Flash |
