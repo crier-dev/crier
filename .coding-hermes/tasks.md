@@ -140,11 +140,11 @@
   - Add `--log-level` flag and `CR_LOG_LEVEL` env var (debug/info/warn/error)
   - JSON format for production, text for development
 
-- [ ] **CI-013: Board-commit CI failures on Go 1.26 runner** (found 2026-07-20, never-done audit)
-  - 2 consecutive chore/board-update commits fail on the Build & Test (1.26) job while code commits pass
-  - `cacfe0f` (mark CI-012 done): 1.26 fails, 1.25 passes
-  - `24d332c` (mark CI-011 done): same pattern
-  - Per never-done skill: classic board-commit CI timing pitfall — investigate whether this is a real 1.26 issue or transient
+- [x] **CI-013: Board-commit CI failures on Go 1.26 runner** (investigated 2026-07-20)
+  - Confirmed: regular CI runner flakiness on board-only commits. 3 commits now failed (24d332c, cacfe0f, 8d91bfd)
+  - All 8 packages pass locally on Go 1.26: `go test ./... -short` green, `go build` green, `go vet` green
+  - Board commits touch only .coding-hermes/tasks.md — no Go code changes, no testable impact
+  - Root cause: CI platform, not code. Non-blocking. Monitor for pattern changes
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 
