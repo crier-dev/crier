@@ -28,5 +28,23 @@ docker-build:
 	docker build -t crier:latest .
 	docker build -f Dockerfile.mcp -t crier-mcp:latest .
 
+coverage:
+	go test -short -count=1 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+
+coverage-html: coverage
+	go tool cover -html=coverage.out -o coverage.html
+
+coverage-check:
+	@go test -short -count=1 -coverprofile=coverage.out ./... > /dev/null 2>&1; \
+	COVERAGE=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$3}' | sed 's/%//'); \
+	echo "Total coverage: $${COVERAGE}%"; \
+	if [ "$$(echo "$${COVERAGE} < 70.0" | bc)" = "1" ]; then \
+		echo "FAIL: Coverage $${COVERAGE}% is below 70% threshold"; \
+		exit 1; \
+	else \
+		echo "PASS: Coverage $${COVERAGE}% meets 70% threshold"; \
+	fi
+
 generate:
 	go generate ./...
