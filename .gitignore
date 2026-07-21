@@ -29,8 +29,11 @@ Thumbs.db
 node_modules/
 dist/
 
-# Hilo
-.vfs/
+# Hilo — local cache files (rebuildable)
+.vfs/graph/graph.db
+.vfs/graph/graph.db.wal
+.vfs/graph/graph.duckdb
+.vfs/graph/.last_warm
 
 # GitReins history
 .gitreins/history/

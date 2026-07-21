@@ -18,10 +18,6 @@ paths = [
   '''.gitreins/history/''',
   '''.*\\.log$''',
   '''vendor/''',
-  '''specs/''',
-  '''docs/''',
-  '''.*\\.spec\\.md$''',
-  '''.*\\.md$''',
   '''.env.example''',
 ]
 
