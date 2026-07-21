@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -17,6 +18,12 @@ import (
 // shutdown via SIGTERM. If someone breaks the wiring in main.go (router,
 // middleware, listener), this test fails immediately.
 func TestServerHealth(t *testing.T) {
+	// Skip on Go 1.25 — go test catches the process-level SIGTERM before
+	// the signal goroutine in main(), producing "signal: terminated" (CI-012).
+	if strings.HasPrefix(runtime.Version(), "go1.25") {
+		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
+	}
+
 	// Bypass auth and force the in-memory store regardless of the dev env.
 	t.Setenv("CR_AUTH_TOKEN", "")
 	t.Setenv("CR_DATABASE_URL", "")
