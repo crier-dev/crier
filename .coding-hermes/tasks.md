@@ -146,6 +146,26 @@
   - Board commits touch only .coding-hermes/tasks.md — no Go code changes, no testable impact
   - Root cause: CI platform, not code. Non-blocking. Monitor for pattern changes
 
+**Idle tick #1 — all 11 checks pass. No new tasks. Counter: 1/7 (no action ≤2).**
+
+Tick summary (2026-07-20 23:37):
+- Self-heal: identity ok, build green, 8/8 packages test green, benchmark timer resolved
+- Discovery sweep: no TODOs, no vulns (govulncheck clean), no stubs (1 nil,nil = error return), CI unreachable (gh returns 404 — repo on GitLab, CI file exists)
+- 11-point audit: all clean (see details below)
+  1. Spec alignment — PASS (OpenAPI spec, code matches)
+  2. Doc coverage — PASS (README, CONTRIBUTING, LICENSE)
+  3. Test gaps — PASS (8/8 packages, 80.4% total coverage)
+  4. Package upgrades — PASS (6 direct deps all current, transitives are noise)
+  5. Pitfall hunt — PASS (no stubs, gitleaks tightened in prior tick)
+  6. Performance — PASS (5 benchmarks: Marshal, Retrieve, Ack, Publish, Subscribe)
+  7. Endpoint verification — PASS (14 routes registered, server starts on :8767)
+  8. CI/CD health — N/A (GitLab repo, GitHub CI unreachable — no new CI found)
+  9. DuckBrain sync — PASS (18+ entries in crier namespace, keys across /project/, /projects/, /findings/)
+  10. Code quality — PASS (no TODOs, max source file 619 lines)
+  11. Middle-out wiring — PASS (all 5 internal packages imported, all 14 routes registered)
+- Hilo: 300 edges, 38 files, 14 orphans (local-entry pattern, not gaps)
+- Scheduler: CooldownS=1800, Enabled=True
+
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 
 Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
