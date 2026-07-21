@@ -1,7 +1,6 @@
 # Crier — Agent-to-Agent Message Bus
 
 [![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev)
-[![CI](https://github.com/crier-dev/crier/actions/workflows/ci.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/ci.yml)
 
 Communication backbone for the autonomous agent economy. Extracted and generalized from Hivemind.
 
@@ -121,7 +120,7 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
 - **API** — 17 HTTP endpoints wired with middleware, graceful shutdown
-- **CI** — GitHub Actions, matrix build Go 1.25 + 1.26
+- **CI** — GitLab CI, matrix build Go 1.25 + 1.26
 
 ### Roadmap
 
