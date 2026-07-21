@@ -66,7 +66,7 @@
   - Makefile: `build-mcp` target builds bin/crier-mcp
   - Makefile: `docker-build` target builds both Docker images
 
-- [ ] **CI-011: Add coverage reporting to CI**
+- [x] **CI-011: Add coverage reporting to CI** (done 2026-07-20, commit 7f385dc)
   - Upload `go test -coverprofile` output to coverage dashboard
   - Set coverage thresholds in CI (fail below 70%)
   - Track trends across runs
