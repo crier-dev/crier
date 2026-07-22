@@ -64,6 +64,7 @@
 
 ---
 
+| U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 
 Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
@@ -79,5 +80,7 @@ Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc cove
 > 1. **Scheduler-disable** — `PUT /api/v1/projects/crier {"Enabled":false}` on the scheduler API (stops PAYG token burn)
 > 2. **Leave running at 12h cooldown** — minimal cost, catches drift/new issues
 > 3. **Manual task injection** — assign new features
-
-> **Scheduler:** CooldownS=43200 (12h), Enabled=True. Idle counter: 7/7 → ESCALATED.
+>
+> **Idle tick #8 (2026-07-22 02:04):** 8th consecutive idle tick. Build+vendor PASS, 7/8 test packages green (mesh CI-014 flake, pre-existing). No new commits. No TODOs in source. Deps current. GO-2026-5970 (moderate, advisory, transitive golang.org/x/text v0.38.0) — unchanged. DuckBrain unresponsive (MCP connection error). Hilo: 304 edges, 38 files. GitLab CI pipeline still stuck (runner capacity — infra). ⚠️ CooldownS reverted to 1800s (4th+ reversion — daemon restart overwrote fleet TOML). Re-fixed to 43200s. Bane escalation still active — no response since tick #7. Idle counter: 8/7.
+>
+> **Scheduler:** CooldownS=43200 (12h), Enabled=True. Idle counter: 8/7 → ESCALATED (awaiting Bane).
