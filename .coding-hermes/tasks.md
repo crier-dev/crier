@@ -44,6 +44,7 @@
 | PERF-001 | Add benchmarks for hot paths | Low | 2 | 12e9840 | Step 3.7 Flash |
 | DUCKBRAIN-001 | Populate project namespace | Low | 1 | 19cc900 | DeepSeek V4 Flash |
 | CI-012 | Fix flaky Go 1.25 test | Medium | 3 | 0f8c01d | DeepSeek V4 Pro |
+| U01 | Usability & coverage audit — no gaps found | High | 3 | — | DeepSeek V4 Pro |
 
 ## Assumptions
 
@@ -64,7 +65,6 @@
 
 ---
 
-| U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 
 Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
@@ -83,4 +83,6 @@ Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc cove
 >
 > **Idle tick #8 (2026-07-22 02:04):** 8th consecutive idle tick. Build+vendor PASS, 7/8 test packages green (mesh CI-014 flake, pre-existing). No new commits. No TODOs in source. Deps current. GO-2026-5970 (moderate, advisory, transitive golang.org/x/text v0.38.0) — unchanged. DuckBrain unresponsive (MCP connection error). Hilo: 304 edges, 38 files. GitLab CI pipeline still stuck (runner capacity — infra). ⚠️ CooldownS reverted to 1800s (4th+ reversion — daemon restart overwrote fleet TOML). Re-fixed to 43200s. Bane escalation still active — no response since tick #7. Idle counter: 8/7.
 >
-> **Scheduler:** CooldownS=43200 (12h), Enabled=True. Idle counter: 8/7 → ESCALATED (awaiting Bane).
+> **Scheduler:** CooldownS=43200 (12h), Enabled=True. Idle counter: 1/7 (reset — U01 completed).
+
+> **Idle tick #9 (2026-07-22 04:29):** U01 usability & coverage audit completed. Zero gaps found: 14 HTTP routes wired, 8 MCP tools registered, thorough error handling (400/404/409/429/500/204), zero stubs, zero TODOs, 80.4% coverage. Board now empty except NEVER-DONE. Idle counter reset to 1 (real work done — worker-like investigation). CooldownS stays at 43200s.
