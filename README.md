@@ -120,7 +120,7 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
 - **API** — 17 HTTP endpoints wired with middleware, graceful shutdown
-- **CI** — GitLab CI, matrix build Go 1.25 + 1.26
+- **CI** — GitHub Actions, matrix build Go 1.25 + 1.26
 
 ### Roadmap
 
