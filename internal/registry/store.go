@@ -35,10 +35,10 @@ func NewHandler(store Store) *Handler {
 }
 
 var (
-	ErrAgentNotFound      = errors.New("agent not found")
-	ErrAgentExists        = errors.New("agent already registered")
-	ErrLeaseConflict      = errors.New("message is not leased under the supplied lease")
-	ErrInvalidStoreInput  = errors.New("invalid store input")
+	ErrAgentNotFound     = errors.New("agent not found")
+	ErrAgentExists       = errors.New("agent already registered")
+	ErrLeaseConflict     = errors.New("message is not leased under the supplied lease")
+	ErrInvalidStoreInput = errors.New("invalid store input")
 )
 
 // MemoryStore is a thread-safe in-memory agent registry with persistent inboxes.

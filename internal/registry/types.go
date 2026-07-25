@@ -64,5 +64,3 @@ type InboxEntry struct {
 	LeaseDuration time.Duration `json:"-"` // not serialized; used by PurgeExpired
 	ACKed         bool          `json:"acked"`
 }
-
-

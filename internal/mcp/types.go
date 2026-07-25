@@ -16,10 +16,10 @@ type jsonRPCRequest struct {
 }
 
 type jsonRPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	Result  any       `json:"result,omitempty"`
 	Error   *rpcError `json:"error,omitempty"`
-	ID      any    `json:"id"`
+	ID      any       `json:"id"`
 }
 
 type rpcError struct {
@@ -34,8 +34,8 @@ type initializeParams struct {
 }
 
 type initializeResult struct {
-	ProtocolVersion string            `json:"protocolVersion"`
-	ServerInfo      serverInfo        `json:"serverInfo"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	ServerInfo      serverInfo         `json:"serverInfo"`
 	Capabilities    serverCapabilities `json:"capabilities"`
 }
 

@@ -161,8 +161,8 @@ func (s *PostgresStore) Get(id string) (*Agent, error) {
 	defer cancel()
 
 	var (
-		agent           Agent
-		publicKey       []byte
+		agent            Agent
+		publicKey        []byte
 		capabilitiesJSON []byte
 	)
 	err := s.pool.QueryRow(ctx, `

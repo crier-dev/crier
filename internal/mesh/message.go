@@ -28,9 +28,9 @@ type Envelope struct {
 
 type Register struct {
 	Envelope
-	AgentID     string       `json:"agent_id"`
-	LeaseID     string       `json:"lease_id"`
-	LeaseTTLMs  int          `json:"lease_ttl_ms"`
+	AgentID      string       `json:"agent_id"`
+	LeaseID      string       `json:"lease_id"`
+	LeaseTTLMs   int          `json:"lease_ttl_ms"`
 	Capabilities Capabilities `json:"capabilities"`
 }
 

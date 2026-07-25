@@ -91,7 +91,7 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 			slog.Error("write error", "error", err)
 			return err
 		}
-		}
+	}
 
 	if err := s.stdin.Err(); err != nil {
 		return fmt.Errorf("stdin: %w", err)
