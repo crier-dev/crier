@@ -1,1 +1,2 @@
-2026-07-25T11:23:41Z — 24th idle tick. Project complete: 8/8 packages passing, 78.6% coverage, GitReins judge configured, Hilo=useful (304 edges/38 files), zero TODOs/FIXMEs. Cron should be paused. Run: hermes cronjob remove <job_id>
+2026-07-26T11:32:10Z — 26th idle tick. Project complete.
+Run: hermes cronjob remove <job_id> OR curl -X PUT http://127.0.0.1:9090/api/v1/projects/crier -H 'Content-Type: application/json' -d '{"Enabled":false}'

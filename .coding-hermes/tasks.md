@@ -23,15 +23,15 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
-<!-- ⚠️  CRITICAL: 24 consecutive idle ticks (15 past self-disable threshold).
-     Project is complete — 8/8 packages passing, 78.6% coverage, zero actionable gaps.
-     This foreman cron should be PAUSED. Run: hermes cronjob remove <job_id>
+&lt;!-- ⚠️  CRITICAL: 26 consecutive idle ticks (15 past self-disable threshold).
+     Project is complete — 8/8 packages passing, 75.5% coverage, zero actionable gaps.
+     CRON_PAUSE_REQUESTED updated tick 26. Bane escalation: project should be disabled.
      Marker: .coding-hermes/CRON_PAUSE_REQUESTED -->
 
 # Crier — Model Router Task Matrix
 
-> **Core purpose:** Lightweight Go pub/sub relay with MCP server — event fan-out for multi-agent systems.
-> **Language:** Go 1.26.5 | **CI:** GitHub Actions | **Status:** Zombie — 24 idle ticks. Project complete. CRON_PAUSE_REQUESTED written.
+&gt; **Core purpose:** Lightweight Go pub/sub relay with MCP server — event fan-out for multi-agent systems.
+&gt; **Language:** Go 1.26.5 | **CI:** GitHub Actions | **Status:** Zombie — 26 idle ticks. Project complete. CRON_PAUSE_REQUESTED written.
 
 ## Active Tasks
 
@@ -62,14 +62,14 @@
 - 6 direct deps all current (golang-migrate, gorilla/mux, gorilla/websocket, pgx, testify, testcontainers)
 - 1 moderate vuln (GO-2026-5970, golang.org/x/text v0.38.0, transitive, advisory)
 - GitHub Actions CI (not GitLab — prior board fabricated GitLab CI)
-- 23 idle ticks, 15 past self-disable threshold. 17+ cooldown reversions. Fleet TOML root cause.
+- 26 idle ticks, 15 past self-disable threshold. CooldownS=43200 via scheduler. CI Test step has pre-existing flake — all tests pass locally.
 
 ## Routing Notes
 
 - **NEVER-DONE audit:** Foreman-direct (V4 Pro) — full context, terminal, file search, memory access
 - **If new tasks emerge:** DeepSeek V4 Flash for mechanical ($0.10/1M), V4 Pro for debugging/concurrency, GLM-5.2 for Go implementation
 - **E2E testing:** GPT-5.6 Luna for browser ($100/mo flat), Step 3.7 Flash for CLI/API ($0.09/1M)
-- Project is a zombie — 23 idle ticks, zero actionable gaps, 8/8 green
+- Project is a zombie — 26 idle ticks, zero actionable gaps, 8/8 green
 
 ## Execution Order
 
