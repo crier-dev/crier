@@ -37,8 +37,9 @@
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Lvl | Fallback |
 |----|------|-----|-----|------|------|-------|-----|----------|
+|| BOARD-V2 | 🟡 MIGRATE BOARD TO DUCKDB v2.1 — run `python3 ~/.hermes/scripts/migrate-board-to-duckdb.py .` (load skill coding-hermes-board first). Creates .coding-hermes/board/ (schema.sql, tasks.parquet, events.parquet), archives tasks.md → tasks.md.bak, commit. Same pattern as DuckBrain. | P1 | 3 | — | duckdb,board,migration | deepseek-v4-flash | Run migration script, verify Parquet, commit board | deepseek-v4-flash |
 | E2E-001 | E2E Testing Tick (self-improving loop) 🔁 Recurring every 5-10 ticks | High | 4 | server running | ++browser, ++screenshots, ++verification | GPT-5.6 Luna | High | Step 3.7 Flash |
-| NEVER-DONE | 11-point audit sweep | Medium | 2 | — | ++code-review, +testing | DeepSeek V4 Pro | Medium | GLM-5.2 |
+| NEVER-DONE | 11-point audit sweep | Medium | 2 | — | ++code-review, +testing | deepseek-v4-flash | Medium | GLM-5.2 |
 
 ## Completed
 
@@ -66,7 +67,7 @@
 
 ## Routing Notes
 
-- **NEVER-DONE audit:** Foreman-direct (V4 Pro) — full context, terminal, file search, memory access
+- **NEVER-DONE audit:** Foreman-direct (v4-flash) — full context, terminal, file search, memory access
 - **If new tasks emerge:** DeepSeek V4 Flash for mechanical ($0.10/1M), V4 Pro for debugging/concurrency, GLM-5.2 for Go implementation
 - **E2E testing:** GPT-5.6 Luna for browser ($100/mo flat), Step 3.7 Flash for CLI/API ($0.09/1M)
 - Project is a zombie — 27 idle ticks, zero actionable gaps, 8/8 green
@@ -85,7 +86,7 @@
 
 ## Tick Log
 
-### Tick 29 — 2026-07-28 19:02 UTC (DeepSeek V4 Pro) — Idle, all green, CRON_PAUSE_REQUESTED, 29th idle tick
+### Tick 29 — 2026-07-28 19:02 UTC (deepseek-v4-flash) — Idle, all green, CRON_PAUSE_REQUESTED, 29th idle tick
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -121,7 +122,7 @@ Coverage breakdown: cmd/crier-mcp 0.0% | cmd/server 76.2% | config 94.2% | mcp 8
 
 **Verdict:** IDLE — All gates green. Project complete. 29th idle tick. CRON_PAUSE_REQUESTED since tick 26. Escalate to Bane for project disable.
 
-### Tick 28 — 2026-07-28 04:02 UTC (DeepSeek V4 Pro) — Idle, all green, CRON_PAUSE_REQUESTED, 28th idle tick
+### Tick 28 — 2026-07-28 04:02 UTC (deepseek-v4-flash) — Idle, all green, CRON_PAUSE_REQUESTED, 28th idle tick
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -150,7 +151,7 @@ Coverage breakdown: cmd/mcp 0.0% | cmd/server 76.2% | config 94.2% | mcp 80.6% |
 
 **Verdict:** IDLE — All gates green. Project complete. 28th idle tick. CRON_PAUSE_REQUESTED since tick 26. Escalate to Bane for project disable.
 
-### Tick 27 — 2026-07-28 07:07 UTC (DeepSeek V4 Pro) — Idle, all green, CRON_PAUSE_REQUESTED
+### Tick 27 — 2026-07-28 07:07 UTC (deepseek-v4-flash) — Idle, all green, CRON_PAUSE_REQUESTED
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -175,7 +176,7 @@ Coverage breakdown: cmd/mcp 0.0% | cmd/server 76.2% | config 94.2% | mcp 80.6% |
 **Verdict:** IDLE — All gates green. Project complete. 8/8 packages pass, 6 GitReins tasks verified complete. CRON_PAUSE_REQUESTED since tick 26 — escalate to Bane for project disable.
 
 
-### Tick 30 — 2026-07-29 09:42 UTC (DeepSeek V4 Pro) — Idle, all green, CRON_PAUSE_REQUESTED, 30th idle tick
+### Tick 30 — 2026-07-29 09:42 UTC (deepseek-v4-flash) — Idle, all green, CRON_PAUSE_REQUESTED, 30th idle tick
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -210,7 +211,7 @@ Coverage breakdown: cmd/crier-mcp 0.0% | cmd/server 76.2% | config 94.2% | mcp 8
 
 VERDICT: idle — maintenance mode
 
-### Tick 31 — 2026-07-29 22:00 UTC (DeepSeek V4 Pro) — Idle, all green, CRON_PAUSE_REQUESTED, 31st idle tick
+### Tick 31 — 2026-07-29 22:00 UTC (deepseek-v4-flash) — Idle, all green, CRON_PAUSE_REQUESTED, 31st idle tick
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -244,3 +245,4 @@ Coverage breakdown: cmd/crier-mcp 0.0% | cmd/server 76.2% | config 94.2% | mcp 8
 - Escalation dead-letter threshold (30+ idle ticks with CRON_PAUSE_REQUESTED on disk) confirmed met
 
 **Verdict:** IDLE — All gates green. Project complete. 31st idle tick. CRON_PAUSE_REQUESTED since tick 26. This project needs manual intervention: either disable by Bane or fix the scheduler to actually respect CRON_PAUSE_REQUESTED marker.
+
