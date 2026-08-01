@@ -117,3 +117,14 @@ tasks:
   status: complete
   created_at: '2026-08-01T04:19:45.678263+00:00'
   completed_at: '2026-08-01T04:29:04.140049+00:00'
+- id: deps-001-xtext-vuln
+  title: "DEPS-001: Upgrade golang.org/x/text v0.38.0 \u2192 v0.39.0 (GO-2026-5970\
+    \ reached via registry/migrate.go sql.Open)"
+  criteria:
+  - go.mod requires golang.org/x/text v0.39.0 (or newer)
+  - govulncheck ./... reports 0 reachable vulnerabilities
+  - go build ./... && go vet ./... && go test -short -count=1 ./... all pass
+  - go mod tidy leaves no drift
+  status: complete
+  created_at: '2026-08-01T10:32:02.270124+00:00'
+  completed_at: '2026-08-01T10:32:42.749576+00:00'
