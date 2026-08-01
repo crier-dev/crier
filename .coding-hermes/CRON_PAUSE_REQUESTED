@@ -1,2 +1,0 @@
-2026-07-26T11:32:10Z — 26th idle tick. Project complete.
-Run: hermes cronjob remove <job_id> OR curl -X PUT http://127.0.0.1:9090/api/v1/projects/crier -H 'Content-Type: application/json' -d '{"Enabled":false}'

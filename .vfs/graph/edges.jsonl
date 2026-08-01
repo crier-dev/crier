@@ -302,3 +302,12 @@
 {"from":"internal/registry/memory_store_test.go","to":"internal/registry/memory_store.go","rel":"tested_by","provenance":"heuristic","confidence":0.8}
 {"from":"internal/registry/migrate.go","to":"internal/registry/migrate_test.go","rel":"tests","provenance":"heuristic","confidence":0.8}
 {"from":"internal/registry/migrate_test.go","to":"internal/registry/migrate.go","rel":"tested_by","provenance":"heuristic","confidence":0.8}
+{"from":"internal/middleware/middleware.go","to":"std:bufio","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/middleware.go","to":"std:net","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"std:net/http","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"std:net/http/httptest","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"std:strings","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"std:testing","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"std:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"pkg:github.com/gorilla/mux","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/middleware/websocket_middleware_test.go","to":"pkg:github.com/gorilla/websocket","rel":"imports","provenance":"ast_exact","confidence":1.0}
