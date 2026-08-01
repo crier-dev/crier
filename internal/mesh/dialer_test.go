@@ -254,10 +254,11 @@ func TestNewAcceptedPeerConnectionStartReadLoop(t *testing.T) {
 		t.Fatal("timed out waiting for accepted message")
 	}
 
-	clientConn.Close()
-
 	closed := make(chan struct{})
 	pc.OnClose(func(error) { close(closed) })
+
+	clientConn.Close()
+
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
