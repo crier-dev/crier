@@ -92,3 +92,26 @@ tasks:
   status: complete
   created_at: '2026-07-19T18:21:27.081751+00:00'
   completed_at: '2026-07-19T18:23:57.702753+00:00'
+- id: bug-001-ws-hijacker
+  title: 'BUG-001: WebSocket upgrade returns 500 through middleware chain (missing
+    http.Hijacker)'
+  criteria:
+  - responseWriter in internal/middleware/middleware.go implements http.Hijacker (Hijack()
+    method delegating to the underlying writer)
+  - Regression test in internal/middleware/ exercises a WebSocket upgrade + echo round-trip
+    through the full middleware chain (Recovery + Logging)
+  - go build ./... && go vet ./... && go test ./... all pass
+  - 'Live E2E: WebSocket subscribe on a running server returns 101 and receives published
+    events'
+  status: pending
+  created_at: '2026-08-01T04:19:39.148381+00:00'
+- id: ci-012-sigterm-flake
+  title: "CI-012: cmd/server TestServerHealth intermittent 'signal: terminated' \u2014\
+    \ SIGTERM handler registration race"
+  criteria:
+  - signal.Notify(SIGINT, SIGTERM) is registered synchronously in main() BEFORE ListenAndServe
+    (not inside the goroutine)
+  - TestServerHealth passes 20/20 consecutive runs
+  - go build ./... && go vet ./... && go test ./... all pass
+  status: pending
+  created_at: '2026-08-01T04:19:45.678263+00:00'

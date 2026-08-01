@@ -122,10 +122,15 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
+	// Graceful shutdown. signal.Notify is registered synchronously BEFORE
+	// ListenAndServe so the handler is guaranteed installed by the time the
+	// server accepts traffic — otherwise a SIGTERM arriving before the wait
+	// goroutine runs (e.g. from TestServerHealth's cleanup) hits the default
+	// handler and kills the process with "signal: terminated" instead of
+	// shutting down gracefully.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

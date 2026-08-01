@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bufio"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -37,6 +39,16 @@ func Recovery(next http.Handler) http.Handler {
 type responseWriter struct {
 	http.ResponseWriter
 	status int
+}
+
+// Hijack implements http.Hijacker so WebSocket upgrades (gorilla/websocket)
+// work through the middleware chain. Without it, Upgrade fails with
+// "response does not implement http.Hijacker" → HTTP 500 on WS endpoints.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
 
 func (rw *responseWriter) WriteHeader(code int) {

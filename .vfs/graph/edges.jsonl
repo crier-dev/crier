@@ -298,3 +298,7 @@
 {"from":"internal/registry/memory_store_test.go","to":"std:testing","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"internal/registry/memory_store_test.go","to":"std:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"cmd/server/main_test.go","to":"std:runtime","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"internal/registry/memory_store.go","to":"internal/registry/memory_store_test.go","rel":"tests","provenance":"heuristic","confidence":0.8}
+{"from":"internal/registry/memory_store_test.go","to":"internal/registry/memory_store.go","rel":"tested_by","provenance":"heuristic","confidence":0.8}
+{"from":"internal/registry/migrate.go","to":"internal/registry/migrate_test.go","rel":"tests","provenance":"heuristic","confidence":0.8}
+{"from":"internal/registry/migrate_test.go","to":"internal/registry/migrate.go","rel":"tested_by","provenance":"heuristic","confidence":0.8}
