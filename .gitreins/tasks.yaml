@@ -128,3 +128,16 @@ tasks:
   status: complete
   created_at: '2026-08-01T10:32:02.270124+00:00'
   completed_at: '2026-08-01T10:32:42.749576+00:00'
+- id: ci-014-flaky-mesh-onclose
+  title: "CI-014: TestNewAcceptedPeerConnectionStartReadLoop flakes 'timed out waiting\
+    \ for OnClose' \u2014 callback registered after Close() in dialer_test.go:257-264,\
+    \ race loses close signal"
+  criteria:
+  - 'TestNewAcceptedPeerConnectionStartReadLoop no longer flakes: OnClose callback
+    registered BEFORE clientConn.Close() (race fix) or equivalent (buffered channel
+    + atomic flag)'
+  - TestNewAcceptedPeerConnectionStartReadLoop passes 20/20 consecutive runs
+  - go build ./... && go vet ./... && go test ./... all pass
+  - CI green on the fix commit
+  status: pending
+  created_at: '2026-08-01T10:39:35.747155+00:00'
