@@ -89,6 +89,7 @@ func main() {
 	}
 
 	registryHandler := registry.NewHandler(regStore)
+	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
 	r.HandleFunc("/agents", registryHandler.HandleRegister).Methods("POST")
 	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")

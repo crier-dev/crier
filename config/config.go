@@ -28,6 +28,9 @@ type Config struct {
 	LogFormat          string
 	RateLimitPerMinute int
 	WSAllowedOrigins   string
+	// RequireAgentSig enforces per-agent ed25519 request signing on inbox
+	// read/ack/stats and agent deletion. Secure by default.
+	RequireAgentSig bool
 }
 
 // Load reads configuration from environment with defaults.
@@ -38,6 +41,7 @@ func Load() (Config, error) {
 		LogLevel:           "info",
 		LogFormat:          "text",
 		RateLimitPerMinute: 100,
+		RequireAgentSig:    true,
 		Database: DatabaseConfig{
 			MaxConns:        4,
 			MinConns:        0,
@@ -136,6 +140,19 @@ func Load() (Config, error) {
 
 	// WebSocket allowed origins (comma-separated, "*" = allow all)
 	cfg.WSAllowedOrigins = os.Getenv("CR_WS_ALLOWED_ORIGINS")
+
+	// Per-agent request signing enforcement. Default true (secure).
+	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.
+	if v := os.Getenv("CR_REQUIRE_AGENT_SIG"); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes":
+			cfg.RequireAgentSig = true
+		case "false", "0", "no":
+			cfg.RequireAgentSig = false
+		default:
+			return cfg, fmt.Errorf("invalid CR_REQUIRE_AGENT_SIG: %q (want true/false)", v)
+		}
+	}
 
 	return cfg, nil
 }

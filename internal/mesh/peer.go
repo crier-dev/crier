@@ -14,8 +14,12 @@ type Mesh struct {
 	mu          sync.RWMutex
 	pending     map[string]chan *Response
 	pendingMu   sync.RWMutex
-	stopCh      chan struct{}
-	config      MeshConfig
+	// routes tracks in-flight agent-to-agent requests so responses can be
+	// routed back to the original requester peer. Keyed by request message ID.
+	routes   map[string]string
+	routesMu sync.RWMutex
+	stopCh   chan struct{}
+	config   MeshConfig
 }
 
 type MeshConfig struct {
@@ -47,6 +51,7 @@ func NewMesh(config MeshConfig) *Mesh {
 		agentID:     config.AgentID,
 		connections: make(map[string]*PeerConnection),
 		pending:     make(map[string]chan *Response),
+		routes:      make(map[string]string),
 		stopCh:      make(chan struct{}),
 		config:      config,
 	}
@@ -243,11 +248,14 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		return
 	}
 	switch env.Type {
+	case TypeRequest:
+		m.handleAgentRequest(peerID, data)
 	case TypeResponse:
 		var resp Response
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return
 		}
+		// Server-initiated request? Deliver to the waiting caller.
 		m.pendingMu.RLock()
 		ch, ok := m.pending[resp.RequestID]
 		m.pendingMu.RUnlock()
@@ -256,7 +264,10 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 			case ch <- &resp:
 			default:
 			}
+			return
 		}
+		// Agent-initiated request? Forward the response back to the requester.
+		m.forwardResponse(resp.RequestID, data)
 	case TypeError:
 		var errMsg ErrorMessage
 		if err := json.Unmarshal(data, &errMsg); err != nil {
@@ -277,6 +288,113 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 			case ch <- resp:
 			default:
 			}
+			return
 		}
+		// Agent-initiated request that failed at the target side.
+		m.forwardResponse(errMsg.RequestID, data)
+	}
+}
+
+// handleAgentRequest forwards an agent-to-agent REQUEST to its target peer.
+// A route is recorded so the eventual RESPONSE can be returned to the
+// requester. If the target is not connected, an ERROR is sent back.
+func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
+	var req Request
+	if err := json.Unmarshal(data, &req); err != nil {
+		return
+	}
+	targetID := req.Target.AgentID
+
+	m.mu.RLock()
+	targetConn, ok := m.connections[targetID]
+	m.mu.RUnlock()
+	if !ok {
+		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
+			ErrCodeControllerOffline, fmt.Sprintf("peer %s not connected", targetID))
+		return
+	}
+
+	// Record the route before forwarding so the response finds its way back.
+	m.routesMu.Lock()
+	pruneRoutesLocked(m.routes, time.Now())
+	if len(m.routes) >= m.config.MaxPendingRequests {
+		m.routesMu.Unlock()
+		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
+			ErrCodeInternal, "mesh route table full")
+		return
+	}
+	m.routes[req.MessageID] = requesterID
+	m.routesMu.Unlock()
+
+	if err := targetConn.Send(data); err != nil {
+		m.routesMu.Lock()
+		delete(m.routes, req.MessageID)
+		m.routesMu.Unlock()
+		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
+			ErrCodeControllerOffline, fmt.Sprintf("deliver to %s: %v", targetID, err))
+	}
+}
+
+// forwardResponse routes a RESPONSE or ERROR back to the agent that issued
+// the original request, if that agent is still connected.
+func (m *Mesh) forwardResponse(requestID string, data []byte) {
+	m.routesMu.Lock()
+	requesterID, ok := m.routes[requestID]
+	if ok {
+		delete(m.routes, requestID)
+	}
+	m.routesMu.Unlock()
+	if !ok {
+		return
+	}
+
+	m.mu.RLock()
+	conn, ok := m.connections[requesterID]
+	m.mu.RUnlock()
+	if ok {
+		_ = conn.Send(data)
+	}
+}
+
+// sendErrorTo sends an ERROR message to a peer (best effort).
+func (m *Mesh) sendErrorTo(peerID, requestID, traceID, code, message string) {
+	m.mu.RLock()
+	conn, ok := m.connections[peerID]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	errMsg := &ErrorMessage{
+		Envelope: Envelope{
+			Type:      TypeError,
+			Version:   1,
+			MessageID: newMessageID(),
+			Timestamp: time.Now(),
+		},
+		RequestID: requestID,
+		Error: ErrorDetail{
+			Code:    code,
+			Message: message,
+		},
+		TraceID: traceID,
+	}
+	data, err := Marshal(errMsg)
+	if err != nil {
+		return
+	}
+	_ = conn.Send(data)
+}
+
+// pruneRoutesLocked keeps the route table bounded. Routes are plain requester
+// lookups without timestamps; when the table grows past a hard cap it is
+// flushed wholesale (stale routes are harmless to keep — they are only ever
+// consulted on a matching response, and responses to flushed routes are
+// dropped). Caller holds routesMu.
+func pruneRoutesLocked(routes map[string]string, now time.Time) {
+	if len(routes) < 4096 {
+		return
+	}
+	for k := range routes {
+		delete(routes, k)
 	}
 }

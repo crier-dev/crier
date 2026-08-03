@@ -123,8 +123,12 @@ func (h *Handler) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUnregister handles DELETE /agents/{id} — removes an agent.
+// Agent-owned: requires a valid per-agent signature when enabled.
 func (h *Handler) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !h.requireAgent(w, r, id) {
+		return
+	}
 	if err := h.store.Unregister(id); err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -169,8 +173,12 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.
+// Agent-owned: requires a valid per-agent signature when enabled.
 func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !h.requireAgent(w, r, id) {
+		return
+	}
 
 	maxMsgs := 10
 	if v := r.URL.Query().Get("max"); v != "" {
@@ -213,8 +221,12 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleAck handles POST /agents/{id}/inbox/ack — acknowledges messages.
+// Agent-owned: requires a valid per-agent signature when enabled.
 func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !h.requireAgent(w, r, id) {
+		return
+	}
 
 	var req ackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -244,8 +256,12 @@ func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleStats handles GET /agents/{id}/inbox/stats — returns queue stats.
+// Agent-owned: requires a valid per-agent signature when enabled.
 func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !h.requireAgent(w, r, id) {
+		return
+	}
 
 	depth, leased, age, err := h.store.Stats(id)
 	if err != nil {

@@ -25,6 +25,10 @@ type Store interface {
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store
+	// requireAgentSig enforces per-agent ed25519 request signing on the
+	// agent-owned routes (retrieve/ack/stats/unregister). When false, only
+	// the shared Bearer token is required (legacy behavior).
+	requireAgentSig bool
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -32,6 +36,11 @@ type Handler struct {
 // if the underlying store is.
 func NewHandler(store Store) *Handler {
 	return &Handler{store: store}
+}
+
+// SetRequireAgentSig toggles per-agent ed25519 signature enforcement.
+func (h *Handler) SetRequireAgentSig(enabled bool) {
+	h.requireAgentSig = enabled
 }
 
 var (
