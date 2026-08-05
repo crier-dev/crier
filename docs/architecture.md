@@ -4,7 +4,7 @@ Communication backbone for the autonomous agent economy. Extracted from Hivemind
 
 ## Architecture
 
-Crier provides three communication primitives:
+Crier provides four primitives for agent communication:
 
 ### 1. Relay Server (pub/sub)
 Central message relay. Agents publish events to topics; subscribers receive them.
@@ -19,12 +19,17 @@ Direct agent-to-agent communication layer.
 - Keepalive + automatic reconnect
 - Request/response correlation
 
-### 3. Agent Registry + Inboxes
-Every agent has a discoverable identity and persistent inbox.
+### 3. Agent Registry
+Every agent has a discoverable identity.
 - Agent registration with capabilities
+- Public-key identity (ed25519) + per-agent request signing
+- Health checking + capability-based routing
+
+### 4. Agent Inboxes
+Persistent per-agent inbox for offline delivery.
 - Persistent inbox per agent (offline delivery)
-- Health checking + lease management
-- Capability-based routing
+- Lease-based delivery with acknowledgements
+- Queue statistics + message expiry
 
 ## Stack
 - **Language:** Go 1.26+

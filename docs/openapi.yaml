@@ -154,11 +154,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message]
+              required: [payload]
               properties:
-                message:
+                payload:
                   type: object
-                  description: Message payload
+                  description: Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve
                 priority:
                   type: integer
                   minimum: 0
@@ -168,8 +168,19 @@ paths:
                   type: integer
                   description: Message expiry (0 = never)
       responses:
-        "202":
+        "201":
           description: Message queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+                    description: Assigned message id
+        "400":
+          description: Invalid request body or store input
         "404":
           description: Agent not found
     get:
@@ -195,8 +206,51 @@ paths:
       responses:
         "200":
           description: Array of leased messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages, lease_id]
+                properties:
+                  messages:
+                    type: array
+                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use
+                    items:
+                      $ref: "#/components/schemas/InboxEntry"
+                  lease_id:
+                    type: string
+                    description: Lease covering the returned messages — pass to inboxAck to release
         "404":
           description: Agent not found
+
+  /agents/{id}/inbox/stats:
+    get:
+      operationId: inboxStats
+      summary: Get inbox queue statistics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Queue statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queue_depth, leased_count, oldest_age_ms]
+                properties:
+                  queue_depth:
+                    type: integer
+                    description: Undelivered messages in queue
+                  leased_count:
+                    type: integer
+                    description: Messages currently leased out
+                  oldest_age_ms:
+                    type: integer
+                    description: Age of oldest queued message in milliseconds
 
   /agents/{id}/inbox/ack:
     post:
@@ -221,5 +275,46 @@ paths:
                   items:
                     type: string
       responses:
-        "200":
-          description: Messages acknowledged
+        "204":
+          description: Messages acknowledged, lease released (no body)
+        "400":
+          description: Invalid request body or missing lease_id
+        "404":
+          description: Agent not found
+        "409":
+          description: Lease conflict — lease_id does not match the active lease
+
+components:
+  schemas:
+    InboxEntry:
+      type: object
+      required: [id, agent_id, payload, created_at, expires_at, acked]
+      properties:
+        id:
+          type: string
+          description: Message id
+        agent_id:
+          type: string
+          description: Owning agent id
+        payload:
+          type: string
+          format: byte
+          description: Message payload as a base64-encoded string (Go []byte JSON encoding). Decode to recover the original JSON object delivered via inboxDeliver.
+        created_at:
+          type: string
+          format: date-time
+          description: Enqueue time (RFC 3339)
+        expires_at:
+          type: string
+          format: date-time
+          description: Expiry time (RFC 3339); 0001-01-01T00:00:00Z when ttl_seconds was 0
+        leased_at:
+          type: string
+          format: date-time
+          description: Present when the message is currently leased
+        lease_id:
+          type: string
+          description: Lease covering this message (present while leased)
+        acked:
+          type: boolean
+          description: Whether the message has been acknowledged
