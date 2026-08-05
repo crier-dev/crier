@@ -64,7 +64,7 @@
 **No Hivemind source — built from scratch**
 
 ### Design
-- Registry is an in-memory store (→ PostgreSQL in CI-003b) mapping agentID → Agent record
+- Registry is backed by a pluggable Store: in-memory by default, PostgreSQL when `CR_DATABASE_URL` is set (CI-003b — implemented)
 - Agent: `{ID, PublicKey, Capabilities, Status, RegisteredAt, LastSeen}`
 - Inbox is a per-agent FIFO queue with lease-based delivery
 - Messages expire after TTL (default 24h)

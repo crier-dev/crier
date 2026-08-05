@@ -50,14 +50,17 @@ var (
 	ErrInvalidStoreInput = errors.New("invalid store input")
 )
 
-// MemoryStore is a thread-safe in-memory agent registry with persistent inboxes.
+// MemoryStore is a thread-safe in-memory agent registry with process-lifetime inboxes.
+// State is ephemeral: agents and undelivered messages are lost on restart.
+// Use PostgresStore (CR_DATABASE_URL) for durability across restarts.
 type MemoryStore struct {
 	mu      sync.RWMutex
 	agents  map[string]*Agent
 	inboxes map[string][]*InboxEntry
 }
 
-// NewMemoryStore returns an in-memory agent registry with inbox persistence.
+// NewMemoryStore returns an in-memory agent registry with process-lifetime
+// inbox persistence (ephemeral across restarts).
 // Uses crypto/rand for lease IDs and sync.RWMutex for thread safety.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{

@@ -29,7 +29,7 @@ Every agent has a discoverable identity and persistent inbox.
 ## Stack
 - **Language:** Go 1.26+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
-- **Storage:** In-memory (PostgreSQL planned via CI-003b — inboxes, registry, event log)
+- **Storage:** In-memory by default; PostgreSQL backend (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts
 - **Auth:** Agent tokens (HMAC-signed)
 
 ## Key Design Decisions

@@ -37,7 +37,7 @@ Every agent has a discoverable identity with capability cards.
 
 ### 4. Inboxes
 
-Persistent per-agent FIFO queues with lease-based delivery.
+Durable per-agent FIFO queues with lease-based delivery. Durability is backend-dependent: with `CR_DATABASE_URL` set (PostgreSQL backend) agents and undelivered messages survive server restarts; without it the in-memory backend is used (process-lifetime only).
 
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
@@ -89,7 +89,7 @@ All configuration is via environment variables (defaults shown):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
-| `CRIER_DATABASE_URL` | `postgres://crier:crier@localhost:5432/crier?sslmode=disable` | PostgreSQL connection (planned, not yet used) |
+| `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
 | `CR_AUTH_TOKEN` | (required) | Bearer token for relay publish authentication |
 
 ## API
@@ -119,13 +119,15 @@ All core primitives are implemented and tested:
 - **Relay** — Thread-safe in-memory pub/sub, 87.4% coverage, 7/7 GitReins PASS
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
+- **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
 - **API** — 17 HTTP endpoints wired with middleware, graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.25 + 1.26
 
 ### Roadmap
 
-- **CI-003b**: PostgreSQL persistence for registry and inboxes (replacing in-memory storage)
-- **CI-007**: MCP server exposing registry and inbox tools
+- **CI-003b** ✅ — PostgreSQL persistence for registry and inboxes (implemented, `CR_DATABASE_URL`)
+- **CI-007** ✅ — MCP server exposing registry and inbox tools (implemented, `cmd/crier-mcp`)
+- **Capability-based routing** — route messages by agent capability cards
 
 ## License
 
