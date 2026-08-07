@@ -73,6 +73,50 @@ paths:
         "200":
           description: Active topics with subscriber counts
 
+  # ── P2P Mesh ──
+  /mesh/peers:
+    get:
+      operationId: meshListPeers
+      summary: List connected mesh peers
+      responses:
+        "200":
+          description: Connected peers with agent IDs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [peers, count]
+                properties:
+                  peers:
+                    type: array
+                    description: Connected peer agent IDs
+                    items:
+                      type: object
+                      required: [agent_id]
+                      properties:
+                        agent_id:
+                          type: string
+                          description: Connected agent identifier
+                  count:
+                    type: integer
+                    description: Number of connected peers
+
+  /mesh/connect/{agentID}:
+    get:
+      operationId: meshConnect
+      summary: Open a P2P WebSocket connection to an agent
+      parameters:
+        - name: agentID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade — bidirectional P2P message frames
+        "400":
+          description: agentID is required
+
   # ── Agent Registry ──
   /agents:
     get:
