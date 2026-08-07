@@ -69,6 +69,38 @@ go build -o bin/crier ./cmd/server
 make run
 ```
 
+### Try it
+
+A minimal register → deliver → retrieve round-trip with the default signed configuration:
+
+```bash
+# 1. Register an agent (public_key = hex-encoded ed25519 public key)
+curl -s -X POST localhost:8767/agents -H 'Content-Type: application/json' \
+  -d '{"id":"agent-1","public_key":"<hex ed25519 pubkey>","capabilities":["demo"]}'
+# 201
+
+# 2. Deliver a message to its inbox
+curl -s -X POST localhost:8767/agents/agent-1/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"hello":"world"}}'
+# 201 {"id":"..."}
+
+# 3. Retrieve — inbox endpoints require per-agent request signatures by default
+#    (CR_REQUIRE_AGENT_SIG=true). Headers:
+#      X-Agent-ID  agent id
+#      X-Agent-Ts  unix seconds
+#      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
+#    e.g. sign "GET\n/agents/agent-1/inbox\n1712345678" with the agent's private key
+curl -s localhost:8767/agents/agent-1/inbox \
+  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345678' -H 'X-Agent-Sig: <hex sig>'
+# 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
+# Note: message payloads are base64-encoded on the wire ([],byte form)
+
+# Dev shortcut: disable signing for trusted single-user setups
+CR_REQUIRE_AGENT_SIG=false make run
+curl -s localhost:8767/agents/agent-1/inbox
+# 200 — no signature headers required
+```
+
 ### Test
 
 ```bash
@@ -91,6 +123,7 @@ All configuration is via environment variables (defaults shown):
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
 | `CR_AUTH_TOKEN` | (required) | Bearer token for relay publish authentication |
+| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on inbox endpoints (retrieve/ack/delete). Set `false` only for trusted single-user dev setups. |
 
 ## API
 
