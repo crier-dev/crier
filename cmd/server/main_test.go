@@ -13,10 +13,12 @@ import (
 	"time"
 )
 
-// TestServerHealth is an entrypoint smoke test: it runs main() on a random
+// TestServerHealth is an entrypoint smoke test: it runs run(nil) on a random
 // free port, hits /health, verifies a 200 response, then triggers graceful
 // shutdown via SIGTERM. If someone breaks the wiring in main.go (router,
-// middleware, listener), this test fails immediately.
+// middleware, listener), this test fails immediately. run(nil) is used
+// instead of main() so the test binary's os.Args (e.g. -test.timeout) never
+// reaches flag parsing, and so the server never calls os.Exit.
 func TestServerHealth(t *testing.T) {
 	// Skip on Go 1.25 — go test catches the process-level SIGTERM before
 	// the signal goroutine in main(), producing "signal: terminated" (CI-012).
@@ -36,7 +38,7 @@ func TestServerHealth(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		main()
+		run(nil)
 	}()
 
 	// Graceful shutdown: main() installs a SIGINT/SIGTERM handler that calls
@@ -94,4 +96,105 @@ func freePort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// TestParseArgs exercises the CLI flag parsing directly (no exec, no server
+// startup). The --help and --version paths are the CR-GAP-005 hard gate.
+func TestParseArgs(t *testing.T) {
+	envVars := []string{
+		"CRIER_PORT",
+		"CR_DATABASE_URL",
+		"CR_REQUIRE_AGENT_SIG",
+		"CR_AUTH_TOKEN",
+		"CR_LOG_LEVEL",
+		"CR_LOG_FORMAT",
+		"CR_RATE_LIMIT_PER_MINUTE",
+		"CR_WS_ALLOWED_ORIGINS",
+	}
+
+	t.Run("help exits 0 and documents env vars", func(t *testing.T) {
+		for _, args := range [][]string{{"--help"}, {"-help"}, {"-h"}} {
+			var out strings.Builder
+			help, showVersion, port, dbURL, err := parseArgs(args, &out)
+			if err != nil {
+				t.Fatalf("parseArgs(%v) error: %v", args, err)
+			}
+			if !help {
+				t.Fatalf("parseArgs(%v): help = false, want true", args)
+			}
+			if showVersion {
+				t.Fatalf("parseArgs(%v): version = true, want false", args)
+			}
+			if port != 0 || dbURL != "" {
+				t.Fatalf("parseArgs(%v): unexpected overrides port=%d dbURL=%q", args, port, dbURL)
+			}
+			usage := out.String()
+			for _, want := range append([]string{"Usage:", "crier [flags]", "-port", "-db-url", "-version"}, envVars...) {
+				if !strings.Contains(usage, want) {
+					t.Errorf("parseArgs(%v): usage output missing %q", args, want)
+				}
+			}
+		}
+	})
+
+	t.Run("version", func(t *testing.T) {
+		for _, args := range [][]string{{"--version"}, {"-version"}} {
+			var out strings.Builder
+			help, showVersion, port, dbURL, err := parseArgs(args, &out)
+			if err != nil {
+				t.Fatalf("parseArgs(%v) error: %v", args, err)
+			}
+			if help {
+				t.Fatalf("parseArgs(%v): help = true, want false", args)
+			}
+			if !showVersion {
+				t.Fatalf("parseArgs(%v): version = false, want true", args)
+			}
+			if port != 0 || dbURL != "" {
+				t.Fatalf("parseArgs(%v): unexpected overrides port=%d dbURL=%q", args, port, dbURL)
+			}
+		}
+	})
+
+	t.Run("port and db-url overrides", func(t *testing.T) {
+		var out strings.Builder
+		help, showVersion, port, dbURL, err := parseArgs([]string{"-port", "9999", "-db-url", "postgres://override"}, &out)
+		if err != nil {
+			t.Fatalf("parseArgs error: %v", err)
+		}
+		if help || showVersion {
+			t.Fatalf("parseArgs: help=%v version=%v, want both false", help, showVersion)
+		}
+		if port != 9999 {
+			t.Fatalf("parseArgs: port = %d, want 9999", port)
+		}
+		if dbURL != "postgres://override" {
+			t.Fatalf("parseArgs: dbURL = %q, want %q", dbURL, "postgres://override")
+		}
+	})
+
+	t.Run("unset flags leave env alone", func(t *testing.T) {
+		var out strings.Builder
+		help, showVersion, port, dbURL, err := parseArgs(nil, &out)
+		if err != nil {
+			t.Fatalf("parseArgs(nil) error: %v", err)
+		}
+		if help || showVersion {
+			t.Fatalf("parseArgs(nil): help=%v version=%v, want both false", help, showVersion)
+		}
+		if port != 0 || dbURL != "" {
+			t.Fatalf("parseArgs(nil): unexpected overrides port=%d dbURL=%q", port, dbURL)
+		}
+	})
+
+	t.Run("unknown flag errors", func(t *testing.T) {
+		var out strings.Builder
+		_, _, _, _, err := parseArgs([]string{"--bogus"}, &out)
+		if err == nil {
+			t.Fatal("parseArgs(--bogus): err = nil, want error")
+		}
+		if !strings.Contains(out.String(), "bogus") {
+			t.Errorf("parseArgs(--bogus): output %q does not mention the unknown flag", out.String())
+		}
+	})
 }

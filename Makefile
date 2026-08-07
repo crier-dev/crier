@@ -1,7 +1,11 @@
 .PHONY: build build-mcp test test-short test-integration lint run clean docker-build generate
 
+# Version injected into cmd/server's version var via -ldflags.
+# Override at build time: make build VERSION=1.2.3
+VERSION ?= dev
+
 build:
-	go build -o bin/crier ./cmd/server
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier ./cmd/server
 
 build-mcp:
 	go build -o bin/crier-mcp ./cmd/crier-mcp
