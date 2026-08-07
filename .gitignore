@@ -51,3 +51,6 @@ dist/
 
 .coding-hermes/board/*.parquet
 .coding-hermes/board/*.duckdb
+
+# Dagger cache (gitreins guard)
+dagger.db*

@@ -142,3 +142,15 @@ tasks:
   status: complete
   created_at: '2026-08-01T10:39:35.747155+00:00'
   completed_at: '2026-08-01T10:55:25.393252+00:00'
+- id: cr-gap-005-cli-flags
+  title: 'CR-GAP-005: CLI --help/--version flags exit 0 instead of starting the server'
+  criteria:
+  - ./bin/crier --help prints usage and exits 0 within 1s (must NOT start the server)
+  - ./bin/crier --version prints a version string (e.g. 'crier dev') and exits 0
+  - ./bin/crier with no args still starts the server on the env-configured CRIER_PORT
+  - go test ./... -count=1 passes all 8 packages (TestServerHealth + new flag-parsing
+    tests included)
+  - No new dependencies added (stdlib flag package only); go vet and gofmt clean
+  status: complete
+  created_at: '2026-08-07T15:23:09.169803+00:00'
+  completed_at: '2026-08-07T15:24:05.358095+00:00'
