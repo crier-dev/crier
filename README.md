@@ -71,16 +71,18 @@ make run
 
 ### Try it
 
-A minimal register → deliver → retrieve round-trip with the default signed configuration:
+A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except `/health` needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped:
 
 ```bash
+AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
+
 # 1. Register an agent (public_key = hex-encoded ed25519 public key)
-curl -s -X POST localhost:8767/agents -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"id":"agent-1","public_key":"<hex ed25519 pubkey>","capabilities":["demo"]}'
 # 201
 
 # 2. Deliver a message to its inbox
-curl -s -X POST localhost:8767/agents/agent-1/inbox -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"payload":{"hello":"world"}}'
 # 201 {"id":"..."}
 
@@ -90,7 +92,7 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox -H 'Content-Type: applicatio
 #      X-Agent-Ts  unix seconds
 #      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
 #    e.g. sign "GET\n/agents/agent-1/inbox\n1712345678" with the agent's private key
-curl -s localhost:8767/agents/agent-1/inbox \
+curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345678' -H 'X-Agent-Sig: <hex sig>'
 # 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
 # Note: message payloads are base64-encoded on the wire ([],byte form)
@@ -126,12 +128,12 @@ All configuration is via environment variables (defaults shown):
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
-| `CR_AUTH_TOKEN` | (required) | Bearer token for relay publish authentication |
+| `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on inbox endpoints (retrieve/ack/delete). Set `false` only for trusted single-user dev setups. |
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 15 endpoints across 5 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 14 endpoints across 5 operation groups:
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -158,8 +160,8 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
-- **API** — 17 HTTP endpoints wired with middleware, graceful shutdown
-- **CI** — GitHub Actions, matrix build Go 1.25 + 1.26
+- **API** — 14 HTTP endpoints wired with middleware, graceful shutdown
+- **CI** — GitHub Actions, matrix build Go 1.26
 
 ### Roadmap
 

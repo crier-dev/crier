@@ -27,6 +27,16 @@ AGENT_ID="demo-$(date +%s)"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# If the server was started with CR_AUTH_TOKEN set (auth enabled), every request
+# except /health must carry the Bearer header below. If CR_AUTH_TOKEN is unset,
+# auth is disabled and the header is omitted. Export the same token you started
+# the server with:
+#   CR_AUTH_TOKEN=secret ./examples/demo.sh
+AUTH_ARGS=()
+if [ -n "${CR_AUTH_TOKEN:-}" ]; then
+  AUTH_ARGS=(-H "Authorization: Bearer ${CR_AUTH_TOKEN}")
+fi
+
 if ! command -v openssl >/dev/null 2>&1; then
   echo "ERROR: openssl required (ed25519 keygen/signing)" >&2
   exit 1
@@ -40,8 +50,8 @@ echo "==> crier demo against ${CRIER_URL} (agent ${AGENT_ID})"
 
 # 0. Health check
 echo "==> [1/6] health"
-curl -sS -o /dev/null -w "    GET /health -> %{http_code}\n" "${CRIER_URL}/health"
-curl -sfS "${CRIER_URL}/health" >/dev/null || {
+curl -sS -o /dev/null -w "    GET /health -> %{http_code}\n" "${AUTH_ARGS[@]}" "${CRIER_URL}/health"
+curl -sfS "${AUTH_ARGS[@]}" "${CRIER_URL}/health" >/dev/null || {
   echo "ERROR: crier not reachable at ${CRIER_URL} — start it first (make run)" >&2
   exit 1
 }
@@ -54,13 +64,13 @@ PUBKEY_HEX=$(openssl pkey -in "${WORKDIR}/agent.key" -pubout -outform DER 2>/dev
 
 # 2. Register the agent
 echo "==> [3/6] register agent"
-curl -sS -X POST "${CRIER_URL}/agents" -H 'Content-Type: application/json' \
+curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents" -H 'Content-Type: application/json' \
   -d "{\"id\":\"${AGENT_ID}\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}" \
   -w "\n    POST /agents -> %{http_code}\n"
 
 # 3. Deliver a message to its inbox
 echo "==> [4/6] deliver message"
-curl -sS -X POST "${CRIER_URL}/agents/${AGENT_ID}/inbox" -H 'Content-Type: application/json' \
+curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox" -H 'Content-Type: application/json' \
   -d '{"payload":{"hello":"world","n":42}}' \
   -w "\n    POST /agents/${AGENT_ID}/inbox -> %{http_code}\n"
 
@@ -70,7 +80,7 @@ TS=$(date +%s)
 printf 'GET\n/agents/%s/inbox\n%s' "${AGENT_ID}" "$TS" > "${WORKDIR}/payload.txt"
 SIG=$(openssl pkeyutl -sign -rawin -inkey "${WORKDIR}/agent.key" -in "${WORKDIR}/payload.txt" 2>/dev/null \
   | xxd -p -c 128)
-RETRIEVE=$(curl -sS "${CRIER_URL}/agents/${AGENT_ID}/inbox" \
+RETRIEVE=$(curl -sS "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox" \
   -H "X-Agent-ID: ${AGENT_ID}" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
   -w "\nHTTP_CODE:%{http_code}")
 echo "    GET /agents/${AGENT_ID}/inbox -> $(echo "${RETRIEVE}" | grep -o 'HTTP_CODE:[0-9]*')"
@@ -86,7 +96,7 @@ TS=$(date +%s)
 printf 'POST\n/agents/%s/inbox/ack\n%s' "${AGENT_ID}" "$TS" > "${WORKDIR}/payload.txt"
 SIG=$(openssl pkeyutl -sign -rawin -inkey "${WORKDIR}/agent.key" -in "${WORKDIR}/payload.txt" 2>/dev/null \
   | xxd -p -c 128)
-curl -sS -X POST "${CRIER_URL}/agents/${AGENT_ID}/inbox/ack" -H 'Content-Type: application/json' \
+curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox/ack" -H 'Content-Type: application/json' \
   -H "X-Agent-ID: ${AGENT_ID}" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
   -d "{\"lease_id\":\"${LEASE_ID}\"}" \
   -w "\n    POST /agents/${AGENT_ID}/inbox/ack -> %{http_code}\n"
@@ -97,7 +107,7 @@ TS=$(date +%s)
 printf 'GET\n/agents/%s/inbox\n%s' "${AGENT_ID}" "$TS" > "${WORKDIR}/payload.txt"
 SIG=$(openssl pkeyutl -sign -rawin -inkey "${WORKDIR}/agent.key" -in "${WORKDIR}/payload.txt" 2>/dev/null \
   | xxd -p -c 128)
-EMPTY=$(curl -sS "${CRIER_URL}/agents/${AGENT_ID}/inbox" \
+EMPTY=$(curl -sS "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox" \
   -H "X-Agent-ID: ${AGENT_ID}" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
   -w "\nHTTP_CODE:%{http_code}")
 echo "    response: $(echo "${EMPTY}" | grep -v 'HTTP_CODE:')"
