@@ -101,6 +101,10 @@ curl -s localhost:8767/agents/agent-1/inbox
 # 200 — no signature headers required
 ```
 
+> Prefer the runnable script: [`examples/demo.sh`](examples/demo.sh) performs the
+> full register → deliver → signed retrieve → ack round-trip with an ephemeral
+> ed25519 keypair (openssl). Start the server, then run `./examples/demo.sh`.
+
 ### Test
 
 ```bash
@@ -144,6 +148,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 | [`docs/architecture.md`](docs/architecture.md) | Architecture overview and design decisions |
 | [`docs/specs.md`](docs/specs.md) | Component specifications and acceptance criteria |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
+| [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
 ## Project Status
 
