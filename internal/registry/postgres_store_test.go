@@ -636,12 +636,14 @@ func TestPostgresStore_Ack_EmptyMessageIDs(t *testing.T) {
 	_, _, err := store.Retrieve(agent.ID, 30*time.Second, 1)
 	require.NoError(t, err)
 
-	// Empty messageIDs is a no-op after the agent existence check passes.
-	require.NoError(t, store.Ack(agent.ID, "any-lease", nil))
+	// Empty messageIDs is a silent no-op (CR-GAP-014) — the store must reject it.
+	err = store.Ack(agent.ID, "any-lease", nil)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrInvalidStoreInput))
 
 	depth, _, _, err := store.Stats(agent.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, depth, "noop Ack should not delete anything")
+	require.Equal(t, 1, depth, "rejected Ack should not delete anything")
 }
 
 func TestPostgresStore_Ack_BlankAgentID(t *testing.T) {
