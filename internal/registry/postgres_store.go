@@ -462,12 +462,10 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 		return fmt.Errorf("ack agent check: %w", err)
 	}
 
-	// Empty messageIDs is a no-op after the agent existence check.
+	// Empty messageIDs must be rejected: a lease-only ack is a silent no-op
+	// that leaves messages queued for redelivery (CR-GAP-014).
 	if len(messageIDs) == 0 {
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("ack commit (noop): %w", err)
-		}
-		return nil
+		return fmt.Errorf("%w: message_ids must not be empty", ErrInvalidStoreInput)
 	}
 
 	rows, err := tx.Query(ctx, `

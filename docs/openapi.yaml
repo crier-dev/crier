@@ -322,7 +322,7 @@ paths:
         "204":
           description: Messages acknowledged, lease released (no body)
         "400":
-          description: Invalid request body or missing lease_id
+          description: Invalid request body, or missing lease_id / message_ids
         "404":
           description: Agent not found
         "409":

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -78,5 +79,16 @@ func BenchmarkAck(b *testing.B) {
 		b.StopTimer()
 		store.inboxes[agentID] = messages
 		b.StartTimer()
+	}
+}
+
+func TestAck_EmptyMessageIDs(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.Register(&Agent{ID: "agent-1"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// A lease-only ack is a silent no-op (CR-GAP-014) — the store must reject it.
+	if err := store.Ack("agent-1", "lease", nil); !errors.Is(err, ErrInvalidStoreInput) {
+		t.Fatalf("expected ErrInvalidStoreInput for empty message_ids, got %v", err)
 	}
 }

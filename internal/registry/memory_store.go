@@ -154,6 +154,12 @@ func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 		return fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 
+	// A lease-only ack is a silent no-op that leaves messages queued for
+	// redelivery after lease expiry (CR-GAP-014) — reject it.
+	if len(messageIDs) == 0 {
+		return fmt.Errorf("%w: message_ids must not be empty", ErrInvalidStoreInput)
+	}
+
 	queue := s.inboxes[agentID]
 	idSet := make(map[string]bool, len(messageIDs))
 	for _, id := range messageIDs {

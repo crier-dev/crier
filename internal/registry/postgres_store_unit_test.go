@@ -553,17 +553,17 @@ func TestPostgresStoreUnit_Ack_LeaseConflict(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestPostgresStoreUnit_Ack_EmptyIDsNoop(t *testing.T) {
+func TestPostgresStoreUnit_Ack_EmptyIDsRejected(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT 1 FROM agents`).
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
-	mock.ExpectCommit()
+	mock.ExpectRollback()
 
 	err := s.Ack("agent", "lease", nil)
-	require.NoError(t, err)
+	require.True(t, errors.Is(err, ErrInvalidStoreInput))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

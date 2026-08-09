@@ -313,6 +313,45 @@ func TestAck_WrongLease(t *testing.T) {
 	}
 }
 
+func TestAck_EmptyMessageIDsRejected(t *testing.T) {
+	store := setupTestStore(t)
+	registerTestAgent(t, store)
+	router := setupRouter(store)
+
+	entry := &InboxEntry{Payload: json.RawMessage(`{}`)}
+	if err := store.Deliver("agent-1", entry); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	_, leaseID, err := store.Retrieve("agent-1", 100*time.Millisecond, 10)
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+
+	// A lease-only ack is a silent no-op (CR-GAP-014) — must be rejected with 400.
+	body, _ := json.Marshal(ackRequest{LeaseID: leaseID})
+	req := httptest.NewRequest("POST", "/agents/agent-1/inbox/ack", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty message_ids, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The message must still be queued — the rejected ack must not have removed it.
+	// (It is leased by the first retrieve, so it returns to the queue after expiry.)
+	time.Sleep(200 * time.Millisecond)
+	store.PurgeExpired()
+
+	messages, _, err := store.Retrieve("agent-1", 30*time.Second, 10)
+	if err != nil {
+		t.Fatalf("re-retrieve: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Errorf("expected 1 message still queued after rejected ack, got %d", len(messages))
+	}
+}
+
 // ----- AC 6: TTL-expired messages auto-purged -----
 
 func TestPurgeExpired(t *testing.T) {

@@ -97,6 +97,14 @@ curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
 # 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
 # Note: message payloads are base64-encoded on the wire ([],byte form)
 
+# 4. Ack the message — message_ids is REQUIRED (an ack without it is rejected
+#    with 400: it would otherwise be a silent no-op and the message would be
+#    redelivered after lease expiry). Sign "POST\n/agents/agent-1/inbox/ack\n<ts>".
+curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345679' -H 'X-Agent-Sig: <hex sig>' \
+  -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<id from retrieve>"]}'
+# 204 — message permanently removed (never redelivered after lease expiry)
+
 # Dev shortcut: disable signing for trusted single-user setups
 CR_REQUIRE_AGENT_SIG=false make run
 curl -s localhost:8767/agents/agent-1/inbox

@@ -88,17 +88,20 @@ echo "    response: $(echo "${RETRIEVE}" | grep -v 'HTTP_CODE:')"
 MESSAGE_COUNT=$(echo "${RETRIEVE}" | grep -v 'HTTP_CODE:' | grep -o '"id"' | wc -l | tr -d ' ')
 [ "${MESSAGE_COUNT}" -ge 1 ] || { echo "ERROR: expected >=1 message, got ${MESSAGE_COUNT}" >&2; exit 1; }
 
-# 5. Ack the first message (signed — lease_id from the retrieve response)
-echo "==> [6/6] signed ack"
+# 5. Ack the message (signed — lease_id AND message_ids from the retrieve response;
+#    message_ids is required — a lease-only ack is rejected with 400)
+echo "==> [6/6] signed ack (lease_id + message_ids)"
 LEASE_ID=$(echo "${RETRIEVE}" | grep -v 'HTTP_CODE:' | grep -o '"lease_id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -n "${LEASE_ID}" ] || { echo "ERROR: no lease_id in retrieve response" >&2; exit 1; }
+MESSAGE_ID=$(echo "${RETRIEVE}" | grep -v 'HTTP_CODE:' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "${MESSAGE_ID}" ] || { echo "ERROR: no message id in retrieve response" >&2; exit 1; }
 TS=$(date +%s)
 printf 'POST\n/agents/%s/inbox/ack\n%s' "${AGENT_ID}" "$TS" > "${WORKDIR}/payload.txt"
 SIG=$(openssl pkeyutl -sign -rawin -inkey "${WORKDIR}/agent.key" -in "${WORKDIR}/payload.txt" 2>/dev/null \
   | xxd -p -c 128)
 curl -sS -X POST "${AUTH_ARGS[@]}" "${CRIER_URL}/agents/${AGENT_ID}/inbox/ack" -H 'Content-Type: application/json' \
   -H "X-Agent-ID: ${AGENT_ID}" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
-  -d "{\"lease_id\":\"${LEASE_ID}\"}" \
+  -d "{\"lease_id\":\"${LEASE_ID}\",\"message_ids\":[\"${MESSAGE_ID}\"]}" \
   -w "\n    POST /agents/${AGENT_ID}/inbox/ack -> %{http_code}\n"
 
 # 6. Verify the inbox is now empty (signed retrieve again)

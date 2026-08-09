@@ -237,6 +237,10 @@ func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lease_id is required"})
 		return
 	}
+	if len(req.MessageIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_ids is required (ack without message IDs is a silent no-op)"})
+		return
+	}
 
 	if err := h.store.Ack(id, req.LeaseID, req.MessageIDs); err != nil {
 		switch {
