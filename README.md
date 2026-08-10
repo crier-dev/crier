@@ -122,6 +122,30 @@ curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
 > full register → deliver → signed retrieve → ack round-trip with an ephemeral
 > ed25519 keypair (openssl). Start the server, then run `./examples/demo.sh`.
 
+### Try the Mesh
+
+The mesh is the second primitive: direct agent-to-agent WebSocket connections.
+Unlike the registry/inboxes it needs no signing setup — just a WebSocket client
+([websocat](https://github.com/vi/websocat), or `npx wscat -c <url>`):
+
+```bash
+# Terminal A — connect as agent-1, then send one REGISTER frame (fire-and-forget:
+# any RFC3339 timestamp works, the server never replies)
+websocat ws://localhost:8767/mesh/connect/agent-1
+{"type":"REGISTER","version":1,"message_id":"0123456789abcdef01234567","timestamp":"2026-08-10T18:00:00.123456789-05:00","agent_id":"agent-1","lease_id":"","lease_ttl_ms":3600000,"capabilities":{"version":"0.1.0","topics":[],"max_concurrent_sessions":10}}
+
+# Terminal B — the peer is now visible:
+curl -s localhost:8767/mesh/peers
+# {"peers":[{"agent_id":"agent-1"}],"count":1}
+```
+
+A peer shows up as soon as the socket connects and stays listed while the
+connection is open (keepalive frames are exchanged every 30s); close Terminal A
+and it disappears. If you started the server with `CR_AUTH_TOKEN` set, add the
+Bearer header to the `curl` as in the section above. For the full wire protocol —
+REQUEST/RESPONSE correlation, error frames, a verified two-agent round-trip —
+see [`docs/mesh-protocol.md`](docs/mesh-protocol.md).
+
 ### Test
 
 ```bash
