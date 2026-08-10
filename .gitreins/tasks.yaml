@@ -154,3 +154,19 @@ tasks:
   status: complete
   created_at: '2026-08-07T15:23:09.169803+00:00'
   completed_at: '2026-08-07T15:24:05.358095+00:00'
+- id: cr-gap-017-mcp-cli-flags
+  title: 'CR-GAP-017: crier-mcp --help/--version flags exit 0 instead of starting
+    the MCP server'
+  criteria:
+  - ./bin/crier-mcp --help prints usage and exits 0 within 1s (must NOT start the
+    stdio MCP server)
+  - ./bin/crier-mcp --version prints a version string (e.g. 'crier-mcp dev') and exits
+    0
+  - ./bin/crier-mcp with no args still starts the stdio MCP server (initialize handshake
+    works)
+  - go test ./... -count=1 passes all 8 packages (TestMCPServerInitialize + new flag-parsing
+    tests included)
+  - No new dependencies added (stdlib flag package only); go vet and gofmt clean
+  status: complete
+  created_at: '2026-08-10T04:37:39.459939+00:00'
+  completed_at: '2026-08-10T04:38:25.326976+00:00'
