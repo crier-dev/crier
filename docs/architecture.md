@@ -16,7 +16,7 @@ Central message relay. Agents publish events to topics; subscribers receive them
 Direct agent-to-agent communication layer.
 - Peer discovery via registry
 - Token auth
-- Keepalive + automatic reconnect
+- Keepalive (client-driven, 30s interval; no server-side liveness processing)
 - Request/response correlation
 
 ### 3. Agent Registry

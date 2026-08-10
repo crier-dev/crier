@@ -22,7 +22,7 @@ Central message relay. Agents publish events to topics; subscribers receive them
 Direct agent-to-agent communication layer with discovery, keepalive, and request/response correlation.
 
 - Peer discovery via registry
-- Registration handshake (REGISTER/REGISTER_ACK)
+- One-way REGISTER on connect (fire-and-forget; the server never sends REGISTER_ACK — see `docs/mesh-protocol.md`)
 - 30-second keepalive loop
 - Concurrent request/response with timeout tracking
 - Clean shutdown with WebSocket close frames
@@ -164,6 +164,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 |------|-------------|
 | [`docs/architecture.md`](docs/architecture.md) | Architecture overview and design decisions |
 | [`docs/specs.md`](docs/specs.md) | Component specifications and acceptance criteria |
+| [`docs/mesh-protocol.md`](docs/mesh-protocol.md) | Mesh wire protocol — framing, message types, correlation contract, worked example |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 

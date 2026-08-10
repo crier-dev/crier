@@ -35,8 +35,8 @@
 
 ### What to port
 - `PeerConnection` — gorilla/websocket dial, read loop, Send with write deadline, close with control frame, OnMessage/OnClose callbacks
-- `Mesh` — peer connect, registration handshake (REGISTER/REGISTER_ACK), keepalive loop (30s), `SendRequest` with pending tracking + timeout, `handleMessage` type dispatch (RESPONSE/ERROR)
-- Federation message types: Envelope, Register, RegisterAck, Keepalive, KeepaliveAck, Request, Response, ErrorMessage, ErrorDetail, PeerRef, Capabilities
+- `Mesh` — peer connect, one-way REGISTER on connect (fire-and-forget; the server never emits REGISTER_ACK), keepalive loop (30s), `SendRequest` with pending tracking + timeout, `handleMessage` type dispatch (RESPONSE/ERROR)
+- Federation message types: Envelope, Register, RegisterAck, Keepalive, Request, Response, ErrorMessage, ErrorDetail, PeerRef, Capabilities (KeepaliveAck is NOT part of the wire protocol — see `docs/mesh-protocol.md`)
 - `Marshal()` — newline-delimited JSON framing
 - `newMessageID()` — crypto/rand hex
 
@@ -53,8 +53,8 @@
 3. `PeerConnection.Close()` sends close frame, cleans up
 4. `Mesh.ConnectPeer()` dials → registers → starts keepalive
 5. `Mesh.SendRequest()` marshals → sends → waits for response with timeout
-6. Keepalive ticker fires every 30s, sends KEEPALIVE message
-7. `handleMessage()` dispatches RESPONSE to pending channel, ERROR to error channel
+6. Keepalive ticker fires every 30s, sends KEEPALIVE message (client-driven only; not processed server-side)
+7. `handleMessage()` dispatches RESPONSE to the pending channel; ERROR frames are converted to synthetic RESPONSEs (status 500) into the same channel
 8. Unit tests for message marshal/unmarshal round-trip
 
 ---
