@@ -8,7 +8,7 @@ build:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier ./cmd/server
 
 build-mcp:
-	go build -o bin/crier-mcp ./cmd/crier-mcp
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier-mcp ./cmd/crier-mcp
 
 test:
 	go test ./... -count=1 -timeout 60s
