@@ -171,6 +171,13 @@ paths:
     delete:
       operationId: registryUnregisterAgent
       summary: Unregister an agent
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as inbox retrieve/ack: sign
+        "DELETE\n/agents/{id}\n<unix-seconds>". An unsigned or invalidly signed
+        DELETE is rejected with 401; an agent may only delete itself (the
+        X-Agent-ID must match the {id} in the path, else 403).
       parameters:
         - name: id
           in: path
@@ -180,6 +187,12 @@ paths:
       responses:
         "204":
           description: Agent unregistered
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
 
   # ── Inboxes ──
   /agents/{id}/inbox:

@@ -86,8 +86,9 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Typ
   -d '{"payload":{"hello":"world"}}'
 # 201 {"id":"..."}
 
-# 3. Retrieve — inbox endpoints require per-agent request signatures by default
-#    (CR_REQUIRE_AGENT_SIG=true). Headers:
+# 3. Retrieve — agent-scoped endpoints require per-agent request signatures by
+#    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats
+#    AND DELETE /agents/{id}. Headers:
 #      X-Agent-ID  agent id
 #      X-Agent-Ts  unix seconds
 #      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
@@ -109,6 +110,12 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content
 CR_REQUIRE_AGENT_SIG=false make run
 curl -s localhost:8767/agents/agent-1/inbox
 # 200 — no signature headers required
+
+# 5. Delete the agent — DELETE /agents/{id} requires the same per-agent
+#    signature (not just inbox endpoints). Sign "DELETE\n/agents/agent-1\n<ts>".
+curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
+  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345680' -H 'X-Agent-Sig: <hex sig>'
+# 204 — agent removed (401 without the signature headers)
 ```
 
 > Prefer the runnable script: [`examples/demo.sh`](examples/demo.sh) performs the
@@ -137,7 +144,7 @@ All configuration is via environment variables (defaults shown):
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
-| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on inbox endpoints (retrieve/ack/delete). Set `false` only for trusted single-user dev setups. |
+| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats and DELETE /agents/{id}). Set `false` only for trusted single-user dev setups. |
 
 ## API
 
