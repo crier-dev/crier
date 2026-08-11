@@ -31,7 +31,7 @@ You need Go 1.26+ and Docker (only for integration tests).
 
 ## Build, Run, and Test
 
-All common workflows are exposed as `make` targets. Run `make` with no arguments to see what's available.
+All common workflows are exposed as `make` targets. Run `make help` to see what's available.
 
 | Target | Command | Purpose |
 |--------|---------|---------|
