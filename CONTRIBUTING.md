@@ -133,7 +133,7 @@ All configuration flows through `config/config.go`. Use `CR_`-prefixed names for
 
 ### Authentication — Bearer tokens
 
-External requests authenticate via `Authorization: Bearer <token>`. The token is read from `CR_AUTH_TOKEN` at startup. When the env var is empty, middleware logs a warning and lets requests through — fine for local development, never fine for production.
+External requests authenticate via `Authorization: Bearer <token>`. The token is read from `CR_AUTH_TOKEN` at startup. When the env var is empty, all requests pass through unauthenticated (a startup warning is logged) — fine for local development, never fine for production.
 
 ### Agent identity — ed25519
 
@@ -207,8 +207,10 @@ Configuration is read from the environment in `config/config.go`. Defaults shown
 | `CR_AUTH_TOKEN` | _(none)_ | Bearer token required for all write endpoints. Empty disables enforcement — local dev only. |
 | `CR_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `CR_LOG_FORMAT` | `text` | Log format: `text` or `json` |
-| `CRIER_DATABASE_URL` | `postgres://crier:crier@localhost:5432/crier` | PostgreSQL connection string. The docker-compose setup listens on `:5437`, so locally use `localhost:5437`. |
+| `CR_DATABASE_URL` | `postgres://crier:crier@localhost:5437/crier` | PostgreSQL connection string (highest precedence, ahead of `DATABASE_URL` and the legacy fallback — see note below). The docker-compose setup maps host `:5437` to container `5432`. |
 | `CR_WS_ALLOWED_ORIGINS` | _(none)_ | Comma-separated WebSocket origin allowlist. Empty allows all. |
+
+> **Legacy:** `CRIER_DATABASE_URL` is still read as the lowest-precedence fallback, but it is deprecated — set `CR_DATABASE_URL` instead.
 
 ### Database pool tuning
 
@@ -216,7 +218,6 @@ Optional, only relevant if you operate the registry store:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CR_DATABASE_URL` | _(none)_ | Highest-precedence database URL (overrides `DATABASE_URL` and `CRIER_DATABASE_URL`) |
 | `DATABASE_URL` | _(none)_ | Standard 12-factor override |
 | `CR_DATABASE_MAX_CONNS` | `4` | Maximum pool connections |
 | `CR_DATABASE_MIN_CONNS` | `0` | Minimum idle connections |
