@@ -124,7 +124,7 @@ paths:
       summary: List registered agents
       responses:
         "200":
-          description: Array of registered agents with health status
+          description: Array of registered agents (status reflects registration-liveness, not live connection health)
     post:
       operationId: registryRegisterAgent
       summary: Register a new agent
@@ -156,7 +156,7 @@ paths:
   /agents/{id}:
     get:
       operationId: registryGetAgent
-      summary: Get agent details and health
+      summary: Get agent details
       parameters:
         - name: id
           in: path
@@ -165,7 +165,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Agent detail with health status
+          description: Agent detail (status reflects registration-liveness, not live connection health)
         "404":
           description: Agent not found
     delete:

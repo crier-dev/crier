@@ -32,8 +32,16 @@ Direct agent-to-agent communication layer with discovery, keepalive, and request
 Every agent has a discoverable identity with capability cards.
 
 - Register/unregister with ed25519 public key
-- List and detail endpoints with health status
+- List and detail endpoints with registration status (see note below)
 - Capability-based routing (future)
+
+> **What `status` means — registration-liveness only.** An agent's `status` is
+> set to `"online"` at registration and never changes until unregistration; it
+> is NOT live-connection health. The registry has no heartbeat source today
+> (mesh KEEPALIVE frames are sent but not processed server-side), so an agent
+> whose process crashed still reports `"online"` with a frozen `last_seen`.
+> For live-connection truth, use the mesh: `GET /mesh/peers` lists agents with
+> an active WebSocket connection (see [Try the Mesh](#try-the-mesh)).
 
 ### 4. Inboxes
 
@@ -76,9 +84,15 @@ A minimal register → deliver → retrieve round-trip with the default signed c
 ```bash
 AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
 
+# 0. One-time setup: generate an ed25519 keypair for agent-1 (needs openssl + xxd)
+openssl genpkey -algorithm ED25519 -out /tmp/crier-agent.key >/dev/null 2>&1
+PUBKEY_HEX=$(openssl pkey -in /tmp/crier-agent.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
+# sig helper: hex(ed25519_sign("METHOD\nPATH\nTS", key)) — same wire format as examples/demo.sh
+sig() { printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
+
 # 1. Register an agent (public_key = hex-encoded ed25519 public key)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
-  -d '{"id":"agent-1","public_key":"<hex ed25519 pubkey>","capabilities":["demo"]}'
+  -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}"
 # 201
 
 # 2. Deliver a message to its inbox
@@ -90,19 +104,22 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Typ
 #    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats
 #    AND DELETE /agents/{id}. Headers:
 #      X-Agent-ID  agent id
-#      X-Agent-Ts  unix seconds
+#      X-Agent-Ts  unix seconds (must be within ±30s of the server clock)
 #      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
-#    e.g. sign "GET\n/agents/agent-1/inbox\n1712345678" with the agent's private key
+#    Timestamps are generated fresh below — never hardcode them (stale timestamps
+#    are rejected with 401).
+TS=$(date +%s)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
-  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345678' -H 'X-Agent-Sig: <hex sig>'
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig GET /agents/agent-1/inbox "$TS")"
 # 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
 # Note: message payloads are base64-encoded on the wire ([],byte form)
 
 # 4. Ack the message — message_ids is REQUIRED (an ack without it is rejected
 #    with 400: it would otherwise be a silent no-op and the message would be
 #    redelivered after lease expiry). Sign "POST\n/agents/agent-1/inbox/ack\n<ts>".
+TS=$(date +%s)
 curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content-Type: application/json' \
-  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345679' -H 'X-Agent-Sig: <hex sig>' \
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig POST /agents/agent-1/inbox/ack "$TS")" \
   -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<id from retrieve>"]}'
 # 204 — message permanently removed (never redelivered after lease expiry)
 
@@ -113,8 +130,9 @@ curl -s localhost:8767/agents/agent-1/inbox
 
 # 5. Delete the agent — DELETE /agents/{id} requires the same per-agent
 #    signature (not just inbox endpoints). Sign "DELETE\n/agents/agent-1\n<ts>".
+TS=$(date +%s)
 curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
-  -H 'X-Agent-ID: agent-1' -H 'X-Agent-Ts: 1712345680' -H 'X-Agent-Sig: <hex sig>'
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig DELETE /agents/agent-1 "$TS")"
 # 204 — agent removed (401 without the signature headers)
 ```
 
