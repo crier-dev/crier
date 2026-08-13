@@ -21,7 +21,8 @@ help:
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
 	@echo ""
-	@echo "Config is env-driven (CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG) — see README.md. The server binary takes no CLI flags."
+	@echo "Config is env-driven (CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG) — see README.md."
+	@echo "The server binary also takes CLI flags: ./bin/crier --help prints full usage, -port overrides CRIER_PORT, -db-url overrides CR_DATABASE_URL, -version prints the build version."
 
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier ./cmd/server

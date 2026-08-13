@@ -199,6 +199,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 | [`docs/specs.md`](docs/specs.md) | Component specifications and acceptance criteria |
 | [`docs/mesh-protocol.md`](docs/mesh-protocol.md) | Mesh wire protocol — framing, message types, correlation contract, worked example |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
+| [`docs/integration-guide.md`](docs/integration-guide.md) | End-to-end integration guide — auth modes, signing, inbox lifecycle, mesh, Postgres |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
 ## Project Status

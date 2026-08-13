@@ -15,7 +15,7 @@ make lint             # go vet ./...
 make coverage-check   # 70% coverage gate
 ```
 
-Config is env-driven (`CRIER_PORT`, `CR_DATABASE_URL`, `CR_AUTH_TOKEN`, `CR_REQUIRE_AGENT_SIG`) — see README.md. The server binary takes no CLI flags.
+Config is env-driven (`CRIER_PORT`, `CR_DATABASE_URL`, `CR_AUTH_TOKEN`, `CR_REQUIRE_AGENT_SIG`) — see README.md. The server binary also takes CLI flags: `./bin/crier --help` prints the full usage screen, `-port` overrides `CRIER_PORT`, `-db-url` overrides `CR_DATABASE_URL`, and `-version` prints the build version.
 
 ## Layout
 
