@@ -4,16 +4,22 @@ info:
   description: |
     Communication backbone for the autonomous agent economy.
     Four primitives: relay, mesh, registry, inboxes.
+
+    Auth: every endpoint except /health requires `Authorization: Bearer <CR_AUTH_TOKEN>` (middleware.Auth). /health is exempt.
   version: "0.1.0"
 servers:
   - url: http://localhost:8767
     description: Local development
+security:
+  - bearerAuth: []
 paths:
   # ── Health ──
+  # /health exempt — middleware.Auth exempts it from the bearer check
   /health:
     get:
       operationId: healthCheck
       summary: Health check
+      security: []
       responses:
         "200":
           description: OK
@@ -342,6 +348,11 @@ paths:
           description: Lease conflict — lease_id does not match the active lease
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token from CR_AUTH_TOKEN — required on all requests except /health
   schemas:
     InboxEntry:
       type: object
