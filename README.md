@@ -1,6 +1,6 @@
 # Crier — Agent-to-Agent Message Bus
 
-[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go)](https://go.dev)
 
 Communication backbone for the autonomous agent economy. Extracted and generalized from Hivemind.
 
@@ -56,7 +56,7 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 
 ### Prerequisites
 
-- Go 1.26 or later
+- Go 1.26.6 or later
 
 ### Build
 
@@ -224,12 +224,14 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 
 All core primitives are implemented and tested:
 
-- **Relay** — Thread-safe in-memory pub/sub, 87.4% coverage, 7/7 GitReins PASS
+- **Relay** — Thread-safe in-memory pub/sub, 87.5% coverage, 7/7 GitReins PASS
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
-- **Registry + Inboxes** — Net-new, 84.8% coverage, 8/8 GitReins PASS
+- **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
 - **API** — 14 HTTP endpoints wired with middleware, graceful shutdown
-- **CI** — GitHub Actions, matrix build Go 1.26
+- **CI** — GitHub Actions, matrix build Go 1.26.6
+
+Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.
 
 ### Roadmap
 

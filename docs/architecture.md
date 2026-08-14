@@ -32,7 +32,7 @@ Persistent per-agent inbox for offline delivery.
 - Queue statistics + message expiry
 
 ## Stack
-- **Language:** Go 1.26+
+- **Language:** Go 1.26.6+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
 - **Storage:** In-memory by default; PostgreSQL backend (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts
 - **Auth:** Agent tokens (HMAC-signed)

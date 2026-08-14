@@ -27,7 +27,7 @@ make build
 make test-short
 ```
 
-You need Go 1.26+ and Docker (only for integration tests).
+You need Go 1.26.6+ and Docker (only for integration tests).
 
 ## Build, Run, and Test
 
