@@ -37,6 +37,7 @@ dist/
 
 # GitReins history
 .gitreins/history/
+.gitreins/usage.jsonl
 
 # Stale build artifacts (from go build without -o)
 /server
