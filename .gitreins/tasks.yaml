@@ -188,3 +188,13 @@ tasks:
   status: complete
   created_at: ''
   completed_at: '2026-08-10T06:49:15.556026+00:00'
+- id: e2e-001-battery-t222
+  title: E2E-001 live battery tick 222
+  criteria:
+  - 'Live E2E battery passes: health 200, WS subscribe 101 through middleware, publish
+    202 + WS delivery, mesh connect 101, signed registry round-trip (register/list/deliver/retrieve/ack/empty-after-ack/delete),
+    SECURITY-001 negatives (unsigned 401, cross-agent 403), CI-012 + CI-014 stress
+    20/20 each'
+  status: complete
+  created_at: '2026-08-16T10:48:22.079969+00:00'
+  completed_at: '2026-08-16T10:49:23.419201+00:00'
