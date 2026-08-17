@@ -1,0 +1,57 @@
+{
+  "task_id": "CR-GAP-034",
+  "task_title": "docs(relay): document zero-subscriber publish drop",
+  "task_criteria": [
+    "README.md documents zero-subscriber publish drop (grep 'zero subscribers' >= 1); docs/openapi.yaml POST /relay/publish 202 response documents fire-and-forget semantics (grep >= 1); go build ./... + go vet ./... + go test ./... pass; gitreins guard PASS"
+  ],
+  "passed": true,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: Tier 1 Guards: PASS  (test mode: full)\n  \u2713 secrets \u2014 clean\n  \u2713 go_build \u2014 ok\n  \u2713 go_lint \u2014 ok\n  \u2713 go",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "Tier 1 Guards: PASS  (test mode: full)\n  \u2713 secrets \u2014 clean\n  \u2713 go_build \u2014 ok\n  \u2713 go_lint \u2014 ok\n  \u2713 go_tests\n",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 README.md documents zero-subscriber publish drop (grep 'zero subscribers' >= 1); docs/openapi.yaml POST /relay/publish 202 response documents fire-and-forget semantics (grep >= 1); go build ./... + go vet ./... + go test ./... pass; gitreins guard PASS: README.md line 17 contains 'zero subscribers' (git show HEAD:README.md | grep -n 'zero subscribers' -> line 17, commit 3758a03). docs/openapi.yaml line 57 contains 'fire-and-forget' in the POST /relay/publish 202 response description (grep -> line 57). go build ./... exit 0; go vet ./... exit 0; go test -short -count=1 ./... exit 0 with all 8 packages ok (cmd/crier-mcp, cmd/server, config, internal/mcp, internal/mesh, internal/middleware, internal/registry, internal/relay). gitreins guard: 'Tier 1 Guards: PASS' (secrets clean, go_build ok, go_lint ok, go_tests).\nAll documentation and verification criteria for CR-GAP-034 are satisfied: README.md documents zero-subscriber publish drop, openapi.yaml 202 response documents fire-and-forget semantics, and build/vet/test/guard all pass.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 README.md documents zero-subscriber publish drop (grep 'zero subscribers' >= 1); docs/openapi.yaml POST /relay/publish 202 response documents fire-and-forget semantics (grep >= 1); go build ./... + go vet ./... + go test ./... pass; gitreins guard PASS: README.md line 17 contains 'zero subscribers' (git show HEAD:README.md | grep -n 'zero subscribers' -> line 17, commit 3758a03). docs/openapi.yaml line 57 contains 'fire-and-forget' in the POST /relay/publish 202 response description",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "README.md documents zero-subscriber publish drop (grep 'zero subscribers' >= 1); docs/openapi.yaml POST /relay/publish 202 response documents fire-and-forget semantics (grep >= 1); go build ./... + go vet ./... + go test ./... pass; gitreins guard PASS",
+                "status": "PASS",
+                "detail": "README.md line 17 contains 'zero subscribers' (git show HEAD:README.md | grep -n 'zero subscribers' -> line 17, commit 3758a03). docs/openapi.yaml line 57 contains 'fire-and-forget' in the POST /relay/publish 202 response description (grep -> line 57). go build ./... exit 0; go vet ./... exit 0; go test -short -count=1 ./... exit 0 with all 8 packages ok (cmd/crier-mcp, cmd/server, config, internal/mcp, internal/mesh, internal/middleware, internal/registry, internal/relay). gitreins guard: 'Tier 1 Guards: PASS' (secrets clean, go_build ok, go_lint ok, go_tests)."
+              }
+            ],
+            "summary": "All documentation and verification criteria for CR-GAP-034 are satisfied: README.md documents zero-subscriber publish drop, openapi.yaml 202 response documents fire-and-forget semantics, and build/vet/test/guard all pass."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: CR-GAP-034\n\nStage tier1: PASS\n    \u2713 guard: Tier 1 Guards: PASS  (test mode: full)\n  \u2713 secrets \u2014 clean\n  \u2713 go_build \u2014 ok\n  \u2713 go_lint \u2014 ok\n  \u2713 go\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 README.md documents zero-subscriber publish drop (grep 'zero subscribers' >= 1); docs/openapi.yaml POST /relay/publish 202 response documents fire-and-forget semantics (grep >= 1); go build ./... + go vet ./... + go test ./... pass; gitreins guard PASS: README.md line 17 contains 'zero subscribers' (git show HEAD:README.md | grep -n 'zero subscribers' -> line 17, commit 3758a03). docs/openapi.yaml line 57 contains 'fire-and-forget' in the POST /relay/publish 202 response description (grep -> line 57). go build ./... exit 0; go vet ./... exit 0; go test -short -count=1 ./... exit 0 with all 8 packages ok (cmd/crier-mcp, cmd/server, config, internal/mcp, internal/mesh, internal/middleware, internal/registry, internal/relay). gitreins guard: 'Tier 1 Guards: PASS' (secrets clean, go_build ok, go_lint ok, go_tests).\nAll documentation and verification criteria for CR-GAP-034 are satisfied: README.md documents zero-subscriber publish drop, openapi.yaml 202 response documents fire-and-forget semantics, and build/vet/test/guard all pass.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-08-17T22:55:49.376298"
+}
