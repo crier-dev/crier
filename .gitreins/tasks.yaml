@@ -198,3 +198,12 @@ tasks:
   status: complete
   created_at: '2026-08-16T10:48:22.079969+00:00'
   completed_at: '2026-08-16T10:49:23.419201+00:00'
+- id: cr-gap-033-relay-identity
+  title: Require agent identity for rate-limited relay publish
+  criteria:
+  - POST /relay/publish without X-Agent-ID returns 401 when rate limiting is enabled;
+    the 101st same-identity publish within a minute returns 429; README wording unified
+    (per-agent, identity required when enabled)
+  status: complete
+  created_at: '2026-08-17T16:40:19.304700+00:00'
+  completed_at: '2026-08-17T16:42:44.398016+00:00'
