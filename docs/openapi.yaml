@@ -53,7 +53,11 @@ paths:
                   description: Event payload
       responses:
         "202":
-          description: Event accepted for delivery
+          description: |
+            Event accepted for delivery (fire-and-forget). If the topic has
+            zero subscribers the event is dropped by design — publishes to
+            empty topics are not queued or retained, and the topic does not
+            appear in GET /relay/topics until at least one subscriber connects.
         "401":
           description: X-Agent-ID header required (rate limiting enabled)
         "429":
