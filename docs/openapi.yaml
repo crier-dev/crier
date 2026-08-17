@@ -54,6 +54,8 @@ paths:
       responses:
         "202":
           description: Event accepted for delivery
+        "401":
+          description: X-Agent-ID header required (rate limiting enabled)
         "429":
           description: Rate limit exceeded
 

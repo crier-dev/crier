@@ -14,7 +14,7 @@ Central message relay. Agents publish events to topics; subscribers receive them
 
 - HTTP + WebSocket transport
 - Topic-based routing with subscriber counts
-- Rate limiting per agent (100 events/minute)
+- Rate limiting per agent (100 events/minute) — requires the `X-Agent-ID` header when enabled; `0` disables both
 - Bearer token authentication
 
 ### 2. WebSocket Mesh (Peer-to-Peer)
@@ -189,7 +189,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats and DELETE /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
-| `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-client rate limit (requests/minute). `0` disables rate limiting. |
+| `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-agent publish rate limit (events/minute), keyed on the `X-Agent-ID` header. `0` disables rate limiting and the identity requirement. |
 | `CR_WS_ALLOWED_ORIGINS` | _(unset — all origins allowed)_ | Comma-separated list of allowed WebSocket `Origin` headers (`scheme://host:port`). `*` allows all origins. |
 | `CR_DATABASE_MAX_CONNS` | `4` | Maximum PostgreSQL pool connections. |
 | `CR_DATABASE_MIN_CONNS` | `0` | Minimum PostgreSQL pool connections kept open (must be ≤ `CR_DATABASE_MAX_CONNS`). |

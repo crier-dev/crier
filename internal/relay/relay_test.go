@@ -491,7 +491,8 @@ func TestHandlePublishRateLimited(t *testing.T) {
 }
 
 func TestHandlePublishRateLimitDisabled(t *testing.T) {
-	// Rate limiting disabled (limit=0).
+	// Rate limiting disabled (limit=0): no X-Agent-ID header required,
+	// all requests pass.
 	rly := New(0)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
@@ -502,7 +503,7 @@ func TestHandlePublishRateLimitDisabled(t *testing.T) {
 			`{"topic":"agent.status","event":{"n":1}}`,
 		))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Agent-ID", "agent-1")
+		// No X-Agent-ID header — identity is only required when limiting is on.
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusAccepted {
@@ -511,9 +512,31 @@ func TestHandlePublishRateLimitDisabled(t *testing.T) {
 	}
 }
 
-func TestHandlePublishRateLimitFallbackToRemoteAddr(t *testing.T) {
-	// Rate limiting with no X-Agent-ID header — falls back to RemoteAddr.
+func TestHandlePublishRequiresAgentID(t *testing.T) {
+	// Rate limiting enabled: publishing without X-Agent-ID is rejected with 401
+	// (no RemoteAddr fallback — identity is mandatory when limiting is on).
 	rly := New(1)
+	router := mux.NewRouter()
+	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
+
+	req := httptest.NewRequest(http.MethodPost, "/relay/publish", strings.NewReader(
+		`{"topic":"agent.status","event":{"ok":true}}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-Agent-ID header.
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("missing X-Agent-ID: got %d, want 401", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "X-Agent-ID header required") {
+		t.Fatalf("body: got %q, want 'X-Agent-ID header required'", rr.Body.String())
+	}
+}
+
+func TestHandlePublishRateLimitDefaultHundred(t *testing.T) {
+	// Default limit: 100 events/minute per agent (same identity).
+	rly := New(100)
 	router := mux.NewRouter()
 	router.HandleFunc("/relay/publish", rly.HandlePublish).Methods("POST")
 
@@ -522,21 +545,21 @@ func TestHandlePublishRateLimitFallbackToRemoteAddr(t *testing.T) {
 			`{"topic":"agent.status","event":{"ok":true}}`,
 		))
 		req.Header.Set("Content-Type", "application/json")
-		// No X-Agent-ID header.
+		req.Header.Set("X-Agent-ID", "agent-1")
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		return rr
 	}
 
-	// First request passes.
-	rr := makeReq()
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("first request: got %d, want 202", rr.Code)
+	for i := 0; i < 100; i++ {
+		if rr := makeReq(); rr.Code != http.StatusAccepted {
+			t.Fatalf("request %d: got %d, want 202", i, rr.Code)
+		}
 	}
 
-	// Second request from same RemoteAddr should be rate limited.
-	rr2 := makeReq()
-	if rr2.Code != http.StatusTooManyRequests {
-		t.Fatalf("second request: got %d, want 429", rr2.Code)
+	// 101st publish from the same agent within the window is rate limited.
+	rr := makeReq()
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("101st request: got %d, want 429", rr.Code)
 	}
 }

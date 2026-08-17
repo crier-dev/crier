@@ -32,13 +32,17 @@ type topicsResponse struct {
 }
 
 // HandlePublish accepts {"topic": "...", "event": {...}} and fans out to subscribers.
-// Returns 202 on success, 429 when rate limited.
+// Returns 202 on success, 401 when X-Agent-ID is missing (rate limiting enabled),
+// 429 when rate limited.
 func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 	// Rate limiting: check before parsing body to avoid wasted work.
 	if r.RateLimiter != nil {
 		agentID := req.Header.Get("X-Agent-ID")
 		if agentID == "" {
-			agentID = req.RemoteAddr
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "X-Agent-ID header required for rate-limited publish"})
+			return
 		}
 		if !r.CheckRateLimit(agentID) {
 			w.Header().Set("Content-Type", "application/json")
