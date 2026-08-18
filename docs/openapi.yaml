@@ -186,7 +186,7 @@ paths:
       description: |
         When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
         per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
-        the same signing contract as inbox retrieve/ack: sign
+        the same signing contract as inbox retrieve/ack/stats: sign
         "DELETE\n/agents/{id}\n<unix-seconds>". An unsigned or invalidly signed
         DELETE is rejected with 401; an agent may only delete itself (the
         X-Agent-ID must match the {id} in the path, else 403).
@@ -255,12 +255,22 @@ paths:
     get:
       operationId: inboxRetrieve
       summary: Retrieve undelivered messages from inbox
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "GET\n/agents/{id}/inbox\n<unix-seconds>". An unsigned or invalidly signed
+        retrieve is rejected with 401; an agent may only retrieve its own inbox
+        (the X-Agent-ID must match the {id} in the path, else 403).
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
         - name: limit
           in: query
           schema:
@@ -289,6 +299,10 @@ paths:
                   lease_id:
                     type: string
                     description: Lease covering the returned messages — pass to inboxAck to release
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
         "404":
           description: Agent not found
 
@@ -296,12 +310,22 @@ paths:
     get:
       operationId: inboxStats
       summary: Get inbox queue statistics
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "GET\n/agents/{id}/inbox/stats\n<unix-seconds>". An unsigned or invalidly
+        signed request is rejected with 401; an agent may only read its own stats
+        (the X-Agent-ID must match the {id} in the path, else 403).
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
       responses:
         "200":
           description: Queue statistics
@@ -320,17 +344,33 @@ paths:
                   oldest_age_ms:
                     type: integer
                     description: Age of oldest queued message in milliseconds
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
 
   /agents/{id}/inbox/ack:
     post:
       operationId: inboxAck
       summary: Acknowledge message delivery (release lease)
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "POST\n/agents/{id}/inbox/ack\n<unix-seconds>". An unsigned or invalidly
+        signed ack is rejected with 401; an agent may only ack its own inbox
+        (the X-Agent-ID must match the {id} in the path, else 403).
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
       requestBody:
         required: true
         content:
@@ -351,12 +391,38 @@ paths:
           description: Messages acknowledged, lease released (no body)
         "400":
           description: Invalid request body, or missing lease_id / message_ids
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
         "404":
           description: Agent not found
         "409":
           description: Lease conflict — lease_id does not match the active lease
 
 components:
+  parameters:
+    XAgentID:
+      name: X-Agent-ID
+      in: header
+      required: true
+      description: The agent claiming to act — must match the {id} in the path (else 403). Required when CR_REQUIRE_AGENT_SIG=true (the default).
+      schema:
+        type: string
+    XAgentTs:
+      name: X-Agent-Ts
+      in: header
+      required: true
+      description: Unix timestamp (seconds) of the signature — must be within ±30s of server time.
+      schema:
+        type: integer
+    XAgentSig:
+      name: X-Agent-Sig
+      in: header
+      required: true
+      description: Hex-encoded ed25519 signature (128 hex chars) over the payload "<METHOD>\n<path>\n<unix-seconds>" where path is the raw URL path (query string excluded).
+      schema:
+        type: string
   securitySchemes:
     bearerAuth:
       type: http
