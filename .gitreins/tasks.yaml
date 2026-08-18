@@ -225,3 +225,12 @@ tasks:
   status: complete
   created_at: '2026-08-18T05:04:48.408029+00:00'
   completed_at: '2026-08-18T05:05:32.809217+00:00'
+- id: cr-gap-036-inbox-sig-spec
+  title: 'openapi.yaml: document X-Agent-* signature headers + 401/403 on inboxRetrieve/inboxAck/inboxStats'
+  criteria:
+  - Each inbox operation's spec (inboxRetrieve/inboxAck/inboxStats) shows the X-Agent-ID/X-Agent-Ts/X-Agent-Sig
+    parameters and 401/403 responses mirroring DELETE /agents/{id}; unsigned live
+    retrieve returns 401 matching the documented response
+  status: complete
+  created_at: '2026-08-18T11:38:01.452807+00:00'
+  completed_at: '2026-08-18T11:39:23.090230+00:00'
