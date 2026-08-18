@@ -217,3 +217,11 @@ tasks:
   status: complete
   created_at: '2026-08-17T22:55:17.197304+00:00'
   completed_at: '2026-08-17T22:55:20.268218+00:00'
+- id: cr-gap-035-ack-lease-id
+  title: 'CR-GAP-035: openapi.yaml inboxAck requestBody schema omits lease_id'
+  criteria:
+  - docs/openapi.yaml inboxAck schema includes lease_id (required) matching server
+    handler (400 without it); openapi validator passes
+  status: complete
+  created_at: '2026-08-18T05:04:48.408029+00:00'
+  completed_at: '2026-08-18T05:05:32.809217+00:00'
