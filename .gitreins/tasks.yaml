@@ -244,3 +244,15 @@ tasks:
   status: complete
   created_at: '2026-08-18T18:19:20.014732+00:00'
   completed_at: '2026-08-18T18:21:10.506940+00:00'
+- id: CR-FEAT-005
+  title: Non-blocking + batching webhook delivery
+  criteria:
+  - 'Batch delivery mode: per-agent/endpoint batch buffer that flushes on max_messages
+    OR flush_interval_s into ONE batch webhook POST (X-Crier-Event: batch, payload
+    {"messages":[envelope,...]}); fire-and-forget async delivery returns 202 to sender
+    without waiting for endpoint reply; per-endpoint flush controls via CR_WEBHOOK_*
+    env; 10 rapid deliveries to one endpoint arrive as <=3 batched POSTs with tuned
+    flush size/interval; go test ./... green'
+  status: complete
+  created_at: '2026-08-20T10:07:03.248230+00:00'
+  completed_at: '2026-08-20T10:19:26.953211+00:00'
