@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ type Driver struct {
 	queue       Queue
 	cfg         DriverConfig
 	resolveConf func(agentID string) (*Config, error)
+	gate        *sessionGate
 	mu          sync.Mutex
 	degraded    map[string]time.Time // agentID -> degraded-since
 	failures    map[string]int       // agentID -> consecutive failures
@@ -60,6 +62,7 @@ func NewDriver(client *Client, queue Queue, cfg DriverConfig) *Driver {
 		client:   client,
 		queue:    queue,
 		cfg:      cfg,
+		gate:     newSessionGate(),
 		degraded: make(map[string]time.Time),
 		failures: make(map[string]int),
 		stopCh:   make(chan struct{}),
@@ -111,6 +114,92 @@ func (d *Driver) Deliver(agentID string, cfg *Config, env *Envelope) (bool, erro
 	d.recordFailure(agentID, res)
 	// Transient failure / unreachable: queue for redelivery (bounded by retries).
 	return false, d.enqueue(agentID, env, 0)
+}
+
+// DeliverBlocking waits for the endpoint's reply and returns it extracted per
+// the schema template (CR-FEAT-002). Retries happen within the caller's
+// budget; the request fails fast with the last error once the budget is
+// exhausted. Per-session FIFO: concurrent blocking deliveries for the same
+// session are serialized (CR-FEAT-004).
+func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Config, env *Envelope, budget time.Duration) ([]byte, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("webhook: nil config for %s", agentID)
+	}
+	if budget <= 0 {
+		budget = 30 * time.Second
+	}
+	release := d.gate.acquire(env.Crier.SessionID)
+	defer release()
+
+	deadline := time.Now().Add(budget)
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("webhook: blocking delivery cancelled: %w", err)
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, fmt.Errorf("webhook: blocking delivery timed out after %s (last: %v)", budget, lastErr)
+			}
+			return nil, fmt.Errorf("webhook: blocking delivery timed out after %s", budget)
+		}
+		res := d.client.Post(cfg, env, attempt)
+		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
+			reply, err := d.client.ExtractReply(cfg, res.Body)
+			if err != nil {
+				return nil, fmt.Errorf("webhook: reply extraction: %w", err)
+			}
+			d.recordSuccess(agentID)
+			return reply, nil
+		}
+		if res.Err != nil {
+			lastErr = res.Err
+		} else {
+			lastErr = fmt.Errorf("status %d", res.StatusCode)
+		}
+		if !res.Retryable {
+			d.recordFailure(agentID, res)
+			return nil, fmt.Errorf("webhook: permanent failure: %w", lastErr)
+		}
+		d.recordFailure(agentID, res)
+		// Backoff within the remaining budget.
+		wait := backoff(attempt + 1)
+		if rem := time.Until(deadline); wait > rem {
+			wait = rem
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("webhook: blocking delivery cancelled: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+}
+
+// sessionGate serializes blocking deliveries per session (CR-FEAT-004):
+// FIFO within a session, free interleaving across sessions.
+type sessionGate struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newSessionGate() *sessionGate {
+	return &sessionGate{locks: make(map[string]*sync.Mutex)}
+}
+
+// acquire returns a release func. Empty session ids are not gated.
+func (g *sessionGate) acquire(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	g.mu.Lock()
+	m, ok := g.locks[sessionID]
+	if !ok {
+		m = &sync.Mutex{}
+		g.locks[sessionID] = m
+	}
+	g.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 // enqueue stores the item for redelivery.

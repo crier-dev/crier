@@ -47,10 +47,15 @@ type Config struct {
 	TimeoutMs      int          `json:"timeout_ms,omitempty"`
 }
 
-// CustomSchema is a bring-your-own endpoint schema (CR-FEAT-003; v1: passthrough
-// envelope with an optional response map).
+// CustomSchema is a bring-your-own endpoint schema (CR-FEAT-003). It wins
+// over the named template when present.
 type CustomSchema struct {
-	ResponseMap string `json:"response_map,omitempty"` // "raw" | jsonpath (v2)
+	// RequestShape overrides the request body/headers template. Nil keeps
+	// passthrough (the full Crier envelope is POSTed).
+	RequestShape *RequestShape `json:"request_shape,omitempty"`
+	// ResponseMap extracts the reply from the response body: "raw" or a dot
+	// path (e.g. "choices.0.message.content").
+	ResponseMap string `json:"response_map,omitempty"`
 }
 
 // Validate checks a webhook config for registration-time errors.
@@ -123,11 +128,13 @@ type Result struct {
 	Err        error
 }
 
-// Post sends one envelope to the endpoint. Returns the Result; never panics.
+// Post sends one envelope to the endpoint through its schema template.
+// Returns the Result; never panics.
 func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
-	body, err := json.Marshal(env)
+	tpl := ResolveTemplate(cfg)
+	body, err := tpl.BuildBody(cfg, env)
 	if err != nil {
-		return Result{Err: fmt.Errorf("marshal envelope: %w", err)}
+		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
 
 	req, err := http.NewRequest(http.MethodPost, cfg.URL, strings.NewReader(string(body)))
@@ -140,6 +147,9 @@ func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
 	req.Header.Set("X-Crier-Retry", fmt.Sprintf("%d", retry))
 	if env.Crier.SessionID != "" {
 		req.Header.Set("X-Crier-Session", env.Crier.SessionID)
+	}
+	for k, v := range tpl.RequestShape.Headers {
+		req.Header.Set(k, v)
 	}
 	if c.secret != nil {
 		mac := hmac.New(sha256.New, c.secret)
@@ -169,6 +179,12 @@ func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
 	default:
 		return Result{StatusCode: resp.StatusCode}
 	}
+}
+
+// ExtractReply pulls the reply out of a response body per the config's
+// schema template (CR-FEAT-002 blocking mode).
+func (c *Client) ExtractReply(cfg *Config, body []byte) ([]byte, error) {
+	return ResolveTemplate(cfg).ExtractReply(body)
 }
 
 // bearerToken resolves a value_ref of the form "env:VAR" from the process env.

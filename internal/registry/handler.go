@@ -37,6 +37,23 @@ type deliverRequest struct {
 	// SessionID carries conversation context for session-aware delivery
 	// (CR-FEAT-004).
 	SessionID string `json:"session_id,omitempty"`
+	// DeliveryMode overrides the agent's webhook default:
+	// blocking | async | batch (CR-FEAT-002/005).
+	DeliveryMode string `json:"delivery_mode,omitempty"`
+	// TimeoutMs bounds a blocking delivery (default 30000).
+	TimeoutMs int `json:"timeout_ms,omitempty"`
+	// RequestID is the sender's correlation id, echoed in the reply
+	// (tool-call reply contract).
+	RequestID string `json:"request_id,omitempty"`
+}
+
+// blockingDeliverResponse is returned for delivery_mode=blocking: the
+// endpoint's reply, extracted per the agent's schema template.
+type blockingDeliverResponse struct {
+	ID        string          `json:"id"`
+	Reply     json.RawMessage `json:"reply"`
+	SessionID string          `json:"session_id,omitempty"`
+	RequestID string          `json:"request_id,omitempty"`
 }
 
 // deliverResponse is the JSON body for POST /agents/{id}/inbox.
@@ -178,16 +195,42 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 
 	if h.webhooks != nil {
 		if target, err := h.store.Get(id); err == nil && target.Webhook != nil {
+			mode := req.DeliveryMode
+			if mode == "" {
+				mode = target.Webhook.DeliveryMode
+			}
+			if mode == "" {
+				mode = "async"
+			}
 			env := &webhook.Envelope{
 				Crier: webhook.EnvelopeMeta{
 					Version:      1,
 					MessageID:    entry.ID,
-					DeliveryMode: "async",
+					RequestID:    req.RequestID,
+					DeliveryMode: mode,
 					Sender:       req.Sender,
 					Kind:         "message",
 					SessionID:    req.SessionID,
 				},
 				Payload: req.Payload,
+			}
+			if mode == "blocking" {
+				budget := time.Duration(req.TimeoutMs) * time.Millisecond
+				if req.TimeoutMs <= 0 {
+					budget = 30 * time.Second
+				}
+				reply, err := h.webhooks.DeliverBlocking(r.Context(), id, target.Webhook, env, budget)
+				if err != nil {
+					writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusOK, blockingDeliverResponse{
+					ID:        entry.ID,
+					Reply:     reply,
+					SessionID: req.SessionID,
+					RequestID: req.RequestID,
+				})
+				return
 			}
 			if _, err := h.webhooks.Deliver(id, target.Webhook, env); err != nil {
 				// Queue path handled inside the driver; the deliver call
