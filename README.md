@@ -187,7 +187,7 @@ All configuration is via environment variables (defaults shown):
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
-| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats and DELETE /agents/{id}). Set `false` only for trusted single-user dev setups. |
+| `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
 | `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-agent publish rate limit (events/minute), keyed on the `X-Agent-ID` header. `0` disables rate limiting and the identity requirement. |
@@ -200,14 +200,14 @@ All configuration is via environment variables (defaults shown):
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 14 endpoints across 5 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 15 endpoints across 5 operation groups:
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Health** | `GET /health` | Service health check |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
-| **Registry** | `POST /agents`, `GET /agents`, `GET /agents/{id}`, `DELETE /agents/{id}` | Agent identity |
+| **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
 
 ## Documentation
@@ -229,7 +229,7 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
-- **API** — 14 HTTP endpoints wired with middleware, graceful shutdown
+- **API** — 15 HTTP endpoints wired with middleware, graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

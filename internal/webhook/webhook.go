@@ -34,6 +34,20 @@ type BatchConfig struct {
 	FlushIntervalS int `json:"flush_interval_s,omitempty"`
 }
 
+// Envelope kinds (spec §3, §7): carried in the envelope crier.kind field and
+// the X-Crier-Event header. Kinds are opaque strings on the wire — the
+// server only defaults a missing kind to KindMessage. configure is the
+// self-configuration directive kind; configure_ack is the agent's reply
+// acknowledging it (CR-FEAT-007).
+const (
+	KindMessage      = "message"
+	KindReply        = "reply"
+	KindBatch        = "batch"
+	KindConfigure    = "configure"
+	KindConfigureAck = "configure_ack"
+	KindProbe        = "probe"
+)
+
 // Config is the per-agent webhook configuration carried on registration.
 type Config struct {
 	URL            string        `json:"url"`

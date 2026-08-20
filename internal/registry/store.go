@@ -24,6 +24,14 @@ type Store interface {
 	PurgeExpired() int
 }
 
+// updater is an optional Store capability: persistence of an agent's
+// mutable registration fields (CR-FEAT-007 PATCH /agents/{id}). Stores that
+// cannot update (e.g. remote proxies) leave it unimplemented and the
+// handler answers 501 for them.
+type updater interface {
+	Update(agent *Agent) error
+}
+
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store

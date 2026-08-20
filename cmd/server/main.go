@@ -163,6 +163,7 @@ func run(args []string) int {
 	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleUnregister).Methods("DELETE")
+	r.HandleFunc("/agents/{id}", registryHandler.HandleUpdateAgent).Methods("PATCH")
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleDeliver).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")

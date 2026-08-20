@@ -67,6 +67,28 @@ func (s *MemoryStore) Unregister(id string) error {
 	return nil
 }
 
+// Update replaces the mutable registration fields of an existing agent
+// (capabilities, webhook) with the caller's copy — the PATCH /agents/{id}
+// path (CR-FEAT-007). Registration identity and timestamps are preserved
+// from the stored record. Returns an error if the agent is not found.
+func (s *MemoryStore) Update(agent *Agent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.agents[agent.ID]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, agent.ID)
+	}
+	if agent.Capabilities == nil {
+		agent.Capabilities = []string{}
+	}
+	agent.Status = existing.Status
+	agent.RegisteredAt = existing.RegisteredAt
+	agent.LastSeen = existing.LastSeen
+	s.agents[agent.ID] = agent
+	return nil
+}
+
 // Deliver appends a message to an agent's FIFO inbox. Returns an error if the
 // agent is not found.
 func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {

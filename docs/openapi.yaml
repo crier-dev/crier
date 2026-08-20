@@ -134,6 +134,17 @@ paths:
     get:
       operationId: registryListAgents
       summary: List registered agents
+      description: |
+        Capability discovery (spec §7): with ?capability=abc only agents whose
+        advertised capabilities include abc are returned. Without the parameter
+        all registered agents are returned.
+      parameters:
+        - name: capability
+          in: query
+          required: false
+          schema:
+            type: string
+          description: When set, only agents advertising this capability are returned (capability discovery, CR-FEAT-007)
       responses:
         "200":
           description: Array of registered agents (status reflects registration-liveness, not live connection health)
@@ -205,6 +216,91 @@ paths:
           description: X-Agent-ID does not match the target agent
         "404":
           description: Agent not found
+    patch:
+      operationId: registryUpdateAgent
+      summary: Partially update an agent's registration (self-configuration directive, spec §7)
+      description: |
+        Partial update of an agent's registration — the self-configuration
+        surface for configure directives (CR-FEAT-007). `capabilities`, when
+        present, replaces the advertised capability list; `webhook`, when
+        present, registers or updates the webhook endpoint; when absent or
+        null the webhook is removed.
+
+        Agent-owned: when CR_REQUIRE_AGENT_SIG=true (the default), this
+        endpoint requires the per-agent ed25519 signature headers X-Agent-ID,
+        X-Agent-Ts, X-Agent-Sig — the same signing contract as DELETE
+        /agents/{id}: sign "PATCH\n/agents/{id}\n<unix-seconds>". An unsigned
+        or invalidly signed PATCH is rejected with 401; an agent may only
+        update itself (the X-Agent-ID must match the {id} in the path,
+        else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: Replaces the advertised capability list when present
+                webhook:
+                  type: object
+                  nullable: true
+                  description: Webhook endpoint config — registers/updates when an object; null or absent removes the webhook
+                  properties:
+                    url:
+                      type: string
+                      description: Endpoint URL (http(s)://) — required when registering
+                    auth_type:
+                      type: string
+                      enum: [none, bearer]
+                    auth_value_ref:
+                      type: string
+                      description: "env:VAR reference for bearer tokens (never stored inline)"
+                    schema_template:
+                      type: string
+                      enum: [generic-custom, openai-compatible, hermes-http-gateway]
+                    custom_schema:
+                      type: object
+                      description: Bring-your-own schema — wins over the named template
+                    delivery_mode:
+                      type: string
+                      enum: [blocking, async, batch]
+                    batch:
+                      type: object
+                      description: Batch-mode coalescing (max_messages, flush_interval_s)
+                    retries:
+                      type: integer
+                      minimum: 0
+                      maximum: 10
+                    timeout_ms:
+                      type: integer
+                      minimum: 0
+                      maximum: 120000
+      responses:
+        "200":
+          description: Agent updated — the full agent object is returned
+        "400":
+          description: Invalid request body or webhook config
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+        "501":
+          description: Registry backend does not support agent updates
 
   # ── Inboxes ──
   /agents/{id}/inbox:
@@ -228,6 +324,9 @@ paths:
                 payload:
                   type: object
                   description: Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve
+                kind:
+                  type: string
+                  description: Envelope kind (spec §3, §7) — message (default), configure (self-configuration directive), or configure_ack (agent's acknowledgement). Webhook deliveries carry it in the envelope crier.kind field and the X-Crier-Event header unchanged.
                 priority:
                   type: integer
                   minimum: 0

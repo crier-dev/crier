@@ -256,6 +256,40 @@ WHERE id = $1;`, id)
 	return nil
 }
 
+// Update replaces the mutable registration fields of an existing agent — the
+// PATCH /agents/{id} path (CR-FEAT-007). The Postgres backend persists
+// capabilities; webhook config is not persisted here (mirrors Register, whose
+// INSERT also omits it — webhook remains an in-memory registration field).
+// Returns ErrAgentNotFound when the agent does not exist.
+func (s *PostgresStore) Update(agent *Agent) error {
+	if agent == nil || agent.ID == "" {
+		return fmt.Errorf("%w: nil agent or blank ID", ErrInvalidStoreInput)
+	}
+	caps := agent.Capabilities
+	if caps == nil {
+		caps = []string{}
+	}
+	capsJSON, err := json.Marshal(caps)
+	if err != nil {
+		return fmt.Errorf("%w: marshal capabilities: %v", ErrInvalidStoreInput, err)
+	}
+
+	ctx, cancel := s.operationContext()
+	defer cancel()
+
+	tag, err := s.pool.Exec(ctx, `
+UPDATE agents
+SET capabilities = $2::jsonb, last_seen = $3
+WHERE id = $1;`, agent.ID, capsJSON, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("update agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, agent.ID)
+	}
+	return nil
+}
+
 // Deliver appends a message to an agent's FIFO inbox.
 func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	if agentID == "" {

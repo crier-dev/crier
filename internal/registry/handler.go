@@ -45,6 +45,19 @@ type deliverRequest struct {
 	// RequestID is the sender's correlation id, echoed in the reply
 	// (tool-call reply contract).
 	RequestID string `json:"request_id,omitempty"`
+	// Kind is the envelope kind (spec §3, §7): message (default), configure,
+	// configure_ack. Passed through to the webhook envelope crier.kind and
+	// the X-Crier-Event header untouched (CR-FEAT-007).
+	Kind string `json:"kind,omitempty"`
+}
+
+// patchRequest is the JSON body for PATCH /agents/{id} — partial update of
+// an agent's registration (spec §7, CR-FEAT-007). capabilities replaces the
+// advertised list when present; webhook registers/updates when present and
+// is removed when absent or null.
+type patchRequest struct {
+	Capabilities []string        `json:"capabilities,omitempty"`
+	Webhook      *webhook.Config `json:"webhook,omitempty"`
 }
 
 // blockingDeliverResponse is returned for delivery_mode=blocking: the
@@ -131,10 +144,25 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleListAgents handles GET /agents — lists all registered agents.
+// With ?capability=abc only agents whose capabilities include abc are
+// returned (capability advertisement/discovery, spec §7, CR-FEAT-007).
+// Without the parameter the behavior is unchanged.
 func (h *Handler) HandleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents := h.store.List()
 	if agents == nil {
 		agents = []*Agent{}
+	}
+	if cap := r.URL.Query().Get("capability"); cap != "" {
+		filtered := make([]*Agent, 0, len(agents))
+		for _, a := range agents {
+			for _, c := range a.Capabilities {
+				if c == cap {
+					filtered = append(filtered, a)
+					break
+				}
+			}
+		}
+		agents = filtered
 	}
 	writeJSON(w, http.StatusOK, agentsResponse{Agents: agents})
 }
@@ -172,6 +200,66 @@ func (h *Handler) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleUpdateAgent handles PATCH /agents/{id} — partial update of an
+// agent's registration (spec §7, CR-FEAT-007): capabilities replaces the
+// advertised list when present; webhook registers/updates when present and
+// is removed when absent or null. Agent-owned: requires a valid per-agent
+// signature when enabled (same gate as DELETE /agents/{id}).
+func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if !h.requireAgent(w, r, id) {
+		return
+	}
+
+	var req patchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+
+	agent, err := h.store.Get(id)
+	if err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
+		return
+	}
+
+	if req.Capabilities != nil {
+		agent.Capabilities = req.Capabilities
+	}
+	if req.Webhook == nil {
+		// Spec §7: webhook absent or null removes the webhook.
+		agent.Webhook = nil
+	} else {
+		if err := req.Webhook.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		agent.Webhook = req.Webhook
+	}
+
+	u, ok := h.store.(updater)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "registry store does not support agent updates"})
+		return
+	}
+	if err := u.Update(agent); err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else if errors.Is(err, ErrInvalidStoreInput) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		} else {
+			writeStoreError(w, err)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, agent)
+}
+
 // HandleDeliver handles POST /agents/{id}/inbox — delivers a message.
 // If the target agent has a webhook endpoint configured and the webhook
 // driver is enabled, the message is pushed to the endpoint instead of the
@@ -202,6 +290,10 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			if mode == "" {
 				mode = "async"
 			}
+			kind := req.Kind
+			if kind == "" {
+				kind = webhook.KindMessage
+			}
 			env := &webhook.Envelope{
 				Crier: webhook.EnvelopeMeta{
 					Version:      1,
@@ -209,7 +301,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 					RequestID:    req.RequestID,
 					DeliveryMode: mode,
 					Sender:       req.Sender,
-					Kind:         "message",
+					Kind:         kind,
 					SessionID:    req.SessionID,
 				},
 				Payload: req.Payload,
