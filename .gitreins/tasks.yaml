@@ -256,3 +256,12 @@ tasks:
   status: complete
   created_at: '2026-08-20T10:07:03.248230+00:00'
   completed_at: '2026-08-20T10:19:26.953211+00:00'
+- id: cr-feat-007
+  title: Self-configuration directive protocol (CONFIGURE kind)
+  criteria:
+  - 'CONFIGURE kind delivered to webhook agent as X-Crier-Event: configure with {directive,target_capability,schema};
+    PATCH /agents/{id} partial update of capabilities+webhook; GET /agents?capability=abc
+    filter; configure_ack reply kind; build/vet/tests pass; guard PASS'
+  status: complete
+  created_at: '2026-08-20T16:35:48.303399+00:00'
+  completed_at: '2026-08-20T16:43:41.548409+00:00'
