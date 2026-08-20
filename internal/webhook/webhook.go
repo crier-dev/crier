@@ -36,15 +36,15 @@ type BatchConfig struct {
 
 // Config is the per-agent webhook configuration carried on registration.
 type Config struct {
-	URL            string       `json:"url"`
-	AuthType       AuthType     `json:"auth_type,omitempty"`
-	AuthValueRef   string       `json:"auth_value_ref,omitempty"`
-	SchemaTemplate string       `json:"schema_template,omitempty"`
+	URL            string        `json:"url"`
+	AuthType       AuthType      `json:"auth_type,omitempty"`
+	AuthValueRef   string        `json:"auth_value_ref,omitempty"`
+	SchemaTemplate string        `json:"schema_template,omitempty"`
 	CustomSchema   *CustomSchema `json:"custom_schema,omitempty"`
-	DeliveryMode   string       `json:"delivery_mode,omitempty"` // blocking|async|batch
-	Batch          *BatchConfig `json:"batch,omitempty"`
-	Retries        int          `json:"retries,omitempty"`
-	TimeoutMs      int          `json:"timeout_ms,omitempty"`
+	DeliveryMode   string        `json:"delivery_mode,omitempty"` // blocking|async|batch
+	Batch          *BatchConfig  `json:"batch,omitempty"`
+	Retries        int           `json:"retries,omitempty"`
+	TimeoutMs      int           `json:"timeout_ms,omitempty"`
 }
 
 // CustomSchema is a bring-your-own endpoint schema (CR-FEAT-003). It wins
@@ -77,6 +77,15 @@ func (c *Config) Validate() error {
 	if c.DeliveryMode != "" && c.DeliveryMode != "blocking" && c.DeliveryMode != "async" && c.DeliveryMode != "batch" {
 		return fmt.Errorf("webhook.delivery_mode must be blocking|async|batch")
 	}
+	if c.Batch != nil {
+		// 0 = unset (driver default applies); negative is a config error.
+		if c.Batch.MaxMessages < 0 {
+			return fmt.Errorf("webhook.batch.max_messages must be >= 0")
+		}
+		if c.Batch.FlushIntervalS < 0 {
+			return fmt.Errorf("webhook.batch.flush_interval_s must be >= 0")
+		}
+	}
 	if c.Retries < 0 || c.Retries > 10 {
 		return fmt.Errorf("webhook.retries must be 0..10")
 	}
@@ -88,7 +97,7 @@ func (c *Config) Validate() error {
 
 // Envelope is the outbound webhook body (spec §3).
 type Envelope struct {
-	Crier   EnvelopeMeta   `json:"crier"`
+	Crier   EnvelopeMeta    `json:"crier"`
 	Payload json.RawMessage `json:"payload"`
 }
 
@@ -136,19 +145,49 @@ func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
 	if err != nil {
 		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
+	return c.postBody(cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry)
+}
 
+// batchEnvelopeBody is the spec §4 batch payload: {"messages": [envelope, …]}.
+type batchEnvelopeBody struct {
+	Messages []*Envelope `json:"messages"`
+}
+
+// PostBatch coalesces several envelopes into ONE webhook POST with
+// X-Crier-Event: batch (spec §4 — CR-FEAT-005). The batch wrapper is always
+// the raw {"messages":[...]} body: schema templates shape individual
+// messages, not the batch envelope.
+func (c *Client) PostBatch(cfg *Config, envs []*Envelope, retry int) Result {
+	if len(envs) == 0 {
+		return Result{Err: fmt.Errorf("batch: no envelopes")}
+	}
+	body, err := json.Marshal(batchEnvelopeBody{Messages: envs})
+	if err != nil {
+		return Result{Err: fmt.Errorf("build batch body: %w", err)}
+	}
+	sender, session := "", ""
+	if envs[0] != nil {
+		sender = envs[0].Crier.Sender
+		session = envs[0].Crier.SessionID
+	}
+	return c.postBody(cfg, body, "batch", sender, session, retry)
+}
+
+// postBody performs the POST with the webhook contract headers (spec §3)
+// and classifies the response.
+func (c *Client) postBody(cfg *Config, body []byte, event, sender, session string, retry int) Result {
 	req, err := http.NewRequest(http.MethodPost, cfg.URL, strings.NewReader(string(body)))
 	if err != nil {
 		return Result{Err: fmt.Errorf("build request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Crier-Event", env.Crier.Kind)
-	req.Header.Set("X-Crier-Agent", env.Crier.Sender)
+	req.Header.Set("X-Crier-Event", event)
+	req.Header.Set("X-Crier-Agent", sender)
 	req.Header.Set("X-Crier-Retry", fmt.Sprintf("%d", retry))
-	if env.Crier.SessionID != "" {
-		req.Header.Set("X-Crier-Session", env.Crier.SessionID)
+	if session != "" {
+		req.Header.Set("X-Crier-Session", session)
 	}
-	for k, v := range tpl.RequestShape.Headers {
+	for k, v := range ResolveTemplate(cfg).RequestShape.Headers {
 		req.Header.Set(k, v)
 	}
 	if c.secret != nil {

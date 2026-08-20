@@ -8,10 +8,11 @@ import (
 
 // QueueItem is one queued webhook delivery (endpoint down / transient failures).
 type QueueItem struct {
-	AgentID   string    `json:"agent_id"`
-	Envelope  *Envelope `json:"envelope"`
-	Retries   int       `json:"retries"`
-	CreatedAt time.Time `json:"created_at"`
+	AgentID   string      `json:"agent_id"`
+	Envelope  *Envelope   `json:"envelope,omitempty"`
+	Batch     []*Envelope `json:"batch,omitempty"` // CR-FEAT-005: coalesced batch; redelivery POSTs it as ONE batch request
+	Retries   int         `json:"retries"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 // Queue stores pending webhook deliveries. v1 ships the in-memory
@@ -26,7 +27,7 @@ type Queue interface {
 // MemoryQueue is a FIFO queue with a mutex. Durable within process lifetime;
 // server restart drains it (documented v1 trade-off for the memory backend).
 type MemoryQueue struct {
-	mu  sync.Mutex
+	mu    sync.Mutex
 	items []*QueueItem
 }
 

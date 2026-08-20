@@ -105,7 +105,7 @@ func TestClientPost_SignatureAndEnvelope(t *testing.T) {
 	c := NewClient(2*time.Second, secret)
 
 	env := &Envelope{
-		Crier: EnvelopeMeta{Version: 1, MessageID: "abc123", Kind: "message", Sender: "agent-a", SessionID: "sess-1"},
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "abc123", Kind: "message", Sender: "agent-a", SessionID: "sess-1"},
 		Payload: json.RawMessage(`{"hello":"world"}`),
 	}
 	res := c.Post(testConfig(cs.server.URL), env, 0)
@@ -144,7 +144,7 @@ func TestClientPost_SignatureAndEnvelope(t *testing.T) {
 // TestClientPost_StatusClasses: 4xx = permanent, 5xx = retryable, 408/429 retryable.
 func TestClientPost_StatusClasses(t *testing.T) {
 	for _, tc := range []struct {
-		status   int
+		status    int
 		retryable bool
 	}{
 		{200, false}, {201, false}, {400, false}, {404, false},
@@ -204,12 +204,15 @@ func TestDriver_CircuitBreaker(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		_, _ = d.Deliver("agent-b", cfg, &Envelope{Crier: EnvelopeMeta{Version: 1, MessageID: "m", Kind: "message"}})
 	}
-	d.mu.Lock()
-	_, deg := d.degraded["agent-b"]
-	d.mu.Unlock()
-	if !deg {
-		t.Fatal("circuit did not open after threshold failures")
-	}
+	// Async mode is enqueue-first (fire-and-forget), so the POSTs and their
+	// failures accrue in the background drain loop — wait for the circuit to
+	// open as an observable end-state.
+	waitFor(t, "circuit open after threshold failures", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		_, deg := d.degraded["agent-b"]
+		return deg
+	})
 	countAtDegrade := cs.messageCount()
 
 	// While degraded: deliveries queue, no NEW message POSTs (probes are

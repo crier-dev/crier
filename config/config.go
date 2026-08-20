@@ -35,14 +35,16 @@ type Config struct {
 	Webhook WebhookConfig
 }
 
-// WebhookConfig holds push-delivery tuning (CR-FEAT-001).
+// WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
 type WebhookConfig struct {
-	Secret           string        // CR_WEBHOOK_SECRET — HMAC outbound signing
-	Timeout          time.Duration // CR_WEBHOOK_TIMEOUT_S
-	MaxRetries       int           // CR_WEBHOOK_MAX_RETRIES
-	RedeliverEvery   time.Duration // CR_WEBHOOK_REDELIVER_S
-	ProbeEvery       time.Duration // CR_WEBHOOK_PROBE_S
-	CircuitThreshold int           // CR_WEBHOOK_CIRCUIT_THRESHOLD
+	Secret             string        // CR_WEBHOOK_SECRET — HMAC outbound signing
+	Timeout            time.Duration // CR_WEBHOOK_TIMEOUT_S
+	MaxRetries         int           // CR_WEBHOOK_MAX_RETRIES
+	RedeliverEvery     time.Duration // CR_WEBHOOK_REDELIVER_S
+	ProbeEvery         time.Duration // CR_WEBHOOK_PROBE_S
+	CircuitThreshold   int           // CR_WEBHOOK_CIRCUIT_THRESHOLD
+	BatchMaxMessages   int           // CR_WEBHOOK_BATCH_MAX — batch flush size default
+	BatchFlushInterval time.Duration // CR_WEBHOOK_BATCH_FLUSH_S — batch flush interval default
 }
 
 // Load reads configuration from environment with defaults.
@@ -55,11 +57,13 @@ func Load() (Config, error) {
 		RateLimitPerMinute: 100,
 		RequireAgentSig:    true,
 		Webhook: WebhookConfig{
-			Timeout:          30 * time.Second,
-			MaxRetries:       5,
-			RedeliverEvery:   30 * time.Second,
-			ProbeEvery:       60 * time.Second,
-			CircuitThreshold: 10,
+			Timeout:            30 * time.Second,
+			MaxRetries:         5,
+			RedeliverEvery:     30 * time.Second,
+			ProbeEvery:         60 * time.Second,
+			CircuitThreshold:   10,
+			BatchMaxMessages:   10,
+			BatchFlushInterval: 5 * time.Second,
 		},
 		Database: DatabaseConfig{
 			MaxConns:        4,
@@ -209,6 +213,22 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_CIRCUIT_THRESHOLD: %q", v)
 		}
 		cfg.Webhook.CircuitThreshold = n
+	}
+	// Batch flush controls (CR-FEAT-005): per-agent registration values
+	// override these defaults at delivery time.
+	if v := os.Getenv("CR_WEBHOOK_BATCH_MAX"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_BATCH_MAX: %q", v)
+		}
+		cfg.Webhook.BatchMaxMessages = n
+	}
+	if v := os.Getenv("CR_WEBHOOK_BATCH_FLUSH_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_BATCH_FLUSH_S: %q", v)
+		}
+		cfg.Webhook.BatchFlushInterval = time.Duration(n) * time.Second
 	}
 
 	return cfg, nil
