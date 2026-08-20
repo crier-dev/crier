@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 func newTestPubKey(t *testing.T) (string, ed25519.PublicKey) {
@@ -531,5 +534,85 @@ func TestHandleStats(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
+	}
+}
+
+// ----- AC: async webhook delivery returns 202 Accepted (spec §4, CR-FEAT-005) -----
+
+func TestDeliver_WebhookAsync_Returns202(t *testing.T) {
+	var mu sync.Mutex
+	posts := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		posts++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	store := setupTestStore(t)
+	_, pubKey := newTestPubKey(t)
+	if err := store.Register(&Agent{
+		ID:        "agent-w",
+		PublicKey: HexKey(pubKey),
+		Webhook: &webhook.Config{
+			URL:          ts.URL,
+			DeliveryMode: "async",
+			Retries:      0,
+			TimeoutMs:    5000,
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	handler := NewHandler(store)
+	driver := webhook.NewDriver(webhook.NewClient(2*time.Second, nil), webhook.NewMemoryQueue(), webhook.DriverConfig{
+		MaxRetries:     5,
+		RedeliverEvery: 200 * time.Millisecond,
+		ProbeEvery:     200 * time.Millisecond,
+	})
+	driver.Start()
+	defer driver.Stop()
+	handler.SetWebhookDriver(driver)
+	// The queue drain resolves the agent's webhook config through this
+	// resolver — without it items are silently dropped ("agent gone").
+	driver.SetConfigResolver(func(agentID string) (*webhook.Config, error) {
+		agent, err := store.Get(agentID)
+		if err != nil {
+			return nil, err
+		}
+		if agent.Webhook == nil {
+			return nil, fmt.Errorf("agent %s has no webhook configured", agentID)
+		}
+		return agent.Webhook, nil
+	})
+
+	router := mux.NewRouter()
+	router.HandleFunc("/agents/{id}/inbox", handler.HandleDeliver).Methods("POST")
+
+	payload := json.RawMessage(`{"msg":"fire-and-forget"}`)
+	body, _ := json.Marshal(deliverRequest{Payload: payload})
+	req := httptest.NewRequest("POST", "/agents/agent-w/inbox", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("async webhook deliver: expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Fire-and-forget: the 202 returns immediately; the endpoint receives the
+	// POST in the background.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		n := posts
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("endpoint never received the async POST (posts=%d)", n)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }

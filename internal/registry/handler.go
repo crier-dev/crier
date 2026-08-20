@@ -238,7 +238,9 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusCreated, deliverResponse{ID: entry.ID})
+			// Async/batch webhook delivery is fire-and-forget: the sender gets
+			// 202 Accepted, delivery happens in the background queue (spec §4).
+			writeJSON(w, http.StatusAccepted, deliverResponse{ID: entry.ID})
 			return
 		}
 	}
