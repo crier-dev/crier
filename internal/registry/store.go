@@ -6,6 +6,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 // Store persists registered agents and their lease-based inboxes.
@@ -29,6 +31,9 @@ type Handler struct {
 	// agent-owned routes (retrieve/ack/stats/unregister). When false, only
 	// the shared Bearer token is required (legacy behavior).
 	requireAgentSig bool
+	// webhooks pushes deliveries to agent webhook endpoints when configured
+	// (CR-FEAT-001). Nil disables webhook delivery.
+	webhooks *webhook.Driver
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -36,6 +41,11 @@ type Handler struct {
 // if the underlying store is.
 func NewHandler(store Store) *Handler {
 	return &Handler{store: store}
+}
+
+// SetWebhookDriver enables push delivery to agent webhook endpoints.
+func (h *Handler) SetWebhookDriver(d *webhook.Driver) {
+	h.webhooks = d
 }
 
 // SetRequireAgentSig toggles per-agent ed25519 signature enforcement.

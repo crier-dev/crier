@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 // registerRequest is the JSON body for POST /agents.
 type registerRequest struct {
-	ID           string   `json:"id"`
-	PublicKey    string   `json:"public_key"`
-	Capabilities []string `json:"capabilities"`
+	ID           string          `json:"id"`
+	PublicKey    string          `json:"public_key"`
+	Capabilities []string        `json:"capabilities"`
+	Webhook      *webhook.Config `json:"webhook,omitempty"`
 }
 
 // agentsResponse is the JSON body for GET /agents.
@@ -29,6 +32,11 @@ type agentsResponse struct {
 // deliverRequest is the JSON body for POST /agents/{id}/inbox.
 type deliverRequest struct {
 	Payload json.RawMessage `json:"payload"`
+	// Sender is the originating agent id (webhook envelope metadata).
+	Sender string `json:"sender,omitempty"`
+	// SessionID carries conversation context for session-aware delivery
+	// (CR-FEAT-004).
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // deliverResponse is the JSON body for POST /agents/{id}/inbox.
@@ -81,9 +89,16 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		ID:           req.ID,
 		PublicKey:    HexKey(rawKey),
 		Capabilities: req.Capabilities,
+		Webhook:      req.Webhook,
 	}
 	if agent.Capabilities == nil {
 		agent.Capabilities = []string{}
+	}
+	if agent.Webhook != nil {
+		if err := agent.Webhook.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	if err := h.store.Register(agent); err != nil {
@@ -140,7 +155,10 @@ func (h *Handler) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// HandleDeliver handles POST /agents/{id}/inbox — delivers a message to an agent.
+// HandleDeliver handles POST /agents/{id}/inbox — delivers a message.
+// If the target agent has a webhook endpoint configured and the webhook
+// driver is enabled, the message is pushed to the endpoint instead of the
+// inbox (CR-FEAT-001: webhook is the preferred push surface).
 func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
@@ -156,6 +174,30 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	entry := &InboxEntry{
 		ID:      hex.EncodeToString(msgID),
 		Payload: req.Payload,
+	}
+
+	if h.webhooks != nil {
+		if target, err := h.store.Get(id); err == nil && target.Webhook != nil {
+			env := &webhook.Envelope{
+				Crier: webhook.EnvelopeMeta{
+					Version:      1,
+					MessageID:    entry.ID,
+					DeliveryMode: "async",
+					Sender:       req.Sender,
+					Kind:         "message",
+					SessionID:    req.SessionID,
+				},
+				Payload: req.Payload,
+			}
+			if _, err := h.webhooks.Deliver(id, target.Webhook, env); err != nil {
+				// Queue path handled inside the driver; the deliver call
+				// itself only fails on config errors — surface those.
+				writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusCreated, deliverResponse{ID: entry.ID})
+			return
+		}
 	}
 
 	if err := h.store.Deliver(id, entry); err != nil {

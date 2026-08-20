@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 // AgentStatus represents the online/offline state of an agent.
@@ -50,6 +52,8 @@ type Agent struct {
 	Status       AgentStatus `json:"status"`
 	RegisteredAt time.Time   `json:"registered_at"`
 	LastSeen     time.Time   `json:"last_seen"`
+	// Webhook is the optional push-delivery endpoint (CR-FEAT-001).
+	Webhook *webhook.Config `json:"webhook,omitempty"`
 }
 
 // InboxEntry is a message stored in an agent's persistent inbox.

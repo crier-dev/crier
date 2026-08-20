@@ -31,6 +31,18 @@ type Config struct {
 	// RequireAgentSig enforces per-agent ed25519 request signing on inbox
 	// read/ack/stats and agent deletion. Secure by default.
 	RequireAgentSig bool
+	// Webhook holds push-delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
+	Webhook WebhookConfig
+}
+
+// WebhookConfig holds push-delivery tuning (CR-FEAT-001).
+type WebhookConfig struct {
+	Secret           string        // CR_WEBHOOK_SECRET — HMAC outbound signing
+	Timeout          time.Duration // CR_WEBHOOK_TIMEOUT_S
+	MaxRetries       int           // CR_WEBHOOK_MAX_RETRIES
+	RedeliverEvery   time.Duration // CR_WEBHOOK_REDELIVER_S
+	ProbeEvery       time.Duration // CR_WEBHOOK_PROBE_S
+	CircuitThreshold int           // CR_WEBHOOK_CIRCUIT_THRESHOLD
 }
 
 // Load reads configuration from environment with defaults.
@@ -42,6 +54,13 @@ func Load() (Config, error) {
 		LogFormat:          "text",
 		RateLimitPerMinute: 100,
 		RequireAgentSig:    true,
+		Webhook: WebhookConfig{
+			Timeout:          30 * time.Second,
+			MaxRetries:       5,
+			RedeliverEvery:   30 * time.Second,
+			ProbeEvery:       60 * time.Second,
+			CircuitThreshold: 10,
+		},
 		Database: DatabaseConfig{
 			MaxConns:        4,
 			MinConns:        0,
@@ -152,6 +171,44 @@ func Load() (Config, error) {
 		default:
 			return cfg, fmt.Errorf("invalid CR_REQUIRE_AGENT_SIG: %q (want true/false)", v)
 		}
+	}
+
+	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
+	cfg.Webhook.Secret = os.Getenv("CR_WEBHOOK_SECRET")
+	if v := os.Getenv("CR_WEBHOOK_TIMEOUT_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_TIMEOUT_S: %q", v)
+		}
+		cfg.Webhook.Timeout = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_WEBHOOK_MAX_RETRIES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_MAX_RETRIES: %q", v)
+		}
+		cfg.Webhook.MaxRetries = n
+	}
+	if v := os.Getenv("CR_WEBHOOK_REDELIVER_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_REDELIVER_S: %q", v)
+		}
+		cfg.Webhook.RedeliverEvery = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_WEBHOOK_PROBE_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_PROBE_S: %q", v)
+		}
+		cfg.Webhook.ProbeEvery = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_WEBHOOK_CIRCUIT_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_WEBHOOK_CIRCUIT_THRESHOLD: %q", v)
+		}
+		cfg.Webhook.CircuitThreshold = n
 	}
 
 	return cfg, nil

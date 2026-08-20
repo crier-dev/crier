@@ -20,6 +20,7 @@ import (
 	"github.com/totalwindupflightsystems/crier/internal/middleware"
 	"github.com/totalwindupflightsystems/crier/internal/registry"
 	"github.com/totalwindupflightsystems/crier/internal/relay"
+	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 // version is the crier server version. Overridable at build time via
@@ -129,6 +130,35 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+
+	// Webhook push delivery (CR-FEAT-001) — active only for agents that
+	// register a webhook endpoint.
+	var secret []byte
+	if cfg.Webhook.Secret != "" {
+		secret = []byte(cfg.Webhook.Secret)
+	}
+	whClient := webhook.NewClient(cfg.Webhook.Timeout, secret)
+	whDriver := webhook.NewDriver(whClient, webhook.NewMemoryQueue(), webhook.DriverConfig{
+		MaxRetries:       cfg.Webhook.MaxRetries,
+		RedeliverEvery:   cfg.Webhook.RedeliverEvery,
+		ProbeEvery:       cfg.Webhook.ProbeEvery,
+		CircuitThreshold: cfg.Webhook.CircuitThreshold,
+	})
+	whDriver.SetConfigResolver(func(agentID string) (*webhook.Config, error) {
+		agent, err := regStore.Get(agentID)
+		if err != nil {
+			return nil, err
+		}
+		if agent.Webhook == nil {
+			return nil, fmt.Errorf("agent %s has no webhook configured", agentID)
+		}
+		return agent.Webhook, nil
+	})
+	whDriver.Start()
+	defer whDriver.Stop()
+	registryHandler.SetWebhookDriver(whDriver)
+	slog.Info("webhook delivery", "enabled", true, "timeout", cfg.Webhook.Timeout,
+		"retries", cfg.Webhook.MaxRetries, "signing", secret != nil)
 	r.HandleFunc("/agents", registryHandler.HandleRegister).Methods("POST")
 	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")

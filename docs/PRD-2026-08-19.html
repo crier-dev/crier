@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crier PRD — The ZeroMQ of Agent Messaging · 2026-08-19</title>
+<style>
+:root { --bg:#0d1117; --panel:#161b22; --border:#21262d; --fg:#c9d1d9; --hi:#e6edf3;
+        --blue:#7aa2f7; --green:#9ece6a; --purple:#bb9af7; --amber:#e0af68; --red:#f7768e; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+.wrap { max-width:980px; margin:0 auto; padding:24px 18px 100px; }
+h1 { color:var(--hi); font-size:28px; margin:8px 0 4px; }
+h2 { color:var(--hi); font-size:20px; margin:42px 0 10px; padding-top:16px; border-top:1px solid var(--border); }
+h3 { color:var(--hi); font-size:15.5px; margin:24px 0 8px; }
+p { margin:8px 0; }
+code { background:#1c2128; border:1px solid var(--border); border-radius:4px; padding:1px 5px;
+       font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#e6edf3; }
+pre { background:#0a0e13; border:1px solid var(--border); border-radius:8px; padding:12px 14px;
+      overflow-x:auto; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#c9d1d9; }
+.stats { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
+.stat { flex:1 1 150px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+.stat b { display:block; font-size:20px; color:var(--hi); }
+.stat span { font-size:12px; color:#8b949e; }
+.card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin:12px 0; }
+.ok { color:var(--green); font-weight:600; } .warn { color:var(--amber); font-weight:600; } .bad { color:var(--red); font-weight:600; }
+.tag { display:inline-block; background:#1c2128; border:1px solid var(--border); border-radius:20px;
+       padding:2px 10px; font-size:11.5px; margin:2px 4px 2px 0; color:#8b949e; }
+ul { margin:6px 0 6px 20px; padding:0; } li { margin:4px 0; }
+table { border-collapse:collapse; width:100%; margin:10px 0; font-size:13.5px; }
+th,td { border:1px solid var(--border); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:#1c2128; color:var(--hi); }
+blockquote { border-left:3px solid var(--blue); margin:10px 0; padding:4px 14px; color:#8b949e; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+.toc { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 18px; }
+.toc a { color:var(--blue); text-decoration:none; }
+.prio { display:inline-block; border-radius:4px; padding:1px 7px; font-size:11px; font-weight:700; margin-right:6px; }
+.p0 { background:#3d1d24; color:#f7768e; } .p1 { background:#2f2a1a; color:#e0af68; } .p2 { background:#1c2128; color:#8b949e; }
+</style></head><body><div class="wrap">
+
+<h1>Crier — The ZeroMQ of Agent Messaging</h1>
+<p class="mono" style="color:#8b949e">Product Requirements Document · v1.0 · 2026-08-19 · repo: github.com/crier-dev/crier · status: <span class="ok">ACTIVE — backlog cut, spec-first execution</span></p>
+
+<div class="stats">
+  <div class="stat"><b>9</b><span>backlog tickets cut (1 spec + 8 features)</span></div>
+  <div class="stat"><b>4</b><span>P0 core tickets (webhook driver, blocking reply, session mapping)</span></div>
+  <div class="stat"><b>13</b><span>MCP bridge tools today (5 new)</span></div>
+  <div class="stat"><b>8/8</b><span>Go test packages green · CI 5/5</span></div>
+</div>
+
+<div class="toc">
+<b>Contents</b>
+<ol>
+<li><a href="#thesis">Thesis — what we are building</a></li>
+<li><a href="#today">What exists today (verified state)</a></li>
+<li><a href="#problem">The gap this PRD closes</a></li>
+<li><a href="#features">New feature set — the backlog</a></li>
+<li><a href="#delivery">Delivery modes: blocking, non-blocking, batching</a></li>
+<li><a href="#webhook">Webhook protocol contract</a></li>
+<li><a href="#schema">Endpoint schema templates (bring-your-own schema)</a></li>
+<li><a href="#session">Session &amp; context mapping</a></li>
+<li><a href="#selfconfig">Self-configuration directives</a></li>
+<li><a href="#federation">Multi-relay federation</a></li>
+<li><a href="#arch">Architecture: today → target</a></li>
+<li><a href="#roadmap">Roadmap &amp; dependencies</a></li>
+<li><a href="#acceptance">Acceptance criteria &amp; KPIs</a></li>
+<li><a href="#risks">Risks &amp; open questions</a></li>
+</ol>
+</div>
+
+<h2 id="thesis">1 · Thesis — what we are building</h2>
+<p>Crier is the <b>messaging primitive for AI agents</b> — the ZeroMQ of agent messaging. One wire protocol, one
+delivery semantic, any backend: harnesses (Hermes, Claude Code, OpenCode, custom), gateways, scripts, and
+proxies connect through it and talk to each other as <b>agents</b>, not as clients.</p>
+<blockquote>“We are building the zeromq of agent messaging primitive.” — Bane, 2026-08-19</blockquote>
+<p>The product promise:</p>
+<ul>
+<li><b>Any agent, any backend, one bus.</b> Agents register with an identity, capabilities, and — new in this
+backlog — an HTTP endpoint schema. Crier handles delivery: durable inbox, live mesh, or <b>push via webhook</b>.</li>
+<li><b>Delivery semantics you choose per message:</b> blocking (request/reply, tool-call reply), non-blocking
+(fire-and-forget), or batched/queued (coalesced webhook POSTs).</li>
+<li><b>Context continuity.</b> Messages carry session context; deliveries land in the <i>same</i> context window
+the conversation lives in — no more orphans.</li>
+<li><b>Zero lock-in.</b> The integration surface is an HTTP endpoint schema <i>you</i> supply at install time.
+“We don't have to build into Hermes — we provide the http endpoint schema template for Hermes http gateway.”</li>
+<li><b>Composable networks.</b> One or more relays, linked; agents discover each other across relays and
+configure themselves on directive (“go have XYZ configure themselves for ABC”).</li>
+</ul>
+
+<h2 id="today">2 · What exists today (verified)</h2>
+<div class="card">
+<h3>Wire protocol — WebSocket mesh (<code>docs/mesh-protocol.md</code>)</h3>
+<ul>
+<li>Transport: WS upgrade <code>GET /mesh/connect/{agentID}</code>; NDJSON frames, one JSON object + trailing <code>\n</code>.</li>
+<li>Envelope: <code>type</code>, <code>version</code> (1), <code>message_id</code> (24-hex), <code>timestamp</code> (RFC3339Nano).</li>
+<li>Frame types: <b>REGISTER</b> (fire-and-forget), <b>KEEPALIVE</b> (30s), <b>REQUEST</b> (agent→agent RPC, relayed),
+<b>RESPONSE</b> (routed back via <code>request_id</code>), <b>ERROR</b> (<code>CONTROLLER_OFFLINE</code>, <code>INTERNAL</code>).</li>
+<li>Sharp edges documented: no crypto on mesh frames (registry is ed25519-signed), no reconnect, silent drops,
+route table 4096→flush, RESPONSE body is JSON-encoded string.</li>
+</ul>
+<h3>Registry + durable inboxes (HTTP)</h3>
+<ul>
+<li>Agents: <code>POST /agents</code> (ed25519 key, capabilities), <code>GET /agents</code>, <code>DELETE /agents/{id}</code>.</li>
+<li>Inboxes: <code>POST /agents/{id}/inbox</code> (deliver), <code>GET .../inbox</code> (retrieve, lease-based), <code>POST .../inbox/ack</code>.</li>
+<li>Signing contract <code>CR_REQUIRE_AGENT_SIG</code>: <code>X-Agent-ID/Ts/Sig</code> headers, ±30s window, 401/403 — now fully
+documented in openapi.yaml (CR-GAP-036, shipped tick 229).</li>
+<li>Memory and PostgreSQL backends; lease TTL default 3600s.</li>
+</ul>
+<h3>MCP bridge — harness-facing client (<code>cmd/crier-mcp</code>, 13 tools)</h3>
+<ul>
+<li>Registry + inbox tools (8, in-process) + <b>bridge tools (5, new 2026-08-18)</b>: <code>send_message</code>,
+<code>get_messages</code> (auto-ack), <code>ask_agent</code> (blocking inbox RPC), <code>mesh_peers</code>, <code>mesh_request</code> (live WS round-trip).</li>
+<li><code>RemoteStore</code> mode: bridge talks to a live server over HTTP (<code>CRIER_HTTP_URL</code>) — N harnesses share one inbox space.</li>
+</ul>
+<h3>Proven end-to-end (2026-08-18, live)</h3>
+<ul>
+<li><b>Two-LLM collaboration demo</b> (<code>examples/llm-mesh/</code>): two harnesses, private clues, one puzzle.
+Bridge lane: <b>14s, both ACCEPTED</b>. Raw protocol lane: <b>8s, both ACCEPTED</b>. Report:
+<code>examples/llm-mesh/REPORT-2026-08-18.html</code>.</li>
+<li><b>E2E battery</b> (tick 232): 14/14 probes + 20/20 + 20/20 stress — health, WS subscribe (BUG-001 regression),
+publish+delivery, mesh connect, signed registry round-trip, SECURITY-001 negatives.</li>
+<li><b>Findings that shaped the design:</b> blocking ask deadlocks conversational agents (interruptible polling
+required); silent frame drops hide client bugs (RFC3339 colon bug); agent→agent REQUEST relay verified live.</li>
+</ul>
+</div>
+
+<h2 id="problem">3 · The gap this PRD closes</h2>
+<div class="card">
+<table>
+<tr><th>Gap</th><th>Today</th><th>Target</th></tr>
+<tr><td><b>Push delivery</b></td><td>Delivery is pull (inbox lease/retrieve) or mesh-push to native clients only</td>
+<td>Server pushes to <b>any HTTP endpoint</b> (webhook) — proxies, gateways, scripts, Hermes API gateway</td></tr>
+<tr><td><b>Cross-backend agents</b></td><td>All participants must speak MCP or the wire protocol</td>
+<td>Agents of <b>different backends</b> coexist; schema templates adapt the envelope per backend</td></tr>
+<tr><td><b>Blocking semantics</b></td><td>Only via inbox poll or live mesh REQUEST (native clients)</td>
+<td>Blocking request/reply over <b>webhook response bodies</b> — the endpoint's reply becomes the tool-call reply</td></tr>
+<tr><td><b>Non-blocking / batching</b></td><td>None</td><td>Fire-and-forget; per-endpoint batch queue (N msgs / T sec → one POST)</td></tr>
+<tr><td><b>Session continuity</b></td><td>Envelope has no session/thread context</td>
+<td><code>session_id</code>/<code>thread_id</code> end-to-end; delivery routed into the <b>same context window</b></td></tr>
+<tr><td><b>Self-configuration</b></td><td>Manual registration only</td>
+<td><code>CONFIGURE</code> directives + capability advertisement — “go have XYZ configure themselves for ABC”</td></tr>
+<tr><td><b>Federation</b></td><td>Single relay</td><td>Relay↔relay links; cross-relay discovery + routing</td></tr>
+</table>
+</div>
+
+<h2 id="features">4 · New feature set — the backlog</h2>
+<p>Cut 2026-08-19 on the foreman board (events 271–279, commit <code>4e072e5</code>). Spec-first:
+<span class="tag">CR-SPEC-001</span> gates the implementation tickets.</p>
+<div class="card">
+<table>
+<tr><th>ID</th><th>Prio</th><th>Feature</th><th>Depends on</th><th>Complexity</th></tr>
+<tr><td class="mono">CR-SPEC-001</td><td><span class="prio p0">P0</span></td><td>Webhook/bridge delivery architecture spec (<code>specs/WEBHOOK-DELIVERY.md</code>)</td><td>—</td><td>6</td></tr>
+<tr><td class="mono">CR-FEAT-001</td><td><span class="prio p0">P0</span></td><td>Webhook delivery driver: per-agent HTTP endpoint, envelope POST, retry/backoff, durable offline queue</td><td>CR-SPEC-001</td><td>7</td></tr>
+<tr><td class="mono">CR-FEAT-002</td><td><span class="prio p0">P0</span></td><td>Blocking webhook reply correlation (2xx body → RESPONSE to sender; timeout → ERROR)</td><td>CR-FEAT-001</td><td>5</td></tr>
+<tr><td class="mono">CR-FEAT-004</td><td><span class="prio p0">P0</span></td><td>Session/context mapping (session_id/thread_id, per-session ordering, same-window delivery)</td><td>CR-FEAT-001</td><td>5</td></tr>
+<tr><td class="mono">CR-FEAT-003</td><td><span class="prio p1">P1</span></td><td>Endpoint schema templates (hermes-http-gateway, openai-compatible, generic-custom)</td><td>CR-FEAT-001/002</td><td>6</td></tr>
+<tr><td class="mono">CR-FEAT-005</td><td><span class="prio p1">P1</span></td><td>Non-blocking + batching delivery (fire-and-forget, per-endpoint batch queue)</td><td>CR-FEAT-001</td><td>4</td></tr>
+<tr><td class="mono">CR-FEAT-007</td><td><span class="prio p1">P1</span></td><td>Self-configuration directive protocol (CONFIGURE + capability advertisement)</td><td>CR-FEAT-001/003</td><td>5</td></tr>
+<tr><td class="mono">CR-FEAT-008</td><td><span class="prio p1">P1</span></td><td>Hermes HTTP gateway template + cross-backend end-to-end demo</td><td>CR-FEAT-003/004</td><td>5</td></tr>
+<tr><td class="mono">CR-FEAT-006</td><td><span class="prio p2">P2</span></td><td>Multi-relay federation (links, cross-relay discovery + routing)</td><td>CR-FEAT-001</td><td>8</td></tr>
+</table>
+</div>
+
+<h2 id="delivery">5 · Delivery modes</h2>
+<div class="card">
+<h3>Blocking (request/reply)</h3>
+<p>Sender issues REQUEST with <code>message_id</code> and expects a correlated RESPONSE. Two paths:</p>
+<ul>
+<li><b>Inbox path (exists):</b> <code>ask_agent</code> bridge tool — message + correlation id into target's inbox;
+reply merged back via <code>crier_reply_to</code>; the harness polls (interruptible — never block exclusively).</li>
+<li><b>Webhook path (new):</b> server POSTs the envelope to the target's webhook and <b>waits</b>. A 2xx body is
+parsed per the endpoint's schema template and returned as the RESPONSE (the “tool call reply”). Timeout /
+non-2xx → <code>ERROR</code> frame (<code>WEBHOOK_FAILED</code>, with status + retry count).</li>
+</ul>
+<h3>Non-blocking (fire-and-forget)</h3>
+<p>Deliver, don't wait. Envelope flag (<code>delivery_mode: "async"</code>) or per-agent default. Sender gets a
+202 accept; delivery is the server's job (queue + retry).</p>
+<h3>Batching / queueing</h3>
+<p>Per-endpoint batch queue: <code>N</code> messages or <code>T</code> seconds (configurable per agent), then ONE webhook
+POST carrying a batch envelope. Endpoint down → durable queue (persisted, redelivery with backoff,
+exponential, bounded). Same queue backs blocking-mode retries.</p>
+<table>
+<tr><th>Mode</th><th>Semantics</th><th>Sender sees</th><th>Failure handling</th></tr>
+<tr><td>blocking (inbox)</td><td>correlated reply via inbox</td><td>reply payload</td><td>poll timeout → retry/interrupt</td></tr>
+<tr><td>blocking (webhook)</td><td>correlated reply via POST response</td><td>reply payload</td><td>retry ×N → ERROR frame</td></tr>
+<tr><td>async</td><td>fire-and-forget</td><td>202 accept</td><td>queue + retry + backoff</td></tr>
+<tr><td>batch</td><td>coalesced delivery</td><td>202 accept</td><td>queue flush retry</td></tr>
+</table>
+</div>
+
+<h2 id="webhook">6 · Webhook protocol contract</h2>
+<div class="card">
+<h3>Envelope (what gets POSTed)</h3>
+<pre>POST {endpoint} HTTP/1.1
+Content-Type: application/json
+X-Crier-Event: message | reply | configure | batch
+X-Crier-Agent: {target_agent_id}
+X-Crier-Session: {session_id}          # when present (CR-FEAT-004)
+X-Crier-Signature: {hmac/ed25519}      # optional, CR_WEBHOOK_SECRET
+
+{
+  "crier": {"version": 1, "message_id": "...", "request_id": "...", "session_id": "...",
+            "delivery_mode": "blocking|async|batch", "sender": {"agent_id": "..."}},
+  "payload": { ... }                    # sender-supplied body
+}</pre>
+<h3>Response contract</h3>
+<ul>
+<li><b>2xx</b> = delivered. Blocking mode: parse body per schema template → becomes the RESPONSE.</li>
+<li><b>4xx</b> = permanent failure (bad schema / auth) → ERROR frame to sender, no retry (except 408/429 → retry).</li>
+<li><b>5xx/timeout</b> = retry with exponential backoff (default: 1s, 2s, 4s, 8s, 16s; <code>CR_WEBHOOK_MAX_RETRIES</code>, default 5) → then ERROR.</li>
+<li>Endpoint unreachable → durable queue, redeliver on interval / on recovery probe.</li>
+</ul>
+<h3>Agent registration extension</h3>
+<pre>POST /agents
+{ "id": "...", "public_key": "...", "capabilities": {...},
+  "webhook": { "url": "https://...", "auth": {"type": "bearer|header", "value_ref": "env:..."},
+               "schema_template": "hermes-http-gateway" | "openai-compatible" | "custom",
+               "custom_schema": {...},                 # bring-your-own schema
+               "delivery_mode": "blocking|async|batch",
+               "batch": {"max_messages": 10, "flush_interval_s": 5},
+               "retries": 5, "timeout_ms": 30000 } }</pre>
+</div>
+
+<h2 id="schema">7 · Endpoint schema templates — bring-your-own schema</h2>
+<div class="card">
+<p>“We don't have to build in Hermes — when we install we provide the http endpoint schema template for Hermes
+http gateway for different actions. You supply the schema, aka your agent does.”</p>
+<p>A template is <b>data</b>, supplied at registration, that maps the Crier envelope ↔ a backend's HTTP API:</p>
+<ul>
+<li><b>request_shape</b> — how envelope fields map into the backend's body/headers/query (JSONPath or fixed mapping).</li>
+<li><b>action_variants</b> — different actions the endpoint supports (message delivery, tool-call reply, configure, ack).</li>
+<li><b>response_map</b> — where the reply text/structured data lives in the backend's response (JSONPath; or “raw body”).</li>
+<li><b>auth</b> — how to authenticate to this backend (bearer from env, header from env, none).</li>
+</ul>
+<h3>v1 templates shipped with CR-FEAT-003</h3>
+<table>
+<tr><th>Template</th><th>Target</th><th>Shape</th></tr>
+<tr><td class="mono">hermes-http-gateway</td><td>Hermes API gateway (<code>api_server</code>)</td>
+<td>POST /v1/chat/completions-style: envelope → messages[], session_id → thread/session routing; reply from choices[0].message.content</td></tr>
+<tr><td class="mono">openai-compatible</td><td>Any OpenAI-compatible gateway</td>
+<td>messages[] + model + stream:false; reply from first choice</td></tr>
+<tr><td class="mono">generic-custom</td><td>Any script/proxy</td>
+<td>Pass-through envelope JSON; reply = raw body; full custom_schema override allowed</td></tr>
+</table>
+</div>
+
+<h2 id="session">8 · Session &amp; context mapping</h2>
+<div class="card">
+<p>Requirement: “ability for a script or an agent to map the context window for messages depending on the
+message so it gets to the same session correctly.”</p>
+<ul>
+<li>Envelope carries <code>session_id</code> + <code>thread_id</code> + optional <code>source_session_link</code> (how the sender
+refers to this conversation).</li>
+<li>The bridge/schema template maps <code>session_id</code> onto the backend's session/thread/context identifier —
+so follow-up messages land in the <b>same context window</b>.</li>
+<li>Per-session ordered delivery to webhook targets (FIFO within a session; sessions interleave freely).</li>
+<li>Round-trip: A→B→A preserves one session id end-to-end; the bridge can attach the originating session to
+replies so the requester sees the reply in its own conversation.</li>
+<li>Scripts can remap: a receiver-side script receives <code>session_id</code>, looks up its own mapping, and sets a
+different <code>session_id</code> on the reply (the “script or agent maps the context window” requirement).</li>
+</ul>
+</div>
+
+<h2 id="selfconfig">9 · Self-configuration directives</h2>
+<div class="card">
+<p>“Go have XYZ configure themselves for ABC.”</p>
+<ul>
+<li>New message kind <code>configure</code> (X-Crier-Event: configure) with a <b>target capability</b> + <b>schema</b>
+(optional). Delivered like any message — inbox, mesh, or webhook.</li>
+<li>Agents advertise capabilities at registration (<code>capabilities</code>), and can <b>update</b> them (new
+<code>PATCH /agents/{id}</code> or re-register semantics).</li>
+<li>On receipt, the agent configures itself (register/update webhook, declare capability, load a schema
+template) and acks the directive.</li>
+<li>Discovery: <code>GET /agents?capability=abc</code> — “who can do ABC” — then dispatch the directive.</li>
+<li>Bridge tool: <code>configure_agent</code> (send directive + wait for ack).</li>
+</ul>
+</div>
+
+<h2 id="federation">10 · Multi-relay federation</h2>
+<div class="card">
+<p>“Multiple agents of different backends within my network with one or more relays.”</p>
+<ul>
+<li>Relay links: <code>CR_FED_LINKS=relay-b=https://relay-b:18767,relay-c=...</code> — a relay connects out to its
+links (authenticated, e.g. shared secret), not a full mesh.</li>
+<li>Cross-relay discovery: linked relays exchange agent tables (bounded, cached, TTL) — <code>GET /agents</code>
+shows remote agents flagged <code>via</code>.</li>
+<li>Cross-relay delivery: message to a remote agent routes through the link; the remote relay delivers via its
+own mechanism (inbox/webhook/mesh) and routes the reply back over the same link. Correlation ids must survive
+hops (the <code>request_id</code> contract is hop-invariant).</li>
+<li>Failure: link down → durable queue at the source relay; ERROR on TTL expiry.</li>
+<li>Security: relays are trust boundaries — link auth + optional envelope signing across relays.</li>
+</ul>
+</div>
+
+<h2 id="arch">11 · Architecture: today → target</h2>
+<h3>Today (verified)</h3>
+<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg" style="background:#0a0e13;border:1px solid #21262d;border-radius:10px;width:100%;height:auto">
+  <style>.box{fill:#161b22;stroke:#30363d;rx:10}.lbl{fill:#e6edf3;font:600 13px monospace}.sub{fill:#8b949e;font:11px monospace}.line{stroke:#7aa2f7;stroke-width:1.5;fill:none}.line2{stroke:#3fb950;stroke-width:1.5;fill:none;stroke-dasharray:5 4}.hub{fill:#0d1117;stroke:#7aa2f7}</style>
+  <rect class="box" x="30" y="40" width="150" height="70"/><text class="lbl" x="105" y="68" text-anchor="middle">harness A</text><text class="sub" x="105" y="86" text-anchor="middle">MCP tools only</text>
+  <rect class="box" x="30" y="200" width="150" height="70"/><text class="lbl" x="105" y="228" text-anchor="middle">harness B</text><text class="sub" x="105" y="246" text-anchor="middle">MCP tools only</text>
+  <rect class="box" x="250" y="40" width="170" height="70"/><text class="lbl" x="335" y="68" text-anchor="middle">crier-mcp (A)</text><text class="sub" x="335" y="86" text-anchor="middle">bridge: socket·lease·ack</text>
+  <rect class="box" x="250" y="200" width="170" height="70"/><text class="lbl" x="335" y="248" text-anchor="middle">crier-mcp (B)</text><text class="sub" x="335" y="266" text-anchor="middle">bridge: socket·lease·ack</text>
+  <rect class="box" x="560" y="85" width="240" height="150"/>
+  <rect class="hub" x="585" y="105" width="190" height="40" rx="8"/><text class="lbl" x="680" y="123" text-anchor="middle" fill="#7aa2f7">crier server</text><text class="sub" x="680" y="139" text-anchor="middle">HTTP + mesh WS</text>
+  <rect class="hub" x="585" y="155" width="190" height="34" rx="8"/><text class="sub" x="680" y="176" text-anchor="middle" fill="#8b949e">inbox A · inbox B</text>
+  <rect class="hub" x="585" y="197" width="190" height="34" rx="8"/><text class="sub" x="680" y="218" text-anchor="middle" fill="#8b949e">mesh REQUEST/RESPONSE</text>
+  <path class="line" d="M180 75 L250 75"/><path class="line" d="M180 235 L250 235"/>
+  <path class="line" d="M420 75 L560 110"/><path class="line" d="M420 235 L560 220"/>
+  <text class="sub" x="215" y="30">MCP stdio</text><text class="sub" x="460" y="60">inbox HTTP</text><text class="sub" x="460" y="285" fill="#3fb950">mesh WS</text>
+</svg>
+<h3>Target</h3>
+<svg viewBox="0 0 860 380" xmlns="http://www.w3.org/2000/svg" style="background:#0a0e13;border:1px solid #21262d;border-radius:10px;width:100%;height:auto">
+  <style>.box{fill:#161b22;stroke:#30363d;rx:10}.lbl{fill:#e6edf3;font:600 13px monospace}.sub{fill:#8b949e;font:11px monospace}.line{stroke:#7aa2f7;stroke-width:1.5;fill:none}.line2{stroke:#3fb950;stroke-width:1.5;fill:none;stroke-dasharray:5 4}.line3{stroke:#e0af68;stroke-width:1.5;fill:none}.hub{fill:#0d1117;stroke:#7aa2f7}</style>
+  <rect class="box" x="20" y="40" width="140" height="60"/><text class="lbl" x="90" y="68" text-anchor="middle">harness A</text><text class="sub" x="90" y="84" text-anchor="middle">Hermes/OpenCode</text>
+  <rect class="box" x="20" y="200" width="140" height="60"/><text class="lbl" x="90" y="228" text-anchor="middle">harness B</text><text class="sub" x="90" y="244" text-anchor="middle">any MCP client</text>
+  <rect class="box" x="20" y="120" width="140" height="50"/><text class="lbl" x="90" y="150" text-anchor="middle">controller</text>
+  <rect class="box" x="210" y="40" width="150" height="60"/><text class="lbl" x="285" y="68" text-anchor="middle">crier-mcp</text><text class="sub" x="285" y="84" text-anchor="middle">13 tools</text>
+  <rect class="box" x="210" y="200" width="150" height="60"/><text class="lbl" x="285" y="228" text-anchor="middle">crier-mcp</text><text class="sub" x="285" y="244" text-anchor="middle">13 tools</text>
+  <rect class="box" x="500" y="90" width="180" height="120"/>
+  <rect class="hub" x="520" y="105" width="140" height="36" rx="8"/><text class="lbl" x="590" y="122" text-anchor="middle" fill="#7aa2f7">relay 1</text><text class="sub" x="590" y="137" text-anchor="middle">webhook driver · queue</text>
+  <rect class="hub" x="520" y="150" width="140" height="48" rx="8"/><text class="sub" x="590" y="170" text-anchor="middle" fill="#8b949e">inbox · mesh ·<tspan x="590" dy="14" fill="#e0af68">webhook POST</tspan></text>
+  <rect class="box" x="730" y="60" width="120" height="50"/><text class="lbl" x="790" y="82" text-anchor="middle" fill="#e0af68">endpoint B</text><text class="sub" x="790" y="97" text-anchor="middle">webhook (schema)</text>
+  <rect class="box" x="730" y="140" width="120" height="50"/><text class="lbl" x="790" y="162" text-anchor="middle" fill="#e0af68">Hermes gw</text><text class="sub" x="790" y="177" text-anchor="middle">schema template</text>
+  <rect class="box" x="40" y="290" width="200" height="60"/><text class="lbl" x="140" y="316" text-anchor="middle" fill="#3fb950">relay 2 (fed)</text><text class="sub" x="140" y="332" text-anchor="middle">agents visible cross-relay</text>
+  <path class="line" d="M160 70 L210 70"/><path class="line" d="M160 230 L210 230"/><path class="line" d="M160 145 L210 145"/>
+  <path class="line" d="M360 70 L500 105"/><path class="line" d="M360 230 L500 175"/>
+  <path class="line3" d="M680 130 L730 95"/><path class="line3" d="M680 160 L730 160"/>
+  <path class="line2" d="M500 170 L240 310"/>
+  <text class="sub" x="70" y="30">MCP</text><text class="sub" x="410" y="55">inbox HTTP</text><text class="sub" x="410" y="260" fill="#3fb950">mesh WS</text>
+  <text class="sub" x="690" y="90" fill="#e0af68">webhook push</text><text class="sub" x="330" y="330" fill="#3fb950">relay link</text>
+</svg>
+</div>
+
+<h2 id="roadmap">12 · Roadmap &amp; dependencies</h2>
+<div class="card">
+<pre>CR-SPEC-001 (spec)
+   └─► CR-FEAT-001 (webhook driver)
+          ├─► CR-FEAT-002 (blocking reply)      ──► CR-FEAT-003 (schema templates)
+          ├─► CR-FEAT-004 (session mapping)          └─► CR-FEAT-007 (self-config)
+          ├─► CR-FEAT-005 (batching)                  └─► CR-FEAT-008 (Hermes demo)
+          └─► CR-FEAT-006 (federation, P2)</pre>
+<table>
+<tr><th>Phase</th><th>Tickets</th><th>Exit criteria</th></tr>
+<tr><td><b>Phase 0</b></td><td>CR-SPEC-001</td><td><code>specs/WEBHOOK-DELIVERY.md</code> merged; openapi additions drafted; ticket reviewed by foreman judge</td></tr>
+<tr><td><b>Phase 1</b></td><td>CR-FEAT-001</td><td>Webhook round-trip E2E (curl endpoint receives exact envelope); retry on 500; queue survives restart</td></tr>
+<tr><td><b>Phase 2</b></td><td>CR-FEAT-002, CR-FEAT-004</td><td>Blocking webhook reply → sender's REQUEST resolves; sessions ordered end-to-end</td></tr>
+<tr><td><b>Phase 3</b></td><td>CR-FEAT-003, CR-FEAT-005</td><td>Two templates drive one driver; batch coalescing observed; templates are data-only</td></tr>
+<tr><td><b>Phase 4</b></td><td>CR-FEAT-007, CR-FEAT-008</td><td>“configure for X” demo; cross-backend demo with Hermes gateway template</td></tr>
+<tr><td><b>Phase 5</b></td><td>CR-FEAT-006</td><td>Two-relay federation demo (cross-relay delivery + reply)</td></tr>
+</table>
+</div>
+
+<h2 id="acceptance">13 · Acceptance criteria &amp; KPIs</h2>
+<div class="card">
+<h3>Product KPIs</h3>
+<ul>
+<li><b>Time-to-integrate a new backend:</b> ≤ 30 min with a shipped template; ≤ 2 h with a custom schema (target).</li>
+<li><b>Delivery reliability:</b> webhook 2xx rate ≥ 99.5% on healthy endpoints (retries excluded); zero message loss on server restart (durable queue).</li>
+<li><b>Latency:</b> blocking webhook reply p50 ≤ 2× endpoint latency + 50ms overhead; batch flush latency ≤ flush interval + 100ms.</li>
+<li><b>Context continuity:</b> 100% of session-tagged messages delivered with the same session_id end-to-end (round-trip test).</li>
+<li><b>Federation:</b> cross-relay delivery p95 ≤ 2× single-relay p95 + 200ms.</li>
+</ul>
+<h3>Technical gates (every implementation ticket)</h3>
+<ul>
+<li><code>go build ./...</code> + <code>go vet ./...</code> + <code>go test ./...</code> (8/8 packages) pass; new code ≥ 70% coverage.</li>
+<li>gitreins guard PASS 4/4 (secrets/build/lint/tests); govulncheck clean.</li>
+<li>openapi.yaml stays the contract source of truth; spec additions validated (YAML parse + $ref resolution).</li>
+<li>E2E battery grows: webhook round-trip, blocking reply, batch coalescing, session continuity, federation probes.</li>
+<li>Every feature has a live-verified demo script under <code>examples/</code> (evidence-first, per Bane).</li>
+</ul>
+</div>
+
+<h2 id="risks">14 · Risks &amp; open questions</h2>
+<div class="card">
+<table>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+<tr><td>Webhook replay / spoofing on open endpoints</td><td><code>X-Crier-Signature</code> (HMAC with per-agent secret by default; ed25519 option); endpoint auth templates; sign all outbound webhooks</td></tr>
+<tr><td>Queue growth when endpoints stay down</td><td>Bounded queues (size + TTL per agent), dead-letter with audit event; poison-endpoint circuit breaker</td></tr>
+<tr><td>Silent drop behavior hides client bugs (proven 2026-08-18)</td><td>Webhook driver MUST log parse failures; add server-side log-on-drop for mesh frames (protocol improvement ticket)</td></tr>
+<tr><td>Session mapping is backend-specific</td><td>Schema templates own the mapping; spec defines the contract, not every backend's quirks</td></tr>
+<tr><td>Federation trust boundaries</td><td>Link auth (shared secret v1), per-link allowlists, envelope signing across relays (v2)</td></tr>
+<tr><td>Blocking webhook ties server resources</td><td>Per-agent concurrency caps; timeout budget from the sender's REQUEST <code>timeout_ms</code>; no unbounded goroutines</td></tr>
+</table>
+<h3>Open questions for the owner</h3>
+<ul>
+<li>Auth model for outbound webhooks: HMAC shared secret (default) vs per-agent ed25519 signing — both?</li>
+<li>Should the durable webhook queue reuse the Postgres backend or ship a lightweight embedded store (bbolt/SQLite)?</li>
+<li>Batch envelope shape: flat array of envelopes vs nested batch object — spec decision in CR-SPEC-001.</li>
+<li>Federation v1: link auth shared-secret sufficient, or OAuth-style token exchange?</li>
+<li>Does “tool call reply” need the reply to map into the sender's ACTIVE tool call (Hermes-specific) or just a correlated message in the same session (generic)? — CR-FEAT-008 demo decides.</li>
+</ul>
+</div>
+
+<p style="color:#484f58;font-size:12px;margin-top:50px">Crier PRD v1.0 — 2026-08-19. Generated from the live board (commit 4e072e5, events 271–279), verified protocol facts, and the 2026-08-18 LLM-mesh demo evidence. “BANKAI” execution: spec + implementation in flight.</p>
+</div></body></html>
