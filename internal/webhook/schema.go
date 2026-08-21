@@ -170,7 +170,12 @@ func (t Template) ExtractReply(body []byte) ([]byte, error) {
 }
 
 // buildContext assembles the template expansion context from a config+envelope.
-func buildContext(cfg *Config, env *Envelope) TemplateContext {
+// The context is JSON round-tripped (marshal -> unmarshal into map[string]any)
+// so struct-typed values (EnvelopeMeta under "crier", TemplateAgent under
+// "agent") become plain map nodes keyed by their json tags — resolvePath can
+// then walk every level uniformly. CR-GAP-037: without this, {{crier.session_id}}
+// descended into a struct and rendered empty.
+func buildContext(cfg *Config, env *Envelope) map[string]any {
 	ctx := TemplateContext{
 		Crier: env.Crier,
 		Agent: TemplateAgent{ID: env.Crier.Sender, DeliveryMode: env.Crier.DeliveryMode},
@@ -180,13 +185,23 @@ func buildContext(cfg *Config, env *Envelope) TemplateContext {
 	if ctx.Payload == nil {
 		ctx.Payload = map[string]any{}
 	}
-	return ctx
+	b, err := json.Marshal(ctx)
+	if err != nil {
+		// Cannot happen: every field is JSON-serializable. Fall back to an
+		// empty context rather than failing the whole template.
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return map[string]any{}
+	}
+	return m
 }
 
 // expandTemplate substitutes {{path[|default:...]}} placeholders in a JSON
 // template. Paths resolve against the context; missing values become the
 // default or empty string.
-func expandTemplate(raw json.RawMessage, ctx TemplateContext) ([]byte, error) {
+func expandTemplate(raw json.RawMessage, ctx map[string]any) ([]byte, error) {
 	s := string(raw)
 	var err error
 	s = placeholderRe.ReplaceAllStringFunc(s, func(ph string) string {
@@ -224,17 +239,13 @@ func expandTemplate(raw json.RawMessage, ctx TemplateContext) ([]byte, error) {
 }
 
 // resolvePath walks a dotted path into the context. Returns ok=false when
-// any segment is missing.
-func resolvePath(ctx TemplateContext, path string) (any, bool) {
+// any segment is missing. The context is a JSON-derived map[string]any (see
+// buildContext), so every node is either a map, a slice, or a scalar.
+func resolvePath(ctx map[string]any, path string) (any, bool) {
 	if path == "" {
 		return nil, false
 	}
-	cur := any(map[string]any{
-		"crier":   ctx.Crier,
-		"payload": ctx.Payload,
-		"agent":   ctx.Agent,
-		"auth":    ctx.Auth,
-	})
+	cur := any(ctx)
 	for _, seg := range strings.Split(path, ".") {
 		switch node := cur.(type) {
 		case map[string]any:

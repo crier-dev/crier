@@ -60,6 +60,74 @@ func TestTemplate_BuildBody_Expansion(t *testing.T) {
 	}
 }
 
+func TestTemplate_BuildBody_CrierSessionThreadExpansion(t *testing.T) {
+	// CR-GAP-037: {{crier.session_id}} / {{crier.thread_id}} rendered EMPTY
+	// because resolvePath only walked map[string]any / []any nodes while
+	// ctx.Crier is the struct-typed EnvelopeMeta. The envelope's session,
+	// thread and message ids must reach the rendered body.
+	tpl := Template{
+		Name:        "test-crier",
+		ResponseMap: "raw",
+		RequestShape: RequestShape{
+			Method: "POST",
+			Body: json.RawMessage(`{
+				"session_id": "{{crier.session_id}}",
+				"thread_id": "{{crier.thread_id}}",
+				"message_id": "{{crier.message_id}}",
+				"content": "{{payload.text}}",
+				"agent_id": "{{agent.id}}"
+			}`),
+		},
+	}
+	env := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-1", SessionID: "sess-x", ThreadID: "thread-y", Sender: "agent-a"},
+		Payload: json.RawMessage(`{"text":"hello"}`),
+	}
+	body, err := tpl.BuildBody(&Config{URL: "http://x"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("body not json: %v", err)
+	}
+	if v["session_id"] != "sess-x" {
+		t.Fatalf("session_id = %v (want sess-x)", v["session_id"])
+	}
+	if v["thread_id"] != "thread-y" {
+		t.Fatalf("thread_id = %v (want thread-y)", v["thread_id"])
+	}
+	if v["message_id"] != "m-1" {
+		t.Fatalf("message_id = %v (want m-1)", v["message_id"])
+	}
+	// Regression: existing {{payload.*}} / {{agent.*}} paths still expand.
+	if v["content"] != "hello" {
+		t.Fatalf("content = %v (want hello)", v["content"])
+	}
+	if v["agent_id"] != "agent-a" {
+		t.Fatalf("agent_id = %v (want agent-a)", v["agent_id"])
+	}
+	// Empty session/thread render as empty strings (omitempty drops the key).
+	emptyEnv := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-2", Sender: "agent-a"},
+		Payload: json.RawMessage(`{}`),
+	}
+	emptyBody, err := tpl.BuildBody(&Config{URL: "http://x"}, emptyEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v2 map[string]any
+	if err := json.Unmarshal(emptyBody, &v2); err != nil {
+		t.Fatalf("empty body not json: %v", err)
+	}
+	if s, ok := v2["session_id"].(string); !ok || s != "" {
+		t.Fatalf("empty session_id = %v (want \"\")", v2["session_id"])
+	}
+	if s, ok := v2["thread_id"].(string); !ok || s != "" {
+		t.Fatalf("empty thread_id = %v (want \"\")", v2["thread_id"])
+	}
+}
+
 func TestTemplate_BuildBody_Passthrough(t *testing.T) {
 	env := &Envelope{Crier: EnvelopeMeta{Version: 1, MessageID: "m1", Kind: "message"}, Payload: json.RawMessage(`{"a":1}`)}
 	body, err := genericCustom.BuildBody(&Config{URL: "http://x"}, env)
