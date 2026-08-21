@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/totalwindupflightsystems/crier/internal/federation"
 	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
@@ -42,6 +43,9 @@ type Handler struct {
 	// webhooks pushes deliveries to agent webhook endpoints when configured
 	// (CR-FEAT-001). Nil disables webhook delivery.
 	webhooks *webhook.Driver
+	// fed forwards deliveries for agents unknown on this relay to linked
+	// relays (CR-FEAT-006). Nil disables federation.
+	fed *federation.Client
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -54,6 +58,13 @@ func NewHandler(store Store) *Handler {
 // SetWebhookDriver enables push delivery to agent webhook endpoints.
 func (h *Handler) SetWebhookDriver(d *webhook.Driver) {
 	h.webhooks = d
+}
+
+// SetFederationClient enables relay-to-relay delivery routing (CR-FEAT-006):
+// deliveries for agents unknown on this relay are forwarded to the client's
+// linked relays. Nil disables federation (local 404 behavior unchanged).
+func (h *Handler) SetFederationClient(c *federation.Client) {
+	h.fed = c
 }
 
 // SetRequireAgentSig toggles per-agent ed25519 signature enforcement.

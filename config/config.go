@@ -33,6 +33,20 @@ type Config struct {
 	RequireAgentSig bool
 	// Webhook holds push-delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	Webhook WebhookConfig
+	// Federation holds relay-to-relay link configuration (CR-FEAT-006).
+	Federation FederationConfig
+}
+
+// FederationConfig holds relay-to-relay federation settings (CR-FEAT-006).
+type FederationConfig struct {
+	// Links are the base URLs of linked relays (CR_FED_LINKS, comma-
+	// separated). Deliveries to agents unknown on this relay are forwarded
+	// to each link in order; GET /fed/peers lists the links with their
+	// agents.
+	Links []string
+	// Name is the optional display name of this relay in the /fed/peers
+	// listing (CR_FED_NAME). Defaults to localhost:<port>.
+	Name string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -163,6 +177,14 @@ func Load() (Config, error) {
 
 	// WebSocket allowed origins (comma-separated, "*" = allow all)
 	cfg.WSAllowedOrigins = os.Getenv("CR_WS_ALLOWED_ORIGINS")
+
+	// Federation (CR-FEAT-006): relay-to-relay links, comma-separated base
+	// URLs. Empty = federation disabled (deliveries to unknown agents 404
+	// as before).
+	if v := os.Getenv("CR_FED_LINKS"); v != "" {
+		cfg.Federation.Links = splitTrim(v)
+	}
+	cfg.Federation.Name = os.Getenv("CR_FED_NAME")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

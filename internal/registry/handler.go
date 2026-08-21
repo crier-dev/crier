@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/totalwindupflightsystems/crier/internal/federation"
 	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
@@ -279,6 +280,33 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	entry := &InboxEntry{
 		ID:      hex.EncodeToString(msgID),
 		Payload: req.Payload,
+	}
+
+	// Federation fallback (CR-FEAT-006): the target agent is not registered
+	// on this relay. When relay links are configured, forward the ORIGINAL
+	// deliver request to each linked relay in order; the first non-404
+	// answer wins and is relayed back verbatim — a blocking webhook reply
+	// from the remote relay (which itself rides inside the remote HTTP
+	// response) therefore returns to the original sender untouched. Requests
+	// that already arrived over a link (hop marker) never forward again.
+	if h.fed != nil && r.Header.Get(federation.HopHeader) == "" {
+		if _, err := h.store.Get(id); errors.Is(err, ErrAgentNotFound) {
+			reqBytes, merr := json.Marshal(req)
+			if merr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "federation: marshal deliver request"})
+				return
+			}
+			if status, respBody, ferr := h.fed.ForwardToAny(r.Context(), id, reqBytes); ferr == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				w.Write(respBody)
+				return
+			}
+			// No linked relay knows the agent (all 404 / unreachable) — the
+			// caller sees the same 404 a single relay would answer.
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
+			return
+		}
 	}
 
 	if h.webhooks != nil {

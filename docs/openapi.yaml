@@ -129,6 +129,54 @@ paths:
         "400":
           description: agentID is required
 
+  # ── Relay Federation (CR-FEAT-006) ──
+  /fed/peers:
+    get:
+      operationId: fedListPeers
+      summary: List federation peers (local relay first, then linked relays with their agents)
+      description: >
+        The local relay is listed first (name from CR_FED_NAME, agents from
+        the local registry). Each linked relay (CR_FED_LINKS) follows with
+        its agents fetched live from its GET /agents endpoint. A link that
+        fails to answer still appears, with an empty agents list.
+      responses:
+        "200":
+          description: Federation peers with their agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [peers]
+                properties:
+                  peers:
+                    type: array
+                    description: Local relay first, then each linked relay
+                    items:
+                      type: object
+                      required: [name, url, agents]
+                      properties:
+                        name:
+                          type: string
+                          description: Relay display name (CR_FED_NAME or host:port)
+                        url:
+                          type: string
+                          description: Relay base URL
+                        agents:
+                          type: array
+                          description: Agents registered on the relay (id + capabilities)
+                          items:
+                            type: object
+                            required: [id]
+                            properties:
+                              id:
+                                type: string
+                                description: Agent identifier
+                              capabilities:
+                                type: array
+                                description: Advertised agent capabilities
+                                items:
+                                  type: string
+
   # ── Agent Registry ──
   /agents:
     get:

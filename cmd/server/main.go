@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/totalwindupflightsystems/crier/internal/federation"
 	"github.com/totalwindupflightsystems/crier/internal/mesh"
 	"github.com/totalwindupflightsystems/crier/internal/middleware"
 	"github.com/totalwindupflightsystems/crier/internal/registry"
@@ -130,6 +131,31 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+
+	// Relay-to-relay federation (CR-FEAT-006). When CR_FED_LINKS is set,
+	// deliveries to agents unknown on this relay are forwarded to the linked
+	// relays in order (first non-404 answer wins, relayed back verbatim),
+	// and GET /fed/peers lists the local relay plus each linked relay with
+	// its agents. The endpoint is always registered: with no links it
+	// simply lists this relay alone.
+	var fedClient *federation.Client
+	if len(cfg.Federation.Links) > 0 {
+		fedClient = federation.NewClient(cfg.Federation.Links, 0)
+		registryHandler.SetFederationClient(fedClient)
+		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg))
+	}
+	localPeer := func() federation.Peer {
+		agents := make([]federation.RemoteAgent, 0)
+		for _, a := range regStore.List() {
+			agents = append(agents, federation.RemoteAgent{ID: a.ID, Capabilities: a.Capabilities})
+		}
+		return federation.Peer{
+			Name:   federationName(cfg),
+			URL:    fmt.Sprintf("http://localhost:%d", cfg.Port),
+			Agents: agents,
+		}
+	}
+	r.HandleFunc("/fed/peers", federation.HandlePeers(fedClient, localPeer)).Methods("GET")
 
 	// Webhook push delivery (CR-FEAT-001) — active only for agents that
 	// register a webhook endpoint.
@@ -254,6 +280,15 @@ func parseArgs(args []string, out io.Writer) (help, showVersion bool, port int, 
 	return false, *versionFlag, *portFlag, *dbURLFlag, nil
 }
 
+// federationName returns this relay's display name for the /fed/peers
+// listing: CR_FED_NAME when set, else localhost:<port>.
+func federationName(cfg config.Config) string {
+	if cfg.Federation.Name != "" {
+		return cfg.Federation.Name
+	}
+	return fmt.Sprintf("localhost:%d", cfg.Port)
+}
+
 // printUsage writes the full usage text: the flag summary plus the
 // environment variables crier reads for configuration.
 func printUsage(out io.Writer, fs *flag.FlagSet) {
@@ -275,5 +310,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_LOG_FORMAT               text|json (default text)")
 	fmt.Fprintln(out, "  CR_RATE_LIMIT_PER_MINUTE    relay publish rate limit (default 100)")
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
+	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
+	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }
