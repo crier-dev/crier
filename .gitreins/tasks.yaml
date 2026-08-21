@@ -265,3 +265,15 @@ tasks:
   status: complete
   created_at: '2026-08-20T16:35:48.303399+00:00'
   completed_at: '2026-08-20T16:43:41.548409+00:00'
+- id: cr-feat-008-hermes-gateway-demo
+  title: 'CR-FEAT-008: Hermes HTTP gateway template + cross-backend webhook demo (adapter,
+    run-demo.sh, transcript in examples/hermes-gateway-demo/)'
+  criteria:
+  - examples/hermes-gateway-demo/ exists with adapter + run-demo.sh + README + TRANSCRIPT
+    showing webhook delivery, blocking reply correlation (request_id==message_id),
+    and session continuity; go build/vet/test pass 9/9; gitreins guard PASS 4/4; demo
+    ran live (exit 0); no dirty-tree files touched (internal/mcp, cmd/crier-mcp, examples/llm-mesh,
+    internal/registry/remote*, .vfs untouched)
+  status: complete
+  created_at: '2026-08-21T04:18:40.792152+00:00'
+  completed_at: '2026-08-21T04:32:10.516700+00:00'
