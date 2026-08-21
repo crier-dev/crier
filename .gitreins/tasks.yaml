@@ -277,3 +277,17 @@ tasks:
   status: complete
   created_at: '2026-08-21T04:18:40.792152+00:00'
   completed_at: '2026-08-21T04:32:10.516700+00:00'
+- id: cr-gap-037-session-template-expansion
+  title: 'CR-GAP-037: hermes-http-gateway template {{crier.session_id}}/{{crier.thread_id}}
+    render EMPTY (resolvePath struct descent gap)'
+  criteria:
+  - Unit test asserts {{crier.session_id}} expands to the envelope's non-empty session_id
+    in rendered webhook body
+  - go build ./... and go vet ./... pass
+  - go test ./... -count=1 passes (9/9 packages)
+  - Only internal/webhook files changed; Bane-pending WIP (internal/mcp/*, cmd/crier-mcp/main.go,
+    internal/registry/remote*.go, examples/llm-mesh/) untouched
+  - Commit message addresses CR-GAP-037 with Co-authored-by trailer
+  status: complete
+  created_at: '2026-08-21T10:44:26.197183+00:00'
+  completed_at: '2026-08-21T10:50:58.492454+00:00'
