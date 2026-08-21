@@ -291,3 +291,14 @@ tasks:
   status: complete
   created_at: '2026-08-21T10:44:26.197183+00:00'
   completed_at: '2026-08-21T10:50:58.492454+00:00'
+- id: cr-feat-006-relay-federation
+  title: CR-FEAT-006 relay-to-relay federation
+  criteria:
+  - "CR-FEAT-006 complete: relay-to-relay federation shipped \u2014 CR_FED_LINKS link\
+    \ config parsed; deliver to a non-local agent forwards over the link and the remote\
+    \ result/reply returns to the original sender; peers listing shows both linked\
+    \ relays (cross-relay agent visibility); go build/vet/test green; gitreins guard\
+    \ PASS; live 2-relay E2E demonstrates the board PASS line"
+  status: complete
+  created_at: '2026-08-21T17:06:47.517578+00:00'
+  completed_at: '2026-08-21T17:15:24.301474+00:00'
