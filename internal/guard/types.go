@@ -50,6 +50,10 @@ type Result struct {
 	Errored     bool      `json:"errored,omitempty"`
 	Quarantined bool      `json:"quarantined,omitempty"`
 	DurationMs  int64     `json:"duration_ms,omitempty"`
+	// MessageID is the guarded message's id (from Input). Internal
+	// plumbing: surfaced on Meta.MessageID (spec §8.2); never serialized
+	// on Result itself (queue items carry their own message id).
+	MessageID string `json:"-"`
 	// DeliveredPayload is the payload to deliver IN PLACE of the original
 	// when the message was sanitized (spec §3.5 notice object). Internal
 	// plumbing — the handler applies it; never serialized.
@@ -63,6 +67,10 @@ type Result struct {
 // Meta is the per-message guard metadata carried on the envelope / inbox
 // entry (wire contract addition, spec §3.7).
 type Meta struct {
+	// MessageID is the guarded message's id (spec §8.2: populated on the
+	// envelope path). Carried on cards, envelope crier.guard metadata,
+	// inbox entries and the 403 body.
+	MessageID   string    `json:"message_id,omitempty"`
 	Decision    Decision  `json:"decision"`
 	RiskLevel   RiskLevel `json:"risk_level"`
 	Reason      string    `json:"reason"`
@@ -80,6 +88,7 @@ type Meta struct {
 // Meta converts a Result into the wire metadata form (spec §3.7).
 func (r Result) Meta() Meta {
 	return Meta{
+		MessageID:          r.MessageID,
 		Decision:           r.Decision,
 		RiskLevel:          r.RiskLevel,
 		Reason:             r.Reason,
@@ -97,6 +106,7 @@ func (r Result) Meta() Meta {
 // carry, spec §2.2). DurationMs is not on the wire and resets to 0.
 func (m Meta) Result() Result {
 	return Result{
+		MessageID:          m.MessageID,
 		Decision:           m.Decision,
 		RiskLevel:          m.RiskLevel,
 		Reason:             m.Reason,

@@ -579,3 +579,35 @@ func TestBuildCheckOrigin_EmptyElementSkipped(t *testing.T) {
 	req := &http.Request{Header: http.Header{"Origin": []string{"https://a.com"}}}
 	assert.True(t, fn(req))
 }
+
+// ---------- LLM message guard (CR-FEAT-014) ----------
+
+func TestLoad_GuardKanbanQueue(t *testing.T) {
+	unsetAll(t)
+	// Guard envs are not part of unsetAll; clear them so ambient
+	// environment cannot leak into this test.
+	for _, k := range []string{
+		"CR_GUARD_ENABLED", "CR_GUARD_TIMEOUT_MS", "CR_GUARD_MAX_CONCURRENT",
+		"CR_GUARD_CIRCUIT_THRESHOLD", "CR_GUARD_CIRCUIT_COOLDOWN_S",
+		"CR_GUARD_MAX_PAYLOAD_BYTES", "CR_GUARD_RENDER_MAX_BYTES",
+		"CR_GUARD_DEEPSEEK_BASE_URL", "CR_GUARD_MODEL", "CR_GUARD_PATTERNS_EXTRA",
+		"CR_GUARD_DEFAULT_POLICY", "CR_GUARD_KANBAN_QUEUE",
+	} {
+		t.Setenv(k, "")
+	}
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 100, cfg.Guard.KanbanQueueSize, "default queue capacity (spec §8.2)")
+
+	t.Setenv("CR_GUARD_KANBAN_QUEUE", "7")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 7, cfg.Guard.KanbanQueueSize)
+
+	for _, bad := range []string{"0", "-3", "abc"} {
+		t.Setenv("CR_GUARD_KANBAN_QUEUE", bad)
+		_, err = config.Load()
+		require.Error(t, err, "CR_GUARD_KANBAN_QUEUE=%q must fail", bad)
+	}
+}

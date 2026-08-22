@@ -759,7 +759,7 @@ components:
           description: "Adds the thinking field to the request; hard-forbidden on the deepseek preset (spec §5.2)"
     GuardKanbanConfig:
       type: object
-      description: "CR-FEAT-014 output option — accepted on the wire, consumed by CR-FEAT-014"
+      description: "CR-FEAT-014 output option (spec §8) — opt-in per policy, OFF by default; cards are written fire-and-forget to the Hermes kanban card writer (never blocks the delivery)"
       properties:
         enabled:
           type: boolean
@@ -768,15 +768,21 @@ components:
           type: string
           enum: [block, all]
           default: block
+          description: "block (default) = card when the verdict is block/sanitize (or a guard-error whose error-path decision is block); all = card for every guarded message on the channel"
         assignee:
           type: string
+          description: "Card assignee; empty defaults to the operator (Bane)"
         board_url:
           type: string
+          description: "Originating project board link for the card (e.g. the crier board path)"
     GuardVerdictMeta:
       type: object
-      description: "Per-message guard verdict metadata (spec §3.7) — carried on webhook envelope crier.guard, inbox entries, deliver responses, and emitted as X-Crier-Guard-* headers"
+      description: "Per-message guard verdict metadata (spec §3.7) — carried on webhook envelope crier.guard, inbox entries, deliver responses, kanban cards, and emitted as X-Crier-Guard-* headers"
       required: [decision, risk_level, reason]
       properties:
+        message_id:
+          type: string
+          description: "Guarded message id (spec §8.2 — populated on the envelope path)"
         decision:
           type: string
           enum: [allow, block, sanitize]

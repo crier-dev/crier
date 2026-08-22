@@ -139,6 +139,12 @@ func run(args []string) int {
 	// entirely (nil filter = disabled).
 	var guardFilter guard.Filter
 	if cfg.Guard.Enabled {
+		// CR-FEAT-014: the Hermes kanban card writer (fire-and-forget
+		// output option, spec §8). Cards are only produced when a policy
+		// opts in via policy.kanban.enabled; write failures are logged and
+		// counted, never surfaced to the delivery path. CR-FEAT-009 can
+		// replace this writer through the same CardWriter interface.
+		kanbanWriter := guard.NewHermesKanbanWriter("hermes")
 		gf, err := guard.New(guard.Options{
 			Timeout:           cfg.Guard.Timeout,
 			MaxConcurrent:     cfg.Guard.MaxConcurrent,
@@ -150,15 +156,18 @@ func run(args []string) int {
 			DefaultModel:      cfg.Guard.Model,
 			ExtraPatterns:     cfg.Guard.ExtraPatterns,
 			DefaultPolicyJSON: cfg.Guard.DefaultPolicy,
+			KanbanWriter:      kanbanWriter,
+			KanbanQueueSize:   cfg.Guard.KanbanQueueSize,
 		})
 		if err != nil {
 			slog.Error("initialize message guard", "error", err)
 			return 1
 		}
+		defer gf.Close()
 		guardFilter = gf
 		slog.Info("message guard", "enabled", true, "model", cfg.Guard.Model,
 			"timeout", cfg.Guard.Timeout, "max_concurrent", cfg.Guard.MaxConcurrent,
-			"circuit_threshold", cfg.Guard.CircuitThreshold)
+			"circuit_threshold", cfg.Guard.CircuitThreshold, "kanban_queue", cfg.Guard.KanbanQueueSize)
 	} else {
 		slog.Info("message guard", "enabled", false)
 	}
@@ -355,6 +364,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_GUARD_MODEL              deepseek preset default model override (default deepseek-v4-flash)")
 	fmt.Fprintln(out, "  CR_GUARD_PATTERNS_EXTRA     JSON array of extra prematch patterns (append/replace)")
 	fmt.Fprintln(out, "  CR_GUARD_DEFAULT_POLICY     JSON Policy — server-wide default when the agent has none (fail-fast)")
+	fmt.Fprintln(out, "  CR_GUARD_KANBAN_QUEUE       kanban worker queue capacity, opt-in per policy.kanban (default 100)")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

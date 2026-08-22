@@ -31,6 +31,8 @@ type Guard struct {
 	renderMaxBytes  int
 	logf            func(msg string, args ...any) // info-level audit
 	logfWarn        func(msg string, args ...any) // warn-level audit (decision != allow || errored)
+	kw              *kanbanWorker                 // CR-FEAT-014 output option; nil = kanban disabled
+	closeOnce       sync.Once
 	mu              sync.Mutex
 	checksTotal     map[string]int64 // "decision/risk"
 	errorsTotal     int64
@@ -51,6 +53,8 @@ type Options struct {
 	DefaultModel      string        // CR_GUARD_MODEL override for the deepseek preset default model
 	ExtraPatterns     string        // CR_GUARD_PATTERNS_EXTRA JSON
 	DefaultPolicyJSON string        // CR_GUARD_DEFAULT_POLICY — server-wide default policy (JSON); invalid fails fast
+	KanbanWriter      CardWriter    // CR-FEAT-014: nil = kanban output disabled (no-op writer)
+	KanbanQueueSize   int           // CR_GUARD_KANBAN_QUEUE (default 100, spec §8.2)
 	LookupEnv         func(string) string
 	Logf              func(msg string, args ...any)
 	LogfWarn          func(msg string, args ...any)
@@ -72,6 +76,9 @@ func New(opts Options) (*Guard, error) {
 	if opts.RenderMaxBytes <= 0 {
 		opts.RenderMaxBytes = 32768
 	}
+	if opts.KanbanQueueSize <= 0 {
+		opts.KanbanQueueSize = 100
+	}
 	scanner, err := NewPreScanner(opts.ExtraPatterns)
 	if err != nil {
 		return nil, err
@@ -92,7 +99,7 @@ func New(opts Options) (*Guard, error) {
 	if logfWarn == nil {
 		logfWarn = func(msg string, args ...any) { slog.Warn(msg, args...) }
 	}
-	return &Guard{
+	g := &Guard{
 		router: NewRouter(RouterOptions{
 			Timeout:          opts.Timeout,
 			MaxConcurrent:    opts.MaxConcurrent,
@@ -110,7 +117,24 @@ func New(opts Options) (*Guard, error) {
 		logfWarn:        logfWarn,
 		checksTotal:     make(map[string]int64),
 		llmCallsTotal:   make(map[string]int64),
-	}, nil
+	}
+	if opts.KanbanWriter != nil {
+		// CR-FEAT-014 (spec §8.2): the kanban worker is a bounded
+		// goroutine + buffered channel; enqueue never blocks. A nil
+		// writer keeps kanban disabled (no-op) until CR-FEAT-009 lands.
+		g.kw = newKanbanWorker(opts.KanbanWriter, opts.KanbanQueueSize, logf, logfWarn)
+	}
+	return g, nil
+}
+
+// Close stops the kanban worker (CR-FEAT-014). Idempotent; safe to call
+// from server shutdown and test cleanup. No-op when kanban is disabled.
+func (g *Guard) Close() {
+	g.closeOnce.Do(func() {
+		if g.kw != nil {
+			g.kw.close()
+		}
+	})
 }
 
 // Check implements Filter (spec §2 / §11.1).
@@ -148,9 +172,11 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 				PolicyID:  policy.ID,
 			}
 		}
+		res.MessageID = in.MessageID
 		res.DurationMs = time.Since(start).Milliseconds()
 		g.record(res)
 		g.audit(agentID, in, res, len(in.Payload))
+		g.maybeEnqueueCard(agentID, in, policy, res)
 		return res, nil
 	}
 
@@ -188,16 +214,21 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		PolicyID:   policy.ID,
 		Provider:   provider,
 		Model:      model,
+		MessageID:  in.MessageID,
 		DurationMs: time.Since(start).Milliseconds(),
 	}
 	if res.Decision == DecisionSanitize {
 		// Quarantine (§3.5): the delivered payload is replaced by the
 		// notice; the original rides in Meta.QuarantinedPayload (base64).
+		// Spec §12.1: the LLM never rewrites payload content — a
+		// sanitized_payload field on the verdict (ticket latitude) is
+		// ignored; the server builds the delivered payload itself.
 		res.Quarantined = true
 		res.DeliveredPayload, res.QuarantinedPayload = quarantinePayload(in, res.Reason)
 	}
 	g.record(res)
 	g.audit(agentID, in, res, len(in.Payload))
+	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res, nil
 }
 
@@ -212,6 +243,7 @@ func (g *Guard) errorResult(agentID string, in Input, policy Policy, start time.
 		Reason:     reason,
 		Errored:    true,
 		PolicyID:   policy.ID,
+		MessageID:  in.MessageID,
 		DurationMs: time.Since(start).Milliseconds(),
 	}
 	if policy.FailClosed {
@@ -226,6 +258,7 @@ func (g *Guard) errorResult(agentID string, in Input, policy Policy, start time.
 	}
 	g.record(res)
 	g.audit(agentID, in, res, payloadBytes)
+	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res
 }
 
@@ -341,6 +374,11 @@ type Counters struct {
 	LLMCallsTotal map[string]int64 // key "provider/model"
 	SanitizeTotal int64
 	BlockTotal    int64
+	// KanbanWritten/Dropped/Failed are CR-FEAT-014 fire-and-forget card
+	// stats (spec §8.2: full queue → drop + counter; failures counted).
+	KanbanWritten int64
+	KanbanDropped int64
+	KanbanFailed  int64
 }
 
 // Snapshot returns the current counters.
@@ -355,11 +393,15 @@ func (g *Guard) Snapshot() Counters {
 	for k, v := range g.llmCallsTotal {
 		calls[k] = v
 	}
-	return Counters{
+	snap := Counters{
 		ChecksTotal:   checks,
 		ErrorsTotal:   g.errorsTotal,
 		LLMCallsTotal: calls,
 		SanitizeTotal: g.sanitizeTotal,
 		BlockTotal:    g.blockTotal,
 	}
+	if g.kw != nil {
+		snap.KanbanWritten, snap.KanbanDropped, snap.KanbanFailed = g.kw.stats()
+	}
+	return snap
 }

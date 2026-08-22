@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -296,6 +297,62 @@ func TestCheck_InvalidVerdictIsGuardError(t *testing.T) {
 	}
 	if res.Decision != DecisionAllow || !res.Errored {
 		t.Fatalf("res = %+v, want fail-open on invalid verdict", res)
+	}
+}
+
+func TestCheck_MalformedVerdictFailClosed(t *testing.T) {
+	// CR-FEAT-013: malformed verdict → treated per fail-open/fail-closed
+	// (spec §3.6). Fail-open is covered above; this is the fail-closed
+	// side: garbage LLM output under fail_closed → block, errored, high.
+	m, srv := newMockLLM(t, 0, `{"choices":[{"message":{"content":"garbage"}}]}`)
+	g, _ := newTestGuard(t, envMap{"K": "k"}, m, srv)
+	res, err := g.Check(context.Background(), "a", customPolicy(true, srv.URL, "env:K"),
+		Input{MessageID: "m1", Payload: []byte(`{"x":1}`)})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.Decision != DecisionBlock || !res.Errored {
+		t.Fatalf("res = %+v, want fail-closed block + errored", res)
+	}
+	if res.RiskLevel != RiskHigh {
+		t.Errorf("risk = %s, want high on fail-closed", res.RiskLevel)
+	}
+	if !strings.HasPrefix(res.Reason, "guard_error:") {
+		t.Errorf("reason = %q, want guard_error prefix", res.Reason)
+	}
+}
+
+func TestCheck_SanitizeIgnoresLLMProvidedPayload(t *testing.T) {
+	// CR-FEAT-013: a verdict that carries sanitized_payload (ticket
+	// latitude) must NOT replace the delivered payload. Spec §12.1: the
+	// LLM never rewrites payload content — the delivered payload is
+	// always the server-built quarantine notice.
+	llm := `{"choices":[{"message":{"content":"{\"decision\":\"sanitize\",\"risk_level\":\"medium\",\"reason\":\"masquerade\",\"matched_patterns\":[],\"sanitized_payload\":\"ATTACKER REWRITE\"}"}}]}`
+	m, srv := newMockLLM(t, 0, llm)
+	g, _ := newTestGuard(t, envMap{"K": "k"}, m, srv)
+	orig := []byte(`{"text":"original payload"}`)
+	res, err := g.Check(context.Background(), "a", customPolicy(false, srv.URL, "env:K"),
+		Input{MessageID: "m1", Sender: "s1", Payload: orig})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.Decision != DecisionSanitize || !res.Quarantined {
+		t.Fatalf("res = %+v, want sanitize+quarantined", res)
+	}
+	if bytes.Contains(res.DeliveredPayload, []byte("ATTACKER REWRITE")) {
+		t.Fatal("LLM-provided sanitized_payload must never be delivered")
+	}
+	var notice map[string]any
+	if err := json.Unmarshal(res.DeliveredPayload, &notice); err != nil {
+		t.Fatalf("DeliveredPayload not JSON: %v", err)
+	}
+	if _, ok := notice["crier_guard"]; !ok {
+		t.Fatalf("delivered payload must be the quarantine notice: %v", notice)
+	}
+	// The original is still recoverable via the base64 quarantine field.
+	raw, err := base64.StdEncoding.DecodeString(res.QuarantinedPayload)
+	if err != nil || string(raw) != string(orig) {
+		t.Fatalf("quarantine round-trip failed: %v %q", err, raw)
 	}
 }
 

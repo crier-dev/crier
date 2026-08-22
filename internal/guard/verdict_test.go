@@ -64,6 +64,26 @@ func TestParseVerdict_Invalid(t *testing.T) {
 	}
 }
 
+func TestParseVerdict_UnknownFieldsIgnored(t *testing.T) {
+	// CR-FEAT-013 hardening: extra fields on the verdict (including a
+	// hypothetical `sanitized_payload` — ticket latitude) parse without
+	// error but are NEVER applied. Spec §12.1 resolved the latitude:
+	// sanitize = deterministic server-side quarantine; the LLM never
+	// rewrites payload content, so no field on Verdict exists for it.
+	raw := `{"decision":"sanitize","risk_level":"medium","reason":"masquerade","matched_patterns":["b64_blob"],"sanitized_payload":"{\"text\":\"attacker rewrite\"}","sneaky":true,"extra":42}`
+	v, err := ParseVerdict(raw)
+	if err != nil {
+		t.Fatalf("ParseVerdict with unknown fields: %v", err)
+	}
+	if v.Decision != DecisionSanitize || v.RiskLevel != RiskMedium {
+		t.Fatalf("verdict = %+v", v)
+	}
+	// Normalization still applies (patterns deduped, order preserved).
+	if len(v.MatchedPatterns) != 1 || v.MatchedPatterns[0] != "b64_blob" {
+		t.Errorf("patterns = %v", v.MatchedPatterns)
+	}
+}
+
 // TestEscalation covers all 6 rows of the §3.4 table plus a lower
 // block_risk threshold.
 func TestEscalation(t *testing.T) {

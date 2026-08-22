@@ -53,6 +53,7 @@ type GuardConfig struct {
 	Model            string        // CR_GUARD_MODEL — deepseek preset default model override
 	ExtraPatterns    string        // CR_GUARD_PATTERNS_EXTRA — JSON array of extra prematch patterns
 	DefaultPolicy    string        // CR_GUARD_DEFAULT_POLICY — JSON Policy (server-wide default, §4.2 step 3 / §9.1)
+	KanbanQueueSize  int           // CR_GUARD_KANBAN_QUEUE — kanban worker queue capacity (spec §8.2, CR-FEAT-014)
 }
 
 // FederationConfig holds relay-to-relay federation settings (CR-FEAT-006).
@@ -107,6 +108,7 @@ func Load() (Config, error) {
 			RenderMaxBytes:   32768,
 			DeepSeekBaseURL:  "https://api.deepseek.com/v1",
 			Model:            "deepseek-v4-flash",
+			KanbanQueueSize:  100,
 		},
 		Database: DatabaseConfig{
 			MaxConns:        4,
@@ -334,6 +336,15 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_GUARD_RENDER_MAX_BYTES: %q", v)
 		}
 		cfg.Guard.RenderMaxBytes = n
+	}
+	if v := os.Getenv("CR_GUARD_KANBAN_QUEUE"); v != "" {
+		// CR-FEAT-014 (spec §8.2): kanban worker queue capacity. The
+		// worker itself is enabled per-policy via policy.kanban.enabled.
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_KANBAN_QUEUE: %q", v)
+		}
+		cfg.Guard.KanbanQueueSize = n
 	}
 	if v := os.Getenv("CR_GUARD_DEEPSEEK_BASE_URL"); v != "" {
 		cfg.Guard.DeepSeekBaseURL = v
