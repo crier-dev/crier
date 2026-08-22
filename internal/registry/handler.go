@@ -14,15 +14,17 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
 // registerRequest is the JSON body for POST /agents.
 type registerRequest struct {
-	ID           string          `json:"id"`
-	PublicKey    string          `json:"public_key"`
-	Capabilities []string        `json:"capabilities"`
-	Webhook      *webhook.Config `json:"webhook,omitempty"`
+	ID           string                  `json:"id"`
+	PublicKey    string                  `json:"public_key"`
+	Capabilities []string                `json:"capabilities"`
+	Webhook      *webhook.Config         `json:"webhook,omitempty"`
+	Guard        *guard.AgentGuardConfig `json:"guard,omitempty"`
 }
 
 // agentsResponse is the JSON body for GET /agents.
@@ -71,8 +73,18 @@ type blockingDeliverResponse struct {
 }
 
 // deliverResponse is the JSON body for POST /agents/{id}/inbox.
+// Guard is present when the verdict was not plain allow (sanitize, or
+// errored fail-open) — visibility for async senders (spec §9.3).
 type deliverResponse struct {
-	ID string `json:"id"`
+	ID    string      `json:"id"`
+	Guard *guard.Meta `json:"guard,omitempty"`
+}
+
+// guardBlockedResponse is the uniform 403 body for blocked deliveries
+// (spec §2.1/§9.3) — the same shape in every delivery mode.
+type guardBlockedResponse struct {
+	Error string     `json:"error"`
+	Guard guard.Meta `json:"guard"`
 }
 
 // retrieveResponse is the JSON body for GET /agents/{id}/inbox.
@@ -121,12 +133,20 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		PublicKey:    HexKey(rawKey),
 		Capabilities: req.Capabilities,
 		Webhook:      req.Webhook,
+		Guard:        req.Guard,
 	}
 	if agent.Capabilities == nil {
 		agent.Capabilities = []string{}
 	}
 	if agent.Webhook != nil {
 		if err := agent.Webhook.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if agent.Guard != nil {
+		// LLM message-guard config validation (spec §4.1/§9.2, CR-FEAT-010).
+		if err := agent.Guard.Validate(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -265,6 +285,16 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 // If the target agent has a webhook endpoint configured and the webhook
 // driver is enabled, the message is pushed to the endpoint instead of the
 // inbox (CR-FEAT-001: webhook is the preferred push surface).
+//
+// LLM message-guard choke point (spec §2, CR-FEAT-010): when the handler
+// has a guard filter and the target agent exists, the message is classified
+// AFTER the deliver request is decoded and BEFORE both downstream branches
+// (webhook driver, inbox store). Verdict routing (§2.1): allow → deliver as
+// today; sanitize → the delivered payload is replaced with the quarantine
+// notice and guard metadata rides on the envelope/entry; block → uniform
+// 403 GUARD_BLOCKED with the verdict (never queued, never stored, never
+// POSTed). Guard errors fail open (deliver, X-Crier-Guard-Error: true)
+// unless the policy is fail_closed.
 func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
@@ -282,6 +312,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		Payload: req.Payload,
 	}
 
+	kind := req.Kind
+	if kind == "" {
+		kind = webhook.KindMessage
+	}
+
+	target, getErr := h.store.Get(id)
+
 	// Federation fallback (CR-FEAT-006): the target agent is not registered
 	// on this relay. When relay links are configured, forward the ORIGINAL
 	// deliver request to each linked relay in order; the first non-404
@@ -289,82 +326,129 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	// from the remote relay (which itself rides inside the remote HTTP
 	// response) therefore returns to the original sender untouched. Requests
 	// that already arrived over a link (hop marker) never forward again.
-	if h.fed != nil && r.Header.Get(federation.HopHeader) == "" {
-		if _, err := h.store.Get(id); errors.Is(err, ErrAgentNotFound) {
-			reqBytes, merr := json.Marshal(req)
-			if merr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "federation: marshal deliver request"})
-				return
-			}
-			if status, respBody, ferr := h.fed.ForwardToAny(r.Context(), id, reqBytes); ferr == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(status)
-				w.Write(respBody)
-				return
-			}
-			// No linked relay knows the agent (all 404 / unreachable) — the
-			// caller sees the same 404 a single relay would answer.
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
+	// The guard is per-receiver: the REMOTE relay's target-agent policy
+	// applies there, so forwarding happens before the local choke point.
+	if h.fed != nil && r.Header.Get(federation.HopHeader) == "" && errors.Is(getErr, ErrAgentNotFound) {
+		reqBytes, merr := json.Marshal(req)
+		if merr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "federation: marshal deliver request"})
 			return
 		}
+		if status, respBody, ferr := h.fed.ForwardToAny(r.Context(), id, reqBytes); ferr == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			w.Write(respBody)
+			return
+		}
+		// No linked relay knows the agent (all 404 / unreachable) — the
+		// caller sees the same 404 a single relay would answer.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
+		return
 	}
 
-	if h.webhooks != nil {
-		if target, err := h.store.Get(id); err == nil && target.Webhook != nil {
-			mode := req.DeliveryMode
-			if mode == "" {
-				mode = target.Webhook.DeliveryMode
-			}
-			if mode == "" {
-				mode = "async"
-			}
-			kind := req.Kind
-			if kind == "" {
-				kind = webhook.KindMessage
-			}
-			env := &webhook.Envelope{
-				Crier: webhook.EnvelopeMeta{
-					Version:      1,
-					MessageID:    entry.ID,
-					RequestID:    req.RequestID,
-					DeliveryMode: mode,
-					Sender:       req.Sender,
-					Kind:         kind,
-					SessionID:    req.SessionID,
-				},
-				Payload: req.Payload,
-			}
-			if mode == "blocking" {
-				budget := time.Duration(req.TimeoutMs) * time.Millisecond
-				if req.TimeoutMs <= 0 {
-					budget = 30 * time.Second
-				}
-				reply, err := h.webhooks.DeliverBlocking(r.Context(), id, target.Webhook, env, budget)
-				if err != nil {
-					writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error()})
-					return
-				}
-				writeJSON(w, http.StatusOK, blockingDeliverResponse{
-					ID:        entry.ID,
-					Reply:     reply,
-					SessionID: req.SessionID,
-					RequestID: req.RequestID,
+	// ▼ GUARD CHOKE POINT (spec §2) — one call site covers webhook
+	// (blocking/async/batch) AND inbox store. Per-message verdicts are
+	// computed exactly once; redelivery/batch flush never re-run the guard.
+	var guardMeta *guard.Meta
+	payload := req.Payload
+	if h.guard != nil && target != nil {
+		res, gerr := h.guard.Check(r.Context(), id, target.Guard, guard.Input{
+			AgentID:   id,
+			MessageID: entry.ID,
+			Sender:    req.Sender,
+			SessionID: req.SessionID,
+			Kind:      kind,
+			Payload:   payload,
+		})
+		if gerr != nil {
+			// Misconfiguration (never provider failure — those are folded
+			// into Result.Errored and resolved per §3.6): fail open with an
+			// audit line (spec §2.2).
+			slog.Warn("guard: check failed, delivering without guard metadata",
+				"error", gerr, "target", id, "message_id", entry.ID)
+		} else {
+			switch res.Decision {
+			case guard.DecisionBlock:
+				// Uniform 403 across ALL modes (spec §2.1): the sender
+				// learns immediately that the message was not accepted.
+				writeJSON(w, http.StatusForbidden, guardBlockedResponse{
+					Error: "GUARD_BLOCKED",
+					Guard: res.Meta(),
 				})
 				return
+			case guard.DecisionSanitize:
+				// Deterministic quarantine (§3.5): deliver the notice,
+				// original rides in crier.guard.quarantined_payload.
+				if len(res.DeliveredPayload) > 0 {
+					payload = res.DeliveredPayload
+				}
+				m := res.Meta()
+				guardMeta = &m
+			default:
+				m := res.Meta()
+				guardMeta = &m
 			}
-			if _, err := h.webhooks.Deliver(id, target.Webhook, env); err != nil {
-				// Queue path handled inside the driver; the deliver call
-				// itself only fails on config errors — surface those.
-				writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-				return
-			}
-			// Async/batch webhook delivery is fire-and-forget: the sender gets
-			// 202 Accepted, delivery happens in the background queue (spec §4).
-			writeJSON(w, http.StatusAccepted, deliverResponse{ID: entry.ID})
-			return
 		}
 	}
 
+	if h.webhooks != nil && target != nil && target.Webhook != nil {
+		mode := req.DeliveryMode
+		if mode == "" {
+			mode = target.Webhook.DeliveryMode
+		}
+		if mode == "" {
+			mode = "async"
+		}
+		env := &webhook.Envelope{
+			Crier: webhook.EnvelopeMeta{
+				Version:      1,
+				MessageID:    entry.ID,
+				RequestID:    req.RequestID,
+				DeliveryMode: mode,
+				Sender:       req.Sender,
+				Kind:         kind,
+				SessionID:    req.SessionID,
+				Guard:        guardMeta,
+			},
+			Payload: payload,
+		}
+		if mode == "blocking" {
+			budget := time.Duration(req.TimeoutMs) * time.Millisecond
+			if req.TimeoutMs <= 0 {
+				budget = 30 * time.Second
+			}
+			reply, err := h.webhooks.DeliverBlocking(r.Context(), id, target.Webhook, env, budget)
+			if err != nil {
+				writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, blockingDeliverResponse{
+				ID:        entry.ID,
+				Reply:     reply,
+				SessionID: req.SessionID,
+				RequestID: req.RequestID,
+			})
+			return
+		}
+		if _, err := h.webhooks.Deliver(id, target.Webhook, env); err != nil {
+			// Queue path handled inside the driver; the deliver call
+			// itself only fails on config errors — surface those.
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		// Async/batch webhook delivery is fire-and-forget: the sender gets
+		// 202 Accepted, delivery happens in the background queue (spec §4).
+		writeJSON(w, http.StatusAccepted, deliverResponse{
+			ID:    entry.ID,
+			Guard: guardInDeliverResponse(guardMeta),
+		})
+		return
+	}
+
+	// Inbox store branch: the entry carries the (possibly quarantined)
+	// payload and the guard metadata (spec §2.2/§9.3).
+	entry.Payload = payload
+	entry.Guard = guardMeta
 	if err := h.store.Deliver(id, entry); err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -376,7 +460,23 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, deliverResponse{ID: entry.ID})
+	writeJSON(w, http.StatusCreated, deliverResponse{
+		ID:    entry.ID,
+		Guard: guardInDeliverResponse(guardMeta),
+	})
+}
+
+// guardInDeliverResponse surfaces guard metadata on success responses when
+// the verdict was not plain allow (spec §9.3: visibility for async
+// senders); plain-allow verdicts and the disabled guard stay absent.
+func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
+	if m == nil {
+		return nil
+	}
+	if m.Decision != guard.DecisionAllow || m.Errored {
+		return m
+	}
+	return nil
 }
 
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.

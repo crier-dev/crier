@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/totalwindupflightsystems/crier/config"
 	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 	"github.com/totalwindupflightsystems/crier/internal/mesh"
 	"github.com/totalwindupflightsystems/crier/internal/middleware"
 	"github.com/totalwindupflightsystems/crier/internal/registry"
@@ -131,6 +132,36 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+
+	// LLM message guard (CR-FEAT-010) — the inbound choke point for every
+	// delivery (webhook POST / inbox store). Constructed BEFORE the routes
+	// are registered (spec §2.2). CR_GUARD_ENABLED=false skips the guard
+	// entirely (nil filter = disabled).
+	var guardFilter guard.Filter
+	if cfg.Guard.Enabled {
+		gf, err := guard.New(guard.Options{
+			Timeout:          cfg.Guard.Timeout,
+			MaxConcurrent:    cfg.Guard.MaxConcurrent,
+			CircuitThreshold: cfg.Guard.CircuitThreshold,
+			CircuitCooldown:  cfg.Guard.CircuitCooldown,
+			MaxPayloadBytes:  cfg.Guard.MaxPayloadBytes,
+			RenderMaxBytes:   cfg.Guard.RenderMaxBytes,
+			DeepSeekBaseURL:  cfg.Guard.DeepSeekBaseURL,
+			DefaultModel:     cfg.Guard.Model,
+			ExtraPatterns:    cfg.Guard.ExtraPatterns,
+		})
+		if err != nil {
+			slog.Error("initialize message guard", "error", err)
+			return 1
+		}
+		guardFilter = gf
+		slog.Info("message guard", "enabled", true, "model", cfg.Guard.Model,
+			"timeout", cfg.Guard.Timeout, "max_concurrent", cfg.Guard.MaxConcurrent,
+			"circuit_threshold", cfg.Guard.CircuitThreshold)
+	} else {
+		slog.Info("message guard", "enabled", false)
+	}
+	registryHandler.SetGuardFilter(guardFilter)
 
 	// Relay-to-relay federation (CR-FEAT-006). When CR_FED_LINKS is set,
 	// deliveries to agents unknown on this relay are forwarded to the linked
@@ -312,5 +343,16 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
 	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")
+	fmt.Fprintln(out, "  CR_GUARD_ENABLED            LLM message guard master switch (default true)")
+	fmt.Fprintln(out, "  CR_GUARD_TIMEOUT_MS         per-message guard budget incl. retries (default 10000)")
+	fmt.Fprintln(out, "  CR_GUARD_MAX_CONCURRENT     concurrent guard LLM calls (default 8)")
+	fmt.Fprintln(out, "  CR_GUARD_CIRCUIT_THRESHOLD  consecutive provider failures to open the circuit (default 10)")
+	fmt.Fprintln(out, "  CR_GUARD_CIRCUIT_COOLDOWN_S circuit open duration (default 300)")
+	fmt.Fprintln(out, "  CR_GUARD_MAX_PAYLOAD_BYTES  payloads above this skip the LLM (default 65536)")
+	fmt.Fprintln(out, "  CR_GUARD_RENDER_MAX_BYTES   projection cap fed to the LLM (default 32768)")
+	fmt.Fprintln(out, "  CR_GUARD_DEEPSEEK_BASE_URL  deepseek preset base URL override (default https://api.deepseek.com/v1)")
+	fmt.Fprintln(out, "  CR_GUARD_MODEL              deepseek preset default model override (default deepseek-v4-flash)")
+	fmt.Fprintln(out, "  CR_GUARD_PATTERNS_EXTRA     JSON array of extra prematch patterns (append/replace)")
+	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

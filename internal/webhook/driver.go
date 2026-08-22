@@ -294,14 +294,20 @@ func (g *sessionGate) acquire(sessionID string) func() {
 	return m.Unlock
 }
 
-// enqueue stores the item for redelivery.
+// enqueue stores the item for redelivery. The guard verdict rides along
+// (spec §2.1: redelivery never re-runs the guard).
 func (d *Driver) enqueue(agentID string, env *Envelope, retries int) error {
-	return d.queue.Push(&QueueItem{
+	item := &QueueItem{
 		AgentID:   agentID,
 		Envelope:  env,
 		Retries:   retries,
 		CreatedAt: time.Now(),
-	})
+	}
+	if env != nil && env.Crier.Guard != nil {
+		g := env.Crier.Guard.Result()
+		item.Guard = &g
+	}
+	return d.queue.Push(item)
 }
 
 // redeliverLoop drains the queue on the redelivery interval (and on demand
@@ -467,7 +473,8 @@ type batchBuffer struct {
 	firstAt time.Time
 }
 
-// add appends an envelope and refreshes the buffer config.
+// add appends an envelope and refreshes the buffer config. The guard
+// verdict rides on the inner envelope (and in the item, spec §2.1).
 func (b *batchBuffer) add(cfg *Config, env *Envelope) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -475,11 +482,16 @@ func (b *batchBuffer) add(cfg *Config, env *Envelope) {
 	if len(b.items) == 0 {
 		b.firstAt = time.Now()
 	}
-	b.items = append(b.items, &QueueItem{
+	item := &QueueItem{
 		AgentID:   b.agentID,
 		Envelope:  env,
 		CreatedAt: time.Now(),
-	})
+	}
+	if env != nil && env.Crier.Guard != nil {
+		g := env.Crier.Guard.Result()
+		item.Guard = &g
+	}
+	b.items = append(b.items, item)
 }
 
 // take atomically removes all pending items, resetting the age clock.

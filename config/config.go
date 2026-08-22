@@ -35,6 +35,23 @@ type Config struct {
 	Webhook WebhookConfig
 	// Federation holds relay-to-relay link configuration (CR-FEAT-006).
 	Federation FederationConfig
+	// Guard holds LLM message-guard tuning (specs/LLM-MESSAGE-GUARD.md
+	// §9.1, CR-FEAT-010).
+	Guard GuardConfig
+}
+
+// GuardConfig holds LLM message-guard tuning (spec §9.1, CR-FEAT-010).
+type GuardConfig struct {
+	Enabled          bool
+	Timeout          time.Duration // CR_GUARD_TIMEOUT_MS — per-message budget (all providers, retries included)
+	MaxConcurrent    int           // CR_GUARD_MAX_CONCURRENT
+	CircuitThreshold int           // CR_GUARD_CIRCUIT_THRESHOLD
+	CircuitCooldown  time.Duration // CR_GUARD_CIRCUIT_COOLDOWN_S
+	MaxPayloadBytes  int           // CR_GUARD_MAX_PAYLOAD_BYTES — above this the LLM is skipped (§6.3)
+	RenderMaxBytes   int           // CR_GUARD_RENDER_MAX_BYTES — projection cap fed to the LLM
+	DeepSeekBaseURL  string        // CR_GUARD_DEEPSEEK_BASE_URL — deepseek preset base URL override
+	Model            string        // CR_GUARD_MODEL — deepseek preset default model override
+	ExtraPatterns    string        // CR_GUARD_PATTERNS_EXTRA — JSON array of extra prematch patterns
 }
 
 // FederationConfig holds relay-to-relay federation settings (CR-FEAT-006).
@@ -78,6 +95,17 @@ func Load() (Config, error) {
 			CircuitThreshold:   10,
 			BatchMaxMessages:   10,
 			BatchFlushInterval: 5 * time.Second,
+		},
+		Guard: GuardConfig{
+			Enabled:          true,
+			Timeout:          10 * time.Second,
+			MaxConcurrent:    8,
+			CircuitThreshold: 10,
+			CircuitCooldown:  300 * time.Second,
+			MaxPayloadBytes:  65536,
+			RenderMaxBytes:   32768,
+			DeepSeekBaseURL:  "https://api.deepseek.com/v1",
+			Model:            "deepseek-v4-flash",
 		},
 		Database: DatabaseConfig{
 			MaxConns:        4,
@@ -252,6 +280,69 @@ func Load() (Config, error) {
 		}
 		cfg.Webhook.BatchFlushInterval = time.Duration(n) * time.Second
 	}
+
+	// LLM message guard (CR-FEAT-010, spec §9.1).
+	if v := os.Getenv("CR_GUARD_ENABLED"); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes":
+			cfg.Guard.Enabled = true
+		case "false", "0", "no":
+			cfg.Guard.Enabled = false
+		default:
+			return cfg, fmt.Errorf("invalid CR_GUARD_ENABLED: %q (want true/false)", v)
+		}
+	}
+	if v := os.Getenv("CR_GUARD_TIMEOUT_MS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_TIMEOUT_MS: %q", v)
+		}
+		cfg.Guard.Timeout = time.Duration(n) * time.Millisecond
+	}
+	if v := os.Getenv("CR_GUARD_MAX_CONCURRENT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_MAX_CONCURRENT: %q", v)
+		}
+		cfg.Guard.MaxConcurrent = n
+	}
+	if v := os.Getenv("CR_GUARD_CIRCUIT_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_CIRCUIT_THRESHOLD: %q", v)
+		}
+		cfg.Guard.CircuitThreshold = n
+	}
+	if v := os.Getenv("CR_GUARD_CIRCUIT_COOLDOWN_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_CIRCUIT_COOLDOWN_S: %q", v)
+		}
+		cfg.Guard.CircuitCooldown = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_GUARD_MAX_PAYLOAD_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_MAX_PAYLOAD_BYTES: %q", v)
+		}
+		cfg.Guard.MaxPayloadBytes = n
+	}
+	if v := os.Getenv("CR_GUARD_RENDER_MAX_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_GUARD_RENDER_MAX_BYTES: %q", v)
+		}
+		cfg.Guard.RenderMaxBytes = n
+	}
+	if v := os.Getenv("CR_GUARD_DEEPSEEK_BASE_URL"); v != "" {
+		cfg.Guard.DeepSeekBaseURL = v
+	}
+	if v := os.Getenv("CR_GUARD_MODEL"); v != "" {
+		cfg.Guard.Model = v
+	}
+	// CR_GUARD_PATTERNS_EXTRA is passed through; it is parsed and validated
+	// by guard.New at startup (a broken pattern table fails fast, spec §9.1).
+	cfg.Guard.ExtraPatterns = os.Getenv("CR_GUARD_PATTERNS_EXTRA")
 
 	return cfg, nil
 }

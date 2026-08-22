@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 )
 
 // QueueItem is one queued webhook delivery (endpoint down / transient failures).
@@ -13,6 +15,12 @@ type QueueItem struct {
 	Batch     []*Envelope `json:"batch,omitempty"` // CR-FEAT-005: coalesced batch; redelivery POSTs it as ONE batch request
 	Retries   int         `json:"retries"`
 	CreatedAt time.Time   `json:"created_at"`
+	// Guard carries the verdict for redelivery (CR-FEAT-010, spec §2.1):
+	// redelivery and batch flush NEVER re-run the guard — the verdict rides
+	// with the message. The envelope's crier.guard metadata is the
+	// authoritative copy for the outbound POST headers; this field is the
+	// durable carry for queue-item consumers.
+	Guard *guard.Result `json:"guard,omitempty"`
 }
 
 // Queue stores pending webhook deliveries. v1 ships the in-memory

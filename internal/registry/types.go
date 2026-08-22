@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
@@ -54,6 +55,9 @@ type Agent struct {
 	LastSeen     time.Time   `json:"last_seen"`
 	// Webhook is the optional push-delivery endpoint (CR-FEAT-001).
 	Webhook *webhook.Config `json:"webhook,omitempty"`
+	// Guard is the optional LLM message-guard policy config (CR-FEAT-010).
+	// API keys are never part of it — only env: refs (spec §4.1/§9.2).
+	Guard *guard.AgentGuardConfig `json:"guard,omitempty"`
 }
 
 // InboxEntry is a message stored in an agent's persistent inbox.
@@ -67,4 +71,8 @@ type InboxEntry struct {
 	LeaseID       string        `json:"lease_id,omitempty"`
 	LeaseDuration time.Duration `json:"-"` // not serialized; used by PurgeExpired
 	ACKed         bool          `json:"acked"`
+	// Guard carries the LLM message-guard metadata for this entry
+	// (CR-FEAT-010, spec §9.3). Present on guarded deliveries; absent when
+	// the guard is disabled.
+	Guard *guard.Meta `json:"guard,omitempty"`
 }

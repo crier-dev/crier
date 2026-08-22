@@ -15,9 +15,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 )
 
 // AuthType enumerates supported outbound authentication schemes.
@@ -125,6 +128,11 @@ type EnvelopeMeta struct {
 	DeliveryMode string `json:"delivery_mode,omitempty"`
 	Sender       string `json:"sender,omitempty"`
 	Kind         string `json:"kind,omitempty"`
+	// Guard carries the LLM message-guard verdict for this message
+	// (CR-FEAT-010, spec §2.2/§9.3): present on every guarded delivery
+	// (allow/sanitize — blocked messages never POST), absent when the
+	// guard is disabled. Emitted as X-Crier-Guard-* headers (§7.2).
+	Guard *guard.Meta `json:"guard,omitempty"`
 }
 
 // Client performs webhook POSTs with timeout and optional HMAC signing.
@@ -152,14 +160,15 @@ type Result struct {
 }
 
 // Post sends one envelope to the endpoint through its schema template.
-// Returns the Result; never panics.
+// Returns the Result; never panics. The envelope's crier.guard metadata is
+// emitted as X-Crier-Guard-* headers (spec §7.2) when present.
 func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
 	tpl := ResolveTemplate(cfg)
 	body, err := tpl.BuildBody(cfg, env)
 	if err != nil {
 		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
-	return c.postBody(cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry)
+	return c.postBody(cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry, env.Crier.Guard)
 }
 
 // batchEnvelopeBody is the spec §4 batch payload: {"messages": [envelope, …]}.
@@ -184,12 +193,78 @@ func (c *Client) PostBatch(cfg *Config, envs []*Envelope, retry int) Result {
 		sender = envs[0].Crier.Sender
 		session = envs[0].Crier.SessionID
 	}
-	return c.postBody(cfg, body, "batch", sender, session, retry)
+	return c.postBody(cfg, body, "batch", sender, session, retry, batchGuardMeta(envs))
+}
+
+// batchGuardMeta computes the worst-case guard metadata across inner
+// envelopes (spec §7.2): any sanitize → sanitize, all allow → allow; risk
+// is the highest present; patterns are unioned; errored if any inner
+// verdict errored. Blocked messages never reach a batch, so block is not a
+// possible aggregate. Per-message verdicts remain in each inner envelope's
+// crier.guard metadata.
+func batchGuardMeta(envs []*Envelope) *guard.Meta {
+	rank := func(d guard.Decision) int {
+		switch d {
+		case guard.DecisionSanitize:
+			return 2
+		case guard.DecisionBlock:
+			return 1
+		}
+		return 0
+	}
+	riskRank := func(r guard.RiskLevel) int {
+		switch r {
+		case guard.RiskLow:
+			return 0
+		case guard.RiskMedium:
+			return 1
+		case guard.RiskHigh:
+			return 2
+		}
+		return 0
+	}
+	var worst *guard.Meta
+	for _, env := range envs {
+		if env == nil || env.Crier.Guard == nil {
+			continue
+		}
+		gm := env.Crier.Guard
+		if worst == nil || rank(gm.Decision) > rank(worst.Decision) ||
+			(rank(gm.Decision) == rank(worst.Decision) && riskRank(gm.RiskLevel) > riskRank(worst.RiskLevel)) {
+			m := *gm
+			m.Patterns = append([]string(nil), gm.Patterns...)
+			worst = &m
+		}
+	}
+	if worst == nil {
+		return nil
+	}
+	// Union of patterns across inner messages, and errored if any errored.
+	seen := make(map[string]bool)
+	union := make([]string, 0)
+	for _, env := range envs {
+		if env == nil || env.Crier.Guard == nil {
+			continue
+		}
+		if env.Crier.Guard.Errored {
+			worst.Errored = true
+		}
+		for _, p := range env.Crier.Guard.Patterns {
+			if !seen[p] {
+				seen[p] = true
+				union = append(union, p)
+			}
+		}
+	}
+	if len(union) > 0 {
+		worst.Patterns = union
+	}
+	return worst
 }
 
 // postBody performs the POST with the webhook contract headers (spec §3)
 // and classifies the response.
-func (c *Client) postBody(cfg *Config, body []byte, event, sender, session string, retry int) Result {
+func (c *Client) postBody(cfg *Config, body []byte, event, sender, session string, retry int, gm *guard.Meta) Result {
 	req, err := http.NewRequest(http.MethodPost, cfg.URL, strings.NewReader(string(body)))
 	if err != nil {
 		return Result{Err: fmt.Errorf("build request: %w", err)}
@@ -200,6 +275,28 @@ func (c *Client) postBody(cfg *Config, body []byte, event, sender, session strin
 	req.Header.Set("X-Crier-Retry", fmt.Sprintf("%d", retry))
 	if session != "" {
 		req.Header.Set("X-Crier-Session", session)
+	}
+	// LLM message-guard outcome headers (spec §7.2, CR-FEAT-010): absent
+	// when the envelope carries no guard metadata.
+	if gm != nil {
+		req.Header.Set("X-Crier-Guard-Decision", string(gm.Decision))
+		req.Header.Set("X-Crier-Guard-Risk", string(gm.RiskLevel))
+		req.Header.Set("X-Crier-Guard-Reason", percentEncode(gm.Reason))
+		if len(gm.Patterns) > 0 {
+			req.Header.Set("X-Crier-Guard-Patterns", strings.Join(gm.Patterns, ","))
+		}
+		if gm.Policy != "" {
+			req.Header.Set("X-Crier-Guard-Policy", gm.Policy)
+		}
+		if gm.Provider != "" {
+			req.Header.Set("X-Crier-Guard-Provider", gm.Provider)
+		}
+		if gm.Model != "" {
+			req.Header.Set("X-Crier-Guard-Model", gm.Model)
+		}
+		if gm.Errored {
+			req.Header.Set("X-Crier-Guard-Error", "true")
+		}
 	}
 	for k, v := range ResolveTemplate(cfg).RequestShape.Headers {
 		req.Header.Set(k, v)
@@ -246,6 +343,13 @@ var bearerToken = func(ref string) string {
 		return ""
 	}
 	return strings.TrimSpace(lookupEnv(strings.TrimPrefix(ref, "env:")))
+}
+
+// percentEncode RFC-3986-encodes a header value (spec §7.2 guard reasons):
+// QueryEscape then restore '+' → %20 (QueryEscape uses '+' for spaces,
+// which is form encoding, not RFC 3986).
+func percentEncode(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 // lookupEnv is indirection for tests.

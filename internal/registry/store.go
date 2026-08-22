@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/totalwindupflightsystems/crier/internal/guard"
 	"github.com/totalwindupflightsystems/crier/internal/webhook"
 )
 
@@ -46,6 +47,10 @@ type Handler struct {
 	// fed forwards deliveries for agents unknown on this relay to linked
 	// relays (CR-FEAT-006). Nil disables federation.
 	fed *federation.Client
+	// guard runs the LLM message-guard choke point on every delivery
+	// (CR-FEAT-010, spec §2). Nil disables the guard (tests,
+	// CR_GUARD_ENABLED=false).
+	guard guard.Filter
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -65,6 +70,19 @@ func (h *Handler) SetWebhookDriver(d *webhook.Driver) {
 // linked relays. Nil disables federation (local 404 behavior unchanged).
 func (h *Handler) SetFederationClient(c *federation.Client) {
 	h.fed = c
+}
+
+// SetGuardFilter enables the LLM message guard (CR-FEAT-010): every
+// delivery to a registered agent passes the choke point before the webhook
+// driver or inbox store sees it. Nil disables the guard (spec §2.2 — kept
+// for tests and for CR_GUARD_ENABLED=false).
+//
+// NOTE: spec §2.2 proposed a NewHandler parameter, but NewHandler is called
+// from the Bane-pending internal/registry/remote_test.go (untouchable), so
+// the setter keeps the public constructor stable — same pattern as
+// SetWebhookDriver / SetFederationClient.
+func (h *Handler) SetGuardFilter(f guard.Filter) {
+	h.guard = f
 }
 
 // SetRequireAgentSig toggles per-agent ed25519 signature enforcement.

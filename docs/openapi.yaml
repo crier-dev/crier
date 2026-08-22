@@ -218,9 +218,14 @@ paths:
                   items:
                     type: string
                   description: Advertised capabilities
+                guard:
+                  $ref: "#/components/schemas/GuardAgentConfig"
+                  description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
       responses:
         "201":
           description: Agent registered
+        "400":
+          description: "Invalid request body, webhook config, or guard config (guard.policies required, policy id 1..64 runes, action allow|block|sanitize, block_risk low|medium|high, providers ≤ 5, custom requires base_url + api_key_ref, deepseek preset forbids thinking_enabled)"
         "409":
           description: Agent ID already registered
 
@@ -355,6 +360,29 @@ paths:
     post:
       operationId: inboxDeliver
       summary: Deliver a message to an agent's inbox
+      description: |
+        Delivers a message to the target agent. When the agent has a webhook
+        endpoint registered, the message is POSTed there instead of the inbox
+        (CR-FEAT-001; delivery_mode blocking|async|batch per WEBHOOK-DELIVERY.md).
+
+        When the target agent has a guard policy (CR-FEAT-010), the message is
+        classified by the LLM message guard before ANY delivery: allow →
+        delivered as today (guard metadata rides in the envelope `crier.guard`
+        and — for webhook deliveries — the X-Crier-Guard-* headers); sanitize →
+        delivered with the payload replaced by the quarantine notice (§3.5);
+        block → 403 GUARD_BLOCKED, never queued/stored/POSTed. Guard errors
+        fail open (delivered, X-Crier-Guard-Error: true) unless the policy is
+        fail_closed (→ 403 with the error-path verdict).
+
+        Outbound webhook POSTs carry, when guarded (spec §7.2):
+        X-Crier-Guard-Decision (allow|sanitize), X-Crier-Guard-Risk,
+        X-Crier-Guard-Reason (RFC 3986 percent-encoded),
+        X-Crier-Guard-Patterns (comma-joined), X-Crier-Guard-Policy,
+        X-Crier-Guard-Provider, X-Crier-Guard-Model, X-Crier-Guard-Error
+        (true on the guard-error path). Batch POSTs carry the worst-case
+        verdict across inner messages; per-message verdicts stay in each
+        inner envelope's crier.guard metadata. Redelivery and batch flush
+        never re-run the guard — the verdict rides with the message.
       parameters:
         - name: id
           in: path
@@ -395,8 +423,17 @@ paths:
                   id:
                     type: string
                     description: Assigned message id
+                  guard:
+                    $ref: "#/components/schemas/GuardVerdictMeta"
+                    description: "Guard verdict metadata when the message was not plain-allowed (sanitize, or errored fail-open) — visibility for async senders (CR-FEAT-010, spec §9.3)"
         "400":
           description: Invalid request body or store input
+        "403":
+          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuardBlockedResponse"
         "404":
           description: Agent not found
     get:
@@ -440,7 +477,7 @@ paths:
                 properties:
                   messages:
                     type: array
-                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use
+                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use. Entries carry guard metadata (CR-FEAT-010) when the delivery was guarded.
                     items:
                       $ref: "#/components/schemas/InboxEntry"
                   lease_id:
@@ -608,3 +645,155 @@ components:
         acked:
           type: boolean
           description: Whether the message has been acknowledged
+        guard:
+          $ref: "#/components/schemas/GuardVerdictMeta"
+          description: "LLM message-guard verdict metadata (CR-FEAT-010) — present on guarded deliveries, absent when the guard is disabled; a sanitized entry's payload is the quarantine notice and the original rides here in quarantined_payload"
+    GuardAgentConfig:
+      type: object
+      required: [policies]
+      description: "LLM message-guard configuration carried on an agent registration (Agent.guard, CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1). At least one policy required. API keys are never part of it — only env: refs."
+      properties:
+        policies:
+          type: array
+          minItems: 1
+          description: "Policies in resolution order — v1 resolves the FIRST policy; channel_match glob resolution lands with CR-FEAT-011"
+          items:
+            $ref: "#/components/schemas/GuardPolicy"
+    GuardPolicy:
+      type: object
+      required: [id]
+      description: "One guard policy. Inline minimal form: {id, fail_closed, providers:[{model, base_url, api_key_ref}]}; a bare id naming a built-in named policy (e.g. \"default\") also resolves."
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Policy id — unique within the agent
+        channel_match:
+          type: string
+          maxLength: 256
+          description: "Channel glob (spec §4.2) — resolution lands with CR-FEAT-011; \"\" or \"*\" = agent default"
+        checks:
+          $ref: "#/components/schemas/GuardChecks"
+        thresholds:
+          $ref: "#/components/schemas/GuardThresholds"
+        action:
+          type: string
+          enum: [allow, block, sanitize]
+          description: "Guard-error path action when fail_closed (default block, spec §3.6)"
+        fail_closed:
+          type: boolean
+          default: false
+          description: "true = guard errors block the message (apply action); false (default) = fail open (deliver with guard_error metadata)"
+        providers:
+          type: array
+          maxItems: 5
+          description: "Provider failover chain — empty = [deepseek preset] (deepseek-v4-flash, thinking disabled)"
+          items:
+            $ref: "#/components/schemas/GuardProviderSpec"
+        kanban:
+          $ref: "#/components/schemas/GuardKanbanConfig"
+    GuardChecks:
+      type: object
+      description: "Attack-class toggles (spec §4.1) — false removes the class from the prompt and suppresses its prematch patterns; absent = true"
+      properties:
+        instruction_injection:
+          type: boolean
+        jailbreak:
+          type: boolean
+        masquerade:
+          type: boolean
+        structured_object:
+          type: boolean
+    GuardThresholds:
+      type: object
+      description: "Deterministic escalation caps (spec §3.4) — the LLM can never under-block below block_risk"
+      properties:
+        block_risk:
+          type: string
+          enum: [low, medium, high]
+          default: high
+    GuardProviderSpec:
+      type: object
+      required: [provider]
+      description: "One provider in the failover chain (spec §5.1). Named presets: deepseek (default base https://api.deepseek.com/v1, env:DEEPSEEK_API_KEY, deepseek-v4-flash — thinking forbidden), groq (env:GROQ_API_KEY), nvidia (env:NVIDIA_API_KEY). custom requires base_url + api_key_ref."
+      properties:
+        provider:
+          type: string
+          enum: [deepseek, groq, nvidia, custom]
+        model:
+          type: string
+          description: Empty = preset default model
+        base_url:
+          type: string
+          description: Empty = preset default base URL (required for custom)
+        api_key_ref:
+          type: string
+          description: "env:VAR reference — resolved at call time, never stored inline (required for custom)"
+        thinking_enabled:
+          type: boolean
+          default: false
+          description: "Adds the thinking field to the request; hard-forbidden on the deepseek preset (spec §5.2)"
+    GuardKanbanConfig:
+      type: object
+      description: "CR-FEAT-014 output option — accepted on the wire, consumed by CR-FEAT-014"
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        on:
+          type: string
+          enum: [block, all]
+          default: block
+        assignee:
+          type: string
+        board_url:
+          type: string
+    GuardVerdictMeta:
+      type: object
+      description: "Per-message guard verdict metadata (spec §3.7) — carried on webhook envelope crier.guard, inbox entries, deliver responses, and emitted as X-Crier-Guard-* headers"
+      required: [decision, risk_level, reason]
+      properties:
+        decision:
+          type: string
+          enum: [allow, block, sanitize]
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        reason:
+          type: string
+          description: "Justification — guard_error: … when the verdict came from the error path"
+        matched_patterns:
+          type: array
+          items:
+            type: string
+          description: "Attack-class identifiers / pattern names (spec §1.1, §6.4)"
+        policy:
+          type: string
+          description: Policy id
+        provider:
+          type: string
+          description: Provider that produced the verdict
+        model:
+          type: string
+          description: Model that produced the verdict
+        errored:
+          type: boolean
+          description: "true when the verdict came from the guard-error path (§3.6)"
+        quarantined:
+          type: boolean
+          description: "true when the message was sanitized — the delivered payload is the quarantine notice"
+        quarantined_payload:
+          type: string
+          format: byte
+          description: "base64(std) of the ORIGINAL payload when sanitized (spec §3.5) — recipient's choice whether to recover it"
+    GuardBlockedResponse:
+      type: object
+      required: [error, guard]
+      description: "Uniform 403 body for guard-blocked deliveries (spec §2.1/§9.3) — every delivery mode"
+      properties:
+        error:
+          type: string
+          enum: [GUARD_BLOCKED]
+        guard:
+          $ref: "#/components/schemas/GuardVerdictMeta"
