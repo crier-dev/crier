@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -218,13 +219,34 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		DurationMs: time.Since(start).Milliseconds(),
 	}
 	if res.Decision == DecisionSanitize {
-		// Quarantine (§3.5): the delivered payload is replaced by the
-		// notice; the original rides in Meta.QuarantinedPayload (base64).
-		// Spec §12.1: the LLM never rewrites payload content — a
-		// sanitized_payload field on the verdict (ticket latitude) is
-		// ignored; the server builds the delivered payload itself.
-		res.Quarantined = true
-		res.DeliveredPayload, res.QuarantinedPayload = quarantinePayload(in, res.Reason)
+		// Sanitize = LLM rewrite + DELIVER (Bane directive 2026-08-22;
+		// spec §3.5/§12.1 amended): the guard LLM rewrites the message with
+		// the FIXED neutralization prompt and the rewritten payload is
+		// delivered in place of the original. The verdict's own
+		// sanitized_payload field stays ignored (untrusted — we generate our
+		// own rewrite); the original rides in Meta.QuarantinedPayload (base64)
+		// for provenance. Rewrite unavailable → never deliver the original:
+		// fail-closed → block, fail-open → deterministic quarantine notice.
+		rewritten, block, rerr := g.rewritePayload(ctx, in, policy, res.Reason)
+		switch {
+		case block:
+			res.Decision = DecisionBlock
+			res.RiskLevel = RiskHigh
+			res.Reason = "no benign content to preserve; blocked instead of rewritten"
+			res.Patterns = append(res.Patterns, "no_benign_content")
+		case rerr == nil:
+			res.Sanitized = true
+			res.DeliveredPayload = rewritten
+			res.QuarantinedPayload = base64.StdEncoding.EncodeToString(in.Payload)
+			res.Reason = "sanitized: " + res.Reason + " (payload rewritten)"
+		case policy.FailClosed:
+			res.Decision = DecisionBlock
+			res.RiskLevel = RiskHigh
+			res.Reason = "sanitize rewrite failed; fail_closed: " + rerr.Error()
+		default:
+			res.Quarantined = true
+			res.DeliveredPayload, res.QuarantinedPayload = quarantinePayload(in, res.Reason+" (rewrite unavailable)")
+		}
 	}
 	g.record(res)
 	g.audit(agentID, in, res, len(in.Payload))
@@ -332,6 +354,7 @@ func (g *Guard) audit(agentID string, in Input, r Result, payloadBytes int) {
 		"patterns", strings.Join(r.Patterns, ","),
 		"errored", r.Errored,
 		"quarantined", r.Quarantined,
+		"sanitized", r.Sanitized,
 		"reason", r.Reason,
 		"ms", r.DurationMs,
 		"payload_bytes", payloadBytes,

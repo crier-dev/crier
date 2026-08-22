@@ -49,6 +49,7 @@ type Result struct {
 	Model       string    `json:"model,omitempty"`
 	Errored     bool      `json:"errored,omitempty"`
 	Quarantined bool      `json:"quarantined,omitempty"`
+	Sanitized   bool      `json:"sanitized,omitempty"`
 	DurationMs  int64     `json:"duration_ms,omitempty"`
 	// MessageID is the guarded message's id (from Input). Internal
 	// plumbing: surfaced on Meta.MessageID (spec §8.2); never serialized
@@ -80,6 +81,7 @@ type Meta struct {
 	Model       string    `json:"model,omitempty"`
 	Errored     bool      `json:"errored,omitempty"`
 	Quarantined bool      `json:"quarantined,omitempty"`
+	Sanitized   bool      `json:"sanitized,omitempty"`
 	// QuarantinedPayload is base64(std) of the original payload when the
 	// message was sanitized (decision=sanitize). Empty otherwise.
 	QuarantinedPayload string `json:"quarantined_payload,omitempty"`
@@ -98,6 +100,7 @@ func (r Result) Meta() Meta {
 		Model:              r.Model,
 		Errored:            r.Errored,
 		Quarantined:        r.Quarantined,
+		Sanitized:          r.Sanitized,
 		QuarantinedPayload: r.QuarantinedPayload,
 	}
 }
@@ -114,8 +117,9 @@ func (m Meta) Result() Result {
 		PolicyID:           m.Policy,
 		Provider:           m.Provider,
 		Model:              m.Model,
-		Errored:            m.Errored,
-		Quarantined:        m.Quarantined,
+		Errored:           m.Errored,
+		Quarantined:       m.Quarantined,
+		Sanitized:         m.Sanitized,
 		QuarantinedPayload: m.QuarantinedPayload,
 	}
 }

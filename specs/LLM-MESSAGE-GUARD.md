@@ -66,7 +66,7 @@ The guard is a filter, not a gatekeeper. Availability of the bus is a first-clas
   from `policy.action`, default `block`). Use for high-sensitivity channels.
 - The guard LLM's output is **advisory and schema-validated**; the server applies a deterministic
   escalation table (§3.4) and a deterministic sanitize transformation (§3.5). No LLM output can
-  make the server do anything outside `allow` / `block` / deterministic quarantine.
+  make the server do anything outside `allow` / `block` / `sanitize` (rewrite or quarantine fallback).
 
 ## 2. Guard placement
 
@@ -112,7 +112,7 @@ through this single call site, so per-message verdicts are computed exactly once
 | Verdict | Webhook modes | Inbox store | Sender-facing deliver response |
 |---|---|---|---|
 | `allow` | POST proceeds unchanged | entry stored unchanged | existing contract (200/202) |
-| `sanitize` | POST proceeds with quarantined payload (§3.5); `crier.guard` metadata + X-Crier-Guard-* headers present | entry stored with quarantined payload + guard metadata | existing contract |
+| `sanitize` | POST proceeds with the rewritten payload (§3.5); `crier.guard` metadata (`sanitized: true`, original base64) + X-Crier-Guard-* headers present | entry stored with rewritten payload + guard metadata | existing contract |
 | `block` | **no POST, no enqueue, no buffer append** | **not stored** | **403** `{"error":"GUARD_BLOCKED","guard":{…verdict…}}` |
 | guard error | policy fallback decision (§3.6) — allow or block; `crier.guard.errored: true` | same | per fallback decision |
 
@@ -248,8 +248,8 @@ Respond with ONE JSON object exactly matching this schema — JSON only, no mark
 explanation outside the object:
 {"decision": "allow"|"block"|"sanitize", "risk_level": "low"|"medium"|"high",
  "reason": "short justification", "matched_patterns": ["..." ]}
-Decision semantics: allow = deliver as-is; sanitize = deliver with the payload quarantined
-(recipient sees a notice, original withheld); block = do not deliver.
+Decision semantics: allow = deliver as-is; sanitize = deliver the LLM-rewritten payload
+(§3.5; original withheld except base64 provenance); block = do not deliver.
 ```
 
 When a policy disables a check (§4.2), the corresponding attack-class paragraph is removed from
@@ -269,30 +269,43 @@ The LLM proposes `(decision, risk_level)`; the policy's `thresholds.block_risk` 
 over-block (an operator who wants "LLM allow is final" sets `block_risk: "high"` and accepts LLM
 block verdicts as-is — there is no un-block).
 
-### 3.5 Sanitize transformation (deterministic, server-side)
+### 3.5 Sanitize transformation (LLM rewrite + deliver; deterministic fallbacks)
 
-**Design decision: the LLM never rewrites payload content.** Rewriting is nondeterministic and is
-itself an injection vector (the rewrite could smuggle content the classifier missed). `sanitize`
-means: the payload is **quarantined** by the server:
+**Design decision (Bane directive 2026-08-22, supersedes the wave-1 quarantine-only reading):**
+`sanitize` = the guard LLM **rewrites** the message with a FIXED, constant system-side
+neutralization prompt, and the **rewritten payload is delivered** — the recipient still gets
+the message, minus the instructions directed at it. The rewrite is a second LLM call made
+only on a sanitize verdict; the message content never reaches the prompt (it is constant).
+The verdict's own `sanitized_payload` field (if the LLM smuggles one into the verdict) stays
+**ignored** — the server generates its own rewrite; LLM-authored rewrites are untrusted.
+
+Rewrite mechanics:
 
 1. The original payload bytes are base64-encoded into `crier.guard.quarantined_payload`
-   (base64 std encoding) on the envelope.
-2. The delivered `payload` is replaced with:
-
-```json
-{
-  "crier_guard": {
-    "quarantined": true,
-    "message_id": "<message_id>",
-    "sender": "<sender>",
-    "reason": "<guard reason>"
-  }
-}
-```
-
-3. `guard.meta.quarantined: true` is set; the receiving agent can recover the original via
-   `crier.guard.quarantined_payload` if its own policy allows it (the recipient's choice — the
-   guard's job is to make quarantine visible, not irreversible).
+   (base64 std encoding) on the envelope — provenance, always present on sanitize.
+2. The rewrite call asks the LLM to strip all instructions directed at the receiving agent
+   while preserving benign intent, questions, or data — and to preserve the original
+   structure (a JSON payload must come back as a JSON object of the same shape).
+3. The rewrite output is **validated before delivery**:
+   - must parse (tolerated: code fences stripped, first balanced JSON object);
+   - `{"rewritten": null, "block": true}` → no benign content → escalate to `block`;
+   - empty output → rewrite failure (fallback below);
+   - must be valid JSON — non-JSON rewrites are wrapped `{"text": "<rewrite>"}` to keep the
+     delivery contract (payloads are JSON);
+   - must not exceed the payload cap; must not re-trip the deterministic pattern scan.
+4. On success: delivered `payload` = the rewritten bytes; `guard.meta.sanitized: true`;
+   `guard.meta.quarantined: false`; `X-Crier-Guard-Decision: sanitize` header on the
+   outbound POST; audit line `sanitized=true`. The rewritten payload is DATA with
+   provenance — the recipient sees exactly that the content was rewritten.
+5. **Rewrite unavailable** (LLM error, timeout, circuit open, validation failure): the
+   original is NEVER delivered on a sanitize decision. Fail-closed policy → escalate to
+   `block`; fail-open policy → deterministic quarantine fallback:
+   - delivered `payload` replaced with a notice object:
+     `{"crier_guard": {"quarantined": true, "message_id": ..., "sender": ..., "reason": ...}}`
+   - `guard.meta.quarantined: true`; the recipient may recover the original via
+     `crier.guard.quarantined_payload` if its own policy allows it.
+6. Attack-only payloads (no benign content) never reach the rewrite — the verdict call's
+   `block` covers them; the rewrite's `block` branch is the second net.
 
 ### 3.6 Guard error handling (LLM/provider failures)
 
@@ -702,7 +715,7 @@ when `decision != allow` or `errored`:
 ```
 guard msg=<message_id> target=<agent_id> policy=<policy_id> chan=<session_id>/<thread_id>
 kind=<kind> decision=<allow|block|sanitize> risk=<low|medium|high> provider=<p> model=<m>
-patterns=<comma-joined> errored=<true|false> quarantined=<true|false>
+patterns=<comma-joined> errored=<true|false> quarantined=<true|false> sanitized=<true|false>
 reason="<reason>" ms=<duration_ms> payload_bytes=<N>
 ```
 
@@ -934,7 +947,11 @@ land with CR-FEAT-010 and grow through 014.
 None outstanding for implementation. Decisions this spec made where the ticket left latitude
 (flagged for the dispatcher):
 
-1. **Sanitize = deterministic server-side quarantine** (no LLM content rewriting) — §3.5.
+1. **Sanitize = LLM rewrite + deliver** (Bane directive 2026-08-22) — a second guard-LLM
+   call with a FIXED neutralization prompt rewrites the message; the rewritten payload is
+   delivered with `sanitized: true` + provenance (original base64). Rewrite failures fall
+   back to deterministic quarantine (fail-open) or block (fail-closed); the original is
+   never delivered on a sanitize decision. See §3.5.
 2. **Blocked messages → uniform 403 GUARD_BLOCKED** on the deliver call in every mode; no
    synthetic ERROR frame to the sender in v1 — §2.1.
 3. **Mesh WS frames out of guard scope v1** (trusted native-channel peers; HTTP surfaces are the
