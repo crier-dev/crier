@@ -128,6 +128,7 @@ func TestClientComplete_ModelRejectedOn400(t *testing.T) {
 func TestClientComplete_ProviderErrors(t *testing.T) {
 	for name, status := range map[string]int{
 		"500": http.StatusInternalServerError,
+		"401": http.StatusUnauthorized,
 		"429": http.StatusTooManyRequests,
 		"503": http.StatusServiceUnavailable,
 	} {

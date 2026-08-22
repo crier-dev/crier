@@ -287,3 +287,110 @@ func TestRouter_DeepSeekPresetDefaults(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// ── CR-FEAT-012: request building per provider preset ───────────────────
+
+// TestRouter_PresetRequestBuilding proves the preset resolution contract
+// (spec §5.2/§5.4): a policy naming a preset with empty base_url /
+// api_key_ref / model resolves the preset's defaults — URL, model, and the
+// env:VAR key ref — and thinking stays OFF unless the policy opts in. The
+// preset base URL itself is overridden to a local mock (the router's
+// base_url override path is the same one operators use for mirrors), so
+// the assertions are: Authorization header from the env ref, model from
+// the preset table, /chat/completions path, no thinking field.
+func TestRouter_PresetRequestBuilding(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string // want model (preset default or explicit)
+		envKey   string // env var the preset's api_key_ref resolves
+		envVal   string
+	}{
+		{"deepseek", "deepseek", "deepseek-v4-flash", "DEEPSEEK_API_KEY", "ds-key"},
+		{"groq default model", "groq", "gpt-oss-120b", "GROQ_API_KEY", "gq-key"},
+		{"nvidia default model", "nvidia", "gemma-4-31b", "NVIDIA_API_KEY", "nv-key"},
+		{"groq explicit model", "groq", "gpt-oss-20b", "GROQ_API_KEY", "gq-key"},
+		{"nvidia explicit model", "nvidia", "deepseek-v4-flash-0731", "NVIDIA_API_KEY", "nv-key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, srv := newMockLLM(t, 0, verdictAllowJSON)
+			env := envMap{tc.envKey: tc.envVal}
+			r := NewRouter(RouterOptions{Timeout: 5 * time.Second, LookupEnv: env.get})
+			spec := ProviderSpec{Provider: tc.provider, BaseURL: srv.URL} // URL override to local mock; model+key from preset
+			if tc.name == "groq explicit model" || tc.name == "nvidia explicit model" {
+				spec.Model = tc.model
+			}
+			_, model, _, err := r.Check(context.Background(), policyWith(spec), "sys", "user")
+			if err != nil {
+				t.Fatalf("Check: %v", err)
+			}
+			if model != tc.model {
+				t.Fatalf("model = %q, want %q (preset default)", model, tc.model)
+			}
+			// Auth header from the preset's env:VAR key ref.
+			if m.lastAuth != "Bearer "+tc.envVal {
+				t.Fatalf("auth = %q, want Bearer %s (from env:%s)", m.lastAuth, tc.envVal, tc.envKey)
+			}
+			// OpenAI-compatible chat-completions path.
+			if m.lastPath != "/chat/completions" {
+				t.Fatalf("path = %q, want /chat/completions", m.lastPath)
+			}
+			// thinking_enabled=false → NO thinking field in the body.
+			if _, has := m.body()["thinking"]; has {
+				t.Fatal("thinking field present with thinking disabled")
+			}
+		})
+	}
+}
+
+// TestRouter_DeepSeekBaseURLOption proves CR_GUARD_DEEPSEEK_BASE_URL
+// (RouterOptions.DeepSeekBaseURL) overrides the deepseek preset's default
+// URL (spec §5.2) — used for mirrors/proxies.
+func TestRouter_DeepSeekBaseURLOption(t *testing.T) {
+	m, srv := newMockLLM(t, 0, verdictAllowJSON)
+	env := envMap{"DEEPSEEK_API_KEY": "ds-key"}
+	r := NewRouter(RouterOptions{Timeout: 5 * time.Second, DeepSeekBaseURL: srv.URL, LookupEnv: env.get})
+	// Implicit [deepseek preset] — the option-rewritten base URL is used.
+	_, model, _, err := r.Check(context.Background(), BuiltinDefaultPolicy(), "sys", "user")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if model != "deepseek-v4-flash" {
+		t.Fatalf("model = %q", model)
+	}
+	if m.lastAuth != "Bearer ds-key" {
+		t.Fatalf("auth = %q", m.lastAuth)
+	}
+	if !strings.HasSuffix(m.lastPath, "/chat/completions") {
+		t.Fatalf("path = %q", m.lastPath)
+	}
+}
+
+// TestRouter_Unauthorized401FailsOver: a 401 on the primary provider is a
+// retryable provider failure (spec §5.4) — one retry, then failover to the
+// fallback; the fallback's verdict wins.
+func TestRouter_Unauthorized401FailsOver(t *testing.T) {
+	h1, s1 := newCountingServer(http.StatusUnauthorized, "")
+	h2, s2 := newCountingServer(0, verdictAllowJSON)
+	env := envMap{"K1": "k1", "K2": "k2"}
+	r := NewRouter(RouterOptions{Timeout: 5 * time.Second, LookupEnv: env.get})
+	p := policyWith(
+		ProviderSpec{Provider: "custom", BaseURL: s1.URL, APIKeyRef: "env:K1", Model: "m1"},
+		ProviderSpec{Provider: "custom", BaseURL: s2.URL, APIKeyRef: "env:K2", Model: "m2"},
+	)
+	provider, model, _, err := r.Check(context.Background(), p, "sys", "user")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if provider != "custom" || model != "m2" {
+		t.Fatalf("provider/model = %s/%s, want custom/m2 (fallback)", provider, model)
+	}
+	// 401 → one retry (250ms backoff) → failover.
+	if n := h1.count(); n != 2 {
+		t.Errorf("provider 1 request count = %d, want 2 (attempt + retry)", n)
+	}
+	if n := h2.count(); n != 1 {
+		t.Errorf("provider 2 request count = %d, want 1", n)
+	}
+}

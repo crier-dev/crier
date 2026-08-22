@@ -401,3 +401,93 @@ func TestGuard_ErrorPathDoesNotPanicWithNilInput(t *testing.T) {
 	}
 	_ = res.Meta()
 }
+
+func TestGuard_ServerDefaultPolicyFromEnv(t *testing.T) {
+	// CR_GUARD_DEFAULT_POLICY (spec §9.1): the server-wide default applies
+	// when the agent has no guard config — its id must surface in results.
+	_, srv := newMockLLM(t, 0, verdictAllowJSON)
+	g, err := New(Options{
+		Timeout:           5 * time.Second,
+		MaxConcurrent:     8,
+		CircuitThreshold:  10,
+		DefaultPolicyJSON: `{"id":"env-default","providers":[{"provider":"custom","model":"env-model","base_url":"` + srv.URL + `","api_key_ref":"env:K"}]}`,
+		LookupEnv:         envMap{"K": "k"}.get,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := g.Check(context.Background(), "a", nil, Input{MessageID: "m1", SessionID: "sess", Payload: []byte(`{"x":1}`)})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.PolicyID != "env-default" {
+		t.Fatalf("policy = %q, want env-default", res.PolicyID)
+	}
+	if res.Provider != "custom" || res.Model != "env-model" {
+		t.Fatalf("provider/model = %s/%s, want custom/env-model", res.Provider, res.Model)
+	}
+}
+
+func TestGuard_InvalidServerDefaultFailsFast(t *testing.T) {
+	// A broken CR_GUARD_DEFAULT_POLICY must fail New, never fail open
+	// silently (spec §9.1).
+	if _, err := New(Options{DefaultPolicyJSON: `{not json`}); err == nil {
+		t.Fatal("New with garbage default policy: want error")
+	}
+	if _, err := New(Options{DefaultPolicyJSON: `{"id":"x","action":"nuke"}`}); err == nil {
+		t.Fatal("New with invalid default policy: want error")
+	}
+}
+
+func TestCheck_PerChannelOverride(t *testing.T) {
+	// Spec §4.3 example: [b-strict session:ops-*, b-default *] — the
+	// channel override wins for ops-* sessions, the agent default for
+	// everything else. Each policy names a DIFFERENT provider so the
+	// winning policy is observable in the result's provider/model.
+	m, srv := newMockLLM(t, 0, verdictAllowJSON)
+	g, _ := newTestGuard(t, envMap{"K1": "k1", "K2": "k2"}, m, srv)
+	cfg := &AgentGuardConfig{Policies: []Policy{
+		{ID: "b-strict", ChannelMatch: "session:ops-*", Providers: []ProviderSpec{{Provider: "custom", Model: "strict-model", BaseURL: srv.URL, APIKeyRef: "env:K1"}}},
+		{ID: "b-default", ChannelMatch: "*", Providers: []ProviderSpec{{Provider: "custom", Model: "default-model", BaseURL: srv.URL, APIKeyRef: "env:K2"}}},
+	}}
+	res, err := g.Check(context.Background(), "agent-b", cfg, Input{MessageID: "m1", SessionID: "ops-42", Payload: []byte(`{"t":"hi"}`)})
+	if err != nil {
+		t.Fatalf("Check ops-42: %v", err)
+	}
+	if res.PolicyID != "b-strict" || res.Model != "strict-model" {
+		t.Fatalf("ops-42: policy=%s model=%s, want b-strict/strict-model", res.PolicyID, res.Model)
+	}
+	res, err = g.Check(context.Background(), "agent-b", cfg, Input{MessageID: "m2", SessionID: "other-1", Payload: []byte(`{"t":"hi"}`)})
+	if err != nil {
+		t.Fatalf("Check other-1: %v", err)
+	}
+	if res.PolicyID != "b-default" || res.Model != "default-model" {
+		t.Fatalf("other-1: policy=%s model=%s, want b-default/default-model", res.PolicyID, res.Model)
+	}
+	// No session → agent default.
+	res, err = g.Check(context.Background(), "agent-b", cfg, Input{MessageID: "m3", Payload: []byte(`{"t":"hi"}`)})
+	if err != nil {
+		t.Fatalf("Check unchanneled: %v", err)
+	}
+	if res.PolicyID != "b-default" {
+		t.Fatalf("unchanneled: policy=%s, want b-default", res.PolicyID)
+	}
+}
+
+func TestCheck_ThreadChannelOverride(t *testing.T) {
+	// Thread-key resolution through the full orchestration: a thread: glob
+	// matches when only thread_id is present on the envelope.
+	m, srv := newMockLLM(t, 0, verdictAllowJSON)
+	g, _ := newTestGuard(t, envMap{"K": "k"}, m, srv)
+	cfg := &AgentGuardConfig{Policies: []Policy{
+		{ID: "t-strict", ChannelMatch: "thread:ops-*", Providers: []ProviderSpec{{Provider: "custom", Model: "strict-model", BaseURL: srv.URL, APIKeyRef: "env:K"}}},
+		{ID: "t-default", ChannelMatch: "*", Providers: []ProviderSpec{{Provider: "custom", Model: "default-model", BaseURL: srv.URL, APIKeyRef: "env:K"}}},
+	}}
+	res, err := g.Check(context.Background(), "agent", cfg, Input{MessageID: "m1", ThreadID: "ops-9", Payload: []byte(`{"x":1}`)})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.PolicyID != "t-strict" || res.Model != "strict-model" {
+		t.Fatalf("thread ops-9: policy=%s model=%s, want t-strict/strict-model", res.PolicyID, res.Model)
+	}
+}

@@ -1,7 +1,10 @@
 package guard
 
 import (
+	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -160,25 +163,85 @@ func BuiltinDefaultPolicy() Policy {
 // NamedPolicies is the in-repo named policy map (v1). A policy whose id
 // names an entry here and carries no inline behavior resolves to the named
 // policy — the brief's "named policy from a simple in-repo policy map".
-// CR-FEAT-011 extends this with the CR_GUARD_DEFAULT_POLICY env default.
+// CR_FEAT-011 extends this with channel_match resolution and the
+// CR_GUARD_DEFAULT_POLICY env server default.
 var NamedPolicies = map[string]Policy{
 	"default": BuiltinDefaultPolicy(),
 }
 
-// ResolvePolicy picks the policy for one delivery (spec §4.2). v1
-// (CR-FEAT-010): the FIRST policy in the agent's list order wins; a bare
-// policy id resolves through NamedPolicies; no agent config → the built-in
-// default. channel_match glob resolution and CR_GUARD_DEFAULT_POLICY
-// arrive with CR-FEAT-011.
-func ResolvePolicy(agentGuard *AgentGuardConfig) Policy {
+// ResolvePolicy picks the policy for one delivery (spec §4.2):
+//
+//  1. First agent policy in list order whose channel_match matches the
+//     envelope's session/thread keys wins ("" or "*" = the agent default;
+//     a bare id resolves through NamedPolicies).
+//  2. No agent policy matched → serverDefault (the CR_GUARD_DEFAULT_POLICY
+//     env policy, or the built-in default when that is also unset).
+//
+// Match rule: channel_match is a Go path.Match glob (`*`, `?`, `[class]`),
+// matched against `session:<session_id>` when session_id is non-empty and
+// against `thread:<thread_id>` when thread_id is non-empty; a policy
+// matches if the glob matches EITHER key. A bare glob (no session:/thread:
+// prefix) matches session_id only. A message with no session/thread context
+// matches only default policies ("", "*") — a channel-glob-only policy
+// never matches an unchanneled message.
+func ResolvePolicy(agentGuard *AgentGuardConfig, serverDefault Policy, sessionID, threadID string) Policy {
 	if agentGuard != nil && len(agentGuard.Policies) > 0 {
-		p := agentGuard.Policies[0]
-		if named, ok := NamedPolicies[p.ID]; ok && p.isBare() {
-			return named
+		for _, p := range agentGuard.Policies {
+			if !channelMatches(p.ChannelMatch, sessionID, threadID) {
+				continue
+			}
+			if named, ok := NamedPolicies[p.ID]; ok && p.isBare() {
+				return named
+			}
+			return p
 		}
-		return p
+	}
+	if serverDefault.ID != "" {
+		return serverDefault
 	}
 	return BuiltinDefaultPolicy()
+}
+
+// channelMatches applies the spec §4.2 match rule to one policy glob.
+func channelMatches(match, sessionID, threadID string) bool {
+	if match == "" || match == "*" {
+		return true // agent default policy — matches every channel
+	}
+	if strings.HasPrefix(match, "session:") || strings.HasPrefix(match, "thread:") {
+		if sessionID != "" && globMatch(match, "session:"+sessionID) {
+			return true
+		}
+		if threadID != "" && globMatch(match, "thread:"+threadID) {
+			return true
+		}
+		return false
+	}
+	// Bare glob (no session:/thread: prefix) matches session_id only.
+	return sessionID != "" && globMatch(match, sessionID)
+}
+
+// globMatch applies path.Match; a malformed pattern never matches.
+func globMatch(pattern, name string) bool {
+	ok, err := path.Match(pattern, name)
+	return err == nil && ok
+}
+
+// ParsePolicy parses and validates a JSON Policy (the
+// CR_GUARD_DEFAULT_POLICY env, spec §9.1). A bare id resolves through
+// NamedPolicies. A broken policy fails fast — a broken server default must
+// not silently fail open.
+func ParsePolicy(raw string) (Policy, error) {
+	var p Policy
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return Policy{}, fmt.Errorf("guard default policy: parse: %w", err)
+	}
+	if err := p.validate(); err != nil {
+		return Policy{}, fmt.Errorf("guard default policy: %w", err)
+	}
+	if named, ok := NamedPolicies[p.ID]; ok && p.isBare() {
+		return named, nil
+	}
+	return p, nil
 }
 
 // isBare reports whether a policy carries only an id (no inline behavior).

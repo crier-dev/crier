@@ -341,6 +341,10 @@ paths:
                       type: integer
                       minimum: 0
                       maximum: 120000
+                guard:
+                  $ref: "#/components/schemas/GuardAgentConfig"
+                  nullable: true
+                  description: "LLM message-guard config (CR-FEAT-011, spec §9.2) — an object replaces the whole guard config (validated, 400 on violation); explicit null removes the guard (agent falls back to the server default policy); absent leaves it unchanged"
       responses:
         "200":
           description: Agent updated — the full agent object is returned
@@ -400,6 +404,25 @@ paths:
                 payload:
                   type: object
                   description: Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve
+                sender:
+                  type: string
+                  description: Originating agent id (webhook envelope metadata)
+                session_id:
+                  type: string
+                  description: "Conversation context for session-aware delivery (CR-FEAT-004) — the guard resolves per-channel policies against it (spec §4.2)"
+                thread_id:
+                  type: string
+                  description: "Thread context for session-aware delivery (CR-FEAT-004) — deliver-API passthrough of the envelope's thread_id (spec §9.3); the guard resolves per-channel policies against it (spec §4.2)"
+                delivery_mode:
+                  type: string
+                  enum: [blocking, async, batch]
+                  description: Overrides the agent's webhook default delivery mode
+                timeout_ms:
+                  type: integer
+                  description: Bounds a blocking delivery (default 30000)
+                request_id:
+                  type: string
+                  description: Sender's correlation id, echoed in the reply
                 kind:
                   type: string
                   description: Envelope kind (spec §3, §7) — message (default), configure (self-configuration directive), or configure_ack (agent's acknowledgement). Webhook deliveries carry it in the envelope crier.kind field and the X-Crier-Event header unchanged.
@@ -651,12 +674,12 @@ components:
     GuardAgentConfig:
       type: object
       required: [policies]
-      description: "LLM message-guard configuration carried on an agent registration (Agent.guard, CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1). At least one policy required. API keys are never part of it — only env: refs."
+      description: "LLM message-guard configuration carried on an agent registration (Agent.guard, CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1). At least one policy required. API keys are never part of it — only env: refs. Resolution (spec §4.2, CR-FEAT-011): first policy in list order whose channel_match matches the message's session/thread wins; a policy with channel_match \"\" or \"*\" is the agent default (list it last); no match → the server default (CR_GUARD_DEFAULT_POLICY env) → the built-in default."
       properties:
         policies:
           type: array
           minItems: 1
-          description: "Policies in resolution order — v1 resolves the FIRST policy; channel_match glob resolution lands with CR-FEAT-011"
+          description: "Policies in resolution order (spec §4.2) — first channel_match match wins"
           items:
             $ref: "#/components/schemas/GuardPolicy"
     GuardPolicy:
@@ -672,7 +695,7 @@ components:
         channel_match:
           type: string
           maxLength: 256
-          description: "Channel glob (spec §4.2) — resolution lands with CR-FEAT-011; \"\" or \"*\" = agent default"
+          description: "Channel glob (spec §4.2, CR-FEAT-011): Go path.Match pattern matched against session:<session_id> and thread:<thread_id> — a policy matches if it matches either key; a bare glob (no session:/thread: prefix) matches session_id only; \"\" or \"*\" = agent default (matches every channel, including unchanneled messages)"
         checks:
           $ref: "#/components/schemas/GuardChecks"
         thresholds:

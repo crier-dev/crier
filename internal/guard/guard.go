@@ -26,6 +26,7 @@ type Filter interface {
 type Guard struct {
 	router          *Router
 	scanner         *PreScanner
+	defaultPolicy   Policy // server-wide default (CR_GUARD_DEFAULT_POLICY, §4.2 step 3)
 	maxPayloadBytes int
 	renderMaxBytes  int
 	logf            func(msg string, args ...any) // info-level audit
@@ -40,23 +41,24 @@ type Guard struct {
 
 // Options wires a Guard (spec §9.1 env → guard.New in cmd/server).
 type Options struct {
-	Timeout          time.Duration // CR_GUARD_TIMEOUT_MS (default 10s)
-	MaxConcurrent    int           // CR_GUARD_MAX_CONCURRENT (default 8)
-	CircuitThreshold int           // CR_GUARD_CIRCUIT_THRESHOLD (default 10)
-	CircuitCooldown  time.Duration // CR_GUARD_CIRCUIT_COOLDOWN_S (default 300s)
-	MaxPayloadBytes  int           // CR_GUARD_MAX_PAYLOAD_BYTES (default 65536)
-	RenderMaxBytes   int           // CR_GUARD_RENDER_MAX_BYTES (default 32768)
-	DeepSeekBaseURL  string        // CR_GUARD_DEEPSEEK_BASE_URL override
-	DefaultModel     string        // CR_GUARD_MODEL override for the deepseek preset default model
-	ExtraPatterns    string        // CR_GUARD_PATTERNS_EXTRA JSON
-	LookupEnv        func(string) string
-	Logf             func(msg string, args ...any)
-	LogfWarn         func(msg string, args ...any)
+	Timeout           time.Duration // CR_GUARD_TIMEOUT_MS (default 10s)
+	MaxConcurrent     int           // CR_GUARD_MAX_CONCURRENT (default 8)
+	CircuitThreshold  int           // CR_GUARD_CIRCUIT_THRESHOLD (default 10)
+	CircuitCooldown   time.Duration // CR_GUARD_CIRCUIT_COOLDOWN_S (default 300s)
+	MaxPayloadBytes   int           // CR_GUARD_MAX_PAYLOAD_BYTES (default 65536)
+	RenderMaxBytes    int           // CR_GUARD_RENDER_MAX_BYTES (default 32768)
+	DeepSeekBaseURL   string        // CR_GUARD_DEEPSEEK_BASE_URL override
+	DefaultModel      string        // CR_GUARD_MODEL override for the deepseek preset default model
+	ExtraPatterns     string        // CR_GUARD_PATTERNS_EXTRA JSON
+	DefaultPolicyJSON string        // CR_GUARD_DEFAULT_POLICY — server-wide default policy (JSON); invalid fails fast
+	LookupEnv         func(string) string
+	Logf              func(msg string, args ...any)
+	LogfWarn          func(msg string, args ...any)
 }
 
 // New builds a Guard. Zero option values take the spec defaults; invalid
-// CR_GUARD_PATTERNS_EXTRA fails fast (a broken guard must not silently
-// degrade, spec §9.1).
+// CR_GUARD_PATTERNS_EXTRA or CR_GUARD_DEFAULT_POLICY fail fast (a broken
+// guard must not silently degrade, spec §9.1).
 func New(opts Options) (*Guard, error) {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
@@ -73,6 +75,15 @@ func New(opts Options) (*Guard, error) {
 	scanner, err := NewPreScanner(opts.ExtraPatterns)
 	if err != nil {
 		return nil, err
+	}
+	defaultPolicy := BuiltinDefaultPolicy()
+	if opts.DefaultPolicyJSON != "" {
+		// Spec §9.1: the server default must parse + validate as a Policy,
+		// else the server fails fast (a broken default policy must not
+		// silently fail open).
+		if defaultPolicy, err = ParsePolicy(opts.DefaultPolicyJSON); err != nil {
+			return nil, err
+		}
 	}
 	logf, logfWarn := opts.Logf, opts.LogfWarn
 	if logf == nil {
@@ -92,6 +103,7 @@ func New(opts Options) (*Guard, error) {
 			LookupEnv:        opts.LookupEnv,
 		}),
 		scanner:         scanner,
+		defaultPolicy:   defaultPolicy,
 		maxPayloadBytes: opts.MaxPayloadBytes,
 		renderMaxBytes:  opts.RenderMaxBytes,
 		logf:            logf,
@@ -104,7 +116,10 @@ func New(opts Options) (*Guard, error) {
 // Check implements Filter (spec §2 / §11.1).
 func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig, in Input) (Result, error) {
 	start := time.Now()
-	policy := ResolvePolicy(cfg)
+	// Per-channel policy resolution (spec §4.2, CR-FEAT-011): agent
+	// channel_match override → agent default → server default
+	// (CR_GUARD_DEFAULT_POLICY) → built-in default.
+	policy := ResolvePolicy(cfg, g.defaultPolicy, in.SessionID, in.ThreadID)
 
 	// Deterministic pattern pre-scan over the RAW payload (spec §6.4):
 	// enriches the prompt and is the only verdict source for oversize

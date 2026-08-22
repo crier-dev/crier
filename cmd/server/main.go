@@ -140,15 +140,16 @@ func run(args []string) int {
 	var guardFilter guard.Filter
 	if cfg.Guard.Enabled {
 		gf, err := guard.New(guard.Options{
-			Timeout:          cfg.Guard.Timeout,
-			MaxConcurrent:    cfg.Guard.MaxConcurrent,
-			CircuitThreshold: cfg.Guard.CircuitThreshold,
-			CircuitCooldown:  cfg.Guard.CircuitCooldown,
-			MaxPayloadBytes:  cfg.Guard.MaxPayloadBytes,
-			RenderMaxBytes:   cfg.Guard.RenderMaxBytes,
-			DeepSeekBaseURL:  cfg.Guard.DeepSeekBaseURL,
-			DefaultModel:     cfg.Guard.Model,
-			ExtraPatterns:    cfg.Guard.ExtraPatterns,
+			Timeout:           cfg.Guard.Timeout,
+			MaxConcurrent:     cfg.Guard.MaxConcurrent,
+			CircuitThreshold:  cfg.Guard.CircuitThreshold,
+			CircuitCooldown:   cfg.Guard.CircuitCooldown,
+			MaxPayloadBytes:   cfg.Guard.MaxPayloadBytes,
+			RenderMaxBytes:    cfg.Guard.RenderMaxBytes,
+			DeepSeekBaseURL:   cfg.Guard.DeepSeekBaseURL,
+			DefaultModel:      cfg.Guard.Model,
+			ExtraPatterns:     cfg.Guard.ExtraPatterns,
+			DefaultPolicyJSON: cfg.Guard.DefaultPolicy,
 		})
 		if err != nil {
 			slog.Error("initialize message guard", "error", err)
@@ -353,6 +354,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_GUARD_DEEPSEEK_BASE_URL  deepseek preset base URL override (default https://api.deepseek.com/v1)")
 	fmt.Fprintln(out, "  CR_GUARD_MODEL              deepseek preset default model override (default deepseek-v4-flash)")
 	fmt.Fprintln(out, "  CR_GUARD_PATTERNS_EXTRA     JSON array of extra prematch patterns (append/replace)")
+	fmt.Fprintln(out, "  CR_GUARD_DEFAULT_POLICY     JSON Policy — server-wide default when the agent has none (fail-fast)")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

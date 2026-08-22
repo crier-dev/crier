@@ -94,6 +94,7 @@ func newGuardFixture(t *testing.T, llmResponse string) *guardFixture {
 	r := mux.NewRouter()
 	r.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
 	r.HandleFunc("/agents/{id}", handler.HandleGetAgent).Methods("GET")
+	r.HandleFunc("/agents/{id}", handler.HandleUpdateAgent).Methods("PATCH")
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleDeliver).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleRetrieve).Methods("GET")
 	return &guardFixture{store: store, handler: handler, router: r, llm: llm, llmURL: llmSrv.URL, env: env}
@@ -132,11 +133,17 @@ func (f *guardFixture) guardPolicy(failClosed bool) *guard.AgentGuardConfig {
 // deliver posts a message and returns the response recorder.
 func (f *guardFixture) deliver(t *testing.T, id string, payload string, session string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, _ := json.Marshal(deliverRequest{Payload: json.RawMessage(payload), SessionID: session})
-	req := httptest.NewRequest("POST", "/agents/"+id+"/inbox", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	return f.deliverReq(t, id, deliverRequest{Payload: json.RawMessage(payload), SessionID: session})
+}
+
+// deliverReq posts a full deliver request (session + thread context).
+func (f *guardFixture) deliverReq(t *testing.T, id string, req deliverRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(req)
+	r := httptest.NewRequest("POST", "/agents/"+id+"/inbox", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, req)
+	f.router.ServeHTTP(rec, r)
 	return rec
 }
 
@@ -592,5 +599,193 @@ func TestGuardDeliver_UnknownAgentStill404(t *testing.T) {
 	}
 	if f.llm.count() != 0 {
 		t.Errorf("guard ran for an unknown agent (llm calls=%d)", f.llm.count())
+	}
+}
+
+// ── CR-FEAT-011: per-channel policy resolution at the choke point ───────
+
+// channelPolicy builds a policy list of [session override, thread override,
+// agent default] each with its own provider so the winning policy is
+// observable in the 403 body's guard metadata.
+func (f *guardFixture) channelPolicy() *guard.AgentGuardConfig {
+	dead := "http://127.0.0.1:1"
+	return &guard.AgentGuardConfig{Policies: []guard.Policy{
+		{ID: "session-strict", ChannelMatch: "session:ops-*", FailClosed: true, Action: guard.DecisionBlock, Providers: []guard.ProviderSpec{{Provider: "custom", Model: "s1", BaseURL: dead, APIKeyRef: "env:GUARD_KEY"}}},
+		{ID: "thread-strict", ChannelMatch: "thread:ops-*", FailClosed: true, Action: guard.DecisionBlock, Providers: []guard.ProviderSpec{{Provider: "custom", Model: "t1", BaseURL: dead, APIKeyRef: "env:GUARD_KEY"}}},
+		{ID: "agent-default", ChannelMatch: "*", FailClosed: false, Providers: []guard.ProviderSpec{{Provider: "custom", Model: "d1", BaseURL: f.llmURL, APIKeyRef: "env:GUARD_KEY"}}},
+	}}
+}
+
+func TestGuardDeliver_PerChannelOverride(t *testing.T) {
+	f := newGuardFixture(t, guardVerdictBlock)
+	if code := f.registerAgent(t, "agent-1", f.channelPolicy()); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+
+	// session ops-42 → session-strict (dead provider, fail_closed) → 403
+	// GUARD_BLOCKED, errored, policy=session-strict.
+	rec := f.deliver(t, "agent-1", `{"text":"x"}`, "ops-42")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("ops-42: %d, want 403", rec.Code)
+	}
+	var blocked guardBlockedResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &blocked); err != nil {
+		t.Fatalf("decode 403: %v", err)
+	}
+	if blocked.Guard.Policy != "session-strict" || !blocked.Guard.Errored {
+		t.Fatalf("ops-42 guard meta: %+v, want policy=session-strict errored", blocked.Guard)
+	}
+
+	// session other-1 → agent-default (mock LLM, block verdict) → 403 with
+	// policy=agent-default, NOT errored.
+	rec = f.deliver(t, "agent-1", `{"text":"x"}`, "other-1")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("other-1: %d, want 403", rec.Code)
+	}
+	var blockedDefault guardBlockedResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &blockedDefault); err != nil {
+		t.Fatalf("decode 403: %v", err)
+	}
+	if blockedDefault.Guard.Policy != "agent-default" || blockedDefault.Guard.Errored {
+		t.Fatalf("other-1 guard meta: %+v, want policy=agent-default not errored", blockedDefault.Guard)
+	}
+
+	// thread ops-9 with NO session → thread-strict (dead provider,
+	// fail_closed) → 403 policy=thread-strict.
+	rec = f.deliverReq(t, "agent-1", deliverRequest{Payload: json.RawMessage(`{"text":"x"}`), ThreadID: "ops-9"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("thread ops-9: %d, want 403", rec.Code)
+	}
+	var blockedThread guardBlockedResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &blockedThread); err != nil {
+		t.Fatalf("decode 403: %v", err)
+	}
+	if blockedThread.Guard.Policy != "thread-strict" || !blockedThread.Guard.Errored {
+		t.Fatalf("thread ops-9 guard meta: %+v, want policy=thread-strict errored", blockedThread.Guard)
+	}
+
+	// No session/thread → agent-default.
+	rec = f.deliver(t, "agent-1", `{"text":"x"}`, "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unchanneled: %d, want 403", rec.Code)
+	}
+	var blockedUnch guardBlockedResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &blockedUnch); err != nil {
+		t.Fatalf("decode 403: %v", err)
+	}
+	if blockedUnch.Guard.Policy != "agent-default" {
+		t.Fatalf("unchanneled guard meta: %+v, want policy=agent-default", blockedUnch.Guard)
+	}
+}
+
+func TestGuardDeliver_ThreadIDPassesThroughEnvelope(t *testing.T) {
+	// deliverRequest.thread_id must ride through to the webhook envelope's
+	// EnvelopeMeta.ThreadID (spec §9.3) — observable on the outbound POST.
+	f := newGuardFixture(t, guardVerdictAllow)
+	f.addWebhookDriver(t)
+	recorder := &webhookRecorder{}
+	recSrv := httptest.NewServer(recorder)
+	t.Cleanup(recSrv.Close)
+
+	if code := f.registerAgent(t, "agent-1", f.guardPolicy(false)); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+	agent, _ := f.store.Get("agent-1")
+	agent.Webhook = &webhook.Config{URL: recSrv.URL, DeliveryMode: "async"}
+	f.store.(*MemoryStore).Update(agent)
+
+	rec := f.deliverReq(t, "agent-1", deliverRequest{Payload: json.RawMessage(`{"text":"hi"}`), SessionID: "sess-1", ThreadID: "thr-9"})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("deliver: %d %s", rec.Code, rec.Body.String())
+	}
+	waitForPosts(t, recorder, 1)
+	post := recorder.last()
+	var env webhook.Envelope
+	if err := json.Unmarshal(post.body, &env); err != nil {
+		t.Fatalf("decode outbound POST: %v", err)
+	}
+	if env.Crier.SessionID != "sess-1" || env.Crier.ThreadID != "thr-9" {
+		t.Fatalf("envelope session/thread = %q/%q, want sess-1/thr-9", env.Crier.SessionID, env.Crier.ThreadID)
+	}
+}
+
+// ── CR-FEAT-011: PATCH guard surface (spec §9.2) ────────────────────────
+
+func TestGuardPatch_ReplaceRemoveUnchanged(t *testing.T) {
+	f := newGuardFixture(t, guardVerdictAllow)
+	if code := f.registerAgent(t, "agent-1", nil); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+
+	// PATCH with a guard object → replaces the (absent) config.
+	cfgJSON, _ := json.Marshal(f.guardPolicy(false))
+	body, _ := json.Marshal(patchRequest{Guard: cfgJSON})
+	req := httptest.NewRequest("PATCH", "/agents/agent-1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH guard: %d %s", rec.Code, rec.Body.String())
+	}
+	agent, _ := f.store.Get("agent-1")
+	if agent.Guard == nil || len(agent.Guard.Policies) != 1 || agent.Guard.Policies[0].ID != "test-policy" {
+		t.Fatalf("guard after PATCH: %+v", agent.Guard)
+	}
+
+	// PATCH absent guard → unchanged.
+	body, _ = json.Marshal(patchRequest{Capabilities: []string{"x"}})
+	req = httptest.NewRequest("PATCH", "/agents/agent-1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH caps: %d", rec.Code)
+	}
+	agent, _ = f.store.Get("agent-1")
+	if agent.Guard == nil || len(agent.Guard.Policies) != 1 {
+		t.Fatalf("guard must be unchanged by caps-only PATCH: %+v", agent.Guard)
+	}
+
+	// PATCH guard: null → removed.
+	body, _ = json.Marshal(patchRequest{Guard: json.RawMessage("null")})
+	req = httptest.NewRequest("PATCH", "/agents/agent-1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH guard null: %d", rec.Code)
+	}
+	agent, _ = f.store.Get("agent-1")
+	if agent.Guard != nil {
+		t.Fatalf("guard must be removed by null PATCH: %+v", agent.Guard)
+	}
+}
+
+func TestGuardPatch_InvalidGuard400(t *testing.T) {
+	f := newGuardFixture(t, guardVerdictAllow)
+	if code := f.registerAgent(t, "agent-1", nil); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+	// Invalid guard JSON → 400, guard untouched.
+	body, _ := json.Marshal(patchRequest{Guard: json.RawMessage(`{not json`)})
+	req := httptest.NewRequest("PATCH", "/agents/agent-1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid guard JSON: %d, want 400", rec.Code)
+	}
+	// Structurally valid but invalid policy (empty policies) → 400.
+	body, _ = json.Marshal(patchRequest{Guard: json.RawMessage(`{"policies":[]}`)})
+	req = httptest.NewRequest("PATCH", "/agents/agent-1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty policies PATCH: %d, want 400", rec.Code)
+	}
+	agent, _ := f.store.Get("agent-1")
+	if agent.Guard != nil {
+		t.Fatalf("failed PATCH must not mutate guard: %+v", agent.Guard)
 	}
 }

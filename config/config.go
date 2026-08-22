@@ -42,7 +42,7 @@ type Config struct {
 
 // GuardConfig holds LLM message-guard tuning (spec §9.1, CR-FEAT-010).
 type GuardConfig struct {
-	Enabled          bool
+	Enabled          bool          // CR_GUARD_ENABLED — master switch
 	Timeout          time.Duration // CR_GUARD_TIMEOUT_MS — per-message budget (all providers, retries included)
 	MaxConcurrent    int           // CR_GUARD_MAX_CONCURRENT
 	CircuitThreshold int           // CR_GUARD_CIRCUIT_THRESHOLD
@@ -52,6 +52,7 @@ type GuardConfig struct {
 	DeepSeekBaseURL  string        // CR_GUARD_DEEPSEEK_BASE_URL — deepseek preset base URL override
 	Model            string        // CR_GUARD_MODEL — deepseek preset default model override
 	ExtraPatterns    string        // CR_GUARD_PATTERNS_EXTRA — JSON array of extra prematch patterns
+	DefaultPolicy    string        // CR_GUARD_DEFAULT_POLICY — JSON Policy (server-wide default, §4.2 step 3 / §9.1)
 }
 
 // FederationConfig holds relay-to-relay federation settings (CR-FEAT-006).
@@ -343,6 +344,9 @@ func Load() (Config, error) {
 	// CR_GUARD_PATTERNS_EXTRA is passed through; it is parsed and validated
 	// by guard.New at startup (a broken pattern table fails fast, spec §9.1).
 	cfg.Guard.ExtraPatterns = os.Getenv("CR_GUARD_PATTERNS_EXTRA")
+	// CR_GUARD_DEFAULT_POLICY is passed through; parsed + validated by
+	// guard.New at startup (a broken server default fails fast, spec §9.1).
+	cfg.Guard.DefaultPolicy = os.Getenv("CR_GUARD_DEFAULT_POLICY")
 
 	return cfg, nil
 }

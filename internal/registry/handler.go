@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -40,6 +41,11 @@ type deliverRequest struct {
 	// SessionID carries conversation context for session-aware delivery
 	// (CR-FEAT-004).
 	SessionID string `json:"session_id,omitempty"`
+	// ThreadID carries thread context for session-aware delivery
+	// (CR-FEAT-004) — the deliver-API passthrough of the envelope's
+	// thread_id (spec §9.3, CR-FEAT-011); used by the guard's per-channel
+	// policy resolution (spec §4.2).
+	ThreadID string `json:"thread_id,omitempty"`
 	// DeliveryMode overrides the agent's webhook default:
 	// blocking | async | batch (CR-FEAT-002/005).
 	DeliveryMode string `json:"delivery_mode,omitempty"`
@@ -57,10 +63,13 @@ type deliverRequest struct {
 // patchRequest is the JSON body for PATCH /agents/{id} — partial update of
 // an agent's registration (spec §7, CR-FEAT-007). capabilities replaces the
 // advertised list when present; webhook registers/updates when present and
-// is removed when absent or null.
+// is removed when absent or null; guard replaces the whole guard config
+// when present, is removed when explicit null, and is UNCHANGED when absent
+// (spec §9.2 — RawMessage distinguishes absent from null, CR-FEAT-011).
 type patchRequest struct {
 	Capabilities []string        `json:"capabilities,omitempty"`
 	Webhook      *webhook.Config `json:"webhook,omitempty"`
+	Guard        json.RawMessage `json:"guard,omitempty"`
 }
 
 // blockingDeliverResponse is returned for delivery_mode=blocking: the
@@ -261,6 +270,26 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		agent.Webhook = req.Webhook
 	}
+	if req.Guard != nil {
+		// Spec §9.2 (CR-FEAT-011): guard present → replaces the whole
+		// guard config; explicit null → guard removed; absent → unchanged
+		// (RawMessage nil = absent, so this branch only fires on present).
+		trimmed := bytes.TrimSpace(req.Guard)
+		if string(trimmed) == "null" {
+			agent.Guard = nil
+		} else {
+			var gc guard.AgentGuardConfig
+			if err := json.Unmarshal(trimmed, &gc); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid guard config: " + err.Error()})
+				return
+			}
+			if err := gc.Validate(); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			agent.Guard = &gc
+		}
+	}
 
 	u, ok := h.store.(updater)
 	if !ok {
@@ -357,6 +386,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			MessageID: entry.ID,
 			Sender:    req.Sender,
 			SessionID: req.SessionID,
+			ThreadID:  req.ThreadID,
 			Kind:      kind,
 			Payload:   payload,
 		})
@@ -408,6 +438,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				Sender:       req.Sender,
 				Kind:         kind,
 				SessionID:    req.SessionID,
+				ThreadID:     req.ThreadID,
 				Guard:        guardMeta,
 			},
 			Payload: payload,
