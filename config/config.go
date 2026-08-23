@@ -54,6 +54,7 @@ type GuardConfig struct {
 	ExtraPatterns    string        // CR_GUARD_PATTERNS_EXTRA — JSON array of extra prematch patterns
 	DefaultPolicy    string        // CR_GUARD_DEFAULT_POLICY — JSON Policy (server-wide default, §4.2 step 3 / §9.1)
 	KanbanQueueSize  int           // CR_GUARD_KANBAN_QUEUE — kanban worker queue capacity (spec §8.2, CR-FEAT-014)
+	KanbanURL        string        // CR_GUARD_KANBAN_URL — HTTP kanban sink base URL ("" = Hermes kanban CLI writer, CR-FEAT-009)
 }
 
 // FederationConfig holds relay-to-relay federation settings (CR-FEAT-006).
@@ -346,6 +347,11 @@ func Load() (Config, error) {
 		}
 		cfg.Guard.KanbanQueueSize = n
 	}
+	// CR_GUARD_KANBAN_URL (CR-FEAT-009): HTTP kanban sink base URL. Empty
+	// = the Hermes kanban CLI writer. Scheme validation (http/https) is
+	// deferred to writer construction in cmd/server — it fails fast there
+	// (spec §9.1) when the value is set but unusable.
+	cfg.Guard.KanbanURL = os.Getenv("CR_GUARD_KANBAN_URL")
 	if v := os.Getenv("CR_GUARD_DEEPSEEK_BASE_URL"); v != "" {
 		cfg.Guard.DeepSeekBaseURL = v
 	}

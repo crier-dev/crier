@@ -611,3 +611,35 @@ func TestLoad_GuardKanbanQueue(t *testing.T) {
 		require.Error(t, err, "CR_GUARD_KANBAN_QUEUE=%q must fail", bad)
 	}
 }
+
+func TestLoad_GuardKanbanURL(t *testing.T) {
+	// CR-FEAT-009: the HTTP kanban sink URL is a pass-through string —
+	// empty default (CLI writer), any value accepted at load (scheme
+	// validation happens at writer construction in cmd/server).
+	unsetAll(t)
+	for _, k := range []string{
+		"CR_GUARD_ENABLED", "CR_GUARD_TIMEOUT_MS", "CR_GUARD_MAX_CONCURRENT",
+		"CR_GUARD_CIRCUIT_THRESHOLD", "CR_GUARD_CIRCUIT_COOLDOWN_S",
+		"CR_GUARD_MAX_PAYLOAD_BYTES", "CR_GUARD_RENDER_MAX_BYTES",
+		"CR_GUARD_DEEPSEEK_BASE_URL", "CR_GUARD_MODEL", "CR_GUARD_PATTERNS_EXTRA",
+		"CR_GUARD_DEFAULT_POLICY", "CR_GUARD_KANBAN_QUEUE", "CR_GUARD_KANBAN_URL",
+	} {
+		t.Setenv(k, "")
+	}
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "", cfg.Guard.KanbanURL, "default: empty = Hermes kanban CLI writer (CR-FEAT-009)")
+
+	t.Setenv("CR_GUARD_KANBAN_URL", "http://127.0.0.1:18775/sink")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:18775/sink", cfg.Guard.KanbanURL)
+
+	// A non-http scheme is still a legal *string* here — the writer
+	// constructor rejects it (fail fast in cmd/server), Load must not.
+	t.Setenv("CR_GUARD_KANBAN_URL", "ftp://cards.example.com/x")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "ftp://cards.example.com/x", cfg.Guard.KanbanURL)
+}

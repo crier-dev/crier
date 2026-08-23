@@ -139,12 +139,25 @@ func run(args []string) int {
 	// entirely (nil filter = disabled).
 	var guardFilter guard.Filter
 	if cfg.Guard.Enabled {
-		// CR-FEAT-014: the Hermes kanban card writer (fire-and-forget
-		// output option, spec §8). Cards are only produced when a policy
-		// opts in via policy.kanban.enabled; write failures are logged and
-		// counted, never surfaced to the delivery path. CR-FEAT-009 can
-		// replace this writer through the same CardWriter interface.
-		kanbanWriter := guard.NewHermesKanbanWriter("hermes")
+		// CR-FEAT-014/009: the kanban card writer (fire-and-forget output
+		// option, spec §8). Cards are only produced when a policy opts in via
+		// policy.kanban.enabled; write failures are logged and counted, never
+		// surfaced to the delivery path. CR_GUARD_KANBAN_URL switches the
+		// writer to the HTTP sink (CR-FEAT-009); empty keeps the Hermes kanban
+		// CLI writer — the working kanban write path on this machine.
+		kanbanMode := "cli"
+		var kanbanWriter guard.CardWriter
+		if cfg.Guard.KanbanURL != "" {
+			w := guard.NewHTTPKanbanWriter(cfg.Guard.KanbanURL)
+			if w == nil {
+				slog.Error("initialize message guard", "error", "invalid CR_GUARD_KANBAN_URL (http/https scheme required)")
+				return 1
+			}
+			kanbanWriter = w
+			kanbanMode = "http"
+		} else {
+			kanbanWriter = guard.NewHermesKanbanWriter("hermes")
+		}
 		gf, err := guard.New(guard.Options{
 			Timeout:           cfg.Guard.Timeout,
 			MaxConcurrent:     cfg.Guard.MaxConcurrent,
@@ -167,7 +180,8 @@ func run(args []string) int {
 		guardFilter = gf
 		slog.Info("message guard", "enabled", true, "model", cfg.Guard.Model,
 			"timeout", cfg.Guard.Timeout, "max_concurrent", cfg.Guard.MaxConcurrent,
-			"circuit_threshold", cfg.Guard.CircuitThreshold, "kanban_queue", cfg.Guard.KanbanQueueSize)
+			"circuit_threshold", cfg.Guard.CircuitThreshold, "kanban_queue", cfg.Guard.KanbanQueueSize,
+			"kanban_writer", kanbanMode)
 	} else {
 		slog.Info("message guard", "enabled", false)
 	}
@@ -365,6 +379,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_GUARD_PATTERNS_EXTRA     JSON array of extra prematch patterns (append/replace)")
 	fmt.Fprintln(out, "  CR_GUARD_DEFAULT_POLICY     JSON Policy — server-wide default when the agent has none (fail-fast)")
 	fmt.Fprintln(out, "  CR_GUARD_KANBAN_QUEUE       kanban worker queue capacity, opt-in per policy.kanban (default 100)")
+	fmt.Fprintln(out, "  CR_GUARD_KANBAN_URL         HTTP kanban sink base URL; empty = hermes kanban CLI writer (default empty)")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

@@ -759,7 +759,7 @@ components:
           description: "Adds the thinking field to the request; hard-forbidden on the deepseek preset (spec §5.2)"
     GuardKanbanConfig:
       type: object
-      description: "CR-FEAT-014 output option (spec §8) — opt-in per policy, OFF by default; cards are written fire-and-forget to the Hermes kanban card writer (never blocks the delivery)"
+      description: "CR-FEAT-014 output option (spec §8) — opt-in per policy, OFF by default; cards are written fire-and-forget to the configured CardWriter — the `hermes kanban create` CLI by default, or an HTTP sink POSTing the card JSON when CR_GUARD_KANBAN_URL is set (CR-FEAT-009) — never blocking the delivery"
       properties:
         enabled:
           type: boolean
