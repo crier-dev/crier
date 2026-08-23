@@ -34,6 +34,11 @@ pipeline:
     - read_diff
     - sandbox
 evaluator:
+  # file_scope: full — "changed" derives the allowed-file set from staged+unstaged
+  # diffs ONLY; with Bane-pending uncommitted work in the tree (internal/mcp/* etc.)
+  # a committed task change is invisible to the judge → false FAIL (tick 245
+  # incident, verdict 22816b13). Full scope lets the judge read the whole repo.
+  file_scope: full
   max_iterations: 50
   max_time: 10m
   max_input_tokens: 2M
