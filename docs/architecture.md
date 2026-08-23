@@ -31,6 +31,12 @@ Persistent per-agent inbox for offline delivery.
 - Lease-based delivery with acknowledgements
 - Queue statistics + message expiry
 
+## Delivery & Escalation Lanes
+Three lanes carry agent work (lane split, CR-FEAT-009):
+- **Dispatch** = the scheduler + per-repo JSONL boards. This is the only authority that dispatches fleet project work.
+- **Communication** = Crier itself (relay, mesh, webhook delivery, inboxes) — agent-to-agent messaging.
+- **Cross-profile queue** = the Hermes kanban. Crier may write cards there as an opt-in escalation sink (guard output option, spec `specs/LLM-MESSAGE-GUARD.md` §8): fire-and-forget cards via the `hermes kanban create` CLI writer (default) or an HTTP sink when `CR_GUARD_KANBAN_URL` is set. The kanban lane NEVER dispatches fleet work — cards are visibility/cross-profile exceptions only.
+
 ## Stack
 - **Language:** Go 1.26.6+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
