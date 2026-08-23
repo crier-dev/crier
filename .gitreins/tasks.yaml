@@ -322,3 +322,15 @@ tasks:
   status: complete
   created_at: '2026-08-23T17:05:14.725487+00:00'
   completed_at: '2026-08-23T17:08:46.701754+00:00'
+- id: cr-gap-042-openssl-rawin-note
+  title: 'CR-GAP-042: OpenSSL 3.x pkeyutl -rawin requirement documented or fallback
+    added'
+  criteria:
+  - README quickstart signing helper (sig() using openssl pkeyutl -sign -rawin) either
+    documents the OpenSSL >= 3 requirement in prerequisites or works on OpenSSL 1.1
+    systems; the helper must fail loudly with a clear hint (not silently produce an
+    empty signature) on unsupported OpenSSL versions; README and examples/demo.sh
+    stay consistent; go build/vet/test pass; gitreins guard PASS.
+  status: complete
+  created_at: '2026-08-23T23:23:40.871357+00:00'
+  completed_at: '2026-08-23T23:28:52.895969+00:00'
