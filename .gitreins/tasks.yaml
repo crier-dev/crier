@@ -313,3 +313,12 @@ tasks:
   status: complete
   created_at: '2026-08-23T00:26:07.558680+00:00'
   completed_at: '2026-08-23T00:35:20.337216+00:00'
+- id: cr-gap-039-guard-docs
+  title: 'LLM guard feature docs: README config table + guard default-on'
+  criteria:
+  - README config table env count matches 'crier --help' env list (all 13 CR_GUARD_*
+    + DEEPSEEK_API_KEY present) AND README mentions guard default-on (CR_GUARD_ENABLED
+    + DEEPSEEK_API_KEY surfaced in quickstart/config section)
+  status: complete
+  created_at: '2026-08-23T17:05:14.725487+00:00'
+  completed_at: '2026-08-23T17:08:46.701754+00:00'
