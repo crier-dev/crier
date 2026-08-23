@@ -58,6 +58,7 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 ### Prerequisites
 
 - Go 1.26.6 or later
+- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below)
 
 ### Build
 
@@ -94,11 +95,13 @@ A minimal register → deliver → retrieve round-trip with the default signed c
 ```bash
 AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
 
-# 0. One-time setup: generate an ed25519 keypair for agent-1 (needs openssl + xxd)
+# 0. One-time setup: generate an ed25519 keypair for agent-1 (needs openssl 3.x + xxd)
 openssl genpkey -algorithm ED25519 -out /tmp/crier-agent.key >/dev/null 2>&1
 PUBKEY_HEX=$(openssl pkey -in /tmp/crier-agent.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
-# sig helper: hex(ed25519_sign("METHOD\nPATH\nTS", key)) — same wire format as examples/demo.sh
-sig() { printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
+# sig helper: hex(ed25519_sign("METHOD\nPATH\nTS", key)) — same wire format as examples/demo.sh.
+# Requires OpenSSL >= 3 for pkeyutl -sign -rawin; on older OpenSSL it errors loudly
+# instead of producing an empty (silently-401-rejected) signature.
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
 
 # 1. Register an agent (public_key = hex-encoded ed25519 public key)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
@@ -148,7 +151,7 @@ curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
 
 > Prefer the runnable script: [`examples/demo.sh`](examples/demo.sh) performs the
 > full register → deliver → signed retrieve → ack round-trip with an ephemeral
-> ed25519 keypair (openssl). Start the server, then run `./examples/demo.sh`.
+> ed25519 keypair (openssl 3.x). Start the server, then run `./examples/demo.sh`.
 
 ### Try the Mesh
 

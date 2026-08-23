@@ -4,7 +4,7 @@
 #
 # Requirements:
 #   - a running crier server (default http://localhost:8767, override with CRIER_URL)
-#   - openssl 1.1.1+ (ed25519 support) and xxd on PATH
+#   - openssl 3.x+ (ed25519 support; the -rawin flag used below is OpenSSL 3+ only) and xxd on PATH
 #
 # Run the server first:
 #   make run                                  # default port 8767, in-memory backend
@@ -39,6 +39,10 @@ fi
 
 if ! command -v openssl >/dev/null 2>&1; then
   echo "ERROR: openssl required (ed25519 keygen/signing)" >&2
+  exit 1
+fi
+if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
+  echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2
   exit 1
 fi
 if ! command -v xxd >/dev/null 2>&1; then
