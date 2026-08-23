@@ -78,6 +78,15 @@ go build -o bin/crier ./cmd/server
 make run
 ```
 
+> **The LLM message guard is ON by default.** Every inbound delivery is
+> classified by a guard LLM (default model `deepseek-v4-flash`, 10s
+> per-message budget — `CR_GUARD_TIMEOUT_MS`) before it is webhook-POSTed
+> or inbox-stored. For local dev without an API key, set
+> `CR_GUARD_ENABLED=false`; to exercise the guard, set `DEEPSEEK_API_KEY`.
+> Without a key the guard call fails and the guard fails OPEN — the
+> delivery proceeds, marked `X-Crier-Guard-Error: true`. See
+> [Message guard (LLM)](#message-guard-llm).
+
 ### Try it
 
 A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except `/health` needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped:
@@ -178,6 +187,24 @@ make test-short
 make lint
 ```
 
+## Message guard (LLM)
+
+Every inbound delivery is classified by an LLM message guard before it reaches the receiver (CR-FEAT-010..014). The guard sits at ONE choke point in `POST /agents/{id}/inbox` — after the deliver request is decoded, before BOTH downstream branches (webhook POST and inbox store) — so webhook (blocking/async/batch) and inbox deliveries get identical treatment. The verdict is computed exactly once per message; redelivery and batch flush never re-run the guard.
+
+- **Prompt-injection screening** — the guard LLM inspects the payload for four attack classes: instruction injection, jailbreak, masquerade (obfuscated/hidden instructions), and structured-object attacks (payloads that could be interpreted as control data). A deterministic pattern pre-scan runs first over the RAW payload; its matches enrich the LLM prompt and are merged into the final verdict. JSON payloads are shown to the LLM as a schema-aware text projection, non-JSON as a text envelope (both bounded by `CR_GUARD_RENDER_MAX_BYTES`).
+- **Structured verdicts** — the LLM answers with exactly one JSON object: `{decision, risk_level, reason, matched_patterns}`, where `decision` is `allow` | `block` | `sanitize` and `risk_level` is `low` | `medium` | `high`. A deterministic escalation table guarantees the LLM can never under-block below the policy's `block_risk` threshold (default `high`).
+- **allow** — delivery proceeds as-is; the verdict still rides on the envelope / inbox entry and the outbound POST headers.
+- **block** — uniform `403 GUARD_BLOCKED` with the full verdict; the message is never queued, never stored, never POSTed.
+- **sanitize** — the guard LLM REWRITES the payload with a fixed neutralization prompt and the **rewritten payload is delivered in place of the original** (validated before delivery: valid JSON, pattern-clean, size-capped). The original rides in `crier.guard.quarantined_payload` (base64) for provenance — the original is never delivered on a sanitize verdict. If the rewrite is unavailable: fail-closed policies block, fail-open policies deliver a deterministic quarantine notice.
+- **Fail-open by default** — an LLM error (provider down, timeout, missing API key) resolves to `allow` with `errored: true`; per-policy `fail_closed: true` flips this to the policy's error action (default `block`).
+- **Outcome on the wire** — the outbound webhook POST carries `X-Crier-Guard-*` headers: `X-Crier-Guard-Decision`, `X-Crier-Guard-Risk`, `X-Crier-Guard-Reason` (percent-encoded), `X-Crier-Guard-Patterns` (comma-joined), `X-Crier-Guard-Policy`, `X-Crier-Guard-Provider`, `X-Crier-Guard-Model`, and `X-Crier-Guard-Error: true` on the error path. Blocked messages never POST. Inbox entries and deliver responses carry the same verdict as `crier.guard` metadata.
+- **Per-agent policy** — guard policy is configured at agent registration: `"guard":{"policies":[{"id":"default"}]}` (at least one policy required; invalid config → 400). A bare id resolves to the built-in named policy; inline policies (`{model, base_url, api_key_ref, fail_closed, action, providers, ...}`) are accepted, and `channel_match` globs (`session:*`, `thread:*`) scope a policy to specific channels. Agents without a guard config use the server-wide default (`CR_GUARD_DEFAULT_POLICY`, built-in `default` when unset).
+- **Providers** — each policy declares a failover chain (`providers`, implicit `[deepseek]` when omitted). Presets: `deepseek` (default, model `deepseek-v4-flash`, thinking disabled — the preset hard-rejects `thinking_enabled`), `groq` (default `gpt-oss-120b`), `nvidia` (default `gemma-4-31b`), or `custom` (requires `base_url` + `api_key_ref`). API keys are referenced as `env:VAR` and never stored inline (deepseek preset → `DEEPSEEK_API_KEY`). The router takes the first healthy provider: one retry (250ms backoff) on 429/5xx/network errors, a per-endpoint circuit breaker (`CR_GUARD_CIRCUIT_*`), a concurrency cap (`CR_GUARD_MAX_CONCURRENT`), and one per-message time budget across the whole chain (`CR_GUARD_TIMEOUT_MS`, default 10s).
+- **Kanban output (opt-in)** — a policy can enable fire-and-forget kanban cards (`"kanban":{"enabled":true,"on":"block"|"all","assignee":...,"board_url":...}`): each scoped verdict posts a card (`[crier-guard] <agent> <decision>: <reason>`, full verdict metadata, sender, truncated payload excerpt) through the `hermes kanban create` CLI or an HTTP sink (`CR_GUARD_KANBAN_URL`). Writes are bounded (queue `CR_GUARD_KANBAN_QUEUE`, default 100; 10s per card) and never fail the delivery — full queue drops + counts, write failures log + count.
+- Payloads above `CR_GUARD_MAX_PAYLOAD_BYTES` (default 65536) skip the LLM entirely: a prematch hit blocks, otherwise the delivery is allowed (risk medium).
+
+Full spec: [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) (CR-SPEC-002).
+
 ## Configuration
 
 All configuration is via environment variables (defaults shown):
@@ -199,7 +226,20 @@ All configuration is via environment variables (defaults shown):
 | `CR_DATABASE_MAX_CONN_LIFETIME` | `30m` | Maximum lifetime of a pooled connection (Go duration, e.g. `30m`, `1h`). |
 | `CR_DATABASE_MAX_CONN_IDLE_TIME` | `5m` | Maximum idle time of a pooled connection (Go duration). |
 | `CR_DATABASE_CONNECT_TIMEOUT` | `10s` | PostgreSQL connect timeout (Go duration). |
+| `CR_GUARD_ENABLED` | `true` | LLM message-guard master switch. When on, every inbound delivery is classified before webhook POST / inbox store. |
+| `CR_GUARD_TIMEOUT_MS` | `10000` | Per-message guard budget in milliseconds — covers the whole provider chain, retries included. |
+| `CR_GUARD_MAX_CONCURRENT` | `8` | Maximum concurrent guard LLM calls. |
+| `CR_GUARD_CIRCUIT_THRESHOLD` | `10` | Consecutive failures (per base URL + model) that open the provider circuit breaker. |
+| `CR_GUARD_CIRCUIT_COOLDOWN_S` | `300` | How long a tripped circuit stays open (seconds); the first call after expiry is the probe. |
+| `CR_GUARD_MAX_PAYLOAD_BYTES` | `65536` | Payloads larger than this skip the LLM entirely (prematch hit → block, else allow, risk medium). |
+| `CR_GUARD_RENDER_MAX_BYTES` | `32768` | Byte cap on the payload projection fed to the LLM. |
+| `CR_GUARD_DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Base URL override for the deepseek provider preset. |
+| `CR_GUARD_MODEL` | `deepseek-v4-flash` | Default model override for the deepseek provider preset. |
+| `CR_GUARD_PATTERNS_EXTRA` | _(unset)_ | JSON array of extra prematch patterns (`[{"name","pattern","class"}]`) — appended, or replacing built-ins with the same name. Invalid JSON/regex fails fast at startup. |
+| `CR_GUARD_DEFAULT_POLICY` | _(unset — built-in `default`)_ | JSON `Policy` used as the server-wide default when the target agent registers no guard config. Must parse + validate at startup (fail-fast). |
+| `CR_GUARD_KANBAN_QUEUE` | `100` | Kanban worker queue capacity (fire-and-forget cards, opt-in per policy `kanban`). |
 | `CR_GUARD_KANBAN_URL` | _(unset — Hermes kanban CLI)_ | HTTP kanban sink base URL (http/https, CR-FEAT-009). When set, guard cards are POSTed here as JSON (fire-and-forget); unset = cards go through the `hermes kanban create` CLI writer. |
+| `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
 
 ## API
 
@@ -222,6 +262,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 | [`docs/mesh-protocol.md`](docs/mesh-protocol.md) | Mesh wire protocol — framing, message types, correlation contract, worked example |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
 | [`docs/integration-guide.md`](docs/integration-guide.md) | End-to-end integration guide — auth modes, signing, inbox lifecycle, mesh, Postgres |
+| [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) | Message guard spec (CR-SPEC-002) — verdict contract, policies, providers, kanban output |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
 ## Project Status
@@ -232,6 +273,7 @@ All core primitives are implemented and tested:
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
+- **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **API** — 15 HTTP endpoints wired with middleware, graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
