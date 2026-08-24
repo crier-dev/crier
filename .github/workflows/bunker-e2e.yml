@@ -44,3 +44,32 @@ jobs:
         with:
           name: bunker-matrix-evidence
           path: /tmp/bunker-matrix-ci.jsonl
+
+  ecosystem-battery:
+    name: Agent-ecosystem battery (compose stack)
+    runs-on: [self-hosted, bunker]
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      CRIER_HOST_PORT: "28767"
+      SINK_HOST_PORT: "29002"
+      PI_HOST_PORT: "29101"
+      OPENCODE_HOST_PORT: "29102"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the ecosystem stack + run the full battery
+        run: |
+          cd examples/agent-ecosystem
+          docker compose up -d --build
+          docker compose run --rm battery
+      - name: Capture battery evidence
+        if: always()
+        run: |
+          docker compose -f examples/agent-ecosystem/docker-compose.yml run --rm --no-deps battery \
+            sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl || true
+      - name: Attach evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecosystem-evidence
+          path: /tmp/ecosystem-evidence.jsonl

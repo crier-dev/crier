@@ -1,0 +1,109 @@
+# Agent-ecosystem stack — crier as the message bus between popular agent systems.
+#
+#   docker compose up -d          # crier + sink + pi-agent + opencode
+#   docker compose --profile hermes up -d   # + hermes (requires hermes-agent:latest image)
+#   docker compose run battery     # run the full battery of tests
+#
+# Config knobs:
+#   DEEPSEEK_API_KEY=sk-...        # enable the LLM guard with the deepseek preset (real verdicts)
+#   CRIER_HOST_PORT=18767          # host port for crier (bunker agents: use their port range)
+#   CRIER_REQUIRE_SIG=false        # signature enforcement (leave false for the demo wiring)
+name: crier-agent-ecosystem
+
+x-crier-env: &crier-env
+  CRIER_PORT: 8767
+  CR_REQUIRE_AGENT_SIG: ${CRIER_REQUIRE_SIG:-false}
+  CR_GUARD_ENABLED: ${CR_GUARD_ENABLED:-true}
+  CR_GUARD_TIMEOUT_MS: 20000
+
+services:
+  crier:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      <<: *crier-env
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CR_GUARD_DEFAULT_POLICY: ${CR_GUARD_DEFAULT_POLICY:-}
+    ports:
+      - "${CRIER_HOST_PORT:-18767}:8767"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8767/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [crier-net]
+
+  sink:
+    # Webhook receiver / echo agent — the simplest "agent" in the mesh.
+    build: ./sink
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9002
+    ports: ["${SINK_HOST_PORT:-19002}:9002"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  pi-agent:
+    # Pi Agent (earendil-works/pi) — minimalist TypeScript harness. Receives
+    # messages through crier (blocking webhook), answers via a real pi SDK
+    # session when DEEPSEEK_API_KEY is set, canned reply otherwise.
+    build: ./pi-agent
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9101
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    ports: ["${PI_HOST_PORT:-19101}:9101"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  opencode:
+    # OpenCode CLI agent (opencode-ai) — same consumer pattern.
+    build: ./opencode
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9102
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENCODE_LIVE: ${OPENCODE_LIVE:-}
+    ports: ["${OPENCODE_HOST_PORT:-19102}:9102"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  hermes:
+    # Hermes Agent — profile-gated: requires the hermes-agent:latest image
+    # (see hermes/README.md for the build). Registers via hermes/register.sh.
+    profiles: ["hermes"]
+    image: hermes-agent:latest
+    environment:
+      CRIER_URL: http://crier:8767
+    volumes:
+      - ./hermes/cont-init.d:/etc/cont-init.d:ro
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  battery:
+    # The full battery of tests against the stack.
+    build: ./battery
+    environment:
+      CRIER_URL: http://crier:8767
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      EVIDENCE: /evidence/ecosystem.jsonl
+    volumes:
+      - battery-evidence:/evidence
+    depends_on:
+      crier: { condition: service_healthy }
+      sink: { condition: service_started }
+      pi-agent: { condition: service_started }
+      opencode: { condition: service_started }
+    networks: [crier-net]
+
+volumes:
+  battery-evidence:
+
+networks:
+  crier-net:
+    driver: bridge
