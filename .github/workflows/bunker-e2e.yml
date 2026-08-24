@@ -6,6 +6,15 @@ on:
   schedule:
     - cron: "30 6 * * *" # nightly 06:30 UTC
 
+# Only one bunker-e2e run at a time: the matrix deploys to the SAME bunker
+# agent/port (crier-lab:30011) and shares /tmp state on the self-hosted
+# runner — parallel runs clobber each other's deployments (observed 2026-08-24:
+# concurrent runs raced on tick-250/251 pushes). Newer runs cancel older ones
+# (intermediate commits don't need battery evidence; the head commit does).
+concurrency:
+  group: bunker-e2e
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
