@@ -1,0 +1,46 @@
+name: bunker-e2e
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 6 * * *" # nightly 06:30 UTC
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker-image:
+    name: Build & publish image (ghcr)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ghcr.io/crier-dev/crier:latest .
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Push
+        run: docker push ghcr.io/crier-dev/crier:${{ github.sha }} && docker push ghcr.io/crier-dev/crier:latest
+
+  bunker-matrix:
+    name: Bunker config-matrix E2E (bunker-las-04)
+    runs-on: [self-hosted, bunker]
+    needs: docker-image
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && needs.docker-image.result == 'success'))
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      EVIDENCE: /tmp/bunker-matrix-ci.jsonl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy container to bunker-las-04 + run config-matrix battery
+        run: |
+          bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30001 \
+            --agent crier-lab --sink http://100.97.236.14:19002
+      - name: Attach evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bunker-matrix-evidence
+          path: /tmp/bunker-matrix-ci.jsonl
