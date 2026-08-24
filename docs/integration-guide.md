@@ -13,7 +13,10 @@ This is the maintained, user-facing companion to:
 
 Everything below was live-verified against a running server. All examples use
 `curl` + `openssl` + `websocat` (or Python `websockets`); no client SDK is
-required.
+required. The signed-config snippets require **OpenSSL >= 3**: the signing
+helper uses `openssl pkeyutl -sign -rawin` (an OpenSSL 3+ flag) and fails
+loudly on older versions instead of producing an empty signature that the
+server silently rejects with 401.
 
 ---
 
@@ -188,7 +191,11 @@ default (`CR_GUARD_DEFAULT_POLICY`, built-in `default`). Full contract:
 ```bash
 TS=$(date +%s)
 printf 'GET\n/agents/agent-1/inbox\n%s' "$TS" > payload.txt
-SIG=$(openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt | xxd -p -c 128)
+# Signing helper — requires OpenSSL >= 3 for pkeyutl -sign -rawin; on older
+# OpenSSL it errors loudly instead of producing an empty (silently-401-rejected)
+# signature.
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt 2>/dev/null | xxd -p -c 128; }
+SIG=$(sig)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}"
 # → 200 {"messages":[{"id":"...","payload":"<base64>",...}],"lease_id":"..."}
@@ -215,7 +222,7 @@ historically it was a silent no-op that left messages queued:
 ```bash
 TS=$(date +%s)
 printf 'POST\n/agents/agent-1/inbox/ack\n%s' "$TS" > payload.txt
-SIG=$(openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt | xxd -p -c 128)
+SIG=$(sig)  # helper from §3 Retrieve — fails loudly on OpenSSL < 3
 curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content-Type: application/json' \
   -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
   -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<message id>"]}'   # → 204
