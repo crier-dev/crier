@@ -208,6 +208,26 @@ Every inbound delivery is classified by an LLM message guard before it reaches t
 
 Full spec: [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) (CR-SPEC-002).
 
+## Agent Ecosystem
+
+The [`examples/agent-ecosystem/`](examples/agent-ecosystem/) directory is a runnable
+reference stack that demonstrates Crier as the message bus between **popular agent systems**:
+Pi Agent, OpenCode, Claude Code, Codex, Aider, Goose, Hermes, plus a plain webhook echo sink
+and a full battery of tests. Every agent self-registers with Crier at boot and answers
+through the bus (blocking webhook round-trips, async fire-and-forget, the LLM message guard
+with real DeepSeek verdicts when `DEEPSEEK_API_KEY` is set).
+
+```bash
+cd examples/agent-ecosystem
+docker compose up -d --build
+docker compose run --rm --build battery
+```
+
+Setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops and
+troubleshooting: [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) (CR-FEAT-022). The
+normative design authority is [`specs/AGENT-ECOSYSTEM.md`](specs/AGENT-ECOSYSTEM.md)
+(CR-SPEC-003).
+
 ## Configuration
 
 All configuration is via environment variables (defaults shown):
@@ -265,6 +285,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 | [`docs/mesh-protocol.md`](docs/mesh-protocol.md) | Mesh wire protocol — framing, message types, correlation contract, worked example |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
 | [`docs/integration-guide.md`](docs/integration-guide.md) | End-to-end integration guide — auth modes, signing, inbox lifecycle, mesh, Postgres |
+| [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) | Agent-ecosystem reference stack — setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops, troubleshooting (CR-FEAT-022) |
 | [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) | Message guard spec (CR-SPEC-002) — verdict contract, policies, providers, kanban output |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
