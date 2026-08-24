@@ -36,8 +36,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Deploy container to bunker-las-04 + run config-matrix battery
         run: |
-          bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30001 \
-            --agent crier-lab --sink http://100.97.236.14:19002
+          bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30011 \
+            --agent crier-lab --sink http://100.97.236.14:19012
       - name: Attach evidence
         if: always()
         uses: actions/upload-artifact@v4
