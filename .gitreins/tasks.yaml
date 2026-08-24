@@ -334,3 +334,14 @@ tasks:
   status: complete
   created_at: '2026-08-23T23:23:40.871357+00:00'
   completed_at: '2026-08-23T23:28:52.895969+00:00'
+- id: cr-gap-044-guard-invisible-integration-docs
+  title: "CR-GAP-044 \u2014 LLM guard invisible in integration docs (guide + demo.sh)"
+  criteria:
+  - 'docs/integration-guide.md documents the LLM message guard: >=5 ''guard'' mentions
+    incl CR_GUARD_ENABLED, GUARD_BLOCKED and X-Crier-Guard- headers; examples/demo.sh
+    has >=2 ''guard'' mentions incl a CR_GUARD_ENABLED=false note for keyless runs;
+    facts match config/config.go defaults; go build/vet/test pass; no changes to forbidden
+    Bane-pending files'
+  status: complete
+  created_at: '2026-08-24T05:41:01.123135+00:00'
+  completed_at: '2026-08-24T05:45:19.005810+00:00'
