@@ -1,6 +1,6 @@
 # Agent-ecosystem stack — crier as the message bus between popular agent systems.
 #
-#   docker compose up -d          # crier + sink + pi-agent + opencode
+#   docker compose up -d          # crier + sink + pi-agent + opencode + claude-code + codex + aider + goose
 #   docker compose --profile hermes up -d   # + hermes (requires hermes-agent:latest image)
 #   docker compose run battery     # run the full battery of tests
 #
@@ -8,6 +8,7 @@
 #   DEEPSEEK_API_KEY=sk-...        # enable the LLM guard with the deepseek preset (real verdicts)
 #   CRIER_HOST_PORT=18767          # host port for crier (bunker agents: use their port range)
 #   CRIER_REQUIRE_SIG=false        # signature enforcement (leave false for the demo wiring)
+#   <HARNESS>_LIVE=1               # per-harness live mode (CLAUDE_CODE_LIVE, CODEX_LIVE, AIDER_LIVE, GOOSE_LIVE, OPENCODE_LIVE)
 name: crier-agent-ecosystem
 
 x-crier-env: &crier-env
@@ -49,7 +50,10 @@ services:
     # Pi Agent (earendil-works/pi) — minimalist TypeScript harness. Receives
     # messages through crier (blocking webhook), answers via a real pi SDK
     # session when DEEPSEEK_API_KEY is set, canned reply otherwise.
-    build: ./pi-agent
+    # Shared consumer at consumer/consumer.mjs (build context = this dir).
+    build:
+      context: .
+      dockerfile: pi-agent/Dockerfile
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9101
@@ -60,14 +64,76 @@ services:
     networks: [crier-net]
 
   opencode:
-    # OpenCode CLI agent (opencode-ai) — same consumer pattern.
-    build: ./opencode
+    # OpenCode CLI agent (opencode-ai) — same shared consumer pattern.
+    build:
+      context: .
+      dockerfile: opencode/Dockerfile
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9102
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENCODE_LIVE: ${OPENCODE_LIVE:-}
     ports: ["${OPENCODE_HOST_PORT:-19102}:9102"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  claude-code:
+    # Claude Code CLI (Anthropic) — shared consumer; live mode via CLAUDE_CODE_LIVE=1.
+    build:
+      context: .
+      dockerfile: claude-code/Dockerfile
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9103
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CLAUDE_CODE_LIVE: ${CLAUDE_CODE_LIVE:-}
+    ports: ["${CLAUDE_CODE_HOST_PORT:-19103}:9103"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  codex:
+    # OpenAI Codex CLI — shared consumer; live mode via CODEX_LIVE=1.
+    build:
+      context: .
+      dockerfile: codex/Dockerfile
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9104
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CODEX_LIVE: ${CODEX_LIVE:-}
+    ports: ["${CODEX_HOST_PORT:-19104}:9104"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  aider:
+    # Aider (python) — shared consumer; live mode via AIDER_LIVE=1.
+    build:
+      context: .
+      dockerfile: aider/Dockerfile
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9105
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      AIDER_LIVE: ${AIDER_LIVE:-}
+    ports: ["${AIDER_HOST_PORT:-19105}:9105"]
+    depends_on:
+      crier: { condition: service_healthy }
+    networks: [crier-net]
+
+  goose:
+    # Goose (block/goose, rust binary) — shared consumer; live mode via GOOSE_LIVE=1.
+    build:
+      context: .
+      dockerfile: goose/Dockerfile
+    environment:
+      CRIER_URL: http://crier:8767
+      PORT: 9106
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GOOSE_LIVE: ${GOOSE_LIVE:-}
+    ports: ["${GOOSE_HOST_PORT:-19106}:9106"]
     depends_on:
       crier: { condition: service_healthy }
     networks: [crier-net]
@@ -99,6 +165,10 @@ services:
       sink: { condition: service_started }
       pi-agent: { condition: service_started }
       opencode: { condition: service_started }
+      claude-code: { condition: service_started }
+      codex: { condition: service_started }
+      aider: { condition: service_started }
+      goose: { condition: service_started }
     networks: [crier-net]
 
 volumes:

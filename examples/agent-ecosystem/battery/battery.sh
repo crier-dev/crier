@@ -1,8 +1,9 @@
 #!/bin/bash
 # The FULL battery of tests for the agent-ecosystem stack.
 # Exercises: agent registration + webhook round-trips through crier
-# (pi-agent, opencode, sink), LLM guard matrix (when DEEPSEEK_API_KEY set),
-# async/batch delivery, blocking replies. Evidence: $EVIDENCE (JSONL).
+# (pi-agent, opencode, claude-code, codex, aider, goose, sink), LLM guard
+# matrix (when DEEPSEEK_API_KEY set), async/batch delivery, blocking replies.
+# Evidence: $EVIDENCE (JSONL).
 set -uo pipefail
 
 CRIER="${CRIER_URL:-http://crier:8767}"
@@ -41,12 +42,24 @@ probe "crier health" 200 "ok" GET "/health"
 wait_ready "sink" "$SINK" || exit 1
 wait_ready "pi-agent" "http://pi-agent:9101" || exit 1
 wait_ready "opencode" "http://opencode:9102" || exit 1
+wait_ready "claude-code" "http://claude-code:9103" || exit 1
+wait_ready "codex" "http://codex:9104" || exit 1
+wait_ready "aider" "http://aider:9105" || exit 1
+wait_ready "goose" "http://goose:9106" || exit 1
 
 # 2. round-trips through the bus (blocking delivery, schema template)
 probe "round-trip pi-agent via crier" 200 '"reply":"' POST "/agents/pi-agent/inbox" \
   '{"payload":{"text":"What is the capital of France?"},"sender":"battery","session_id":"eco-pi","delivery_mode":"blocking","timeout_ms":30000}'
 probe "round-trip opencode via crier" 200 '"reply":"' POST "/agents/opencode/inbox" \
   '{"payload":{"text":"Explain what a message bus is."},"sender":"battery","session_id":"eco-oc","delivery_mode":"blocking","timeout_ms":30000}'
+probe "round-trip claude-code via crier" 200 '"reply":"' POST "/agents/claude-code/inbox" \
+  '{"payload":{"text":"What is the capital of France?"},"sender":"battery","session_id":"eco-cc","delivery_mode":"blocking","timeout_ms":30000}'
+probe "round-trip codex via crier" 200 '"reply":"' POST "/agents/codex/inbox" \
+  '{"payload":{"text":"Explain what a message bus is."},"sender":"battery","session_id":"eco-cx","delivery_mode":"blocking","timeout_ms":30000}'
+probe "round-trip aider via crier" 200 '"reply":"' POST "/agents/aider/inbox" \
+  '{"payload":{"text":"Suggest a good commit message for a typo fix."},"sender":"battery","session_id":"eco-ai","delivery_mode":"blocking","timeout_ms":30000}'
+probe "round-trip goose via crier" 200 '"reply":"' POST "/agents/goose/inbox" \
+  '{"payload":{"text":"What does a message bus do?"},"sender":"battery","session_id":"eco-gs","delivery_mode":"blocking","timeout_ms":30000}'
 probe "round-trip sink echo via crier" 200 "ECHO" POST "/agents/sink/inbox" \
   '{"payload":{"text":"What vegetable is in plot B?"},"sender":"battery","session_id":"eco-sink","delivery_mode":"blocking","timeout_ms":15000}'
 
