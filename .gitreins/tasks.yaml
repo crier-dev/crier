@@ -345,3 +345,39 @@ tasks:
   status: complete
   created_at: '2026-08-24T05:41:01.123135+00:00'
   completed_at: '2026-08-24T05:45:19.005810+00:00'
+- id: CR-FEAT-018
+  title: Agent-ecosystem docker-compose package
+  criteria:
+  - 'examples/agent-ecosystem/ exists with docker-compose.yml running crier + pi-agent
+    + opencode + hermes profile + webhook sink + battery service; each agent service
+    runs its real runtime with a thin adapter and self-registers with crier; battery/battery.sh
+    runs the full battery (health, agent round-trips via crier, guard matrix probes:
+    clean 201 / injection 403 / fail-open / fail-closed, blocking + batch delivery,
+    kanban card) writing JSONL evidence; README documents per-agent setup walkthroughs;
+    compose works on any docker host.'
+  status: complete
+  created_at: '2026-08-24T07:24:03.909232+00:00'
+  completed_at: '2026-08-24T07:24:11.491194+00:00'
+- id: CR-FEAT-019
+  title: Deploy ecosystem stack on bunker-las-04 crier-lab live
+  criteria:
+  - 'examples/agent-ecosystem is deployed on bunker-las-04 crier-lab (scp + docker
+    compose up; docker compose v2.39.2 installed on the agent), all ecosystem services
+    healthy over tailnet at 100.95.199.98:18767 (crier relay with agents sink/guarded/opencode/pi-agent
+    registered online), and battery.sh passes against the REMOTE stack (8/8 incl.
+    LLM guard matrix: clean 201, injection 403 GUARD_BLOCKED) with captured evidence
+    committed at examples/agent-ecosystem/battery/evidence/remote-bunker-las-04-2026-08-24.jsonl
+    (all runs timestamped on the agent''s battery-evidence volume 07:20-07:32Z).'
+  status: complete
+  created_at: '2026-08-24T07:24:04.088283+00:00'
+  completed_at: '2026-08-24T07:35:33.778635+00:00'
+- id: CR-FEAT-020
+  title: Ecosystem battery in CI
+  criteria:
+  - .github/workflows/bunker-e2e.yml contains an ecosystem-battery job or matrix mode
+    that runs battery.sh against the compose stack on the self-hosted bunker runner
+    (docker compose up + battery + evidence artifact); workflow valid and battery
+    job wired on push/nightly.
+  status: complete
+  created_at: '2026-08-24T07:24:04.277481+00:00'
+  completed_at: '2026-08-24T07:27:04.229038+00:00'
