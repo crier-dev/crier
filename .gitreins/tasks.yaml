@@ -396,3 +396,13 @@ tasks:
   status: complete
   created_at: '2026-08-24T07:53:25.331519+00:00'
   completed_at: '2026-08-24T08:00:23.105310+00:00'
+- id: cr-gap-040-backfill-commit-refs
+  title: 'CR-GAP-040: backfill commit_hash + files_changed on 7 complete board rows'
+  criteria:
+  - tasks.jsonl rows CR-FEAT-002, CR-SPEC-002, CR-FEAT-010, CR-FEAT-011, CR-FEAT-013,
+    CR-FEAT-014, CR-GAP-038 each have commit_hash and files_changed populated, values
+    verified against git log (implementing commit exists and files match git show
+    --stat), all other fields preserved
+  status: complete
+  created_at: '2026-08-24T08:15:18.176047+00:00'
+  completed_at: '2026-08-24T08:17:29.537653+00:00'
