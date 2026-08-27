@@ -266,13 +266,14 @@ All configuration is via environment variables (defaults shown):
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 15 endpoints across 5 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 12 endpoints across 6 operation groups:
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Health** | `GET /health` | Service health check |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
+| **Federation** |  | Relay-to-relay federation peer listing (CR-FEAT-006) |
 | **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
 
@@ -298,7 +299,7 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 15 HTTP endpoints wired with middleware, graceful shutdown
+- **API** — 12 HTTP endpoints wired with middleware, graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.
