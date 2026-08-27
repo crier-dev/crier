@@ -55,7 +55,11 @@ func run(args []string) int {
 	}
 	defer cleanup()
 
-	server := mcp.New(store)
+	server := mcp.NewWithOptions(store, mcp.Options{
+		AgentID: os.Getenv("CRIER_AGENT_ID"),
+		HTTPURL: os.Getenv("CRIER_HTTP_URL"),
+		MeshURL: os.Getenv("CRIER_MESH_URL"),
+	})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		return 1
@@ -63,8 +67,17 @@ func run(args []string) int {
 	return 0
 }
 
-// initStore creates a Store backend: PostgreSQL if CR_DATABASE_URL is set, otherwise in-memory.
+// initStore creates a Store backend: a RemoteStore against a running Crier
+// server when CRIER_HTTP_URL is set, PostgreSQL if CR_DATABASE_URL is set,
+// otherwise in-memory.
 func initStore(cfg config.Config) (registry.Store, func(), error) {
+	if url := os.Getenv("CRIER_HTTP_URL"); url != "" {
+		agentID := os.Getenv("CRIER_AGENT_ID")
+		if agentID == "" {
+			return nil, nil, fmt.Errorf("CRIER_AGENT_ID is required when CRIER_HTTP_URL is set")
+		}
+		return registry.NewRemoteStore(url, agentID, os.Getenv("CRIER_AUTH_TOKEN")), func() {}, nil
+	}
 	if cfg.Database.URL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
 		defer cancel()

@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/totalwindupflightsystems/crier/internal/registry"
 )
@@ -23,23 +25,56 @@ const (
 )
 
 // MCPServer reads JSON-RPC from stdin and writes to stdout.
-// It is a thin wrapper around a registry.Store.
+// It is a thin wrapper around a registry.Store, plus the bridge layer that
+// lets harnesses use messaging without touching the transport: leases,
+// acks, correlation ids and the mesh connection are all owned here.
 type MCPServer struct {
 	store  registry.Store
 	tools  map[string]toolHandler
 	stdin  *bufio.Scanner
 	stdout *json.Encoder
+
+	agentID string // bridge identity (own inbox / mesh identity)
+	httpURL string // remote server URL for mesh_peers
+	bridge  *meshBridge
+
+	mu       sync.Mutex
+	buffered []*registry.InboxEntry // pulled by ask_agent polling, unseen by the harness
 }
 
 type toolHandler func(args json.RawMessage) (any, error)
 
+// Options configures the bridge layer of the MCP server.
+type Options struct {
+	// AgentID is the bridge's own identity: the agent whose inbox
+	// get_messages/ask_agent read, and the mesh identity for mesh_request.
+	AgentID string
+	// HTTPURL is the Crier server base URL (http://host:port). Enables
+	// mesh_peers. Also the target of the RemoteStore when the store itself
+	// is remote.
+	HTTPURL string
+	// MeshURL is the WebSocket mesh endpoint (ws://host:port/mesh/connect/<id>).
+	// Enables mesh_request.
+	MeshURL string
+}
+
 // New creates an MCPServer backed by the given Store.
 func New(store registry.Store) *MCPServer {
+	return NewWithOptions(store, Options{})
+}
+
+// NewWithOptions creates an MCPServer with bridge options.
+func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 	s := &MCPServer{
-		store:  store,
-		tools:  make(map[string]toolHandler),
-		stdin:  bufio.NewScanner(os.Stdin),
-		stdout: json.NewEncoder(os.Stdout),
+		store:   store,
+		tools:   make(map[string]toolHandler),
+		stdin:   bufio.NewScanner(os.Stdin),
+		stdout:  json.NewEncoder(os.Stdout),
+		agentID: opts.AgentID,
+		httpURL: strings.TrimSuffix(opts.HTTPURL, "/"),
+	}
+	if opts.MeshURL != "" && opts.AgentID != "" {
+		s.bridge = newMeshBridge(opts.AgentID, opts.MeshURL)
 	}
 	s.registerTools()
 	return s
@@ -55,6 +90,11 @@ func (s *MCPServer) registerTools() {
 	s.tools["retrieve_inbox"] = s.handleRetrieveInbox
 	s.tools["ack_messages"] = s.handleAckMessages
 	s.tools["inbox_stats"] = s.handleInboxStats
+	s.tools["send_message"] = s.handleSendMessage
+	s.tools["get_messages"] = s.handleGetMessages
+	s.tools["ask_agent"] = s.handleAskAgent
+	s.tools["mesh_peers"] = s.handleMeshPeers
+	s.tools["mesh_request"] = s.handleMeshRequest
 }
 
 // Serve runs the stdio JSON-RPC loop. Blocks until shutdown.
@@ -63,6 +103,10 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 	defer cancel()
 
 	slog.Info("crier-mcp starting", "version", serverVersion, "transport", "stdio")
+
+	if s.bridge != nil {
+		go s.bridge.connectWithRetry(5, 2*time.Second)
+	}
 
 	for s.stdin.Scan() {
 		select {
@@ -221,6 +265,31 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 			Name:        "inbox_stats",
 			Description: "Get inbox statistics for an agent — queue depth, leased count, oldest message age.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier"}},"required":["agent_id"]}`),
+		},
+		{
+			Name:        "send_message",
+			Description: "Send a message to an agent's durable inbox (bridge-level: no leases, no acks to manage). Optionally reply_to a message's correlation id to answer an ask_agent.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Target agent identifier"},"payload":{"type":"object","description":"Message payload (JSON object)"},"reply_to":{"type":"string","description":"Optional correlation id from a question you are answering; the bridge merges crier_reply_to into the payload"}},"required":["agent_id","payload"]}`),
+		},
+		{
+			Name:        "get_messages",
+			Description: "Get the messages in this agent's own inbox (the bridge owns the lease and acks them for you).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"max":{"type":"integer","description":"Maximum messages to return","default":10,"minimum":1,"maximum":100}},"required":[]}`),
+		},
+		{
+			Name:        "ask_agent",
+			Description: "Blocking request/reply to another agent over the durable inbox: sends the payload (merged with a correlation id) and waits for a reply that answers it. Use this to ask an agent a question and get its answer in one call.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Target agent identifier"},"payload":{"type":"object","description":"The question payload"},"timeout_s":{"type":"integer","description":"How long to wait for the reply (default 30, max 300)"}},"required":["agent_id","payload"]}`),
+		},
+		{
+			Name:        "mesh_peers",
+			Description: "List the agents currently connected to the live mesh.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+		},
+		{
+			Name:        "mesh_request",
+			Description: "Live REQUEST/RESPONSE round-trip to another agent over the mesh (requires the bridge's own WebSocket connection). Use for liveness/RPC; LLM content should ride the durable inbox (ask_agent).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","description":"Target agent identifier"},"method":{"type":"string","description":"Application-level method, e.g. GET or PING"},"path":{"type":"string","description":"Application-level path, e.g. /ping"},"body":{"description":"Opaque JSON body"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 15000)"}},"required":["target","method","path"]}`),
 		},
 	}
 }

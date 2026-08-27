@@ -141,3 +141,68 @@ type UnregisterAgentOutput struct {
 type ListAgentsOutput struct {
 	Agents []*registry.Agent `json:"agents"`
 }
+
+// Bridge-level messaging types (harness-facing; the bridge owns the
+// transport: leases, acks, correlation).
+
+// SendMessageInput delivers a message to an agent's inbox. When ReplyTo is
+// set, the bridge merges a crier_reply_to field into the payload so the
+// recipient's ask_agent can correlate the reply.
+type SendMessageInput struct {
+	AgentID string         `json:"agent_id"`
+	Payload map[string]any `json:"payload"`
+	ReplyTo string         `json:"reply_to,omitempty"`
+}
+
+type SendMessageOutput struct {
+	MessageID string `json:"message_id"`
+	AgentID   string `json:"agent_id"`
+}
+
+type GetMessagesInput struct {
+	Max int `json:"max,omitempty"`
+}
+
+// MessageView is one retrieved inbox message. The bridge has already
+// acknowledged it (the harness never sees leases or acks).
+type MessageView struct {
+	ID      string         `json:"id"`
+	Payload map[string]any `json:"payload"`
+}
+
+type GetMessagesOutput struct {
+	Messages []MessageView `json:"messages"`
+}
+
+// AskAgentInput is a blocking request/reply over the durable inbox: the
+// bridge delivers the payload (merged with a crier_correlation_id), then
+// polls its own inbox for a reply carrying crier_reply_to == that id.
+type AskAgentInput struct {
+	AgentID  string         `json:"agent_id"`
+	Payload  map[string]any `json:"payload"`
+	TimeoutS int            `json:"timeout_s,omitempty"`
+}
+
+type AskAgentOutput struct {
+	MessageID string         `json:"message_id"`
+	Response  map[string]any `json:"response"`
+}
+
+type MeshPeersOutput struct {
+	Peers []string `json:"peers"`
+	Count int      `json:"count"`
+}
+
+type MeshRequestInput struct {
+	Target    string `json:"target"`
+	Method    string `json:"method"`
+	Path      string `json:"path"`
+	Body      any    `json:"body,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+}
+
+type MeshRequestOutput struct {
+	StatusCode int            `json:"status_code"`
+	Body       map[string]any `json:"body"`
+	TraceID    string         `json:"trace_id"`
+}
