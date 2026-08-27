@@ -273,7 +273,7 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 | **Health** | `GET /health` | Service health check |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
-| **Federation** |  | Relay-to-relay federation peer listing (CR-FEAT-006) |
+| **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
 | **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
 
