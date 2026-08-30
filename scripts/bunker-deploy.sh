@@ -30,6 +30,7 @@ done
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 KEY="$HOME/.bunker/keys/$AGENT"
 TARBALL=/tmp/crier-image.tar.gz
+BUNKER="$HOME/go/bin/bunker"
 
 cd "$REPO"
 if [[ $SKIP_BUILD -eq 0 ]]; then
@@ -39,8 +40,8 @@ fi
 
 scp -q -i "$KEY" -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes \
   "$TARBALL" "bunker-$AGENT@$HOST:/home/bunker-$AGENT/"
-bunker exec "$AGENT" --server "$SERVER" -- docker load -i "/home/bunker-$AGENT/crier-image.tar.gz" >/dev/null
-bunker exec "$AGENT" --server "$SERVER" -- docker rm -f crier-relay >/dev/null 2>&1 || true
+"$BUNKER" exec "$AGENT" --server "$SERVER" -- docker load -i "/home/bunker-$AGENT/crier-image.tar.gz" >/dev/null
+"$BUNKER" exec "$AGENT" --server "$SERVER" -- docker rm -f crier-relay >/dev/null 2>&1 || true
 
 ENVFLAGS=()
 if [[ -n "${CR_ENV_FILE:-}" && -f "$CR_ENV_FILE" ]]; then
@@ -50,7 +51,7 @@ if [[ -n "${CR_ENV_FILE:-}" && -f "$CR_ENV_FILE" ]]; then
   done < "$CR_ENV_FILE"
 fi
 
-bunker exec "$AGENT" --server "$SERVER" -- docker run -d --name crier-relay --restart unless-stopped \
+"$BUNKER" exec "$AGENT" --server "$SERVER" -- docker run -d --name crier-relay --restart unless-stopped \
   -p "$PORT:8767" -e CRIER_PORT=8767 "${ENVFLAGS[@]}" "$IMAGE" >/dev/null
 sleep 2
 curl -sf "http://$HOST:$PORT/health" >/dev/null && echo "bunker-deploy: $AGENT container health OK on :$PORT"

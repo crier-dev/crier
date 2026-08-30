@@ -7,7 +7,7 @@
 #   blocking     — blocking webhook round-trip through the guard (needs sink)
 # Evidence: JSONL at $EVIDENCE (default /tmp/bunker-matrix-<ts>.jsonl).
 # Usage: bunker-matrix.sh [--host 100.95.199.98] [--port 30001] [--agent crier-lab]
-#                         [--server bunker-las-04] [--sink http://100.97.236.14:19002] [--skip-build]
+#                         [--server bunker-las-04] [--sink http://100.97.236.14:19012] [--skip-build]
 set -uo pipefail
 
 HOST=100.95.199.98
@@ -30,18 +30,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BUNKER="$HOME/go/bin/bunker"
 fatal() { echo "FATAL: $*" >&2; exit 1; }
 
 # Preflight: agent must be registered on the pinned server, the ssh key must
 # authenticate, and bunker exec must reach the agent's rootless dockerd —
 # abort FATAL before any probe so we never test stale containers.
-~/go/bin/bunker info "$AGENT" --server "$SERVER" >/dev/null 2>&1 \
+"$BUNKER" info "$AGENT" --server "$SERVER" >/dev/null 2>&1 \
   || fatal "agent $AGENT not found on $SERVER (re-register with spawn/heartbeat)"
 ssh -q -i "$HOME/.bunker/keys/$AGENT" -o StrictHostKeyChecking=accept-new \
   -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 \
   "bunker-$AGENT@$HOST" true \
   || fatal "ssh key $HOME/.bunker/keys/$AGENT does not authenticate"
-~/go/bin/bunker exec "$AGENT" --server "$SERVER" -- docker ps >/dev/null 2>&1 \
+"$BUNKER" exec "$AGENT" --server "$SERVER" -- docker ps >/dev/null 2>&1 \
   || fatal "bunker exec docker ps failed on $SERVER"
 echo "preflight OK: $AGENT on $SERVER"
 
