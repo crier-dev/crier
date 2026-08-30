@@ -43,10 +43,15 @@ jobs:
       EVIDENCE: /tmp/bunker-matrix-ci.jsonl
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure crier-lab agent on bunker-las-04 (720h TTL) + heartbeat
+        run: |
+          $HOME/go/bin/bunker info crier-lab --server bunker-las-04 >/dev/null 2>&1 \
+            || $HOME/go/bin/bunker spawn crier-lab --server bunker-las-04 --ttl 720h
+          $HOME/go/bin/bunker heartbeat crier-lab --server bunker-las-04
       - name: Deploy container to bunker-las-04 + run config-matrix battery
         run: |
           bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30011 \
-            --agent crier-lab --sink http://100.97.236.14:19012
+            --agent crier-lab --server bunker-las-04 --sink http://100.97.236.14:19012
       - name: Attach evidence
         if: always()
         uses: actions/upload-artifact@v4
