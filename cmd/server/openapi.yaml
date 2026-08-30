@@ -1,0 +1,828 @@
+openapi: "3.1.0"
+info:
+  title: Crier — Agent Message Bus
+  description: |
+    Communication backbone for the autonomous agent economy.
+    Four primitives: relay, mesh, registry, inboxes.
+
+    Auth: every endpoint except /health requires `Authorization: Bearer <CR_AUTH_TOKEN>` (middleware.Auth). /health is exempt.
+  version: "0.1.0"
+servers:
+  - url: http://localhost:8767
+    description: Local development
+security:
+  - bearerAuth: []
+paths:
+  # ── Health ──
+  # /health exempt — middleware.Auth exempts it from the bearer check
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ── Relay: Pub/Sub ──
+  /relay/publish:
+    post:
+      operationId: relayPublish
+      summary: Publish an event to a topic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, event]
+              properties:
+                topic:
+                  type: string
+                  description: Topic name (dot-separated, supports wildcard subscribers)
+                event:
+                  type: object
+                  description: Event payload
+      responses:
+        "202":
+          description: |
+            Event accepted for delivery (fire-and-forget). If the topic has
+            zero subscribers the event is dropped by design — publishes to
+            empty topics are not queued or retained, and the topic does not
+            appear in GET /relay/topics until at least one subscriber connects.
+        "401":
+          description: X-Agent-ID header required (rate limiting enabled)
+        "429":
+          description: Rate limit exceeded
+
+  /relay/subscribe/{topic}:
+    get:
+      operationId: relaySubscribe
+      summary: Subscribe to topic via WebSocket
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade — events streamed as JSON frames
+
+  /relay/topics:
+    get:
+      operationId: relayListTopics
+      summary: List active topics
+      responses:
+        "200":
+          description: Active topics with subscriber counts
+
+  # ── P2P Mesh ──
+  /mesh/peers:
+    get:
+      operationId: meshListPeers
+      summary: List connected mesh peers
+      responses:
+        "200":
+          description: Connected peers with agent IDs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [peers, count]
+                properties:
+                  peers:
+                    type: array
+                    description: Connected peer agent IDs
+                    items:
+                      type: object
+                      required: [agent_id]
+                      properties:
+                        agent_id:
+                          type: string
+                          description: Connected agent identifier
+                  count:
+                    type: integer
+                    description: Number of connected peers
+
+  /mesh/connect/{agentID}:
+    get:
+      operationId: meshConnect
+      summary: Open a P2P WebSocket connection to an agent
+      parameters:
+        - name: agentID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade — bidirectional P2P message frames
+        "400":
+          description: agentID is required
+
+  # ── Relay Federation (CR-FEAT-006) ──
+  /fed/peers:
+    get:
+      operationId: fedListPeers
+      summary: List federation peers (local relay first, then linked relays with their agents)
+      description: >
+        The local relay is listed first (name from CR_FED_NAME, agents from
+        the local registry). Each linked relay (CR_FED_LINKS) follows with
+        its agents fetched live from its GET /agents endpoint. A link that
+        fails to answer still appears, with an empty agents list.
+      responses:
+        "200":
+          description: Federation peers with their agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [peers]
+                properties:
+                  peers:
+                    type: array
+                    description: Local relay first, then each linked relay
+                    items:
+                      type: object
+                      required: [name, url, agents]
+                      properties:
+                        name:
+                          type: string
+                          description: Relay display name (CR_FED_NAME or host:port)
+                        url:
+                          type: string
+                          description: Relay base URL
+                        agents:
+                          type: array
+                          description: Agents registered on the relay (id + capabilities)
+                          items:
+                            type: object
+                            required: [id]
+                            properties:
+                              id:
+                                type: string
+                                description: Agent identifier
+                              capabilities:
+                                type: array
+                                description: Advertised agent capabilities
+                                items:
+                                  type: string
+
+  # ── Agent Registry ──
+  /agents:
+    get:
+      operationId: registryListAgents
+      summary: List registered agents
+      description: |
+        Capability discovery (spec §7): with ?capability=abc only agents whose
+        advertised capabilities include abc are returned. Without the parameter
+        all registered agents are returned.
+      parameters:
+        - name: capability
+          in: query
+          required: false
+          schema:
+            type: string
+          description: When set, only agents advertising this capability are returned (capability discovery, CR-FEAT-007)
+      responses:
+        "200":
+          description: Array of registered agents (status reflects registration-liveness, not live connection health)
+    post:
+      operationId: registryRegisterAgent
+      summary: Register a new agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, public_key]
+              properties:
+                id:
+                  type: string
+                  description: Agent identifier
+                public_key:
+                  type: string
+                  description: Ed25519 public key (hex-encoded)
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: Advertised capabilities
+                guard:
+                  $ref: "#/components/schemas/GuardAgentConfig"
+                  description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
+      responses:
+        "201":
+          description: Agent registered
+        "400":
+          description: "Invalid request body, webhook config, or guard config (guard.policies required, policy id 1..64 runes, action allow|block|sanitize, block_risk low|medium|high, providers ≤ 5, custom requires base_url + api_key_ref, deepseek preset forbids thinking_enabled)"
+        "409":
+          description: Agent ID already registered
+
+  /agents/{id}:
+    get:
+      operationId: registryGetAgent
+      summary: Get agent details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent detail (status reflects registration-liveness, not live connection health)
+        "404":
+          description: Agent not found
+    delete:
+      operationId: registryUnregisterAgent
+      summary: Unregister an agent
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as inbox retrieve/ack/stats: sign
+        "DELETE\n/agents/{id}\n<unix-seconds>". An unsigned or invalidly signed
+        DELETE is rejected with 401; an agent may only delete itself (the
+        X-Agent-ID must match the {id} in the path, else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Agent unregistered
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+    patch:
+      operationId: registryUpdateAgent
+      summary: Partially update an agent's registration (self-configuration directive, spec §7)
+      description: |
+        Partial update of an agent's registration — the self-configuration
+        surface for configure directives (CR-FEAT-007). `capabilities`, when
+        present, replaces the advertised capability list; `webhook`, when
+        present, registers or updates the webhook endpoint; when absent or
+        null the webhook is removed.
+
+        Agent-owned: when CR_REQUIRE_AGENT_SIG=true (the default), this
+        endpoint requires the per-agent ed25519 signature headers X-Agent-ID,
+        X-Agent-Ts, X-Agent-Sig — the same signing contract as DELETE
+        /agents/{id}: sign "PATCH\n/agents/{id}\n<unix-seconds>". An unsigned
+        or invalidly signed PATCH is rejected with 401; an agent may only
+        update itself (the X-Agent-ID must match the {id} in the path,
+        else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: Replaces the advertised capability list when present
+                webhook:
+                  type: object
+                  nullable: true
+                  description: Webhook endpoint config — registers/updates when an object; null or absent removes the webhook
+                  properties:
+                    url:
+                      type: string
+                      description: Endpoint URL (http(s)://) — required when registering
+                    auth_type:
+                      type: string
+                      enum: [none, bearer]
+                    auth_value_ref:
+                      type: string
+                      description: "env:VAR reference for bearer tokens (never stored inline)"
+                    schema_template:
+                      type: string
+                      enum: [generic-custom, openai-compatible, hermes-http-gateway]
+                    custom_schema:
+                      type: object
+                      description: Bring-your-own schema — wins over the named template
+                    delivery_mode:
+                      type: string
+                      enum: [blocking, async, batch]
+                    batch:
+                      type: object
+                      description: Batch-mode coalescing (max_messages, flush_interval_s)
+                    retries:
+                      type: integer
+                      minimum: 0
+                      maximum: 10
+                    timeout_ms:
+                      type: integer
+                      minimum: 0
+                      maximum: 120000
+                guard:
+                  $ref: "#/components/schemas/GuardAgentConfig"
+                  nullable: true
+                  description: "LLM message-guard config (CR-FEAT-011, spec §9.2) — an object replaces the whole guard config (validated, 400 on violation); explicit null removes the guard (agent falls back to the server default policy); absent leaves it unchanged"
+      responses:
+        "200":
+          description: Agent updated — the full agent object is returned
+        "400":
+          description: Invalid request body or webhook config
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+        "501":
+          description: Registry backend does not support agent updates
+
+  # ── Inboxes ──
+  /agents/{id}/inbox:
+    post:
+      operationId: inboxDeliver
+      summary: Deliver a message to an agent's inbox
+      description: |
+        Delivers a message to the target agent. When the agent has a webhook
+        endpoint registered, the message is POSTed there instead of the inbox
+        (CR-FEAT-001; delivery_mode blocking|async|batch per WEBHOOK-DELIVERY.md).
+
+        When the target agent has a guard policy (CR-FEAT-010), the message is
+        classified by the LLM message guard before ANY delivery: allow →
+        delivered as today (guard metadata rides in the envelope `crier.guard`
+        and — for webhook deliveries — the X-Crier-Guard-* headers); sanitize →
+        delivered with the payload replaced by the quarantine notice (§3.5);
+        block → 403 GUARD_BLOCKED, never queued/stored/POSTed. Guard errors
+        fail open (delivered, X-Crier-Guard-Error: true) unless the policy is
+        fail_closed (→ 403 with the error-path verdict).
+
+        Outbound webhook POSTs carry, when guarded (spec §7.2):
+        X-Crier-Guard-Decision (allow|sanitize), X-Crier-Guard-Risk,
+        X-Crier-Guard-Reason (RFC 3986 percent-encoded),
+        X-Crier-Guard-Patterns (comma-joined), X-Crier-Guard-Policy,
+        X-Crier-Guard-Provider, X-Crier-Guard-Model, X-Crier-Guard-Error
+        (true on the guard-error path). Batch POSTs carry the worst-case
+        verdict across inner messages; per-message verdicts stay in each
+        inner envelope's crier.guard metadata. Redelivery and batch flush
+        never re-run the guard — the verdict rides with the message.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: object
+                  description: Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve
+                sender:
+                  type: string
+                  description: Originating agent id (webhook envelope metadata)
+                session_id:
+                  type: string
+                  description: "Conversation context for session-aware delivery (CR-FEAT-004) — the guard resolves per-channel policies against it (spec §4.2)"
+                thread_id:
+                  type: string
+                  description: "Thread context for session-aware delivery (CR-FEAT-004) — deliver-API passthrough of the envelope's thread_id (spec §9.3); the guard resolves per-channel policies against it (spec §4.2)"
+                delivery_mode:
+                  type: string
+                  enum: [blocking, async, batch]
+                  description: Overrides the agent's webhook default delivery mode
+                timeout_ms:
+                  type: integer
+                  description: Bounds a blocking delivery (default 30000)
+                request_id:
+                  type: string
+                  description: Sender's correlation id, echoed in the reply
+                kind:
+                  type: string
+                  description: Envelope kind (spec §3, §7) — message (default), configure (self-configuration directive), or configure_ack (agent's acknowledgement). Webhook deliveries carry it in the envelope crier.kind field and the X-Crier-Event header unchanged.
+                priority:
+                  type: integer
+                  minimum: 0
+                  maximum: 9
+                  default: 0
+                ttl_seconds:
+                  type: integer
+                  description: Message expiry (0 = never)
+      responses:
+        "201":
+          description: Message queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+                    description: Assigned message id
+                  guard:
+                    $ref: "#/components/schemas/GuardVerdictMeta"
+                    description: "Guard verdict metadata when the message was not plain-allowed (sanitize, or errored fail-open) — visibility for async senders (CR-FEAT-010, spec §9.3)"
+        "400":
+          description: Invalid request body or store input
+        "403":
+          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuardBlockedResponse"
+        "404":
+          description: Agent not found
+    get:
+      operationId: inboxRetrieve
+      summary: Retrieve undelivered messages from inbox
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "GET\n/agents/{id}/inbox\n<unix-seconds>". An unsigned or invalidly signed
+        retrieve is rejected with 401; an agent may only retrieve its own inbox
+        (the X-Agent-ID must match the {id} in the path, else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: lease_seconds
+          in: query
+          schema:
+            type: integer
+            default: 30
+            description: Duration to lease messages (prevents double delivery)
+      responses:
+        "200":
+          description: Array of leased messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages, lease_id]
+                properties:
+                  messages:
+                    type: array
+                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use. Entries carry guard metadata (CR-FEAT-010) when the delivery was guarded.
+                    items:
+                      $ref: "#/components/schemas/InboxEntry"
+                  lease_id:
+                    type: string
+                    description: Lease covering the returned messages — pass to inboxAck to release
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+
+  /agents/{id}/inbox/stats:
+    get:
+      operationId: inboxStats
+      summary: Get inbox queue statistics
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "GET\n/agents/{id}/inbox/stats\n<unix-seconds>". An unsigned or invalidly
+        signed request is rejected with 401; an agent may only read its own stats
+        (the X-Agent-ID must match the {id} in the path, else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      responses:
+        "200":
+          description: Queue statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queue_depth, leased_count, oldest_age_ms]
+                properties:
+                  queue_depth:
+                    type: integer
+                    description: Undelivered messages in queue
+                  leased_count:
+                    type: integer
+                    description: Messages currently leased out
+                  oldest_age_ms:
+                    type: integer
+                    description: Age of oldest queued message in milliseconds
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+
+  /agents/{id}/inbox/ack:
+    post:
+      operationId: inboxAck
+      summary: Acknowledge message delivery (release lease)
+      description: |
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig —
+        the same signing contract as DELETE /agents/{id}: sign
+        "POST\n/agents/{id}/inbox/ack\n<unix-seconds>". An unsigned or invalidly
+        signed ack is rejected with 401; an agent may only ack its own inbox
+        (the X-Agent-ID must match the {id} in the path, else 403).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lease_id, message_ids]
+              properties:
+                lease_id:
+                  type: string
+                  description: Lease ID from the inboxRetrieve response — must match the active lease or the server rejects with 409
+                message_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "204":
+          description: Messages acknowledged, lease released (no body)
+        "400":
+          description: Invalid request body, or missing lease_id / message_ids
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "404":
+          description: Agent not found
+        "409":
+          description: Lease conflict — lease_id does not match the active lease
+
+components:
+  parameters:
+    XAgentID:
+      name: X-Agent-ID
+      in: header
+      required: true
+      description: The agent claiming to act — must match the {id} in the path (else 403). Required when CR_REQUIRE_AGENT_SIG=true (the default).
+      schema:
+        type: string
+    XAgentTs:
+      name: X-Agent-Ts
+      in: header
+      required: true
+      description: Unix timestamp (seconds) of the signature — must be within ±30s of server time.
+      schema:
+        type: integer
+    XAgentSig:
+      name: X-Agent-Sig
+      in: header
+      required: true
+      description: Hex-encoded ed25519 signature (128 hex chars) over the payload "<METHOD>\n<path>\n<unix-seconds>" where path is the raw URL path (query string excluded).
+      schema:
+        type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token from CR_AUTH_TOKEN — required on all requests except /health
+  schemas:
+    InboxEntry:
+      type: object
+      required: [id, agent_id, payload, created_at, expires_at, acked]
+      properties:
+        id:
+          type: string
+          description: Message id
+        agent_id:
+          type: string
+          description: Owning agent id
+        payload:
+          type: string
+          format: byte
+          description: Message payload as a base64-encoded string (Go []byte JSON encoding). Decode to recover the original JSON object delivered via inboxDeliver.
+        created_at:
+          type: string
+          format: date-time
+          description: Enqueue time (RFC 3339)
+        expires_at:
+          type: string
+          format: date-time
+          description: Expiry time (RFC 3339); 0001-01-01T00:00:00Z when ttl_seconds was 0
+        leased_at:
+          type: string
+          format: date-time
+          description: Present when the message is currently leased
+        lease_id:
+          type: string
+          description: Lease covering this message (present while leased)
+        acked:
+          type: boolean
+          description: Whether the message has been acknowledged
+        guard:
+          $ref: "#/components/schemas/GuardVerdictMeta"
+          description: "LLM message-guard verdict metadata (CR-FEAT-010) — present on guarded deliveries, absent when the guard is disabled; a sanitized entry's payload is the quarantine notice and the original rides here in quarantined_payload"
+    GuardAgentConfig:
+      type: object
+      required: [policies]
+      description: "LLM message-guard configuration carried on an agent registration (Agent.guard, CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1). At least one policy required. API keys are never part of it — only env: refs. Resolution (spec §4.2, CR-FEAT-011): first policy in list order whose channel_match matches the message's session/thread wins; a policy with channel_match \"\" or \"*\" is the agent default (list it last); no match → the server default (CR_GUARD_DEFAULT_POLICY env) → the built-in default."
+      properties:
+        policies:
+          type: array
+          minItems: 1
+          description: "Policies in resolution order (spec §4.2) — first channel_match match wins"
+          items:
+            $ref: "#/components/schemas/GuardPolicy"
+    GuardPolicy:
+      type: object
+      required: [id]
+      description: "One guard policy. Inline minimal form: {id, fail_closed, providers:[{model, base_url, api_key_ref}]}; a bare id naming a built-in named policy (e.g. \"default\") also resolves."
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Policy id — unique within the agent
+        channel_match:
+          type: string
+          maxLength: 256
+          description: "Channel glob (spec §4.2, CR-FEAT-011): Go path.Match pattern matched against session:<session_id> and thread:<thread_id> — a policy matches if it matches either key; a bare glob (no session:/thread: prefix) matches session_id only; \"\" or \"*\" = agent default (matches every channel, including unchanneled messages)"
+        checks:
+          $ref: "#/components/schemas/GuardChecks"
+        thresholds:
+          $ref: "#/components/schemas/GuardThresholds"
+        action:
+          type: string
+          enum: [allow, block, sanitize]
+          description: "Guard-error path action when fail_closed (default block, spec §3.6)"
+        fail_closed:
+          type: boolean
+          default: false
+          description: "true = guard errors block the message (apply action); false (default) = fail open (deliver with guard_error metadata)"
+        providers:
+          type: array
+          maxItems: 5
+          description: "Provider failover chain — empty = [deepseek preset] (deepseek-v4-flash, thinking disabled)"
+          items:
+            $ref: "#/components/schemas/GuardProviderSpec"
+        kanban:
+          $ref: "#/components/schemas/GuardKanbanConfig"
+    GuardChecks:
+      type: object
+      description: "Attack-class toggles (spec §4.1) — false removes the class from the prompt and suppresses its prematch patterns; absent = true"
+      properties:
+        instruction_injection:
+          type: boolean
+        jailbreak:
+          type: boolean
+        masquerade:
+          type: boolean
+        structured_object:
+          type: boolean
+    GuardThresholds:
+      type: object
+      description: "Deterministic escalation caps (spec §3.4) — the LLM can never under-block below block_risk"
+      properties:
+        block_risk:
+          type: string
+          enum: [low, medium, high]
+          default: high
+    GuardProviderSpec:
+      type: object
+      required: [provider]
+      description: "One provider in the failover chain (spec §5.1). Named presets: deepseek (default base https://api.deepseek.com/v1, env:DEEPSEEK_API_KEY, deepseek-v4-flash — thinking forbidden), groq (env:GROQ_API_KEY), nvidia (env:NVIDIA_API_KEY). custom requires base_url + api_key_ref."
+      properties:
+        provider:
+          type: string
+          enum: [deepseek, groq, nvidia, custom]
+        model:
+          type: string
+          description: Empty = preset default model
+        base_url:
+          type: string
+          description: Empty = preset default base URL (required for custom)
+        api_key_ref:
+          type: string
+          description: "env:VAR reference — resolved at call time, never stored inline (required for custom)"
+        thinking_enabled:
+          type: boolean
+          default: false
+          description: "Adds the thinking field to the request; hard-forbidden on the deepseek preset (spec §5.2)"
+    GuardKanbanConfig:
+      type: object
+      description: "CR-FEAT-014 output option (spec §8) — opt-in per policy, OFF by default; cards are written fire-and-forget to the configured CardWriter — the `hermes kanban create` CLI by default, or an HTTP sink POSTing the card JSON when CR_GUARD_KANBAN_URL is set (CR-FEAT-009) — never blocking the delivery"
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        on:
+          type: string
+          enum: [block, all]
+          default: block
+          description: "block (default) = card when the verdict is block/sanitize (or a guard-error whose error-path decision is block); all = card for every guarded message on the channel"
+        assignee:
+          type: string
+          description: "Card assignee; empty defaults to the operator (Bane)"
+        board_url:
+          type: string
+          description: "Originating project board link for the card (e.g. the crier board path)"
+    GuardVerdictMeta:
+      type: object
+      description: "Per-message guard verdict metadata (spec §3.7) — carried on webhook envelope crier.guard, inbox entries, deliver responses, kanban cards, and emitted as X-Crier-Guard-* headers"
+      required: [decision, risk_level, reason]
+      properties:
+        message_id:
+          type: string
+          description: "Guarded message id (spec §8.2 — populated on the envelope path)"
+        decision:
+          type: string
+          enum: [allow, block, sanitize]
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        reason:
+          type: string
+          description: "Justification — guard_error: … when the verdict came from the error path"
+        matched_patterns:
+          type: array
+          items:
+            type: string
+          description: "Attack-class identifiers / pattern names (spec §1.1, §6.4)"
+        policy:
+          type: string
+          description: Policy id
+        provider:
+          type: string
+          description: Provider that produced the verdict
+        model:
+          type: string
+          description: Model that produced the verdict
+        errored:
+          type: boolean
+          description: "true when the verdict came from the guard-error path (§3.6)"
+        quarantined:
+          type: boolean
+          description: "true when the message was sanitized — the delivered payload is the quarantine notice"
+        quarantined_payload:
+          type: string
+          format: byte
+          description: "base64(std) of the ORIGINAL payload when sanitized (spec §3.5) — recipient's choice whether to recover it"
+    GuardBlockedResponse:
+      type: object
+      required: [error, guard]
+      description: "Uniform 403 body for guard-blocked deliveries (spec §2.1/§9.3) — every delivery mode"
+      properties:
+        error:
+          type: string
+          enum: [GUARD_BLOCKED]
+        guard:
+          $ref: "#/components/schemas/GuardVerdictMeta"

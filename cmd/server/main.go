@@ -93,6 +93,13 @@ func run(args []string) int {
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
 
+	// OpenAPI spec (CR-GAP-049) — the spec is served live so spec-vs-code
+	// drift is visible on the running server. All three endpoints are exempt
+	// from auth (same as /health) so a token-less curl works.
+	r.HandleFunc("/openapi.json", handleOpenAPIJSON).Methods("GET")
+	r.HandleFunc("/openapi.yaml", handleOpenAPIYAML).Methods("GET")
+	r.HandleFunc("/docs", handleOpenAPIDocs).Methods("GET")
+
 	// Relay pub/sub
 	relaySvc := relay.New(cfg.RateLimitPerMinute)
 	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
