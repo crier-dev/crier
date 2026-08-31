@@ -262,11 +262,19 @@ All configuration is via environment variables (defaults shown):
 | `CR_GUARD_DEFAULT_POLICY` | _(unset — built-in `default`)_ | JSON `Policy` used as the server-wide default when the target agent registers no guard config. Must parse + validate at startup (fail-fast). |
 | `CR_GUARD_KANBAN_QUEUE` | `100` | Kanban worker queue capacity (fire-and-forget cards, opt-in per policy `kanban`). |
 | `CR_GUARD_KANBAN_URL` | _(unset — Hermes kanban CLI)_ | HTTP kanban sink base URL (http/https, CR-FEAT-009). When set, guard cards are POSTed here as JSON (fire-and-forget); unset = cards go through the `hermes kanban create` CLI writer. |
+| `CR_WEBHOOK_SECRET` | _(unset)_ | HMAC outbound signing. |
+| `CR_WEBHOOK_TIMEOUT_S` | `30` | Outbound webhook timeout, seconds. |
+| `CR_WEBHOOK_MAX_RETRIES` | `5` | Outbound retry count. |
+| `CR_WEBHOOK_REDELIVER_S` | `30` | Redelivery interval, seconds. |
+| `CR_WEBHOOK_PROBE_S` | `60` | Dead-target probe interval, seconds. |
+| `CR_WEBHOOK_CIRCUIT_THRESHOLD` | `10` | Consecutive failures that open the circuit. |
+| `CR_WEBHOOK_BATCH_MAX` | `10` | Batch flush size. |
+| `CR_WEBHOOK_BATCH_FLUSH_S` | `5` | Batch flush interval, seconds. |
 | `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 12 endpoints across 6 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 16 endpoints across 6 operation groups:
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -299,7 +307,7 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 12 HTTP endpoints wired with middleware, graceful shutdown
+- **API** — 16 HTTP endpoints wired with middleware, graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.
