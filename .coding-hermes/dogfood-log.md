@@ -35,3 +35,4 @@
 **Foreman:** not paused (cooldown 7200s < 14400s) — no wake needed; board has fresh work.
 2026-09-01 | UNKNOWN-VALUE | n/a t2fs | friction 0 | 3 findings
 
+2026-09-07 | SHIPPABLE | 21s t2fs | friction 6 | 5 findings
