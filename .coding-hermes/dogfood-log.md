@@ -36,3 +36,21 @@
 2026-09-01 | UNKNOWN-VALUE | n/a t2fs | friction 0 | 3 findings
 
 2026-09-07 | SHIPPABLE | 21s t2fs | friction 6 | 5 findings
+
+## 2026-09-08 — Crier (cron dogfood run #3: webhook delivery + federation focus)
+
+**Promise statement:** "A user can start one Go server and drive an agent-to-agent bus: registry with ed25519 identities and signed self-configuration (PATCH), durable lease-based inboxes, PUSH delivery to any agent's own HTTP endpoint (webhook driver: blocking/async/batch, HMAC-signed envelopes, schema templates incl. openai-compatible), and relay-to-relay federation via CR_FED_LINKS with agent-table exchange and reply routing."
+
+**Date | Verdict | install | t2fs | friction:** 2026-09-08 | PROMISING-BUT-ROUGH | SKIPPED-install-bunker (host unreachable: ssh timeout + ping 100% loss to 100.69.3.13) | ~2 min | 7 frictions | 3 headline findings below.
+
+**What was actually done (real use, not tests):**
+- Two fresh relays (A :8899 auth+HMAC, B :8898) + 4 controllable HTTP receivers (ok / always-500 / fail-n / timeout modes, full request logging).
+- Webhook blocking round-trip: deliver → receiver POSTed envelope (X-Crier-Event/Agent/Session/Signature headers) → reply extracted → 200 in 16ms with session echo. HMAC-SHA256 signature VERIFIED against raw body.
+- PATCH /agents/{id} with per-agent ed25519 signature: changed webhook URL live → next deliver hit the new endpoint.
+- openai-compatible template: payload.text → messages[]/model mapping worked; reply extracted via jsonpath; wrong reply shape → clean 504 with the exact extraction error.
+- Async: 202 + guard metadata to sender, push arrives after; batch: 5 messages → exactly 1 POST with per-message guard metadata inside.
+- Retry ladder against always-500: watched X-Crier-Retry 2→5 at 30s intervals, then `webhook: delivery dropped (retries exhausted)` — sender inbox stayed EMPTY (DF-CRIER-8).
+- Federation: cross-relay deliver landed in B's inbox (guard+lease intact), agent tables exchanged in /fed/peers, blocking webhook reply routed back through A→sender with same message_id. But: links carry NO auth (DF-CRIER-6), link-down = instant silent 404 drop (DF-CRIER-7).
+- CR-GAP-014 re-check: lease-only ack now 400 (was silent 204 no-op in August) — VERIFIED FIXED; correct ack 204 → queue_depth 0.
+
+**Top 3 findings:** DF-CRIER-6 federation has no auth mechanism (breaks against the documented default auth posture); DF-CRIER-7 fed link-down drops silently (spec promised hold+queue+ERROR); DF-CRIER-8 async webhook retries exhaust → silent drop (spec promised ERROR frame).

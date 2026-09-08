@@ -2,11 +2,12 @@
 name: crier-usage
 description: >-
   How to use the Crier agent-to-agent message bus (relay pub/sub, agent
-  registry, durable lease-based inboxes, mesh, MCP server) for real — entry
-  points, run commands, the signed-request scheme, the ack contract gotcha,
-  and common pitfalls. Load this when working in the crier repo or integrating
-  with a running crier server.
-version: 1.0.0
+  registry, durable lease-based inboxes, webhook push delivery, federation,
+  mesh, MCP server) for real — entry points, run commands, the signed-request
+  scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
+  and common pitfalls. Load this when working in the crier repo or
+  integrating with a running crier server.
+version: 1.1.0
 ---
 
 # Crier Usage — field guide for agents
@@ -60,9 +61,55 @@ Verify with `GET .../inbox/stats` (`queue_depth: 0`), never with a re-retrieve
 - The server never sends REGISTER_ACK and ignores KEEPALIVE (claims in
   README/specs are overstated — see CR-GAP-016).
 
+## Webhook push delivery (verified 2026-09-08)
+
+Register an agent with a `webhook` object (or add one later via **signed**
+`PATCH /agents/{id}` — sign `"PATCH\n/agents/{id}\n<ts>"`, same scheme as
+DELETE; a PATCH without the sig headers → 401):
+
+```json
+{"id":"wb-agent","public_key":"<64hex>","capabilities":["echo"],
+ "webhook":{"url":"http://127.0.0.1:9101/hooks/wb","schema_template":"generic-custom",
+            "delivery_mode":"blocking","timeout_ms":5000,"retries":2}}
+```
+
+- **blocking** — deliver call waits; receiver's 2xx body becomes `"reply"` in
+  the deliver response. Extract via schema `response_map`; `openai-compatible`
+  expects `$.choices[0].message.content` (map `payload.text` → the prompt).
+  A wrong reply body → 504 with the exact missing-key path (good error).
+- **async/batch** — 202 immediately; batch coalesces N deliveries into ONE
+  POST (`X-Crier-Event: batch`, body `{"messages":[envelopes]}`).
+- **HMAC**: set `CR_WEBHOOK_SECRET`; every outbound POST carries
+  `X-Crier-Signature = hex(hmac_sha256(secret, raw_body))` plus
+  `X-Crier-Event/Agent/Session/Retry` headers. Verify against the raw bytes.
+- Envelope body: `crier.{version,message_id,session_id,thread_id,
+  delivery_mode,sender,kind,guard}` + `payload`. NOTE: `sender` is a plain
+  STRING on the wire (spec §3 draws an object — drift, DF-CRIER-11).
+- ⚠️ **Failure paths are lossy** (as of 2026-09-08): async retries exhaust →
+  silent drop, no ERROR to sender (DF-CRIER-8); per-agent `retries` is
+  ignored (server default wins, DF-CRIER-9). For must-not-lose messages, use
+  inbox pull or wrap async sends with your own correlation+timeout.
+
+## Federation (CR_FED_LINKS) — LAN-only plumbing for now
+
+- `CR_FED_LINKS=http://relay-b:8767` → deliver to an agent unknown locally is
+  forwarded to the link; agent tables exchange on a 60s TTL and show in
+  `GET /fed/peers` with the link's agents; blocking webhook replies route
+  back through the originating relay with the same `message_id` (verified).
+- ⚠️ **Links carry NO credentials** (DF-CRIER-6): the forward is a bare POST,
+  so an auth-enabled (`CR_AUTH_TOKEN`) remote relay 401s every federated
+  delivery and the sender sees that 401 verbatim. Federate only with
+  token-less (LAN) relays today.
+- ⚠️ **Link down = instant silent 404 drop** (DF-CRIER-7): the cached agent
+  table still lists the dead relay's agents, the forward fails, and
+  `CR_FED_MAX_HOLD_S` / durable queue / ERROR frame promised by spec §8 do
+  not exist. Message lost.
+- `GET /fed/peers` lists YOUR OWN relay as a peer (DF-CRIER-12) — filter self
+  before parsing.
+
 ## Common pitfalls
 
-1. Ack without `message_ids` → false success, message redelivered later.
+1. ~~Ack without `message_ids` → false success~~ **FIXED (verified 2026-09-08):** lease-only ack now → 400. Still always ack with `lease_id` + the `message_ids` from the retrieve, verify via `/inbox/stats`.
 2. Clock skew > 30s → 401 on signed requests.
 3. No `CR_DATABASE_URL` → all state lost on restart (documented, but easy to miss).
 4. `GET /relay/topics` shows only topics with live subscribers.
@@ -80,5 +127,7 @@ Verify with `GET .../inbox/stats` (`queue_depth: 0`), never with a re-retrieve
 - Durability: agent + undelivered message survive server restart with
   `CR_DATABASE_URL` (verified against a scratch postgres container).
 
-See `docs/dogfood/2026-08-09-integration.md` for the full integration report
-and `docs/dogfood/diagnostics.md` for the build/behavior trail.
+See `docs/dogfood/2026-08-09-integration.md` and
+`docs/dogfood/2026-09-08-integration.md` (webhook + federation leg) for the
+full integration reports and `docs/dogfood/diagnostics.md` for the
+build/behavior trail.

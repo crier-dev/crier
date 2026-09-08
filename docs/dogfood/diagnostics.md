@@ -86,3 +86,67 @@ quickstart CR-GAP-010, endpoint counts CR-GAP-011, CI matrix CR-GAP-012,
 CONTRIBUTING Go version CR-GAP-013). This run adds CR-GAP-014..018. The
 recurring E2E-001 (live battery every 5–10 ticks) and NEVER-DONE (11-point
 audit) tasks remain open by design.
+
+---
+
+# 2026-09-08 addendum — webhook driver + federation diagnostics
+
+## How the push side is built
+
+- **Delivery choke point**: `POST /agents/{id}/inbox` resolves the target's
+  webhook config (set at registration or via signed PATCH). Webhook present →
+  the webhook driver handles it per `delivery_mode`; absent → durable inbox
+  pull model, unchanged. The LLM guard runs BEFORE both branches, once per
+  message; its verdict rides outbound in `X-Crier-Guard-*` headers and
+  `crier.guard` (fail-open with `errored:true` when no API key — don't
+  confuse that with a real classification).
+- **Blocking mode** = synchronous: the deliver HTTP call waits for the
+  receiver's 2xx, extracts the reply per schema `response_map`, and returns
+  `{"id","reply","session_id"}` to the sender. Bounded by `timeout_ms`
+  (request-level or agent default). Failure → 504 with last status.
+- **Async/batch** = queue + worker: 202 immediately, POST happens off-thread;
+  batch coalesces to `{"messages":[...]}` on `max_messages` or flush interval.
+- **HMAC**: `CR_WEBHOOK_SECRET` → `X-Crier-Signature =
+  hex(hmac_sha256(secret, raw_body))` on every outbound POST. Verified exact
+  against a Python receiver in this run.
+- **Federation** (`CR_FED_LINKS`) is just the webhook driver aimed at another
+  crier: deliver to an unknown agent → forward the envelope to each link;
+  agent tables exchange on a TTL (60s observed) and appear in `/fed/peers`
+  with `via`. Replies route back because `message_id` is hop-invariant.
+
+## Failure-path errors hit in this run (and the right way today)
+
+1. **Federating with an auth-enabled relay** (DF-CRIER-6): A forwards bare;
+   B's Bearer middleware 401s it; the sender sees the 401 verbatim. No
+   `CR_FED_*` secret env exists. Right way today: LAN-only links, or put your
+   own proxy that injects auth between the relays.
+2. **Link down** (DF-CRIER-7): B's agent stays in A's cached table after B
+   dies, so A forwards → connection refused → instant 404 to the sender.
+   `CR_FED_MAX_HOLD_S` is not consulted (set 60, held 0). Message lost.
+3. **Async retries exhausted** (DF-CRIER-8): the queue drops the message with
+   only a server-log line; the promised ERROR `WEBHOOK_FAILED` to the sender
+   does not exist. Observed cadence 30s (not `CR_WEBHOOK_REDELIVER_S=5`) and
+   attempt count from the server default (per-agent `retries` ignored,
+   DF-CRIER-9).
+4. **Wrong reply shape for the template** → 504 with a GOOD error message
+   (`response map "choices.0.message.content": missing key "choices"`) —
+   this is the model error path; extraction errors are loud, unlike the
+   silent drops above.
+5. **Registration validation order quirk** (not filed): a bad `public_key`
+   with a webhook object errors the same as without; the confusing part was
+   mine — the 400 body was swallowed by `-o /dev/null` and the next call's
+   404 ("agent not found: \"wb-oai\"") read like a registry bug. Lesson:
+   when piping curl to `/dev/null` you are testing blind; show the body.
+
+## Right-way cheat sheet additions
+
+- Webhook success path is production-solid: blocking/async/batch + HMAC +
+  templates + live reconfig via signed PATCH. Failure paths are not: wrap
+  async sends in your own correlation/timeout, and don't federate over
+  untrusted links.
+- When testing push delivery, run a logging receiver and assert on the LOG
+  (envelope headers/body), not just on the deliver response — the deliver
+  response hides what actually went on the wire in async/batch modes.
+- `CR_FED_NAME` sets your display name for OTHERS' `/fed/peers`, but your
+  own listing can still show a self-entry with a `localhost:<port>` name you
+  never configured (DF-CRIER-12) — don't parse that endpoint blindly.

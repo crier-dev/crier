@@ -1,4 +1,19 @@
 
+## Dogfood Findings (2026-09-08)
+Verdict: PROMISING-BUT-ROUGH
+Promise: A user can start one Go server and drive an agent-to-agent bus: registry (ed25519 identities, signed self-configuration via PATCH), durable lease-based inboxes, PUSH delivery to any agent's own HTTP endpoint (webhook, blocking/async/batch, HMAC-signed, schema templates), and relay-to-relay federation (CR_FED_LINKS). This run focused on webhook delivery + federation — the two primitives no prior dogfood had exercised.
+Install: SKIPPED-install-bunker — bunker host las-bunker-03 (100.69.3.13) unreachable: ssh connect timeout + ping 100% packet loss at run time; never silently passed.
+Board rows: DF-CRIER-6..12 (see .coding-hermes/board/tasks.jsonl).
+
+- [P1] DF-CRIER-6: Federation forwards deliveries WITHOUT auth credentials — link to an auth-enabled relay 401s instantly (spec §8 promised authenticated links; no CR_FED_* secret env exists at all).
+- [P1] DF-CRIER-7: Fed link down = instant silent 404 drop — no CR_FED_MAX_HOLD_S hold, no durable queue at source, no ERROR frame; message lost (spec §8 promised all three).
+- [P1] DF-CRIER-8: Async webhook delivery silently drops after retries exhausted — sender inbox empty, no ERROR WEBHOOK_FAILED, nothing observable except a server log line.
+- [P2] DF-CRIER-9: Per-agent webhook `retries` setting ignored (agent said 3, server did 6; CR_WEBHOOK_MAX_RETRIES=5 floors it); CR_WEBHOOK_REDELIVER_S=5 also ignored (30s cadence).
+- [P2] DF-CRIER-10: docs/integration-guide.md has zero webhook/federation content — wire contract only in DRAFT spec + openapi.yaml.
+- [P3] DF-CRIER-11: Envelope sender shape drift — spec §3 object {"agent_id":...} vs wire plain string.
+- [P3] DF-CRIER-12: GET /fed/peers lists the local relay as its own peer.
+- VERIFIED-FIXED: CR-GAP-014 (ack without message_ids) now correctly rejected with 400; correct ack → 204 + queue_depth 0. README ack contract now matches live behavior.
+
 ## Dogfood Findings (2026-09-01)
 Verdict: UNKNOWN-VALUE
 Promise: {"entry_point":"?","promise":"(unparsed agent output) agent error: agent loop reached max_turns (25) with no final response","run_commands":[]}
