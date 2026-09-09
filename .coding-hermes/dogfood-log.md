@@ -54,3 +54,5 @@
 - CR-GAP-014 re-check: lease-only ack now 400 (was silent 204 no-op in August) — VERIFIED FIXED; correct ack 204 → queue_depth 0.
 
 **Top 3 findings:** DF-CRIER-6 federation has no auth mechanism (breaks against the documented default auth posture); DF-CRIER-7 fed link-down drops silently (spec promised hold+queue+ERROR); DF-CRIER-8 async webhook retries exhaust → silent drop (spec promised ERROR frame).
+2026-09-09 | SHIPPABLE | 8s t2fs | friction 7 | 5 findings
+
