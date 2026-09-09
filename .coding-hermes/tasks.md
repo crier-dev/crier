@@ -79,3 +79,13 @@ Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server), de
 - [P2] Relay publish body schema undocumented in README — {topic,payload} 400s, {topic,event} works — Live: POST /relay/publish with {"topic":"t1","payload":{...}} → 400 'event is required'; with {"topic":"t1","event":{...}} → 202. Correct schema exists only in docs/openapi.yaml:46; README relay secti
 - [P2] Default port :8767 occupied by pre-existing crier instance; no port-conflict guidance — Live: :8767 held by a 2-day-old crier (pid 3466723; four other crier instances on 28767/38767/48767). CRIER_PORT=18767 override bound cleanly and /health 200 — env override works, but README quickstar
 - [P2] README prerequisite Go 1.26.6+ vs go1.26.5 — minor version drift, no failure — README:3/60/311 say Go 1.26.6 or later; go1.26.5 built bin/crier and ran the full demo round-trip without issue. Cosmetic prerequisite overstatement, not a defect.
+
+## Dogfood Findings (2026-09-09)
+Verdict: SHIPPABLE
+Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server), default port :8767; companion MCP server bin/crier-mcp (cmd/crier-mcp); no client SDK required — plain curl/openssl/websocat against the HTTP API","promise":"This project claims a user (an autonomous agent, or a developer wiring on
+
+- [P2] Relay publish docs gap: no README curl example, and the integration-guide example omits X-Agent-ID — Live on HEAD 1d5f80e: publish without X-Agent-ID → 401 'X-Agent-ID header required for rate-limited publish'; body key 'payload' → 400 'event is required' (correct key is 'event', schema only in docs/
+- [P2] MCP env vars (CRIER_HTTP_URL, CRIER_AGENT_ID, CRIER_MESH_URL, CRIER_AUTH_TOKEN) undocumented in README — 0 mentions in README.md; only in cmd/crier-mcp/main.go:59-79 and --help. Verified live: with CRIER_HTTP_URL+CRIER_AGENT_ID set, MCP stdio tools/list returns 13 tools and remote register_agent lands on
+- [P2] Default port :8767 chronically squatted; no second-instance guidance — A fleet crier instance currently listens on :8767 (ss -tlnp). README quickstart hardcodes :8767 with no occupied-port note; CRIER_PORT env override verified working (scratch instance bound :58768, /he
+- [P2] demo.sh guard note keyed on DEEPSEEK_API_KEY, not actual guard state — With CR_GUARD_ENABLED=false the 'fails open' note still prints whenever DEEPSEEK_API_KEY is unset (examples/demo.sh:70-72), mildly confusing for keyless dev; the printed tip is accurate and the script
+- [P2] MCP remote register_agent response echoes zero-value timestamps — tools/call register_agent over CRIER_HTTP_URL returns status '' and registered_at 0001-01-01T00:00:00Z in the MCP response while the server-side record is correct (GET /agents shows status online + re
