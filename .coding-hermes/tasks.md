@@ -40,3 +40,13 @@ Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server, def
 - [P2] MCP remote-mode env vars and signing caveat undocumented — CRIER_HTTP_URL/CRIER_AGENT_ID exist only in cmd/crier-mcp/main.go; README has a single MCP mention (CI-007). Live: remote inbox_stats → 401 'missing agent signature headers' under default CR_REQUIRE_A
 - [P2] Stale-timestamp 401 now distinct from missing-headers 401 — report friction stale — Live: stale ts → 401 'request timestamp outside allowed window (±30s)'; no headers → 401 'missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)'. The misleading-error friction is fixed
 - [P2] Docker battery lacks teardown note; websocat/wscat not in prerequisites — README prerequisites list only Go/OpenSSL/xxd, yet the mesh section requires websocat/wscat (Python websockets alternative exists in integration-guide.md:257). No 'docker compose down' teardown in REA
+
+## Dogfood Findings (2026-09-09)
+Verdict: SHIPPABLE
+Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server), default port :8767; secondary entry point is the MCP server bin/crier-mcp (cmd/crier-mcp)","promise":"Crier is an agent-to-agent message bus (Go) that claims a user can build an autonomous agent economy where agents register with e
+
+- [P1] MCP stdio registry is process-local — register via MCP invisible to HTTP server, undocumented — Verified live on HEAD 11bac21: MCP stdio register_agent (13 tools via tools/list) returned 201 but the agent never appeared in GET /agents on the HTTP server (only demo-1788983260 listed); remote mode
+- [P2] Relay has no worked example — publish 401s without X-Agent-ID and README omits the header — Verified: POST /relay/publish without X-Agent-ID → 401 'X-Agent-ID header required for rate-limited publish'; with the header → 202 and WS frame delivered as plain JSON. README relay section is prose 
+- [P2] MCP remote-mode env vars undocumented in README — CRIER_HTTP_URL/CRIER_AGENT_ID/CRIER_AUTH_TOKEN exist only in a PRD HTML per report; grep of README confirms zero mentions. Remote mode verified working (register_agent 201, agent visible on HTTP serve
+- [P2] Port-bind failure silent in background starts; quickstart hardcodes :8767 — Verified: ./bin/crier -port 8767 with the port held logs 'server failed error="listen tcp :8767: bind: address already in use"' and exits 1 — but a backgrounded start shows nothing, and README curl ex
+- [P2] No MCP tools/call JSON-RPC example in README — Verified: initialize/tools/list/tools/call all work over stdio (13 tools), but README has no worked MCP example — a new user must hand-write JSON-RPC. Report's friction 5 confirmed.

@@ -56,3 +56,4 @@
 **Top 3 findings:** DF-CRIER-6 federation has no auth mechanism (breaks against the documented default auth posture); DF-CRIER-7 fed link-down drops silently (spec promised hold+queue+ERROR); DF-CRIER-8 async webhook retries exhaust → silent drop (spec promised ERROR frame).
 2026-09-09 | SHIPPABLE | 8s t2fs | friction 7 | 5 findings
 
+2026-09-09 | SHIPPABLE | 2s t2fs | friction 5 | 5 findings
