@@ -69,3 +69,13 @@ Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server, def
 - [P2] Relay subscribe path missing from README quickstart — Guessed /relay/subscribe?topic=X from README prose and got 404; the real path is /relay/subscribe/{topic} (path segment), documented only in docs/integration-guide.md and the API table — no relay exam
 - [P2] X-Agent-ID publish requirement buried in config table — First /relay/publish returned 401 because X-Agent-ID is required when rate limiting is enabled (default 100/min); this is documented only in the config table, not the relay section, so a first-time pu
 - [P2] MCP stdio framing undocumented for raw clients — crier-mcp is line-delimited JSON-RPC (bufio.Scanner), not 4-byte length-prefixed framing; a hand-rolled probe hung 60s until the source was read. Raw MCP clients need this documented.
+
+## Dogfood Findings (2026-09-09)
+Verdict: SHIPPABLE
+Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server), default port :8767; optional MCP server bin/crier-mcp (cmd/crier-mcp)","promise":"This project claims a user can build and operate an agent-to-agent communication backbone for the autonomous agent economy: agents register with ed25
+
+- [P1] MCP remote mode broken as documented — help/README say CR_AUTH_TOKEN, code reads CRIER_AUTH_TOKEN — cmd/crier-mcp/main.go:79 reads os.Getenv("CRIER_AUTH_TOKEN") but --help and README document CR_AUTH_TOKEN. Live on HEAD 96fcacf: with documented CR_AUTH_TOKEN=judge-token, remote register_agent → 401 
+- [P1] Stdin-piped openssl pkeyutl -sign -rawin yields empty signature and a misleading 401 — Live: file-based helper (README/demo.sh) → 129-char hex sig, signed retrieve 200; piping the payload via stdin → 0 bytes, server 401 'missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-S
+- [P2] Relay publish body schema undocumented in README — {topic,payload} 400s, {topic,event} works — Live: POST /relay/publish with {"topic":"t1","payload":{...}} → 400 'event is required'; with {"topic":"t1","event":{...}} → 202. Correct schema exists only in docs/openapi.yaml:46; README relay secti
+- [P2] Default port :8767 occupied by pre-existing crier instance; no port-conflict guidance — Live: :8767 held by a 2-day-old crier (pid 3466723; four other crier instances on 28767/38767/48767). CRIER_PORT=18767 override bound cleanly and /health 200 — env override works, but README quickstar
+- [P2] README prerequisite Go 1.26.6+ vs go1.26.5 — minor version drift, no failure — README:3/60/311 say Go 1.26.6 or later; go1.26.5 built bin/crier and ran the full demo round-trip without issue. Cosmetic prerequisite overstatement, not a defect.
