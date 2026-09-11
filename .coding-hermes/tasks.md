@@ -26,3 +26,13 @@ Promise: {"entry_point":"HTTP/WebSocket server binary (bin/crier, from cmd/serve
 - [P1] Mesh REQUEST/RESPONSE wire format only in docs/mesh-protocol.md — README mesh example stops at REGISTER/peers; the actual request/response contract (PeerRef source/target objects, status_code, request_id echoing message_id) lives only in a separate doc. Users cannot complete a mesh exchange from the README alone.
 - [P1] KEEPALIVE frames interleave on the mesh socket mid-conversation, undocumented — Clients must loop-recv and filter frames by type or KEEPALIVE frames corrupt the request/response flow. This behavior is not documented in the README, so a naive client implementation stalls or misparses.
 - [P2] Port-conflict guidance missing and /version is not an HTTP route — Default :8767 was occupied by fleet instances; README never documents running a second instance on another port (override + bind-failure guidance). GET /version returns 404 — only the -version CLI flag works, and the route is undocumented.
+
+## Dogfood Findings (2026-09-11)
+Verdict: SHIPPABLE
+Promise: {"entry_point":"HTTP/WebSocket server binary bin/crier (cmd/server, default port :8767), plus a secondary MCP server binary bin/crier-mcp (cmd/crier-mcp) exposing registry+inbox tools; config is env-driven (CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG) with CLI flag overrides (-p
+
+- [P2] Integration guide MCP tool count is stale — docs/integration-guide.md claims 8 tools; live tools/list on bin/crier-mcp returns 13 (ack_messages, ask_agent, deliver_message, get_agent, get_messages, inbox_stats, list_agents, mesh_peers, mesh_req
+- [P2] Health endpoint not discoverable — Verified live: /health returns 200, /healthz returns 404; /health is only mentioned mid-paragraph in the README auth section, no endpoint table.
+- [P2] Relay pub/sub not runnable from README alone — Subscribe URL /relay/subscribe/{topic} and the {topic, event} publish envelope only exist in docs/openapi.yaml; a guessed payload body gets 400 'event is required'. Verified live that the documented p
+- [P2] README 401-on-stale-timestamp claim has a 404 edge case — Unregistered agents get 404 (existence checked before signature/timestamp); negative-path testers will trip on the mismatch. Documented happy-path auth held: unsigned retrieve 401, duplicate register 
+- [P2] No version stamping — make build succeeds but ./bin/crier -version prints 'crier dev' — useless for bug reports.
