@@ -242,6 +242,11 @@ func run(args []string) int {
 		}
 		return agent.Webhook, nil
 	})
+	// DF-CRIER-8: when an async delivery exhausts its bounded retries, the
+	// originating sender gets exactly one durable WEBHOOK_FAILED
+	// notification in its own inbox. The sink is the Store's direct inbox
+	// Deliver path — it bypasses webhook routing, so it cannot recurse.
+	whDriver.SetFailureNotifier(registry.WebhookFailureSink(regStore))
 	whDriver.Start()
 	defer whDriver.Stop()
 	registryHandler.SetWebhookDriver(whDriver)

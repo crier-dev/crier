@@ -8,6 +8,25 @@ import (
 	"time"
 )
 
+// CodeWebhookFailed is the machine-readable error code carried by the
+// durable sender notification emitted when an async delivery exhausts its
+// bounded retries (DF-CRIER-8, spec §4).
+const CodeWebhookFailed = "WEBHOOK_FAILED"
+
+// FailureNotification describes one queued delivery that exhausted its
+// bounded retries (DF-CRIER-8). It is emitted exactly once per dropped
+// item, after exhaustion only, via the notifier installed with
+// SetFailureNotifier. StatusCode is 0 on transport-level failure; Err then
+// carries the error string.
+type FailureNotification struct {
+	MessageID   string `json:"message_id"`
+	Sender      string `json:"sender"`
+	TargetAgent string `json:"target_agent"`
+	Retries     int    `json:"retries"`
+	StatusCode  int    `json:"status_code,omitempty"`
+	Err         string `json:"error,omitempty"`
+}
+
 // Driver orchestrates webhook delivery: immediate POST attempts, bounded
 // retries with exponential backoff, a durable queue for offline endpoints,
 // a circuit breaker that degrades poisoned endpoints (probe + drain), and —
@@ -16,20 +35,21 @@ import (
 //
 // Ticket: CR-FEAT-001/CR-FEAT-005. Spec: specs/WEBHOOK-DELIVERY.md §3-§4.
 type Driver struct {
-	client      *Client
-	queue       Queue
-	cfg         DriverConfig
-	resolveConf func(agentID string) (*Config, error)
-	gate        *sessionGate
-	mu          sync.Mutex
-	degraded    map[string]time.Time // agentID -> degraded-since
-	failures    map[string]int       // agentID -> consecutive failures
-	batches     map[string]*batchBuffer
-	drainWakeCh chan struct{} // nudges redeliverLoop (async enqueues)
-	flushWakeCh chan struct{} // nudges batchLoop (batch enqueues)
-	stopCh      chan struct{}
-	stopped     bool
-	wg          sync.WaitGroup
+	client        *Client
+	queue         Queue
+	cfg           DriverConfig
+	resolveConf   func(agentID string) (*Config, error)
+	notifyFailure func(FailureNotification) error
+	gate          *sessionGate
+	mu            sync.Mutex
+	degraded      map[string]time.Time // agentID -> degraded-since
+	failures      map[string]int       // agentID -> consecutive failures
+	batches       map[string]*batchBuffer
+	drainWakeCh   chan struct{} // nudges redeliverLoop (async enqueues)
+	flushWakeCh   chan struct{} // nudges batchLoop (batch enqueues)
+	stopCh        chan struct{}
+	stopped       bool
+	wg            sync.WaitGroup
 }
 
 // DriverConfig holds env-driven tuning (spec §9).
@@ -372,7 +392,49 @@ func (d *Driver) drainQueue() {
 		} else {
 			logf("webhook: delivery dropped (retries exhausted)",
 				"agent", item.AgentID, "retries", item.Retries)
+			d.notifyExhausted(item, res)
 		}
+	}
+}
+
+// notifyExhausted emits the DF-CRIER-8 failure notification for a dropped
+// (retry-exhausted) queue item. Exactly-once per item: drainQueue pops the
+// item and does not requeue it, so this runs at most once. Best-effort:
+// a missing sender or a failing sink is logged, never requeued, never
+// panics, and never routes back through webhook delivery.
+func (d *Driver) notifyExhausted(item *QueueItem, res Result) {
+	if d.notifyFailure == nil {
+		return
+	}
+	// Metadata source: the single envelope, or the first envelope of a
+	// coalesced batch (same drain path, CR-FEAT-005).
+	env := item.Envelope
+	if env == nil && len(item.Batch) > 0 {
+		env = item.Batch[0]
+	}
+	var sender, msgID string
+	if env != nil {
+		sender = env.Crier.Sender
+		msgID = env.Crier.MessageID
+	}
+	if sender == "" {
+		logf("webhook: failure notification skipped (no sender on exhausted item)",
+			"agent", item.AgentID, "message_id", msgID, "retries", item.Retries)
+		return
+	}
+	n := FailureNotification{
+		MessageID:   msgID,
+		Sender:      sender,
+		TargetAgent: item.AgentID,
+		Retries:     item.Retries,
+		StatusCode:  res.StatusCode,
+	}
+	if res.Err != nil {
+		n.Err = res.Err.Error()
+	}
+	if err := d.notifyFailure(n); err != nil {
+		logf("webhook: failure notification failed (best-effort)",
+			"sender", sender, "agent", item.AgentID, "message_id", msgID, "error", err)
 	}
 }
 
@@ -448,6 +510,16 @@ func (d *Driver) recordFailure(agentID string, res Result) {
 // server startup). Without it, Deliver returns an error for unknown agents.
 func (d *Driver) SetConfigResolver(fn func(agentID string) (*Config, error)) {
 	d.resolveConf = fn
+}
+
+// SetFailureNotifier installs the sink invoked exactly once when a queued
+// delivery exhausts its bounded retries (DF-CRIER-8). Wire it to the
+// registry Store's direct inbox Deliver path (registry.WebhookFailureSink)
+// so the notification is durable and bypasses webhook routing (no
+// recursion). Nil disables notifications (dropped items are log-only, the
+// pre-DF-CRIER-8 behavior).
+func (d *Driver) SetFailureNotifier(fn func(FailureNotification) error) {
+	d.notifyFailure = fn
 }
 
 // agentConfig is the internal accessor used by the loops.

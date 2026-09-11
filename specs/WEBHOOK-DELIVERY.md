@@ -94,8 +94,16 @@ keyed by `message_id` so webhook replies flow through `forwardResponse` unchange
 | Mode | Semantics | Sender sees | Failure |
 |---|---|---|---|
 | blocking | POST + wait, reply from body | reply payload | retries → ERROR `WEBHOOK_FAILED{status, retries}` |
-| async | POST, don't wait | 202 accept | queue + retry + backoff |
-| batch | coalesce N/T → one batch POST | 202 accept | queue flush retry |
+| async | POST, don't wait | 202 accept | queue + retry + backoff; retries exhausted → durable `WEBHOOK_FAILED` inbox notification to the sender |
+| batch | coalesce N/T → one batch POST | 202 accept | queue flush retry (exhaustion notifies like async) |
+
+- Async exhaustion notification (DF-CRIER-8): when a queued delivery exceeds `CR_WEBHOOK_MAX_RETRIES`, the
+  driver drops it AND emits exactly one notification into the originating sender's durable inbox (direct
+  store write — never webhook-routed, so it cannot recurse). Payload:
+  `{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<agent>","retries":N,"status_code":S,"error":"…"}`
+  (`status_code` omitted on transport failure; `error` carries the transport error string). A missing sender
+  or a failed notification write is logged best-effort: the delivery is not requeued and the notification is
+  not retried or duplicated.
 
 - Sender selects per message: `delivery_mode` in the REQUEST/deliver payload overrides the agent default.
 - Batch envelope: `X-Crier-Event: batch`, payload = `{"messages": [envelope, …]}`.
