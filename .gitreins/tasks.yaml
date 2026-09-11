@@ -424,3 +424,12 @@ tasks:
   status: complete
   created_at: '2026-09-11T05:11:13.555848+00:00'
   completed_at: '2026-09-11T05:17:24.228148+00:00'
+- id: DF-CRIER-6
+  title: Federation forwards authenticated deliveries
+  criteria:
+  - With CR_FED_TOKEN configured, forwarded relay-to-relay inbox requests authenticate
+    to a CR_AUTH_TOKEN-protected remote relay; absent or wrong federation token remains
+    rejected; config/docs/tests cover the secret without logging it.
+  status: complete
+  created_at: '2026-09-11T12:58:32.443216+00:00'
+  completed_at: '2026-09-11T13:12:12.254214+00:00'
