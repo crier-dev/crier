@@ -202,9 +202,9 @@ func run(args []string) int {
 	// simply lists this relay alone.
 	var fedClient *federation.Client
 	if len(cfg.Federation.Links) > 0 {
-		fedClient = federation.NewClient(cfg.Federation.Links, 0)
+		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
 		registryHandler.SetFederationClient(fedClient)
-		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg))
+		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg), "auth", cfg.Federation.Token != "")
 	}
 	localPeer := func() federation.Peer {
 		agents := make([]federation.RemoteAgent, 0)
@@ -374,6 +374,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
 	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")
+	fmt.Fprintln(out, "  CR_FED_TOKEN                shared secret for link auth: sent as Bearer to linked relays; must equal the destination's CR_AUTH_TOKEN (empty = no link auth)")
 	fmt.Fprintln(out, "  CR_GUARD_ENABLED            LLM message guard master switch (default true)")
 	fmt.Fprintln(out, "  CR_GUARD_TIMEOUT_MS         per-message guard budget incl. retries (default 10000)")
 	fmt.Fprintln(out, "  CR_GUARD_MAX_CONCURRENT     concurrent guard LLM calls (default 8)")

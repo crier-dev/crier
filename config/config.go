@@ -67,6 +67,16 @@ type FederationConfig struct {
 	// Name is the optional display name of this relay in the /fed/peers
 	// listing (CR_FED_NAME). Defaults to localhost:<port>.
 	Name string
+	// Token is the optional shared secret for outbound federation link
+	// authentication (CR_FED_TOKEN, DF-CRIER-6). When set, every request
+	// this relay sends to a linked relay carries
+	// "Authorization: Bearer <token>", so a remote relay protecting itself
+	// with CR_AUTH_TOKEN accepts the forward. The linked relay must share
+	// the value: source CR_FED_TOKEN == destination CR_AUTH_TOKEN. Empty
+	// (default) sends no Authorization header — links are unauthenticated,
+	// as before. The secret is never logged, echoed, serialized, or
+	// included in GET /fed/peers output.
+	Token string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -217,6 +227,10 @@ func Load() (Config, error) {
 		cfg.Federation.Links = splitTrim(v)
 	}
 	cfg.Federation.Name = os.Getenv("CR_FED_NAME")
+	// CR_FED_TOKEN (DF-CRIER-6): optional shared secret for outbound link
+	// auth, sent as "Authorization: Bearer <token>" to linked relays. Empty
+	// (default) = unauthenticated links, as before. Never logged or served.
+	cfg.Federation.Token = os.Getenv("CR_FED_TOKEN")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

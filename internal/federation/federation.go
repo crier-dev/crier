@@ -27,6 +27,12 @@ import (
 // links).
 const HopHeader = "X-Crier-Fed-Hop"
 
+// BearerPrefix is the authorization scheme used for federation link auth
+// (DF-CRIER-6). The shared secret is sent as "Authorization: Bearer <token>",
+// matching the Bearer scheme the destination relay's CR_AUTH_TOKEN middleware
+// already validates.
+const BearerPrefix = "Bearer "
+
 // DefaultTimeout bounds a single outbound federation HTTP request. Blocking
 // webhook deliveries on the remote relay run within their own budget
 // (default 30s), so 60s comfortably covers the remote round-trip.
@@ -60,21 +66,28 @@ type Peer struct {
 }
 
 // Client forwards deliveries and discovery to the configured linked relays.
-// The zero value is not usable; construct with NewClient.
+// When token is non-empty, every outbound request carries
+// "Authorization: Bearer <token>" (federation link auth, DF-CRIER-6) so a
+// CR_AUTH_TOKEN-protected destination relay accepts the forward. The token
+// is write-protected: it is never logged, echoed, serialized, or included
+// in /fed/peers output. The zero value is not usable; construct with
+// NewClient.
 type Client struct {
 	links []Link
+	token string
 	http  *http.Client
 }
 
 // NewClient builds a Client over the link base URLs from CR_FED_LINKS.
 // Entries that are not valid http(s) URLs are skipped (they are config
 // garbage; the remaining links still work). A non-positive timeout falls
-// back to DefaultTimeout.
-func NewClient(links []string, timeout time.Duration) *Client {
+// back to DefaultTimeout. token is the optional shared secret for link
+// authentication ("" = unauthenticated links, CR_FED_TOKEN unset).
+func NewClient(links []string, timeout time.Duration, token string) *Client {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	c := &Client{http: &http.Client{Timeout: timeout}}
+	c := &Client{http: &http.Client{Timeout: timeout}, token: token}
 	for _, raw := range links {
 		if l, ok := parseLink(raw); ok {
 			c.links = append(c.links, l)
@@ -86,6 +99,16 @@ func NewClient(links []string, timeout time.Duration) *Client {
 // Links returns the configured (valid) links.
 func (c *Client) Links() []Link {
 	return c.links
+}
+
+// authorize sets the Authorization header on an outbound request when the
+// client was configured with a shared secret (CR_FED_TOKEN). With no token
+// the header is left unset entirely (unauthenticated links, the historical
+// behavior). Never log the header or the token.
+func (c *Client) authorize(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", BearerPrefix+c.token)
+	}
 }
 
 // parseLink normalizes one CR_FED_LINKS entry into a Link. Valid entries
@@ -120,6 +143,7 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(HopHeader, "1")
+	c.authorize(req)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -166,6 +190,7 @@ func (c *Client) FetchRemoteAgents(ctx context.Context, link Link) ([]RemoteAgen
 	if err != nil {
 		return nil, fmt.Errorf("federation: build agents request: %w", err)
 	}
+	c.authorize(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("federation: fetch agents from %s: %w", link.URL, err)

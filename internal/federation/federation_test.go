@@ -43,7 +43,7 @@ func TestParseLink(t *testing.T) {
 }
 
 func TestNewClientSkipsInvalidLinks(t *testing.T) {
-	c := NewClient([]string{"http://localhost:1", "garbage", "", "https://localhost:2"}, 0)
+	c := NewClient([]string{"http://localhost:1", "garbage", "", "https://localhost:2"}, 0, "")
 	links := c.Links()
 	if len(links) != 2 {
 		t.Fatalf("Links() len = %d, want 2 (invalid entries skipped)", len(links))
@@ -61,6 +61,7 @@ type remoteRelay struct {
 	gotPath   string
 	gotBody   []byte
 	gotHop    string
+	gotAuth   string
 	status    int
 	body      string
 }
@@ -70,6 +71,7 @@ func (r *remoteRelay) handler() http.HandlerFunc {
 		r.gotMethod = req.Method
 		r.gotPath = req.URL.Path
 		r.gotHop = req.Header.Get(HopHeader)
+		r.gotAuth = req.Header.Get("Authorization")
 		body := make([]byte, req.ContentLength)
 		if req.ContentLength > 0 {
 			if _, err := req.Body.Read(body); err != nil && err.Error() != "EOF" {
@@ -88,7 +90,7 @@ func TestForwardDeliver(t *testing.T) {
 	srv := httptest.NewServer(rr.handler())
 	defer srv.Close()
 
-	c := NewClient([]string{srv.URL}, 0)
+	c := NewClient([]string{srv.URL}, 0, "")
 	body := []byte(`{"payload":{"text":"hello"},"sender":"agent-1","delivery_mode":"blocking"}`)
 	status, respBody, err := c.ForwardDeliver(context.Background(), c.Links()[0], "agent-2", body)
 	if err != nil {
@@ -112,6 +114,89 @@ func TestForwardDeliver(t *testing.T) {
 	if rr.gotHop != "1" {
 		t.Errorf("hop header = %q, want \"1\" (loop prevention)", rr.gotHop)
 	}
+	if rr.gotAuth != "" {
+		t.Errorf("Authorization header = %q, want none (CR_FED_TOKEN unset)", rr.gotAuth)
+	}
+}
+
+// TestForwardDeliverLinkAuth proves the DF-CRIER-6 contract: a client built
+// with the CR_FED_TOKEN shared secret sends the exact
+// "Authorization: Bearer <token>" header on forwarded delivers, while body
+// passthrough and the hop header stay untouched.
+func TestForwardDeliverLinkAuth(t *testing.T) {
+	const token = "shared-federation-secret"
+	rr := &remoteRelay{t: t, status: http.StatusOK, body: `{"id":"ok"}`}
+	srv := httptest.NewServer(rr.handler())
+	defer srv.Close()
+
+	c := NewClient([]string{srv.URL}, 0, token)
+	body := []byte(`{"payload":{"text":"hello"},"sender":"agent-1","delivery_mode":"blocking"}`)
+	status, respBody, err := c.ForwardDeliver(context.Background(), c.Links()[0], "agent-2", body)
+	if err != nil {
+		t.Fatalf("ForwardDeliver: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if rr.gotAuth != "Bearer "+token {
+		t.Errorf("Authorization header = %q, want exactly %q", rr.gotAuth, "Bearer "+token)
+	}
+	// Auth must not disturb the existing forwarding contract.
+	if string(rr.gotBody) != string(body) {
+		t.Errorf("forwarded body = %s, want the original deliver JSON", rr.gotBody)
+	}
+	if rr.gotHop != "1" {
+		t.Errorf("hop header = %q, want \"1\" (loop prevention)", rr.gotHop)
+	}
+	if string(respBody) != `{"id":"ok"}` {
+		t.Errorf("response body = %s, want relayed verbatim", respBody)
+	}
+}
+
+// TestFetchRemoteAgentsLinkAuth proves the discovery request also carries
+// the Bearer header when the token is set (GET /agents is protected by the
+// same CR_AUTH_TOKEN middleware on the remote relay).
+func TestFetchRemoteAgentsLinkAuth(t *testing.T) {
+	const token = "shared-federation-secret"
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"agents":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient([]string{srv.URL}, 0, token)
+	if _, err := c.FetchRemoteAgents(context.Background(), c.Links()[0]); err != nil {
+		t.Fatalf("FetchRemoteAgents: %v", err)
+	}
+	if gotAuth != "Bearer "+token {
+		t.Errorf("Authorization header = %q, want exactly %q", gotAuth, "Bearer "+token)
+	}
+}
+
+// TestPeersDoesNotExposeToken proves the shared secret never surfaces in
+// the /fed/peers listing (it is a secret, not link metadata).
+func TestPeersDoesNotExposeToken(t *testing.T) {
+	const token = "shared-federation-secret-leak-probe"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"agents":[{"id":"remote-a","capabilities":[]}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient([]string{srv.URL}, 0, token)
+	h := HandlePeers(c, func() Peer {
+		return Peer{Name: "local", URL: "http://localhost:18771", Agents: []RemoteAgent{}}
+	})
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/fed/peers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body := rec.Body.String(); strings.Contains(body, token) {
+		t.Errorf("/fed/peers response contains the shared secret: %s", body)
+	}
 }
 
 func TestForwardToAnySkipsNotFoundAndWinsOnFirstHit(t *testing.T) {
@@ -122,7 +207,7 @@ func TestForwardToAnySkipsNotFoundAndWinsOnFirstHit(t *testing.T) {
 	defer srv1.Close()
 	defer srv2.Close()
 
-	c := NewClient([]string{srv1.URL, srv2.URL}, 0)
+	c := NewClient([]string{srv1.URL, srv2.URL}, 0, "")
 	status, body, err := c.ForwardToAny(context.Background(), "agent-remote", []byte(`{"payload":{}}`))
 	if err != nil {
 		t.Fatalf("ForwardToAny: %v", err)
@@ -144,7 +229,7 @@ func TestForwardToAnyAllNotFound(t *testing.T) {
 	defer srv1.Close()
 	defer srv2.Close()
 
-	c := NewClient([]string{srv1.URL, srv2.URL}, 0)
+	c := NewClient([]string{srv1.URL, srv2.URL}, 0, "")
 	if _, _, err := c.ForwardToAny(context.Background(), "ghost", []byte(`{"payload":{}}`)); err == nil {
 		t.Fatal("ForwardToAny all-404: want error, got nil")
 	}
@@ -159,7 +244,7 @@ func TestForwardToAnyUnreachableLinkFallsThrough(t *testing.T) {
 	srv2 := httptest.NewServer(rr2.handler())
 	defer srv2.Close()
 
-	c := NewClient([]string{dead.URL, srv2.URL}, 0)
+	c := NewClient([]string{dead.URL, srv2.URL}, 0, "")
 	status, body, err := c.ForwardToAny(context.Background(), "agent-remote", []byte(`{"payload":{}}`))
 	if err != nil {
 		t.Fatalf("ForwardToAny: %v", err)
@@ -170,7 +255,7 @@ func TestForwardToAnyUnreachableLinkFallsThrough(t *testing.T) {
 }
 
 func TestForwardToAnyNoLinks(t *testing.T) {
-	c := NewClient(nil, 0)
+	c := NewClient(nil, 0, "")
 	if _, _, err := c.ForwardToAny(context.Background(), "ghost", []byte(`{}`)); err == nil {
 		t.Fatal("ForwardToAny with no links: want error, got nil")
 	}
@@ -189,7 +274,7 @@ func TestFetchRemoteAgents(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient([]string{srv.URL}, 0)
+	c := NewClient([]string{srv.URL}, 0, "")
 	agents, err := c.FetchRemoteAgents(context.Background(), c.Links()[0])
 	if err != nil {
 		t.Fatalf("FetchRemoteAgents: %v", err)
@@ -211,7 +296,7 @@ func TestFetchRemoteAgentsNonOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient([]string{srv.URL}, 0)
+	c := NewClient([]string{srv.URL}, 0, "")
 	if _, err := c.FetchRemoteAgents(context.Background(), c.Links()[0]); err == nil {
 		t.Fatal("FetchRemoteAgents on 500: want error, got nil")
 	}
@@ -224,7 +309,7 @@ func TestPeers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient([]string{srv.URL}, 0)
+	c := NewClient([]string{srv.URL}, 0, "")
 	peers := c.Peers(context.Background())
 	if len(peers) != 1 {
 		t.Fatalf("peers len = %d, want 1", len(peers))
@@ -242,7 +327,7 @@ func TestPeersUnreachableLinkStillListed(t *testing.T) {
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	dead.Close()
 
-	c := NewClient([]string{dead.URL}, 0)
+	c := NewClient([]string{dead.URL}, 0, "")
 	peers := c.Peers(context.Background())
 	if len(peers) != 1 {
 		t.Fatalf("peers len = %d, want 1 (down link still listed)", len(peers))
@@ -259,7 +344,7 @@ func TestHandlePeers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient([]string{srv.URL}, 0)
+	c := NewClient([]string{srv.URL}, 0, "")
 	h := HandlePeers(c, func() Peer {
 		return Peer{Name: "local", URL: "http://localhost:18771", Agents: []RemoteAgent{{ID: "local-a", Capabilities: []string{"y"}}}}
 	})

@@ -27,6 +27,9 @@ func unsetAll(t *testing.T) {
 		"CR_DATABASE_MAX_CONN_LIFETIME",
 		"CR_DATABASE_MAX_CONN_IDLE_TIME",
 		"CR_DATABASE_CONNECT_TIMEOUT",
+		"CR_FED_LINKS",
+		"CR_FED_NAME",
+		"CR_FED_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -435,6 +438,44 @@ func TestLoad_AuthToken(t *testing.T) {
 		cfg, err := config.Load()
 		require.NoError(t, err)
 		assert.Empty(t, cfg.AuthToken)
+	})
+}
+
+// ---------- Federation ----------
+
+func TestLoad_FedToken(t *testing.T) {
+	t.Run("empty by default", func(t *testing.T) {
+		unsetAll(t)
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.Federation.Token, "default CR_FED_TOKEN is empty (no link auth)")
+	})
+
+	t.Run("picked up from env", func(t *testing.T) {
+		unsetAll(t)
+		t.Setenv("CR_FED_TOKEN", "shared-federation-secret")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "shared-federation-secret", cfg.Federation.Token)
+	})
+
+	t.Run("empty string is not an error", func(t *testing.T) {
+		unsetAll(t)
+		t.Setenv("CR_FED_TOKEN", "")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.Federation.Token, "empty CR_FED_TOKEN behaves like unset")
+	})
+
+	// DF-CRIER-6 isolation: the federation link token must stay independent
+	// of the local relay's own CR_AUTH_TOKEN (a source relay is commonly
+	// also a destination with its own inbound token).
+	t.Run("independent of CR_AUTH_TOKEN", func(t *testing.T) {
+		unsetAll(t)
+		t.Setenv("CR_AUTH_TOKEN", "inbound-local-secret")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.Federation.Token, "CR_AUTH_TOKEN must not leak into Federation.Token")
 	})
 }
 

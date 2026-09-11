@@ -43,7 +43,7 @@ func (r *fedRemoteRelay) handler() http.HandlerFunc {
 func setupFedRouter(store Store, links []string) (*mux.Router, *Handler) {
 	handler := NewHandler(store)
 	if len(links) > 0 {
-		handler.SetFederationClient(federation.NewClient(links, 0))
+		handler.SetFederationClient(federation.NewClient(links, 0, ""))
 	}
 	r := mux.NewRouter()
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleDeliver).Methods("POST")
