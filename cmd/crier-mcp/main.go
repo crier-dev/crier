@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +19,27 @@ import (
 // version is the crier-mcp version. Overridable at build time via
 // -ldflags "-X main.version=<ver>" (see the Makefile build-mcp target).
 var version = "dev"
+
+// Key sources recorded on the bridge identity.
+const (
+	keySourceFile      = "file"      // CRIER_AGENT_PRIVATE_KEY_FILE
+	keySourceEphemeral = "ephemeral" // generated in-process for this run
+)
+
+// bridgeCapabilities are the capability tags advertised for the bridge's own
+// identity when it self-registers on a remote server.
+var bridgeCapabilities = []string{"mcp", "bridge"}
+
+// bridgeIdentity is the signing identity crier-mcp holds on a remote Crier
+// server: the agent id it acts as, the public half of its signing key, and
+// where that key came from. Remote is false for the Postgres/in-memory
+// backends, where no server-side registration is needed.
+type bridgeIdentity struct {
+	Remote    bool
+	AgentID   string
+	PublicKey ed25519.PublicKey
+	KeySource string
+}
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -48,12 +71,17 @@ func run(args []string) int {
 		return 1
 	}
 
-	store, cleanup, err := initStore(cfg)
+	store, identity, cleanup, err := initStore(cfg)
 	if err != nil {
 		slog.Error("initialize store", "error", err)
 		return 1
 	}
 	defer cleanup()
+
+	// Register the bridge's own identity before serving, so the reply leg
+	// (get_messages / ask_agent polling its own inbox) works without an
+	// operator registering the agent by hand (DF-CRIER-28).
+	ensureBridgeIdentity(store, identity, slog.Default())
 
 	server := mcp.NewWithOptions(store, mcp.Options{
 		AgentID: os.Getenv("CRIER_AGENT_ID"),
@@ -69,29 +97,49 @@ func run(args []string) int {
 
 // initStore creates a Store backend: a RemoteStore against a running Crier
 // server when CRIER_HTTP_URL is set, PostgreSQL if CR_DATABASE_URL is set,
-// otherwise in-memory.
+// otherwise in-memory. It also returns the bridge's signing identity (only
+// meaningful in remote mode) so the caller can register it on the server.
 //
-// In remote mode, CRIER_AGENT_PRIVATE_KEY_FILE (optional) loads a PKCS#8 PEM
-// ed25519 private key and enables per-agent request signing for servers
-// running with CR_REQUIRE_AGENT_SIG=true (the secure default). A bad or
-// missing key file is an explicit startup error; without the variable the
-// bridge stays unsigned, which remains valid against servers that disable
-// per-agent signatures.
-func initStore(cfg config.Config) (registry.Store, func(), error) {
+// In remote mode the bridge always signs its requests, which is what a
+// server running with the secure default (CR_REQUIRE_AGENT_SIG=true)
+// requires:
+//
+//   - CRIER_AGENT_PRIVATE_KEY_FILE set: that PKCS#8 PEM ed25519 key is
+//     loaded; a bad or unreadable file is an explicit startup error.
+//   - unset: an ephemeral ed25519 key is generated in-process so signed
+//     servers work out of the box. It changes on every run, so a persistent
+//     server keeps the FIRST run's registered public key — set the variable
+//     for a stable identity (see the key-mismatch remedy in
+//     ensureBridgeIdentity).
+func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error) {
 	if url := os.Getenv("CRIER_HTTP_URL"); url != "" {
 		agentID := os.Getenv("CRIER_AGENT_ID")
 		if agentID == "" {
-			return nil, nil, fmt.Errorf("CRIER_AGENT_ID is required when CRIER_HTTP_URL is set")
+			return nil, bridgeIdentity{}, nil, fmt.Errorf("CRIER_AGENT_ID is required when CRIER_HTTP_URL is set")
 		}
+		identity := bridgeIdentity{Remote: true, AgentID: agentID}
 		var opts []registry.RemoteOption
 		if keyFile := os.Getenv("CRIER_AGENT_PRIVATE_KEY_FILE"); keyFile != "" {
 			priv, err := registry.LoadEd25519PrivateKeyFile(keyFile)
 			if err != nil {
-				return nil, nil, fmt.Errorf("CRIER_AGENT_PRIVATE_KEY_FILE: %w", err)
+				return nil, bridgeIdentity{}, nil, fmt.Errorf("CRIER_AGENT_PRIVATE_KEY_FILE: %w", err)
 			}
 			opts = append(opts, registry.WithSigningKey(priv))
+			identity.PublicKey = priv.Public().(ed25519.PublicKey)
+			identity.KeySource = keySourceFile
+		} else {
+			_, priv, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				return nil, bridgeIdentity{}, nil, fmt.Errorf("generate ephemeral signing key: %w", err)
+			}
+			opts = append(opts, registry.WithSigningKey(priv))
+			identity.PublicKey = priv.Public().(ed25519.PublicKey)
+			identity.KeySource = keySourceEphemeral
+			slog.Info("no CRIER_AGENT_PRIVATE_KEY_FILE set — signing with an ephemeral key generated for this run",
+				"agent_id", agentID, "key_source", keySourceEphemeral,
+				"note", "the key is regenerated on every run, so a persistent server keeps the first run's registered key; set CRIER_AGENT_PRIVATE_KEY_FILE for a stable identity")
 		}
-		return registry.NewRemoteStore(url, agentID, os.Getenv("CRIER_AUTH_TOKEN"), opts...), func() {}, nil
+		return registry.NewRemoteStore(url, agentID, os.Getenv("CRIER_AUTH_TOKEN"), opts...), identity, func() {}, nil
 	}
 	if cfg.Database.URL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
@@ -104,11 +152,54 @@ func initStore(cfg config.Config) (registry.Store, func(), error) {
 			MaxConnIdleTime: cfg.Database.MaxConnIdleTime,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("postgres: %w", err)
+			return nil, bridgeIdentity{}, nil, fmt.Errorf("postgres: %w", err)
 		}
-		return pgStore, func() { pgStore.Close() }, nil
+		return pgStore, bridgeIdentity{}, func() { pgStore.Close() }, nil
 	}
-	return registry.NewMemoryStore(), func() {}, nil
+	return registry.NewMemoryStore(), bridgeIdentity{}, func() {}, nil
+}
+
+// ensureBridgeIdentity registers the bridge's own agent id on the remote
+// server, idempotently, and reports the outcome loudly (DF-CRIER-28: without
+// this the bridge polls its own inbox under an identity the server never
+// heard of, so get_messages / ask_agent fail with "agent not found" until an
+// operator registers it by hand).
+//
+// Registration failure never aborts startup: the bridge may legitimately be
+// pointed at a server that is unreachable at this instant, and a harness that
+// is already running should not be killed by a bootstrap step. Every failure
+// is logged at error level with its cause instead of being swallowed.
+func ensureBridgeIdentity(store registry.Store, id bridgeIdentity, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if !id.Remote || id.AgentID == "" {
+		return
+	}
+	remote, ok := store.(*registry.RemoteStore)
+	if !ok {
+		return
+	}
+
+	res, err := remote.EnsureRegistered(id.AgentID, id.PublicKey, bridgeCapabilities)
+	if err != nil {
+		logger.Error("bridge identity registration FAILED — get_messages/ask_agent will fail with \"agent not found\" until this agent is registered on the server",
+			"agent_id", id.AgentID, "key_source", id.KeySource, "error", err)
+		return
+	}
+
+	switch {
+	case res.Created:
+		logger.Info("registered bridge identity on the Crier server",
+			"agent_id", id.AgentID, "key_source", id.KeySource, "capabilities", bridgeCapabilities)
+	case res.KeyMatches:
+		logger.Info("bridge identity already registered and the server's public key matches — no action needed",
+			"agent_id", id.AgentID, "key_source", id.KeySource)
+	default:
+		logger.Error("bridge identity already exists on the server with a DIFFERENT public key — every signed request from this bridge will be rejected with 401",
+			"agent_id", id.AgentID, "key_source", id.KeySource,
+			"remedy", fmt.Sprintf("set CRIER_AGENT_PRIVATE_KEY_FILE to the private key whose public half is registered for %q, or delete the stale agent server-side (DELETE /agents/%s) and restart, or point the bridge at a fresh in-memory server", id.AgentID, id.AgentID))
+	}
 }
 
 // parseArgs parses crier-mcp's CLI flags, writing usage/error output to out.
@@ -163,7 +254,22 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CRIER_AGENT_PRIVATE_KEY_FILE  optional PKCS#8 PEM ed25519 private key (openssl genpkey")
 	fmt.Fprintln(out, "                              -algorithm ED25519). Enables per-agent request signing")
 	fmt.Fprintln(out, "                              (X-Agent-Ts/X-Agent-Sig on every request) for servers with")
-	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=true. Omit it only when the server sets")
-	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=false. The public half of the key must be")
-	fmt.Fprintln(out, "                              registered for CRIER_AGENT_ID. Key material is never logged.")
+	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=true (the secure default). Key material")
+	fmt.Fprintln(out, "                              is never logged.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Bridge registration (remote mode, automatic — no operator step):")
+	fmt.Fprintln(out, "  On startup crier-mcp registers CRIER_AGENT_ID on the server, idempotently:")
+	fmt.Fprintln(out, "  an existing registration is left untouched, so re-running is a no-op.")
+	fmt.Fprintln(out, "  Without CRIER_AGENT_PRIVATE_KEY_FILE an ephemeral ed25519 key is generated")
+	fmt.Fprintln(out, "  in-process, so requests are signed out of the box against the secure default.")
+	fmt.Fprintln(out, "  That key changes on every run: a persistent server keeps the FIRST run's")
+	fmt.Fprintln(out, "  registered public key, and later runs log a key-mismatch ERROR because every")
+	fmt.Fprintln(out, "  signed request would be rejected with 401. Remedies then: set")
+	fmt.Fprintln(out, "  CRIER_AGENT_PRIVATE_KEY_FILE to the private key whose public half is registered")
+	fmt.Fprintln(out, "  for CRIER_AGENT_ID, or delete the stale agent server-side (DELETE /agents/{id})")
+	fmt.Fprintln(out, "  and restart, or point the bridge at a fresh in-memory server. Set the variable")
+	fmt.Fprintln(out, "  for any long-lived bridge. Servers that disable signature enforcement")
+	fmt.Fprintln(out, "  (CR_REQUIRE_AGENT_SIG=false) ignore the key, and registration still works.")
+	fmt.Fprintln(out, "  A registration failure (server unreachable, signing disabled, ...) is logged at")
+	fmt.Fprintln(out, "  error level and never aborts startup.")
 }

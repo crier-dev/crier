@@ -324,7 +324,7 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 		setEnv(t, "CRIER_AUTH_TOKEN", "")
 		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", keyPath)
 
-		rs, cleanup, err := initStore(config.Config{})
+		rs, _, cleanup, err := initStore(config.Config{})
 		if err != nil {
 			t.Fatalf("initStore: %v", err)
 		}
@@ -352,19 +352,72 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 		}
 	})
 
-	t.Run("unset key file stays unsigned (compat)", func(t *testing.T) {
-		setEnv(t, "CRIER_HTTP_URL", "http://localhost:8767")
-		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+	t.Run("unset key file generates an ephemeral signing key that signs", func(t *testing.T) {
+		// A signed server (the secure default). The bridge has no key file,
+		// so it must mint an ephemeral key and sign with it.
+		store := registry.NewMemoryStore()
+		h := registry.NewHandler(store)
+		h.SetRequireAgentSig(true)
+		r := mux.NewRouter()
+		r.HandleFunc("/agents", h.HandleRegister).Methods(http.MethodPost)
+		r.HandleFunc("/agents/{id}/inbox", h.HandleDeliver).Methods(http.MethodPost)
+		r.HandleFunc("/agents/{id}/inbox", h.HandleRetrieve).Methods(http.MethodGet)
+		r.HandleFunc("/agents/{id}/inbox/ack", h.HandleAck).Methods(http.MethodPost)
+		srv := httptest.NewServer(r)
+		t.Cleanup(srv.Close)
+
+		setEnv(t, "CRIER_HTTP_URL", srv.URL)
+		setEnv(t, "CRIER_AGENT_ID", "ephemeral-agent")
 		setEnv(t, "CRIER_AUTH_TOKEN", "")
 		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", "")
 
-		store, cleanup, err := initStore(config.Config{})
+		got, identity, cleanup, err := initStore(config.Config{})
 		if err != nil {
 			t.Fatalf("initStore: %v", err)
 		}
 		defer cleanup()
-		if _, ok := store.(*registry.RemoteStore); !ok {
-			t.Fatalf("store type = %T, want *registry.RemoteStore", store)
+		remote, ok := got.(*registry.RemoteStore)
+		if !ok {
+			t.Fatalf("store type = %T, want *registry.RemoteStore", got)
+		}
+		if !identity.Remote || identity.AgentID != "ephemeral-agent" {
+			t.Fatalf("identity = %+v, want Remote=true AgentID=ephemeral-agent", identity)
+		}
+		if identity.KeySource != "ephemeral" {
+			t.Fatalf("KeySource = %q, want %q", identity.KeySource, "ephemeral")
+		}
+		if len(identity.PublicKey) != ed25519.PublicKeySize {
+			t.Fatalf("ephemeral PublicKey len = %d, want %d", len(identity.PublicKey), ed25519.PublicKeySize)
+		}
+
+		// Register the ephemeral public key, then exercise a signature-gated
+		// route: a 200 proves the generated key is actually wired into the
+		// store's signing path (not just held in the identity struct).
+		res, err := remote.EnsureRegistered("ephemeral-agent", identity.PublicKey, nil)
+		if err != nil || !res.Created {
+			t.Fatalf("EnsureRegistered = %+v, %v", res, err)
+		}
+		if err := remote.Deliver("ephemeral-agent", &registry.InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}); err != nil {
+			t.Fatalf("Deliver: %v", err)
+		}
+		entries, leaseID, err := remote.Retrieve("ephemeral-agent", 30*time.Second, 5)
+		if err != nil {
+			t.Fatalf("signed Retrieve with the ephemeral key: %v", err)
+		}
+		if len(entries) != 1 || leaseID == "" {
+			t.Fatalf("Retrieve = %d entries lease=%q", len(entries), leaseID)
+		}
+
+		// A second initStore mints a DIFFERENT key: that is the documented
+		// ephemeral-key consequence, and it is asserted so it cannot silently
+		// become stable (which would make the mismatch path unreachable).
+		_, identity2, cleanup2, err := initStore(config.Config{})
+		if err != nil {
+			t.Fatalf("second initStore: %v", err)
+		}
+		defer cleanup2()
+		if identity2.PublicKey.Equal(identity.PublicKey) {
+			t.Fatal("two ephemeral identities share a public key, want a fresh key per run")
 		}
 	})
 
@@ -373,7 +426,7 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
 		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", filepath.Join(t.TempDir(), "nope.key"))
 
-		_, _, err := initStore(config.Config{})
+		_, _, _, err := initStore(config.Config{})
 		if err == nil || !strings.Contains(err.Error(), "CRIER_AGENT_PRIVATE_KEY_FILE") {
 			t.Fatalf("err = %v, want CRIER_AGENT_PRIVATE_KEY_FILE failure", err)
 		}
@@ -389,7 +442,7 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
 		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", path)
 
-		_, _, err := initStore(config.Config{})
+		_, _, _, err := initStore(config.Config{})
 		if err == nil || !strings.Contains(err.Error(), "no PEM data") {
 			t.Fatalf("err = %v, want no-PEM failure", err)
 		}
@@ -413,7 +466,7 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
 		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", path)
 
-		_, _, err = initStore(config.Config{})
+		_, _, _, err = initStore(config.Config{})
 		if err == nil || !strings.Contains(err.Error(), "ed25519") {
 			t.Fatalf("err = %v, want non-ed25519 failure", err)
 		}
@@ -425,8 +478,9 @@ func TestInitStoreRemoteSigningKey(t *testing.T) {
 
 // TestHelpDocumentsRemoteMode pins the remote-mode onboarding in the binary's
 // --help: all four remote env variables (CRIER_HTTP_URL, CRIER_AGENT_ID,
-// CRIER_AUTH_TOKEN, CRIER_AGENT_PRIVATE_KEY_FILE) plus the no-key-only-when-
-// server-opted-out rule and the key-material-never-logged guarantee.
+// CRIER_AUTH_TOKEN, CRIER_AGENT_PRIVATE_KEY_FILE) plus the signing rules, the
+// automatic bridge registration (DF-CRIER-28), the ephemeral-key fallback,
+// the key-mismatch remedies, and the key-material-never-logged guarantee.
 func TestHelpDocumentsRemoteMode(t *testing.T) {
 	var out strings.Builder
 	if _, _, err := parseArgs([]string{"--help"}, &out); err != nil {
@@ -442,6 +496,12 @@ func TestHelpDocumentsRemoteMode(t *testing.T) {
 		"CR_REQUIRE_AGENT_SIG=false",
 		"never logged",
 		"openssl genpkey",
+		// Bridge registration documentation (DF-CRIER-28).
+		"registers CRIER_AGENT_ID",
+		"ephemeral ed25519 key is generated",
+		"key-mismatch ERROR",
+		"DELETE /agents/{id}",
+		"never aborts startup",
 	} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage output missing %q", want)
