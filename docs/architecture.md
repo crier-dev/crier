@@ -43,6 +43,25 @@ Three lanes carry agent work (lane split, CR-FEAT-009):
 - **Storage:** In-memory by default; PostgreSQL backend (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts
 - **Auth:** Agent tokens (HMAC-signed)
 
+## ZeroMQ Pattern Mapping
+Crier speaks the patterns ZeroMQ made standard — prebuilt, so agents never assemble sockets:
+
+| ZeroMQ pattern | Crier realization |
+|---|---|
+| PUB/SUB | Relay: HTTP publish (202) → topic frames over WebSocket |
+| REQ/REP | Mesh REQUEST/RESPONSE between registered peers |
+| PUSH/PULL (pipeline) | Durable lease-based inboxes — **superset**: queues survive peer death and bus restarts |
+| PAIR (exclusive 1:1) | Direct mesh connection between two peers |
+| ROUTER/DEALER | Prebuilt: crier **is** the broker ZMQ makes you assemble from those sockets |
+| XPUB/XSUB | Prebuilt: the relay is the subscription-forwarding proxy |
+| STREAM | **Deliberately excluded** — raw passthrough would bypass the message guard and the signed registry (choke-point doctrine: every message is guarded and attributed) |
+
+Beyond ZMQ: durable queues, an ed25519 identity registry, the LLM guard on every
+message, the MCP tool surface (agents send via tools, never raw sockets), and
+federation across buses (`/fed/peers`). ZMQ retains the edge on latency
+(microseconds, in-process IPC); crier is deliberately HTTP/WS-network-class for
+the agent economy.
+
 ## Key Design Decisions
 - OpenAPI 3.1 spec as single source of truth → auto-generate MCP tools
 - Content-addressed events (SHA-256)
