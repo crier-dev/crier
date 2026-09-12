@@ -387,6 +387,19 @@ paths:
         verdict across inner messages; per-message verdicts stay in each
         inner envelope's crier.guard metadata. Redelivery and batch flush
         never re-run the guard — the verdict rides with the message.
+
+        Federation (CR-FEAT-006, DF-CRIER-7): when the target agent is not
+        registered here and relay links are configured (CR_FED_LINKS), the
+        original request is forwarded to the linked relays in order. A link
+        answering anything but 404 with a non-retryable status wins and its
+        status+body are relayed back verbatim (a blocking webhook reply
+        returns untouched). A transient outage (unreachable link, or a
+        retryable 5xx/408/429) is HELD at the source and retried inside
+        CR_FED_MAX_HOLD_S: the sender gets 202 {"status":"held",...}, and if
+        the delivery still cannot be made it gets exactly one
+        FEDERATION_FAILED notification in its own inbox. A definitive
+        all-links-404 is answered 404 immediately. With no hold queue
+        available the transient failure is reported synchronously as 502.
       parameters:
         - name: id
           in: path
@@ -449,6 +462,27 @@ paths:
                   guard:
                     $ref: "#/components/schemas/GuardVerdictMeta"
                     description: "Guard verdict metadata when the message was not plain-allowed (sanitize, or errored fail-open) — visibility for async senders (CR-FEAT-010, spec §9.3)"
+        "202":
+          description: "Delivery accepted but not yet made (webhook async/batch, or a held federation delivery). Federation hold (DF-CRIER-7): every link is failing transiently, so the request is queued at this relay and retried inside CR_FED_MAX_HOLD_S; a terminal failure is reported once as FEDERATION_FAILED in the sender's own inbox."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, id, target, max_hold_s]
+                properties:
+                  status:
+                    type: string
+                    enum: [held]
+                    description: "held — the federation delivery is queued at the source and retried"
+                  id:
+                    type: string
+                    description: Assigned message id (also the correlation id of the FEDERATION_FAILED notification, if any)
+                  target:
+                    type: string
+                    description: Target agent id the held delivery is addressed to
+                  max_hold_s:
+                    type: integer
+                    description: "Hold budget (CR_FED_MAX_HOLD_S) in seconds — after this the sender is told FEDERATION_FAILED"
         "400":
           description: Invalid request body or store input
         "403":
@@ -458,7 +492,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/GuardBlockedResponse"
         "404":
-          description: Agent not found
+          description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) or reported as 502 FEDERATION_FAILED."
+        "502":
+          description: "Federation link failure with no hold queue available: every link is unreachable or answered a retryable status. Explicit failure, never a 404."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message_id, target, attempts]
+                properties:
+                  error:
+                    type: string
+                    enum: [FEDERATION_FAILED]
+                  message_id:
+                    type: string
+                    description: Assigned message id of the failed delivery
+                  target:
+                    type: string
+                    description: Target agent id
+                  sender:
+                    type: string
+                    description: Sender from the original request, when present
+                  request_id:
+                    type: string
+                    description: Sender correlation id, when present
+                  session_id:
+                    type: string
+                    description: Session id, when present
+                  attempts:
+                    type: integer
+                    description: Forward attempts made before giving up
+                  status:
+                    type: integer
+                    description: Last retryable remote status observed (absent when the failure was transport-level)
+                  detail:
+                    type: string
+                    description: Last transport/status error (never carries the link token)
     get:
       operationId: inboxRetrieve
       summary: Retrieve undelivered messages from inbox

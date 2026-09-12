@@ -96,6 +96,59 @@ type guardBlockedResponse struct {
 	Guard guard.Meta `json:"guard"`
 }
 
+// federationHeldResponse is the 202 body when a delivery to a remote agent
+// was held at the source because every link failed transiently (DF-CRIER-7,
+// spec §8). The delivery is retried for up to max_hold_s; if it still cannot
+// be delivered the sender gets a FEDERATION_FAILED notification in its inbox.
+// `id` is the assigned message id, the same field the async webhook-accept
+// response carries, so a client that only reads `id` keeps working.
+type federationHeldResponse struct {
+	Status   string `json:"status"` // always "held"
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	MaxHoldS int    `json:"max_hold_s"`
+}
+
+// federationFailureResponse is the stable JSON body for a synchronous
+// federation transient failure (HTTP 502): the links are unreachable or
+// unhealthy and no hold queue took the delivery. It carries the correlation
+// context of the original request and is explicitly NOT an agent-not-found.
+type federationFailureResponse struct {
+	Error     string `json:"error"` // always FEDERATION_FAILED
+	MessageID string `json:"message_id"`
+	Target    string `json:"target"`
+	Sender    string `json:"sender,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Attempts  int    `json:"attempts"`
+	Status    int    `json:"status,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+// federationFailure builds the 502 body for a transient federation failure.
+// The link token is never included (TransientError only carries the link URL
+// and the transport error).
+func federationFailure(req deliverRequest, messageID, target string, err error) federationFailureResponse {
+	resp := federationFailureResponse{
+		Error:     federation.CodeFederationFailed,
+		MessageID: messageID,
+		Target:    target,
+		Sender:    req.Sender,
+		RequestID: req.RequestID,
+		SessionID: req.SessionID,
+		Attempts:  1,
+		Detail:    err.Error(),
+	}
+	var transient *federation.TransientError
+	if errors.As(err, &transient) {
+		if transient.Attempts > 0 {
+			resp.Attempts = transient.Attempts
+		}
+		resp.Status = transient.LastStatus
+	}
+	return resp
+}
+
 // retrieveResponse is the JSON body for GET /agents/{id}/inbox.
 type retrieveResponse struct {
 	Messages []*InboxEntry `json:"messages"`
@@ -348,30 +401,63 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 
 	target, getErr := h.store.Get(id)
 
-	// Federation fallback (CR-FEAT-006): the target agent is not registered
-	// on this relay. When relay links are configured, forward the ORIGINAL
-	// deliver request to each linked relay in order; the first non-404
-	// answer wins and is relayed back verbatim — a blocking webhook reply
-	// from the remote relay (which itself rides inside the remote HTTP
-	// response) therefore returns to the original sender untouched. Requests
-	// that already arrived over a link (hop marker) never forward again.
+	// Federation fallback (CR-FEAT-006, hold/retry DF-CRIER-7): the target
+	// agent is not registered on this relay. When relay links are
+	// configured, forward the ORIGINAL deliver request to each linked relay
+	// in order; the first non-404, non-retryable answer wins and is relayed
+	// back verbatim — a blocking webhook reply from the remote relay (which
+	// itself rides inside the remote HTTP response) therefore returns to the
+	// original sender untouched. Requests that already arrived over a link
+	// (hop marker) never forward again.
 	// The guard is per-receiver: the REMOTE relay's target-agent policy
 	// applies there, so forwarding happens before the local choke point.
+	//
+	// Failure contract (spec §8): a DEFINITIVE all-links-404 stays
+	// agent-not-found, but a TRANSIENT link outage (unreachable / retryable
+	// status) is never reported as 404 — the delivery is held at the source
+	// and retried inside CR_FED_MAX_HOLD_S (202 Accepted), and only when no
+	// hold queue is available (or it refuses the delivery) is an explicit
+	// bounded 502 FEDERATION_FAILED returned.
 	if h.fed != nil && r.Header.Get(federation.HopHeader) == "" && errors.Is(getErr, ErrAgentNotFound) {
 		reqBytes, merr := json.Marshal(req)
 		if merr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "federation: marshal deliver request"})
 			return
 		}
-		if status, respBody, ferr := h.fed.ForwardToAny(r.Context(), id, reqBytes); ferr == nil {
+		status, respBody, held, ferr := h.fed.ForwardOrHold(r.Context(), id, reqBytes, federation.HoldMeta{
+			MessageID: entry.ID,
+			Sender:    req.Sender,
+			RequestID: req.RequestID,
+			SessionID: req.SessionID,
+		})
+		switch {
+		case ferr == nil:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			w.Write(respBody)
-			return
+		case held != nil:
+			// Transient link outage: queued at the source for bounded
+			// retry. The sender is told the delivery is held, and a
+			// terminal FEDERATION_FAILED lands in its inbox if the hold
+			// budget expires (asymmetric — never a silent drop, never a
+			// misleading 404).
+			maxHold := h.fed.MaxHold()
+			writeJSON(w, http.StatusAccepted, federationHeldResponse{
+				Status:   "held",
+				ID:       held.ID,
+				Target:   id,
+				MaxHoldS: int(maxHold.Seconds()),
+			})
+		case errors.Is(ferr, federation.ErrNotFoundOnAnyLink):
+			// Every linked relay answered 404 (and none failed
+			// transiently): the agent is nowhere in the federation — the
+			// caller sees the same 404 a single relay would answer.
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
+		default:
+			// Transient failure with no hold queue to hold it: an explicit
+			// bounded failure with the correlation context, never a 404.
+			writeJSON(w, http.StatusBadGateway, federationFailure(req, entry.ID, id, ferr))
 		}
-		// No linked relay knows the agent (all 404 / unreachable) — the
-		// caller sees the same 404 a single relay would answer.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
 		return
 	}
 

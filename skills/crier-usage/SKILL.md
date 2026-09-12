@@ -96,14 +96,21 @@ DELETE; a PATCH without the sig headers → 401):
   forwarded to the link; agent tables exchange on a 60s TTL and show in
   `GET /fed/peers` with the link's agents; blocking webhook replies route
   back through the originating relay with the same `message_id` (verified).
-- ⚠️ **Links carry NO credentials** (DF-CRIER-6): the forward is a bare POST,
-  so an auth-enabled (`CR_AUTH_TOKEN`) remote relay 401s every federated
-  delivery and the sender sees that 401 verbatim. Federate only with
-  token-less (LAN) relays today.
-- ⚠️ **Link down = instant silent 404 drop** (DF-CRIER-7): the cached agent
-  table still lists the dead relay's agents, the forward fails, and
-  `CR_FED_MAX_HOLD_S` / durable queue / ERROR frame promised by spec §8 do
-  not exist. Message lost.
+- ⚠️ **Links carry NO credentials unless `CR_FED_TOKEN` is set** (DF-CRIER-6): with
+  no token the forward is a bare POST, so an auth-enabled (`CR_AUTH_TOKEN`)
+  remote relay 401s every federated delivery and the sender sees that 401
+  verbatim. Set the source relay's `CR_FED_TOKEN` equal to the destination's
+  `CR_AUTH_TOKEN` to federate with an auth-enabled relay.
+- ✅ **Link down = held, not lost** (DF-CRIER-7): a transient outage
+  (unreachable link, or a retryable 5xx/408/429) gets `202
+  {"status":"held","id":…,"target":…,"max_hold_s":…}` — the delivery is queued
+  at the source and retried inside `CR_FED_MAX_HOLD_S` (default 300s). If it
+  still cannot be delivered the sender gets exactly one durable
+  `FEDERATION_FAILED` entry in its own inbox (`{kind:error, code, message_id,
+  target, sender, request_id, session_id, attempts, status, error}`). A
+  definitive all-links-404 still answers `404` immediately. Durability: set
+  `CR_FED_QUEUE_FILE` or held deliveries die with the process (memory queue) —
+  the same contract as the in-memory inbox backend.
 - `GET /fed/peers` lists YOUR OWN relay as a peer (DF-CRIER-12) — filter self
   before parsing.
 

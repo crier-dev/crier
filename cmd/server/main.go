@@ -200,11 +200,45 @@ func run(args []string) int {
 	// and GET /fed/peers lists the local relay plus each linked relay with
 	// its agents. The endpoint is always registered: with no links it
 	// simply lists this relay alone.
-	var fedClient *federation.Client
+	//
+	// Hold queue (DF-CRIER-7, spec §8): a TRANSIENT link outage no longer
+	// answers 404 — the delivery is held at the source and retried inside
+	// CR_FED_MAX_HOLD_S, and only then is the sender told FEDERATION_FAILED
+	// (written straight into its inbox, which cannot recurse). Hold state is
+	// durable only when CR_FED_QUEUE_FILE is set; without it the queue is
+	// process-lifetime, matching the in-memory registry backend.
+	var (
+		fedClient *federation.Client
+		fedHold   *federation.HoldManager
+	)
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
+
+		queueMode := "memory (process-lifetime)"
+		var holdQueue federation.HoldQueue
+		if cfg.Federation.QueueFile != "" {
+			fq, qerr := federation.OpenFileHoldQueue(cfg.Federation.QueueFile)
+			if qerr != nil {
+				slog.Error("open federation hold queue", "error", qerr)
+				return 1
+			}
+			holdQueue = fq
+			queueMode = "file"
+		} else {
+			holdQueue = federation.NewMemoryHoldQueue()
+		}
+		fedHold = federation.NewHoldManager(fedClient, holdQueue, federation.HoldConfig{
+			MaxHold: cfg.Federation.MaxHold,
+		})
+		fedHold.SetNotifier(registry.FederationFailureSink(regStore))
+		fedClient.SetHoldManager(fedHold)
+		fedHold.Start()
+		defer fedHold.Stop()
+
 		registryHandler.SetFederationClient(fedClient)
-		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg), "auth", cfg.Federation.Token != "")
+		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg),
+			"auth", cfg.Federation.Token != "", "max_hold_s", int(cfg.Federation.MaxHold.Seconds()),
+			"hold_queue", queueMode, "pending", fedHold.Pending())
 	}
 	localPeer := func() federation.Peer {
 		agents := make([]federation.RemoteAgent, 0)
@@ -302,6 +336,12 @@ func run(args []string) int {
 
 		purgeCancel()
 		meshSvc.Stop()
+		if fedHold != nil {
+			// Stop the federation retry worker before the store closes: it
+			// joins its goroutine, so shutdown leaks nothing. Pending items
+			// stay in the queue (durable when CR_FED_QUEUE_FILE is set).
+			fedHold.Stop()
+		}
 		if err := srv.Shutdown(ctx); err != nil {
 			slog.Warn("http shutdown", "error", err)
 		}
@@ -380,6 +420,8 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
 	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")
 	fmt.Fprintln(out, "  CR_FED_TOKEN                shared secret for link auth: sent as Bearer to linked relays; must equal the destination's CR_AUTH_TOKEN (empty = no link auth)")
+	fmt.Fprintln(out, "  CR_FED_MAX_HOLD_S           how long a delivery is held and retried when every link is down, before the sender is told FEDERATION_FAILED (default 300)")
+	fmt.Fprintln(out, "  CR_FED_QUEUE_FILE           durable hold-queue document path; unset = held deliveries are process-lifetime only (lost on restart)")
 	fmt.Fprintln(out, "  CR_GUARD_ENABLED            LLM message guard master switch (default true)")
 	fmt.Fprintln(out, "  CR_GUARD_TIMEOUT_MS         per-message guard budget incl. retries (default 10000)")
 	fmt.Fprintln(out, "  CR_GUARD_MAX_CONCURRENT     concurrent guard LLM calls (default 8)")

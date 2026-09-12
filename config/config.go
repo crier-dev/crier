@@ -77,6 +77,18 @@ type FederationConfig struct {
 	// as before. The secret is never logged, echoed, serialized, or
 	// included in GET /fed/peers output.
 	Token string
+	// MaxHold bounds how long a delivery to a remote agent is held at this
+	// relay when every link fails transiently, before the sender gets an
+	// explicit FEDERATION_FAILED outcome (CR_FED_MAX_HOLD_S, DF-CRIER-7,
+	// specs/WEBHOOK-DELIVERY.md §8/§9). Default 300s. Only the transient
+	// case is held: a definitive all-links-404 is answered immediately.
+	MaxHold time.Duration
+	// QueueFile is the path of the durable hold queue document
+	// (CR_FED_QUEUE_FILE, DF-CRIER-7). When set, held deliveries survive a
+	// source-relay restart. Empty (default) keeps the queue in process
+	// memory only — held deliveries are lost on restart, the same contract
+	// the in-memory registry backend documents for inboxes.
+	QueueFile string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -120,6 +132,10 @@ func Load() (Config, error) {
 			DeepSeekBaseURL:  "https://api.deepseek.com/v1",
 			Model:            "deepseek-v4-flash",
 			KanbanQueueSize:  100,
+		},
+		Federation: FederationConfig{
+			// CR_FED_MAX_HOLD_S (DF-CRIER-7, spec §8/§9).
+			MaxHold: 300 * time.Second,
 		},
 		Database: DatabaseConfig{
 			MaxConns:        4,
@@ -231,6 +247,20 @@ func Load() (Config, error) {
 	// auth, sent as "Authorization: Bearer <token>" to linked relays. Empty
 	// (default) = unauthenticated links, as before. Never logged or served.
 	cfg.Federation.Token = os.Getenv("CR_FED_TOKEN")
+	// CR_FED_MAX_HOLD_S (DF-CRIER-7, spec §8/§9): how long a delivery whose
+	// links are all transiently down is held at this relay before the sender
+	// gets an explicit FEDERATION_FAILED outcome. Default 300s.
+	if v := os.Getenv("CR_FED_MAX_HOLD_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_FED_MAX_HOLD_S: %q (want positive seconds)", v)
+		}
+		cfg.Federation.MaxHold = time.Duration(n) * time.Second
+	}
+	// CR_FED_QUEUE_FILE (DF-CRIER-7): path of the durable hold-queue
+	// document. Unset (default) keeps held deliveries in process memory
+	// only, matching the in-memory registry backend contract.
+	cfg.Federation.QueueFile = os.Getenv("CR_FED_QUEUE_FILE")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

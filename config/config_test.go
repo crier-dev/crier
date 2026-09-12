@@ -30,6 +30,8 @@ func unsetAll(t *testing.T) {
 		"CR_FED_LINKS",
 		"CR_FED_NAME",
 		"CR_FED_TOKEN",
+		"CR_FED_MAX_HOLD_S",
+		"CR_FED_QUEUE_FILE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -479,6 +481,62 @@ func TestLoad_FedToken(t *testing.T) {
 	})
 }
 
+// TestLoad_FederationMaxHold pins the DF-CRIER-7 hold-budget contract:
+// CR_FED_MAX_HOLD_S defaults to 300 seconds, is parsed as seconds, and a
+// non-positive or non-numeric value fails fast (a typo must not silently
+// disable the hold).
+func TestLoad_FederationMaxHold(t *testing.T) {
+	t.Run("default is 300 seconds", func(t *testing.T) {
+		unsetAll(t)
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, 300*time.Second, cfg.Federation.MaxHold, "spec §9 default CR_FED_MAX_HOLD_S = 300")
+	})
+
+	t.Run("picked up from env", func(t *testing.T) {
+		unsetAll(t)
+		t.Setenv("CR_FED_MAX_HOLD_S", "45")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, 45*time.Second, cfg.Federation.MaxHold)
+	})
+
+	for _, bad := range []string{"0", "-1", "abc", "3.5", ""} {
+		t.Run("invalid "+bad, func(t *testing.T) {
+			unsetAll(t)
+			t.Setenv("CR_FED_MAX_HOLD_S", bad)
+			cfg, err := config.Load()
+			if bad == "" {
+				require.NoError(t, err, "empty string behaves like unset")
+				assert.Equal(t, 300*time.Second, cfg.Federation.MaxHold)
+				return
+			}
+			require.Error(t, err, "CR_FED_MAX_HOLD_S=%q must fail fast", bad)
+			assert.Contains(t, err.Error(), "CR_FED_MAX_HOLD_S")
+			_ = cfg
+		})
+	}
+}
+
+// TestLoad_FederationQueueFile pins the durability switch: the hold queue is
+// durable only when CR_FED_QUEUE_FILE is set (DF-CRIER-7).
+func TestLoad_FederationQueueFile(t *testing.T) {
+	t.Run("empty by default (memory queue)", func(t *testing.T) {
+		unsetAll(t)
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.Federation.QueueFile, "default has no durable queue path")
+	})
+
+	t.Run("picked up from env", func(t *testing.T) {
+		unsetAll(t)
+		t.Setenv("CR_FED_QUEUE_FILE", "/var/lib/crier/fed-hold.json")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, "/var/lib/crier/fed-hold.json", cfg.Federation.QueueFile)
+	})
+}
+
 // ---------- All env vars set together ----------
 
 func TestLoad_AllEnvVarsSet(t *testing.T) {
@@ -496,6 +554,8 @@ func TestLoad_AllEnvVarsSet(t *testing.T) {
 	t.Setenv("CR_DATABASE_MAX_CONN_LIFETIME", "45m")
 	t.Setenv("CR_DATABASE_MAX_CONN_IDLE_TIME", "7m")
 	t.Setenv("CR_DATABASE_CONNECT_TIMEOUT", "15s")
+	t.Setenv("CR_FED_MAX_HOLD_S", "600")
+	t.Setenv("CR_FED_QUEUE_FILE", "/tmp/crier-fed-hold.json")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -510,6 +570,8 @@ func TestLoad_AllEnvVarsSet(t *testing.T) {
 	assert.Equal(t, 45*time.Minute, cfg.Database.MaxConnLifetime)
 	assert.Equal(t, 7*time.Minute, cfg.Database.MaxConnIdleTime)
 	assert.Equal(t, 15*time.Second, cfg.Database.ConnectTimeout)
+	assert.Equal(t, 600*time.Second, cfg.Federation.MaxHold)
+	assert.Equal(t, "/tmp/crier-fed-hold.json", cfg.Federation.QueueFile)
 }
 
 // ---------- Edge case: empty string is treated as "unset" for non-precedence fields ----------

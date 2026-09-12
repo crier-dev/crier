@@ -173,6 +173,57 @@ Template = JSON object with three sections; stored under `templates/` and refere
 - Link down → durable queue at source; ERROR after `CR_FED_MAX_HOLD_S` (default 300s).
 - Discovery: remote agents appear in `GET /agents` with `via`; `mesh_peers`/bridge `list_agents` include them.
 
+### 8.1 Hold/retry contract (DF-CRIER-7)
+
+An outage must never be reported as `agent not found`, and a message must never be dropped silently. The
+source relay classifies a failed forward attempt into exactly three outcomes:
+
+| Outcome | Trigger | Response to the original sender |
+|---|---|---|
+| **Relayed** | a link answers anything except 404 with a non-retryable status | that link's status + body verbatim (unchanged blocking-webhook reply behavior) |
+| **Agent not found** | every link answers 404 and none failed transiently | `404` immediately — the hold budget is never waited out |
+| **Held** | at least one link was unreachable or answered a retryable status (5xx, 408, 429) and none delivered | `202 Accepted` `{"status":"held","id":…,"target":…,"max_hold_s":…}`; retried in the background |
+
+- Retry runs until delivery succeeds or the hold budget (`CR_FED_MAX_HOLD_S`) expires. A retry re-POSTs the
+  **same bytes** as the original attempt (same hop header, same link auth) and the delivery is removed from
+  the queue the moment a 2xx is seen, so a recovery forwards it exactly once.
+- **Terminal FEDERATION_FAILED.** When the budget expires — or a retry gets a definitive answer that is not a
+  delivery (all-links-404, or any non-2xx rejection) — the sender gets exactly one durable notification in its
+  own inbox, written directly through the store (never through webhook/federation routing, so it cannot
+  recurse or requeue):
+
+  ```json
+  {"kind":"error","code":"FEDERATION_FAILED","message_id":"…","target":"agent-remote","sender":"agent-a",
+   "request_id":"…","session_id":"…","attempts":4,"status":503,"error":"…"}
+  ```
+
+  Correlation fields (`message_id`, `target`, `sender`, `request_id`, `session_id`, `attempts`, `status`,
+  `error`) are required; the message body is never echoed.
+- With **no hold queue configured** (a bare `SetFederationClient` in an embedder, or a queue that refuses the
+  delivery because it is full / the body exceeds the cap) the transient failure is reported synchronously as
+  `502` with the stable body `{"error":"FEDERATION_FAILED","message_id":…,"target":…,"sender":…,
+  "request_id":…,"session_id":…,"attempts":…,"status":…,"detail":…}`.
+- Retry backoff is exponential (2s doubling, capped at 60s) inside the budget; every retry re-runs the same
+  per-link classification as the first attempt, so a link that comes back is used immediately.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `CR_FED_MAX_HOLD_S` | `300` | hold budget (P2) |
+| `CR_FED_QUEUE_FILE` | unset | durable hold-queue document path |
+
+**What is durable.** With `CR_FED_QUEUE_FILE` set, held deliveries live in one atomically rewritten JSON
+document (marshal → `fsync` `<path>.tmp` → rename `<path>` → `<path>.bak` → rename `<path>.tmp` → `<path>`,
+`0600`), survive a source-relay restart, and are resumed with their original deadline. A crash at any point
+leaves a parseable document: the new one at `<path>` or the previous good one at `<path>.bak`, recovered on
+open. Without `CR_FED_QUEUE_FILE` the queue is **process-lifetime only** — held deliveries are lost on
+restart, the same contract the in-memory registry backend documents for inboxes, so run the durable registry
+(`CR_DATABASE_URL`) together with `CR_FED_QUEUE_FILE` when held work must survive a restart.
+
+**Known limitations.** (a) Retry-on-5xx is at-least-once: a delivery the remote relay partially processed
+before answering 5xx can be forwarded again, exactly as the webhook client's retry-on-5xx already can. (b) A
+held **blocking** delivery cannot return its remote reply to the original caller — that HTTP request already
+completed with `202`; the recovery is logged and the terminal case is the FEDERATION_FAILED notification.
+
 ## 9. Config surface (env)
 
 | Env | Default | Meaning |
@@ -185,6 +236,7 @@ Template = JSON object with three sections; stored under `templates/` and refere
 | `CR_WEBHOOK_CIRCUIT_THRESHOLD` | 10 | consecutive failures → degraded |
 | `CR_FED_LINKS` | unset | relay link list (P2) |
 | `CR_FED_MAX_HOLD_S` | 300 | federation hold time (P2) |
+| `CR_FED_QUEUE_FILE` | unset | durable hold-queue document (P2, DF-CRIER-7) |
 
 ## 10. Implementation plan (ticket mapping)
 

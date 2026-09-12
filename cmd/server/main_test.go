@@ -113,6 +113,8 @@ func TestParseArgs(t *testing.T) {
 		"CR_LOG_FORMAT",
 		"CR_RATE_LIMIT_PER_MINUTE",
 		"CR_WS_ALLOWED_ORIGINS",
+		"CR_FED_MAX_HOLD_S",
+		"CR_FED_QUEUE_FILE",
 	}
 
 	t.Run("help exits 0 and documents env vars", func(t *testing.T) {

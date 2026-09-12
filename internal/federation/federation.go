@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -65,6 +66,75 @@ type Peer struct {
 	Agents []RemoteAgent `json:"agents"`
 }
 
+// ErrNotFoundOnAnyLink reports that every configured linked relay answered
+// 404, i.e. the agent exists nowhere in the federation. It is a DEFINITIVE
+// answer and never wraps a link outage: a transient failure (unreachable
+// link, retryable status) is reported as *TransientError instead, so callers
+// can tell "the agent is nowhere" (answer 404) from "the federation is
+// unreachable" (hold and retry, spec §8, DF-CRIER-7).
+var ErrNotFoundOnAnyLink = errors.New("agent not found on any linked relay")
+
+// TransientError reports that at least one configured link failed
+// transiently (transport error or retryable status) and no link delivered
+// the request. It carries the last observed failure for the terminal
+// FEDERATION_FAILED report. Callers must not answer 404 for it.
+type TransientError struct {
+	// Attempts is the number of forward passes made in this call (always 1
+	// for a single pass; the hold queue keeps counting across retries).
+	Attempts int
+	// LastStatus is the last retryable remote status seen (0 when the
+	// failure was transport-level).
+	LastStatus int
+	// LastErr is the last transport-level error (nil when every link
+	// answered with a retryable status).
+	LastErr error
+}
+
+// Error implements error. The message carries the link URL and the transport
+// error only — never the link token.
+func (e *TransientError) Error() string {
+	switch {
+	case e.LastErr != nil && e.LastStatus != 0:
+		return fmt.Sprintf("federation: no link delivered (last status %d, last error: %v)", e.LastStatus, e.LastErr)
+	case e.LastErr != nil:
+		return fmt.Sprintf("federation: no link reachable (last error: %v)", e.LastErr)
+	case e.LastStatus != 0:
+		return fmt.Sprintf("federation: no link delivered (last status %d)", e.LastStatus)
+	default:
+		return "federation: no link delivered"
+	}
+}
+
+// Unwrap exposes the underlying transport error.
+func (e *TransientError) Unwrap() error { return e.LastErr }
+
+// retryableStatus reports whether a remote link response means "the link is
+// unhealthy, try again later" rather than "here is the answer to your
+// delivery":
+//
+//   - 5xx: the gateway class a half-dead relay, proxy or load balancer emits
+//     (the repo's webhook client classifies every 5xx as retryable, spec §9
+//     "transient retries", so the relay link follows the same rule);
+//   - 408 Request Timeout / 429 Too Many Requests: explicit "try again".
+//
+// Everything else — 2xx/3xx (relayed verbatim), 404 (try the next link),
+// other 4xx (definitive rejection) — is an answer, not a link outage.
+//
+// Caveat: retrying after a 5xx can duplicate a delivery the remote relay
+// partially processed, exactly as the webhook client's retry-on-5xx already
+// can. The duplicate window is the reason the recovery pass stops at the
+// first non-retryable answer.
+func retryableStatus(status int) bool {
+	switch {
+	case status >= 500:
+		return true
+	case status == http.StatusRequestTimeout, status == http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
+}
+
 // Client forwards deliveries and discovery to the configured linked relays.
 // When token is non-empty, every outbound request carries
 // "Authorization: Bearer <token>" (federation link auth, DF-CRIER-6) so a
@@ -76,6 +146,33 @@ type Client struct {
 	links []Link
 	token string
 	http  *http.Client
+	// hold queues deliveries whose links are all transiently down for
+	// bounded retry (DF-CRIER-7, spec §8). Nil means a transient failure is
+	// reported to the caller synchronously (HTTP 502 FEDERATION_FAILED)
+	// instead of being held.
+	hold *HoldManager
+}
+
+// SetHoldManager attaches the hold/retry queue (DF-CRIER-7). With no hold
+// manager a transient link outage is surfaced to the caller as an explicit
+// bounded failure rather than held (never as a 404).
+func (c *Client) SetHoldManager(m *HoldManager) { c.hold = m }
+
+// MaxHold returns the hold budget in force, or 0 when no hold queue is
+// attached.
+func (c *Client) MaxHold() time.Duration {
+	if c.hold == nil {
+		return 0
+	}
+	return c.hold.MaxHold()
+}
+
+// timeout is the outbound per-request budget.
+func (c *Client) timeout() time.Duration {
+	if c.http != nil && c.http.Timeout > 0 {
+		return c.http.Timeout
+	}
+	return DefaultTimeout
 }
 
 // NewClient builds a Client over the link base URLs from CR_FED_LINKS.
@@ -157,28 +254,94 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	return resp.StatusCode, respBody, nil
 }
 
-// ForwardToAny relays a deliver request to each linked relay in order and
-// returns the first non-404 response verbatim. A 404 means "this relay does
-// not know the agent either" — the search continues. If every link 404s or
-// is unreachable, it returns a non-nil error (the caller answers 404).
-func (c *Client) ForwardToAny(ctx context.Context, agentID string, body []byte) (int, []byte, error) {
-	var lastErr error
+// forwardPass makes one pass over the links and returns the first non-404,
+// non-retryable response verbatim. A 404 means "this relay does not know the
+// agent either" — the search continues. When nothing delivered, the returned
+// error is either *TransientError (at least one link failed transiently) or
+// ErrNotFoundOnAnyLink (every link answered 404 / no links configured), so
+// the caller can hold-and-retry the former and answer 404 for the latter.
+func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (int, []byte, error) {
+	var (
+		lastErr      error
+		lastStatus   int
+		sawTransient bool
+	)
 	for _, link := range c.links {
 		status, respBody, err := c.ForwardDeliver(ctx, link, agentID, body)
 		if err != nil {
 			slog.Warn("federation: link unreachable, trying next", "link", link.URL, "error", err)
 			lastErr = err
+			sawTransient = true
 			continue
 		}
 		if status == http.StatusNotFound {
 			continue // agent not on this relay either
 		}
+		if retryableStatus(status) {
+			slog.Warn("federation: link unhealthy, trying next", "link", link.URL, "status", status)
+			lastStatus = status
+			sawTransient = true
+			continue
+		}
 		return status, respBody, nil
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("agent %q not found on any linked relay", agentID)
+	if sawTransient {
+		return 0, nil, &TransientError{Attempts: 1, LastStatus: lastStatus, LastErr: lastErr}
 	}
-	return 0, nil, lastErr
+	return 0, nil, ErrNotFoundOnAnyLink
+}
+
+// ForwardToAny relays a deliver request to each linked relay in order and
+// returns the first non-404, non-retryable response verbatim. When nothing
+// delivered it returns *TransientError or ErrNotFoundOnAnyLink (see
+// forwardPass); callers that must not lose a message on a link outage use
+// ForwardOrHold instead.
+func (c *Client) ForwardToAny(ctx context.Context, agentID string, body []byte) (int, []byte, error) {
+	return c.forwardPass(ctx, agentID, body)
+}
+
+// ForwardOrHold makes one immediate pass over the links — the synchronous
+// behavior callers already depend on: a successful forward (including a
+// blocking webhook reply) is returned verbatim (err == nil, held == nil), and
+// a definitive all-links-404 is returned as ErrNotFoundOnAnyLink (the caller
+// answers 404).
+//
+// A transient failure (every link unreachable / retryable) instead hands the
+// delivery to the hold queue when one is attached, and returns the held item
+// so the caller can accept it (HTTP 202) rather than lose it — the returned
+// error is still non-nil, so only err == nil means "relayed". With no queue
+// the transient error is returned unchanged (held == nil), and the caller
+// reports an explicit synchronous failure (HTTP 502) — never a 404.
+func (c *Client) ForwardOrHold(ctx context.Context, agentID string, body []byte, meta HoldMeta) (int, []byte, *HoldItem, error) {
+	status, respBody, err := c.forwardPass(ctx, agentID, body)
+	if err == nil {
+		return status, respBody, nil, nil
+	}
+	var transient *TransientError
+	if !errors.As(err, &transient) {
+		return 0, nil, nil, err // definitive: agent not found anywhere
+	}
+	if c.hold == nil {
+		return 0, nil, nil, err
+	}
+	item := &HoldItem{
+		ID:         meta.MessageID,
+		AgentID:    agentID,
+		Body:       append(json.RawMessage(nil), body...),
+		Sender:     meta.Sender,
+		RequestID:  meta.RequestID,
+		SessionID:  meta.SessionID,
+		Attempts:   transient.Attempts,
+		LastStatus: transient.LastStatus,
+		LastError:  transient.Error(),
+	}
+	if qerr := c.hold.Enqueue(item); qerr != nil {
+		// Queue full / unusable body / write failure: report synchronously
+		// rather than pretend the message was accepted.
+		slog.Warn("federation: hold queue refused delivery", "target", agentID, "error", qerr)
+		return 0, nil, nil, fmt.Errorf("federation: hold delivery: %w", qerr)
+	}
+	return 0, nil, item, err
 }
 
 // FetchRemoteAgents fetches the agent list from a linked relay via its
