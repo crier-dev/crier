@@ -2,13 +2,26 @@ package main
 
 import (
 	"bufio"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/totalwindupflightsystems/crier/internal/registry"
 )
 
 // TestMCPServerInitialize is an entrypoint smoke test: it builds and starts
@@ -232,4 +245,206 @@ func TestMCPServerCLIFlags(t *testing.T) {
 			t.Fatalf("--version output %q does not start with %q", out, "crier-mcp ")
 		}
 	})
+}
+
+// writeAgentKeyPEM writes a PKCS#8 PEM ed25519 private key (the
+// `openssl genpkey -algorithm ED25519` format) to a temp file and returns the
+// path plus the key.
+func writeAgentKeyPEM(t *testing.T, dir string) (string, ed25519.PrivateKey) {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("marshal pkcs8: %v", err)
+	}
+	path := filepath.Join(dir, "agent.key")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	return path, priv
+}
+
+// TestInitStoreRemoteSigningKey covers the remote-mode startup wiring:
+// CRIER_AGENT_PRIVATE_KEY_FILE loads a PKCS#8 PEM ed25519 key and enables
+// signing; the variable's absence stays unsigned; and unreadable, malformed,
+// non-PKCS#8, and non-ed25519 key files are explicit startup errors that
+// never echo key material.
+func TestInitStoreRemoteSigningKey(t *testing.T) {
+	setEnv := func(t *testing.T, key, val string) {
+		t.Helper()
+		if val == "" {
+			t.Setenv(key, "")
+		} else {
+			t.Setenv(key, val)
+		}
+	}
+
+	t.Run("valid key file enables signing end-to-end", func(t *testing.T) {
+		// Real registry handler in the secure default configuration; the
+		// store produced by initStore must be able to retrieve against it.
+		store := registry.NewMemoryStore()
+		h := registry.NewHandler(store)
+		h.SetRequireAgentSig(true)
+		r := mux.NewRouter()
+		r.HandleFunc("/agents", h.HandleRegister).Methods(http.MethodPost)
+		r.HandleFunc("/agents/{id}/inbox", h.HandleDeliver).Methods(http.MethodPost)
+		r.HandleFunc("/agents/{id}/inbox", h.HandleRetrieve).Methods(http.MethodGet)
+		r.HandleFunc("/agents/{id}/inbox/ack", h.HandleAck).Methods(http.MethodPost)
+		r.HandleFunc("/agents/{id}/inbox/stats", h.HandleStats).Methods(http.MethodGet)
+		r.HandleFunc("/agents/{id}", h.HandleUnregister).Methods(http.MethodDelete)
+		srv := httptest.NewServer(r)
+		t.Cleanup(srv.Close)
+
+		dir := t.TempDir()
+		keyPath, priv := writeAgentKeyPEM(t, dir)
+		pub := priv.Public().(ed25519.PublicKey)
+
+		// Register the agent + public key (the README bootstrap step).
+		body := fmt.Sprintf(`{"id":"mcp-agent","public_key":%q,"capabilities":["demo"]}`, hex.EncodeToString(pub))
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/agents", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("build register request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("register: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("register status = %d", resp.StatusCode)
+		}
+
+		setEnv(t, "CRIER_HTTP_URL", srv.URL)
+		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+		setEnv(t, "CRIER_AUTH_TOKEN", "")
+		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", keyPath)
+
+		rs, cleanup, err := initStore(config.Config{})
+		if err != nil {
+			t.Fatalf("initStore: %v", err)
+		}
+		defer cleanup()
+		remote, ok := rs.(*registry.RemoteStore)
+		if !ok {
+			t.Fatalf("store type = %T, want *registry.RemoteStore", rs)
+		}
+
+		// Deliver then retrieve: retrieve is signature-gated, so a 200 with
+		// the message proves the loaded key was actually wired in and every
+		// request carries a verifying signature.
+		if err := remote.Deliver("mcp-agent", &registry.InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}); err != nil {
+			t.Fatalf("Deliver: %v", err)
+		}
+		entries, leaseID, err := remote.Retrieve("mcp-agent", 30*time.Second, 5)
+		if err != nil {
+			t.Fatalf("signed Retrieve via initStore: %v", err)
+		}
+		if len(entries) != 1 || leaseID == "" {
+			t.Fatalf("Retrieve = %d entries lease=%q", len(entries), leaseID)
+		}
+		if err := remote.Ack("mcp-agent", leaseID, []string{entries[0].ID}); err != nil {
+			t.Fatalf("signed Ack via initStore: %v", err)
+		}
+	})
+
+	t.Run("unset key file stays unsigned (compat)", func(t *testing.T) {
+		setEnv(t, "CRIER_HTTP_URL", "http://localhost:8767")
+		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+		setEnv(t, "CRIER_AUTH_TOKEN", "")
+		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", "")
+
+		store, cleanup, err := initStore(config.Config{})
+		if err != nil {
+			t.Fatalf("initStore: %v", err)
+		}
+		defer cleanup()
+		if _, ok := store.(*registry.RemoteStore); !ok {
+			t.Fatalf("store type = %T, want *registry.RemoteStore", store)
+		}
+	})
+
+	t.Run("missing file is an explicit startup error", func(t *testing.T) {
+		setEnv(t, "CRIER_HTTP_URL", "http://localhost:8767")
+		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", filepath.Join(t.TempDir(), "nope.key"))
+
+		_, _, err := initStore(config.Config{})
+		if err == nil || !strings.Contains(err.Error(), "CRIER_AGENT_PRIVATE_KEY_FILE") {
+			t.Fatalf("err = %v, want CRIER_AGENT_PRIVATE_KEY_FILE failure", err)
+		}
+	})
+
+	t.Run("garbage file is an explicit startup error", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "garbage.key")
+		if err := os.WriteFile(path, []byte("not a pem at all"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		setEnv(t, "CRIER_HTTP_URL", "http://localhost:8767")
+		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", path)
+
+		_, _, err := initStore(config.Config{})
+		if err == nil || !strings.Contains(err.Error(), "no PEM data") {
+			t.Fatalf("err = %v, want no-PEM failure", err)
+		}
+	})
+
+	t.Run("non-ed25519 pkcs8 key rejected with no key material leaked", func(t *testing.T) {
+		dir := t.TempDir()
+		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate rsa key: %v", err)
+		}
+		der, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		path := filepath.Join(dir, "rsa.key")
+		if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		setEnv(t, "CRIER_HTTP_URL", "http://localhost:8767")
+		setEnv(t, "CRIER_AGENT_ID", "mcp-agent")
+		setEnv(t, "CRIER_AGENT_PRIVATE_KEY_FILE", path)
+
+		_, _, err = initStore(config.Config{})
+		if err == nil || !strings.Contains(err.Error(), "ed25519") {
+			t.Fatalf("err = %v, want non-ed25519 failure", err)
+		}
+		if strings.Contains(err.Error(), "PRIVATE KEY") && strings.Contains(err.Error(), "-----BEGIN") {
+			t.Fatal("error echoed key material")
+		}
+	})
+}
+
+// TestHelpDocumentsRemoteMode pins the remote-mode onboarding in the binary's
+// --help: all four remote env variables (CRIER_HTTP_URL, CRIER_AGENT_ID,
+// CRIER_AUTH_TOKEN, CRIER_AGENT_PRIVATE_KEY_FILE) plus the no-key-only-when-
+// server-opted-out rule and the key-material-never-logged guarantee.
+func TestHelpDocumentsRemoteMode(t *testing.T) {
+	var out strings.Builder
+	if _, _, err := parseArgs([]string{"--help"}, &out); err != nil {
+		t.Fatalf("parseArgs(--help): %v", err)
+	}
+	usage := out.String()
+	for _, want := range []string{
+		"CRIER_HTTP_URL",
+		"CRIER_AGENT_ID",
+		"CRIER_AUTH_TOKEN",
+		"CRIER_AGENT_PRIVATE_KEY_FILE",
+		"CR_REQUIRE_AGENT_SIG=true",
+		"CR_REQUIRE_AGENT_SIG=false",
+		"never logged",
+		"openssl genpkey",
+	} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("usage output missing %q", want)
+		}
+	}
 }

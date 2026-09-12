@@ -153,6 +153,44 @@ curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
 > full register → deliver → signed retrieve → ack round-trip with an ephemeral
 > ed25519 keypair (openssl 3.x). Start the server, then run `./examples/demo.sh`.
 
+### Remote MCP mode (crier-mcp)
+
+`crier-mcp` bridges MCP clients (Claude Code, Cursor, …) to a running Crier
+server instead of an in-process store: set `CRIER_HTTP_URL` (plus
+`CRIER_AGENT_ID`) and every registry/inbox tool call becomes a signed HTTP
+request against that server.
+
+Because the server enforces per-agent signatures by default
+(`CR_REQUIRE_AGENT_SIG=true`), remote mode needs the agent's **ed25519
+private key** — the same PKCS#8 PEM file the quickstart above generates with
+`openssl genpkey -algorithm ED25519`. Generate (or reuse) a key, register its
+public half for your agent id, then point crier-mcp at the file:
+
+```bash
+# 0. One-time: generate a key and register its public half for the bridge agent
+openssl genpkey -algorithm ED25519 -out ~/.config/crier/mcp-agent.key
+PUBKEY_HEX=$(openssl pkey -in ~/.config/crier/mcp-agent.key -pubout -outform DER | tail -c 32 | xxd -p -c 64)
+curl -s -X POST localhost:8767/agents -H 'Content-Type: application/json' \
+  -d "{\"id\":\"mcp-agent\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"mcp\"]}"
+
+# 1. Run the MCP bridge against the remote server (all four vars are read at startup)
+export CRIER_HTTP_URL=http://localhost:8767
+export CRIER_AGENT_ID=mcp-agent
+export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
+# Optional shared bearer token, only when the server runs with CR_AUTH_TOKEN:
+# export CRIER_AUTH_TOKEN=...
+make build-mcp && ./bin/crier-mcp
+```
+
+- `CRIER_AGENT_PRIVATE_KEY_FILE` must contain a PKCS#8 PEM ed25519 private
+  key; anything else (unreadable file, wrong format, RSA/EC key) is an
+  explicit startup error. Key material is never logged or echoed.
+- Each request carries a fresh `X-Agent-Ts` / `X-Agent-Sig` signing
+  `METHOD\n<path>\n<unix-seconds>` — the query string is excluded.
+- The key is **optional only when the server disables per-agent signatures**
+  (`CR_REQUIRE_AGENT_SIG=false`): with the variable unset, crier-mcp sends
+  the plain `X-Agent-ID` identity, which signed servers reject with 401.
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections.

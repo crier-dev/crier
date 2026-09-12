@@ -316,6 +316,49 @@ and undelivered messages survive server restarts; without
 (`make build-mcp && ./bin/crier-mcp`, stdio, 8 tools) shares the same
 backend, so agents registered over HTTP are visible over MCP and vice versa.
 
+### 6.1 Remote MCP mode (crier-mcp against a running server)
+
+The MCP server can also bridge to a **running Crier server over HTTP**
+instead of opening its own database: set `CRIER_HTTP_URL` and `CRIER_AGENT_ID`
+and registry/inbox tool calls become HTTP requests carrying that agent
+identity. With the server in the secure default configuration
+(`CR_REQUIRE_AGENT_SIG=true`), those requests must be per-agent signed, so
+crier-mcp loads an ed25519 private key at startup:
+
+```bash
+# One-time: generate (or reuse) a PKCS#8 PEM ed25519 key and register its
+# public half for the bridge's agent id — same key format as §3.
+openssl genpkey -algorithm ED25519 -out ~/.config/crier/mcp-agent.key
+PUBKEY_HEX=$(openssl pkey -in ~/.config/crier/mcp-agent.key -pubout -outform DER | tail -c 32 | xxd -p -c 64)
+curl -s -X POST localhost:8767/agents -H 'Content-Type: application/json' \
+  -d "{\"id\":\"mcp-agent\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"mcp\"]}"
+
+# Run the bridge: URL, agent id, and the private key file.
+export CRIER_HTTP_URL=http://localhost:8767
+export CRIER_AGENT_ID=mcp-agent
+export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
+# Optional: shared bearer token, only when the server runs with CR_AUTH_TOKEN.
+# export CRIER_AUTH_TOKEN=...
+make build-mcp && ./bin/crier-mcp
+```
+
+- `CRIER_AGENT_PRIVATE_KEY_FILE` must hold a **PKCS#8 PEM ed25519** private
+  key (`openssl genpkey -algorithm ED25519`). Unreadable, malformed,
+  non-PKCS#8, or non-ed25519 keys fail at startup with an explicit error;
+  key material is never logged or echoed.
+- Every request then carries fresh `X-Agent-Ts` / `X-Agent-Sig` headers
+  signing `METHOD\n<path>\n<unix-seconds>` (query string excluded) — the
+  same scheme as §3, generated automatically.
+- `CRIER_AUTH_TOKEN` is orthogonal: it authenticates the bridge to a server
+  that requires the shared bearer token; the per-agent key authenticates the
+  agent. Both can be set at once.
+- **No key is needed only when the server disables per-agent signatures**
+  (`CR_REQUIRE_AGENT_SIG=false`): unset `CRIER_AGENT_PRIVATE_KEY_FILE` and
+  crier-mcp falls back to the plain `X-Agent-ID` identity. Against a signed
+  server that combination fails with 401 on agent-owned routes.
+
+The full variable reference is in `./bin/crier-mcp --help`.
+
 ---
 
 ## 7. Full round-trip in one script

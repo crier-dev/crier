@@ -3,11 +3,16 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,23 +26,111 @@ import (
 //
 // With the server's per-agent signing disabled (CR_REQUIRE_AGENT_SIG=false),
 // the only identity this store needs is the agent id sent via X-Agent-ID.
+// With per-agent signing enabled (the secure default), configure the agent's
+// ed25519 private key via WithSigningKey: every request then carries fresh
+// X-Agent-Ts / X-Agent-Sig headers signing "METHOD\n<path>\n<unix-seconds>"
+// (path excludes the query string) — the exact payload the server verifies.
 type RemoteStore struct {
 	baseURL string
 	agentID string
 	token   string
+	priv    ed25519.PrivateKey
 	client  *http.Client
+}
+
+// RemoteOption customizes a RemoteStore.
+type RemoteOption func(*RemoteStore)
+
+// WithSigningKey enables per-agent request signing with the given ed25519
+// private key: each request is stamped with a fresh unix-seconds timestamp in
+// X-Agent-Ts and a hex-encoded signature over "METHOD\n<path>\n<ts>" in
+// X-Agent-Sig, where <path> is the escaped URL path with the query string
+// excluded. The public half of the key must be registered for the agent
+// server-side (see the Register public_key field). A nil key keeps the store
+// unsigned — correct for servers running CR_REQUIRE_AGENT_SIG=false.
+func WithSigningKey(priv ed25519.PrivateKey) RemoteOption {
+	return func(s *RemoteStore) { s.priv = priv }
 }
 
 // NewRemoteStore creates a RemoteStore for the given server base URL.
 // agentID is the identity used on agent-owned routes; token (optional) is the
 // shared bearer token when the server runs with CR_AUTH_TOKEN.
-func NewRemoteStore(baseURL, agentID, token string) *RemoteStore {
-	return &RemoteStore{
+//
+// Signing is opt-in via RemoteOption (WithSigningKey); the variadic options
+// keep the existing three-argument call sites source-compatible.
+func NewRemoteStore(baseURL, agentID, token string, opts ...RemoteOption) *RemoteStore {
+	s := &RemoteStore{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		agentID: agentID,
 		token:   token,
 		client:  &http.Client{Timeout: 15 * time.Second},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
+}
+
+// signRequest stamps the per-agent signature headers on req when a private
+// key is configured. The signed payload must match the server's verification
+// byte-for-byte: "METHOD\n<path>\n<unix-seconds>". The server signs over
+// r.URL.Path — the DECODED path, query string excluded — so the client signs
+// req.URL.Path (not EscapedPath): for a path that needs escaping the wire
+// form differs (%20 vs space) and only the decoded form verifies.
+func (s *RemoteStore) signRequest(req *http.Request) {
+	if len(s.priv) == 0 {
+		return
+	}
+	ts := time.Now().Unix()
+	tsStr := strconv.FormatInt(ts, 10)
+	payload := []byte(req.Method + "\n" + req.URL.Path + "\n" + tsStr)
+	sig := ed25519.Sign(s.priv, payload)
+	req.Header.Set(HeaderAgentTS, tsStr)
+	req.Header.Set(HeaderAgentSig, hex.EncodeToString(sig))
+}
+
+// LoadEd25519PrivateKeyFile reads and parses a private key from a PEM file.
+// It exists so CLI entrypoints (e.g. crier-mcp with
+// CRIER_AGENT_PRIVATE_KEY_FILE) can load the same `openssl genpkey
+// -algorithm ED25519` key the README's signing workflow generates.
+//
+// The file must contain a PKCS#8 ("PRIVATE KEY") PEM block encoding an
+// ed25519 key. Unreadable files, missing/outer-wrong PEM blocks, other PKCS#8
+// key types (RSA, EC), and other key encodings all fail with an explicit
+// error naming the cause. Key material is never included in any error —
+// errors reference the path and the structural problem only.
+func LoadEd25519PrivateKeyFile(path string) (ed25519.PrivateKey, error) {
+	if path == "" {
+		return nil, fmt.Errorf("private key file path is empty")
+	}
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read private key file: %w", err)
+	}
+	return ParseEd25519PrivateKeyPEM(pemBytes)
+}
+
+// ParseEd25519PrivateKeyPEM parses PKCS#8 PEM bytes into an ed25519 private
+// key with the same strictness as LoadEd25519PrivateKeyFile.
+func ParseEd25519PrivateKeyPEM(pemBytes []byte) (ed25519.PrivateKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM data found in private key file")
+	}
+	if block.Type != "PRIVATE KEY" {
+		return nil, fmt.Errorf("private key PEM block type is %q, want PKCS#8 %q (openssl genpkey output)", block.Type, "PRIVATE KEY")
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse PKCS#8 private key: %w", err)
+	}
+	priv, ok := parsed.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("private key is %T, want ed25519 (openssl genpkey -algorithm ED25519)", parsed)
+	}
+	return priv, nil
 }
 
 // ---- HTTP plumbing -------------------------------------------------------
@@ -60,6 +153,7 @@ func (s *RemoteStore) do(method, path string, body any, out any) error {
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
+	s.signRequest(req)
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("remote %s %s: %w", method, path, err)
