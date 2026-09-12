@@ -456,3 +456,12 @@ tasks:
   status: complete
   created_at: '2026-09-12T02:55:58.515013+00:00'
   completed_at: '2026-09-12T10:07:55.382966+00:00'
+- id: DF-CRIER-18
+  title: Sign crier-mcp remote agent requests
+  criteria:
+  - Remote MCP mode with a matching PKCS#8 PEM Ed25519 key must pass signed retrieve,
+    stats, ack, and unregister against the secure-by-default server; unsigned compatibility,
+    explicit invalid-key errors, help/docs, and full Go gates must hold.
+  status: complete
+  created_at: '2026-09-12T16:50:35.592730+00:00'
+  completed_at: '2026-09-12T17:26:43.464708+00:00'
