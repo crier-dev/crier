@@ -97,3 +97,13 @@ Promise: {"entry_point":"cmd/server/main.go (builds bin/crier; optional MCP brid
 - [P1] Demo reports an incorrect effective guard state — examples/demo.sh warned that the guard was enabled and failing open because DEEPSEEK_API_KEY was unset, while the running server logged CR_GUARD_ENABLED=false; this makes security-relevant output untrustworthy.
 - [P2] Documented command sequence performs redundant builds — make build, direct go build, and make run all succeeded, but make run depends on make build, causing the server to be compiled three times when the requested commands are followed sequentially.
 - [P2] Core message-bus workflow works when using the runnable demo — The isolated server reached 200 /health in 20.9 seconds, and the demo completed registration, delivery, signed retrieval, signed acknowledgement, and empty-inbox verification with HTTP 201, 201, 200, 204, and 200.
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"cmd/server/main.go (built as bin/crier); MCP bridge: cmd/crier-mcp/main.go (built as bin/crier-mcp)","promise":"Promise: this project claims a user can register and discover autonomous agents and exchange guarded messages through pub/sub, peer-to-peer mesh, webhooks, and durable inbo
+
+- [P1] Documented secure workflow cannot complete — TESTERS.md discards Bob's generated Ed25519 private key, then attempts protected inbox retrieval and webhook PATCH without signatures; both reproducibly return 401. The working signed demo proves the 
+- [P1] MCP launch command contaminates the stdio protocol — The documented compound command `make build-mcp && ./bin/crier-mcp` emits Go build output before JSON-RPC. A strict MCP client therefore does not receive a clean stdio stream, although separately laun
+- [P1] MCP storage mode and state visibility are unclear — Bare crier-mcp silently uses an undocumented process-local store; startup output does not distinguish local storage from HTTP-bridge mode. Users cannot reliably know whether MCP and server clients sha
+- [P1] Published authentication contract contradicts runtime defaults — OpenAPI states that every non-health endpoint requires bearer authentication, but the shipped default has auth disabled: unauthenticated registration and delivery succeeded. Per-agent signature enforc
+- [P2] Documentation and response metadata contain misleading details — /docs is a static specification index rather than the advertised interactive console; /health returns JSON text as `text/plain` despite OpenAPI declaring `application/json`; the demo incorrectly warns
