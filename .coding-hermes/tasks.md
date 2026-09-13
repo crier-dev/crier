@@ -29,3 +29,31 @@ Promise: {"entry_point":"Go HTTP/WebSocket server binary bin/crier (cmd/server, 
 - [P1] First-publish onboarding wall: README lacks publish shape, X-Agent-ID requirement, and WS auth recipe — Live-verified: POST /relay/publish with guessed {topic,payload} -> 400 bare 'event is required'; correct shape without X-Agent-ID -> 401 'X-Agent-ID header required for rate-limited publish' even with
 - [P2] MCP surface doc drift: guide says 8 tools (live: 13), shared-backend claim false in default in-memory mode — Live tools/list over stdio returned 13 tools (register_agent..mesh_request) vs integration guide's 8; MCP-local agent registered in default mode is invisible over HTTP (own process-local store) despit
 - [P2] Silent failure modes read as broken: no WS welcome frame, malformed mesh frames dropped despite INVALID_MESSAGE spec — Live: successful relay subscribe -> 101 then zero frames (silence on connect); reporter confirmed wrong-shape mesh frames vanish silently though docs/mesh-protocol.md defines an INVALID_MESSAGE error 
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Primary: bin/crier HTTP/WebSocket server from cmd/server on port 8767. Secondary: bin/crier-mcp stdio MCP server/HTTP bridge from cmd/crier-mcp.","promise":"Promise: this project claims a user can connect autonomous AI agents to discover peers and exchange guarded messages through pu
+
+- [P1] Documented default workflows fail with 401 responses — TESTERS.md starts with signature enforcement enabled but later uses unsigned inbox retrieval, and the integration guide omits X-Agent-ID from relay publishing under the default rate limit; both docume
+- [P1] Keyless make run degrades guarded delivery — The exact make run path enables the guard without an API key; benign messages are delivered with a medium-risk guard_error until the user discovers and sets CR_GUARD_ENABLED=false, weakening confidenc
+- [P2] MCP onboarding and inventory documentation are stale — Live initialize and tools/list succeeded and exposed 13 tools, but the integration guide advertises 8 and provides no copy-paste initialize, notifications/initialized, tools/list, and tools/call trans
+- [P2] Core multi-transport workflow completes with real value — Within 25 seconds, the server served health on port 8767; the signed demo completed register, deliver, retrieve, acknowledge, and empty-inbox verification; WebSocket relay received a published event a
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Primary: bin/crier HTTP/WebSocket server from cmd/server on port 8767. Secondary: bin/crier-mcp stdio MCP server/HTTP bridge from cmd/crier-mcp.","promise":"Promise: this project claims a user can connect autonomous AI agents to discover peers and exchange guarded messages through pu
+
+- [P1] Documented default workflows fail with 401 responses — TESTERS.md starts with signature enforcement enabled but later uses unsigned inbox retrieval, and the integration guide omits X-Agent-ID from relay publishing under the default rate limit; both docume
+- [P1] Keyless make run degrades guarded delivery — The exact make run path enables the guard without an API key; benign messages are delivered with a medium-risk guard_error until the user discovers and sets CR_GUARD_ENABLED=false, weakening confidenc
+- [P2] MCP onboarding and inventory documentation are stale — Live initialize and tools/list succeeded and exposed 13 tools, but the integration guide advertises 8 and provides no copy-paste initialize, notifications/initialized, tools/list, and tools/call trans
+- [P2] Core multi-transport workflow completes with real value — Within 25 seconds, the server served health on port 8767; the signed demo completed register, deliver, retrieve, acknowledge, and empty-inbox verification; WebSocket relay received a published event a"}
+
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Primary: bin/crier HTTP/WebSocket server from cmd/server on port 8767. Secondary: bin/crier-mcp stdio MCP server/HTTP bridge from cmd/crier-mcp.","promise":"Promise: this project claims a user can connect autonomous AI agents to discover peers and exchange guarded messages through pu
+
+- [P1] Documented default workflows fail with 401 responses — TESTERS.md starts with signature enforcement enabled but later uses unsigned inbox retrieval, and the integration guide omits X-Agent-ID from relay publishing under the default rate limit; both docume
+- [P1] Keyless make run degrades guarded delivery — The exact make run path enables the guard without an API key; benign messages are delivered with a medium-risk guard_error until the user discovers and sets CR_GUARD_ENABLED=false, weakening confidenc
+- [P2] MCP onboarding and inventory documentation are stale — Live initialize and tools/list succeeded and exposed 13 tools, but the integration guide advertises 8 and provides no copy-paste initialize, notifications/initialized, tools/list, and tools/call trans
+- [P2] Core multi-transport workflow completes with real value — Within 25 seconds, the server served health on port 8767; the signed demo completed register, deliver, retrieve, acknowledge, and empty-inbox verification; WebSocket relay received a published event a"}

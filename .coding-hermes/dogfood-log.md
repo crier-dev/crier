@@ -5,3 +5,6 @@
 
 2026-09-13 | PROMISING-BUT-ROUGH | 35s t2fs | friction 10 | 5 findings
 
+2026-09-13 | PROMISING-BUT-ROUGH | 25s t2fs | friction 5 | 4 findings
+2026-09-13 | PROMISING-BUT-ROUGH | 25s t2fs | friction 5 | 4 findings
+2026-09-13 | PROMISING-BUT-ROUGH | 25s t2fs | friction 5 | 4 findings
