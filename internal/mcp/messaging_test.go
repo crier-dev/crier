@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 func newTestServer(t *testing.T, opts Options) (*MCPServer, registry.Store) {

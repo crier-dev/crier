@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/guard"
 )
 
 // captureEndpoint records one request's headers and body.

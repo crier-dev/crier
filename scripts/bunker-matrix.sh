@@ -1,19 +1,25 @@
 #!/bin/bash
-# bunker-matrix.sh — config-matrix E2E battery against the CONTAINERIZED crier
-# on a bunker agent (CR-FEAT-016). Cells:
-#   guard-on     — default guard, real DeepSeek: clean 201, injection 403
+# bunker-matrix.sh — config-matrix E2E battery against a REMOTE crier instance
+# (CR-FEAT-016). Cells:
+#   guard-on     — default guard, real LLM key: clean 201, injection 403
 #   guard-off    — CR_GUARD_ENABLED=false: everything delivered
 #   fail-closed  — dead provider + fail_closed policy: 403 errored on any message
 #   blocking     — blocking webhook round-trip through the guard (needs sink)
 # Evidence: JSONL at $EVIDENCE (default /tmp/bunker-matrix-<ts>.jsonl).
-# Usage: bunker-matrix.sh [--host 100.95.199.98] [--port 30001] [--agent crier-lab]
-#                         [--server bunker-las-04] [--sink http://100.97.236.14:19012] [--skip-build]
+#
+# All connection details are operator-supplied — nothing private is baked in:
+#   --host   host running crier (default 127.0.0.1)
+#   --port   crier port (default 8767)
+#   --agent  remote-agent name, if driving via the bunker tool (optional)
+#   --server bunker server name, if using bunker (optional)
+#   --sink   webhook sink URL for the blocking cell
+#   DEEPSEEK_API_KEY env var supplies the guard key (guard-on cell skips without it).
 set -uo pipefail
 
-HOST=100.95.199.98
-PORT=30001
-AGENT=crier-lab
-SERVER="bunker-las-04"
+HOST=127.0.0.1
+PORT=8767
+AGENT=""
+SERVER=""
 SINK=""
 SKIP_BUILD=0
 while [[ $# -gt 0 ]]; do
@@ -33,25 +39,24 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BUNKER="$HOME/go/bin/bunker"
 fatal() { echo "FATAL: $*" >&2; exit 1; }
 
-# Preflight: agent must be registered on the pinned server, the ssh key must
-# authenticate, and bunker exec must reach the agent's rootless dockerd —
-# abort FATAL before any probe so we never test stale containers.
-"$BUNKER" info "$AGENT" --server "$SERVER" >/dev/null 2>&1 \
-  || fatal "agent $AGENT not found on $SERVER (re-register with spawn/heartbeat)"
-ssh -q -i "$HOME/.bunker/keys/$AGENT" -o StrictHostKeyChecking=accept-new \
-  -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 \
-  "bunker-$AGENT@$HOST" true \
-  || fatal "ssh key $HOME/.bunker/keys/$AGENT does not authenticate"
-"$BUNKER" exec "$AGENT" --server "$SERVER" -- docker ps >/dev/null 2>&1 \
-  || fatal "bunker exec docker ps failed on $SERVER"
-echo "preflight OK: $AGENT on $SERVER"
+# Optional bunker preflight — only when --agent/--server were supplied.
+if [[ -n "$AGENT" && -n "$SERVER" ]]; then
+  "$BUNKER" info "$AGENT" --server "$SERVER" >/dev/null 2>&1 \
+    || fatal "agent $AGENT not found on $SERVER (re-register with spawn/heartbeat)"
+  "$BUNKER" exec "$AGENT" --server "$SERVER" -- docker ps >/dev/null 2>&1 \
+    || fatal "bunker exec docker ps failed on $SERVER"
+  echo "preflight OK: $AGENT on $SERVER"
+fi
 
 BASE="http://$HOST:$PORT"
 EVIDENCE="${EVIDENCE:-/tmp/bunker-matrix-$(date +%s).jsonl}"
 : > "$EVIDENCE"  # fresh evidence every run — never append to stale rows
 DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
-if [[ -z "$DEEPSEEK_KEY" ]]; then
+if [[ -z "$DEEPSEEK_KEY" && -f "$HOME/.hermes/.env" ]]; then
   DEEPSEEK_KEY="$(grep '^DEEPSEEK_API_KEY=' "$HOME/.hermes/.env" | head -1 | cut -d= -f2-)"
+fi
+if [[ -z "$DEEPSEEK_KEY" ]]; then
+  echo "note: DEEPSEEK_API_KEY not set — guard-on cell will SKIP"
 fi
 PASS=0; FAIL=0
 

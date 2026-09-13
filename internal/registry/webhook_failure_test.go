@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // TestWebhookFailureSink_DeliversDurableNotification: the sink wires a

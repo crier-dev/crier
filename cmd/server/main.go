@@ -15,14 +15,14 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/totalwindupflightsystems/crier/config"
-	"github.com/totalwindupflightsystems/crier/internal/federation"
-	"github.com/totalwindupflightsystems/crier/internal/guard"
-	"github.com/totalwindupflightsystems/crier/internal/mesh"
-	"github.com/totalwindupflightsystems/crier/internal/middleware"
-	"github.com/totalwindupflightsystems/crier/internal/registry"
-	"github.com/totalwindupflightsystems/crier/internal/relay"
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/mesh"
+	"github.com/crier-dev/crier/internal/middleware"
+	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/relay"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // version is the crier server version. Overridable at build time via

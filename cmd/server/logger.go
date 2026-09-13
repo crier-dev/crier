@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/crier-dev/crier/config"
 )
 
 // initLogger installs the process-wide slog default logger based on cfg.

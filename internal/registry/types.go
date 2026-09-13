@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/guard"
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // AgentStatus represents the online/offline state of an agent.

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // validTestKey returns a hex-encoded ed25519 public key (64 hex chars).

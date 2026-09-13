@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/totalwindupflightsystems/crier/config"
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // TestMCPServerInitialize is an entrypoint smoke test: it builds and starts

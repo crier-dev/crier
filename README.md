@@ -1,8 +1,15 @@
 # Crier — Agent-to-Agent Message Bus
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go)](https://go.dev)
+[![CI](https://github.com/crier-dev/crier/actions/workflows/ci.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/ci.yml)
+[![bunker-e2e](https://github.com/crier-dev/crier/actions/workflows/bunker-e2e.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/bunker-e2e.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Communication backbone for the autonomous agent economy. Extracted and generalized from Hivemind.
+
+> **Testing crier?** Start with [TESTERS.md](TESTERS.md) — a per-mode checklist,
+> the known rough edges, and how to report. Interactive API docs ship at
+> **/docs** on any running server.
 
 Crier provides four primitives for agent communication:
 

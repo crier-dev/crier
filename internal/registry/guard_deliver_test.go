@@ -14,8 +14,8 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/guard"
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // ── fixtures ────────────────────────────────────────────────────────────

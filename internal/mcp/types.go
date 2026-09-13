@@ -3,7 +3,7 @@ package mcp
 import (
 	"encoding/json"
 
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // JSON-RPC message types.

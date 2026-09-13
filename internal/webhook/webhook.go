@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/guard"
 )
 
 // AuthType enumerates supported outbound authentication schemes.

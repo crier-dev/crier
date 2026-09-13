@@ -1,0 +1,40 @@
+name: pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site
+        run: |
+          mkdir -p site/docs site/examples
+          cp .github/site/index.html site/index.html
+          cp README.md TESTERS.md SECURITY.md CONTRIBUTING.md AGENTS.md site/
+          cp docs/*.md site/docs/ 2>/dev/null || true
+          cp docs/openapi.yaml site/docs/openapi.yaml 2>/dev/null || true
+          for ex in demo.sh; do cp examples/$ex site/examples/ 2>/dev/null || true; done
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

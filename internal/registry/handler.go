@@ -14,9 +14,9 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/federation"
-	"github.com/totalwindupflightsystems/crier/internal/guard"
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // registerRequest is the JSON body for POST /agents.

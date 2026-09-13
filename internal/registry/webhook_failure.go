@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // webhookFailurePayload is the durable, machine-readable inbox payload for a

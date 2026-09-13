@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/mesh"
+	"github.com/crier-dev/crier/internal/mesh"
 )
 
 type meshReply struct {

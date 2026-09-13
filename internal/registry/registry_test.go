@@ -15,7 +15,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 func newTestPubKey(t *testing.T) (string, ed25519.PublicKey) {

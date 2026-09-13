@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // ---- logging capture ------------------------------------------------------

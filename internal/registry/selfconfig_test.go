@@ -16,7 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // selfConfigRouter wires the CR-FEAT-007 surface: PATCH /agents/{id},

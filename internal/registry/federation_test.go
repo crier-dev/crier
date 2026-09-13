@@ -9,7 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/federation"
 )
 
 // fedRemoteRelay is a fake linked relay: it records the forwarded deliver

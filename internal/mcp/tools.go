@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // handleRegisterAgent — spec §4.1, Appendix B.

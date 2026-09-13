@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/guard"
 )
 
 // QueueItem is one queued webhook delivery (endpoint down / transient failures).

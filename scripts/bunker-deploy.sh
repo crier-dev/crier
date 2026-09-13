@@ -2,16 +2,18 @@
 # bunker-deploy.sh — build the crier image, transfer to a bunker agent,
 # load into its rootless dockerd, run the container on the agent's port range.
 # Usage:
-#   bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host 100.95.199.98]
-#                    [--server bunker-las-04] [--port 30001] [--image crier:test]
+#   bunker-deploy.sh [--skip-build] [--agent <agent>] [--host <host>]
+#                    [--server <bunker-server>] [--port <port>] [--image crier:test]
+# All targets are operator-supplied via flags or BUNKER_AGENT/BUNKER_HOST/
+# BUNKER_SERVER env vars — no private infrastructure is referenced.
 # Config matrix envs: CR_ENV_FILE=/path/to/env-file (one KEY=VALUE per line,
 # '#' comments allowed) — each line becomes a docker -e flag.
 set -euo pipefail
 
-AGENT=crier-lab
-HOST=100.95.199.98
-SERVER="${BUNKER_SERVER:-bunker-las-04}"
-PORT=30001
+AGENT="${BUNKER_AGENT:-}"
+HOST="${BUNKER_HOST:-127.0.0.1}"
+SERVER="${BUNKER_SERVER:-}"
+PORT=8767
 IMAGE=crier:test
 SKIP_BUILD=0
 while [[ $# -gt 0 ]]; do

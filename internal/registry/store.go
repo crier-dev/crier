@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/federation"
-	"github.com/totalwindupflightsystems/crier/internal/guard"
-	"github.com/totalwindupflightsystems/crier/internal/webhook"
+	"github.com/crier-dev/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // Store persists registered agents and their lease-based inboxes.

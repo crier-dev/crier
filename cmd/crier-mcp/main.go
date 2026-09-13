@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/totalwindupflightsystems/crier/config"
-	"github.com/totalwindupflightsystems/crier/internal/mcp"
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/mcp"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // version is the crier-mcp version. Overridable at build time via

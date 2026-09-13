@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/federation"
 )
 
 // holdRelay is a linked relay whose status the test controls at runtime, so

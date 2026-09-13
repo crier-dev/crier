@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crier — agent-to-agent message bus</title>
+<style>
+:root{--bg:#0f1115;--p:#171a21;--l:#2a2f3a;--ink:#dfe3ea;--dim:#8b93a3;--acc:#4cc38a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:64px 20px 40px}
+h1{font-size:34px;margin-bottom:6px}
+.tag{color:var(--dim);font-size:18px;margin-bottom:28px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:26px 0}
+.c{background:var(--p);border:1px solid var(--l);border-radius:12px;padding:18px}
+.c b{display:block;margin-bottom:6px;font-size:15px}
+.c p{color:var(--dim);font-size:13.5px}
+.c a{color:var(--acc);text-decoration:none;font-size:13.5px}
+code{background:#1b2030;padding:2px 6px;border-radius:5px;font-size:13px}
+pre{background:#1b2030;border:1px solid var(--l);border-radius:10px;padding:14px;overflow-x:auto;font-size:13px;margin:10px 0}
+pre code{background:none;padding:0}
+.btn{display:inline-block;background:var(--acc);color:#0f1115;font-weight:600;padding:10px 18px;border-radius:8px;text-decoration:none;margin-right:10px;margin-bottom:10px}
+.ghost{background:none;color:var(--acc);border:1px solid var(--acc)}
+h2{margin:30px 0 10px;font-size:20px}
+ul{margin:8px 0 8px 20px}
+li{margin:4px 0}
+.foot{margin-top:40px;color:var(--dim);font-size:13px;border-top:1px solid var(--l);padding-top:16px}
+</style></head><body><div class="wrap">
+<h1>📣 Crier</h1>
+<div class="tag">Agent-to-agent message bus — relay pub/sub, WebSocket mesh, durable inboxes, federation, MCP tools.</div>
+<a class="btn" href="https://github.com/crier-dev/crier">Source on GitHub</a>
+<a class="btn ghost" href="https://github.com/crier-dev/crier/blob/main/TESTERS.md">Testing? Start here</a>
+<div class="cards">
+  <div class="c"><b>30-second taste</b>
+    <pre><code>go install github.com/crier-dev/crier/cmd/crier@latest
+crier -port 8767
+curl localhost:8767/health</code></pre>
+    <a href="https://github.com/crier-dev/crier#quick-start">Full quickstart →</a></div>
+  <div class="c"><b>Eight ways to move a message</b>
+    <p>Inbox lease · relay pub/sub · blocking &amp; async webhook · batch · mesh REQ/REP · federation · MCP tools</p>
+    <a href="https://github.com/crier-dev/crier/blob/main/TESTERS.md">Try each in ~30 min →</a></div>
+  <div class="c"><b>Docs</b>
+    <p><a href="https://github.com/crier-dev/crier/blob/main/docs/architecture.md">Architecture</a> · <a href="https://github.com/crier-dev/crier/blob/main/docs/mesh-protocol.md">Mesh protocol</a> · <a href="https://github.com/crier-dev/crier/blob/main/docs/openapi.yaml">OpenAPI spec</a> · live <code>/docs</code> on every running server</p></div>
+  <div class="c"><b>For agent frameworks</b>
+    <p>crier-mcp speaks MCP over stdio: <code>deliver_message</code>, <code>ask_agent</code>, 13 tools total — agents never touch the raw wire.</p></div>
+</div>
+<h2>What it is</h2>
+<p>Crier is the communication backbone for fleets of autonomous agents: a central relay with topic fan-out,
+direct peer-to-peer RPC over WebSocket, durable per-agent inboxes with lease/ack semantics, relay-to-relay
+federation with hold-and-retry, an LLM guard that classifies every inbound message, and an MCP bridge so
+agent frameworks can use it all as plain tools.</p>
+<h2>Status</h2>
+<ul>
+  <li>Pre-1.0, under active development — APIs may change</li>
+  <li>Test suite: 11 Go packages green; E2E battery runs on every push</li>
+  <li>Known rough edges tracked openly in the repo — see <a href="https://github.com/crier-dev/crier/blob/main/TESTERS.md" style="color:var(--acc)">TESTERS.md</a></li>
+</ul>
+<div class="foot">MIT licensed · <a style="color:var(--dim)" href="https://github.com/crier-dev/crier/issues">report an issue</a> · security: see SECURITY.md</div>
+</div></body></html>

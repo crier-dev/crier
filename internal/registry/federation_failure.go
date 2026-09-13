@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/crier/internal/federation"
+	"github.com/crier-dev/crier/internal/federation"
 )
 
 // federationFailurePayload is the machine-readable entry written into the

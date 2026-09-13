@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/totalwindupflightsystems/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // mergeBridgeField adds key=value to payload unless already present.

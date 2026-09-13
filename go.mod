@@ -1,4 +1,4 @@
-module github.com/totalwindupflightsystems/crier
+module github.com/crier-dev/crier
 
 go 1.26.6
 

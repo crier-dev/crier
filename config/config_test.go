@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/totalwindupflightsystems/crier/config"
+	"github.com/crier-dev/crier/config"
 )
 
 // unsetAll clears every env var consumed by config.Load() so each test
