@@ -127,3 +127,13 @@ Promise: {"readme_present":true,"run_commands":["make build","CR_GUARD_ENABLED=f
 - [P1] Usability evidence is incomplete — friction_count=0 conflicts with the absence of a first success; zero recorded friction does not establish low-friction usability when the run never produced a usable result.
 - [P1] Captured output is not actionable — The only note is `(unparsed) What would you like me to do?`, which neither demonstrates Crier functionality nor identifies what a real user can accomplish.
 - [P2] Trustworthiness cannot be established — promises_held and promises_broken are both empty despite works=false, leaving no command output, behavior trace, or explicit promise assessment to audit.
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"project_summary":"Crier is a Go-based agent-to-agent message bus providing HTTP/WebSocket pub/sub relay, peer-to-peer mesh networking, a discoverable agent registry, durable lease-based inboxes, relay federation, an MCP bridge, and an optional LLM message guard.","readme_present":true,"runme_comma
+
+- [P1] Default tester walkthrough fails authentication — TESTERS.md omits mandatory agent-signature headers: its inbox retrieval and webhook PATCH commands return HTTP 401, preventing the documented default workflow from completing as written.
+- [P1] Advertised matrix harness is not locally runnable — scripts/bunker-matrix.sh requires undisclosed remote deployment arguments and failed at scp with "Connection closed" before exercising all advertised message-moving modes.
+- [P2] Interactive API documentation claim is inaccurate — /docs only links to OpenAPI JSON and YAML and provides no browser interface for executing requests, despite being described as interactive.
+- [P2] Keyless quickstart produces noisy guard metadata — Without DEEPSEEK_API_KEY, delivery succeeds fail-open as documented, but an ordinary first message is marked medium-risk with guard_error metadata.
+- [P2] Core messaging paths provide verified real value — A healthy server was reached in 38 seconds; signed inbox delivery and acknowledgement, WebSocket relay fan-out, two-bus federation, all Go tests, go vet, and the 70% coverage gate succeeded, with meas
