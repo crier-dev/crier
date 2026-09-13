@@ -67,3 +67,13 @@ Promise: {"entry_point":"cmd/server (bin/crier HTTP/WebSocket server); optional 
 - [P2] Documented MCP inventory is stale — docs/integration-guide.md and skills/crier-usage/SKILL.md advertise 8 MCP tools, while live tools/list returned 13.
 - [P2] Demo reports guard configuration inaccurately — examples/demo.sh warned that the guard was enabled and failing open even though the server startup log confirmed CR_GUARD_ENABLED=false.
 - [P2] Core relay workflow delivers real value — Both binaries built; /health returned 200; the signed inbox lifecycle completed with 201/201/200/204; WebSocket relay publish returned 202 and delivered the expected frame; first success took about 31
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Primary: cmd/server builds bin/crier, a Go HTTP/WebSocket server listening on :8767 by default. Secondary: cmd/crier-mcp builds bin/crier-mcp, a stdio MCP server and remote bridge.","promise":"Promise: this project claims a developer or operator can connect heterogeneous autonomous a
+
+- [P1] TTL contract is silently ignored — A message created with ttl_seconds=1 was accepted but received an effective 86400-second expiry, so the OpenAPI contract misrepresents retention behavior without returning an error.
+- [P1] Default MCP and HTTP processes do not share state as documented — HTTP agents were absent from the local in-memory MCP agent list; state became shared only in remote bridge mode. The integration guide instead claims the default MCP server shares the HTTP backend.
+- [P1] Official operator recipes fail under their documented defaults — The relay publish example returned 401 until X-Agent-ID was added, and TESTERS.md starts with CR_REQUIRE_AGENT_SIG=true while its unsigned inbox GET and webhook PATCH omit required signatures; the uns
+- [P2] MCP and guard documentation is stale or misleading — Live tools/list returned 13 tools rather than the documented 8, and examples/demo.sh warned that the guard was ON because the client lacked DEEPSEEK_API_KEY even though the running server log proved C
+- [P2] Startup lacks collision-safe guidance — The documented :8767 startup failed because another Crier listener occupied the port; using verified port 18877 worked, but discovery and alternate-port verification required manual operator investiga
