@@ -356,6 +356,10 @@ INSERT INTO inbox_entries (
 }
 
 // Retrieve atomically selects, locks, and leases a disjoint FIFO batch.
+// The lease ID is minted only once a non-empty batch is locked, so an empty
+// or fully leased inbox returns a non-nil empty slice and an empty lease ID
+// (DF-CRIER-32). The row locks taken by the claiming SELECT are held until
+// the transaction commits, which keeps concurrent retrievers disjoint.
 func (s *PostgresStore) Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error) {
 	if agentID == "" {
 		return nil, "", fmt.Errorf("%w: blank agent ID", ErrInvalidStoreInput)
@@ -365,11 +369,6 @@ func (s *PostgresStore) Retrieve(agentID string, leaseDuration time.Duration, ma
 	}
 	if maxMessages <= 0 {
 		return nil, "", fmt.Errorf("%w: max messages must be positive", ErrInvalidStoreInput)
-	}
-
-	leaseID, err := newLeaseID()
-	if err != nil {
-		return nil, "", fmt.Errorf("generate lease id: %w", err)
 	}
 
 	ctx, cancel := s.operationContext()
@@ -398,33 +397,21 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 		return nil, "", fmt.Errorf("retrieve agent check: %w", err)
 	}
 
-	// 2. Select, lock, update, and return a disjoint FIFO batch.
+	// 2. Claim a disjoint FIFO batch: lock the candidate rows (skipping rows
+	// a concurrent retriever already locked) and read them back. The locks
+	// live until commit, so nothing needs to be re-checked when the batch is
+	// stamped below.
 	rows, err := tx.Query(ctx, `
-WITH candidates AS (
-    SELECT id
-    FROM inbox_entries
-    WHERE agent_id = $1
-      AND acked = FALSE
-      AND expires_at > $2
-      AND (lease_expires_at IS NULL OR lease_expires_at <= $2)
-    ORDER BY delivery_sequence ASC
-    FOR UPDATE SKIP LOCKED
-    LIMIT $3
-), leased AS (
-    UPDATE inbox_entries AS entry
-    SET leased_at = $2,
-        lease_id = $4,
-        lease_expires_at = $5
-    FROM candidates
-    WHERE entry.id = candidates.id
-    RETURNING entry.id, entry.agent_id, entry.payload, entry.created_at,
-              entry.expires_at, entry.leased_at, entry.lease_id, entry.acked,
-              entry.delivery_sequence
-)
-SELECT id, agent_id, payload, created_at, expires_at, leased_at, lease_id, acked
-FROM leased
-ORDER BY delivery_sequence ASC;`,
-		agentID, now, maxMessages, leaseID, leaseExpiresAt,
+SELECT id, agent_id, payload, created_at, expires_at
+FROM inbox_entries
+WHERE agent_id = $1
+  AND acked = FALSE
+  AND expires_at > $2
+  AND (lease_expires_at IS NULL OR lease_expires_at <= $2)
+ORDER BY delivery_sequence ASC
+FOR UPDATE SKIP LOCKED
+LIMIT $3;`,
+		agentID, now, maxMessages,
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("retrieve select: %w", err)
@@ -432,21 +419,52 @@ ORDER BY delivery_sequence ASC;`,
 
 	result := make([]*InboxEntry, 0)
 	for rows.Next() {
-		var (
-			entry    InboxEntry
-			leasedAt *time.Time
-		)
-		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.CreatedAt, &entry.ExpiresAt, &leasedAt, &entry.LeaseID, &entry.ACKed); err != nil {
+		var entry InboxEntry
+		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.CreatedAt, &entry.ExpiresAt); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
-		entry.LeasedAt = leasedAt
-		entry.LeaseDuration = leaseDuration
 		result = append(result, &entry)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, "", fmt.Errorf("retrieve rows: %w", err)
+	}
+
+	// Nothing claimable: no lease is minted, and the transaction (which wrote
+	// nothing) rolls back via the deferred Rollback.
+	if len(result) == 0 {
+		return []*InboxEntry{}, "", nil
+	}
+
+	leaseID, err := newLeaseID()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate lease id: %w", err)
+	}
+
+	ids := make([]string, 0, len(result))
+	for _, entry := range result {
+		ids = append(ids, entry.ID)
+		entry.LeaseID = leaseID
+		entry.LeaseDuration = leaseDuration
+		leasedAt := now
+		entry.LeasedAt = &leasedAt
+	}
+
+	tag, err := tx.Exec(ctx, `
+UPDATE inbox_entries
+SET leased_at = $2,
+    lease_id = $3,
+    lease_expires_at = $4
+WHERE agent_id = $1
+  AND id = ANY($5::text[]);`,
+		agentID, now, leaseID, leaseExpiresAt, ids,
+	)
+	if err != nil {
+		return nil, "", fmt.Errorf("retrieve lease: %w", err)
+	}
+	if int(tag.RowsAffected()) != len(ids) {
+		return nil, "", fmt.Errorf("retrieve lease: leased %d of %d locked candidate message(s)", tag.RowsAffected(), len(ids))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -457,6 +475,10 @@ ORDER BY delivery_sequence ASC;`,
 }
 
 // Ack validates then deletes messages atomically inside a transaction.
+// An ID that does not exist in the inbox is reported as ErrMessageNotFound; an
+// ID that exists under a different (or no) lease is reported as
+// ErrLeaseConflict. Missing IDs take precedence so an all-unknown request is
+// never mistaken for a stale-lease problem (DF-CRIER-32).
 func (s *PostgresStore) Ack(agentID, leaseID string, messageIDs []string) error {
 	if agentID == "" {
 		return fmt.Errorf("%w: blank agent ID", ErrInvalidStoreInput)
@@ -500,6 +522,55 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// that leaves messages queued for redelivery (CR-GAP-014).
 	if len(messageIDs) == 0 {
 		return fmt.Errorf("%w: message_ids must not be empty", ErrInvalidStoreInput)
+	}
+
+	// Classify every requested ID before deleting: an ID absent from the
+	// inbox is a not-found (404) while an ID present under another lease is a
+	// lease conflict (409). Both used to share one sentinel and one status.
+	lookup, err := tx.Query(ctx, `
+SELECT id, COALESCE(lease_id, '') AS lease_id
+FROM inbox_entries
+WHERE agent_id = $1
+  AND id = ANY($2::text[]);`, agentID, messageIDs)
+	if err != nil {
+		return fmt.Errorf("ack lookup: %w", err)
+	}
+
+	currentLease := make(map[string]string, len(messageIDs))
+	for lookup.Next() {
+		var (
+			id       string
+			existing string
+		)
+		if err := lookup.Scan(&id, &existing); err != nil {
+			lookup.Close()
+			return fmt.Errorf("ack lookup scan: %w", err)
+		}
+		currentLease[id] = existing
+	}
+	lookup.Close()
+	if err := lookup.Err(); err != nil {
+		return fmt.Errorf("ack lookup rows: %w", err)
+	}
+
+	var missing, mismatched []string
+	for _, id := range messageIDs {
+		current, ok := currentLease[id]
+		if !ok {
+			missing = append(missing, id)
+			continue
+		}
+		if current != leaseID {
+			mismatched = append(mismatched, id)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: message id(s) %s do not exist in agent %q's inbox (never delivered, already acknowledged, or expired)",
+			ErrMessageNotFound, quoteMessageIDs(missing), agentID)
+	}
+	if len(mismatched) > 0 {
+		return fmt.Errorf("%w: message %q is not leased under lease %q (current lease: %q)",
+			ErrLeaseConflict, mismatched[0], leaseID, currentLease[mismatched[0]])
 	}
 
 	rows, err := tx.Query(ctx, `

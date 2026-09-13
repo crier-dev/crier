@@ -569,12 +569,13 @@ paths:
                 properties:
                   messages:
                     type: array
-                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use. Entries carry guard metadata (CR-FEAT-010) when the delivery was guarded.
+                    description: Leased inbox entries — payload objects travel as base64-encoded strings (Go []byte JSON encoding); decode each entry's payload before use. Entries carry guard metadata (CR-FEAT-010) when the delivery was guarded. Always a JSON array (never null); an empty array means nothing was claimed.
                     items:
                       $ref: "#/components/schemas/InboxEntry"
                   lease_id:
                     type: string
-                    description: Lease covering the returned messages — pass to inboxAck to release
+                    description: |-
+                      Lease covering the returned messages — pass it to inboxAck together with IDs from THIS response to release them. It is an EMPTY STRING exactly when no messages were claimed (empty inbox, or every queued message is already leased and unexpired): no lease is minted, the messages array is empty, and there is nothing to ack. Do not reuse a lease ID from an earlier retrieval, and do not ack an empty batch.
         "401":
           description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
         "403":
@@ -657,11 +658,13 @@ paths:
               properties:
                 lease_id:
                   type: string
-                  description: Lease ID from the inboxRetrieve response — must match the active lease or the server rejects with 409
+                  description: |-
+                    The non-empty lease ID from the inboxRetrieve response that returned these message IDs. It must match the lease currently held on every acked message, or the server rejects with 409. A retrieve that claimed nothing returns an empty lease_id — such a response has no IDs to ack, so never send it here.
                 message_ids:
                   type: array
                   items:
                     type: string
+                  description: IDs to acknowledge — only IDs returned by the same retrieve call as lease_id. An ID the inbox does not hold (never delivered, already acked, or expired) is rejected with 404.
       responses:
         "204":
           description: Messages acknowledged, lease released (no body)
@@ -672,9 +675,11 @@ paths:
         "403":
           description: X-Agent-ID does not match the target agent
         "404":
-          description: Agent not found
+          description: |-
+            Agent not found, OR at least one message_id does not exist in the agent's inbox (never delivered, already acknowledged, or expired and purged). A missing ID always answers 404 — it is never reported as a lease conflict — and the error body names the offending IDs.
         "409":
-          description: Lease conflict — lease_id does not match the active lease
+          description: |-
+            Lease conflict — every requested message ID exists, but at least one is leased under a different (or no) lease. The body reports the current lease held on the message, so the caller can re-retrieve instead of acking with a stale lease.
 
 components:
   parameters:

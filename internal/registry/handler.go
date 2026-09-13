@@ -598,6 +598,10 @@ func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
 
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.
 // Agent-owned: requires a valid per-agent signature when enabled.
+//
+// Zero claimed messages is a successful read: the body carries
+// {"messages":[],"lease_id":""} and the caller must not ack. A non-empty
+// lease_id is returned exactly when messages were leased (DF-CRIER-32).
 func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if !h.requireAgent(w, r, id) {
@@ -646,6 +650,10 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 
 // HandleAck handles POST /agents/{id}/inbox/ack — acknowledges messages.
 // Agent-owned: requires a valid per-agent signature when enabled.
+//
+// Failure classes are distinct (DF-CRIER-32): 404 when a requested message ID
+// does not exist in the inbox, 409 when it exists but is leased under a
+// different lease, 400 for a malformed request.
 func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if !h.requireAgent(w, r, id) {
@@ -669,6 +677,8 @@ func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Ack(id, req.LeaseID, req.MessageIDs); err != nil {
 		switch {
 		case errors.Is(err, ErrAgentNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrMessageNotFound):
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		case errors.Is(err, ErrLeaseConflict):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})

@@ -119,8 +119,11 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 }
 
 // Retrieve fetches up to maxMessages un-ACKed, un-expired messages from an
-// agent's inbox. It assigns a new leaseID, sets LeasedAt to now, and marks
-// each message with the leaseID. Returns the leased messages and the leaseID.
+// agent's inbox. When at least one message is claimable it mints a new lease
+// ID, sets LeasedAt to now, and marks each message with that lease ID.
+// When nothing is claimable (empty inbox, or every queued message already
+// leased and unexpired) it returns a non-nil empty slice and an EMPTY lease
+// ID — no lease is minted for a batch that does not exist (DF-CRIER-32).
 // Under write lock, so concurrent retrievers get disjoint message sets.
 func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error) {
 	s.mu.Lock()
@@ -130,17 +133,26 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		return nil, "", fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 
-	leaseID, err := newLeaseID()
-	if err != nil {
-		return nil, "", fmt.Errorf("generate lease id: %w", err)
-	}
-
 	now := time.Now()
 	queue := s.inboxes[agentID]
-	var leased []*InboxEntry
+
+	// Pass 1: pick the batch. Expired leases on the way past are released
+	// inline so the entry falls through to the claiming pass (DF-CRIER-33).
+	// Without this, a default-backend message was redelivered only after
+	// lease + a purge tick (60s for a documented 30s lease), because
+	// PurgeExpired was the only release path. PurgeExpired remains the
+	// backstop for messages nobody retrieves.
+	capHint := maxMessages
+	if capHint < 0 {
+		capHint = 0
+	}
+	if capHint > len(queue) {
+		capHint = len(queue)
+	}
+	batch := make([]*InboxEntry, 0, capHint)
 
 	for _, entry := range queue {
-		if len(leased) >= maxMessages {
+		if len(batch) >= maxMessages {
 			break
 		}
 		// Skip already ACKed messages.
@@ -152,12 +164,7 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 			continue
 		}
 		// Skip already leased messages, unless the lease has expired — in
-		// which case release it inline and let the entry fall through to the
-		// leasing path below (DF-CRIER-33). Without this, a default-backend
-		// message was redelivered only after lease + a purge tick (60s for a
-		// documented 30s lease), because PurgeExpired was the only release
-		// path. PurgeExpired remains the backstop for messages nobody
-		// retrieves.
+		// which case release it inline and treat it as available.
 		if entry.LeasedAt != nil && entry.LeaseID != "" {
 			leaseDuration := entry.LeaseDuration
 			if leaseDuration == 0 {
@@ -173,18 +180,36 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 			}
 		}
 
+		batch = append(batch, entry)
+	}
+
+	if len(batch) == 0 {
+		// Nothing was leased: minting a lease here would hand the caller a
+		// usable-looking credential over zero messages.
+		return []*InboxEntry{}, "", nil
+	}
+
+	leaseID, err := newLeaseID()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate lease id: %w", err)
+	}
+
+	// Pass 2: stamp the claimed batch with the lease.
+	for _, entry := range batch {
 		leasedAt := now
 		entry.LeasedAt = &leasedAt
 		entry.LeaseID = leaseID
 		entry.LeaseDuration = leaseDuration
-		leased = append(leased, entry)
 	}
 
-	return leased, leaseID, nil
+	return batch, leaseID, nil
 }
 
 // Ack permanently removes messages by ID that match the given leaseID.
-// Returns an error if any message is not found under that lease.
+// Message IDs absent from the inbox are reported as ErrMessageNotFound;
+// IDs that exist under a different (or no) lease are reported as
+// ErrLeaseConflict. Missing IDs are reported first so an all-unknown request
+// is never mistaken for a stale-lease problem (DF-CRIER-32).
 func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -205,18 +230,32 @@ func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 		idSet[id] = true
 	}
 
-	// Verify all messages exist and are leased with the correct leaseID.
-	found := 0
+	// Classify every requested ID before deleting anything: absent from the
+	// inbox (never delivered, acked, or expired+purged) is a not-found;
+	// present under another lease is a lease conflict.
+	index := make(map[string]*InboxEntry, len(queue))
 	for _, entry := range queue {
-		if idSet[entry.ID] {
-			found++
-			if entry.LeaseID != leaseID {
-				return fmt.Errorf("%w: message %q is not leased under lease %q (current lease: %q)", ErrLeaseConflict, entry.ID, leaseID, entry.LeaseID)
-			}
+		index[entry.ID] = entry
+	}
+
+	var missing, mismatched []string
+	for _, id := range messageIDs {
+		entry, ok := index[id]
+		if !ok {
+			missing = append(missing, id)
+			continue
+		}
+		if entry.LeaseID != leaseID {
+			mismatched = append(mismatched, id)
 		}
 	}
-	if found < len(messageIDs) {
-		return fmt.Errorf("%w: %d of %d message(s) not found", ErrLeaseConflict, len(messageIDs)-found, len(messageIDs))
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: message id(s) %s do not exist in agent %q's inbox (never delivered, already acknowledged, or expired)",
+			ErrMessageNotFound, quoteMessageIDs(missing), agentID)
+	}
+	if len(mismatched) > 0 {
+		return fmt.Errorf("%w: message %q is not leased under lease %q (current lease: %q)",
+			ErrLeaseConflict, mismatched[0], leaseID, index[mismatched[0]].LeaseID)
 	}
 
 	// Filter out ACKed messages.

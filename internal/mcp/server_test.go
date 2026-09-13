@@ -325,8 +325,10 @@ func TestRetrieveInbox_Empty(t *testing.T) {
 	if len(out.Messages) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(out.Messages))
 	}
-	if out.LeaseID == "" {
-		t.Error("expected non-empty lease_id")
+	if out.LeaseID != "" {
+		// An empty retrieval claims nothing, so it must not hand the caller a
+		// lease it could try to ack (DF-CRIER-32).
+		t.Errorf("expected empty lease_id for an empty inbox, got %q", out.LeaseID)
 	}
 }
 

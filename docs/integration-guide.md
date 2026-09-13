@@ -201,6 +201,25 @@ curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
 # → 200 {"messages":[{"id":"...","payload":"<base64>",...}],"lease_id":"..."}
 ```
 
+An empty or fully-leased inbox is a **successful read with nothing to claim** —
+not an error, and not a lease:
+
+```bash
+# second retrieve while everything is still leased (or a fresh agent)
+# → 200 {"messages":[],"lease_id":""}
+```
+
+The rules that follow from that (DF-CRIER-32):
+
+- `messages` is always a JSON array — `[]` when nothing was claimable, never
+  `null`.
+- `lease_id` is a **non-empty string only when at least one message was
+  leased**. An empty `lease_id` means there is nothing to ack: no lease was
+  minted, so do not store it, retry it, or send it to the ack endpoint.
+- Ack only IDs that came back from the **same** retrieve call as their
+  `lease_id`. A lease does not make messages ackable across responses, and a
+  lease covers exactly the batch it was minted for.
+
 The signature scheme (config C only; the headers are ignored when
 `CR_REQUIRE_AGENT_SIG=false`):
 
@@ -227,6 +246,22 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content
   -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}" \
   -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<message id>"]}'   # → 204
 ```
+
+Ack failures are two distinct classes — read the status, not just "error"
+(DF-CRIER-32):
+
+| Status | Meaning | What to do |
+|---|---|---|
+| `204` | Every ID was removed under that lease | done |
+| `400` | Malformed body, or `lease_id` / `message_ids` missing or empty (a lease-only ack is a silent no-op — CR-GAP-014) | fix the request |
+| `404` | Agent not found, **or** a requested `message_id` does not exist in the inbox (never delivered, already acked, or expired and purged). The body names the offending IDs. | drop the unknown IDs; do not retry them under another lease |
+| `409` | Every requested ID exists, but at least one is leased under a **different** (or no) lease — the body reports the lease currently held | re-retrieve to get a fresh lease for those IDs |
+
+A missing ID is always `404` and never reported as a lease conflict, so a
+`409` means the messages are there and the lease you sent is stale — not that
+your IDs are wrong. Conversely, if every ID you sent was returned by the
+retrieve that minted `lease_id`, a `409` means the lease has since been
+released (expired + purged, or acked by another caller).
 
 Verify the queue actually drained with the stats endpoint (not with a
 re-retrieve — leased messages stay hidden behind their lease until it

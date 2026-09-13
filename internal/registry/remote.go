@@ -135,18 +135,21 @@ func ParseEd25519PrivateKeyPEM(pemBytes []byte) (ed25519.PrivateKey, error) {
 
 // ---- HTTP plumbing -------------------------------------------------------
 
-func (s *RemoteStore) do(method, path string, body any, out any) error {
+// send performs the request and returns the HTTP status and the raw response
+// body. It does not classify the status: endpoints with their own error
+// semantics (Ack's 404-vs-409 split) map it themselves.
+func (s *RemoteStore) send(method, path string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode request: %w", err)
+			return 0, nil, fmt.Errorf("encode request: %w", err)
 		}
 		rdr = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(context.Background(), method, s.baseURL+path, rdr)
 	if err != nil {
-		return err
+		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Agent-ID", s.agentID)
@@ -156,11 +159,19 @@ func (s *RemoteStore) do(method, path string, body any, out any) error {
 	s.signRequest(req)
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("remote %s %s: %w", method, path, err)
+		return 0, nil, fmt.Errorf("remote %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	switch resp.StatusCode {
+	return resp.StatusCode, raw, nil
+}
+
+func (s *RemoteStore) do(method, path string, body any, out any) error {
+	status, raw, err := s.send(method, path, body)
+	if err != nil {
+		return err
+	}
+	switch status {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		if out != nil && len(raw) > 0 {
 			if err := json.Unmarshal(raw, out); err != nil {
@@ -175,7 +186,38 @@ func (s *RemoteStore) do(method, path string, body any, out any) error {
 	case http.StatusBadRequest:
 		return fmt.Errorf("%w: %s", ErrInvalidStoreInput, string(raw))
 	default:
-		return fmt.Errorf("remote %s %s: status %d: %s", method, path, resp.StatusCode, string(raw))
+		return fmt.Errorf("remote %s %s: status %d: %s", method, path, status, string(raw))
+	}
+}
+
+// doAck is the ack path's error decoder. On this endpoint a 404 means the
+// requested message ID does not exist (not "agent not found", which is the
+// shared do() mapping) and a 409 means the message exists under a different
+// lease — the two failure classes clients must be able to tell apart
+// (DF-CRIER-32).
+func (s *RemoteStore) doAck(agentID string, body any) error {
+	path := "/agents/" + url.PathEscape(agentID) + "/inbox/ack"
+	status, raw, err := s.send(http.MethodPost, path, body)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case http.StatusOK, http.StatusNoContent:
+		return nil
+	case http.StatusNotFound:
+		// A missing agent and a missing message both answer 404; the body
+		// distinguishes them, so surface both sentinels' wording and let the
+		// caller match on whichever it needs.
+		if strings.Contains(string(raw), ErrAgentNotFound.Error()) {
+			return fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(string(raw)))
+		}
+		return fmt.Errorf("%w: %s", ErrMessageNotFound, strings.TrimSpace(string(raw)))
+	case http.StatusConflict:
+		return fmt.Errorf("%w: %s", ErrLeaseConflict, strings.TrimSpace(string(raw)))
+	case http.StatusBadRequest:
+		return fmt.Errorf("%w: %s", ErrInvalidStoreInput, string(raw))
+	default:
+		return fmt.Errorf("remote %s: status %d: %s", path, status, string(raw))
 	}
 }
 
@@ -229,6 +271,10 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	return nil
 }
 
+// Retrieve fetches a leased batch from the server. The returned lease ID is
+// empty exactly when the server claimed no messages (empty inbox, or every
+// message already leased) — in that case messages is a non-nil empty slice and
+// there is nothing to ack (DF-CRIER-32).
 func (s *RemoteStore) Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error) {
 	if maxMessages <= 0 {
 		maxMessages = 10
@@ -252,14 +298,17 @@ func (s *RemoteStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 	return out.Messages, out.LeaseID, nil
 }
 
+// Ack acknowledges messages on the server. A message ID the server does not
+// hold decodes to ErrMessageNotFound (404) and one leased under another lease
+// to ErrLeaseConflict (409) so callers can tell the two apart (DF-CRIER-32).
 func (s *RemoteStore) Ack(agentID, leaseID string, messageIDs []string) error {
 	if len(messageIDs) == 0 {
 		return fmt.Errorf("%w: message_ids must not be empty", ErrInvalidStoreInput)
 	}
-	return s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox/ack", map[string]any{
+	return s.doAck(agentID, map[string]any{
 		"lease_id":    leaseID,
 		"message_ids": messageIDs,
-	}, nil)
+	})
 }
 
 func (s *RemoteStore) Stats(agentID string) (queueDepth, leasedCount int, oldestAge time.Duration, err error) {

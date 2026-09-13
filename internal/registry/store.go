@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +22,23 @@ type Store interface {
 	List() []*Agent
 	Unregister(id string) error
 	Deliver(agentID string, entry *InboxEntry) error
+	// Retrieve atomically leases up to maxMessages un-ACKed, un-expired
+	// messages from the agent's FIFO inbox and returns them with the lease ID
+	// that covers them. The lease ID is non-empty exactly when at least one
+	// message was leased: a registered agent with nothing claimable (empty
+	// inbox, or every queued message already leased and unexpired) yields a
+	// non-nil empty slice and an EMPTY lease ID — no lease is minted, because
+	// there is nothing an ack could legitimately cover (DF-CRIER-32).
+	// Concurrent callers get disjoint batches.
 	Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error)
+	// Ack permanently removes the given message IDs, but only when each one is
+	// currently leased under leaseID. Error contract:
+	//   - ErrMessageNotFound: at least one ID does not exist in the agent's
+	//     inbox (never delivered, already acked, or expired and purged);
+	//   - ErrLeaseConflict: every ID exists, but at least one is leased under
+	//     a different (or no) lease.
+	// A missing ID is reported before a lease mismatch, so a request whose IDs
+	// are all unknown never masquerades as a stale-lease problem.
 	Ack(agentID, leaseID string, messageIDs []string) error
 	Stats(agentID string) (queueDepth, leasedCount int, oldestAge time.Duration, err error)
 	PurgeExpired() int
@@ -94,8 +112,29 @@ var (
 	ErrAgentNotFound     = errors.New("agent not found")
 	ErrAgentExists       = errors.New("agent already registered")
 	ErrLeaseConflict     = errors.New("message is not leased under the supplied lease")
+	ErrMessageNotFound   = errors.New("message not found")
 	ErrInvalidStoreInput = errors.New("invalid store input")
 )
+
+// quoteMessageIDs renders message IDs for error details: quoted,
+// comma-separated, in the caller's order, capped so a large bogus request
+// cannot bloat the response body.
+func quoteMessageIDs(ids []string) string {
+	const maxListed = 5
+	shown := ids
+	if len(shown) > maxListed {
+		shown = shown[:maxListed]
+	}
+	quoted := make([]string, 0, len(shown))
+	for _, id := range shown {
+		quoted = append(quoted, fmt.Sprintf("%q", id))
+	}
+	list := strings.Join(quoted, ", ")
+	if len(ids) > maxListed {
+		list = fmt.Sprintf("%s (+%d more)", list, len(ids)-maxListed)
+	}
+	return list
+}
 
 // MemoryStore is a thread-safe in-memory agent registry with process-lifetime inboxes.
 // State is ephemeral: agents and undelivered messages are lost on restart.

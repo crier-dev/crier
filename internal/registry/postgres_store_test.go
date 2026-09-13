@@ -474,8 +474,30 @@ func TestPostgresStore_Retrieve_EmptyInbox(t *testing.T) {
 
 	msgs, leaseID, err := store.Retrieve(agent.ID, 5*time.Second, 5)
 	require.NoError(t, err)
+	require.NotNil(t, msgs, "an empty retrieval must return a non-nil empty slice")
 	require.Empty(t, msgs)
-	require.NotEmpty(t, leaseID)
+	// Nothing was claimed, so no lease is minted (DF-CRIER-32).
+	require.Empty(t, leaseID)
+}
+
+func TestPostgresStore_Retrieve_AllLeasedMintsNoLease(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "allleased")
+
+	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{}`)}))
+	first, firstLease, err := store.Retrieve(agent.ID, 30*time.Second, 5)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.NotEmpty(t, firstLease)
+
+	second, secondLease, err := store.Retrieve(agent.ID, 30*time.Second, 5)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Empty(t, second)
+	require.Empty(t, secondLease, "a fully leased inbox must not mint a lease")
+
+	// The first lease still owns its message.
+	require.NoError(t, store.Ack(agent.ID, firstLease, []string{first[0].ID}))
 }
 
 func TestPostgresStore_Retrieve_FIFOOrder(t *testing.T) {
@@ -670,18 +692,23 @@ func TestPostgresStore_Ack_UnknownAgent(t *testing.T) {
 	require.True(t, errors.Is(err, ErrAgentNotFound))
 }
 
-func TestPostgresStore_Ack_PartialMismatch(t *testing.T) {
-	// Ack with one valid message ID and one bogus ID — must report ErrLeaseConflict
-	// (delete count != requested count).
+func TestPostgresStore_Ack_MissingID(t *testing.T) {
+	// Ack with an ID the inbox does not hold must report ErrMessageNotFound
+	// (distinct from a lease conflict) and delete nothing.
 	store := newTestStore(t)
-	agent := newTestAgent(t, store, "partialmismatch")
+	agent := newTestAgent(t, store, "missingid")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{}`)}))
 	_, leaseID, err := store.Retrieve(agent.ID, 30*time.Second, 1)
 	require.NoError(t, err)
 
 	err = store.Ack(agent.ID, leaseID, []string{"definitely-not-a-real-id"})
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrLeaseConflict))
+	require.True(t, errors.Is(err, ErrMessageNotFound), "want ErrMessageNotFound, got %v", err)
+	require.False(t, errors.Is(err, ErrLeaseConflict))
+
+	depth, _, _, err := store.Stats(agent.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, depth, "a rejected Ack must not delete anything")
 }
 
 // --- Stats --------------------------------------------------------------------

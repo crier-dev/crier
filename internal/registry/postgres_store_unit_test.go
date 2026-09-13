@@ -431,12 +431,16 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	mock.ExpectQuery(`SELECT 1 FROM agents`).
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
-	// CTE query — the WITH candidates/leased query
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "created_at", "expires_at", "leased_at", "lease_id", "acked"}).
-		AddRow("msg-1", "agent", []byte(`{}`), now, now.Add(time.Hour), nil, nil, false)
-	mock.ExpectQuery(`SELECT id, agent_id, payload`).
-		WithArgs("agent", pgxmock.AnyArg(), 10, pgxmock.AnyArg(), pgxmock.AnyArg()).
+	// Claiming select — locks a disjoint FIFO batch.
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "created_at", "expires_at"}).
+		AddRow("msg-1", "agent", []byte(`{}`), now, now.Add(time.Hour))
+	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
+		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)
+	// The batch is stamped with a freshly minted lease.
+	mock.ExpectExec(`UPDATE inbox_entries`).
+		WithArgs("agent", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), []string{"msg-1"}).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	// Commit
 	mock.ExpectCommit()
 
@@ -444,6 +448,8 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.NotEmpty(t, leaseID)
+	require.Equal(t, leaseID, msgs[0].LeaseID, "returned entries must carry the minted lease")
+	require.Equal(t, 30*time.Second, msgs[0].LeaseDuration)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -508,6 +514,11 @@ func TestPostgresStoreUnit_Ack_Success(t *testing.T) {
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
 
+	// Classification lookup: the message exists under the supplied lease.
+	mock.ExpectQuery(`SELECT id, COALESCE`).
+		WithArgs("agent", []string{"msg-1"}).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "lease_id"}).AddRow("msg-1", "lease-1"))
+
 	returningRows := pgxmock.NewRows([]string{"id"}).
 		AddRow("msg-1")
 	mock.ExpectQuery(`DELETE FROM inbox_entries`).
@@ -542,10 +553,10 @@ func TestPostgresStoreUnit_Ack_LeaseConflict(t *testing.T) {
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
 
-	returningRows := pgxmock.NewRows([]string{"id"}) // 0 rows — no matching messages
-	mock.ExpectQuery(`DELETE FROM inbox_entries`).
-		WithArgs("agent", "lease", []string{"msg-1"}).
-		WillReturnRows(returningRows)
+	// The message exists, but under a different lease: no DELETE runs.
+	mock.ExpectQuery(`SELECT id, COALESCE`).
+		WithArgs("agent", []string{"msg-1"}).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "lease_id"}).AddRow("msg-1", "other-lease"))
 	mock.ExpectRollback()
 
 	err := s.Ack("agent", "lease", []string{"msg-1"})
