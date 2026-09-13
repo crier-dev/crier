@@ -151,9 +151,26 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		if entry.ExpiresAt.Before(now) {
 			continue
 		}
-		// Skip already leased messages (lease still active).
+		// Skip already leased messages, unless the lease has expired — in
+		// which case release it inline and let the entry fall through to the
+		// leasing path below (DF-CRIER-33). Without this, a default-backend
+		// message was redelivered only after lease + a purge tick (60s for a
+		// documented 30s lease), because PurgeExpired was the only release
+		// path. PurgeExpired remains the backstop for messages nobody
+		// retrieves.
 		if entry.LeasedAt != nil && entry.LeaseID != "" {
-			continue
+			leaseDuration := entry.LeaseDuration
+			if leaseDuration == 0 {
+				leaseDuration = 30 * time.Second
+			}
+			if entry.LeasedAt.Add(leaseDuration).Before(now) {
+				// Lease expired: release inline and treat as available.
+				entry.LeasedAt = nil
+				entry.LeaseID = ""
+				entry.LeaseDuration = 0
+			} else {
+				continue
+			}
 		}
 
 		leasedAt := now
