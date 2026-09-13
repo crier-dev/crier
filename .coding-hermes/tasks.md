@@ -117,3 +117,13 @@ Promise: {"key_features":["Agent-to-agent message bus","Relay pub/sub over HTTP 
 - [P1] Demo reports guard configuration unreliably — examples/demo.sh warned that the guard was enabled and failing open while the server log proved CR_GUARD_ENABLED=false; the script infers server state from its own environment rather than the running 
 - [P2] Documentation and HTTP contract contain observable mismatches — /docs is a static OpenAPI JSON/YAML index rather than the promised interactive console, and GET /health returned JSON as text/plain despite OpenAPI declaring application/json.
 - [P2] Quick start performs a redundant rebuild — Following make build with make run rebuilds the same server binary, adding avoidable friction despite the first healthy response arriving in 0.898 seconds with a warm Go cache.
+
+## Dogfood Findings (2026-09-13)
+Verdict: UNKNOWN-VALUE
+Promise: {"readme_present":true,"run_commands":["make build","CR_GUARD_ENABLED=false ./bin/crier -port 8767"]}
+
+- [P0] No successful real-use workflow was demonstrated — Real-use evidence reports works=false, time_to_first_success_s=null, and no completed user outcome.
+- [P1] Promised commands were not verified — The evidence does not show whether `make build` or `CR_GUARD_ENABLED=false ./bin/crier -port 8767` completed successfully, so the promised workflow cannot be confirmed.
+- [P1] Usability evidence is incomplete — friction_count=0 conflicts with the absence of a first success; zero recorded friction does not establish low-friction usability when the run never produced a usable result.
+- [P1] Captured output is not actionable — The only note is `(unparsed) What would you like me to do?`, which neither demonstrates Crier functionality nor identifies what a real user can accomplish.
+- [P2] Trustworthiness cannot be established — promises_held and promises_broken are both empty despite works=false, leaving no command output, behavior trace, or explicit promise assessment to audit.
