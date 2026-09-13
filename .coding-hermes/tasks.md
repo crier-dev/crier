@@ -57,3 +57,13 @@ Promise: {"entry_point":"Primary: bin/crier HTTP/WebSocket server from cmd/serve
 - [P1] Keyless make run degrades guarded delivery — The exact make run path enables the guard without an API key; benign messages are delivered with a medium-risk guard_error until the user discovers and sets CR_GUARD_ENABLED=false, weakening confidenc
 - [P2] MCP onboarding and inventory documentation are stale — Live initialize and tools/list succeeded and exposed 13 tools, but the integration guide advertises 8 and provides no copy-paste initialize, notifications/initialized, tools/list, and tools/call trans
 - [P2] Core multi-transport workflow completes with real value — Within 25 seconds, the server served health on port 8767; the signed demo completed register, deliver, retrieve, acknowledge, and empty-inbox verification; WebSocket relay received a published event a"}
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"cmd/server (bin/crier HTTP/WebSocket server); optional cmd/crier-mcp (bin/crier-mcp MCP bridge)","promise":"Promise: this project claims a user can exchange messages between autonomous agents by using Crier’s HTTP/WebSocket relay, peer mesh, agent registry, durable inboxes, and optio
+
+- [P1] Documented HTTP workflows fail under their stated defaults — TESTERS.md starts with CR_REQUIRE_AGENT_SIG=true but its unsigned inbox GET returned 401; the integration guide's relay publish also returned 401 because it omitted the required X-Agent-ID.
+- [P1] MCP bridge works but lacks a usable client path — The bridge built, initialized, exposed tools, and retrieved an HTTP-delivered message, but exercising initialize, tools/list, and tools/call required a custom JSON-RPC harness and live schema discover
+- [P2] Documented MCP inventory is stale — docs/integration-guide.md and skills/crier-usage/SKILL.md advertise 8 MCP tools, while live tools/list returned 13.
+- [P2] Demo reports guard configuration inaccurately — examples/demo.sh warned that the guard was enabled and failing open even though the server startup log confirmed CR_GUARD_ENABLED=false.
+- [P2] Core relay workflow delivers real value — Both binaries built; /health returned 200; the signed inbox lifecycle completed with 201/201/200/204; WebSocket relay publish returned 202 and delivered the expected frame; first success took about 31
