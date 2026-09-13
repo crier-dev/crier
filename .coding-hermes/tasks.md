@@ -107,3 +107,13 @@ Promise: {"entry_point":"cmd/server/main.go (built as bin/crier); MCP bridge: cm
 - [P1] MCP storage mode and state visibility are unclear — Bare crier-mcp silently uses an undocumented process-local store; startup output does not distinguish local storage from HTTP-bridge mode. Users cannot reliably know whether MCP and server clients sha
 - [P1] Published authentication contract contradicts runtime defaults — OpenAPI states that every non-health endpoint requires bearer authentication, but the shipped default has auth disabled: unauthenticated registration and delivery succeeded. Per-agent signature enforc
 - [P2] Documentation and response metadata contain misleading details — /docs is a static specification index rather than the advertised interactive console; /health returns JSON text as `text/plain` despite OpenAPI declaring `application/json`; the demo incorrectly warns
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"key_features":["Agent-to-agent message bus","Relay pub/sub over HTTP and WebSocket","Peer-to-peer WebSocket mesh","Discoverable agent registry","Durable lease-based inboxes","PostgreSQL persistence","LLM prompt-injection guard","Relay-to-relay federation","Remote MCP bridge"],"quick_start":["Requi
+
+- [P1] Default manual walkthrough fails authentication — TESTERS.md omits required per-agent signatures for inbox reads and webhook PATCH requests; both returned HTTP 401. Its random public-key-shaped registrations retain no matching private keys, so users 
+- [P1] Concurrent-consumer guidance misstates live behavior — A live race over ten queued messages produced a 0/10 split with no duplication, contradicting TESTERS.md's claim that both retrievers receive every message and concealing a starvation risk.
+- [P1] Demo reports guard configuration unreliably — examples/demo.sh warned that the guard was enabled and failing open while the server log proved CR_GUARD_ENABLED=false; the script infers server state from its own environment rather than the running 
+- [P2] Documentation and HTTP contract contain observable mismatches — /docs is a static OpenAPI JSON/YAML index rather than the promised interactive console, and GET /health returned JSON as text/plain despite OpenAPI declaring application/json.
+- [P2] Quick start performs a redundant rebuild — Following make build with make run rebuilds the same server binary, adding avoidable friction despite the first healthy response arriving in 0.898 seconds with a warm Go cache.
