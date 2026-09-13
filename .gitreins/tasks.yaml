@@ -477,3 +477,12 @@ tasks:
   status: complete
   created_at: '2026-09-12T18:51:24.475913+00:00'
   completed_at: '2026-09-12T19:05:27.803022+00:00'
+- id: DF-CRIER-31
+  title: Default guard hard-blocks payloads over 64KB on b64 false positive
+  criteria:
+  - A benign >64KB alphanumeric/base64-like payload is not hard-blocked solely by
+    b64_blob; explicit oversize injection remains blocked; regression tests and operator
+    guidance cover the behavior; full guard passes
+  status: complete
+  created_at: '2026-09-13T01:22:52.857281+00:00'
+  completed_at: '2026-09-13T01:40:06.503859+00:00'
