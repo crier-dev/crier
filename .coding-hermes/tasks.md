@@ -148,3 +148,13 @@ Promise: {"entry_point":"Primary: cmd/server, built as ./bin/crier and serving H
 - [P1] Ecosystem request contract is not usable from the guide alone — An intuitive payload.task request returned HTTP 200 with ECHO: no text; the required payload.text, sender, session_id, delivery_mode, and timeout_ms fields had to be recovered from battery.sh before a successful blocking sink round-trip.
 - [P2] Public API and identity claims drift from observed behavior — The claimed interactive /docs page was only a static OpenAPI link index, /health returned JSON as text/plain, and the MCP binary reported dev via -version but 0.1.0 during initialize.
 - [P2] Core workflow succeeds quickly and demonstrates real value — The server built and reached HTTP 200 health in 1.001 seconds; signed register/deliver/retrieve/ACK completed, unsigned retrieval returned 401, MCP state changes read back immediately, and both Compose batteries reported 10 pass, 0 fail, 1 skip.
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Primary: bin/crier HTTP/WebSocket server from cmd/server on port 8767. Optional: bin/crier-mcp stdio MCP server from cmd/crier-mcp.","promise":"Promise: this project claims a user can connect autonomous AI agents across different runtimes and backends for pub/sub, request/reply, dura
+
+- [P1] Documented manual workflows fail under the documented startup configuration — TESTERS.md leaves CR_REQUIRE_AGENT_SIG at its true default but uses unsigned inbox-retrieve and webhook-PATCH requests; both returned HTTP 401, so users cannot complete those documented paths without 
+- [P1] MCP integration has conflicting discovery, framing, and identity contracts — Live tools/list returned 13 tools while docs/integration-guide.md claims 8; the binary reported dev via -version but initialize reported 0.1.0; successful tools/call responses omitted isError:false; a
+- [P2] Advertised interactive documentation is only a static specification index — The /docs endpoint had no request forms or execution controls and only linked OpenAPI JSON/YAML, contradicting the interactive-docs claim while leaving the raw specifications accessible.
+- [P2] HTTP and relay wire contracts drift from live behavior — GET /health returned valid JSON with Content-Type text/plain despite OpenAPI declaring application/json, and relay subscribers received a bare event object although the documentation does not define t
+- [P2] Core workflows are fast and provide demonstrated real value despite setup friction — First health success took 1.13 seconds; the signed demo completed register/deliver/retrieve/ack, WebSocket pub/sub delivered the exact event after a 101 upgrade and HTTP 202 publish, negative authenti
