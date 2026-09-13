@@ -87,3 +87,13 @@ Promise: {"entry_point":"cmd/server (built as ./bin/crier; default port :8767)",
 - [P1] Advertised wildcard subscriptions are unsupported — The OpenAPI topic description promises wildcard subscribers, but subscribing to dogfood.* returned HTTP 400 without an explanatory reason; only exact-topic pub/sub was verified working.
 - [P1] Demo reports guard state from the wrong configuration source — examples/demo.sh warned that the guard was enabled and failing open because DEEPSEEK_API_KEY was unset, while the tested server log showed the effective configuration was CR_GUARD_ENABLED=false, makin
 - [P2] Documented startup sequence performs a redundant rebuild — Running make build followed by make run compiled the server twice; despite this, health and docs returned 200 and first success was reached in 23.7 seconds.
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"cmd/server/main.go (builds bin/crier; optional MCP bridge: cmd/crier-mcp/main.go)","promise":"Promise: this project claims a user can connect autonomous agents through pub/sub, peer-to-peer WebSockets, discoverable identities, and durable inbox messaging by running the Crier HTTP/Web
+
+- [P1] Documented tester workflow fails under default authentication settings — TESTERS.md registers agents without retaining private keys, but CR_REQUIRE_AGENT_SIG=true by default; its unsigned inbox GET returned 401, so a real user cannot complete the documented manual workflow
+- [P1] Advertised interactive API documentation is not interactive — The live /docs endpoint returned a static index linking JSON and YAML specifications, with no controls for issuing the requests that TESTERS.md says users can fire from the browser.
+- [P1] Demo reports an incorrect effective guard state — examples/demo.sh warned that the guard was enabled and failing open because DEEPSEEK_API_KEY was unset, while the running server logged CR_GUARD_ENABLED=false; this makes security-relevant output untrustworthy.
+- [P2] Documented command sequence performs redundant builds — make build, direct go build, and make run all succeeded, but make run depends on make build, causing the server to be compiled three times when the requested commands are followed sequentially.
+- [P2] Core message-bus workflow works when using the runnable demo — The isolated server reached 200 /health in 20.9 seconds, and the demo completed registration, delivery, signed retrieval, signed acknowledgement, and empty-inbox verification with HTTP 201, 201, 200, 204, and 200.
