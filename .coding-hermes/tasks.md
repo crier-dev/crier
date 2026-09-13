@@ -77,3 +77,13 @@ Promise: {"entry_point":"Primary: cmd/server builds bin/crier, a Go HTTP/WebSock
 - [P1] Official operator recipes fail under their documented defaults — The relay publish example returned 401 until X-Agent-ID was added, and TESTERS.md starts with CR_REQUIRE_AGENT_SIG=true while its unsigned inbox GET and webhook PATCH omit required signatures; the uns
 - [P2] MCP and guard documentation is stale or misleading — Live tools/list returned 13 tools rather than the documented 8, and examples/demo.sh warned that the guard was ON because the client lacked DEEPSEEK_API_KEY even though the running server log proved C
 - [P2] Startup lacks collision-safe guidance — The documented :8767 startup failed because another Crier listener occupied the port; using verified port 18877 worked, but discovery and alternate-port verification required manual operator investiga
+
+## Dogfood Findings (2026-09-13)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"cmd/server (built as ./bin/crier; default port :8767)","promise":"Promise: this project claims a user can connect autonomous agents through pub/sub, peer-to-peer messaging, discoverable identities, and durable inboxes by using the Crier HTTP/WebSocket message bus.","readme_present":t
+
+- [P1] Core messaging works, but the documented tester workflow fails under default authentication — The runnable demo completed registration, delivery, signed retrieval, acknowledgement, and empty-inbox verification; exact-topic WebSocket pub/sub also delivered an event. However, TESTERS.md creates 
+- [P1] Inbox validation contradicts the published API contract — POST /agents/scout-bob/inbox with an empty JSON object returned 201 and queued a payload-less message, although OpenAPI marks payload as required and promises HTTP 400 for invalid bodies.
+- [P1] Advertised wildcard subscriptions are unsupported — The OpenAPI topic description promises wildcard subscribers, but subscribing to dogfood.* returned HTTP 400 without an explanatory reason; only exact-topic pub/sub was verified working.
+- [P1] Demo reports guard state from the wrong configuration source — examples/demo.sh warned that the guard was enabled and failing open because DEEPSEEK_API_KEY was unset, while the tested server log showed the effective configuration was CR_GUARD_ENABLED=false, makin
+- [P2] Documented startup sequence performs a redundant rebuild — Running make build followed by make run compiled the server twice; despite this, health and docs returned 200 and first success was reached in 23.7 seconds.
