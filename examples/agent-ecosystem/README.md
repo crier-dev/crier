@@ -112,9 +112,9 @@ bunker exec my-lab -- bash -c 'cd ~/agent-ecosystem && docker compose run --rm b
 # poke the stack from outside: http://<bunker-ip>:30001/health etc.
 ```
 
-### Live bunker verification (2026-08-24, bunker-las-04 / crier-lab)
+### Live bunker verification (2026-08-24, bunker-server / crier-lab)
 
-The stack is deployed and verified live on `bunker-las-04` (`crier-lab` agent,
+The stack is deployed and verified live on `bunker-server` (`crier-lab` agent,
 default host ports 18767/19002/19101/19102 — override via `CRIER_HOST_PORT` /
 `SINK_HOST_PORT` / `PI_HOST_PORT` / `OPENCODE_HOST_PORT` per the agent's port
 range). All four agents
@@ -122,7 +122,7 @@ range). All four agents
 full battery passes remotely with the guard matrix enabled (real DeepSeek
 verdicts): **8 pass / 0 fail / 0 skip** — clean payload 201, injection
 `403 GUARD_BLOCKED` with structured verdict. Raw evidence:
-`battery/evidence/remote-bunker-las-04-2026-08-24.jsonl`.
+`battery/evidence/remote-bunker-server-2026-08-24.jsonl`.
 
 ## Config knobs
 

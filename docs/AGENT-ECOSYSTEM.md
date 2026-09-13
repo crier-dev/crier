@@ -305,7 +305,7 @@ makes the battery CI-friendly: `docker compose run --rm battery` fails the job o
 4. Rebuild the battery image with `--build` and re-run; commit the probe with the battery.sh
    change (the evidence file lives on a volume — never commit your local run's evidence
    unless it is a deliberate live-verification record like
-   `battery/evidence/remote-bunker-las-04-2026-08-24.jsonl`).
+   `battery/evidence/remote-bunker-server-2026-08-24.jsonl`).
 
 ## 4. Bunker deployment walkthrough
 
@@ -348,10 +348,10 @@ bunker exec my-lab -- bash -c 'cd /home/bunker-my-lab/agent-ecosystem && docker 
 curl -s http://<bunker-ip>:30001/health
 ```
 
-**Live-proven** 2026-08-24 on `bunker-las-04` (agent `crier-lab`): all agents registered and
+**Live-proven** 2026-08-24 on `bunker-server` (agent `crier-lab`): all agents registered and
 answered online, full battery passed remotely with the guard matrix enabled (real DeepSeek
 verdicts), evidence committed at
-`examples/agent-ecosystem/battery/evidence/remote-bunker-las-04-2026-08-24.jsonl`.
+`examples/agent-ecosystem/battery/evidence/remote-bunker-server-2026-08-24.jsonl`.
 
 ### 4.2 Port mapping on a bunker
 
@@ -398,7 +398,7 @@ For a single crier relay instead of the full stack, `scripts/bunker-deploy.sh` a
 same prebuild/save/scp/load/run cycle:
 
 ```
-bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host 100.95.199.98]
+bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host localhost]
                  [--port 30001] [--image crier:test]
 ```
 
@@ -420,7 +420,7 @@ self-hosted bunker runner for deploy/battery jobs and `ubuntu-latest` for the im
 | Job | Runner | Needs | Triggers | What it does |
 |---|---|---|---|---|
 | `docker-image` | ubuntu-latest | — | **push only** | `docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ...:latest .`; login GHCR with `secrets.GITHUB_TOKEN`; push both tags |
-| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30011 --agent crier-lab --sink http://100.97.236.14:19012`; env `DEEPSEEK_API_KEY` + `EVIDENCE=/tmp/bunker-matrix-ci.jsonl` |
+| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host localhost --port 30011 --agent crier-lab --sink http://localhost:19012`; env `DEEPSEEK_API_KEY` + `EVIDENCE=/tmp/bunker-matrix-ci.jsonl` |
 | `ecosystem-battery` | [self-hosted, bunker] | — | **dispatch \| schedule only — never push** | `cd examples/agent-ecosystem && docker compose up -d --build && docker compose run --rm battery` with ports `28767/29002/29101/29102`; evidence captured after (below) |
 
 Both deploy jobs are gated (`if: always() && ...`) so a failed image build does not leave
@@ -431,9 +431,9 @@ intermediate commit is waste, the nightly + manual triggers cover it.
 
 - **Triggers**: `workflow_dispatch` (manual — the "Run workflow" button), `push` to `main`
   (image + matrix only), `schedule` — cron `30 6 * * *` (nightly 06:30 UTC, all jobs).
-- **Ports**: the matrix relay deploys to `bunker-las-04:30011` (inside crier-lab's
+- **Ports**: the matrix relay deploys to `bunker-server:30011` (inside crier-lab's
   30000–30099 range); its blocking cell needs a live echo sink answering the
-  `openai-compatible` contract at `http://100.97.236.14:19012` (systemd unit
+  `openai-compatible` contract at `http://localhost:19012` (systemd unit
   `crier-ci-sink.service` on the control node — do not substitute
   `examples/agent-ecosystem/sink/echo_sink.py`, it replies `{"reply": ...}` which the matrix's
   `choices.0.message.content` extraction cannot read). The ecosystem battery uses
@@ -541,7 +541,7 @@ containers, don't just export the var).
 - `specs/AGENT-ECOSYSTEM.md` (CR-SPEC-003) — the design authority: harness matrix, wiring
   contract, battery/CI/bunker contracts, config knobs, non-goals.
 - `examples/agent-ecosystem/README.md` — runnable quickstart + live bunker verification note.
-- `examples/agent-ecosystem/battery/evidence/remote-bunker-las-04-2026-08-24.jsonl` — real
+- `examples/agent-ecosystem/battery/evidence/remote-bunker-server-2026-08-24.jsonl` — real
   key-mode battery evidence from the live bunker deployment.
 - `scripts/bunker-deploy.sh` / `scripts/bunker-matrix.sh` — single-relay deploy + config
   matrix batteries.

@@ -181,7 +181,7 @@ two named templates:
   (`{"model": "{{agent.model|default:deepseek-v4-flash}}", "messages": [{"role": "user",
   "content": "{{payload.text}}"}], "stream": false}`) and the reply is extracted from
   `choices.0.message.content`. Used by the bunker-matrix **blocking cell** (§6.2) against the
-  CI echo sink at `http://100.97.236.14:19012` (`/home/kara/bin/crier-ci-sink.py`,
+  CI echo sink at `http://localhost:19012` (`~/bin/crier-ci-sink.py`,
   systemd unit `crier-ci-sink.service`), which answers that contract with
   `{"choices": [{"message": {"content": "ECHO: <text>"}}]}`.
 - `hermes-http-gateway` exists in the named registry (session-aware variant of
@@ -306,7 +306,7 @@ bunker runner** (`runs-on: [self-hosted, bunker]`) for the deploy/battery jobs a
 | Job | Runner | Needs | Triggers | What it does |
 |---|---|---|---|---|
 | `docker-image` | ubuntu-latest | — | **push only** (`if: github.event_name == 'push'`) | `docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ...:latest .`; login GHCR with `secrets.GITHUB_TOKEN`; push both tags (`permissions: packages: write`) |
-| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30011 --agent crier-lab --sink http://100.97.236.14:19012`; env `DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}`, `EVIDENCE: /tmp/bunker-matrix-ci.jsonl` |
+| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host localhost --port 30011 --agent crier-lab --sink http://localhost:19012`; env `DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}`, `EVIDENCE: /tmp/bunker-matrix-ci.jsonl` |
 | `ecosystem-battery` | [self-hosted, bunker] | — | **dispatch \| schedule only — never push** | `cd examples/agent-ecosystem && docker compose up -d --build && docker compose run --rm battery` with ports 28767/29002/29101/29102; captures evidence (below) |
 
 Both deploy jobs are gated by `if: always() && (...)` so a failed image build does not leave
@@ -323,7 +323,7 @@ probes it. Four cells, each redeploying the relay with a different env file:
 | `guard-on` | `CR_REQUIRE_AGENT_SIG=false` + `DEEPSEEK_API_KEY` + `CR_GUARD_DEFAULT_POLICY={"id":"default","providers":[{"provider":"deepseek","model":"deepseek-v4-flash","base_url":"https://api.deepseek.com/v1","api_key_ref":"env:DEEPSEEK_API_KEY"}]}` | `guard-on clean` → 201; `guard-on injection` → 403 `GUARD_BLOCKED` |
 | `guard-off` | `CR_REQUIRE_AGENT_SIG=false` + `CR_GUARD_ENABLED=false` | `guard-off clean` → 201; `guard-off injection delivered` → **201** (guard bypassed) |
 | `fail-closed` | `CR_REQUIRE_AGENT_SIG=false` + per-agent policy `{"id":"dead","fail_closed":true,"providers":[{"provider":"custom","model":"m","base_url":"http://127.0.0.1:9","api_key_ref":"env:DEEPSEEK_API_KEY"}]}` (dead provider) | `fail-closed clean blocked` → 403; `fail-closed injection blocked` → 403 (any message blocked on provider failure) |
-| `blocking` | plain relay + `PATCH /agents/blocking` webhook `{"url":"$SINK/hooks/blocking","delivery_mode":"blocking","schema_template":"openai-compatible"}` | `blocking round-trip reply` → 200, body contains `ECHO` (needs `--sink`; CI passes the durable echo sink `http://100.97.236.14:19012`) |
+| `blocking` | plain relay + `PATCH /agents/blocking` webhook `{"url":"$SINK/hooks/blocking","delivery_mode":"blocking","schema_template":"openai-compatible"}` | `blocking round-trip reply` → 200, body contains `ECHO` (needs `--sink`; CI passes the durable echo sink `http://localhost:19012`) |
 
 Each cell registers its agent (`guard-on`/`guard-off`/`fail-closed`/`blocking`) with a fresh
 random 64-hex key via the matrix's `register()` helper. Matrix evidence uses
@@ -371,17 +371,17 @@ bunker exec my-lab -- bash -c 'cd ~/agent-ecosystem && docker compose run --rm b
 
 Image names are the compose project-prefixed defaults (`crier-agent-ecosystem-<service>`);
 the battery image must be rebuilt locally whenever battery.sh changes. **Live-proven**
-2026-08-24 on `bunker-las-04` (agent `crier-lab`): all four agents (sink, guarded, opencode,
+2026-08-24 on `bunker-server` (agent `crier-lab`): all four agents (sink, guarded, opencode,
 pi-agent) registered and answered online, full battery passed remotely with the guard matrix
 enabled (real DeepSeek verdicts), evidence committed at
-`examples/agent-ecosystem/battery/evidence/remote-bunker-las-04-2026-08-24.jsonl`.
+`examples/agent-ecosystem/battery/evidence/remote-bunker-server-2026-08-24.jsonl`.
 
 ### 6.2 Single-relay path (bunker-deploy.sh)
 
 For a single crier relay (the bunker-matrix cells):
 
 ```
-bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host 100.95.199.98]
+bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host localhost]
                  [--port 30001] [--image crier:test]
 ```
 
@@ -400,7 +400,7 @@ matrix writes per-cell env files (`/tmp/mx-<cell>.env`) and passes them through.
 - Bunker compose stack: **30001–30004** (`CRIER_HOST_PORT=30001 SINK_HOST_PORT=30002
   PI_HOST_PORT=30003 OPENCODE_HOST_PORT=30004`) — inside the agent's allowed range
   (crier-lab: 30000–30099).
-- Bunker-matrix relay: **30011** on bunker-las-04 (CI passes `--port 30011`).
+- Bunker-matrix relay: **30011** on bunker-server (CI passes `--port 30011`).
 - CI ecosystem-battery on the self-hosted runner: **28767 / 29002 / 29101 / 29102**
   (deliberately distinct from any bunker-agent ports).
 - In-container ports are fixed: crier `8767`, sink `9002`, pi-agent `9101`, opencode `9102`.

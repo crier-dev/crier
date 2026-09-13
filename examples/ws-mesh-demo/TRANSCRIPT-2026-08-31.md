@@ -8,7 +8,7 @@
     built /tmp/tmp.mH9IknpLAs/crier and /tmp/tmp.mH9IknpLAs/ws-mesh-demo
 
 ==> [2/7] start relay on :18767 (auth-disabled)
-time=2026-08-31T12:29:53.586-05:00 level=WARN source=/home/kara/crier/internal/middleware/auth.go:19 msg="auth disabled, all requests pass through (development mode)"
+time=2026-08-31T12:29:53.586-05:00 level=WARN source=~/crier/internal/middleware/auth.go:19 msg="auth disabled, all requests pass through (development mode)"
 {"status":"ok"} <- relay healthy
 
 ==> [3/7] spawn subscriber on /relay/subscribe/demo

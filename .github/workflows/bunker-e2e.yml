@@ -34,24 +34,28 @@ jobs:
         run: docker push ghcr.io/crier-dev/crier:${{ github.sha }} && docker push ghcr.io/crier-dev/crier:latest
 
   bunker-matrix:
-    name: Bunker config-matrix E2E (bunker-las-04)
+    name: Bunker config-matrix E2E
     runs-on: [self-hosted, bunker]
     needs: docker-image
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && needs.docker-image.result == 'success'))
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       EVIDENCE: /tmp/bunker-matrix-ci.jsonl
+      BUNKER_AGENT: ${{ secrets.BUNKER_AGENT }}
+      BUNKER_SERVER: ${{ secrets.BUNKER_SERVER }}
+      BUNKER_HOST: ${{ secrets.BUNKER_HOST }}
+      SINK_URL: ${{ secrets.SINK_URL }}
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure crier-lab agent on bunker-las-04 (720h TTL) + heartbeat
+      - name: Ensure bunker agent exists + heartbeat
         run: |
-          $HOME/go/bin/bunker info crier-lab --server bunker-las-04 >/dev/null 2>&1 \
-            || $HOME/go/bin/bunker spawn crier-lab --server bunker-las-04 --ttl 720h
-          $HOME/go/bin/bunker heartbeat crier-lab --server bunker-las-04
-      - name: Deploy container to bunker-las-04 + run config-matrix battery
+          $HOME/go/bin/bunker info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
+            || $HOME/go/bin/bunker spawn "$BUNKER_AGENT" --server "$BUNKER_SERVER" --ttl 720h
+          $HOME/go/bin/bunker heartbeat "$BUNKER_AGENT" --server "$BUNKER_SERVER"
+      - name: Deploy container to bunker + run config-matrix battery
         run: |
-          bash scripts/bunker-matrix.sh --host 100.95.199.98 --port 30011 \
-            --agent crier-lab --server bunker-las-04 --sink http://100.97.236.14:19012
+          bash scripts/bunker-matrix.sh --host "$BUNKER_HOST" --port 30011 \
+            --agent "$BUNKER_AGENT" --server "$BUNKER_SERVER" --sink "$SINK_URL"
       - name: Attach evidence
         if: always()
         uses: actions/upload-artifact@v4

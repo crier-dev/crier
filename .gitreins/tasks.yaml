@@ -359,14 +359,14 @@ tasks:
   created_at: '2026-08-24T07:24:03.909232+00:00'
   completed_at: '2026-08-24T07:24:11.491194+00:00'
 - id: CR-FEAT-019
-  title: Deploy ecosystem stack on bunker-las-04 crier-lab live
+  title: Deploy ecosystem stack on bunker-server crier-lab live
   criteria:
-  - 'examples/agent-ecosystem is deployed on bunker-las-04 crier-lab (scp + docker
+  - 'examples/agent-ecosystem is deployed on bunker-server crier-lab (scp + docker
     compose up; docker compose v2.39.2 installed on the agent), all ecosystem services
-    healthy over tailnet at 100.95.199.98:18767 (crier relay with agents sink/guarded/opencode/pi-agent
+    healthy over tailnet at localhost:18767 (crier relay with agents sink/guarded/opencode/pi-agent
     registered online), and battery.sh passes against the REMOTE stack (8/8 incl.
     LLM guard matrix: clean 201, injection 403 GUARD_BLOCKED) with captured evidence
-    committed at examples/agent-ecosystem/battery/evidence/remote-bunker-las-04-2026-08-24.jsonl
+    committed at examples/agent-ecosystem/battery/evidence/remote-bunker-server-2026-08-24.jsonl
     (all runs timestamped on the agent''s battery-evidence volume 07:20-07:32Z).'
   status: complete
   created_at: '2026-08-24T07:24:04.088283+00:00'

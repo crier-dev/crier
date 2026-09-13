@@ -5,7 +5,7 @@
   adapter port : 18789
   session_id   : sess-demo-20260820-233059
   thread_id    : thr-demo-20260820-233059 (carried in the deliver payload — see README §session mapping)
-  transcript   : /home/kara/crier/examples/hermes-gateway-demo/TRANSCRIPT-2026-08-20.md
+  transcript   : ~/crier/examples/hermes-gateway-demo/TRANSCRIPT-2026-08-20.md
 
 ══════════════════════════════════════════════════════════
 == [0/7] preflight
@@ -102,4 +102,4 @@ Here’s a quick way to see it:
   inbox        : 2f6e129781c08b86696b2a99 delivered + retrieved + acked by harness-agent
   run artifacts: /tmp/crier-demo.yxA442 (crier.log, adapter.log, json payloads)
 
-DEMO PASSED — transcript: /home/kara/crier/examples/hermes-gateway-demo/TRANSCRIPT-2026-08-20.md
+DEMO PASSED — transcript: ~/crier/examples/hermes-gateway-demo/TRANSCRIPT-2026-08-20.md
