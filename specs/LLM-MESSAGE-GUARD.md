@@ -646,11 +646,17 @@ envelope contains `<empty_payload/>` (the LLM sees a deliberate marker, not a mi
 ### 6.3 Payload size cap
 
 - `payload` bytes > `CR_GUARD_MAX_PAYLOAD_BYTES` (default 65536) → **skip the LLM entirely**:
-  the guard runs the deterministic pattern pre-scan (§7.1) only. A pre-scan hit → `block`
-  (high-confidence patterns only); no hit → `allow` with `risk_level: medium`, `reason:
+  the guard runs the deterministic pattern pre-scan (§7.1) only. A high-confidence pre-scan hit →
+  `block`; a low-confidence (shape-only) hit only → `allow` with `risk_level: medium`, `reason:
+  payload_exceeds_guard_cap: low-confidence prematch only` and the hit names reported in
+  `patterns` (plus `oversize`); no hit → `allow` with `risk_level: medium`, `reason:
   payload_exceeds_guard_cap`, `patterns: ["oversize"]`. Rationale: the guard is a filter, not a
   throughput gate; truncated projections could hide attacks, so over-cap payloads get the cheap
   deterministic check and a visible risk marker instead of a blind LLM pass over a prefix.
+  Confidence is per-pattern (§6.4): `low` marks shape-only evidence that benign payloads trip
+  routinely, so it may never block on its own — the over-cap decision uses only the
+  high-confidence subset, while `blocked`/normal-size paths and the prompt `<prematch>` section
+  keep every (enabled) match.
 - This cap applies to the raw payload bytes, before projection.
 
 ### 6.4 Pattern pre-scan (internal/guard/patterns.go)
@@ -660,21 +666,32 @@ not the projection) that (a) enriches the prompt (`<prematch>` section) and (b) 
 verdict source for over-cap payloads. Built-in seed table (names are stable; regexes are Go
 `regexp` literals, case-insensitive):
 
-| Name | Pattern (Go regexp) | Class |
-|---|---|---|
-| `ignore_previous` | `(?i)ignore\s+(all\s+)?(previous|prior|above)\s+instructions?` | instruction_injection |
-| `system_override` | `(?i)(you\s+are\s+now|from\s+now\s+on|act\s+as)\s+(dan|gpt[-\s]?\w*|an?\s+unrestricted|a\s+new\s+system)` | jailbreak |
-| `no_restrictions` | `(?i)(no\s+(rules|restrictions|filter)|unrestricted\s+mode|without\s+(any\s+)?(rules|limits))` | jailbreak |
-| `hidden_cot` | `(?i)(show\s+(your\s+)?(chain|steps?|reasoning)|think\s+step\s+by\s+step)` | jailbreak |
-| `system_role` | `"role"\s*:\s*"system"` | structured_object |
-| `control_keys` | `"(system|instructions|prompt|tools|schema)"\s*:` | structured_object |
-| `b64_blob` | `[A-Za-z0-9+/]{80,}={0,2}` | masquerade |
-| `stringified_json` | `"(\\u00[0-9a-f]{2}|\\")?[^"]*\\"\\s*[:{]` | masquerade |
-| `disguised_prompt` | `(?i)(this\s+is\s+(not\s+)?(a\s+)?(prompt|instruction)|treat\s+as\s+(data|text))\s*:` | masquerade |
-| `ignore_above` | `(?i)ignore\s+everything\s+above` | instruction_injection |
+| Name | Pattern (Go regexp) | Class | Confidence |
+|---|---|---|---|
+| `ignore_previous` | `(?i)ignore\s+(all\s+)?(previous|prior|above)\s+instructions?` | instruction_injection | high |
+| `system_override` | `(?i)(you\s+are\s+now|from\s+now\s+on|act\s+as)\s+(dan|gpt[-\s]?\w*|an?\s+unrestricted|a\s+new\s+system)` | jailbreak | high |
+| `no_restrictions` | `(?i)(no\s+(rules|restrictions|filter)|unrestricted\s+mode|without\s+(any\s+)?(rules|limits))` | jailbreak | high |
+| `hidden_cot` | `(?i)(show\s+(your\s+)?(chain|steps?|reasoning)|think\s+step\s+by\s+step)` | jailbreak | high |
+| `system_role` | `"role"\s*:\s*"system"` | structured_object | high |
+| `control_keys` | `"(system|instructions|prompt|tools|schema)"\s*:` | structured_object | high |
+| `b64_blob` | `[A-Za-z0-9+/]{80,}={0,2}` | masquerade | **low** |
+| `stringified_json` | `"(\\u00[0-9a-f]{2}|\\")?[^"]*\\"\s*[:{]` | masquerade | high |
+| `disguised_prompt` | `(?i)(this\s+is\s+(not\s+)?(a\s+)?(prompt|instruction)|treat\s+as\s+(data|text))\s*:` | masquerade | high |
+| `ignore_above` | `(?i)ignore\s+everything\s+above` | instruction_injection | high |
 
-`CR_GUARD_PATTERNS_EXTRA` (JSON array of `{"name": "...", "pattern": "...", "class": "..."}`)
-appends patterns at startup; a duplicate name replaces the built-in. Matched names are
+A pattern's confidence is `high` unless declared `low`. Only high-confidence matches may justify
+`block` on the over-cap path (§6.3); low-confidence matches still enrich the prompt and appear in
+`matched_patterns` for normal-size payloads. Seed table as of DF-CRIER-31: `b64_blob` is the only
+low-confidence entry (its `[A-Za-z0-9+/]{80,}` run is tripped by ordinary machine-generated
+bodies — e.g. a hashed/encoded field or a long identifier — so a hit alone is not evidence of an
+attack).
+
+`CR_GUARD_PATTERNS_EXTRA` (JSON array of
+`{"name": "...", "pattern": "...", "class": "...", "confidence": "high"|"low"}`)
+appends patterns at startup; a duplicate name replaces the built-in. `confidence` is optional and
+defaults to `high` (an operator-supplied pattern keeps blocking power unless it is explicitly
+marked weak); a name the scanner does not know is also treated as high-confidence, so an
+unclassifiable pattern can never silently lose its blocking power. Matched names are
 deduplicated, ordered by table order, joined into `<prematch>`, and merged into the final
 `Result.Patterns` (union of prematch names + LLM-reported names, deduplicated, LLM names first).
 Class identifiers in `matched_patterns` are the §1.1 identifiers.

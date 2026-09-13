@@ -153,10 +153,15 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 	prematch := g.scanner.Scan(in.Payload)
 	prematch = filterPrematch(prematch, policy.Checks, g.scanner)
 
-	// Oversize path (§6.3): skip the LLM entirely.
+	// Oversize path (§6.3): skip the LLM entirely. Only high-confidence
+	// prematch hits may block here — low-confidence shape-only evidence
+	// (b64_blob on an ordinary long alphanumeric/base64-like body) is
+	// reported as evidence but cannot hard-block on its own (DF-CRIER-31).
 	if len(in.Payload) > g.maxPayloadBytes {
+		strong := g.scanner.HighConfidence(prematch)
 		var res Result
-		if len(prematch) > 0 {
+		switch {
+		case len(strong) > 0:
 			res = Result{
 				Decision:  DecisionBlock,
 				RiskLevel: RiskHigh,
@@ -164,7 +169,15 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 				Patterns:  prematch,
 				PolicyID:  policy.ID,
 			}
-		} else {
+		case len(prematch) > 0:
+			res = Result{
+				Decision:  DecisionAllow,
+				RiskLevel: RiskMedium,
+				Reason:    "payload_exceeds_guard_cap: low-confidence prematch only",
+				Patterns:  append([]string{"oversize"}, prematch...),
+				PolicyID:  policy.ID,
+			}
+		default:
 			res = Result{
 				Decision:  DecisionAllow,
 				RiskLevel: RiskMedium,

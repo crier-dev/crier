@@ -9,11 +9,29 @@ import (
 // Pattern is one deterministic prematch rule (spec §6.4). Names are stable;
 // regexes are Go regexp literals, case-insensitive where the seed table
 // says so.
+//
+// Confidence classifies how much a match can justify a verdict on its own
+// (spec §6.3: only high-confidence patterns may block an over-cap payload
+// without an LLM call). Empty / any value other than ConfidenceLow counts
+// as high-confidence — unknown patterns fail safe towards blocking.
 type Pattern struct {
-	Name    string `json:"name"`
-	Pattern string `json:"pattern"`
-	Class   string `json:"class"`
+	Name       string `json:"name"`
+	Pattern    string `json:"pattern"`
+	Class      string `json:"class"`
+	Confidence string `json:"confidence,omitempty"`
 }
+
+// Pattern confidence levels (spec §6.3 / §6.4).
+const (
+	// ConfidenceHigh is the default: the match is specific enough to act on
+	// by itself (explicit injection/jailbreak text, control keys, structural
+	// escapes).
+	ConfidenceHigh = "high"
+	// ConfidenceLow marks shape-only evidence that benign payloads trip
+	// routinely (a long base64-like run), so it may enrich the prompt and be
+	// reported, but must not block an over-cap payload on its own.
+	ConfidenceLow = "low"
+)
 
 // SeedPatterns is the built-in prematch table (spec §6.4). Class
 // identifiers are the §1.1 identifiers (instruction_injection, jailbreak,
@@ -25,7 +43,7 @@ var SeedPatterns = []Pattern{
 	{Name: "hidden_cot", Pattern: `(?i)(show\s+(your\s+)?(chain|steps?|reasoning)|think\s+step\s+by\s+step)`, Class: "jailbreak"},
 	{Name: "system_role", Pattern: `"role"\s*:\s*"system"`, Class: "structured_object"},
 	{Name: "control_keys", Pattern: `"(system|instructions|prompt|tools|schema)"\s*:`, Class: "structured_object"},
-	{Name: "b64_blob", Pattern: `[A-Za-z0-9+/]{80,}={0,2}`, Class: "masquerade"},
+	{Name: "b64_blob", Pattern: `[A-Za-z0-9+/]{80,}={0,2}`, Class: "masquerade", Confidence: ConfidenceLow},
 	{Name: "stringified_json", Pattern: `"(\\u00[0-9a-f]{2}|\\")?[^"]*\\"\s*[:{]`, Class: "masquerade"},
 	{Name: "disguised_prompt", Pattern: `(?i)(this\s+is\s+(not\s+)?(a\s+)?(prompt|instruction)|treat\s+as\s+(data|text))\s*:`, Class: "masquerade"},
 	{Name: "ignore_above", Pattern: `(?i)ignore\s+everything\s+above`, Class: "instruction_injection"},
@@ -39,9 +57,10 @@ type PreScanner struct {
 }
 
 type compiledPattern struct {
-	name  string
-	class string
-	re    *regexp.Regexp
+	name    string
+	class   string
+	lowConf bool
+	re      *regexp.Regexp
 }
 
 // NewPreScanner compiles the seed table plus CR_GUARD_PATTERNS_EXTRA (a
@@ -75,7 +94,12 @@ func NewPreScanner(extraJSON string) (*PreScanner, error) {
 		if err != nil {
 			return nil, fmt.Errorf("guard: pattern %q: %w", p.Name, err)
 		}
-		sc.patterns = append(sc.patterns, compiledPattern{name: p.Name, class: p.Class, re: re})
+		sc.patterns = append(sc.patterns, compiledPattern{
+			name:    p.Name,
+			class:   p.Class,
+			lowConf: p.Confidence == ConfidenceLow,
+			re:      re,
+		})
 	}
 	return sc, nil
 }
@@ -89,6 +113,28 @@ func (s *PreScanner) Scan(payload []byte) []string {
 		if p.re.Match(payload) && !seen[p.name] {
 			seen[p.name] = true
 			out = append(out, p.name)
+		}
+	}
+	return out
+}
+
+// HighConfidence returns the subset of prematch names that may block the
+// oversize fast path (spec §6.3: high-confidence patterns only), preserving
+// input (table) order. Names the scanner does not know are treated as
+// high-confidence: an unclassifiable pattern must never silently lose its
+// blocking power.
+func (s *PreScanner) HighConfidence(names []string) []string {
+	var out []string
+	for _, name := range names {
+		low := false
+		for _, p := range s.patterns {
+			if p.name == name {
+				low = p.lowConf
+				break
+			}
+		}
+		if !low {
+			out = append(out, name)
 		}
 	}
 	return out

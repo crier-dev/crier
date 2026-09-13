@@ -85,7 +85,14 @@ make run
 > or inbox-stored. For local dev without an API key, set
 > `CR_GUARD_ENABLED=false`; to exercise the guard, set `DEEPSEEK_API_KEY`.
 > Without a key the guard call fails and the guard fails OPEN — the
-> delivery proceeds, marked `X-Crier-Guard-Error: true`. See
+> delivery proceeds, marked `X-Crier-Guard-Error: true`. Note the over-cap
+> path is deterministic: it runs regardless of the guard LLM's health, so a
+> keyless deployment still gets it. If a workload legitimately sends
+> machine-generated bodies above the cap, raise
+> `CR_GUARD_MAX_PAYLOAD_BYTES`, or silence the noisy class per policy
+> (`"checks":{"masquerade":false}` — the class's prematch patterns are then
+> suppressed); extra patterns appended via `CR_GUARD_PATTERNS_EXTRA` opt
+> into the low-confidence treatment with `"confidence":"low"`. See
 > [Message guard (LLM)](#message-guard-llm).
 
 ### Try it
@@ -260,7 +267,7 @@ Every inbound delivery is classified by an LLM message guard before it reaches t
 - **Per-agent policy** — guard policy is configured at agent registration: `"guard":{"policies":[{"id":"default"}]}` (at least one policy required; invalid config → 400). A bare id resolves to the built-in named policy; inline policies (`{model, base_url, api_key_ref, fail_closed, action, providers, ...}`) are accepted, and `channel_match` globs (`session:*`, `thread:*`) scope a policy to specific channels. Agents without a guard config use the server-wide default (`CR_GUARD_DEFAULT_POLICY`, built-in `default` when unset).
 - **Providers** — each policy declares a failover chain (`providers`, implicit `[deepseek]` when omitted). Presets: `deepseek` (default, model `deepseek-v4-flash`, thinking disabled — the preset hard-rejects `thinking_enabled`), `groq` (default `gpt-oss-120b`), `nvidia` (default `gemma-4-31b`), or `custom` (requires `base_url` + `api_key_ref`). API keys are referenced as `env:VAR` and never stored inline (deepseek preset → `DEEPSEEK_API_KEY`). The router takes the first healthy provider: one retry (250ms backoff) on 429/5xx/network errors, a per-endpoint circuit breaker (`CR_GUARD_CIRCUIT_*`), a concurrency cap (`CR_GUARD_MAX_CONCURRENT`), and one per-message time budget across the whole chain (`CR_GUARD_TIMEOUT_MS`, default 10s).
 - **Kanban output (opt-in)** — a policy can enable fire-and-forget kanban cards (`"kanban":{"enabled":true,"on":"block"|"all","assignee":...,"board_url":...}`): each scoped verdict posts a card (`[crier-guard] <agent> <decision>: <reason>`, full verdict metadata, sender, truncated payload excerpt) through the `hermes kanban create` CLI or an HTTP sink (`CR_GUARD_KANBAN_URL`). Writes are bounded (queue `CR_GUARD_KANBAN_QUEUE`, default 100; 10s per card) and never fail the delivery — full queue drops + counts, write failures log + count.
-- Payloads above `CR_GUARD_MAX_PAYLOAD_BYTES` (default 65536) skip the LLM entirely: a prematch hit blocks, otherwise the delivery is allowed (risk medium).
+- Payloads above `CR_GUARD_MAX_PAYLOAD_BYTES` (default 65536) skip the LLM entirely — the deterministic pre-scan is the only verdict source. Only **high-confidence** prematch hits (explicit injection text, control keys, structural escapes) block; a hit from a low-confidence shape pattern (currently `b64_blob`, an 80+ char alphanumeric/base64-like run that ordinary machine-generated bodies trip) is reported as evidence but not blocked: delivery is allowed with `risk_level: medium` and `reason: payload_exceeds_guard_cap: low-confidence prematch only`. No hit at all → allow, risk medium, `reason: payload_exceeds_guard_cap`, `patterns: ["oversize"]`.
 
 Full spec: [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) (CR-SPEC-002).
 
@@ -313,7 +320,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_GUARD_MAX_CONCURRENT` | `8` | Maximum concurrent guard LLM calls. |
 | `CR_GUARD_CIRCUIT_THRESHOLD` | `10` | Consecutive failures (per base URL + model) that open the provider circuit breaker. |
 | `CR_GUARD_CIRCUIT_COOLDOWN_S` | `300` | How long a tripped circuit stays open (seconds); the first call after expiry is the probe. |
-| `CR_GUARD_MAX_PAYLOAD_BYTES` | `65536` | Payloads larger than this skip the LLM entirely (prematch hit → block, else allow, risk medium). |
+| `CR_GUARD_MAX_PAYLOAD_BYTES` | `65536` | Payloads larger than this skip the LLM entirely (risk medium). Only high-confidence prematch hits block; low-confidence shape hits (`b64_blob`) allow with `reason: payload_exceeds_guard_cap: low-confidence prematch only`. |
 | `CR_GUARD_RENDER_MAX_BYTES` | `32768` | Byte cap on the payload projection fed to the LLM. |
 | `CR_GUARD_DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Base URL override for the deepseek provider preset. |
 | `CR_GUARD_MODEL` | `deepseek-v4-flash` | Default model override for the deepseek provider preset. |

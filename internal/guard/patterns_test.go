@@ -86,6 +86,54 @@ func TestPreScanner_ExtraPatterns(t *testing.T) {
 	}
 }
 
+// DF-CRIER-31: only high-confidence prematch names may block the oversize
+// fast path (spec §6.3). b64_blob is shape-only evidence that benign
+// payloads trip routinely; every explicit pattern stays high-confidence,
+// and unknown names fail safe (high) so a pattern the scanner cannot
+// classify never quietly loses its blocking power.
+func TestPreScanner_HighConfidenceClassification(t *testing.T) {
+	sc, err := NewPreScanner("")
+	if err != nil {
+		t.Fatalf("NewPreScanner: %v", err)
+	}
+	if got := sc.HighConfidence([]string{"b64_blob"}); len(got) != 0 {
+		t.Errorf("HighConfidence([b64_blob]) = %v, want empty (low confidence)", got)
+	}
+	for _, name := range []string{
+		"ignore_previous", "ignore_above", "system_override", "no_restrictions",
+		"hidden_cot", "system_role", "control_keys", "stringified_json", "disguised_prompt",
+	} {
+		if got := sc.HighConfidence([]string{name}); len(got) != 1 || got[0] != name {
+			t.Errorf("HighConfidence([%s]) = %v, want [%s]", name, got, name)
+		}
+	}
+	// Mixed input keeps only the explicit names, preserving input order.
+	if got := sc.HighConfidence([]string{"b64_blob", "ignore_previous"}); len(got) != 1 || got[0] != "ignore_previous" {
+		t.Errorf("HighConfidence(mixed) = %v, want [ignore_previous]", got)
+	}
+	if got := sc.HighConfidence(nil); len(got) != 0 {
+		t.Errorf("HighConfidence(nil) = %v, want empty", got)
+	}
+}
+
+// DF-CRIER-31: CR_GUARD_PATTERNS_EXTRA entries default to high-confidence
+// (no weakening of operator-supplied patterns) and may opt into low
+// confidence with "confidence": "low".
+func TestPreScanner_ExtraPatternConfidence(t *testing.T) {
+	extra := `[{"name":"my_weak","pattern":"(?i)weak\\s+marker","class":"masquerade","confidence":"low"},
+	           {"name":"my_strong","pattern":"(?i)strong\\s+marker","class":"jailbreak"}]`
+	sc, err := NewPreScanner(extra)
+	if err != nil {
+		t.Fatalf("NewPreScanner: %v", err)
+	}
+	if got := sc.HighConfidence([]string{"my_weak"}); len(got) != 0 {
+		t.Errorf("HighConfidence([my_weak]) = %v, want empty (declared low)", got)
+	}
+	if got := sc.HighConfidence([]string{"my_strong"}); len(got) != 1 || got[0] != "my_strong" {
+		t.Errorf("HighConfidence([my_strong]) = %v, want [my_strong] (unset = high)", got)
+	}
+}
+
 func TestPreScanner_InvalidInput(t *testing.T) {
 	if _, err := NewPreScanner(`not json`); err == nil {
 		t.Fatal("invalid CR_GUARD_PATTERNS_EXTRA JSON must fail fast")
