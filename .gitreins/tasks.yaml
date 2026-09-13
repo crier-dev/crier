@@ -486,3 +486,12 @@ tasks:
   status: complete
   created_at: '2026-09-13T01:22:52.857281+00:00'
   completed_at: '2026-09-13T01:40:06.503859+00:00'
+- id: DF-CRIER-33
+  title: MemoryStore inline lease-expiry release
+  criteria:
+  - MemoryStore.Retrieve returns a previously-leased message once its lease duration
+    elapses WITHOUT PurgeExpired running (unit test with short lease proves it); matches
+    PostgresStore inline lease_expires_at semantics; go build/vet/test all green
+  status: complete
+  created_at: '2026-09-13T10:31:23.805344+00:00'
+  completed_at: '2026-09-13T10:34:11.810307+00:00'
