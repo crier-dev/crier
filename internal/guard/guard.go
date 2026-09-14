@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/crier-dev/crier/internal/middleware"
 )
 
 // Filter is the guard choke point (spec §2). A nil Filter disables the
@@ -189,27 +191,27 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		res.MessageID = in.MessageID
 		res.DurationMs = time.Since(start).Milliseconds()
 		g.record(res)
-		g.audit(agentID, in, res, len(in.Payload))
+		g.audit(ctx, agentID, in, res, len(in.Payload))
 		g.maybeEnqueueCard(agentID, in, policy, res)
 		return res, nil
 	}
 
 	projection, err := Render(in.Payload, g.renderMaxBytes)
 	if err != nil {
-		return g.errorResult(agentID, in, policy, start, len(in.Payload), fmt.Errorf("render: %w", err)), nil
+		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), fmt.Errorf("render: %w", err)), nil
 	}
 	sys := SystemPrompt(policy.Checks)
 	user := UserMessage(in, prematch, projection)
 
 	provider, model, content, err := g.router.Check(ctx, policy, sys, user)
 	if err != nil {
-		return g.errorResult(agentID, in, policy, start, len(in.Payload), err), nil
+		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), err), nil
 	}
 	g.llmCall(provider, model)
 
 	verdict, err := ParseVerdict(content)
 	if err != nil {
-		return g.errorResult(agentID, in, policy, start, len(in.Payload), err), nil
+		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), err), nil
 	}
 
 	// Union of prematch names + LLM-reported names, deduplicated, LLM names
@@ -262,7 +264,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		}
 	}
 	g.record(res)
-	g.audit(agentID, in, res, len(in.Payload))
+	g.audit(ctx, agentID, in, res, len(in.Payload))
 	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res, nil
 }
@@ -271,7 +273,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 // (deliver, decision allow, risk medium), fail-closed per policy (apply
 // policy.action — default block — with risk high). Errored is always set
 // (record() counts it in errorsTotal).
-func (g *Guard) errorResult(agentID string, in Input, policy Policy, start time.Time, payloadBytes int, cause error) Result {
+func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, policy Policy, start time.Time, payloadBytes int, cause error) Result {
 	reason := "guard_error: " + strings.TrimPrefix(cause.Error(), "guard: ")
 	res := Result{
 		RiskLevel:  RiskMedium,
@@ -292,7 +294,7 @@ func (g *Guard) errorResult(agentID string, in Input, policy Policy, start time.
 		res.Decision = DecisionAllow
 	}
 	g.record(res)
-	g.audit(agentID, in, res, payloadBytes)
+	g.audit(ctx, agentID, in, res, payloadBytes)
 	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res
 }
@@ -352,8 +354,11 @@ func mergePatterns(llm, prematch []string) []string {
 
 // audit writes the spec §7.3 line (level=info; level=warn when decision
 // != allow or errored) plus the blocked-delivery warn line with
-// event=guard_blocked.
-func (g *Guard) audit(agentID string, in Input, r Result, payloadBytes int) {
+// event=guard_blocked. The line carries the request's correlation id when the
+// delivery came over HTTP (DF-CRIER-141) — the guard's decision line is the
+// choke-point record the relay/inbox/webhook lines are joined to, so it is
+// annotated rather than duplicated.
+func (g *Guard) audit(ctx context.Context, agentID string, in Input, r Result, payloadBytes int) {
 	args := []any{
 		"msg", in.MessageID,
 		"target", agentID,
@@ -362,6 +367,7 @@ func (g *Guard) audit(agentID string, in Input, r Result, payloadBytes int) {
 		"kind", in.Kind,
 		"decision", r.Decision,
 		"risk", r.RiskLevel,
+		"request_id", middleware.RequestIDFromContext(ctx),
 		"provider", r.Provider,
 		"model", r.Model,
 		"patterns", strings.Join(r.Patterns, ","),

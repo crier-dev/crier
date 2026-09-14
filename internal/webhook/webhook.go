@@ -376,3 +376,21 @@ func min(a, b int) int {
 var logf = func(msg string, args ...any) {
 	slog.Info(msg, args...)
 }
+
+// logfWarn is the warn-level logger hook (DF-CRIER-141): failed delivery
+// attempts are warn, dispatch/success are info.
+var logfWarn = func(msg string, args ...any) {
+	slog.Warn(msg, args...)
+}
+
+// endpointLabel renders a webhook endpoint for logging: host + path only. The
+// query string is DROPPED (it may carry an auth token) and an unparseable URL
+// yields "" rather than the raw value, so no log line can leak a credential
+// (DF-CRIER-141).
+func endpointLabel(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host + u.Path
+}

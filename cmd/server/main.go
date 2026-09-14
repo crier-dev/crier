@@ -88,7 +88,12 @@ func run(args []string) int {
 
 	r := mux.NewRouter()
 
-	// Middleware
+	// Middleware. RequestID is registered FIRST so it is the outermost
+	// wrapper (gorilla/mux applies the first Use on the outside): every
+	// request — including 401s and the public /health and /version routes —
+	// gets a correlation id, echoed as X-Request-Id and carried in the
+	// request context for the handler log lines (DF-CRIER-141).
+	r.Use(middleware.RequestID)
 	r.Use(middleware.Auth(cfg.AuthToken))
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)

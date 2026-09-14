@@ -18,6 +18,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -589,7 +590,10 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if _, err := h.webhooks.Deliver(id, target.Webhook, env); err != nil {
+		// DeliverContext carries the request's correlation id into the
+		// driver so the background webhook dispatch/outcome log lines can be
+		// joined to this request (DF-CRIER-141).
+		if _, err := h.webhooks.DeliverContext(r.Context(), id, target.Webhook, env); err != nil {
 			// Queue path handled inside the driver; the deliver call
 			// itself only fails on config errors — surface those.
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
@@ -597,6 +601,17 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		}
 		// Async/batch webhook delivery is fire-and-forget: the sender gets
 		// 202 Accepted, delivery happens in the background queue (spec §4).
+		// The accept is logged with the correlation context (DF-CRIER-141)
+		// so the sender's request can be joined to the background dispatch
+		// and outcome lines the webhook driver emits.
+		slog.Info("inbox deliver accepted",
+			"target", id,
+			"sender", req.Sender,
+			"message_id", entry.ID,
+			"mode", mode,
+			"transport", "webhook",
+			"request_id", middleware.RequestIDFromContext(r.Context()),
+		)
 		writeJSON(w, http.StatusAccepted, deliverResponse{
 			ID:    entry.ID,
 			Guard: guardInDeliverResponse(guardMeta),
@@ -619,6 +634,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("inbox deliver accepted",
+		"target", id,
+		"sender", req.Sender,
+		"message_id", entry.ID,
+		"transport", "inbox",
+		"request_id", middleware.RequestIDFromContext(r.Context()),
+	)
 	writeJSON(w, http.StatusCreated, deliverResponse{
 		ID:        entry.ID,
 		ExpiresAt: &entry.ExpiresAt,

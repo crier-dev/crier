@@ -7,6 +7,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+
+	"github.com/crier-dev/crier/internal/middleware"
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -40,7 +42,15 @@ func HandleConnect(m *Mesh) http.HandlerFunc {
 		pc.StartReadLoop()
 		m.AcceptPeer(agentID, pc)
 
-		slog.Info("mesh peer connected", "agent_id", agentID)
+		// WS connect is an Info event (DF-CRIER-141); the accept/disconnect
+		// pair around it is debug.
+		slog.Info("mesh peer connected", "agent_id", agentID,
+			"request_id", middleware.RequestIDFromContext(r.Context()))
+		m.mu.Lock()
+		peers := len(m.connections)
+		m.mu.Unlock()
+		slog.Debug("mesh: peer accepted", "agent_id", agentID, "peers", peers,
+			"request_id", middleware.RequestIDFromContext(r.Context()))
 	}
 }
 

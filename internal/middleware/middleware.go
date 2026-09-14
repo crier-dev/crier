@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-// Logging logs each request with method, path, status, and duration.
+// Logging logs each request with method, path, status, duration and the
+// X-Request-Id correlation id (DF-CRIER-141). Register it inside RequestID so
+// the id is always present.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -19,6 +21,7 @@ func Logging(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", wrapped.status,
 			"duration", time.Since(start),
+			"request_id", RequestIDFromContext(r.Context()),
 		)
 	})
 }

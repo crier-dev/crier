@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -79,6 +80,7 @@ func (m *Mesh) ConnectPeer(ctx context.Context, peerID, wsURL string) error {
 		m.mu.Lock()
 		delete(m.connections, peerID)
 		m.mu.Unlock()
+		slog.Debug("mesh: peer disconnected", "agent_id", peerID, "error", err)
 	})
 	if err := m.register(ctx, conn); err != nil {
 		conn.Close()
@@ -140,6 +142,8 @@ func (m *Mesh) SendRequest(ctx context.Context, targetID, method, path string, b
 	case resp := <-respCh:
 		return resp, nil
 	case <-timeoutCtx.Done():
+		slog.Debug("mesh: REQUEST timed out", "target", targetID, "message_id", msgID,
+			"timeout", m.config.RequestTimeout)
 		return nil, fmt.Errorf("request to %s timed out after %s", targetID, m.config.RequestTimeout)
 	}
 }
@@ -174,6 +178,7 @@ func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
 		m.mu.Lock()
 		delete(m.connections, agentID)
 		m.mu.Unlock()
+		slog.Debug("mesh: peer disconnected", "agent_id", agentID, "error", err)
 	})
 
 	go m.keepaliveLoop(agentID, conn)
@@ -210,7 +215,11 @@ func (m *Mesh) register(ctx context.Context, conn *PeerConnection) error {
 	if err != nil {
 		return fmt.Errorf("marshal register: %w", err)
 	}
-	return conn.Send(data)
+	if err := conn.Send(data); err != nil {
+		return err
+	}
+	slog.Debug("mesh: REGISTER sent", "agent_id", m.agentID, "message_id", reg.MessageID)
+	return nil
 }
 
 func (m *Mesh) keepaliveLoop(peerID string, conn *PeerConnection) {
@@ -245,11 +254,27 @@ func (m *Mesh) keepaliveLoop(peerID string, conn *PeerConnection) {
 func (m *Mesh) handleMessage(peerID string, data []byte) {
 	var env Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
+		// A frame that is not even an envelope is dropped silently today;
+		// log it so a malformed peer is visible (DF-CRIER-141).
+		slog.Debug("mesh: message dropped (unmarshal)", "peer", peerID, "bytes", len(data))
 		return
 	}
 	switch env.Type {
 	case TypeRequest:
 		m.handleAgentRequest(peerID, data)
+	case TypeRegister, TypeRegisterAck:
+		// The handshake payload is logged at info (agent id + peer) so the
+		// REGISTER lifecycle is traceable. Inbound REGISTER/REGISTER_ACK
+		// still have no state handler in the mesh router — the handshake is
+		// owned by the connecting side (Mesh.register) — so this logs what
+		// arrived rather than claiming it was processed.
+		var reg Register
+		if err := json.Unmarshal(data, &reg); err != nil {
+			slog.Info("mesh: REGISTER received (unparseable payload)", "peer", peerID)
+			return
+		}
+		slog.Info("mesh: REGISTER received", "type", env.Type, "agent_id", reg.AgentID,
+			"peer", peerID, "message_id", reg.MessageID)
 	case TypeResponse:
 		var resp Response
 		if err := json.Unmarshal(data, &resp); err != nil {
@@ -292,6 +317,8 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		}
 		// Agent-initiated request that failed at the target side.
 		m.forwardResponse(errMsg.RequestID, data)
+	default:
+		slog.Debug("mesh: message dropped (unhandled type)", "peer", peerID, "type", env.Type)
 	}
 }
 
@@ -309,6 +336,8 @@ func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
 	targetConn, ok := m.connections[targetID]
 	m.mu.RUnlock()
 	if !ok {
+		slog.Debug("mesh: REQUEST dropped (target peer not connected)",
+			"requester", requesterID, "target", targetID, "message_id", req.MessageID)
 		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
 			ErrCodeControllerOffline, fmt.Sprintf("peer %s not connected", targetID))
 		return
@@ -319,6 +348,9 @@ func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
 	pruneRoutesLocked(m.routes, time.Now())
 	if len(m.routes) >= m.config.MaxPendingRequests {
 		m.routesMu.Unlock()
+		slog.Debug("mesh: REQUEST dropped (route table full)",
+			"requester", requesterID, "target", targetID, "message_id", req.MessageID,
+			"limit", m.config.MaxPendingRequests)
 		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
 			ErrCodeInternal, "mesh route table full")
 		return
@@ -330,6 +362,8 @@ func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
 		m.routesMu.Lock()
 		delete(m.routes, req.MessageID)
 		m.routesMu.Unlock()
+		slog.Debug("mesh: REQUEST dropped (send failed)",
+			"requester", requesterID, "target", targetID, "message_id", req.MessageID, "error", err)
 		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
 			ErrCodeControllerOffline, fmt.Sprintf("deliver to %s: %v", targetID, err))
 	}
@@ -345,6 +379,7 @@ func (m *Mesh) forwardResponse(requestID string, data []byte) {
 	}
 	m.routesMu.Unlock()
 	if !ok {
+		slog.Debug("mesh: RESPONSE dropped (no route for request)", "request_id", requestID)
 		return
 	}
 

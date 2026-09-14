@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/crier-dev/crier/internal/middleware"
 )
 
 // CodeWebhookFailed is the machine-readable error code carried by the
@@ -166,16 +168,28 @@ func (d *Driver) Stop() {
 // Returns (delivered, error); non-blocking modes return (false, nil) to
 // signal "accepted, delivery in background".
 func (d *Driver) Deliver(agentID string, cfg *Config, env *Envelope) (bool, error) {
+	return d.DeliverContext(context.Background(), agentID, cfg, env)
+}
+
+// DeliverContext is Deliver carrying the caller's context: the request
+// correlation id it holds (middleware.RequestIDFromContext, set by the
+// X-Request-Id middleware) rides with the delivery into the queue and the
+// batch buffer, so every dispatch/outcome log line the driver emits for this
+// delivery can be joined to the HTTP request that accepted it
+// (DF-CRIER-141). Deliver keeps the old behavior for callers with no
+// request context.
+func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config, env *Envelope) (bool, error) {
 	if cfg == nil {
 		return false, fmt.Errorf("webhook: nil config for %s", agentID)
 	}
+	rid := middleware.RequestIDFromContext(ctx)
 
 	switch effectiveDeliveryMode(cfg, env) {
 	case "batch":
-		d.bufferEnqueue(agentID, cfg, env)
+		d.bufferEnqueue(agentID, cfg, env, rid)
 		return false, nil
 	case "async":
-		return d.enqueueAsync(agentID, env)
+		return d.enqueueAsync(agentID, env, rid)
 	default:
 		// Legacy immediate-attempt path (blocking callers via Deliver).
 	}
@@ -185,17 +199,19 @@ func (d *Driver) Deliver(agentID string, cfg *Config, env *Envelope) (bool, erro
 	d.mu.Unlock()
 	if deg {
 		// Circuit open: queue without hammering a poisoned endpoint.
-		return false, d.enqueue(agentID, env, 0)
+		return false, d.enqueue(agentID, env, 0, rid)
 	}
 
+	d.logDispatch(agentID, cfg, env, 0, rid)
 	res := d.client.Post(cfg, env, 0)
+	d.logOutcome(agentID, cfg, env, 0, res, rid)
 	if res.Err == nil && !res.Retryable && res.StatusCode >= 200 && res.StatusCode < 300 {
 		d.recordSuccess(agentID)
 		return true, nil
 	}
 	d.recordFailure(agentID, res)
 	// Transient failure / unreachable: queue for redelivery (bounded by retries).
-	return false, d.enqueue(agentID, env, 0)
+	return false, d.enqueue(agentID, env, 0, rid)
 }
 
 // effectiveDeliveryMode resolves the per-message mode: the envelope's own
@@ -212,8 +228,8 @@ func effectiveDeliveryMode(cfg *Config, env *Envelope) string {
 
 // enqueueAsync implements fire-and-forget: the item goes straight to the
 // durable queue and the drain loop is woken to POST it in the background.
-func (d *Driver) enqueueAsync(agentID string, env *Envelope) (bool, error) {
-	if err := d.enqueue(agentID, env, 0); err != nil {
+func (d *Driver) enqueueAsync(agentID string, env *Envelope, rid string) (bool, error) {
+	if err := d.enqueue(agentID, env, 0, rid); err != nil {
 		return false, err
 	}
 	d.wake(d.drainWakeCh)
@@ -233,6 +249,10 @@ func (d *Driver) wake(ch chan struct{}) {
 // budget; the request fails fast with the last error once the budget is
 // exhausted. Per-session FIFO: concurrent blocking deliveries for the same
 // session are serialized (CR-FEAT-004).
+//
+// ctx is also the correlation source (DF-CRIER-141): the id it carries
+// (middleware.RequestIDFromContext) is logged on every dispatch and outcome
+// line, including each in-budget retry.
 func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Config, env *Envelope, budget time.Duration) ([]byte, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("webhook: nil config for %s", agentID)
@@ -240,6 +260,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	if budget <= 0 {
 		budget = 30 * time.Second
 	}
+	rid := middleware.RequestIDFromContext(ctx)
 	release := d.gate.acquire(env.Crier.SessionID)
 	defer release()
 
@@ -255,7 +276,9 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 			}
 			return nil, fmt.Errorf("webhook: blocking delivery timed out after %s", budget)
 		}
+		d.logDispatch(agentID, cfg, env, attempt, rid)
 		res := d.client.Post(cfg, env, attempt)
+		d.logOutcome(agentID, cfg, env, attempt, res, rid)
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			reply, err := d.client.ExtractReply(cfg, res.Body)
 			if err != nil {
@@ -315,13 +338,16 @@ func (g *sessionGate) acquire(sessionID string) func() {
 }
 
 // enqueue stores the item for redelivery. The guard verdict rides along
-// (spec §2.1: redelivery never re-runs the guard).
-func (d *Driver) enqueue(agentID string, env *Envelope, retries int) error {
+// (spec §2.1: redelivery never re-runs the guard), and rid — the accepting
+// request's correlation id, "" for non-HTTP callers — rides along so the
+// background dispatch lines carry it (DF-CRIER-141).
+func (d *Driver) enqueue(agentID string, env *Envelope, retries int, rid string) error {
 	item := &QueueItem{
 		AgentID:   agentID,
 		Envelope:  env,
 		Retries:   retries,
 		CreatedAt: time.Now(),
+		RequestID: rid,
 	}
 	if env != nil && env.Crier.Guard != nil {
 		g := env.Crier.Guard.Result()
@@ -370,9 +396,13 @@ func (d *Driver) drainQueue() {
 		if len(item.Batch) > 0 {
 			// CR-FEAT-005: queued batch items redeliver as ONE batch POST
 			// (the flush failed while the endpoint was down).
+			d.logBatchDispatch(item.AgentID, cfg, len(item.Batch), item.Retries, item.RequestID)
 			res = d.client.PostBatch(cfg, item.Batch, item.Retries)
+			d.logBatchOutcome(item.AgentID, cfg, len(item.Batch), item.Retries, res, item.RequestID)
 		} else {
+			d.logDispatch(item.AgentID, cfg, item.Envelope, item.Retries, item.RequestID)
 			res = d.client.Post(cfg, item.Envelope, item.Retries)
+			d.logOutcome(item.AgentID, cfg, item.Envelope, item.Retries, res, item.RequestID)
 		}
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			d.recordSuccess(item.AgentID)
@@ -546,8 +576,10 @@ type batchBuffer struct {
 }
 
 // add appends an envelope and refreshes the buffer config. The guard
-// verdict rides on the inner envelope (and in the item, spec §2.1).
-func (b *batchBuffer) add(cfg *Config, env *Envelope) {
+// verdict rides on the inner envelope (and in the item, spec §2.1), and rid
+// — the accepting request's correlation id — rides on the item so the flush
+// line can carry it (DF-CRIER-141).
+func (b *batchBuffer) add(cfg *Config, env *Envelope, rid string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.cfg = cfg
@@ -558,6 +590,7 @@ func (b *batchBuffer) add(cfg *Config, env *Envelope) {
 		AgentID:   b.agentID,
 		Envelope:  env,
 		CreatedAt: time.Now(),
+		RequestID: rid,
 	}
 	if env != nil && env.Crier.Guard != nil {
 		g := env.Crier.Guard.Result()
@@ -591,7 +624,7 @@ func (b *batchBuffer) pending() (n int, age time.Duration, cfg *Config) {
 
 // bufferEnqueue routes a batch-mode envelope into the per-agent buffer and
 // wakes the flush loop. Never blocks on the endpoint.
-func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope) {
+func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope, rid string) {
 	d.mu.Lock()
 	buf := d.batches[agentID]
 	if buf == nil {
@@ -599,7 +632,7 @@ func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope) {
 		d.batches[agentID] = buf
 	}
 	d.mu.Unlock()
-	buf.add(cfg, env)
+	buf.add(cfg, env, rid)
 	d.wake(d.flushWakeCh)
 }
 
@@ -687,6 +720,7 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 	for _, it := range items {
 		envs = append(envs, it.Envelope)
 	}
+	d.logBatchDispatch(agentID, cfg, len(envs), 0, batchRequestID(items))
 	res := d.client.PostBatch(cfg, envs, 0)
 	if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 		d.recordSuccess(agentID)
@@ -700,12 +734,14 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		d.recordSuccess(agentID)
 		return
 	}
+	d.logBatchOutcome(agentID, cfg, len(envs), 0, res, batchRequestID(items))
 	d.recordFailure(agentID, res)
 	d.requeueBatch(agentID, items)
 }
 
 // requeueBatch pushes a failed batch into the durable queue as ONE batch
-// item, preserving the coalescing across retries.
+// item, preserving the coalescing across retries. The request correlation id
+// of the flush is carried on (DF-CRIER-141).
 func (d *Driver) requeueBatch(agentID string, items []*QueueItem) {
 	envs := make([]*Envelope, 0, len(items))
 	for _, it := range items {
@@ -716,7 +752,100 @@ func (d *Driver) requeueBatch(agentID string, items []*QueueItem) {
 		Batch:     envs,
 		Retries:   0,
 		CreatedAt: time.Now(),
+		RequestID: batchRequestID(items),
 	})
+}
+
+// logDispatch records one outbound single-envelope webhook attempt (info) —
+// the dispatch half of the dispatch/outcome pair (DF-CRIER-141). attempt is
+// the X-Crier-Retry value: 0 is the first try, >0 is a redelivery. The
+// payload body is never logged.
+func (d *Driver) logDispatch(agentID string, cfg *Config, env *Envelope, attempt int, rid string) {
+	logf("webhook: delivery dispatched",
+		dispatchArgs(agentID, cfg, envelopeID(env), 1, attempt, rid)...)
+}
+
+// logBatchDispatch is logDispatch for a coalesced batch: message_count
+// replaces the single message id (a batch has no one id).
+func (d *Driver) logBatchDispatch(agentID string, cfg *Config, messages, attempt int, rid string) {
+	logf("webhook: batch dispatched",
+		dispatchArgs(agentID, cfg, "", messages, attempt, rid)...)
+}
+
+// logOutcome records the result of one single-envelope attempt: info with the
+// status code on success, warn with the error otherwise (DF-CRIER-141).
+func (d *Driver) logOutcome(agentID string, cfg *Config, env *Envelope, attempt int, res Result, rid string) {
+	logResult("webhook: delivery delivered", "webhook: delivery failed",
+		dispatchArgs(agentID, cfg, envelopeID(env), 1, attempt, rid), res)
+}
+
+// logBatchOutcome is logOutcome for a coalesced batch.
+func (d *Driver) logBatchOutcome(agentID string, cfg *Config, messages, attempt int, res Result, rid string) {
+	logResult("webhook: batch delivered", "webhook: batch delivery failed",
+		dispatchArgs(agentID, cfg, "", messages, attempt, rid), res)
+}
+
+// logResult emits the outcome line at the level the result deserves: success
+// (2xx, no transport error) is info with the status code, everything else is
+// warn with the status/error. Retry bookkeeping (attempt counts, backoff,
+// dead-lettering) is logged by the caller, not here.
+func logResult(okMsg, errMsg string, args []any, res Result) {
+	if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
+		logf(okMsg, append(args, "status", res.StatusCode)...)
+		return
+	}
+	var err error = res.Err
+	if err == nil {
+		err = fmt.Errorf("status %d", res.StatusCode)
+	}
+	logfWarn(errMsg, append(args, "status", res.StatusCode, "error", err)...)
+}
+
+// dispatchArgs is the shared attribute set for a webhook dispatch/outcome
+// line: agent, endpoint (host + path only, never the query — it may carry a
+// credential), message count, and the request correlation id when the
+// delivery came from an HTTP request. message_id is omitted for batches and
+// retry is omitted on the first attempt, so the common case stays one short
+// line. No payload bodies, tokens or HMAC secret are ever logged.
+func dispatchArgs(agentID string, cfg *Config, messageID string, messages, attempt int, rid string) []any {
+	endpoint := ""
+	if cfg != nil {
+		endpoint = endpointLabel(cfg.URL)
+	}
+	args := []any{
+		"agent", agentID,
+		"endpoint", endpoint,
+		"messages", messages,
+		"request_id", rid,
+	}
+	if messageID != "" {
+		args = append(args, "message_id", messageID)
+	}
+	if attempt > 0 {
+		args = append(args, "retry", attempt)
+	}
+	return args
+}
+
+// envelopeID is the message id an attempt carries ("" for a nil envelope or a
+// batch).
+func envelopeID(env *Envelope) string {
+	if env == nil {
+		return ""
+	}
+	return env.Crier.MessageID
+}
+
+// batchRequestID is the request correlation id of a coalesced flush: the
+// items in one flush were accepted by different requests, so the first
+// non-empty id stands in for the flush.
+func batchRequestID(items []*QueueItem) string {
+	for _, it := range items {
+		if it != nil && it.RequestID != "" {
+			return it.RequestID
+		}
+	}
+	return ""
 }
 
 // flushAllBatches force-flushes every buffer (used on shutdown).

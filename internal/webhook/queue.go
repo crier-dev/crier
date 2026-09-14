@@ -15,6 +15,11 @@ type QueueItem struct {
 	Batch     []*Envelope `json:"batch,omitempty"` // CR-FEAT-005: coalesced batch; redelivery POSTs it as ONE batch request
 	Retries   int         `json:"retries"`
 	CreatedAt time.Time   `json:"created_at"`
+	// RequestID is the X-Request-Id of the HTTP request that accepted this
+	// delivery (DF-CRIER-141). It rides with the item so the background
+	// dispatch/outcome log lines carry the same correlation id as the
+	// deliver request that enqueued it. Empty for non-HTTP callers.
+	RequestID string `json:"request_id,omitempty"`
 	// Guard carries the verdict for redelivery (CR-FEAT-010, spec §2.1):
 	// redelivery and batch flush NEVER re-run the guard — the verdict rides
 	// with the message. The envelope's crier.guard metadata is the
