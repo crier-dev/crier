@@ -47,7 +47,13 @@ paths:
               properties:
                 topic:
                   type: string
-                  description: Topic name (dot-separated, supports wildcard subscribers)
+                  description: |
+                    Literal, dot-separated topic name — segments of letters,
+                    digits, "_" or "-" joined by single dots, at most 256
+                    bytes. Wildcards are subscriber-side only: a topic
+                    containing "*" or ">" is rejected with 400. The event fans
+                    out to every matching exact or wildcard subscription, and
+                    each matching subscription receives it exactly once.
                 event:
                   type: object
                   description: Event payload
@@ -58,6 +64,12 @@ paths:
             zero subscribers the event is dropped by design — publishes to
             empty topics are not queued or retained, and the topic does not
             appear in GET /relay/topics until at least one subscriber connects.
+        "400":
+          description: |
+            Invalid request — malformed JSON, missing or empty topic/event, or
+            an invalid topic (empty, leading/trailing/consecutive dots,
+            whitespace or any character outside `letters digits _ - .`, over
+            256 bytes, or a wildcard token).
         "401":
           description: X-Agent-ID header required (rate limiting enabled)
         "429":
@@ -66,7 +78,28 @@ paths:
   /relay/subscribe/{topic}:
     get:
       operationId: relaySubscribe
-      summary: Subscribe to topic via WebSocket
+      summary: Subscribe to a topic or wildcard pattern via WebSocket
+      description: |
+        The path accepts a literal topic name or a wildcard subscription
+        pattern. Published topic names are always literal — wildcards are
+        subscriber-side only.
+
+        Wildcard tokens match whole dot-separated segments:
+
+        - `*` is one complete segment and matches EXACTLY one segment:
+          `demo.*` matches `demo.one`, but not `demo.one.two` and not `demo`.
+        - `>` is one complete FINAL segment and matches ONE OR MORE trailing
+          segments: `demo.>` matches `demo.one` and `demo.one.two`, but not
+          `demo` itself.
+
+        Every other shape is invalid and is rejected with 400 BEFORE the
+        WebSocket upgrade: an embedded token (`foo*bar`), a `>` that is not the
+        last segment (`foo.>.bar`), empty segments, leading/trailing dots,
+        whitespace, and names over 256 bytes.
+
+        Each matching published event is delivered to a subscription exactly
+        once. A subscription appears in `GET /relay/topics` under the pattern
+        name it subscribed with.
       parameters:
         - name: topic
           in: path
@@ -76,6 +109,8 @@ paths:
       responses:
         "101":
           description: WebSocket upgrade — events streamed as JSON frames
+        "400":
+          description: Invalid subscription pattern (rejected before the upgrade)
 
   /relay/topics:
     get:
@@ -83,7 +118,9 @@ paths:
       summary: List active topics
       responses:
         "200":
-          description: Active topics with subscriber counts
+          description: |
+            Active topics with subscriber counts. Wildcard subscriptions are
+            listed under their pattern name (e.g. `demo.*`).
 
   # ── P2P Mesh ──
   /mesh/peers:

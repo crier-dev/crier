@@ -77,9 +77,14 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 }
 
 // HandleSubscribe upgrades to WebSocket and streams events for the path topic.
+// The path accepts a literal topic name or a wildcard subscription pattern
+// ("*" = exactly one segment, ">" = one or more trailing segments in final
+// position). The pattern is validated before the upgrade, so an invalid
+// subscription is refused with HTTP 400 and never holds a socket.
 func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	topic := mux.Vars(req)["topic"]
-	if err := validateTopic(topic); err != nil {
+	pattern, err := parseSubscriptionPattern(topic)
+	if err != nil {
 		http.Error(w, `{"error":"invalid topic"}`, http.StatusBadRequest)
 		return
 	}
@@ -91,7 +96,7 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	}
 	defer conn.Close()
 
-	events, unsub := r.Subscribe(topic)
+	events, unsub := r.subscribePattern(topic, pattern)
 	defer unsub()
 
 	// Detect client disconnect via read pump.

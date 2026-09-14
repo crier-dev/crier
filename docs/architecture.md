@@ -9,7 +9,12 @@ Crier provides four primitives for agent communication:
 ### 1. Relay Server (pub/sub)
 Central message relay. Agents publish events to topics; subscribers receive them.
 - HTTP + WebSocket transport
-- Topic-based routing with wildcards
+- Topic-based routing with subscriber-side wildcards: `*` matches exactly one
+  dot-separated segment (`demo.*` matches `demo.one`, not `demo.one.two`), and
+  `>` matches one or more trailing segments in final position (`demo.>` matches
+  `demo.one` and `demo.one.two`, not `demo`). Published topic names stay
+  literal — a publish to `demo.*` is rejected with 400. Every matching
+  subscription receives each event exactly once.
 - Rate limiting per agent
 
 ### 2. WebSocket Mesh (peer-to-peer)
