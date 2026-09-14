@@ -103,8 +103,11 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
-	if entry.ExpiresAt.IsZero() {
-		entry.ExpiresAt = entry.CreatedAt.Add(24 * time.Hour)
+	// Apply the delivery's requested lifetime: ttl_seconds > 0 → that many
+	// seconds, ttl_seconds == 0 → never expires (ExpiresAt stays zero),
+	// absent → the 24h default (DF-CRIER-37).
+	if err := resolveMessageExpiry(entry); err != nil {
+		return err
 	}
 	if entry.ID == "" {
 		id, err := newLeaseID()
@@ -159,8 +162,11 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		if entry.ACKed {
 			continue
 		}
-		// Skip expired messages.
-		if entry.ExpiresAt.Before(now) {
+		// Skip expired messages. A zero ExpiresAt means "never expires"
+		// (ttl_seconds=0, DF-CRIER-37) — the zero time is Before(now), so
+		// the check must be skipped explicitly or a never-expiring message
+		// would be treated as long expired.
+		if !entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(now) {
 			continue
 		}
 		// Skip already leased messages, unless the lease has expired — in
@@ -288,7 +294,9 @@ func (s *MemoryStore) Stats(agentID string) (queueDepth, leasedCount int, oldest
 		if entry.ACKed {
 			continue
 		}
-		if entry.ExpiresAt.Before(now) {
+		// A zero ExpiresAt is "never expires" (DF-CRIER-37) — counted, not
+		// silently treated as expired.
+		if !entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(now) {
 			continue
 		}
 		queueDepth++
@@ -320,8 +328,10 @@ func (s *MemoryStore) PurgeExpired() int {
 	for agentID, queue := range s.inboxes {
 		filtered := make([]*InboxEntry, 0, len(queue))
 		for _, entry := range queue {
-			// Remove expired messages.
-			if entry.ExpiresAt.Before(now) {
+			// Remove expired messages. A zero ExpiresAt means the message
+			// never expires (ttl_seconds=0, DF-CRIER-37) and must survive
+			// every purge pass.
+			if !entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(now) {
 				removed++
 				continue
 			}

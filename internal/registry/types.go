@@ -71,6 +71,14 @@ type InboxEntry struct {
 	LeaseID       string        `json:"lease_id,omitempty"`
 	LeaseDuration time.Duration `json:"-"` // not serialized; used by PurgeExpired
 	ACKed         bool          `json:"acked"`
+	// TTLSeconds is the lifetime the delivery requested, in seconds
+	// (POST /agents/{id}/inbox `ttl_seconds`, documented in openapi.yaml but
+	// parsed nowhere until DF-CRIER-37). It is not serialized: it exists so
+	// the store — or a remote proxy forwarding the delivery — can resolve the
+	// expiry from the CALLER'S INTENT instead of re-deriving it from a
+	// timestamp. nil = unspecified (the store default applies); 0 = never
+	// expires (ExpiresAt stays the zero time); n > 0 = CreatedAt + n seconds.
+	TTLSeconds *int `json:"-"`
 	// Guard carries the LLM message-guard metadata for this entry
 	// (CR-FEAT-010, spec §9.3). Present on guarded deliveries; absent when
 	// the guard is disabled.

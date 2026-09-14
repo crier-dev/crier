@@ -57,7 +57,7 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
-- TTL expiry auto-purges stale messages (default 24h)
+- TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires)
 - Concurrent retrievers get disjoint message sets
 
 ## Quick Start
@@ -135,10 +135,11 @@ curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application
   -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}"
 # 201
 
-# 2. Deliver a message to its inbox
+# 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
+#    24h default, 0 means the message never expires.
 curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
-  -d '{"payload":{"hello":"world"}}'
-# 201 {"id":"..."}
+  -d '{"payload":{"hello":"world"},"ttl_seconds":3600}'
+# 201 {"id":"...","expires_at":"..."}  (expires_at = created_at + ttl_seconds)
 
 # 3. Retrieve — agent-scoped endpoints require per-agent request signatures by
 #    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -290,6 +291,39 @@ WHERE id = $1;`, agent.ID, capsJSON, time.Now().UTC())
 	return nil
 }
 
+// pgTimestamptz renders a message expiry for the inbox_entries.expires_at
+// column. The zero time means "never expires" (ttl_seconds=0, DF-CRIER-37):
+// Postgres has no zero time.Time, and the column is NOT NULL with a
+// `CHECK (expires_at > created_at)` constraint, so "never" is stored as the
+// native timestamptz `infinity` — which satisfies the CHECK, is never matched
+// by the purge predicate (expires_at <= now), and always passes the claim
+// predicate (expires_at > now). No schema change is needed.
+func pgTimestamptz(expiry time.Time) pgtype.Timestamptz {
+	if expiry.IsZero() {
+		return pgtype.Timestamptz{Valid: true, InfinityModifier: pgtype.Infinity}
+	}
+	return pgtype.Timestamptz{Time: expiry, Valid: true}
+}
+
+// expiryFromTimestamptz is the read-side inverse of pgTimestamptz: a stored
+// `infinity` decodes back to the zero time, so the Postgres backend reports
+// the same never-expires representation as the in-memory backend and the
+// documented wire contract (expires_at 0001-01-01T00:00:00Z when
+// ttl_seconds was 0). Reading into a plain time.Time would fail outright:
+// pgx refuses `infinity` for a *time.Time destination.
+func expiryFromTimestamptz(ts pgtype.Timestamptz) time.Time {
+	switch ts.InfinityModifier {
+	case pgtype.Infinity:
+		return time.Time{}
+	case pgtype.NegativeInfinity:
+		// crier never writes this; treat it as long expired rather than as
+		// never-expiring, which is the safe direction.
+		return time.Unix(0, 0).UTC()
+	default:
+		return ts.Time.UTC()
+	}
+}
+
 // Deliver appends a message to an agent's FIFO inbox.
 func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	if agentID == "" {
@@ -316,13 +350,17 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	} else {
 		entry.CreatedAt = entry.CreatedAt.UTC()
 	}
-	if entry.ExpiresAt.IsZero() {
-		entry.ExpiresAt = entry.CreatedAt.Add(24 * time.Hour)
-	} else {
-		entry.ExpiresAt = entry.ExpiresAt.UTC()
+	// Apply the delivery's requested lifetime (DF-CRIER-37): ttl_seconds > 0
+	// → that many seconds, ttl_seconds == 0 → never expires (ExpiresAt stays
+	// the zero time), absent → the 24h default.
+	if err := resolveMessageExpiry(entry); err != nil {
+		return err
 	}
-	if !entry.ExpiresAt.After(entry.CreatedAt) {
-		return fmt.Errorf("%w: expiry at or before creation", ErrInvalidStoreInput)
+	if !entry.ExpiresAt.IsZero() {
+		entry.ExpiresAt = entry.ExpiresAt.UTC()
+		if !entry.ExpiresAt.After(entry.CreatedAt) {
+			return fmt.Errorf("%w: expiry at or before creation", ErrInvalidStoreInput)
+		}
 	}
 
 	// Clear lease/ack fields on deliver.
@@ -338,7 +376,7 @@ INSERT INTO inbox_entries (
     id, agent_id, payload, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked
 ) VALUES ($1, $2, $3::jsonb, $4, $5, NULL, NULL, NULL, FALSE);`,
-		entry.ID, agentID, entry.Payload, entry.CreatedAt, entry.ExpiresAt,
+		entry.ID, agentID, entry.Payload, entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -420,10 +458,15 @@ LIMIT $3;`,
 	result := make([]*InboxEntry, 0)
 	for rows.Next() {
 		var entry InboxEntry
-		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.CreatedAt, &entry.ExpiresAt); err != nil {
+		// expires_at is read through pgtype.Timestamptz so a stored
+		// `infinity` (ttl_seconds=0 → never expires, DF-CRIER-37) decodes
+		// instead of erroring, then normalizes to the zero time.
+		var expiresAt pgtype.Timestamptz
+		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.CreatedAt, &expiresAt); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
+		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
 		result = append(result, &entry)
 	}
 	rows.Close()

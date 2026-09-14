@@ -262,9 +262,17 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	var out struct {
 		ID string `json:"id"`
 	}
-	if err := s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox", map[string]any{
+	body := map[string]any{
 		"payload": json.RawMessage(entry.Payload),
-	}, &out); err != nil {
+	}
+	// Forward a requested lifetime verbatim so a proxied delivery honors
+	// ttl_seconds (including 0 = never expires) instead of silently falling
+	// back to the downstream relay's default (DF-CRIER-37). Absent when the
+	// caller did not request one — the downstream default then applies.
+	if entry.TTLSeconds != nil {
+		body["ttl_seconds"] = *entry.TTLSeconds
+	}
+	if err := s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox", body, &out); err != nil {
 		return err
 	}
 	entry.ID = out.ID // the server assigns the id

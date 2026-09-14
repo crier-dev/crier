@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -58,7 +60,17 @@ type deliverRequest struct {
 	// configure_ack. Passed through to the webhook envelope crier.kind and
 	// the X-Crier-Event header untouched (CR-FEAT-007).
 	Kind string `json:"kind,omitempty"`
+	// TTLSeconds is the requested message lifetime in seconds (documented in
+	// openapi.yaml; parsed nowhere until DF-CRIER-37). A POINTER so absent is
+	// distinguishable from an explicit 0: absent = the store default (24h),
+	// 0 = the message never expires, n > 0 = n seconds.
+	TTLSeconds *int `json:"ttl_seconds,omitempty"`
 }
+
+// maxTTLSeconds bounds ttl_seconds so the requested lifetime still fits a
+// time.Duration (int64 nanoseconds) without overflowing into a negative
+// interval. 9223372036s ≈ 292 years.
+const maxTTLSeconds = int64(math.MaxInt64) / int64(time.Second)
 
 // patchRequest is the JSON body for PATCH /agents/{id} — partial update of
 // an agent's registration (spec §7, CR-FEAT-007). capabilities replaces the
@@ -85,8 +97,14 @@ type blockingDeliverResponse struct {
 // Guard is present when the verdict was not plain allow (sanitize, or
 // errored fail-open) — visibility for async senders (spec §9.3).
 type deliverResponse struct {
-	ID    string      `json:"id"`
-	Guard *guard.Meta `json:"guard,omitempty"`
+	ID string `json:"id"`
+	// ExpiresAt is the RESOLVED message expiry (RFC 3339) of a stored inbox
+	// message, so a sender can see what the requested ttl_seconds actually
+	// became; the zero time (0001-01-01T00:00:00Z) means the message never
+	// expires (DF-CRIER-37). Absent on the webhook paths, where no inbox
+	// entry is created and expiry does not apply.
+	ExpiresAt *time.Time  `json:"expires_at,omitempty"`
+	Guard     *guard.Meta `json:"guard,omitempty"`
 }
 
 // guardBlockedResponse is the uniform 403 body for blocked deliveries
@@ -386,12 +404,36 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Requested message lifetime (DF-CRIER-37): absent keeps the store
+	// default, 0 means never expires. Reject values that cannot be honored —
+	// a negative lifetime and a value that would overflow time.Duration.
+	if req.TTLSeconds != nil {
+		if *req.TTLSeconds < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ttl_seconds must not be negative"})
+			return
+		}
+		if int64(*req.TTLSeconds) > maxTTLSeconds {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("ttl_seconds must be <= %d", maxTTLSeconds),
+			})
+			return
+		}
+	}
+
 	msgID := make([]byte, 12)
 	rand.Read(msgID)
 
 	entry := &InboxEntry{
-		ID:      hex.EncodeToString(msgID),
-		Payload: req.Payload,
+		ID:         hex.EncodeToString(msgID),
+		Payload:    req.Payload,
+		CreatedAt:  time.Now().UTC(),
+		TTLSeconds: req.TTLSeconds,
+	}
+	// Resolve the expiry now, from the same instant the store will use, so
+	// the response can report what the message's expiry actually became.
+	if err := resolveMessageExpiry(entry); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	kind := req.Kind
@@ -578,8 +620,9 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, deliverResponse{
-		ID:    entry.ID,
-		Guard: guardInDeliverResponse(guardMeta),
+		ID:        entry.ID,
+		ExpiresAt: &entry.ExpiresAt,
+		Guard:     guardInDeliverResponse(guardMeta),
 	})
 }
 

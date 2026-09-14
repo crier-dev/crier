@@ -116,6 +116,48 @@ var (
 	ErrInvalidStoreInput = errors.New("invalid store input")
 )
 
+// DefaultMessageTTL is the lifetime a stored message gets when the delivery
+// does not request one (`ttl_seconds` absent). It is the 24h default the
+// stores applied unconditionally before DF-CRIER-37 wired the documented
+// field through; absent-field behavior is unchanged.
+const DefaultMessageTTL = 24 * time.Hour
+
+// resolveMessageExpiry fills entry.ExpiresAt in place from the delivery's
+// requested TTL (DF-CRIER-37). Contract:
+//
+//   - an explicitly supplied ExpiresAt wins — store-internal callers pass an
+//     absolute instant and are not second-guessed;
+//   - TTLSeconds == nil  → CreatedAt + DefaultMessageTTL (the 24h default);
+//   - *TTLSeconds == 0   → NEVER expires: ExpiresAt keeps the zero time, the
+//     representation every consumption path (and the API contract) reads as
+//     "no expiry";
+//   - *TTLSeconds > 0    → CreatedAt + n seconds;
+//   - *TTLSeconds < 0    → ErrInvalidStoreInput (the handler answers 400
+//     before this is ever reached).
+//
+// Callers must set entry.CreatedAt first. Idempotent: re-resolving an entry
+// whose ExpiresAt is already set leaves it untouched.
+func resolveMessageExpiry(entry *InboxEntry) error {
+	if entry == nil || !entry.ExpiresAt.IsZero() {
+		return nil
+	}
+	if entry.TTLSeconds == nil {
+		entry.ExpiresAt = entry.CreatedAt.Add(DefaultMessageTTL)
+		return nil
+	}
+	ttl := *entry.TTLSeconds
+	switch {
+	case ttl < 0:
+		return fmt.Errorf("%w: ttl_seconds must not be negative (%d)", ErrInvalidStoreInput, ttl)
+	case ttl == 0:
+		// Never expires — leave ExpiresAt at the zero time.
+		return nil
+	default:
+		entry.ExpiresAt = entry.CreatedAt.Add(time.Duration(ttl) * time.Second)
+		return nil
+	}
+}
+
 // quoteMessageIDs renders message IDs for error details: quoted,
 // comma-separated, in the caller's order, capped so a large bogus request
 // cannot bloat the response body.
