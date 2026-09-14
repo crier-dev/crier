@@ -11,8 +11,10 @@ import (
 // requests pass through (development mode). When set, requests missing the
 // Authorization header or bearing an incorrect token receive 401.
 //
-// The /health and OpenAPI spec endpoints (/openapi.json, /openapi.yaml,
-// /docs) are always exempt from authentication.
+// /health, the build-identity endpoint (/version) and the OpenAPI spec
+// endpoints (/openapi.json, /openapi.yaml, /docs) are always exempt from
+// authentication: an operator must be able to ask a live server what it is and
+// what it serves without holding a token.
 func Auth(authToken string) func(http.Handler) http.Handler {
 	if authToken == "" {
 		// No auth configured — pass through all requests.
@@ -24,10 +26,12 @@ func Auth(authToken string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health check and OpenAPI spec endpoints are always public so a
-			// token-less curl of the spec works (CR-GAP-049).
+			// Health check, build identity and OpenAPI spec endpoints are
+			// always public so a token-less curl of the spec works
+			// (CR-GAP-049) and an operator can ask a running server what
+			// build it is (DF-CRIER-101).
 			switch r.URL.Path {
-			case "/health", "/openapi.json", "/openapi.yaml", "/docs":
+			case "/health", "/version", "/openapi.json", "/openapi.yaml", "/docs":
 				next.ServeHTTP(w, r)
 				return
 			}

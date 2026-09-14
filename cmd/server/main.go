@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/mesh"
@@ -25,9 +26,12 @@ import (
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
-// version is the crier server version. Overridable at build time via
-// -ldflags "-X main.version=<ver>" (see the Makefile build target).
-var version = "dev"
+// The build identity printed by -version and served by GET /version lives in
+// internal/buildinfo — one source for both binaries (DF-CRIER-127). The
+// identity is stamped at link time by the Makefile
+// (-X .../internal/buildinfo.Version=...) and otherwise falls back to the
+// vcs.revision/vcs.time/vcs.modified metadata the Go toolchain records in
+// every main package built inside a git checkout.
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -48,7 +52,9 @@ func run(args []string) int {
 		return 0
 	}
 	if showVersion {
-		fmt.Fprintf(os.Stdout, "crier %s\n", version)
+		// The canonical build identity, e.g. "crier v1.2.3-1a2b3c4d" or, for
+		// an unstamped build from a git checkout, "crier vdev-1a2b3c4d-dirty".
+		fmt.Fprintf(os.Stdout, "crier %s\n", buildinfo.String())
 		return 0
 	}
 
@@ -92,6 +98,12 @@ func run(args []string) int {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
+
+	// Build identity (DF-CRIER-101/127) — the running binary's version,
+	// commit, build time and dirty flag as JSON. Exempt from auth like
+	// /health so an operator can ask a live server what it is running
+	// without holding a token.
+	r.HandleFunc("/version", handleVersion).Methods("GET")
 
 	// OpenAPI spec (CR-GAP-049) — the spec is served live so spec-vs-code
 	// drift is visible on the running server. All three endpoints are exempt
@@ -350,7 +362,8 @@ func run(args []string) int {
 		}
 	}()
 
-	slog.Info("crier starting", "port", cfg.Port, "services", "relay+mesh+registry")
+	slog.Info("crier starting", "port", cfg.Port, "services", "relay+mesh+registry",
+		"version", buildinfo.String())
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		return 1

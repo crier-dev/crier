@@ -7,12 +7,15 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"gopkg.in/yaml.v3"
 )
 
@@ -355,4 +358,250 @@ func TestOpenAPIDocsSpec(t *testing.T) {
 	if string(docsSpec) != string(openapiYAML) {
 		t.Errorf("docs/openapi.yaml (%d bytes) differs from the embedded cmd/server/openapi.yaml (%d bytes) — run `go generate ./cmd/server`", len(docsSpec), len(openapiYAML))
 	}
+}
+
+// TestVersionEndpointServed is the DF-CRIER-101 end-to-end gate: on a running
+// server, GET /version returns the RESOLVED build identity as JSON (not a
+// hardcoded string), and it is reachable without a token while auth is
+// enabled — exempt from middleware.Auth exactly like /health.
+func TestVersionEndpointServed(t *testing.T) {
+	// Skip on Go 1.25 — same SIGTERM-in-go-test caveat as TestServerHealth.
+	if strings.HasPrefix(runtime.Version(), "go1.25") {
+		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
+	}
+
+	t.Setenv("CR_AUTH_TOKEN", "test-token")
+	t.Setenv("CR_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CRIER_DATABASE_URL", "")
+
+	port := freePort(t)
+	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(nil)
+	}()
+
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find own process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = self.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Errorf("server did not shut down within 10s of SIGTERM")
+		}
+	})
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// /health is public even with auth on, so it is the readiness probe.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp, err := client.Get(baseURL + "/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not start within 10s: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	resp, err := client.Get(baseURL + "/version")
+	if err != nil {
+		t.Fatalf("GET /version: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /version without a token: status %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("GET /version: Content-Type %q, want %q", ct, "application/json")
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /version body: %v", err)
+	}
+
+	var served map[string]any
+	if err := json.Unmarshal(body, &served); err != nil {
+		t.Fatalf("GET /version: body %q is not valid JSON: %v", body, err)
+	}
+
+	// The handler must serve the package's resolved identity — anything
+	// else (a stale var, a hardcoded string) is the bug this closes.
+	want := buildinfo.Resolve()
+	for key, wantValue := range map[string]any{
+		"version":    want.Version,
+		"commit":     want.Commit,
+		"build_time": want.BuildTime,
+		"modified":   want.Modified,
+	} {
+		if got := served[key]; got != wantValue {
+			t.Errorf("GET /version: %s = %#v, want %#v (buildinfo.Resolve)", key, got, wantValue)
+		}
+	}
+
+	if len(served) != 4 {
+		t.Errorf("GET /version: %d keys %v, want exactly version/commit/build_time/modified", len(served), served)
+	}
+	// The test binary is built by `go test`, which may or may not stamp VCS
+	// metadata; when it did, the served identity must carry a real commit
+	// rather than the "unknown" sentinel.
+	if want.Commit == buildinfo.DefaultCommit {
+		t.Logf("test binary has no VCS metadata — served identity %q (the exec test covers the fallback)", want.String())
+	} else if got := served["commit"]; got == buildinfo.DefaultCommit {
+		t.Errorf("GET /version: commit = %q, want %q (vcs.revision was available)", got, want.Commit)
+	}
+}
+
+// TestServerVersionCLIFlags is the DF-CRIER-106/116/127 acceptance gate on the
+// real binary. The unstamped case is the load-bearing one: a bare `go build`
+// with NO ldflags must still report the commit the binary was built from, via
+// the VCS metadata the Go toolchain embeds. The second build proves the
+// Makefile's -X target path is wired correctly — the linker SILENTLY ignores
+// an -X flag naming a symbol it cannot find, so only an assertion on the
+// output can catch a typo'd path.
+func TestServerVersionCLIFlags(t *testing.T) {
+	dir := t.TempDir()
+	plainBin := filepath.Join(dir, "crier-plain")
+	injectedBin := filepath.Join(dir, "crier-injected")
+
+	// A sibling worker may commit while this test builds; accept either HEAD
+	// observed around the build.
+	headBefore := gitHead(t, ".")
+
+	if out, err := exec.Command("go", "build", "-o", plainBin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build unstamped crier: %v\n%s", err, out)
+	}
+	injectedLDFlags := "-X github.com/crier-dev/crier/internal/buildinfo.Version=9.9.9"
+	if out, err := exec.Command("go", "build", "-ldflags", injectedLDFlags, "-o", injectedBin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build stamped crier: %v\n%s", err, out)
+	}
+
+	headAfter := gitHead(t, ".")
+
+	t.Run("unstamped build reports the commit it was built from", func(t *testing.T) {
+		out, err := exec.Command(plainBin, "-version").CombinedOutput()
+		if err != nil {
+			t.Fatalf("-version exited with error: %v\n%s", err, out)
+		}
+		identity := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "crier"))
+		if !strings.HasPrefix(identity, "v") {
+			t.Fatalf("-version output %q is not the canonical identity (want %q)", out, "crier v<version>-<commit>")
+		}
+		if identity == "v"+buildinfo.DefaultVersion {
+			t.Fatalf("-version printed %q — the placeholder version with no commit (DF-CRIER-127)", strings.TrimSpace(string(out)))
+		}
+
+		commit := identityCommit(identity)
+		if commit == "" {
+			t.Fatalf("-version identity %q carries no commit segment", identity)
+		}
+		if !isShortHex(commit) {
+			t.Fatalf("-version identity %q: commit segment %q is not a short git revision", identity, commit)
+		}
+
+		switch {
+		case headBefore == "" && headAfter == "":
+			t.Logf("git unavailable: cannot tie commit %q to a repo revision", commit)
+		case commit != shortSha(headBefore) && commit != shortSha(headAfter):
+			t.Errorf("-version reports commit %q, which is neither HEAD (%s) nor the revision HEAD moved to (%s)",
+				commit, shortSha(headBefore), shortSha(headAfter))
+		}
+	})
+
+	t.Run("ldflags-stamped version wins, commit still resolved", func(t *testing.T) {
+		out, err := exec.Command(injectedBin, "-version").CombinedOutput()
+		if err != nil {
+			t.Fatalf("-version exited with error: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "v9.9.9-") {
+			t.Errorf("-version output %q does not carry the injected version %q — check the -X target path in the Makefile", out, "v9.9.9-")
+		}
+		if got := identityCommit(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "crier"))); !isShortHex(got) {
+			t.Errorf("-version output %q does not carry a resolved commit", out)
+		}
+	})
+
+	t.Run("Makefile stamps the symbols the binary reads", func(t *testing.T) {
+		// The linker SILENTLY ignores an -X flag naming a symbol it cannot
+		// find, so a typo'd package path in the Makefile would keep every
+		// build green while the identity stayed unstamped. `make -n` prints
+		// the fully expanded command without running it — that text is the
+		// only proof the release wiring points at the symbols
+		// internal/buildinfo actually reads.
+		out, err := exec.Command("make", "-C", "../..", "-n", "build").CombinedOutput()
+		if err != nil {
+			t.Fatalf("make -C ../.. -n build: %v\n%s", err, out)
+		}
+		expanded := string(out)
+		const pkg = "github.com/crier-dev/crier/internal/buildinfo"
+		for _, symbol := range []string{".Version", ".Commit", ".BuildTime"} {
+			if !strings.Contains(expanded, "-X "+pkg+symbol+"=") {
+				t.Errorf("`make -n build` does not stamp %s%s:\n%s", pkg, symbol, expanded)
+			}
+		}
+		if head := gitHead(t, "."); head != "" && !strings.Contains(expanded, "-X "+pkg+".Commit="+head) {
+			t.Errorf("`make -n build` does not stamp HEAD (%s) as the commit:\n%s", head, expanded)
+		}
+	})
+}
+
+// gitHead returns the current HEAD sha of the repository containing dir, or ""
+// when git is unavailable (the caller then cannot tie a reported commit to a
+// revision and says so instead of failing).
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// shortSha returns the 8 characters a build identity carries.
+func shortSha(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// identityCommit extracts the trailing commit segment of a canonical identity
+// ("v<version>-<commit>[-dirty]", where the version may itself contain dashes,
+// e.g. a git-describe string): "v1.2.3-1a2b3c4d-dirty" → "1a2b3c4d", "vdev" →
+// "".
+func identityCommit(identity string) string {
+	trimmed := strings.TrimSuffix(identity, "-dirty")
+	idx := strings.LastIndex(trimmed, "-")
+	if idx < 0 {
+		return ""
+	}
+	return trimmed[idx+1:]
+}
+
+// isShortHex reports whether s is 1-8 hex digits, i.e. a shortened git
+// revision rather than a word like "unknown".
+func isShortHex(s string) bool {
+	if s == "" || len(s) > 8 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }

@@ -12,13 +12,14 @@ import (
 	"os"
 
 	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/mcp"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
-// version is the crier-mcp version. Overridable at build time via
-// -ldflags "-X main.version=<ver>" (see the Makefile build-mcp target).
-var version = "dev"
+// The crier-mcp build identity printed by -version lives in
+// internal/buildinfo — the same source cmd/server uses, so both binaries
+// report one format from one set of linker-injected values (DF-CRIER-127).
 
 // Key sources recorded on the bridge identity.
 const (
@@ -61,7 +62,7 @@ func run(args []string) int {
 		return 0
 	}
 	if showVersion {
-		fmt.Fprintf(os.Stdout, "crier-mcp %s\n", version)
+		fmt.Fprintf(os.Stdout, "crier-mcp %s\n", buildinfo.String())
 		return 0
 	}
 

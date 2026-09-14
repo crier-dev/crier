@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,27 @@ func TestAuthHealthEndpointBypassesWithTokenSet(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+// TestAuthVersionEndpointBypassesWithTokenSet: the build-identity endpoint is
+// exempt like /health, so an operator can ask a live server what it runs
+// without holding a token (DF-CRIER-101).
+func TestAuthVersionEndpointBypassesWithTokenSet(t *testing.T) {
+	handler := Auth("secret-token")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"version":"1.2.3"}`))
+	}))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/version", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"version"`) {
+		t.Errorf("body = %q, want the handler's version JSON", body)
 	}
 }
 

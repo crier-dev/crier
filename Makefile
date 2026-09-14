@@ -1,8 +1,22 @@
 .PHONY: help build build-mcp test test-short test-integration lint run clean docker-build coverage coverage-html coverage-check generate
 
-# Version injected into cmd/server's version var via -ldflags.
-# Override at build time: make build VERSION=1.2.3
-VERSION ?= dev
+# Build identity. The linker stamps internal/buildinfo, which both binaries
+# (cmd/server and cmd/crier-mcp) read — one identity, one format, so the CLI,
+# GET /version and the startup log can never disagree (DF-CRIER-127).
+#
+# VERSION defaults to the git description, so even a bare `make build` carries
+# a real identity instead of the "dev" placeholder; a build with no tags
+# resolves to the short commit. Override any of them at build time:
+#   make build VERSION=1.2.3
+# A bare `go build` (no ldflags) is still covered: internal/buildinfo falls
+# back to the vcs.revision/vcs.time/vcs.modified metadata the Go toolchain
+# records for any main package built inside a git checkout.
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+BUILDINFO_PKG := github.com/crier-dev/crier/internal/buildinfo
+CRIER_LDFLAGS := -X $(BUILDINFO_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Commit=$(COMMIT) -X $(BUILDINFO_PKG).BuildTime=$(BUILD_TIME)
 
 # Default target (first target in the file) — bare `make` shows the menu.
 help:
@@ -22,13 +36,13 @@ help:
 	@echo "  generate          Run go generate ./..."
 	@echo ""
 	@echo "Config is env-driven (CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG) — see README.md."
-	@echo "The server binary also takes CLI flags: ./bin/crier --help prints full usage, -port overrides CRIER_PORT, -db-url overrides CR_DATABASE_URL, -version prints the build version."
+	@echo "The server binary also takes CLI flags: ./bin/crier --help prints full usage, -port overrides CRIER_PORT, -db-url overrides CR_DATABASE_URL, -version prints the build identity (version, commit, dirty marker)."
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier ./cmd/server
+	go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier ./cmd/server
 
 build-mcp:
-	go build -ldflags "-X main.version=$(VERSION)" -o bin/crier-mcp ./cmd/crier-mcp
+	go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-mcp ./cmd/crier-mcp
 
 test:
 	go test ./... -count=1 -timeout 60s

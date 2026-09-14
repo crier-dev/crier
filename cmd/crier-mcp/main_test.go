@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -213,6 +214,9 @@ func TestParseArgs(t *testing.T) {
 // and --version prints a version string and exits 0.
 func TestMCPServerCLIFlags(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "crier-mcp")
+	// Read HEAD before building and again after: a sibling worker may commit
+	// while the build runs, and either revision is a legitimate stamp.
+	headBefore := gitShortHead(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build crier-mcp: %v\n%s", err, out)
@@ -244,7 +248,46 @@ func TestMCPServerCLIFlags(t *testing.T) {
 		if !strings.HasPrefix(string(out), "crier-mcp ") {
 			t.Fatalf("--version output %q does not start with %q", out, "crier-mcp ")
 		}
+
+		// DF-CRIER-127: the printed identity must carry a real commit, not
+		// the "dev" placeholder that shipped before. Canonical form:
+		// "crier-mcp v<version>-<commit>[-dirty]".
+		identity := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "crier-mcp"))
+		match := mcpIdentityRE.FindStringSubmatch(identity)
+		if match == nil {
+			t.Fatalf("--version identity %q is not the canonical form %q", identity, "v<version>-<commit>[-dirty]")
+		}
+		commit := match[1]
+		switch {
+		case headBefore == "":
+			t.Logf("git unavailable: cannot tie commit %q to a repo revision", commit)
+		case commit != headBefore:
+			if headAfter := gitShortHead(t); commit != headAfter {
+				t.Errorf("--version reports commit %q, which is neither HEAD (%s) nor the revision HEAD moved to (%s)",
+					commit, headBefore, headAfter)
+			}
+		}
 	})
+}
+
+// mcpIdentityRE matches the canonical identity printed by -version: a version
+// segment (which may itself contain dashes, e.g. a git-describe string) and a
+// shortened commit, with the optional dirty marker.
+var mcpIdentityRE = regexp.MustCompile(`^v.+?-([0-9a-f]{8})(-dirty)?$`)
+
+// gitShortHead returns the first 8 characters of the repository HEAD, or ""
+// when git is unavailable (the caller then says so instead of failing).
+func gitShortHead(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	sha := strings.TrimSpace(string(out))
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 // writeAgentKeyPEM writes a PKCS#8 PEM ed25519 private key (the

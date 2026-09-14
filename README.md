@@ -79,6 +79,19 @@ Or build directly:
 go build -o bin/crier ./cmd/server
 ```
 
+Both stamp the build identity (`version`, `commit`, `build_time`) into the
+binary via `-ldflags`; a build with no ldflags at all still reports the git
+commit, because `internal/buildinfo` falls back to the VCS metadata the Go
+toolchain embeds. Ask a binary or a running server what it is:
+
+```bash
+./bin/crier -version          # crier v1.2.3-1a2b3c4d
+curl -s localhost:8767/version # {"version":"1.2.3","commit":"1a2b3c4d",...}
+```
+
+Override the version with `make build VERSION=1.2.3`; `make build` with no
+override uses `git describe`.
+
 ### Run
 
 ```bash
@@ -104,7 +117,7 @@ make run
 
 ### Try it
 
-A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except `/health` needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped:
+A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except `/health` and `/version` needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped:
 
 ```bash
 AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
@@ -306,7 +319,7 @@ All configuration is via environment variables (defaults shown):
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
-| `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
+| `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` and `/version` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
@@ -347,11 +360,12 @@ All configuration is via environment variables (defaults shown):
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 16 endpoints across 6 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 17 endpoints across 7 operation groups:
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Health** | `GET /health` | Service health check |
+| **Version** | `GET /version` | Build identity of the running server (version, commit, build time, dirty) — public like `/health` |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |

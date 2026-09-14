@@ -36,7 +36,7 @@ The server binary takes no positional arguments but accepts flags that
 |------|-----------|---------|
 | `-port N` | `CRIER_PORT` | `8767` |
 | `-db-url URL` | `CR_DATABASE_URL` | unset (in-memory backend) |
-| `-version` | — | prints build version and exits |
+| `-version` | — | prints the build identity (version, commit, dirty marker) and exits |
 
 Configuration is otherwise env-driven (full table in README):
 
@@ -44,7 +44,7 @@ Configuration is otherwise env-driven (full table in README):
 |---------|---------|---------|
 | `CRIER_PORT` | listen port | `8767` |
 | `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) | unset |
-| `CR_AUTH_TOKEN` | bearer token required on all requests except `/health` | empty = auth disabled |
+| `CR_AUTH_TOKEN` | bearer token required on all requests except `/health` and `/version` | empty = auth disabled |
 | `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on inbox + agent-delete endpoints | `true` |
 | `CR_LOG_LEVEL` / `CR_LOG_FORMAT` | logging (`debug\|info\|warn\|error`, `text\|json`) | `info` / `text` |
 | `CR_RATE_LIMIT_PER_MINUTE` | relay publish rate limit | `100` |
@@ -71,7 +71,7 @@ in this guide works under all three (drop or add the headers as shown):
 | Config | `CR_AUTH_TOKEN` | `CR_REQUIRE_AGENT_SIG` | Effect |
 |--------|-----------------|------------------------|--------|
 | A. Open | unset | `false` | No auth at all. Good for local dev only. |
-| B. Bearer only | `secret` | `false` | All HTTP requests (except `/health`) need `Authorization: Bearer secret`; inbox endpoints are open to any agent. |
+| B. Bearer only | `secret` | `false` | All HTTP requests (except `/health` and `/version`) need `Authorization: Bearer secret`; inbox endpoints are open to any agent. |
 | C. Full security | `secret` | `true` (default) | Bearer token **and** per-agent ed25519 signatures on inbox/agent-delete endpoints. The production default. |
 
 Start command per config:

@@ -5,7 +5,7 @@ info:
     Communication backbone for the autonomous agent economy.
     Four primitives: relay, mesh, registry, inboxes.
 
-    Auth: every endpoint except /health requires `Authorization: Bearer <CR_AUTH_TOKEN>` (middleware.Auth). /health is exempt.
+    Auth: every endpoint except /health and /version requires `Authorization: Bearer <CR_AUTH_TOKEN>` (middleware.Auth). /health and /version are exempt.
   version: "0.1.0"
 servers:
   - url: http://localhost:8767
@@ -31,6 +31,47 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  # ── Build identity ──
+  # /version exempt — middleware.Auth exempts it from the bearer check, like
+  # /health, so an operator can ask a running server what build it is without
+  # holding a token.
+  /version:
+    get:
+      operationId: buildVersion
+      summary: Build identity of the running server
+      description: >
+        Version, git commit, build time and dirty flag of the binary serving
+        this request, resolved by internal/buildinfo. This is the same identity
+        `crier -version` prints and the startup log carries, so the CLI and the
+        HTTP surface cannot disagree. Values fall back to the VCS metadata the
+        Go toolchain embeds when no version was stamped at link time.
+      security: []
+      responses:
+        "200":
+          description: Resolved build identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, commit, build_time, modified]
+                properties:
+                  version:
+                    type: string
+                    description: Stamped version (no leading "v"), or "dev" when none was stamped
+                    example: "1.2.3"
+                  commit:
+                    type: string
+                    description: Short (8-char) git revision the binary was built from, or "unknown" when unavailable
+                    example: "1a2b3c4d"
+                  build_time:
+                    type: string
+                    description: RFC 3339 timestamp — the stamped build time, else the commit time, else "unknown"
+                    example: "2026-09-14T06:05:59Z"
+                  modified:
+                    type: boolean
+                    description: True when the working tree had uncommitted changes at build time
+                    example: false
 
   # ── Relay: Pub/Sub ──
   /relay/publish:
@@ -745,7 +786,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Bearer token from CR_AUTH_TOKEN — required on all requests except /health
+      description: Bearer token from CR_AUTH_TOKEN — required on all requests except /health and /version
   schemas:
     InboxEntry:
       type: object
