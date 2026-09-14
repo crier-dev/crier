@@ -533,3 +533,11 @@ tasks:
   status: complete
   created_at: '2026-09-14T15:30:57.104397+00:00'
   completed_at: '2026-09-14T15:43:11.086183+00:00'
+- id: DF-CRIER-141
+  title: 'message-path observability: X-Request-Id middleware + relay/webhook logging'
+  criteria:
+  - middleware echoes X-Request-Id; relay publish + webhook dispatch/outcome log with
+    ids; full test suite green
+  status: complete
+  created_at: '2026-09-14T21:57:33.708521+00:00'
+  completed_at: '2026-09-14T22:04:56.676076+00:00'
