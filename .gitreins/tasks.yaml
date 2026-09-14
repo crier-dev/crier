@@ -524,3 +524,12 @@ tasks:
   status: complete
   created_at: '2026-09-14T10:27:15.480062+00:00'
   completed_at: '2026-09-14T10:42:13.232362+00:00'
+- id: DF-CRIER-37
+  title: Wire ttl_seconds through agent registration
+  criteria:
+  - "Register with ttl_seconds=3600 stores ExpiresAt\u2248CreatedAt+1h; ttl_seconds=0\
+    \ never expires; absent field keeps 24h default; go build/vet/test all pass; no\
+    \ remaining hard-coded 24h ExpiresAt ignoring ttl"
+  status: complete
+  created_at: '2026-09-14T15:30:57.104397+00:00'
+  completed_at: '2026-09-14T15:43:11.086183+00:00'
