@@ -199,3 +199,45 @@ path works end-to-end as a non-root user IF you install Go to a HOME prefix —
 the official tarball targets `/usr/local` (root-only) and a naive `tar -C ~`
 puts GOROOT inside GOPATH (loud warning, still builds). 58s clone→toolchain→
 `make build`→smoke at 57034d8. Docs polish filed as DF-CRIER-131.
+
+## The guard's verdict pipeline (how it actually flows, 2026-09-14)
+
+`HandleDeliver` decodes the body and assembles the envelope, then calls
+`guard.Filter.Check` ONCE — webhook modes and inbox storage branch only
+after the verdict, so per-message cost is exactly one LLM call. Inside
+`Check`: deterministic pattern pre-scan (raw bytes, `patterns.go`) → policy
+resolution (agent policies matched against `session:`/`thread:` globs,
+else `CR_GUARD_DEFAULT_POLICY`, else built-in default) → payload projection
+(`render.go`; JSON gets a schema-aware `path=type value` walk so attack
+KEY names are visible to the LLM) → router (`router.go`: providers in
+policy order, one 250ms-retry each, per-`base_url+model` circuit breaker,
+8-wide semaphore, whole chain under one 10s budget) → strict verdict
+validation (§3.1; anything off-schema = guard error, NOT a downgrade).
+The LLM's `(decision, risk_level)` then passes the deterministic escalation
+table (`block_risk` cap) — the model can never under-block below the
+policy threshold. Two things worth knowing that only a live run shows:
+
+- **The verdict LLM is a classifier, not a router of gray cases — treat its
+  strictness as a tuning surface.** Across 8 live verdicts (funded
+  deepseek-v4-flash, temperature 0) it proposed block 6, allow 1, sanitize
+  0; mixed benign+injection content was blocked wholesale and a benign
+  `{"prompt": …}` payload was quarantined. Both behaviors trace to the
+  system prompt (§3.3), which never says "mixed content ⇒ sanitize" and
+  never says "a control-shaped key alone is not an attack." Since the
+  prompt is explicitly immutable outside a deliberate version bump, these
+  are prompt-version changes, not code patches — filed as DF-CRIER-147/148.
+  The sanitize machinery itself is sound: the error-path action:sanitize
+  run delivered the exact §3.5 quarantine fallback with byte-perfect
+  `quarantined_payload` recovery, so once the verdict side is retuned the
+  rewrite path has working rails to land on.
+- **Failover is observable only in the verdict metadata.** Provider skip,
+  retry, and circuit events produce no log lines of their own; the single
+  audit line's `provider=`/`model=` fields are the only record of who
+  answered (DF-CRIER-149). When wiring a new lane, probe it with one
+  delivery and read that field — don't assume the first provider served it.
+
+Join the guard line to its delivery line via `request_id` (DF-CRIER-141's
+correlation middleware now threads through the guard audit call). Sample
+block line: `guard msg=<id> target=inbox-1 ... decision=block risk=high
+request_id=<rid> provider=deepseek model=deepseek-v4-flash patterns="…"
+ms=1644 payload_bytes=156` + a WARN `event=guard_blocked` twin.

@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Crier Usage — field guide for agents
@@ -133,6 +133,43 @@ DELETE; a PATCH without the sig headers → 401):
   curl -X POST localhost:18871/agents/eve/inbox -H 'Content-Type: application/json' \
     -d '{"payload":{"k":"v"},"sender":"workshop"}'
   ```
+
+## Message guard (LLM) — live-verified 2026-09-14 (funded deepseek key, HEAD 157061d)
+
+The guard is ON by default. With `DEEPSEEK_API_KEY` in the environment every
+delivery is classified by a real LLM before storage/webhook POST; without a
+key it fails OPEN (`X-Crier-Guard-Error: true`, delivery proceeds). What a
+live run proved:
+
+- **Clean payloads** → allowed; verdict arrives as `X-Crier-Guard-*` headers
+  on the webhook POST and a `crier.guard` block in the envelope/inbox entry.
+  Budget ~1.1–1.7s per guarded message (timeout `CR_GUARD_TIMEOUT_MS=10000`).
+- **Injection/masquerade/structured-object attacks** → uniform
+  `403 {"error":"GUARD_BLOCKED","guard":{…}}`, never stored, never POSTed.
+  The LLM decodes base64 by itself and quotes the decoded text in the reason;
+  `matched_patterns` mixes deterministic prematch names (`ignore_previous`)
+  with LLM-coined names — don't string-match on exact values.
+- **Oversize (>64KB `CR_GUARD_MAX_PAYLOAD_BYTES`)** → LLM skipped, ~40ms,
+  `patterns:["oversize",…]`, risk medium, delivered.
+- **Per-agent policies** register inline on POST /agents
+  (`"guard":{"policies":[…]}`); `providers` is the failover order and
+  `api_key_ref` is always `env:VAR` (never a literal key). Failover is
+  SILENT — read `provider`/`model` in the verdict to know who answered.
+- **`fail_closed:true`** → provider death becomes a 403 with
+  `errored:true`; action can be `block` (default) or `sanitize`, and the
+  sanitize error path stores the §3.5 quarantine fallback: payload replaced
+  by `{"crier_guard":{quarantined:true,…}}`, original recoverable from
+  `guard.quarantined_payload` (base64).
+- **Know before you ship:** the LLM proposes `block` for MIXED
+  benign+injection content (your benign half dies with the attack —
+  DF-CRIER-147) and quarantines benign payloads carrying lone
+  control-ish keys like `prompt` (DF-CRIER-148). Until those are fixed,
+  don't name data fields `system`/`prompt`/`tools` and don't rely on
+  sanitize preserving mixed content. The groq preset models were all
+  model_not_found on live Groq (DF-CRIER-149) — verify a lane with a probe
+  delivery before trusting it.
+- Every guard decision logs one line carrying the HTTP `request_id` —
+  join it to the delivery line to trace a message end-to-end.
 
 ## Common pitfalls
 
