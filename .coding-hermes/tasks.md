@@ -227,4 +227,4 @@ Verified live at HEAD (first-ever real-LLM guard dogfood; every prior run was ke
 - error-path action:"sanitize" → quarantine fallback delivered: payload = {"crier_guard":{quarantined:true,...}} notice, original recoverable byte-for-byte from guard.quarantined_payload (spec §3.5 step 5 proven live);
 - audit lines now carry request_id (DF-CRIER-141 fix landed) — guard verdict ↔ delivery correlate 1:1.
 
-Scratch: /tmp/dogfood-crier-guard (:18901 server, :18902 receiver). Bunker install leg: NOT rerun — proven this morning at 57034d8 (58s, docs/dogfood/2026-09-14-integration.md) and HEAD's only delta is build-identity/request-id/ttl wiring, no install-path files.
+Scratch: /tmp/dogfood-crier-guard (:18901 server, :18902 receiver). Bunker install leg RERUN after finding HEAD touched the Makefile (build-identity ldflags): fresh clone of public URL at 0bd0fc7 on las-bunker-03, agent 89b92a60, toolchain download + make build = 35s, smoke passed — health 200, -version reports the real build identity (v0bd0fc7), /version 200. Destroyed after. The morning run's docs claim stands; the new Makefile builds clean from scratch.

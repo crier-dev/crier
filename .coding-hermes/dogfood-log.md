@@ -37,4 +37,4 @@
 
 2026-09-14 | PROMISING-BUT-ROUGH | 1.853s t2fs | friction 14 | 5 findings\n
 2026-09-14 | PROMISING-BUT-ROUGH | n/a t2fs | friction 0 | 4 findings\n
-2026-09-14 (2nd) | SHIPPABLE | 4.2s t2fs (build 3.1s + health; guard verdicts ~1.1-1.7s) | friction 4 | 4 findings (DF-CRIER-147/148/149/150) — first live-LLM guard run; bunker leg carried by morning run at 57034d8
+2026-09-14 (2nd) | SHIPPABLE | 4.2s t2fs (build 3.1s + health; guard verdicts ~1.1-1.7s) | friction 4 | 4 findings (DF-CRIER-147/148/149/150) — first live-LLM guard run; bunker leg rerun at 0bd0fc7 (35s, new Makefile, smoke ok)

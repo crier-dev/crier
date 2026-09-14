@@ -118,3 +118,8 @@ curl -s https://api.deepseek.com/v1/chat/completions -H "Authorization: Bearer $
 Cost: ~10 guard calls ≈ 10k tokens total (pennies). Cleanup: server and
 receiver killed, scratch dir left in /tmp. No repo data touched; no
 visibility/permission changes; no scheduler cooldown touched.
+
+Installability re-proof: because HEAD's delta included the Makefile
+(build-identity ldflags), the bunker leg was rerun at 0bd0fc7 (agent
+89b92a60, public clone, toolchain download + `make build` = 35s, smoke:
+health 200 + real `-version` identity + `/version` 200). Agent destroyed.
