@@ -150,3 +150,52 @@ audit) tasks remain open by design.
 - `CR_FED_NAME` sets your display name for OTHERS' `/fed/peers`, but your
   own listing can still show a self-entry with a `localhost:<port>` name you
   never configured (DF-CRIER-12) — don't parse that endpoint blindly.
+
+---
+
+# 2026-09-14 addendum — federation failure taxonomy + how the hold path is built
+
+## How the federation hold path works (read this before touching it)
+
+- `internal/federation/federation.go` classifies every link answer: 2xx/3xx
+  relays verbatim; 404 means "try the next link"; 5xx/408/429 and transport
+  errors are `TransientError`; any other 4xx is a definitive rejection that
+  surfaces to the sender as-is. `forwardPass` returns
+  `ErrNotFoundOnAnyLink` only when EVERY link 404s (or none are configured).
+- `ForwardOrHold` = one synchronous pass; on a transient error it hands the
+  envelope to the `HoldManager` (`hold.go`) and the caller answers
+  `202 {"status":"held",...}`. No hold manager attached → explicit `502
+  FEDERATION_FAILED` synchronously, never a silent 404.
+- `hold.go` runs a retry loop (`RetryEvery` with doubling backoff capped at
+  `MaxRetryInterval`, plus a wake channel so enqueues trigger an immediate
+  sweep). Per item: before `deadline` → re-forward; past `deadline` →
+  `fail(..., "hold budget exhausted")`. A definitive non-2xx on retry →
+  `fail(..., "definitive rejection")`; `ErrNotFoundOnAnyLink` →
+  `fail(..., "agent not found on any linked relay")`.
+- `fail()` removes the item from the queue FIRST (exactly-once: a re-sweep can
+  never double-report), logs, then calls the notifier:
+  `registry.FederationFailureSink` marshals a `{kind:error, code:
+  FEDERATION_FAILED, ...}` payload and `Store.Deliver`s it into the SENDER's
+  inbox — the same durable inbox path as any message, so it survives restarts
+  under Postgres. An empty sender ⇒ refusal + one log line (see trap below).
+- `CR_FED_QUEUE_FILE` (`holdfile.go`) makes the queue an atomically rewritten
+  JSON document (`0600`, `.bak` recovery). `loadHoldFile` drops structurally
+  broken items with a warning instead of refusing to start.
+
+## The trap the tests missed (DF-CRIER-129/130)
+
+The report can only be delivered if the ORIGINAL deliver body carried
+`"sender":"..."`. Unit tests cover queue mechanics and sink behavior in
+isolation, but nothing drives handler → ForwardOrHold → expiry → sink over
+real HTTP — so the sender-field requirement was invisible until a live run
+sent a body without it and the terminal outcome vanished into a log line.
+Rule for reviewers: any change to `HoldMeta` population or `HoldItem`
+serialization needs a handler-level test that asserts the report LANDS.
+
+## Installability (bunker leg, 2026-09-14)
+
+Fresh bare-Debian agent: git + docker-compose preinstalled, NO Go. Documented
+path works end-to-end as a non-root user IF you install Go to a HOME prefix —
+the official tarball targets `/usr/local` (root-only) and a naive `tar -C ~`
+puts GOROOT inside GOPATH (loud warning, still builds). 58s clone→toolchain→
+`make build`→smoke at 57034d8. Docs polish filed as DF-CRIER-131.

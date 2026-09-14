@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Crier Usage — field guide for agents
@@ -20,8 +20,8 @@ over the mesh. One server binary + an MCP server front-end.
 
 | What | How |
 |------|-----|
-| HTTP API | `./bin/crier` — 14 endpoints, `docs/openapi.yaml` |
-| MCP | `make build-mcp && ./bin/crier-mcp` — stdio, 8 tools |
+| HTTP API | `./bin/crier` — 16 endpoints, `docs/openapi.yaml` |
+| MCP | `make build-mcp && ./bin/crier-mcp` — stdio; run `tools/list` for the live tool inventory (the old "8 tools" figure is stale) |
 | Demo | `./examples/demo.sh` (needs `CR_AUTH_TOKEN` exported if auth is on) |
 | Specs | `docs/specs.md`, `docs/architecture.md`, `specs/ci-003b-postgresql-persistence.md` |
 | Board | `.coding-hermes/board/tasks.jsonl` (JSONL v2.1 — append rows, commit) |
@@ -90,29 +90,49 @@ DELETE; a PATCH without the sig headers → 401):
   ignored (server default wins, DF-CRIER-9). For must-not-lose messages, use
   inbox pull or wrap async sends with your own correlation+timeout.
 
-## Federation (CR_FED_LINKS) — LAN-only plumbing for now
+## Federation (CR_FED_LINKS) — proven outage-safe at HEAD 2026-09-14
 
 - `CR_FED_LINKS=http://relay-b:8767` → deliver to an agent unknown locally is
   forwarded to the link; agent tables exchange on a 60s TTL and show in
   `GET /fed/peers` with the link's agents; blocking webhook replies route
   back through the originating relay with the same `message_id` (verified).
-- ⚠️ **Links carry NO credentials unless `CR_FED_TOKEN` is set** (DF-CRIER-6): with
-  no token the forward is a bare POST, so an auth-enabled (`CR_AUTH_TOKEN`)
-  remote relay 401s every federated delivery and the sender sees that 401
-  verbatim. Set the source relay's `CR_FED_TOKEN` equal to the destination's
-  `CR_AUTH_TOKEN` to federate with an auth-enabled relay.
-- ✅ **Link down = held, not lost** (DF-CRIER-7): a transient outage
-  (unreachable link, or a retryable 5xx/408/429) gets `202
-  {"status":"held","id":…,"target":…,"max_hold_s":…}` — the delivery is queued
-  at the source and retried inside `CR_FED_MAX_HOLD_S` (default 300s). If it
-  still cannot be delivered the sender gets exactly one durable
-  `FEDERATION_FAILED` entry in its own inbox (`{kind:error, code, message_id,
-  target, sender, request_id, session_id, attempts, status, error}`). A
-  definitive all-links-404 still answers `404` immediately. Durability: set
-  `CR_FED_QUEUE_FILE` or held deliveries die with the process (memory queue) —
-  the same contract as the in-memory inbox backend.
-- `GET /fed/peers` lists YOUR OWN relay as a peer (DF-CRIER-12) — filter self
-  before parsing.
+- **Link auth (fixed since DF-CRIER-6, verified live 2026-09-14):** set the
+  source relay's `CR_FED_TOKEN` equal to the destination relay's
+  `CR_AUTH_TOKEN` (ONE shared secret on both sides — two different values
+  was my first mistake; the sender sees `{"error":"invalid token"}` 401).
+- ✅ **Link down = held, not lost** (DF-CRIER-7, verified live incl. crash
+  recovery): a transient outage (unreachable link, or a retryable
+  5xx/408/429) gets `202 {"status":"held","id":…,"target":…,"max_hold_s":…}`
+  immediately (no blocking). The delivery is queued and retried with backoff
+  inside `CR_FED_MAX_HOLD_S` (default 300s). With `CR_FED_QUEUE_FILE=<path>`
+  the queue is an atomically rewritten JSON doc — held deliveries survive a
+  source-relay crash and flush on restart (verified: A killed mid-hold, both
+  relays restarted, message delivered exactly once). Without the file, held
+  deliveries die with the process (memory queue) — same contract as the
+  in-memory inbox backend.
+- ✅ **Terminal outcomes are inbox entries, not drops** (verified live): on
+  budget expiry or a definitive all-links-404 the sender gets exactly one
+  `FEDERATION_FAILED` entry in its OWN inbox (`{kind:error, code, message_id,
+  target, sender, attempts, status, error}`). ⚠️ **This only happens if the
+  original deliver body carried `"sender":"<agent-id>"`** — the report is
+  routed via that field; with no sender the outcome is refused with a log
+  line only (DF-CRIER-129). The distinct 404-vs-budget failure reasons are
+  preserved in the report's `error` field.
+- `GET /fed/peers` requires the Bearer header on an auth-enabled relay (it is
+  not exempt like `/health`) and lists YOUR OWN relay as a peer
+  (DF-CRIER-12) — filter self before parsing.
+- Operator recipe that worked (scratch ports):
+  ```bash
+  # relay B (destination)
+  CR_AUTH_TOKEN=relayb-secret ./bin/crier -port 18872
+  # relay A (source) — CR_FED_TOKEN == B's CR_AUTH_TOKEN
+  CR_FED_NAME=relay-a CR_FED_LINKS=http://localhost:18872 \
+  CR_FED_TOKEN=relayb-secret CR_FED_MAX_HOLD_S=60 \
+  CR_FED_QUEUE_FILE=/tmp/holdq.json ./bin/crier -port 18871
+  # deliver — include "sender" to enable failure reports
+  curl -X POST localhost:18871/agents/eve/inbox -H 'Content-Type: application/json' \
+    -d '{"payload":{"k":"v"},"sender":"workshop"}'
+  ```
 
 ## Common pitfalls
 

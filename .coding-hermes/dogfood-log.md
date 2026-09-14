@@ -32,3 +32,4 @@
 
 2026-09-14 | PROMISING-BUT-ROUGH | 1.008s t2fs | friction 10 | 5 findings\n
 2026-09-14 | PROMISING-BUT-ROUGH | n/a t2fs | friction 0 | 5 findings\n
+2026-09-14 | SHIPPABLE | 58s t2fs (fresh-machine incl. toolchain; ~5s on warm host) | friction 3 | 3 findings (DF-CRIER-129/130/131)
