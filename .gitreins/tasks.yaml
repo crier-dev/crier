@@ -516,3 +516,11 @@ tasks:
   status: complete
   created_at: '2026-09-13T23:41:06.785304+00:00'
   completed_at: '2026-09-14T00:05:50.324257+00:00'
+- id: DF-CRIER-127
+  title: Version is always 'crier dev'
+  criteria:
+  - -version prints a real build identity (git SHA or VERSION) on make build, in CI
+    artifacts, and is reachable at runtime
+  status: complete
+  created_at: '2026-09-14T10:27:15.480062+00:00'
+  completed_at: '2026-09-14T10:42:13.232362+00:00'
