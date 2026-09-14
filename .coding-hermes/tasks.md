@@ -199,3 +199,12 @@ Board rows: DF-CRIER-129 (FEDERATION_FAILED report silently dropped when the del
 Verified working at HEAD (real use, not tests): federated deliver A→B with CR_FED_TOKEN=relayb-secret matching B's CR_AUTH_TOKEN (201, 10ms) — the DF-CRIER-6 blocker is fixed; link down → 202 {"status":"held",...} with durable queue file (DF-CRIER-7 fix verified incl. crash-recovery across a relay restart); hold-budget expiry → exactly one FEDERATION_FAILED report in the sender's signed inbox; wrong relay pair (A holds, B restarts with in-memory registry, agent re-registered late) → correct "agent not found on any linked relay" 404-failure report; PostgreSQL registry+inbox durability re-proven at HEAD (carol/frank + message survived relay restart); fresh-machine install+smoke on bunker-las-03 passed.
 
 Not re-tested this run (prior coverage stands): relay/mesh/MCP surfaces, guard verdict paths, webhook retry-exhaustion notification.
+
+## Dogfood Findings (2026-09-14)
+Verdict: UNKNOWN-VALUE
+Promise: {"error":{"code":null,"message":"usage credits auto reload payment failed, update your payment method or add usage credits at https://ollama.com/settings (ref: 025ced17-35dd-4f6c-b80f-b43be8c5977e)","param":null,"type":"api_error"}}
+
+- [P0] No real use completed — provider rejected both runs at the credit/payment layer — Promise run and real-use run each returned only an api_error wrapper: 'usage credits auto reload payment failed, update your payment method or add usage credits at https://ollama.com/settings' (refs 0
+- [P0] Failure is environmental, not project-attributable — Both payloads are a bare upstream error object with code:null and no partial result, and the two runs differ only by request ref — the same provider-side billing block hit cache/CI deterministically. 
+- [P1] Blocker is Bane-actionable and already queued — Remedy is outside the project: fix auto-reload payment or add usage credits at ollama.com/settings, then re-run. This matches the known ollama-cloud outage logged on 09-12 (credits/payment failed) — u
+- [P2] Error surfacing is honest — The failure was passed through verbatim with provider message, settings URL, and a unique ref rather than being swallowed or faked as success — that is the one trust-positive signal available in this 
