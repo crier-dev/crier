@@ -228,3 +228,13 @@ Verified live at HEAD (first-ever real-LLM guard dogfood; every prior run was ke
 - audit lines now carry request_id (DF-CRIER-141 fix landed) — guard verdict ↔ delivery correlate 1:1.
 
 Scratch: /tmp/dogfood-crier-guard (:18901 server, :18902 receiver). Bunker install leg RERUN after finding HEAD touched the Makefile (build-identity ldflags): fresh clone of public URL at 0bd0fc7 on las-bunker-03, agent 89b92a60, toolchain download + make build = 35s, smoke passed — health 200, -version reports the real build identity (v0bd0fc7), /version 200. Destroyed after. The morning run's docs claim stands; the new Makefile builds clean from scratch.
+
+## Dogfood Findings (2026-09-15)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Two Go binaries, no library-first or cron surface: (1) cmd/server → bin/crier, the HTTP/WebSocket agent message bus listening on :8767 by default (17 endpoints in 7 groups: /health, /version, /docs interactive API docs, /relay/publish, /relay/subscribe/{topic}, /relay/topics, /mesh/c
+
+- [P0] Webhook config returns 200 then is silently discarded on the documented durable (postgres) backend — PATCH /agents/bob {"webhook":...} -> 200 on CR_DATABASE_URL postgres, but GET shows webhook:null, no warning logged, and the sink received 0 POSTs (message landed in the inbox instead); the same PATCH
+- [P1] Shipped mesh demo and TESTERS onboarding recipes fail as written; /docs is not interactive — examples/ws-mesh-demo/run-demo.sh aborts at step 5/7 'FAIL: demo-agent-a missing from /mesh/peers' (reproduced 3x) because peers connect without HTTP-registering; a control that registers first makes 
+- [P1] MCP surface advertises 13 tools but 3 are unreachable in in-process mode and bridge scope contradicts the tool schema — In-process stdio mode: get_messages -> isError 'bridge has no agent identity: set CRIER_AGENT_ID' (or 'agent not found' once set), ask_agent same family, mesh_peers -> 'mesh_peers requires CRIER_HTTP_
+- [P1] Default run path is blocked on shared hosts by port squatting, and the documented postgres compose collides by hardcoded name — Live-checked on this host: :8767, :18767, :8770, :8771 are all held by running crier processes and :5437 by an unrelated listener, so bare ./bin/crier cannot bind and the documented path only worked w
+- [P2] Validation and build-identity gaps: empty required payload accepted, over-cap guard verdict omitted, container/bare builds report version 'dev' — POST /agents/{id}/inbox with {} returns 201 and stores an empty-payload message although openapi declares requestBody required:[payload]. A 70KB over-cap delivery returns 201 with no 'guard' field in 
