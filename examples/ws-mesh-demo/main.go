@@ -21,7 +21,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const defaultBaseURL = "http://127.0.0.1:18767"
+// defaultBaseURL is the demo's scratch default (run-demo.sh starts its relay
+// here). It deliberately avoids the fleet's long-lived ports (:8767 relay,
+// :18767 docker-published crier) so a bare `peer -agent X` cannot connect to
+// some other server by accident. run-demo.sh always passes -url explicitly.
+const defaultBaseURL = "http://127.0.0.1:18961"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `ws-mesh-demo — crier relay + mesh demo client (CR-GAP-050)
