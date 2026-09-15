@@ -66,8 +66,35 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 2, version, "should reflect the two embedded migration files")
+	assert.Equal(t, 3, version, "should reflect the three embedded migration files")
 	assert.False(t, dirty, "migrations should not be marked dirty")
+}
+
+// TestRunMigrations_AgentConfigColumns verifies that 003 added the nullable
+// webhook/guard columns to agents (DF-CRIER-151). A migration applied by a
+// different name would be a no-op on an existing database, so the columns —
+// not the file — are what this asserts.
+func TestRunMigrations_AgentConfigColumns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	clearSchema(ctx, t, db)
+
+	require.NoError(t, RunMigrations(ctx, testConnString))
+
+	for _, col := range []string{"webhook", "guard"} {
+		var exists bool
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT FROM information_schema.columns
+				WHERE table_name = 'agents' AND column_name = $1
+			)
+		`, col).Scan(&exists)
+		require.NoError(t, err)
+		assert.True(t, exists, "agents.%s should exist after migration", col)
+	}
 }
 
 // TestRunMigrations_Idempotent verifies that running migrations twice succeeds.

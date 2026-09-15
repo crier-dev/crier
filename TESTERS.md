@@ -81,6 +81,9 @@ curl -s -X PATCH localhost:8767/agents/bob -H 'Content-Type: application/json' \
 curl -s -X POST localhost:8767/agents/bob/inbox -H 'Content-Type: application/json' \
   -d '{"payload":{"ping":1}}'   # → 200 and the SINK's reply comes back inline
 # switch to "async" in the PATCH and the deliver returns 202 instead
+# with CR_DATABASE_URL set (the postgres backend) this webhook config is
+# PERSISTED: restart the server and GET /agents/bob still returns it.
+# A PATCH with {"webhook":null} removes it.
 ```
 
 **4. Mesh request/response (advanced)** — peer-to-peer RPC over WebSocket:

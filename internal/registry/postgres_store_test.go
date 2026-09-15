@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -814,4 +816,158 @@ func TestPostgresStore_Close_NilPoolSafe(t *testing.T) {
 	// a nil pool must not panic when Close is invoked.
 	s := &PostgresStore{pool: nil}
 	s.Close()
+}
+
+// --- Optional agent configs (DF-CRIER-151) -------------------------------------
+//
+// Before the fix the durable backend accepted a webhook/guard config with HTTP
+// 200 and dropped it: the columns did not exist and neither Register nor Update
+// wrote them. These tests prove persistence against real postgres — the only
+// thing unit tests with a mock pool cannot prove.
+
+func TestPostgresStore_Register_PersistsWebhookAndGuard(t *testing.T) {
+	store := newTestStore(t)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	agent := &Agent{
+		ID:        "config-agent",
+		PublicKey: HexKey(pub),
+		Webhook:   &webhook.Config{URL: "http://127.0.0.1:9911/hook", DeliveryMode: "blocking"},
+		Guard:     &guard.AgentGuardConfig{Policies: []guard.Policy{{ID: "default"}}},
+	}
+	require.NoError(t, store.Register(agent))
+
+	got, err := store.Get("config-agent")
+	require.NoError(t, err)
+	require.NotNil(t, got.Webhook, "webhook config must be persisted by Register")
+	require.Equal(t, *agent.Webhook, *got.Webhook)
+	require.NotNil(t, got.Guard, "guard config must be persisted by Register")
+	require.Equal(t, *agent.Guard, *got.Guard)
+
+	// A completely fresh store (new pool, new process state) reads them back:
+	// the configs live in the database, not in the registering process.
+	fresh, err := NewPostgresStore(context.Background(), testConnString)
+	require.NoError(t, err)
+	defer fresh.Close()
+	again, err := fresh.Get("config-agent")
+	require.NoError(t, err)
+	require.NotNil(t, again.Webhook)
+	require.Equal(t, agent.Webhook.URL, again.Webhook.URL)
+	require.Equal(t, "blocking", again.Webhook.DeliveryMode)
+	require.NotNil(t, again.Guard)
+}
+
+func TestPostgresStore_Register_NilConfigsReadBackNil(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "noconfig")
+
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.Webhook, "an agent registered without a webhook must read back nil")
+	require.Nil(t, got.Guard, "an agent registered without a guard must read back nil")
+}
+
+func TestPostgresStore_Update_PersistsChangedWebhook(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "updatecfg")
+	require.Nil(t, agent.Webhook)
+
+	agent.Webhook = &webhook.Config{URL: "http://127.0.0.1:9911/hook", DeliveryMode: "blocking"}
+	agent.Guard = &guard.AgentGuardConfig{Policies: []guard.Policy{{ID: "default"}}}
+	require.NoError(t, store.Update(agent))
+
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Webhook, "PATCH must persist a new webhook on the postgres backend")
+	require.Equal(t, "http://127.0.0.1:9911/hook", got.Webhook.URL)
+	require.NotNil(t, got.Guard)
+
+	// Change the webhook and persist again — the second write must land too.
+	got.Webhook.DeliveryMode = "async"
+	require.NoError(t, store.Update(got))
+
+	again, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, again.Webhook)
+	require.Equal(t, "async", again.Webhook.DeliveryMode, "changed webhook must be persisted")
+}
+
+func TestPostgresStore_Update_NilWebhookClears(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "clearinput")
+
+	agent.Webhook = &webhook.Config{URL: "http://127.0.0.1:9911/hook"}
+	agent.Guard = &guard.AgentGuardConfig{Policies: []guard.Policy{{ID: "default"}}}
+	require.NoError(t, store.Update(agent))
+
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Webhook)
+
+	// Spec §7: webhook absent or null removes the webhook. The handler clears
+	// the field before calling Update, so nil here must write SQL NULL.
+	got.Webhook = nil
+	got.Guard = nil
+	require.NoError(t, store.Update(got))
+
+	cleared, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.Nil(t, cleared.Webhook, "an explicit nil webhook must clear the stored config")
+	require.Nil(t, cleared.Guard)
+
+	// ...and the columns really are SQL NULL, not a JSON null or empty object.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	var (
+		webhookNull bool
+		guardNull   bool
+	)
+	require.NoError(t, db.QueryRowContext(ctx,
+		`SELECT webhook IS NULL, guard IS NULL FROM agents WHERE id = $1`, agent.ID).
+		Scan(&webhookNull, &guardNull))
+	require.True(t, webhookNull, "cleared webhook column must be SQL NULL")
+	require.True(t, guardNull, "cleared guard column must be SQL NULL")
+}
+
+// TestPostgresStore_Get_StoredJSONNullReadsNil: a column holding the JSON value
+// `null` (rather than SQL NULL) is the same absent config on the wire — no
+// error, no empty object.
+func TestPostgresStore_Get_StoredJSONNullReadsNil(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "jsonnull")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	_, err := db.ExecContext(ctx,
+		`UPDATE agents SET webhook = 'null'::jsonb, guard = 'null'::jsonb WHERE id = $1`, agent.ID)
+	require.NoError(t, err)
+
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.Webhook)
+	require.Nil(t, got.Guard)
+}
+
+func TestPostgresStore_List_IncludesConfigs(t *testing.T) {
+	store := newTestStore(t)
+
+	withConfig := newTestAgent(t, store, "listcfg")
+	withConfig.Webhook = &webhook.Config{URL: "http://127.0.0.1:9912/a"}
+	require.NoError(t, store.Update(withConfig))
+
+	plain := newTestAgent(t, store, "listplain")
+
+	byID := map[string]*Agent{}
+	for _, a := range store.List() {
+		byID[a.ID] = a
+	}
+	require.NotNil(t, byID[withConfig.ID], "configured agent must appear in List")
+	require.NotNil(t, byID[withConfig.ID].Webhook, "List must carry the stored webhook")
+	require.Equal(t, "http://127.0.0.1:9912/a", byID[withConfig.ID].Webhook.URL)
+	require.Nil(t, byID[plain.ID].Webhook, "List must leave an absent webhook nil")
 }

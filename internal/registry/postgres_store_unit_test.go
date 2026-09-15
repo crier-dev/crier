@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pashagolub/pgxmock/v5"
@@ -23,6 +25,36 @@ func newMockStore(t *testing.T) (*PostgresStore, pgxmock.PgxPoolIface) {
 	s := &PostgresStore{pool: mock}
 	t.Cleanup(s.Close)
 	return s, mock
+}
+
+// agentRowColumns is the column set Get/List scan, in order — it mirrors
+// agentConfigColumns (DF-CRIER-151 adds webhook + guard). Keep the two in sync.
+func agentRowColumns() []string {
+	return []string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen", "webhook", "guard"}
+}
+
+// Exact marshalled shapes, verified by running the marshaller (struct field
+// order + omitempty decide these; the assertions below pin the wire shape).
+const (
+	wantWebhookJSON = `{"url":"http://hook.local/x"}`
+	wantGuardJSON   = `{"policies":[{"id":"default","checks":{},"thresholds":{}}]}`
+)
+
+func testWebhookConfig() *webhook.Config {
+	return &webhook.Config{URL: "http://hook.local/x"}
+}
+
+func testGuardConfig() *guard.AgentGuardConfig {
+	return &guard.AgentGuardConfig{Policies: []guard.Policy{{ID: "default"}}}
+}
+
+// poisonConfig is a config whose marshalling always fails — it stands in for
+// any config that cannot be persisted, which must surface as
+// ErrInvalidStoreInput instead of being silently dropped.
+type poisonConfig struct{}
+
+func (poisonConfig) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("cannot marshal this config")
 }
 
 // testAgent returns a valid Agent for use in mock-backed unit tests.
@@ -103,6 +135,53 @@ func TestPostgresStoreUnit_Register_InvalidStatus(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// marshalling helpers — configuration failures must be loud
+// ---------------------------------------------------------------------------
+
+// TestPostgresStoreUnit_MarshalOptionalConfig_NilIsNull pins the SQL NULL
+// representation: a nil config yields a nil slice, which pgx encodes as NULL
+// (never an empty byte slice, which Postgres would reject as invalid JSON).
+func TestPostgresStoreUnit_MarshalOptionalConfig_NilIsNull(t *testing.T) {
+	raw, err := marshalOptionalConfig[*webhook.Config](nil)
+	require.NoError(t, err)
+	require.Nil(t, raw)
+}
+
+func TestPostgresStoreUnit_MarshalOptionalConfig_MarshalsConfig(t *testing.T) {
+	raw, err := marshalOptionalConfig(testWebhookConfig())
+	require.NoError(t, err)
+	require.Equal(t, wantWebhookJSON, string(raw))
+}
+
+// TestPostgresStoreUnit_MarshalOptionalConfig_FailureIsInvalidInput is the
+// anti-silent-drop guard: a config that cannot be marshalled must fail loudly
+// rather than persist nothing behind a success status (DF-CRIER-151).
+func TestPostgresStoreUnit_MarshalOptionalConfig_FailureIsInvalidInput(t *testing.T) {
+	raw, err := marshalOptionalConfig(&poisonConfig{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrInvalidStoreInput), "want ErrInvalidStoreInput, got %v", err)
+	require.Nil(t, raw)
+}
+
+// TestPostgresStoreUnit_UnmarshalOptionalConfig_NullFormsAreNil proves both
+// NULL representations read back as an absent config: SQL NULL (nil src) and a
+// stored JSON null. Neither may be an error or an empty object.
+func TestPostgresStoreUnit_UnmarshalOptionalConfig_NullFormsAreNil(t *testing.T) {
+	for _, raw := range [][]byte{nil, {}, []byte(""), []byte("null"), []byte(" null ")} {
+		var cfg *webhook.Config
+		require.NoError(t, unmarshalOptionalConfig(raw, &cfg), "raw=%q", raw)
+		require.Nil(t, cfg, "raw=%q must decode to a nil config", raw)
+	}
+}
+
+func TestPostgresStoreUnit_UnmarshalOptionalConfig_DecodesConfig(t *testing.T) {
+	var cfg *webhook.Config
+	require.NoError(t, unmarshalOptionalConfig([]byte(wantWebhookJSON), &cfg))
+	require.NotNil(t, cfg)
+	require.Equal(t, "http://hook.local/x", cfg.URL)
+}
+
+// ---------------------------------------------------------------------------
 // Register — SQL execution paths
 // ---------------------------------------------------------------------------
 
@@ -111,11 +190,35 @@ func TestPostgresStoreUnit_Register_Success(t *testing.T) {
 	ag := testAgent(t)
 
 	mock.ExpectExec(`INSERT INTO agents`).
-		WithArgs(ag.ID, []byte(ag.PublicKey), pgxmock.AnyArg(), string(ag.Status), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(ag.ID, []byte(ag.PublicKey), pgxmock.AnyArg(), string(ag.Status), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			([]byte)(nil), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Register(ag)
 	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Register_PersistsWebhookAndGuard is the unit-level
+// half of DF-CRIER-151: the marshalled configs must reach the INSERT args
+// (pre-fix they were not in the statement at all, so the column set is pinned
+// by the ExpectExec SQL regex as well).
+func TestPostgresStoreUnit_Register_PersistsWebhookAndGuard(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+	ag.Webhook = testWebhookConfig()
+	ag.Guard = testGuardConfig()
+
+	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard \)`).
+		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			[]byte(wantWebhookJSON), []byte(wantGuardJSON)).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	require.NoError(t, s.Register(ag))
+
+	// The caller's object is untouched by the marshalling.
+	require.NotNil(t, ag.Webhook)
+	require.NotNil(t, ag.Guard)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -124,7 +227,8 @@ func TestPostgresStoreUnit_Register_AgentExists(t *testing.T) {
 	ag := testAgent(t)
 
 	mock.ExpectExec(`INSERT INTO agents`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23505"})
 
 	err := s.Register(ag)
@@ -137,7 +241,8 @@ func TestPostgresStoreUnit_Register_SQLError(t *testing.T) {
 	ag := testAgent(t)
 
 	mock.ExpectExec(`INSERT INTO agents`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("connection refused"))
 
 	err := s.Register(ag)
@@ -156,9 +261,10 @@ func TestPostgresStoreUnit_Get_Success(t *testing.T) {
 	ag := testAgent(t)
 	now := time.Now().UTC()
 
-	rows := pgxmock.NewRows([]string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen"}).
-		AddRow(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(ag.Status), now, now)
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen`).
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(ag.Status), now, now,
+			[]byte(wantWebhookJSON), []byte(wantGuardJSON))
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WithArgs(ag.ID).
 		WillReturnRows(rows)
 
@@ -167,13 +273,90 @@ func TestPostgresStoreUnit_Get_Success(t *testing.T) {
 	require.Equal(t, ag.ID, got.ID)
 	require.Equal(t, ag.Status, got.Status)
 	require.Equal(t, []string{"relay"}, got.Capabilities)
+	require.NotNil(t, got.Webhook, "webhook config must survive the read path")
+	require.Equal(t, "http://hook.local/x", got.Webhook.URL)
+	require.NotNil(t, got.Guard, "guard config must survive the read path")
+	require.Equal(t, []guard.Policy{{ID: "default"}}, got.Guard.Policies)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Get_NullConfigsAreNil covers the SQL NULL round trip:
+// an agent stored without either config reads back with both pointers nil —
+// not an error, not an empty object.
+func TestPostgresStoreUnit_Get_NullConfigsAreNil(t *testing.T) {
+	s, mock := newMockStore(t)
+	now := time.Now().UTC()
+	pub := make([]byte, ed25519.PublicKeySize)
+
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		WithArgs("a1").
+		WillReturnRows(rows)
+
+	got, err := s.Get("a1")
+	require.NoError(t, err)
+	require.Nil(t, got.Webhook, "SQL NULL webhook must decode to a nil pointer")
+	require.Nil(t, got.Guard, "SQL NULL guard must decode to a nil pointer")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Get_StoredJSONNullIsNil: a column holding the JSON
+// value `null` (rather than SQL NULL) is the same absent config on the wire.
+func TestPostgresStoreUnit_Get_StoredJSONNullIsNil(t *testing.T) {
+	s, mock := newMockStore(t)
+	now := time.Now().UTC()
+	pub := make([]byte, ed25519.PublicKeySize)
+
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte("null"), []byte("null"))
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		WithArgs("a1").
+		WillReturnRows(rows)
+
+	got, err := s.Get("a1")
+	require.NoError(t, err)
+	require.Nil(t, got.Webhook)
+	require.Nil(t, got.Guard)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
+	now := time.Now().UTC()
+	pub := make([]byte, ed25519.PublicKeySize)
+
+	t.Run("webhook", func(t *testing.T) {
+		s, mock := newMockStore(t)
+		rows := pgxmock.NewRows(agentRowColumns()).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte(`{"url":`), nil)
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+			WithArgs("a1").
+			WillReturnRows(rows)
+
+		_, err := s.Get("a1")
+		require.Error(t, err, "an unreadable stored config must surface, not be ignored")
+		require.False(t, errors.Is(err, ErrAgentNotFound))
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("guard", func(t *testing.T) {
+		s, mock := newMockStore(t)
+		rows := pgxmock.NewRows(agentRowColumns()).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, []byte(`[1,2]`))
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+			WithArgs("a1").
+			WillReturnRows(rows)
+
+		_, err := s.Get("a1")
+		require.Error(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
 }
 
 func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WithArgs("missing").
 		WillReturnError(pgx.ErrNoRows)
 
@@ -185,7 +368,7 @@ func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
 func TestPostgresStoreUnit_Get_SQLError(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WithArgs("error-agent").
 		WillReturnError(errors.New("connection closed"))
 
@@ -202,8 +385,8 @@ func TestPostgresStoreUnit_Get_SQLError(t *testing.T) {
 func TestPostgresStoreUnit_List_Empty(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	rows := pgxmock.NewRows([]string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen"})
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen FROM agents`).
+	rows := pgxmock.NewRows(agentRowColumns())
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WillReturnRows(rows)
 
 	agents := s.List()
@@ -217,28 +400,129 @@ func TestPostgresStoreUnit_List_Populated(t *testing.T) {
 	now := time.Now().UTC()
 	// Two agents
 	pub := make([]byte, ed25519.PublicKeySize)
-	rows := pgxmock.NewRows([]string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen"}).
-		AddRow("a1", pub, []byte(`["relay"]`), "online", now, now).
-		AddRow("a2", pub, []byte(`[]`), "offline", now, now)
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen FROM agents`).
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow("a1", pub, []byte(`["relay"]`), "online", now, now, []byte(wantWebhookJSON), nil).
+		AddRow("a2", pub, []byte(`[]`), "offline", now, now, nil, []byte(wantGuardJSON))
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WillReturnRows(rows)
 
 	agents := s.List()
 	require.Len(t, agents, 2)
 	require.Equal(t, "a1", agents[0].ID)
 	require.Equal(t, "a2", agents[1].ID)
+	// Configs are decoded per row, and a NULL stays nil.
+	require.NotNil(t, agents[0].Webhook)
+	require.Equal(t, "http://hook.local/x", agents[0].Webhook.URL)
+	require.Nil(t, agents[0].Guard)
+	require.Nil(t, agents[1].Webhook)
+	require.NotNil(t, agents[1].Guard)
+	require.Equal(t, []guard.Policy{{ID: "default"}}, agents[1].Guard.Policies)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestPostgresStoreUnit_List_QueryError(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen FROM agents`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
 		WillReturnError(errors.New("connection closed"))
 
 	agents := s.List()
 	require.NotNil(t, agents)
 	require.Empty(t, agents)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// ---------------------------------------------------------------------------
+// Update — the PATCH /agents/{id} path (DF-CRIER-151)
+// ---------------------------------------------------------------------------
+
+func TestPostgresStoreUnit_Update_NilAgent(t *testing.T) {
+	s, mock := newMockStore(t)
+	err := s.Update(nil)
+	require.True(t, errors.Is(err, ErrInvalidStoreInput))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_Update_BlankID(t *testing.T) {
+	s, mock := newMockStore(t)
+	err := s.Update(&Agent{ID: ""})
+	require.True(t, errors.Is(err, ErrInvalidStoreInput))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Update_PersistsWebhookAndGuard pins the UPDATE column
+// set and args — the pre-fix statement wrote capabilities only.
+func TestPostgresStoreUnit_Update_PersistsWebhookAndGuard(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+	ag.Webhook = testWebhookConfig()
+	ag.Guard = testGuardConfig()
+
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
+		WithArgs(ag.ID, []byte(`["relay"]`), []byte(wantWebhookJSON), []byte(wantGuardJSON), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	require.NoError(t, s.Update(ag))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Update_NilWebhookClearsColumn: spec §7 — webhook
+// absent/null removes the webhook, which is an explicit SQL NULL write, not a
+// skipped column.
+func TestPostgresStoreUnit_Update_NilWebhookClearsColumn(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+	ag.Webhook = nil
+	ag.Guard = nil
+
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	require.NoError(t, s.Update(ag))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_Update_NotFound(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+
+	mock.ExpectExec(`UPDATE agents`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+
+	err := s.Update(ag)
+	require.True(t, errors.Is(err, ErrAgentNotFound))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_Update_NilCapabilitiesMarshalAsEmptyArray(t *testing.T) {
+	// A nil capability list is stored as [] rather than null, matching Register
+	// (the column is NOT NULL DEFAULT '[]' with a jsonb_typeof = 'array' CHECK).
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+	ag.Capabilities = nil
+
+	mock.ExpectExec(`UPDATE agents`).
+		WithArgs(ag.ID, []byte(`[]`), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	require.NoError(t, s.Update(ag))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_Update_SQLError(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+
+	mock.ExpectExec(`UPDATE agents`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnError(errors.New("connection closed"))
+
+	err := s.Update(ag)
+	require.Error(t, err)
+	require.False(t, errors.Is(err, ErrAgentNotFound))
+	require.False(t, errors.Is(err, ErrInvalidStoreInput))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

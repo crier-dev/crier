@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -104,6 +105,48 @@ func (s *PostgresStore) operationContext() (context.Context, context.CancelFunc)
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
+// agentConfigColumns is the column list shared by Get and List, in the exact
+// order both scan it: the six registration columns followed by the two
+// optional configs added by 003_add_agent_config_columns.
+const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard`
+
+// marshalOptionalConfig marshals one of an agent's optional configs (webhook,
+// guard) for its nullable JSONB column. A nil config — absent, or explicitly
+// null on the wire — yields a nil slice, which pgx encodes as SQL NULL
+// (pgtype.Map.Encode documents the nil return as "the SQL value NULL"; the
+// JSONB plan returns (nil, nil) for a nil []byte). A config that cannot be
+// marshalled is reported as ErrInvalidStoreInput rather than persisted as
+// nothing: silent acceptance of an unusable config is the DF-CRIER-151
+// failure shape this backend must not reproduce.
+func marshalOptionalConfig[T any](cfg *T) ([]byte, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("%w: marshal agent config: %v", ErrInvalidStoreInput, err)
+	}
+	return raw, nil
+}
+
+// unmarshalOptionalConfig is the read-side inverse of marshalOptionalConfig:
+// SQL NULL (a nil src, which is what the JSONB scan plan yields for NULL) and
+// a stored JSON null both leave dst nil — the wire shape stays "config
+// absent", identical to the in-memory backend — while anything else is
+// decoded into a fresh value.
+func unmarshalOptionalConfig[T any](raw []byte, dst **T) error {
+	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		*dst = nil
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return err
+	}
+	*dst = &v
+	return nil
+}
+
 // Register adds an agent. Maps duplicate PK to ErrAgentExists.
 func (s *PostgresStore) Register(agent *Agent) error {
 	if agent == nil || agent.ID == "" {
@@ -124,6 +167,14 @@ func (s *PostgresStore) Register(agent *Agent) error {
 	if err != nil {
 		return fmt.Errorf("%w: marshal capabilities: %v", ErrInvalidStoreInput, err)
 	}
+	webhookJSON, err := marshalOptionalConfig(agent.Webhook)
+	if err != nil {
+		return err
+	}
+	guardJSON, err := marshalOptionalConfig(agent.Guard)
+	if err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	status := agent.Status
@@ -136,9 +187,9 @@ func (s *PostgresStore) Register(agent *Agent) error {
 
 	_, err = s.pool.Exec(ctx, `
 INSERT INTO agents (
-    id, public_key, capabilities, status, registered_at, last_seen
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6);`,
-		agent.ID, []byte(agent.PublicKey), capsJSON, string(status), now, now,
+    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb);`,
+		agent.ID, []byte(agent.PublicKey), capsJSON, string(status), now, now, webhookJSON, guardJSON,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -165,12 +216,15 @@ func (s *PostgresStore) Get(id string) (*Agent, error) {
 		agent            Agent
 		publicKey        []byte
 		capabilitiesJSON []byte
+		webhookJSON      []byte
+		guardJSON        []byte
 	)
 	err := s.pool.QueryRow(ctx, `
-SELECT id, public_key, capabilities, status, registered_at, last_seen
+SELECT `+agentConfigColumns+`
 FROM agents
 WHERE id = $1;`, id).Scan(
 		&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
+		&webhookJSON, &guardJSON,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -189,6 +243,12 @@ WHERE id = $1;`, id).Scan(
 	if err := json.Unmarshal(capabilitiesJSON, &agent.Capabilities); err != nil {
 		return nil, fmt.Errorf("get agent: unmarshal capabilities: %w", err)
 	}
+	if err := unmarshalOptionalConfig(webhookJSON, &agent.Webhook); err != nil {
+		return nil, fmt.Errorf("get agent: unmarshal webhook: %w", err)
+	}
+	if err := unmarshalOptionalConfig(guardJSON, &agent.Guard); err != nil {
+		return nil, fmt.Errorf("get agent: unmarshal guard: %w", err)
+	}
 	return &agent, nil
 }
 
@@ -200,7 +260,7 @@ func (s *PostgresStore) List() []*Agent {
 	defer cancel()
 
 	rows, err := s.pool.Query(ctx, `
-SELECT id, public_key, capabilities, status, registered_at, last_seen
+SELECT `+agentConfigColumns+`
 FROM agents
 ORDER BY registered_at ASC, id ASC;`)
 	if err != nil {
@@ -215,8 +275,11 @@ ORDER BY registered_at ASC, id ASC;`)
 			agent            Agent
 			publicKey        []byte
 			capabilitiesJSON []byte
+			webhookJSON      []byte
+			guardJSON        []byte
 		)
-		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen); err != nil {
+		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
+			&webhookJSON, &guardJSON); err != nil {
 			slog.Error("postgres list scan", "error", err)
 			return []*Agent{}
 		}
@@ -229,6 +292,14 @@ ORDER BY registered_at ASC, id ASC;`)
 		agent.PublicKey = key
 		if err := json.Unmarshal(capabilitiesJSON, &agent.Capabilities); err != nil {
 			slog.Error("postgres list: unmarshal capabilities", "error", err)
+			return []*Agent{}
+		}
+		if err := unmarshalOptionalConfig(webhookJSON, &agent.Webhook); err != nil {
+			slog.Error("postgres list: unmarshal webhook", "error", err, "agent_id", agent.ID)
+			return []*Agent{}
+		}
+		if err := unmarshalOptionalConfig(guardJSON, &agent.Guard); err != nil {
+			slog.Error("postgres list: unmarshal guard", "error", err, "agent_id", agent.ID)
 			return []*Agent{}
 		}
 		out = append(out, &agent)
@@ -258,9 +329,11 @@ WHERE id = $1;`, id)
 }
 
 // Update replaces the mutable registration fields of an existing agent — the
-// PATCH /agents/{id} path (CR-FEAT-007). The Postgres backend persists
-// capabilities; webhook config is not persisted here (mirrors Register, whose
-// INSERT also omits it — webhook remains an in-memory registration field).
+// PATCH /agents/{id} path (CR-FEAT-007). The Postgres backend persists all
+// three mutable fields: capabilities, webhook and guard are each written to
+// their column, and an explicit nil (webhook absent or null in the PATCH
+// body, spec §7) writes SQL NULL — so "removes the webhook" means removed on
+// this backend, not accepted-and-ignored (DF-CRIER-151).
 // Returns ErrAgentNotFound when the agent does not exist.
 func (s *PostgresStore) Update(agent *Agent) error {
 	if agent == nil || agent.ID == "" {
@@ -274,14 +347,22 @@ func (s *PostgresStore) Update(agent *Agent) error {
 	if err != nil {
 		return fmt.Errorf("%w: marshal capabilities: %v", ErrInvalidStoreInput, err)
 	}
+	webhookJSON, err := marshalOptionalConfig(agent.Webhook)
+	if err != nil {
+		return err
+	}
+	guardJSON, err := marshalOptionalConfig(agent.Guard)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := s.operationContext()
 	defer cancel()
 
 	tag, err := s.pool.Exec(ctx, `
 UPDATE agents
-SET capabilities = $2::jsonb, last_seen = $3
-WHERE id = $1;`, agent.ID, capsJSON, time.Now().UTC())
+SET capabilities = $2::jsonb, webhook = $3::jsonb, guard = $4::jsonb, last_seen = $5
+WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}

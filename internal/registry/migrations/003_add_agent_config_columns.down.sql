@@ -1,0 +1,3 @@
+ALTER TABLE agents
+    DROP COLUMN IF EXISTS guard,
+    DROP COLUMN IF EXISTS webhook;
