@@ -248,3 +248,12 @@ Promise: {"entry_point":"Go HTTP + WebSocket server binary (cmd/server → bin/c
 - [P1] Documented start command collides with a stale server and nothing identifies which binary answered — `./bin/crier -port 8767` died on 'address already in use' (stale crier from an earlier session); first curls were answered by the OLD process — /version reported commit d9ccafb while the fresh build w
 - [P1] README/TESTERS promise interactive /docs you can fire requests from; it is a static link page, and the endpoint count contradicts itself — Friction #5: '/docs is a static page with two links to /openapi.json and /openapi.yaml, no try-it UI.' Same README says '17 endpoints across 7 operation groups' vs 'API — 16 HTTP endpoints wired' whil
 - [P2] Tester-facing truth is stale or self-undercutting (known-issues list, cached tests, container identity) — TESTERS.md 'Known rough edges' is wrong at HEAD on 4 items (wildcard subscribe works, ttl_seconds honored 3600→+1h / 0→never, unknown mesh peer returns CONTROLLER_OFFLINE not a hang, redelivery ~30s n
+
+## Dogfood Findings (2026-09-15)
+Verdict: UNKNOWN-VALUE
+Promise: {"entry_point":"CLI server binary `bin/crier` (Go, ./cmd/server) — HTTP + WebSocket server on :8767 default serving /relay/*, /mesh/*, /agents/*, /fed/*, /health, /version, /docs; second binary `bin/crier-mcp` (./cmd/crier-mcp) is an MCP server bridging MCP clients to the running crier server via CR
+
+- [P0] Real-use run produced no usable evidence — works=false with friction_count=0, empty frictions, null time_to_first_success_s, and notes '(unparsed)' — the scout run itself did not complete or its output failed to parse, so neither success nor f
+- [P1] Core promises unverified either way — promises_held and promises_broken are both empty: pub/sub relay, WS mesh, ed25519 registry, and durable inbox delivery were never exercised to a recordable outcome, so the cryptographic register→publi
+- [P1] Usability metrics absent — time_to_first_success_s=null means there is no evidence a new user got from clone to first successful message exchange; usability cannot be assessed.
+- [P2] Build surface looks plausible but untested — Promise lists two buildable binaries (./cmd/server, ./cmd/crier-mcp), make targets, and a demo script, but no finding confirms any of make build, bin/crier -version, or examples/demo.sh actually ran.
