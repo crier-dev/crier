@@ -551,3 +551,18 @@ tasks:
   status: complete
   created_at: '2026-09-15T04:14:06.647104+00:00'
   completed_at: '2026-09-15T04:25:02.509116+00:00'
+- id: DF-CRIER-158
+  title: Guard error path must keep the deterministic pre-scan authoritative and risk-marked
+    allows must be surfaced
+  criteria:
+  - internal/guard/guard.go errorResult applies the filtered prematch (Patterns populated
+    on every error path) and escalates a fail-open outcome to block/high when a high-confidence
+    prematch hit exists; registry handler guardInDeliverResponse surfaces allow verdicts
+    carrying a risk marker while a clean low-risk allow stays absent; specs/LLM-MESSAGE-GUARD.md
+    3.6/6.3/9.3 amended in place; new tests cover the unreachable-provider injection
+    payload (block/high/errored + ignore_previous) and low-confidence-only fail-open
+    preservation; go build, go vet, go test ./... -count=1 and gitreins guard all
+    pass; gofmt -l empty.
+  status: complete
+  created_at: '2026-09-15T10:48:43.873211+00:00'
+  completed_at: '2026-09-15T10:56:44.104731+00:00'
