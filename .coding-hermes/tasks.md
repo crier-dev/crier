@@ -267,3 +267,8 @@ Promise: {"entry_point":"A Go HTTP + WebSocket server binary — `bin/crier` bui
 - [P1] Concurrent retriever disjointness promise fails (4/0 starvation, not distribution) — README states concurrent retrievers get disjoint message sets. Observed: 4 queued messages, two parallel signed retrieves returned 4 and 0 — the first drained the batch, the second starved. Fix or dro
 - [P2] Promised interactive /docs is a static link index — README: 'Interactive API docs ship at /docs'. Live /docs is a 1002-byte static page with no form, input or button, self-declaring 'no CDN / Swagger-UI dependency', only linking /openapi.json and /open
 - [P2] Small contract/identity divergences that erode trust and waste user time — Build identity disagrees across artifacts of one checkout: make build -> 0294515-dirty, bare go build -> vdev-..., docker image -> 'dev', MCP initialize -> serverInfo.version 0.1.0; /health returns JS
+
+## Dogfood Findings (2026-09-15)
+Verdict: UNKNOWN-VALUE
+Promise: {"entry_point":"HTTP + WebSocket relay server, a self-hosted Go binary built from cmd/server to bin/crier (default listen port :8767, CLI flags -port/-db-url/-version, env-driven via CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG); plus a second binary bin/crier-mcp from cmd/crier-
+
