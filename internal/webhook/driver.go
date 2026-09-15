@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -14,6 +15,15 @@ import (
 // durable sender notification emitted when an async delivery exhausts its
 // bounded retries (DF-CRIER-8, spec §4).
 const CodeWebhookFailed = "WEBHOOK_FAILED"
+
+// ErrPermanent marks a BLOCKING delivery failure the endpoint will never
+// accept: it answered a non-retryable status (4xx other than 408/429), or it
+// answered 2xx with a body the agent's reply schema cannot map. Retrying the
+// identical envelope cannot change either outcome, so DeliverBlocking wraps
+// both with ErrPermanent and the deliver API answers 502 Bad Gateway —
+// distinct from the 504 Gateway Timeout it returns for budget/timeout
+// exhaustion, which a later attempt can still win (DF-CRIER-157).
+var ErrPermanent = errors.New("webhook: permanent failure")
 
 // FailureNotification describes one queued delivery that exhausted its
 // bounded retries (DF-CRIER-8). It is emitted exactly once per dropped
@@ -282,7 +292,10 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			reply, err := d.client.ExtractReply(cfg, res.Body)
 			if err != nil {
-				return nil, fmt.Errorf("webhook: reply extraction: %w", err)
+				// A 2xx whose body the reply schema cannot map is as
+				// permanent as a 4xx: the same envelope gets the same
+				// body back (DF-CRIER-157).
+				return nil, fmt.Errorf("%w: reply extraction: %w", ErrPermanent, err)
 			}
 			d.recordSuccess(agentID)
 			return reply, nil
@@ -294,7 +307,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		}
 		if !res.Retryable {
 			d.recordFailure(agentID, res)
-			return nil, fmt.Errorf("webhook: permanent failure: %w", lastErr)
+			return nil, fmt.Errorf("%w: %w", ErrPermanent, lastErr)
 		}
 		d.recordFailure(agentID, res)
 		// Backoff within the remaining budget.

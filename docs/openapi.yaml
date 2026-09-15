@@ -539,16 +539,20 @@ paths:
                     is not stored, so it has no expiry.
       responses:
         "201":
-          description: Message queued
+          description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157)."
           content:
             application/json:
               schema:
                 type: object
-                required: [id]
+                required: [id, transport]
                 properties:
                   id:
                     type: string
                     description: Assigned message id
+                  transport:
+                    type: string
+                    enum: [inbox]
+                    description: "Where the message went (DF-CRIER-157): \"inbox\" — it is in the target's durable inbox and retrievable with GET /agents/{id}/inbox. The field is always present, so a sender branches on it instead of inferring the destination from the status code."
                   expires_at:
                     type: string
                     format: date-time
@@ -557,26 +561,56 @@ paths:
                     $ref: "#/components/schemas/GuardVerdictMeta"
                     description: "Guard verdict metadata whenever the verdict is not a CLEAN pass (decision allow + no error + risk low + no matched patterns) — visibility for async senders. Surfaced for sanitize, errored fail-open, and any allow carrying a risk marker (e.g. the over-cap `oversize` marker); a clean allow omits it (CR-FEAT-010, spec §9.3, DF-CRIER-158)"
         "202":
-          description: "Delivery accepted but not yet made (webhook async/batch, or a held federation delivery). Federation hold (DF-CRIER-7): every link is failing transiently, so the request is queued at this relay and retried inside CR_FED_MAX_HOLD_S; a terminal failure is reported once as FEDERATION_FAILED in the sender's own inbox."
+          description: |
+            Accepted, not yet delivered. Two shapes — branch on the body, not on the status code (DF-CRIER-157, DF-CRIER-7).
+
+            (a) WEBHOOK async/batch accept (`transport: "webhook"`): the message was handed to the target's webhook queue and is NOT stored in its inbox, so the target's inbox stays EMPTY by design — an empty retrieve does not mean the delivery was lost. `delivery_mode` echoes the RESOLVED queue semantics (`async` = one queued POST; `batch` = coalesced into the endpoint's next batch flush). Failure recovery: when the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable `WEBHOOK_FAILED` message is written into the SENDER's own inbox — a direct store write that never routes back through webhook delivery.
+
+            (b) HELD federation delivery (`status: "held"`): every link is failing transiently, so the request is queued at this relay and retried inside `CR_FED_MAX_HOLD_S`; a terminal failure is reported once as `FEDERATION_FAILED` in the sender's own inbox.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WebhookDeliverAccept"
+                  - type: object
+                    required: [status, id, target, max_hold_s]
+                    properties:
+                      status:
+                        type: string
+                        enum: [held]
+                        description: "held — the federation delivery is queued at the source and retried"
+                      id:
+                        type: string
+                        description: Assigned message id (also the correlation id of the FEDERATION_FAILED notification, if any)
+                      target:
+                        type: string
+                        description: Target agent id the held delivery is addressed to
+                      max_hold_s:
+                        type: integer
+                        description: "Hold budget (CR_FED_MAX_HOLD_S) in seconds — after this the sender is told FEDERATION_FAILED"
+        "200":
+          description: "Blocking webhook delivery completed — the endpoint's reply is in the body (delivery_mode=blocking). Nothing is stored in the target's inbox, and the 200 is webhook-transported by construction (DF-CRIER-157)."
           content:
             application/json:
               schema:
                 type: object
-                required: [status, id, target, max_hold_s]
+                required: [id, transport, reply]
                 properties:
-                  status:
-                    type: string
-                    enum: [held]
-                    description: "held — the federation delivery is queued at the source and retried"
                   id:
                     type: string
-                    description: Assigned message id (also the correlation id of the FEDERATION_FAILED notification, if any)
-                  target:
+                    description: Assigned message id
+                  transport:
                     type: string
-                    description: Target agent id the held delivery is addressed to
-                  max_hold_s:
-                    type: integer
-                    description: "Hold budget (CR_FED_MAX_HOLD_S) in seconds — after this the sender is told FEDERATION_FAILED"
+                    enum: [webhook]
+                    description: "Always \"webhook\": a blocking delivery exists only on the webhook path"
+                  reply:
+                    description: "The endpoint's reply, extracted per the agent's reply schema (`schema_template` or `custom_schema.response_map`: JSONPath into the body, or `raw` = the whole body) — arbitrary JSON"
+                  session_id:
+                    type: string
+                    description: Session id from the original request, when present
+                  request_id:
+                    type: string
+                    description: Sender correlation id, echoed back
         "400":
           description: Invalid request body or store input
         "403":
@@ -588,40 +622,52 @@ paths:
         "404":
           description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) or reported as 502 FEDERATION_FAILED."
         "502":
-          description: "Federation link failure with no hold queue available: every link is unreachable or answered a retryable status. Explicit failure, never a 404."
+          description: |
+            Bad gateway — the delivery was rejected upstream; a rejection is never reported as 404.
+
+            (a) BLOCKING webhook delivery permanently rejected (`error: "webhook: permanent failure: …"`): the endpoint answered a non-retryable status (4xx other than 408/429 — bad auth, wrong URL, bad request) or answered 2xx with a body the agent's reply schema cannot map (`reply extraction: …`). Retrying the identical message cannot succeed, so it fails fast instead of burning the caller's budget (DF-CRIER-157). A timeout or an exhausted budget stays `504`, where a later attempt can still land.
+
+            (b) FEDERATION_FAILED — link failure with no hold queue available: every link is unreachable or answered a retryable status.
           content:
             application/json:
               schema:
-                type: object
-                required: [error, message_id, target, attempts]
-                properties:
-                  error:
-                    type: string
-                    enum: [FEDERATION_FAILED]
-                  message_id:
-                    type: string
-                    description: Assigned message id of the failed delivery
-                  target:
-                    type: string
-                    description: Target agent id
-                  sender:
-                    type: string
-                    description: Sender from the original request, when present
-                  request_id:
-                    type: string
-                    description: Sender correlation id, when present
-                  session_id:
-                    type: string
-                    description: Session id, when present
-                  attempts:
-                    type: integer
-                    description: Forward attempts made before giving up
-                  status:
-                    type: integer
-                    description: Last retryable remote status observed (absent when the failure was transport-level)
-                  detail:
-                    type: string
-                    description: Last transport/status error (never carries the link token)
+                oneOf:
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        description: "\"webhook: permanent failure: status 400\" / \"webhook: permanent failure: reply extraction: …\" — the endpoint's non-retryable rejection of a blocking delivery (DF-CRIER-157)"
+                  - type: object
+                    required: [error, message_id, target, attempts]
+                    properties:
+                      error:
+                        type: string
+                        enum: [FEDERATION_FAILED]
+                      message_id:
+                        type: string
+                        description: Assigned message id of the failed delivery
+                      target:
+                        type: string
+                        description: Target agent id
+                      sender:
+                        type: string
+                        description: Sender from the original request, when present
+                      request_id:
+                        type: string
+                        description: Sender correlation id, when present
+                      session_id:
+                        type: string
+                        description: Session id, when present
+                      attempts:
+                        type: integer
+                        description: Forward attempts made before giving up
+                      status:
+                        type: integer
+                        description: Last retryable remote status observed (absent when the failure was transport-level)
+                      detail:
+                        type: string
+                        description: Last transport/status error (never carries the link token)
     get:
       operationId: inboxRetrieve
       summary: Retrieve undelivered messages from inbox
@@ -994,3 +1040,22 @@ components:
           enum: [GUARD_BLOCKED]
         guard:
           $ref: "#/components/schemas/GuardVerdictMeta"
+    WebhookDeliverAccept:
+      type: object
+      required: [id, transport, delivery_mode]
+      description: "Accept body for an async/batch webhook delivery (DF-CRIER-157). The message is queued for the target's webhook endpoint and is NOT stored in its inbox, so GET /agents/{id}/inbox stays empty by design. When the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable WEBHOOK_FAILED message — {\"kind\":\"error\",\"code\":\"WEBHOOK_FAILED\",\"message_id\":\"<original>\",\"target\":\"<agent>\",\"retries\":N,\"status_code\":S,\"error\":\"…\"} — is written into the SENDER's own inbox (direct store write, never webhook-routed; `status_code` omitted and `error` carrying the string on a transport failure)."
+      properties:
+        id:
+          type: string
+          description: Assigned message id
+        transport:
+          type: string
+          enum: [webhook]
+          description: "Where the message went: \"webhook\" — the target has a webhook endpoint and its durable inbox was bypassed"
+        delivery_mode:
+          type: string
+          enum: [async, batch]
+          description: "Resolved queue semantics of this accept: `async` = one queued POST; `batch` = coalesced into the endpoint's next batch flush. The per-message `delivery_mode` override wins over the agent's configured default"
+        guard:
+          $ref: "#/components/schemas/GuardVerdictMeta"
+          description: "Guard verdict metadata whenever the verdict is not a CLEAN pass — same contract as the 201 inbox accept (CR-FEAT-010, spec §9.3)"

@@ -89,28 +89,52 @@ Reply becomes a RESPONSE frame/message with `request_id` = original REQUEST's `m
 contract as the mesh RESPONSE frame (CR-SPEC note: HTTP hop must preserve the contract; the route table is
 keyed by `message_id` so webhook replies flow through `forwardResponse` unchanged).
 
+Sender-visible status for a blocking delivery on the deliver API (`POST /agents/{id}/inbox`, DF-CRIER-157):
+a row above that is PERMANENT (a non-retryable `4xx (other)`) answers **502 Bad Gateway** with
+`{"error":"webhook: permanent failure: status 400"}`, and so does a `2xx` whose body the reply schema cannot
+map (`{"error":"webhook: permanent failure: reply extraction: …"}`) — the same envelope will get the same
+answer, so retrying cannot succeed. A transient `5xx / 408 / 429 / timeout` that exhausts the caller's budget
+answers **504 Gateway Timeout** with `{"error":"webhook: blocking delivery timed out after 30s (last: status 503)"}`;
+only that class can still land on a later attempt. (Timeout and budget exhaustion are the only 504 cases.)
+
 ## 4. Delivery modes
 
 | Mode | Semantics | Sender sees | Failure |
 |---|---|---|---|
-| blocking | POST + wait, reply from body | reply payload | retries → ERROR `WEBHOOK_FAILED{status, retries}` |
-| async | POST, don't wait | 202 accept | queue + retry + backoff; retries exhausted → durable `WEBHOOK_FAILED` inbox notification to the sender |
-| batch | coalesce N/T → one batch POST | 202 accept | queue flush retry (exhaustion notifies like async) |
+| blocking | POST + wait, reply from body | `200 {"id","transport":"webhook","reply",…}` | permanent endpoint rejection → 502; retries exhausted / timeout → 504 |
+| async | POST, don't wait | `202 {"id","transport":"webhook","delivery_mode":"async"}` accept | queue + retry + backoff; retries exhausted → durable `WEBHOOK_FAILED` inbox notification to the sender |
+| batch | coalesce N/T → one batch POST | `202 {"id","transport":"webhook","delivery_mode":"batch"}` accept | queue flush retry (exhaustion notifies like async) |
 
+- **Transport signaling (DF-CRIER-157):** every accept names where the message actually went, so a sender
+  never infers the destination from the status code. `"transport":"webhook"` on the 200/202 webhook paths —
+  the durable inbox is BYPASSED by design, so `GET /agents/{id}/inbox` for that agent stays empty and an empty
+  retrieve is not evidence that the message was never sent; `"transport":"inbox"` on the 201 store path, which
+  also carries `expires_at` (no inbox entry exists on the webhook paths, so no expiry applies there).
+  `delivery_mode` is echoed on the 202 accept (`async` | `batch`, the RESOLVED mode — a per-message
+  `delivery_mode` override wins over the agent default) so the sender learns the queue semantics it entered.
 - Async exhaustion notification (DF-CRIER-8): when a queued delivery exceeds `CR_WEBHOOK_MAX_RETRIES`, the
   driver drops it AND emits exactly one notification into the originating sender's durable inbox (direct
-  store write — never webhook-routed, so it cannot recurse). Payload:
+  store write — never webhook-routed, so it cannot recurse, and it lands there even when the SENDER itself is
+  a webhook-configured agent). Payload:
   `{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<agent>","retries":N,"status_code":S,"error":"…"}`
   (`status_code` omitted on transport failure; `error` carries the transport error string). A missing sender
   or a failed notification write is logged best-effort: the delivery is not requeued and the notification is
   not retried or duplicated.
+  Timing: one attempt per `CR_WEBHOOK_REDELIVER_S` tick (default 30s) and the item is dropped once
+  `item.Retries > CR_WEBHOOK_MAX_RETRIES`, so with the defaults (5 / 30s) the notification arrives roughly
+  two to three minutes after the accept. While the endpoint is degraded (circuit open after
+  `CR_WEBHOOK_CIRCUIT_THRESHOLD` consecutive failures) queued items are re-queued WITHOUT a POST, so
+  exhaustion is delayed until the probe (`CR_WEBHOOK_PROBE_S`, default 60s) succeeds and drains the queue.
 
 - Sender selects per message: `delivery_mode` in the REQUEST/deliver payload overrides the agent default.
 - Batch envelope: `X-Crier-Event: batch`, payload = `{"messages": [envelope, …]}`.
 - Queue: durable (Postgres when `CR_DATABASE_URL`, else in-memory) — redelivery on interval
   (`CR_WEBHOOK_REDELIVER_S`, default 30s) and on recovery probe (endpoint healthcheck every 60s).
-- Circuit breaker: 10 consecutive 5xx/timeout → endpoint marked `degraded`; redelivery interval backs off to
-  5 min; probe succeeds → immediate drain. (`CR_WEBHOOK_CIRCUIT_THRESHOLD`, default 10.)
+- Circuit breaker: `CR_WEBHOOK_CIRCUIT_THRESHOLD` consecutive 5xx/timeout failures (default 10) → endpoint
+  marked `degraded`; while degraded the queued items are re-queued WITHOUT a POST (the poisoned endpoint is not
+  hammered), and a successful probe (`CR_WEBHOOK_PROBE_S`, default 60s) clears the mark and drains the queue
+  immediately. The redelivery ticker keeps running at `CR_WEBHOOK_REDELIVER_S` throughout — there is no separate
+  longer backoff interval; the pause is what lengthens the time to exhaustion.
 
 ## 5. Session & context mapping (CR-FEAT-004)
 

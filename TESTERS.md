@@ -80,7 +80,15 @@ curl -s -X PATCH localhost:8767/agents/bob -H 'Content-Type: application/json' \
   -d '{"webhook":{"url":"http://127.0.0.1:9911/hook","delivery_mode":"blocking"}}'
 curl -s -X POST localhost:8767/agents/bob/inbox -H 'Content-Type: application/json' \
   -d '{"payload":{"ping":1}}'   # → 200 and the SINK's reply comes back inline
-# switch to "async" in the PATCH and the deliver returns 202 instead
+# switch to "async" in the PATCH and the deliver returns 202 instead — the body
+# names where the message went: {"transport":"webhook","delivery_mode":"async"}.
+# bob's messages go to the SINK, NOT his inbox ("accepted for webhook delivery,
+# not stored") — GET /agents/bob/inbox stays empty by design, that is expected.
+# Now point the PATCH at a dead port (http://127.0.0.1:1/hook) and deliver as
+# alice: the accept is STILL 202 (queued, not delivered), and once the retries
+# run out (~2-3 min with the defaults) ALICE's inbox — the SENDER's, not bob's —
+# receives {"kind":"error","code":"WEBHOOK_FAILED","message_id":"...",
+# "target":"bob","retries":6,"status_code":0,"error":"post ...: connection refused"}.
 # with CR_DATABASE_URL set (the postgres backend) this webhook config is
 # PERSISTED: restart the server and GET /agents/bob still returns it.
 # A PATCH with {"webhook":null} removes it.
@@ -122,10 +130,43 @@ Tracked on the board; do **not** re-report unless your reproduction differs:
 | 4 | Mesh REQUEST to an id never registered over HTTP hangs forever (no error frame) | open, P1 |
 | 5 | No work distribution: two retrievers on one inbox both get every message | open, P2 |
 | 6 | Malformed mesh frames are dropped silently (spec says INVALID_MESSAGE reply) | open, P2 |
+| 7 | A webhook agent's inbox stays empty after a `202` accept | by design — see "202 from a webhook agent" below, not a bug |
 
 Known-good as of this writing: register/deliver/retrieve/ack, blocking +
 async webhook, relay publish→subscribe fan-out, bus-to-bus forwarding,
 failure-notification after hold expiry, MCP stdio session end-to-end.
+
+### 202 from a webhook agent means accepted, not stored
+
+A delivery to an agent that has a webhook configured goes to that endpoint and
+**bypasses the durable inbox** (`specs/WEBHOOK-DELIVERY.md` §4). The accept
+tells you which: `202` + `"transport":"webhook"` (plus `"delivery_mode":
+"async"|"batch"`) means the message was queued for the endpoint and is NOT in
+the target's inbox; `201` + `"transport":"inbox"` (plus `expires_at`) means it
+is stored and retrievable; `200` + `"transport":"webhook"` is blocking mode,
+with the endpoint's reply in the same body.
+
+So an empty `GET /agents/{id}/inbox` for a webhook-configured agent is the
+documented behavior — do not report it. Instead, watch the SENDER's inbox: when
+a queued async/batch delivery exhausts its bounded retries
+(`CR_WEBHOOK_MAX_RETRIES`, default 5 — one attempt per `CR_WEBHOOK_REDELIVER_S`
+tick, default 30s, so ~2-3 minutes after the accept by default; longer while
+the endpoint is degraded and redeliveries pause until a probe
+(`CR_WEBHOOK_PROBE_S`) succeeds), exactly one durable notification lands there:
+
+```json
+{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<recipient agent>","retries":6,"status_code":503,"error":"status 503"}
+```
+
+`status_code` is omitted (and `error` carries the transport error string) when
+the endpoint never answered at all. The notification is best-effort: an
+unregistered sender, or a rejected message with no `sender`, is logged instead
+of notified, and it is never retried.
+
+Blocking mode answers synchronously instead: a permanent rejection by the
+endpoint (non-retryable 4xx — bad auth, wrong URL — or a 2xx whose body the
+reply schema cannot map) returns `502` ("retrying cannot succeed"), while a
+timeout / exhausted budget returns `504`.
 
 ## 4. How to report
 

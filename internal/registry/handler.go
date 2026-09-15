@@ -88,7 +88,10 @@ type patchRequest struct {
 // blockingDeliverResponse is returned for delivery_mode=blocking: the
 // endpoint's reply, extracted per the agent's schema template.
 type blockingDeliverResponse struct {
-	ID        string          `json:"id"`
+	ID string `json:"id"`
+	// Transport is always "webhook": a blocking delivery exists only on the
+	// webhook path, so no inbox entry is created (DF-CRIER-157).
+	Transport string          `json:"transport"`
 	Reply     json.RawMessage `json:"reply"`
 	SessionID string          `json:"session_id,omitempty"`
 	RequestID string          `json:"request_id,omitempty"`
@@ -99,6 +102,17 @@ type blockingDeliverResponse struct {
 // errored fail-open) — visibility for async senders (spec §9.3).
 type deliverResponse struct {
 	ID string `json:"id"`
+	// Transport names where the message actually went (DF-CRIER-157):
+	// "webhook" when the target agent has a webhook endpoint — such a
+	// delivery BYPASSES the durable inbox by design, so a later retrieve is
+	// empty — or "inbox" when the message was stored in the agent's durable
+	// inbox. Always present, so a sender never has to infer the destination
+	// from the status code alone.
+	Transport string `json:"transport"`
+	// DeliveryMode echoes the webhook queue semantics of a 202 accept:
+	// "async" (one queued POST) or "batch" (coalesced into the endpoint's
+	// next batch flush). Absent for inbox and blocking deliveries.
+	DeliveryMode string `json:"delivery_mode,omitempty"`
 	// ExpiresAt is the RESOLVED message expiry (RFC 3339) of a stored inbox
 	// message, so a sender can see what the requested ttl_seconds actually
 	// became; the zero time (0001-01-01T00:00:00Z) means the message never
@@ -579,11 +593,21 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			}
 			reply, err := h.webhooks.DeliverBlocking(r.Context(), id, target.Webhook, env, budget)
 			if err != nil {
+				// 502 vs 504 (DF-CRIER-157): a PERMANENT endpoint rejection —
+				// a non-retryable status, or a 2xx whose body the agent's reply
+				// schema cannot map — can never succeed on retry, so it is a
+				// Bad Gateway. A timeout / budget exhaustion is a Gateway
+				// Timeout: the same delivery may still land later.
+				if errors.Is(err, webhook.ErrPermanent) {
+					writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+					return
+				}
 				writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error()})
 				return
 			}
 			writeJSON(w, http.StatusOK, blockingDeliverResponse{
 				ID:        entry.ID,
+				Transport: "webhook",
 				Reply:     reply,
 				SessionID: req.SessionID,
 				RequestID: req.RequestID,
@@ -601,9 +625,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		}
 		// Async/batch webhook delivery is fire-and-forget: the sender gets
 		// 202 Accepted, delivery happens in the background queue (spec §4).
-		// The accept is logged with the correlation context (DF-CRIER-141)
-		// so the sender's request can be joined to the background dispatch
-		// and outcome lines the webhook driver emits.
+		// The accept names where the message went (transport=webhook — the
+		// durable inbox is bypassed, so a later retrieve is empty) and which
+		// queue semantics apply (delivery_mode=async|batch), so a sender is
+		// never left inferring that from the status code alone
+		// (DF-CRIER-157). The accept is logged with the correlation context
+		// (DF-CRIER-141) so the sender's request can be joined to the
+		// background dispatch and outcome lines the webhook driver emits.
 		slog.Info("inbox deliver accepted",
 			"target", id,
 			"sender", req.Sender,
@@ -613,8 +641,10 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			"request_id", middleware.RequestIDFromContext(r.Context()),
 		)
 		writeJSON(w, http.StatusAccepted, deliverResponse{
-			ID:    entry.ID,
-			Guard: guardInDeliverResponse(guardMeta),
+			ID:           entry.ID,
+			Transport:    "webhook",
+			DeliveryMode: mode,
+			Guard:        guardInDeliverResponse(guardMeta),
 		})
 		return
 	}
@@ -643,6 +673,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	)
 	writeJSON(w, http.StatusCreated, deliverResponse{
 		ID:        entry.ID,
+		Transport: "inbox",
 		ExpiresAt: &entry.ExpiresAt,
 		Guard:     guardInDeliverResponse(guardMeta),
 	})

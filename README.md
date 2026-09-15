@@ -68,6 +68,51 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 - TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires)
 - Concurrent retrievers get disjoint message sets
 
+### 5. Webhook delivery (bypasses the inbox)
+
+An agent that registers a `webhook` config (`PATCH /agents/{id}` with
+`{"webhook":{"url":…}}`) receives its messages at that endpoint instead of its
+durable inbox (CR-FEAT-001, [`specs/WEBHOOK-DELIVERY.md`](specs/WEBHOOK-DELIVERY.md) §4).
+The inbox is **not** written: `GET /agents/{id}/inbox` for a webhook-configured
+agent is empty by design, so an empty retrieve is not evidence that a message
+was never sent — the message may have gone to the endpoint (or failed there).
+
+The deliver accept names the transport, so a sender never has to infer it from
+the status code (DF-CRIER-157):
+
+| Accept | `transport` | `delivery_mode` | Meaning |
+|--------|-------------|-----------------|---------|
+| `200` | `webhook` | — | blocking: the endpoint's reply is in `reply` |
+| `202` | `webhook` | `async` \| `batch` | accepted for **webhook delivery, queued — not stored** |
+| `201` | `inbox` | — | stored in the durable inbox (`expires_at` present) |
+
+A `202` is a promise about the queue, not about delivery: the endpoint can
+still fail afterwards. A blocking delivery the endpoint permanently rejects
+(a non-retryable 4xx, or a 2xx whose body the agent's reply schema cannot map)
+answers `502` — retrying the identical message cannot succeed. Only a timeout
+or an exhausted budget answers `504`, where a later attempt can still land.
+
+**Recovery when an async/batch delivery dies.** After the queue exhausts its
+bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per
+`CR_WEBHOOK_REDELIVER_S` tick — 5 failed attempts / 30s by default, i.e.
+roughly two to three minutes after the accept), the item is dropped and
+exactly one durable notification is written into the **sender's own inbox**. It
+is a direct store write: it never routes back through webhook delivery, so it
+cannot recurse — even when the sender itself is a webhook-configured agent.
+
+```json
+{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<recipient agent>","retries":6,"status_code":503,"error":"status 503"}
+```
+
+`status_code` is omitted and `error` carries the transport error string when the
+failure was transport-level (no HTTP response). The notification is
+best-effort and never retried: a missing `sender` on the rejected message, or an
+unregistered sender, is logged instead. While an endpoint is degraded (circuit
+opened after `CR_WEBHOOK_CIRCUIT_THRESHOLD` consecutive failures) queued
+redeliveries pause instead of POSTing and resume when a probe
+(`CR_WEBHOOK_PROBE_S`) succeeds, so a poisoned endpoint can take much longer
+than the default cadence to reach exhaustion.
+
 ## Quick Start
 
 ### Prerequisites
@@ -144,10 +189,12 @@ curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application
 # 201
 
 # 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
-#    24h default, 0 means the message never expires.
+#    24h default, 0 means the message never expires. `transport` in the body is
+#    always present: "inbox" here, "webhook" when the target has a webhook
+#    configured (then the inbox is bypassed — see §5 of the architecture notes).
 curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"payload":{"hello":"world"},"ttl_seconds":3600}'
-# 201 {"id":"...","expires_at":"..."}  (expires_at = created_at + ttl_seconds)
+# 201 {"id":"...","transport":"inbox","expires_at":"..."}  (expires_at = created_at + ttl_seconds)
 
 # 3. Retrieve — agent-scoped endpoints require per-agent request signatures by
 #    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats
@@ -359,8 +406,8 @@ All configuration is via environment variables (defaults shown):
 | `CR_GUARD_KANBAN_URL` | _(unset — Hermes kanban CLI)_ | HTTP kanban sink base URL (http/https, CR-FEAT-009). When set, guard cards are POSTed here as JSON (fire-and-forget); unset = cards go through the `hermes kanban create` CLI writer. |
 | `CR_WEBHOOK_SECRET` | _(unset)_ | HMAC outbound signing. |
 | `CR_WEBHOOK_TIMEOUT_S` | `30` | Outbound webhook timeout, seconds. |
-| `CR_WEBHOOK_MAX_RETRIES` | `5` | Outbound retry count. |
-| `CR_WEBHOOK_REDELIVER_S` | `30` | Redelivery interval, seconds. |
+| `CR_WEBHOOK_MAX_RETRIES` | `5` | Outbound retry count for queued async/batch webhook deliveries. When a delivery exhausts them, the sender gets exactly one durable `WEBHOOK_FAILED` in its own inbox — see [Webhook delivery](#5-webhook-delivery-bypasses-the-inbox). |
+| `CR_WEBHOOK_REDELIVER_S` | `30` | Redelivery interval, seconds — one queued delivery attempt per tick. |
 | `CR_WEBHOOK_PROBE_S` | `60` | Dead-target probe interval, seconds. |
 | `CR_WEBHOOK_CIRCUIT_THRESHOLD` | `10` | Consecutive failures that open the circuit. |
 | `CR_WEBHOOK_BATCH_MAX` | `10` | Batch flush size. |
