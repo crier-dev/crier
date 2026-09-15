@@ -25,6 +25,7 @@ jobs:
         run: |
           mkdir -p site/docs site/examples
           cp .github/site/index.html site/index.html
+          cp .github/site/agents.png .github/site/mascots.png site/ 2>/dev/null || true
           cp README.md TESTERS.md SECURITY.md CONTRIBUTING.md AGENTS.md site/
           cp docs/*.md site/docs/ 2>/dev/null || true
           cp docs/openapi.yaml site/docs/openapi.yaml 2>/dev/null || true

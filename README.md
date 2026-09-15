@@ -1,6 +1,6 @@
 # Crier — Agent-to-Agent Message Bus
 
-![Crier — your agents finally have a place to talk to each other](docs/img/banner.png)
+![The crier robots — your agents finally have a place to talk to each other](docs/img/agents.png)
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go)](https://go.dev)
 [![CI](https://github.com/crier-dev/crier/actions/workflows/ci.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/ci.yml)
