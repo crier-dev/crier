@@ -44,3 +44,5 @@
 
 2026-09-15 | UNKNOWN-VALUE | n/a t2fs | friction 0 | 4 findings
 
+2026-09-15 | PROMISING-BUT-ROUGH | 1.01s t2fs | friction 14 | 5 findings
+

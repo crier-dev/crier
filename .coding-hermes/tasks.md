@@ -257,3 +257,13 @@ Promise: {"entry_point":"CLI server binary `bin/crier` (Go, ./cmd/server) — HT
 - [P1] Core promises unverified either way — promises_held and promises_broken are both empty: pub/sub relay, WS mesh, ed25519 registry, and durable inbox delivery were never exercised to a recordable outcome, so the cryptographic register→publi
 - [P1] Usability metrics absent — time_to_first_success_s=null means there is no evidence a new user got from clone to first successful message exchange; usability cannot be assessed.
 - [P2] Build surface looks plausible but untested — Promise lists two buildable binaries (./cmd/server, ./cmd/crier-mcp), make targets, and a demo script, but no finding confirms any of make build, bin/crier -version, or examples/demo.sh actually ran.
+
+## Dogfood Findings (2026-09-15)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"A Go HTTP + WebSocket server binary — `bin/crier` built from `cmd/server` (CLI flags `-port`, `-db-url`, `-version`; otherwise env-driven via CRIER_PORT/CR_DATABASE_URL/CR_AUTH_TOKEN/CR_REQUIRE_AGENT_SIG/CR_GUARD_*), listening on :8767 and serving the REST API, `/relay/*`, `/mesh/*`,
+
+- [P1] Documented durable-backend path cannot be run as written — README's `docker compose up -d postgres` fails: docker-compose.yml hardcodes container_name crier-postgres ('Conflict. The container name "/crier-postgres" is already in use') with no name/port overri
+- [P1] TESTERS.md 'known rough edges' is stale in 4 of 6 rows and hides a real defect — Rows claiming wildcard subscribe, ttl_seconds, unacked redelivery (~60s) and mesh REQUEST to WS-only peers are 'skip these' all now work; row 5's symptom is inverted — two concurrent signed retrievers
+- [P1] Concurrent retriever disjointness promise fails (4/0 starvation, not distribution) — README states concurrent retrievers get disjoint message sets. Observed: 4 queued messages, two parallel signed retrieves returned 4 and 0 — the first drained the batch, the second starved. Fix or dro
+- [P2] Promised interactive /docs is a static link index — README: 'Interactive API docs ship at /docs'. Live /docs is a 1002-byte static page with no form, input or button, self-declaring 'no CDN / Swagger-UI dependency', only linking /openapi.json and /open
+- [P2] Small contract/identity divergences that erode trust and waste user time — Build identity disagrees across artifacts of one checkout: make build -> 0294515-dirty, bare go build -> vdev-..., docker image -> 'dev', MCP initialize -> serverInfo.version 0.1.0; /health returns JS
