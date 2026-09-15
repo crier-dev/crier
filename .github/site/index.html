@@ -56,6 +56,7 @@ pre code{background:none;border:none;padding:0;white-space:pre}
 .use{background:var(--p);border:1px solid var(--l);border-radius:14px;padding:22px}
 .use .ico{font-size:26px;margin-bottom:10px;display:block}
 .use h3{margin-bottom:8px}
+.use h3 .robo{display:inline-block;vertical-align:middle;margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid var(--acc);color:var(--acc);font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.9}
 .use p{color:var(--dim);font-size:14.5px}
 .use p b{color:var(--ink);font-weight:600}
 
@@ -100,57 +101,11 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
     <a class="btn ghost" href="https://github.com/crier-dev/crier">Star on GitHub</a>
     <div class="badges"><span><b>1</b> Go binary</span><span><b>8</b> ways to move a message</span><span><b>0</b> external dependencies</span><span><b>ed25519</b> signed everything</span></div>
   </div>
-  <div class="heroart" aria-hidden="true">
-  <svg viewBox="0 0 460 340">
-    <defs>
-      <path id="h1" d="M230,170 Q140,90 60,70" fill="none"/>
-      <path id="h2" d="M230,170 Q320,80 400,66" fill="none"/>
-      <path id="h3" d="M230,170 Q130,200 52,236" fill="none"/>
-      <path id="h4" d="M230,170 Q330,210 406,248" fill="none"/>
-      <path id="h5" d="M230,170 Q200,260 120,300" fill="none"/>
-      <path id="h6" d="M230,170 Q290,270 370,296" fill="none"/>
-      <path id="h7" d="M60,70 Q230,20 400,66" fill="none"/>
-      <path id="h8" d="M52,236 Q40,290 120,300" fill="none"/>
-    </defs>
-    <g stroke="#1e2432" stroke-width="1.5" fill="none">
-      <use href="#h1"/><use href="#h2"/><use href="#h3"/><use href="#h4"/><use href="#h5"/><use href="#h6"/><use href="#h7"/><use href="#h8"/>
-    </g>
-    <!-- packets riding the links -->
-    <g>
-      <circle r="4.5" fill="#4cc38a"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#h1"/></animateMotion></circle>
-      <circle r="3.5" fill="#8ca8e8"><animateMotion dur="2.7s" begin="-1.1s" repeatCount="indefinite"><mpath href="#h2"/></animateMotion></circle>
-      <circle r="4" fill="#e8a04c"><animateMotion dur="3.8s" begin="-0.4s" repeatCount="indefinite"><mpath href="#h3"/></animateMotion></circle>
-      <circle r="3.5" fill="#4cc38a"><animateMotion dur="2.9s" begin="-2s" repeatCount="indefinite"><mpath href="#h4"/></animateMotion></circle>
-      <circle r="4" fill="#c58ce8"><animateMotion dur="4.1s" begin="-1.6s" repeatCount="indefinite"><mpath href="#h5"/></animateMotion></circle>
-      <circle r="3.5" fill="#8ca8e8"><animateMotion dur="3.4s" begin="-0.8s" repeatCount="indefinite"><mpath href="#h6"/></animateMotion></circle>
-      <circle r="3" fill="#4cc38a"><animateMotion dur="5s" begin="-2.4s" repeatCount="indefinite"><mpath href="#h7"/></animateMotion></circle>
-      <circle r="3" fill="#e8a04c"><animateMotion dur="4.6s" begin="-3s" repeatCount="indefinite"><mpath href="#h8"/></animateMotion></circle>
-    </g>
-    <!-- nodes: hub + agents -->
-    <g>
-      <circle cx="230" cy="170" r="26" fill="#10141d" stroke="#4cc38a" stroke-width="2"/>
-      <text x="230" y="176" text-anchor="middle" font-size="15">📣</text>
-      <g fill="#141821" stroke="#33405a" stroke-width="1.5">
-        <circle cx="60"  cy="70"  r="17"/><circle cx="400" cy="66"  r="17"/>
-        <circle cx="52"  cy="236" r="17"/><circle cx="406" cy="248" r="17"/>
-        <circle cx="120" cy="300" r="17"/><circle cx="370" cy="296" r="17"/>
-      </g>
-      <g font-size="13" text-anchor="middle">
-        <text x="60"  y="75">🤖</text><text x="400" y="71">🧠</text><text x="52" y="241">⚙️</text>
-        <text x="406" y="253">🤖</text><text x="120" y="305">🧠</text><text x="370" y="301">⚙️</text>
-      </g>
-    </g>
-  </svg>
+  <div class="heroart" aria-hidden="false">
+    <img src="agents.png" alt="The crier fleet — friendly robots on their own floating platforms, passing glowing messages along luminous paths"
+         style="width:100%;display:block;border-radius:16px;border:1px solid var(--l);box-shadow:0 24px 80px rgba(0,0,0,.5)">
   </div>
 </div></div>
-
-<!-- ============ FLEET BAND ============ -->
-<div style="border-bottom:1px solid var(--l);background:var(--bg2)">
-  <div class="wrap" style="padding-top:8px">
-    <img src="agents.png" alt="The crier fleet — robots on their own platforms, passing glowing messages along luminous paths" style="width:100%;display:block;border-radius:14px;border:1px solid var(--l)">
-    <p style="text-align:center;color:var(--dim);font-size:14px;margin:14px 0 26px">One fleet, many platforms — every agent gets a mailbox, a voice, and a place in the mesh.</p>
-  </div>
-</div>
 
 <!-- ============ TOPOLOGIES ============ -->
 <section id="topologies"><div class="wrap">
@@ -242,15 +197,18 @@ footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
   <div class="kicker">Who it's for</div>
   <h2>One bus, every part of your life</h2>
   <p class="sub">Crier is infrastructure the way email is infrastructure — the same tool scales from two friends to two companies. You run it; nobody else sees a message.</p>
+  <figure style="margin:30px 0 4px;text-align:center">
+    <img src="mascots.png" alt="From left: Hardhat, Homey, the Suit, and Courier — the crier mascot fleet" style="width:80%;max-width:660px;border-radius:14px;border:1px solid var(--l);display:inline-block">
+    <figcaption style="color:var(--dim);font-size:13.5px;margin-top:12px">The fleet, left to right: <b style="color:var(--ink)">Hardhat</b> · <b style="color:var(--ink)">Homey</b> · <b style="color:var(--ink)">the Suit</b> · <b style="color:var(--ink)">Courier</b> — you'll meet them below.</figcaption>
+  </figure>
   <div class="grid">
-    <div class="use" style="overflow:hidden;padding:0"><img src="mascots.png" alt="The four crier mascots: builder, home, business, and courier robots" style="width:100%;display:block"></div>
-    <div class="use"><span class="ico">🏠</span><h3>You and your friends</h3>
-      <p>Put crier on a spare box or a $4 VPS and your group gets a <b>private channel</b>: shared reminders, home-automation events, game-server alerts, personal AI assistants that remember context. <b>No third-party cloud in the middle</b> — the group chat's backend is yours.</p></div>
-    <div class="use"><span class="ico">🏢</span><h3>Your team at work</h3>
+    <div class="use"><span class="ico">🏢</span><h3>Your team at work <span class="robo">Hardhat</span></h3>
       <p>Wire internal tools together without a middleware project: CI bots, deploy watchers, on-call pings, and AI copilots coordinating through <b>one auditable choke point your team owns</b>. Durable inboxes mean an offline service catches up instead of missing the memo.</p></div>
-    <div class="use"><span class="ico">🤝</span><h3>Between businesses</h3>
+    <div class="use"><span class="ico">🏠</span><h3>You and your friends <span class="robo">Homey</span></h3>
+      <p>Put crier on a spare box or a $4 VPS and your group gets a <b>private channel</b>: shared reminders, home-automation events, game-server alerts, personal AI assistants that remember context. <b>No third-party cloud in the middle</b> — the group chat's backend is yours.</p></div>
+    <div class="use"><span class="ico">🤝</span><h3>Between businesses <span class="robo">the Suit</span></h3>
       <p>Partners exchange events without opening firewalls or trusting each other's queues. <b>Federation holds and retries</b> while the other side is down, and when delivery truly fails, the sender receives an explicit <code>FEDERATION_FAILED</code> — <b>failure is a message, not a mystery</b>.</p></div>
-    <div class="use"><span class="ico">🧠</span><h3>Your AI agents</h3>
+    <div class="use"><span class="ico">🧠</span><h3>Your AI agents <span class="robo">Courier</span></h3>
       <p>Give LLM agents a way to talk to each other and to your systems. Through <b>MCP</b> they deliver messages, ask peers questions and wait for answers, and subscribe to topics — while the <b>LLM guard</b> classifies everything crossing the bus, so one compromised agent can't quietly injection-attack the rest.</p></div>
   </div>
 </div></section>
