@@ -541,3 +541,13 @@ tasks:
   status: complete
   created_at: '2026-09-14T21:57:33.708521+00:00'
   completed_at: '2026-09-14T22:04:56.676076+00:00'
+- id: DF-CRIER-151
+  title: 'Persist webhook + guard config on the postgres backend (P0: PATCH returned
+    200 then was silently dropped)'
+  criteria:
+  - Migration 003 adds nullable webhook/guard JSONB columns; Register/Update persist
+    them and Get/List return them; integration round-trip test against real postgres
+    proves a config survives a server restart; no silent acceptance.
+  status: complete
+  created_at: '2026-09-15T04:14:06.647104+00:00'
+  completed_at: '2026-09-15T04:25:02.509116+00:00'
