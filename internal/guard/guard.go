@@ -198,20 +198,20 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 
 	projection, err := Render(in.Payload, g.renderMaxBytes)
 	if err != nil {
-		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), fmt.Errorf("render: %w", err)), nil
+		return g.errorResult(ctx, agentID, in, policy, prematch, start, len(in.Payload), fmt.Errorf("render: %w", err)), nil
 	}
 	sys := SystemPrompt(policy.Checks)
 	user := UserMessage(in, prematch, projection)
 
 	provider, model, content, err := g.router.Check(ctx, policy, sys, user)
 	if err != nil {
-		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), err), nil
+		return g.errorResult(ctx, agentID, in, policy, prematch, start, len(in.Payload), err), nil
 	}
 	g.llmCall(provider, model)
 
 	verdict, err := ParseVerdict(content)
 	if err != nil {
-		return g.errorResult(ctx, agentID, in, policy, start, len(in.Payload), err), nil
+		return g.errorResult(ctx, agentID, in, policy, prematch, start, len(in.Payload), err), nil
 	}
 
 	// Union of prematch names + LLM-reported names, deduplicated, LLM names
@@ -273,11 +273,23 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 // (deliver, decision allow, risk medium), fail-closed per policy (apply
 // policy.action — default block — with risk high). Errored is always set
 // (record() counts it in errorsTotal).
-func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, policy Policy, start time.Time, payloadBytes int, cause error) Result {
+//
+// DF-CRIER-158: the deterministic pre-scan is provider-independent, so a
+// guard error must never discard it. `prematch` is the already-filtered
+// §6.4 evidence for this payload and is ALWAYS carried on Result.Patterns
+// (an LLM outage must not erase the record of what the payload matched).
+// When that evidence contains a high-confidence hit — the same subset that
+// hard-blocks the §6.3 oversize path without any LLM call — the fail-open
+// outcome escalates to block/high: an unreachable LLM is not a reason to
+// deliver a textbook injection. A payload with no high-confidence evidence
+// still fails open exactly as before.
+func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, policy Policy, prematch []string, start time.Time, payloadBytes int, cause error) Result {
 	reason := "guard_error: " + strings.TrimPrefix(cause.Error(), "guard: ")
+	strong := g.scanner.HighConfidence(prematch)
 	res := Result{
 		RiskLevel:  RiskMedium,
 		Reason:     reason,
+		Patterns:   prematch,
 		Errored:    true,
 		PolicyID:   policy.ID,
 		MessageID:  in.MessageID,
@@ -290,6 +302,10 @@ func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, polic
 			res.Quarantined = true
 			res.DeliveredPayload, res.QuarantinedPayload = quarantinePayload(in, reason)
 		}
+	} else if len(strong) > 0 {
+		res.Decision = DecisionBlock
+		res.RiskLevel = RiskHigh
+		res.Reason = reason + "; deterministic prematch block: " + strings.Join(strong, ", ")
 	} else {
 		res.Decision = DecisionAllow
 	}

@@ -61,7 +61,8 @@ The guard is a filter, not a gatekeeper. Availability of the bus is a first-clas
 - **Default: fail-open.** If the guard cannot produce a verdict (provider error, timeout,
   malformed LLM output, missing API key), the message is delivered with `risk_level: medium` and
   `reason: guard_error: …` recorded in audit + headers. The bus never stops because the guard's
-  LLM provider is down.
+  LLM provider is down. (One exception, DF-CRIER-158: a high-confidence deterministic pre-scan hit
+  — §6.4 — blocks instead of delivering, because the pre-scan never depends on the provider. See §3.6.)
 - **Per-policy: fail-closed.** A policy with `fail_closed: true` blocks on guard error (action
   from `policy.action`, default `block`). Use for high-sensitivity channels.
 - The guard LLM's output is **advisory and schema-validated**; the server applies a deterministic
@@ -314,10 +315,26 @@ schema-invalid or unparseable verdict, all providers failed → **guard error**,
 deterministically per policy:
 
 - `policy.fail_closed == false` (default): **fail-open** → deliver, `decision: allow`,
-  `risk_level: medium`, `reason: "guard_error: <short cause>"`, `errored: true`.
+  `risk_level: medium`, `reason: "guard_error: <short cause>"`, `errored: true` — *unless* the
+  deterministic pre-scan (§6.4) matched a high-confidence pattern, which escalates the outcome to
+  `block`/`high` (see below).
 - `policy.fail_closed == true`: **fail-closed** → apply `policy.action` (`allow` | `block` |
   `sanitize`, default `block`), `risk_level: high`, `reason: "guard_error: <short cause>"`,
   `errored: true`.
+
+**Deterministic evidence survives a guard error (DF-CRIER-158).** Every guard-error outcome
+carries the already-filtered §6.4 pre-scan evidence for the payload in `matched_patterns` — the
+error path never discards it, so the audit line, the kanban card, the envelope/inbox metadata and
+the deliver response all still name what the payload matched. Because the pre-scan is
+provider-independent (same table, no LLM call), a HIGH-confidence hit escalates the fail-open
+outcome to `decision: block`, `risk_level: high`, `reason: "guard_error: <short cause>;
+deterministic prematch block: <names>"` — `errored` stays `true` (the LLM did fail) and the
+message is not delivered. Rationale: §6.3 already blocks a high-confidence match with no LLM call
+at all, so a keyless or unreachable provider must never switch injection screening off. Payloads
+whose pre-scan evidence is empty, or low-confidence only (shape matches such as `b64_blob`), still
+fail open exactly as above. Fail-closed resolution is unchanged: `policy.action` still decides
+(`allow` | `block` | `sanitize`) and the evidence rides on the result either way. This amendment
+addressed DF-CRIER-158.
 
 `Result.Errored` is recorded in audit and surfaced as `X-Crier-Guard-Error: true` on the POST /
 in the 403 body. Parsing tolerance (only for the transport, never for the schema): strip
@@ -658,6 +675,11 @@ envelope contains `<empty_payload/>` (the LLM sees a deliberate marker, not a mi
   high-confidence subset, while `blocked`/normal-size paths and the prompt `<prematch>` section
   keep every (enabled) match.
 - This cap applies to the raw payload bytes, before projection.
+- **The marker is meant to be seen (DF-CRIER-158):** this path returns `allow` with a risk level
+  of `medium` and a non-empty `matched_patterns` (`oversize`, plus any low-confidence prematch
+  hits), which is NOT a clean pass — such a verdict is surfaced in the deliver response `guard`
+  object (§9.3), never suppressed. Only a clean allow (risk `low`, no patterns, no error) stays
+  absent from that response.
 
 ### 6.4 Pattern pre-scan (internal/guard/patterns.go)
 
@@ -852,8 +874,13 @@ Both endpoints accept an optional `guard` object alongside `webhook`:
 - `QueueItem` gains `Guard *guard.Result json:"guard,omitempty"` (in-memory + durable queue
   serialization) so redelivery and batch flush preserve the original verdict.
 - Deliver responses: blocked → `403 {"error": "GUARD_BLOCKED", "guard": {…Meta…}}` (all modes);
-  non-blocking success responses gain an optional `guard` field with the Meta when the verdict
-  was not plain `allow` (visibility for async senders).
+  non-blocking success responses gain an optional `guard` field with the Meta whenever the verdict
+  is not a **clean pass** (visibility for async senders, DF-CRIER-158). "Clean pass" means exactly
+  `decision: allow`, `errored: false`, `risk_level: low` and no `matched_patterns` — only that (and
+  the disabled guard) stays absent. Any allow that carries a risk marker IS surfaced: the §6.3
+  over-cap `oversize` marker, a low-confidence pre-match hit, or the deterministic evidence a
+  guard-error outcome now retains (§3.6). An allow-with-risk must never be indistinguishable from a
+  clean allow on the wire.
 
 ### 9.4 openapi.yaml additions (summary)
 
@@ -900,14 +927,16 @@ Both endpoints accept an optional `guard` object alongside `webhook`:
 | 22 | router: timeout budget across chain | budget expiry → guard error |
 | 23 | sanitize: quarantine shape | exact §3.5 payload; base64 round-trip of original |
 | 24 | oversize payload (> cap) | LLM never called; prematch hit → block; none → allow/medium/oversize |
-| 25 | fail_open (default) on all-providers-down | delivered, errored=true, decision allow |
-| 26 | fail_closed on all-providers-down | action applied (block), errored=true |
+| 25 | fail_open (default) on all-providers-down | delivered, errored=true, decision allow, and the prematch evidence (empty or low-confidence only) retained in `matched_patterns` |
+| 26 | fail_closed on all-providers-down | action applied (block), errored=true, prematch evidence retained |
 | 27 | blocked deliver (handler-level) | 403 GUARD_BLOCKED, no inbox entry, no webhook POST, no queue item |
 | 28 | sanitized deliver (handler-level) | delivered with quarantine payload + guard metadata + headers |
 | 29 | kanban: on=block fires for block/sanitize only | card written with exact Card fields |
 | 30 | kanban: on=all fires for every message | card per message; queue full → drop + counter, never blocks |
 | 31 | kanban: disabled | no-op writer, zero cards |
 | 32 | audit line shape | exact §7.3 fields present; warn level on block |
+| 33 | guard error + high-confidence prematch hit (DF-CRIER-158) | unreachable provider + fail_open → block/high/errored with the pattern named in `matched_patterns`; fail-open preserved when only low-confidence evidence matched; policy `checks` suppression still applies on the error path |
+| 34 | deliver response guard visibility (DF-CRIER-158) | an allow carrying a risk marker (over-cap `oversize`) is surfaced in the response `guard` object; a clean allow omits it |
 
 Coverage gate: `go test ./internal/guard/... -coverprofile=...` ≥ **70%** (matches the repo's
 `make coverage-check` standard; the new package must meet it standalone).

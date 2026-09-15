@@ -454,7 +454,10 @@ paths:
         delivered with the payload replaced by the quarantine notice (§3.5);
         block → 403 GUARD_BLOCKED, never queued/stored/POSTed. Guard errors
         fail open (delivered, X-Crier-Guard-Error: true) unless the policy is
-        fail_closed (→ 403 with the error-path verdict).
+        fail_closed (→ 403 with the error-path verdict) — except that a
+        high-confidence deterministic pre-scan hit blocks even under fail_open,
+        since the pre-scan never depends on the provider (DF-CRIER-158,
+        spec §3.6); the pre-scan's matches are retained either way.
 
         Outbound webhook POSTs carry, when guarded (spec §7.2):
         X-Crier-Guard-Decision (allow|sanitize), X-Crier-Guard-Risk,
@@ -552,7 +555,7 @@ paths:
                     description: "Resolved expiry of the stored message (RFC 3339) — it reflects the requested ttl_seconds, never a fixed default; the zero time 0001-01-01T00:00:00Z when ttl_seconds was 0 (never expires). Absent on webhook deliveries (blocking 200, async/batch 202), where no inbox entry is created."
                   guard:
                     $ref: "#/components/schemas/GuardVerdictMeta"
-                    description: "Guard verdict metadata when the message was not plain-allowed (sanitize, or errored fail-open) — visibility for async senders (CR-FEAT-010, spec §9.3)"
+                    description: "Guard verdict metadata whenever the verdict is not a CLEAN pass (decision allow + no error + risk low + no matched patterns) — visibility for async senders. Surfaced for sanitize, errored fail-open, and any allow carrying a risk marker (e.g. the over-cap `oversize` marker); a clean allow omits it (CR-FEAT-010, spec §9.3, DF-CRIER-158)"
         "202":
           description: "Delivery accepted but not yet made (webhook async/batch, or a held federation delivery). Federation hold (DF-CRIER-7): every link is failing transiently, so the request is queued at this relay and retried inside CR_FED_MAX_HOLD_S; a terminal failure is reported once as FEDERATION_FAILED in the sender's own inbox."
           content:
@@ -872,7 +875,7 @@ components:
         fail_closed:
           type: boolean
           default: false
-          description: "true = guard errors block the message (apply action); false (default) = fail open (deliver with guard_error metadata)"
+          description: "true = guard errors block the message (apply action); false (default) = fail open (deliver with guard_error metadata). A high-confidence deterministic pre-scan hit blocks under fail_open too — the pre-scan is provider-independent (DF-CRIER-158, spec §3.6)"
         providers:
           type: array
           maxItems: 5

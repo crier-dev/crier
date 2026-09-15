@@ -648,17 +648,26 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// guardInDeliverResponse surfaces guard metadata on success responses when
-// the verdict was not plain allow (spec §9.3: visibility for async
-// senders); plain-allow verdicts and the disabled guard stay absent.
+// guardInDeliverResponse surfaces guard metadata on success responses
+// whenever the verdict carries anything the caller should see (spec §9.3:
+// visibility for async senders, DF-CRIER-158). It stays absent ONLY for a
+// clean pass: decision allow, no error, risk low, no matched patterns.
+//
+// A risk-MARKED allow is not a clean pass. The §6.3 oversize fast path
+// answers `allow` with risk medium and `patterns: ["oversize"]` precisely
+// so the marker is visible, and error-path verdicts now carry the
+// deterministic prematch evidence; dropping those made an allow-with-risk
+// indistinguishable from a clean allow on the wire (while fail-open was
+// surfaced). A nil meta (guard disabled) also stays absent.
 func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
 	if m == nil {
 		return nil
 	}
-	if m.Decision != guard.DecisionAllow || m.Errored {
-		return m
+	if m.Decision == guard.DecisionAllow && !m.Errored &&
+		m.RiskLevel == guard.RiskLow && len(m.Patterns) == 0 {
+		return nil
 	}
-	return nil
+	return m
 }
 
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.
