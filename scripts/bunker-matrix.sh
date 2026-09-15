@@ -106,7 +106,11 @@ probe "guard-on injection" 403 "GUARD_BLOCKED" POST "/agents/guard-on/inbox" "$I
 # ---- cell: guard-off ----
 echo "--- cell guard-off (CR_GUARD_ENABLED=false) ---"
 printf 'CR_REQUIRE_AGENT_SIG=false\nCR_GUARD_ENABLED=false\n' > /tmp/mx-guard-off.env
-bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" --skip-build || fatal "cell deploy failed: guard-off — no probes against stale container"
+# The env file MUST be handed to the deploy (same as the fail-closed cell
+# below): without CR_ENV_FILE the container keeps the guard ENABLED, and the
+# cell then only passed because a keyless guard failed open on the injection —
+# i.e. it was green because of the very defect DF-CRIER-158 fixes.
+CR_ENV_FILE=/tmp/mx-guard-off.env bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" --skip-build || fatal "cell deploy failed: guard-off — no probes against stale container"
 register guard-off ''
 probe "guard-off clean" 201 "" POST "/agents/guard-off/inbox" "$CLEAN"
 probe "guard-off injection delivered" 201 "" POST "/agents/guard-off/inbox" "$INJECT"
