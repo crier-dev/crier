@@ -926,3 +926,14 @@ tasks:
   status: complete
   created_at: '2026-09-16T18:36:57.784191+00:00'
   completed_at: '2026-09-16T18:53:18.211647+00:00'
+- id: crier-294-df-crier-167-durable-backend-path
+  title: 'DF-CRIER-167: documented durable-backend path cannot be run as written'
+  criteria:
+  - On a clean HEAD checkout, 'docker compose up -d postgres' must succeed as written
+    (no name conflict with an existing crier-postgres container), the compose host
+    port must be env-overridable, and the URL the README/.env.example document must
+    connect to the container it just started (user crier, db crier). go build/vet/test
+    and make docs-check pass; no unrelated file touched.
+  status: complete
+  created_at: '2026-09-16T20:00:22.096040+00:00'
+  completed_at: '2026-09-16T20:20:53.753764+00:00'
