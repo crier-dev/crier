@@ -672,3 +672,16 @@ tasks:
   status: complete
   created_at: '2026-09-16T09:52:13.244133+00:00'
   completed_at: '2026-09-16T10:10:59.112173+00:00'
+- id: cr-gap-058-openapi-reconcile
+  title: '[docs-sweep T4] docs/openapi.yaml reconcile: POST /agents webhook object
+    + per-agent signature securityScheme + embedded-copy parity'
+  criteria:
+  - docs/openapi.yaml POST /agents requestBody declares the webhook object the live
+    server accepts; a per-agent signature securityScheme exists in components/securitySchemes
+    and is referenced by the signature-protected ops; make generate leaves cmd/server/openapi.yaml
+    byte-identical to docs/openapi.yaml; make docs-check and make test-short green;
+    every already-documented T4 item is re-verified with file:line evidence in the
+    worker_summary and left unedited.
+  status: complete
+  created_at: '2026-09-16T10:20:56.522079+00:00'
+  completed_at: '2026-09-16T10:28:44.359772+00:00'
