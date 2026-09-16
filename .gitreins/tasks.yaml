@@ -612,3 +612,15 @@ tasks:
   status: complete
   created_at: '2026-09-16T06:39:55.511989+00:00'
   completed_at: '2026-09-16T06:48:37.879347+00:00'
+- id: INT-CI-004
+  title: Blocking webhook budget must bound the attempt itself (driver-global client
+    timeout races the endpoint)
+  criteria:
+  - 'internal/webhook: DeliverBlocking must apply the remaining budget as a per-attempt
+    context deadline so an attempt can never overrun the budget; deterministic regression
+    test proves a 2s endpoint with a 100ms budget can never return 200 (504 path);
+    make test-short green across 3 consecutive parallel-package runs and TestDeliver_Blocking_TimeoutIs504
+    -count=10 green; guard PASS + gofmt clean; zero unrelated files'
+  status: complete
+  created_at: '2026-09-16T07:10:34.880159+00:00'
+  completed_at: '2026-09-16T07:23:07.942586+00:00'
