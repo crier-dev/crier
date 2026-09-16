@@ -234,16 +234,22 @@ CRIER_HTTP_URL=http://localhost:8767 CRIER_AGENT_ID=my-bridge ./bin/crier-mcp
 ## 3. Known rough edges (skip these, or expect them)
 
 Tracked on the board; do **not** re-report unless your reproduction differs.
-Re-measured live on 2026-09-16 at the current HEAD — the previous table's four
-other rows were fixed and are listed underneath.
+Every row of the earlier table was re-measured live on 2026-09-16 against a
+binary built from the current HEAD, and **no open rough edge reproduced** — the
+one mesh row that was open no longer hangs (see the list below), so the
+remaining entry is behaviour, not a defect:
 
 | # | Symptom | Status |
 |---|---|---|
-| 1 | Mesh `REQUEST` to an agent id that never connected hangs forever: no `ERROR` frame, though the spec promises `CONTROLLER_OFFLINE` (reproduced: no frame within 8s of the `REQUEST`) | open, P1 |
-| 2 | A webhook agent's inbox stays empty after a `202` accept | by design — see "202 from a webhook agent" below, not a bug |
+| 1 | A webhook agent's inbox stays empty after a `202` accept | by design — see "202 from a webhook agent" below, not a bug |
 
 Verified good since the last revision of this file (do not report as broken):
 
+- **A mesh `REQUEST` to a peer that is not connected is answered, not hung.**
+  The requester receives an `ERROR` frame carrying `code: CONTROLLER_OFFLINE` in
+  ~40 ms (measured at HEAD with a raw stdlib mesh client), whether or not the
+  target id ever registered over HTTP — the `docs/mesh-protocol.md` promise
+  holds, so a requester never waits for its own timeout.
 - **Wildcard relay subscriptions work.** `GET /relay/subscribe/alerts.*` upgrades
   (`101`) and receives a publish to `alerts.fire`; `alerts.*` matches exactly one
   segment, and a terminal `alerts.>` receives `alerts.fire.deep`.
