@@ -7,6 +7,7 @@
 package webhook
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -162,13 +163,26 @@ type Result struct {
 // Post sends one envelope to the endpoint through its schema template.
 // Returns the Result; never panics. The envelope's crier.guard metadata is
 // emitted as X-Crier-Guard-* headers (spec §7.2) when present.
+//
+// Post carries no caller context; PostContext is the bounded-attempt form
+// used by blocking delivery (INT-CI-004).
 func (c *Client) Post(cfg *Config, env *Envelope, retry int) Result {
+	return c.PostContext(context.Background(), cfg, env, retry)
+}
+
+// PostContext is Post carrying a caller context: the outbound request is
+// built with it (http.NewRequestWithContext), so cancelling ctx — or a
+// deadline on it — aborts the attempt in flight instead of letting it run to
+// the driver-global client timeout (INT-CI-004). A cancelled/deadline
+// attempt surfaces the usual way: Result.Err set and Retryable true (the
+// same classification as a network timeout), never ErrPermanent.
+func (c *Client) PostContext(ctx context.Context, cfg *Config, env *Envelope, retry int) Result {
 	tpl := ResolveTemplate(cfg)
 	body, err := tpl.BuildBody(cfg, env)
 	if err != nil {
 		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
-	return c.postBody(cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry, env.Crier.Guard)
+	return c.postBody(ctx, cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry, env.Crier.Guard)
 }
 
 // batchEnvelopeBody is the spec §4 batch payload: {"messages": [envelope, …]}.
@@ -180,7 +194,17 @@ type batchEnvelopeBody struct {
 // X-Crier-Event: batch (spec §4 — CR-FEAT-005). The batch wrapper is always
 // the raw {"messages":[...]} body: schema templates shape individual
 // messages, not the batch envelope.
+//
+// PostBatch carries no caller context; PostBatchContext is the bounded-attempt
+// form (INT-CI-004).
 func (c *Client) PostBatch(cfg *Config, envs []*Envelope, retry int) Result {
+	return c.PostBatchContext(context.Background(), cfg, envs, retry)
+}
+
+// PostBatchContext is PostBatch carrying a caller context, so the coalesced
+// batch POST is abortable at the caller's deadline exactly like a
+// single-envelope attempt (INT-CI-004).
+func (c *Client) PostBatchContext(ctx context.Context, cfg *Config, envs []*Envelope, retry int) Result {
 	if len(envs) == 0 {
 		return Result{Err: fmt.Errorf("batch: no envelopes")}
 	}
@@ -193,7 +217,7 @@ func (c *Client) PostBatch(cfg *Config, envs []*Envelope, retry int) Result {
 		sender = envs[0].Crier.Sender
 		session = envs[0].Crier.SessionID
 	}
-	return c.postBody(cfg, body, "batch", sender, session, retry, batchGuardMeta(envs))
+	return c.postBody(ctx, cfg, body, "batch", sender, session, retry, batchGuardMeta(envs))
 }
 
 // batchGuardMeta computes the worst-case guard metadata across inner
@@ -263,9 +287,10 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 }
 
 // postBody performs the POST with the webhook contract headers (spec §3)
-// and classifies the response.
-func (c *Client) postBody(cfg *Config, body []byte, event, sender, session string, retry int, gm *guard.Meta) Result {
-	req, err := http.NewRequest(http.MethodPost, cfg.URL, strings.NewReader(string(body)))
+// and classifies the response. ctx bounds the request: the caller's deadline
+// aborts the attempt (INT-CI-004).
+func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, session string, retry int, gm *guard.Meta) Result {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, strings.NewReader(string(body)))
 	if err != nil {
 		return Result{Err: fmt.Errorf("build request: %w", err)}
 	}

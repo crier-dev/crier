@@ -287,7 +287,24 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 			return nil, fmt.Errorf("webhook: blocking delivery timed out after %s", budget)
 		}
 		d.logDispatch(agentID, cfg, env, attempt, rid)
-		res := d.client.Post(cfg, env, attempt)
+		// Bound the ATTEMPT ITSELF by the remaining budget (INT-CI-004).
+		// Without this the attempt is capped only by the driver-global
+		// client timeout, so a delivery carrying timeout_ms=100 could run
+		// for the full global timeout, hold a session-gate slot the whole
+		// time, and — when the endpoint's late 2xx won the race — be
+		// reported to the caller as a SUCCESS even though its own budget had
+		// expired. The pre-attempt deadline check above only returns when
+		// now > deadline, so remaining can be exactly 0 here; clamp to keep
+		// the attempt context off a zero/negative duration (an already-
+		// expired context would also time the attempt out, but this keeps the
+		// "never unbounded, never zero" property explicit).
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			remaining = time.Nanosecond
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
+		res := d.client.PostContext(attemptCtx, cfg, env, attempt)
+		cancel()
 		d.logOutcome(agentID, cfg, env, attempt, res, rid)
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			reply, err := d.client.ExtractReply(cfg, res.Body)
