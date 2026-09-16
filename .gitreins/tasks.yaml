@@ -855,3 +855,16 @@ tasks:
   status: complete
   created_at: '2026-09-16T15:40:50.543092+00:00'
   completed_at: '2026-09-16T16:23:20.437208+00:00'
+- id: DF-CRIER-195
+  title: Bridge accepts the server's CR_AUTH_TOKEN env name as an alias (undocumented
+    divergence)
+  criteria:
+  - cmd/crier-mcp must resolve its shared bearer token from CRIER_AUTH_TOKEN with
+    a documented fallback to the server's CR_AUTH_TOKEN, warn (not silently ignore)
+    when the alias or a conflict is used, and unit tests must prove the precedence;
+    a live remote-mode bridge started with ONLY CR_AUTH_TOKEN set must authenticate
+    successfully where the no-token control 401s. README and crier-mcp --help must
+    document both accepted names.
+  status: complete
+  created_at: '2026-09-16T16:35:15.311506+00:00'
+  completed_at: '2026-09-16T16:51:56.279791+00:00'
