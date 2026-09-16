@@ -868,3 +868,18 @@ tasks:
   status: complete
   created_at: '2026-09-16T16:35:15.311506+00:00'
   completed_at: '2026-09-16T16:51:56.279791+00:00'
+- id: df-crier-194-server-stop
+  title: No documented way to stop the server; port stays bound after the launcher
+    exits
+  criteria:
+  - Makefile gains a working stop target (make stop kills the running crier server
+    via its pidfile and exits 0; with no server running it exits 0 with a clear message);
+    the server writes a pidfile (e.g. bin/crier.pid or /tmp/crier-<port>.pid) at startup
+    and removes it on graceful shutdown; a second start while the port is already
+    bound prints an actionable error naming the port and the pidfile/kill path instead
+    of an opaque bind failure; README documents how to stop the server (make stop
+    + Ctrl-C) and TESTERS.md quickstart mentions it; go build, go vet, and the full
+    test suite pass with the new regression tests
+  status: complete
+  created_at: '2026-09-16T17:20:54.790378+00:00'
+  completed_at: '2026-09-16T17:43:32.121738+00:00'
