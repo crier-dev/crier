@@ -296,6 +296,9 @@ paths:
                   items:
                     type: string
                   description: Advertised capabilities
+                webhook:
+                  $ref: "#/components/schemas/WebhookConfig"
+                  description: "Optional webhook endpoint registered at creation time (same object as the PATCH `webhook` property) — when present the endpoint is registered immediately; absent or null leaves the agent with no webhook. Validated on registration (400 on violation), with the same rules as PATCH."
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
@@ -338,6 +341,9 @@ paths:
           required: true
           schema:
             type: string
+      security:
+        - bearerAuth: []
+          agentSignature: []
       responses:
         "204":
           description: Agent unregistered
@@ -373,6 +379,9 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+      security:
+        - bearerAuth: []
+          agentSignature: []
       requestBody:
         required: true
         content:
@@ -386,39 +395,9 @@ paths:
                     type: string
                   description: Replaces the advertised capability list when present
                 webhook:
-                  type: object
+                  $ref: "#/components/schemas/WebhookConfig"
                   nullable: true
                   description: Webhook endpoint config — registers/updates when an object; null or absent removes the webhook
-                  properties:
-                    url:
-                      type: string
-                      description: Endpoint URL (http(s)://) — required when registering
-                    auth_type:
-                      type: string
-                      enum: [none, bearer]
-                    auth_value_ref:
-                      type: string
-                      description: "env:VAR reference for bearer tokens (never stored inline)"
-                    schema_template:
-                      type: string
-                      enum: [generic-custom, openai-compatible, hermes-http-gateway]
-                    custom_schema:
-                      type: object
-                      description: Bring-your-own schema — wins over the named template
-                    delivery_mode:
-                      type: string
-                      enum: [blocking, async, batch]
-                    batch:
-                      type: object
-                      description: Batch-mode coalescing (max_messages, flush_interval_s)
-                    retries:
-                      type: integer
-                      minimum: 0
-                      maximum: 10
-                    timeout_ms:
-                      type: integer
-                      minimum: 0
-                      maximum: 120000
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   nullable: true
@@ -698,6 +677,9 @@ paths:
             type: integer
             default: 30
             description: Duration to lease messages (prevents double delivery)
+      security:
+        - bearerAuth: []
+          agentSignature: []
       responses:
         "200":
           description: Array of leased messages
@@ -743,6 +725,9 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+      security:
+        - bearerAuth: []
+          agentSignature: []
       responses:
         "200":
           description: Queue statistics
@@ -788,6 +773,9 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+      security:
+        - bearerAuth: []
+          agentSignature: []
       requestBody:
         required: true
         content:
@@ -849,6 +837,21 @@ components:
       type: http
       scheme: bearer
       description: Bearer token from CR_AUTH_TOKEN — required on all requests except /health and /version
+    agentSignature:
+      type: apiKey
+      in: header
+      name: X-Agent-Sig
+      description: |-
+        Per-agent ed25519 signature — the second factor on agent-owned endpoints.
+        Send a hex-encoded ed25519 signature (128 hex chars) over
+        "<METHOD>\n<path>\n<unix-seconds>", where path is the raw URL path with
+        the query string excluded, together with the companion headers
+        X-Agent-ID (must match the {id} in the path, else 403) and X-Agent-Ts
+        (±30 seconds of server time). Required — alongside bearerAuth — when
+        CR_REQUIRE_AGENT_SIG=true (the default) on DELETE /agents/{id}, PATCH
+        /agents/{id}, GET /agents/{id}/inbox, GET /agents/{id}/inbox/stats and
+        POST /agents/{id}/inbox/ack; an unsigned or invalidly signed request is
+        rejected with 401.
   schemas:
     InboxEntry:
       type: object
@@ -1040,6 +1043,39 @@ components:
           enum: [GUARD_BLOCKED]
         guard:
           $ref: "#/components/schemas/GuardVerdictMeta"
+    WebhookConfig:
+      type: object
+      description: "Webhook endpoint configuration (CR-FEAT-001, spec WEBHOOK-DELIVERY.md) — the object accepted by POST /agents (`webhook` at creation) and PATCH /agents/{id} (`webhook` object registers/updates it). `url` is required when registering; the remaining fields fall back to the server defaults."
+      properties:
+        url:
+          type: string
+          description: Endpoint URL (http(s)://) — required when registering
+        auth_type:
+          type: string
+          enum: [none, bearer]
+        auth_value_ref:
+          type: string
+          description: "env:VAR reference for bearer tokens (never stored inline)"
+        schema_template:
+          type: string
+          enum: [generic-custom, openai-compatible, hermes-http-gateway]
+        custom_schema:
+          type: object
+          description: Bring-your-own schema — wins over the named template
+        delivery_mode:
+          type: string
+          enum: [blocking, async, batch]
+        batch:
+          type: object
+          description: Batch-mode coalescing (max_messages, flush_interval_s)
+        retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+        timeout_ms:
+          type: integer
+          minimum: 0
+          maximum: 120000
     WebhookDeliverAccept:
       type: object
       required: [id, transport, delivery_mode]
