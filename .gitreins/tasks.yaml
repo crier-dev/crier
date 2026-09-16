@@ -937,3 +937,28 @@ tasks:
   status: complete
   created_at: '2026-09-16T20:00:22.096040+00:00'
   completed_at: '2026-09-16T20:20:53.753764+00:00'
+- id: crier-295-df-crier-194-stop-path
+  title: 'DF-CRIER-194: documented, safe stop path for a detached server (make stop
+    + pidfile)'
+  criteria:
+  - 'Acceptance verified live against the built binary: (1) -pidfile/-stop exist and
+    the pidfile is written only after a successful bind; (2) a detached server holding
+    its port is stopped by ''make stop'' and the port is provably released; (3) a
+    pidfile naming a non-crier process is REFUSED with zero signal delivered and a
+    non-zero exit; (4) README + TESTERS document start/stop/restart including the
+    lost-launcher case; (5) unit tests cover the pidfile and ownership checks; build/vet/test/docs-check/gitreins
+    guard all green.'
+  status: complete
+  created_at: '2026-09-16T20:33:18.685842+00:00'
+  completed_at: '2026-09-16T20:59:11.659774+00:00'
+- id: crier-295b-df-crier-194-testers-reachable
+  title: 'DF-CRIER-194 rework: TESTERS.md start/stop guidance must reach the server
+    TESTERS itself starts (judge finding on 462f79a)'
+  criteria:
+  - "TESTERS.md \xA71's documented start writes the pidfile the documented stop reads\
+    \ ('make stop' reaches the server TESTERS just started, proven live), TESTERS.md\
+    \ carries the lost-launcher/detached case and the manual fallback, 'make docs-check'\
+    \ stays green, and the repo's build/vet/test/guard gates stay green."
+  status: complete
+  created_at: '2026-09-16T21:02:34.554843+00:00'
+  completed_at: '2026-09-16T21:09:34.539030+00:00'
