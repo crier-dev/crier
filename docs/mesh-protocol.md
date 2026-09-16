@@ -160,7 +160,7 @@ with an unknown `request_id` is dropped with no error and no log.
   (`CONTROLLER_OFFLINE`) back to the requester, in place of a response. The
   requester's pending channel treats ERROR as a synthetic RESPONSE with
   `status_code: 500` and the `ErrorDetail` JSON as the body.
-- Route table full (4096 entries, flushed wholesale) → `ERROR` `INTERNAL`.
+- Route table full (`MaxPendingRequests` entries, default 50, flushed wholesale) → `ERROR` `INTERNAL`.
 - **Malformed frames (unparseable JSON, wrong field shapes) are silently dropped** —
   no `ERROR` frame, no log line. This is a known limitation, not a feature: build
   validation into your client, or run a proxy that adds it.

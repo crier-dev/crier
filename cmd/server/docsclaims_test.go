@@ -1209,9 +1209,11 @@ func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (an
 	return func(claimID string) (any, error) {
 		switch claimID {
 		case "MESH-ROUTE-CAP-4096":
-			// docs/mesh-protocol.md claims the route table flushes wholesale at
-			// 4096 entries. The live cap is the production constant, imported —
-			// never a duplicated literal.
+			// The id is historical (CR-GAP-062 seeded it against the 4096 literal
+			// that DF-CRIER-187 removed): docs/mesh-protocol.md now claims the
+			// route table is bounded by the configured MaxPendingRequests. The
+			// live cap is the production constant, imported — never a duplicated
+			// literal.
 			return mesh.DefaultMeshConfig("").MaxPendingRequests, nil
 		case "TTL-SECONDS-CLAIM-IGNORED":
 			return liveTTLDeliverySeconds(client, baseURL)

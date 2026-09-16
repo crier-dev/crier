@@ -235,14 +235,19 @@ claims:
   # REPORTED (t.Logf) instead of failing the build. Deleting the xfail line makes
   # the claim fail for real, naming claimed vs observed — that is the proof the
   # live probe is not vacuous. xfail must never hide a claim that actually holds.
+  # DF-CRIER-187 fixed this claim: pruneRoutesLocked now keys off the configured
+  # cap, so the doc line and the live production constant agree and the xfail
+  # marker is gone. The id is HISTORICAL — CR-GAP-062 seeded it against the 4096
+  # literal that row removed — and is kept because the id keys the live probe in
+  # cmd/server/docsclaims_test.go makeLiveDefaultProbes.
   - id: MESH-ROUTE-CAP-4096
     kind: default
     doc: docs/mesh-protocol.md
-    quote: "Route table full (4096 entries, flushed wholesale)"
-    # `expect` is the number the DOC prints; the id-keyed probe returns the live
-    # production constant (mesh.DefaultMeshConfig("").MaxPendingRequests).
-    expect: 4096
-    xfail: "DF-CRIER-187"
+    quote: "Route table full (`MaxPendingRequests` entries, default 50, flushed wholesale)"
+    # `expect` is both the number the DOC prints and the live production
+    # constant (mesh.DefaultMeshConfig("").MaxPendingRequests).
+    expect: 50
+    xfail: null
   - id: WEBHOOK-DEFAULT-BLOCKING
     kind: status
     doc: specs/WEBHOOK-DELIVERY.md
