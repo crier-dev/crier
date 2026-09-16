@@ -798,3 +798,15 @@ tasks:
   status: complete
   created_at: '2026-09-16T14:18:04.495517+00:00'
   completed_at: '2026-09-16T14:24:41.256920+00:00'
+- id: DF-CRIER-143
+  title: Malformed mesh REQUEST errors with blank peer name
+  criteria:
+  - "A REQUEST frame whose target peer cannot be resolved (wrong field shape, e.g.\
+    \ from/to instead of source/target) must produce an ERROR frame that is self-diagnosing\
+    \ \u2014 code INVALID_MESSAGE, a non-empty message naming the problem \u2014 never\
+    \ CONTROLLER_OFFLINE with an empty peer identifier; a well-formed REQUEST to a\
+    \ disconnected peer must still return CONTROLLER_OFFLINE naming that peer; live\
+    \ probe scripts/mesh-malformed-error-probe.py exits 0; go build/vet/test green."
+  status: complete
+  created_at: '2026-09-16T14:35:24.701376+00:00'
+  completed_at: '2026-09-16T14:39:50.833476+00:00'
