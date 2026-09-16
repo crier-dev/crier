@@ -324,13 +324,29 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 
 // handleAgentRequest forwards an agent-to-agent REQUEST to its target peer.
 // A route is recorded so the eventual RESPONSE can be returned to the
-// requester. If the target is not connected, an ERROR is sent back.
+// requester. If the target is not connected, an ERROR is sent back; a REQUEST
+// that carries no resolvable target at all is rejected as malformed.
 func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
 		return
 	}
 	targetID := req.Target.AgentID
+	if targetID == "" {
+		// A wrong-shaped envelope (a client's own "from"/"to" spellings
+		// instead of the wire's source/target PeerRef objects) leaves no
+		// target to resolve at all. Falling through to the lookup below
+		// would answer CONTROLLER_OFFLINE for a frame that never named a
+		// reachable peer, and would blame an identifier that is blank —
+		// "peer  not connected" misdirects the reader to the wrong
+		// subsystem. Answer INVALID_MESSAGE ("Malformed frame" in the
+		// protocol's ERROR-code table) and name the field that is missing.
+		slog.Debug("mesh: REQUEST dropped (missing target peer id)",
+			"requester", requesterID, "message_id", req.MessageID)
+		m.sendErrorTo(requesterID, req.MessageID, req.TraceID,
+			ErrCodeInvalidMessage, "malformed REQUEST: missing target peer id (expected target.agent_id)")
+		return
+	}
 
 	m.mu.RLock()
 	targetConn, ok := m.connections[targetID]
