@@ -700,3 +700,23 @@ tasks:
   status: complete
   created_at: '2026-09-16T10:38:51.645326+00:00'
   completed_at: '2026-09-16T10:49:36.037218+00:00'
+- id: cr-gap-060-examples-agents-prose
+  title: '[docs-sweep T6] examples/ + AGENTS.md/.env.example/Makefile prose truth
+    pass (CR-GAP-060)'
+  criteria:
+  - 'The T6 file family contains no false claim at HEAD: the stale ''Known gap - {{crier.session_id}}
+    renders empty'' section in examples/hermes-gateway-demo/README.md and the matching
+    adapter.py comment are corrected to the shipped state (CR-GAP-037 fix, buildContext
+    JSON round-trip) with a live repro proving session_id now renders; .env.example
+    documents CRIER_AGENT_PRIVATE_KEY_FILE (already documented in README.md and cmd/crier-mcp
+    --help, read at cmd/crier-mcp/main.go:123) so its ''full documented env surface''
+    header stays true; AGENTS.md lists make docs-check + make generate and the docs/openapi.yaml
+    -> cmd/server/openapi.yaml generated-copy + byte-identity rule, with specs/ in
+    Layout; examples/demo.sh no longer claims the demo''s own DEEPSEEK_API_KEY/CR_GUARD_ENABLED
+    environment determines the server-side guard; specs/AGENTS.md DexDat boilerplate
+    is absent at HEAD and every already-accurate item is re-verified file:line and
+    left unedited; make docs-check + go build/vet/test green; no edit inside the frozen
+    zones (docs/mesh-protocol.md, specs/**, docs/claims.yaml, README.md guard bullets)'
+  status: complete
+  created_at: '2026-09-16T11:16:52.258538+00:00'
+  completed_at: '2026-09-16T11:45:58.807739+00:00'
