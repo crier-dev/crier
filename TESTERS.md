@@ -16,18 +16,25 @@ keypair they need, and every gated call below carries them.
 ```bash
 git clone https://github.com/crier-dev/crier.git && cd crier
 make build
-CR_GUARD_ENABLED=false ./bin/crier -port 8767 &
+CR_GUARD_ENABLED=false ./bin/crier -port 8767 -pidfile .crier.pid &
 ```
 
+The `-pidfile` matters: it is what pairs this start with `make stop` below.
 Shared host? Port 8767 may already be taken by someone else's server. Check
 first (`ss -tlnp | grep :8767` — empty output means free); if it is held,
-start on a free port instead (`./bin/crier -port 8768` — a failed bind now
-names the port and the holder-check command) and confirm the build that
-answered with `curl -s localhost:8768/version`.
+start on a free port instead (`./bin/crier -port 8768 -pidfile .crier.pid` —
+a failed bind now names the port and the holder-check command) and confirm
+the build that answered with `curl -s localhost:8768/version`.
 
 Keep that server running — every exercise below assumes `localhost:8767`.
-Stop or restart it at any time with `make stop` (reads the same `.crier.pid`
-`make run` wrote; with no server running it just reports "nothing to stop").
+Stop or restart it at any time with `make stop`: it reads the same `.crier.pid`
+the start line above wrote, sends that pid one SIGTERM, waits for the port to
+be released, and removes the file (no pidfile present — you never started
+one — it just reports "nothing to stop"). If the launcher is lost (started
+with `&`, then the shell closed), `make stop` still works — the pidfile names
+the server process, not the launcher. A server started without `-pidfile` is
+stopped manually: `ss -tlnp | grep :8767`, then `kill <pid>` (SIGTERM is the
+graceful path).
 Anything you send stays on your machine; crier phones home to **nothing**.
 
 Confirm it is up. `$BASE` is just the address you started it on; `make
@@ -216,7 +223,7 @@ not an RPC round trip.
 **5. Federation (two buses)** — forward across relays:
 
 ```bash
-CR_FED_LINKS=http://localhost:8767 ./bin/crier -port 8768 &
+CR_FED_LINKS=http://localhost:8767 ./bin/crier -port 8768 -pidfile .crier-fed.pid &
 curl -s -X POST localhost:8768/agents/alice/inbox -H 'Content-Type: application/json' \
   -d '{"payload":{"via":"guest-bus"}}'
 # alice lives on :8767 — the guest forwards (the guest answers 201 and the
@@ -228,7 +235,8 @@ curl -s -X POST localhost:8768/agents/alice/inbox -H 'Content-Type: application/
 # "FEDERATION_FAILED","message_id":"...","target":"alice","sender":"...",
 # "attempts":9,"error":"federation: no link reachable (last error: ...)"}.
 # A held request with no "sender" is logged, never delivered: it has no inbox
-# to be addressed to.
+# to be addressed to. Stop the guest bus with `make stop PIDFILE=.crier-fed.pid`
+# (its own pidfile: the default `.crier.pid` belongs to the §1 server).
 ```
 
 **6. MCP mode (for agent frameworks)** — expose crier as tools:
