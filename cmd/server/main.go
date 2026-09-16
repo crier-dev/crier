@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/middleware"
+	"github.com/crier-dev/crier/internal/pidfile"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
 	"github.com/crier-dev/crier/internal/webhook"
@@ -43,7 +45,7 @@ func main() {
 // exit code and is the testable entrypoint (main() is a thin wrapper), so
 // TestServerHealth can invoke it without os.Args carrying go test's flags.
 func run(args []string) int {
-	help, showVersion, port, dbURL, err := parseArgs(args, os.Stdout)
+	help, showVersion, stop, port, dbURL, pidfilePath, err := parseArgs(args, os.Stdout)
 	if err != nil {
 		// The flag package already printed the error and usage to stdout.
 		return 2
@@ -57,6 +59,11 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stdout, "crier %s\n", buildinfo.String())
 		return 0
 	}
+	if stop {
+		// -stop never starts the server: it resolves the pidfile (flag
+		// wins over CR_PIDFILE), performs the safe stop, and exits.
+		return stopServer(os.Stdout, resolvePidfile(pidfilePath))
+	}
 
 	// Flag overrides take precedence over the env-driven configuration.
 	// Zero/empty values mean "not set" — the env vars win in that case.
@@ -66,6 +73,7 @@ func run(args []string) int {
 	if dbURL != "" {
 		os.Setenv("CR_DATABASE_URL", dbURL)
 	}
+	pfPath := resolvePidfile(pidfilePath)
 
 	// Bootstrap with a default info-level text logger so any pre-config
 	// logging has a destination. Re-initialized with the user's choices
@@ -339,11 +347,16 @@ func run(args []string) int {
 	}()
 
 	// Graceful shutdown. signal.Notify is registered synchronously BEFORE
-	// ListenAndServe so the handler is guaranteed installed by the time the
+	// the serve loop so the handler is guaranteed installed by the time the
 	// server accepts traffic — otherwise a SIGTERM arriving before the wait
 	// goroutine runs (e.g. from TestServerHealth's cleanup) hits the default
 	// handler and kills the process with "signal: terminated" instead of
 	// shutting down gracefully.
+	//
+	// The pidfile is REMOVED on this same graceful path (DF-CRIER-194): by
+	// the time the shutdown finishes, the listener is gone, so the pidfile
+	// must not outlive the server it names. It is written only after the
+	// bind succeeded (see the listen call below).
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -363,6 +376,11 @@ func run(args []string) int {
 		if err := srv.Shutdown(ctx); err != nil {
 			slog.Warn("http shutdown", "error", err)
 		}
+		if pfPath != "" {
+			if err := pidfile.Remove(pfPath); err != nil {
+				slog.Warn("remove pidfile", "error", err)
+			}
+		}
 		if closer, ok := regStore.(interface{ Close() }); ok {
 			closer.Close()
 		}
@@ -370,7 +388,28 @@ func run(args []string) int {
 
 	slog.Info("crier starting", "port", cfg.Port, "services", "relay+mesh+registry",
 		"version", buildinfo.String())
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// Bind BEFORE serving: the pidfile must exist only once the port is
+	// actually held, and a failed bind must leave no pidfile behind
+	// (DF-CRIER-194). The existing logServeFailure diagnostic for the
+	// shared-port dead end (DF-CRIER-154) runs unchanged.
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		logServeFailure(cfg.Port, err)
+		return 1
+	}
+	if pfPath != "" {
+		self, exeErr := os.Executable()
+		if exeErr != nil {
+			slog.Warn("pidfile: resolve binary path", "error", exeErr)
+		} else {
+			if err := pidfile.Write(pfPath, pidfile.Record{PID: os.Getpid(), Port: cfg.Port, Binary: self}); err != nil {
+				slog.Warn("pidfile: write", "path", pfPath, "error", err)
+			} else {
+				slog.Info("pidfile written", "path", pfPath)
+			}
+		}
+	}
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		logServeFailure(cfg.Port, err)
 		return 1
 	}
@@ -404,16 +443,20 @@ func logServeFailure(port int, err error) {
 //   - help: -help/--help (or -h) was requested; usage has already been
 //     printed to out.
 //   - showVersion: -version/--version was requested.
-//   - port/dbURL: flag overrides for the env-driven config; 0/"" mean the
-//     flag was not set and the environment wins.
+//   - stop: -stop was requested (perform the stop action and exit; the
+//     server never starts).
+//   - port/dbURL/pidfile: flag overrides; 0/"" mean the flag was not set
+//     and the environment (or, for pidfile, nothing at all) wins.
 //   - err: parse failure (unknown flag or bad value); the error message and
 //     usage have already been printed to out.
-func parseArgs(args []string, out io.Writer) (help, showVersion bool, port int, dbURL string, err error) {
+func parseArgs(args []string, out io.Writer) (help, showVersion, stop bool, port int, dbURL, pidfile string, err error) {
 	fs := flag.NewFlagSet("crier", flag.ContinueOnError)
 	fs.SetOutput(out)
 	versionFlag := fs.Bool("version", false, "print version and exit")
 	portFlag := fs.Int("port", 0, "listen port (overrides CRIER_PORT)")
 	dbURLFlag := fs.String("db-url", "", "PostgreSQL connection URL (overrides CR_DATABASE_URL)")
+	stopFlag := fs.Bool("stop", false, "stop the server recorded in the pidfile (see -pidfile) and exit; never starts the server")
+	pidfileFlag := fs.String("pidfile", "", "write a pidfile at this path once the port is bound, removed on graceful shutdown (overrides CR_PIDFILE; pairs with -stop)")
 	fs.Usage = func() { printUsage(out, fs) }
 
 	if err := fs.Parse(args); err != nil {
@@ -421,11 +464,108 @@ func parseArgs(args []string, out io.Writer) (help, showVersion bool, port int, 
 			// The flag package already printed usage. -h/-help must exit
 			// 0 (the package's default ExitOnError path exits 2, which
 			// violates the CR-GAP-005 acceptance criteria).
-			return true, false, 0, "", nil
+			return true, false, false, 0, "", "", nil
 		}
-		return false, false, 0, "", err
+		return false, false, false, 0, "", "", err
 	}
-	return false, *versionFlag, *portFlag, *dbURLFlag, nil
+	return false, *versionFlag, *stopFlag, *portFlag, *dbURLFlag, *pidfileFlag, nil
+}
+
+// resolvePidfile picks the pidfile path: an explicit -pidfile flag wins,
+// then the CR_PIDFILE env var; empty means "no pidfile" and the server
+// writes nothing (the default — behaviour only changes for operators who
+// ask for it, DF-CRIER-194).
+func resolvePidfile(flagPath string) string {
+	if flagPath != "" {
+		return flagPath
+	}
+	return os.Getenv("CR_PIDFILE")
+}
+
+// stopServer performs the -stop action against path and returns a process
+// exit code. It is the safe half of DF-CRIER-194: no pidfile is a clean
+// no-op, a stale pidfile is cleaned up, a live pid whose /proc exe does
+// not match the recorded binary is REFUSED without any signal, and the
+// happy path sends one SIGTERM (which triggers the existing graceful
+// shutdown), waits up to 10s, then removes the pidfile. It never
+// SIGKILLs and never falls back to matching by port or process name — an
+// unrelated process must not be reachable through this command.
+func stopServer(out io.Writer, path string) int {
+	if path == "" {
+		fmt.Fprintln(out, "crier: -stop needs a pidfile: pass -pidfile <path> or set CR_PIDFILE")
+		return 2
+	}
+	rec, err := pidfile.Read(path)
+	if errors.Is(err, pidfile.ErrNoPidfile) {
+		fmt.Fprintf(out, "crier: nothing to stop — no pidfile at %s\n", path)
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crier: cannot read pidfile: %v\n", err)
+		return 1
+	}
+
+	if err := pidfile.SafeToSignal(rec); err != nil {
+		if errors.Is(err, pidfile.ErrNotAlive) {
+			// Stale pidfile: the server it named is already gone.
+			fmt.Fprintf(out, "crier: pid %d (port %d) is not running — removing stale pidfile %s\n",
+				rec.PID, rec.Port, path)
+			if rmErr := pidfile.Remove(path); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "crier: removing stale pidfile: %v\n", rmErr)
+				return 1
+			}
+			return 0
+		}
+		var mismatch *pidfile.MismatchError
+		if errors.As(err, &mismatch) {
+			fmt.Fprintf(os.Stderr, "crier: REFUSING to stop pid %d: it is not the server this pidfile recorded\n", rec.PID)
+			fmt.Fprintf(os.Stderr, "  pidfile %s recorded binary: %s\n", path, mismatch.Recorded)
+			fmt.Fprintf(os.Stderr, "  pid %d is actually running:  %s\n", rec.PID, mismatch.Live)
+			fmt.Fprintf(os.Stderr, "  (the pid was likely recycled by the OS; nothing was signalled)\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "crier: REFUSING to stop pid %d: %v (nothing was signalled)\n", rec.PID, err)
+		}
+		return 1
+	}
+
+	proc, findErr := os.FindProcess(rec.PID)
+	if findErr != nil {
+		fmt.Fprintf(os.Stderr, "crier: find pid %d: %v\n", rec.PID, findErr)
+		return 1
+	}
+	fmt.Fprintf(out, "crier: stopping pid %d (SIGTERM)\n", rec.PID)
+	if sigErr := proc.Signal(syscall.SIGTERM); sigErr != nil {
+		// The process may have exited between the ownership check and
+		// the signal; treat "already gone" as success, anything else
+		// as a failure.
+		if errors.Is(sigErr, syscall.ESRCH) || errors.Is(sigErr, os.ErrProcessDone) {
+			fmt.Fprintf(out, "crier: pid %d already exited\n", rec.PID)
+			_ = pidfile.Remove(path)
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "crier: signal pid %d: %v\n", rec.PID, sigErr)
+		return 1
+	}
+
+	// Poll for exit: killed-but-unreaped children (and processes whose
+	// parent is not us) drop their /proc entry promptly on exit, and
+	// pidfile.Alive also treats zombies as gone. Graceful shutdown takes
+	// a moment (open connections drain), so allow 10s.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !pidfile.Alive(rec.PID) {
+			fmt.Fprintf(out, "crier: pid %d stopped\n", rec.PID)
+			if rmErr := pidfile.Remove(path); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "crier: removing pidfile: %v\n", rmErr)
+				return 1
+			}
+			return 0
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	fmt.Fprintf(os.Stderr, "crier: pid %d is still running after 10s — not removing %s; inspect it (ss -tlnp | grep :%d) and stop it manually if needed\n",
+		rec.PID, path, rec.Port)
+	return 1
 }
 
 // federationName returns this relay's display name for the /fed/peers
@@ -451,6 +591,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "Configuration is read from environment variables; the")
 	fmt.Fprintln(out, "-port and -db-url flags override them when set:")
 	fmt.Fprintln(out, "  CRIER_PORT                  listen port (default 8767)")
+	fmt.Fprintln(out, "  CR_PIDFILE                  pidfile path; set to pair the server with -stop / make stop (default: none)")
 	fmt.Fprintln(out, "  CR_DATABASE_URL             PostgreSQL URL (fallbacks: DATABASE_URL, CRIER_DATABASE_URL)")
 	fmt.Fprintln(out, "  CR_AUTH_TOKEN               bearer token required on all requests (empty = auth disabled)")
 	fmt.Fprintln(out, "  CR_REQUIRE_AGENT_SIG        require per-agent ed25519 signatures (default true)")

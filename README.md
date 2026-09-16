@@ -174,6 +174,56 @@ If the bind fails anyway, the server exits non-zero naming the port, the
 holder-check command and the `-port`/`CRIER_PORT` alternative, plus the build
 identity of the binary that failed to start.
 
+### Stop / restart
+
+```bash
+make stop
+```
+
+`make run` starts the server with a pidfile (`.crier.pid` at the repo root —
+gitignored; override with `PIDFILE=<path>` for `make run`/`make stop`, or set
+`CR_PIDFILE`). The pidfile is written only after the port is actually bound —
+a failed bind leaves no pidfile — and records the pid, the port and the
+absolute binary path. `make stop` reads it, verifies the recorded pid is
+still running that exact binary (via `/proc/<pid>/exe`), and sends one
+SIGTERM, which triggers the server's graceful shutdown. With no pidfile
+`make stop` is a clean no-op success, so it is safe in any state:
+
+```bash
+$ make stop
+./bin/crier -stop -pidfile .crier.pid
+crier: nothing to stop — no pidfile at .crier.pid
+```
+
+A stale pidfile (the server died without cleanup) is removed and reported;
+a pidfile whose pid now runs a *different* binary is refused with both
+paths printed and **nothing is signalled** — the stop command never
+SIGKILLs and never matches by port or process name, so it cannot kill an
+unrelated process.
+
+Lost the launcher? A server started detached (`setsid make run …`, then the
+launcher exits) keeps holding its port — that server is exactly what
+`make stop` reaches, because the pidfile names the server process, not the
+launcher:
+
+```bash
+$ setsid make run &        # launcher exits; server keeps running
+$ make stop
+./bin/crier -stop -pidfile .crier.pid
+crier: stopping pid 4169877 (SIGTERM)
+crier: pid 4169877 stopped
+```
+
+Older servers started without a pidfile (before this existed) are not
+reachable by `make stop`. Find them by port and stop them manually —
+SIGTERM (the default `kill`) and Ctrl-C both trigger the same graceful
+shutdown:
+
+```bash
+ss -tlnp | grep :8767         # who holds the default port?
+kill <pid>                    # SIGTERM — graceful shutdown
+```
+
 > **The LLM message guard is ON by default.** Every inbound delivery is
 > classified by a guard LLM (default model `deepseek-v4-flash`, 10s
 > per-message budget — `CR_GUARD_TIMEOUT_MS`) before it is webhook-POSTed
@@ -456,6 +506,7 @@ All configuration is via environment variables (defaults shown):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
+| `CR_PIDFILE` | _(unset — no pidfile)_ | Pidfile path. When set (or `-pidfile <path>` is passed, or `make run`'s default `.crier.pid` is used), the server writes `{pid, port, binary}` to this file **after** the port is bound and removes it on graceful shutdown; `-stop`/`make stop` read it to stop that exact process safely (ownership-checked against `/proc/<pid>/exe`; a mismatch is refused without signalling). See [Stop / restart](#stop--restart). |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5437/crier?sslmode=disable`. See [Durable backend (PostgreSQL)](#durable-backend-postgresql) for the runnable compose path. |
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |

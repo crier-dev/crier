@@ -1,4 +1,9 @@
-.PHONY: help build build-mcp test test-short test-integration lint run clean docker-build coverage coverage-html coverage-check docs-check generate
+.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate
+
+# Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
+# lives at the repo root, is written only after the port is bound, and is
+# removed on graceful shutdown; override with PIDFILE= (or CR_PIDFILE).
+PIDFILE ?= .crier.pid
 
 # Build identity. The linker stamps internal/buildinfo, which both binaries
 # (cmd/server and cmd/crier-mcp) read — one identity, one format, so the CLI,
@@ -23,7 +28,8 @@ help:
 	@echo "Available targets:"
 	@echo "  build             Compile the main server binary into bin/crier"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
-	@echo "  run               Build and run the server (default :8767)"
+	@echo "  run               Build and run the server (default :8767, pidfile $(PIDFILE))"
+	@echo "  stop              Stop the server started by make run (reads $(PIDFILE); no pidfile = nothing to stop, exit 0)"
 	@echo "  test              Full test suite, no caching (go test ./... -count=1 -timeout 60s)"
 	@echo "  test-short        Unit tests only — skips integration, no Docker required"
 	@echo "  test-integration  PostgreSQL-backed registry tests (requires Docker)"
@@ -58,7 +64,10 @@ lint:
 	go vet ./...
 
 run: build
-	./bin/crier
+	./bin/crier -pidfile $(PIDFILE)
+
+stop:
+	./bin/crier -stop -pidfile $(PIDFILE)
 
 clean:
 	rm -rf bin/

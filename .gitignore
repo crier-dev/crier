@@ -42,6 +42,9 @@ dist/
 # Stale build artifacts (from go build without -o)
 /server
 
+# Server pidfile (make run / make stop, DF-CRIER-194)
+.crier.pid
+
 # OpenCode
 .opencode/
 .axiom/

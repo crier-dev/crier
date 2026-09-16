@@ -26,6 +26,8 @@ names the port and the holder-check command) and confirm the build that
 answered with `curl -s localhost:8768/version`.
 
 Keep that server running — every exercise below assumes `localhost:8767`.
+Stop or restart it at any time with `make stop` (reads the same `.crier.pid`
+`make run` wrote; with no server running it just reports "nothing to stop").
 Anything you send stays on your machine; crier phones home to **nothing**.
 
 Confirm it is up. `$BASE` is just the address you started it on; `make

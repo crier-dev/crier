@@ -47,6 +47,11 @@ ignore_paths:
   # finds no registration), so it is ignored while the shipped route is claimed
   # live just below.
   - /events
+  # DF-CRIER-194: README's Stop/restart section and CR_PIDFILE row document
+  # the pidfile ownership check against the kernel's /proc/<pid>/exe —
+  # filesystem paths the scanner splits at the placeholder, not API routes.
+  - /proc/
+  - /exe
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
