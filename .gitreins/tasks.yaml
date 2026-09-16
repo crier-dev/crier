@@ -624,3 +624,12 @@ tasks:
   status: complete
   created_at: '2026-09-16T07:10:34.880159+00:00'
   completed_at: '2026-09-16T07:23:07.942586+00:00'
+- id: CR-GAP-055
+  title: 'docs-sweep T1: land the claim-executing docs gate'
+  criteria:
+  - make test-short and make docs-check are green at HEAD, and the gate provably fails
+    when a documented claim is broken (negative control in-suite plus a break/revert
+    transcript)
+  status: complete
+  created_at: '2026-09-16T07:36:17.358606+00:00'
+  completed_at: '2026-09-16T08:18:58.610125+00:00'
