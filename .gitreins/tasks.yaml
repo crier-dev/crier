@@ -988,3 +988,15 @@ tasks:
   status: complete
   created_at: '2026-09-16T21:51:09.289857+00:00'
   completed_at: '2026-09-16T22:01:54.935836+00:00'
+- id: DF-CRIER-188
+  title: Synchronize asynchronous kanban test body handoff
+  criteria:
+  - TestHTTPKanbanWriter_ThroughWorker uses a real synchronization boundary for handler-to-test
+    body transfer, retains the real guard worker and HTTP writer and all title/message
+    ID assertions, fails boundedly when no card arrives, passes go test -race -count=20
+    ./internal/guard/ -run TestHTTPKanbanWriter_ThroughWorker and go test -race -count=1
+    ./internal/guard/ and full go build/vet/test. No production behavior changes or
+    skipped/weakened tests.
+  status: complete
+  created_at: '2026-09-16T22:28:21.448233+00:00'
+  completed_at: '2026-09-16T22:33:10.108355+00:00'
