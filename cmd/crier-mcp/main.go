@@ -27,6 +27,68 @@ const (
 	keySourceEphemeral = "ephemeral" // generated in-process for this run
 )
 
+// Env-var names accepted for the bridge's shared bearer token, and the
+// source values resolveBridgeToken reports (DF-CRIER-195).
+const (
+	tokenVarBridge = "CRIER_AUTH_TOKEN" // the bridge's own name
+	tokenVarAlias  = "CR_AUTH_TOKEN"    // the server's documented name, accepted as an alias
+
+	tokenSourceBridge = "CRIER_AUTH_TOKEN" // value came from the bridge's own variable
+	tokenSourceAlias  = "CR_AUTH_TOKEN"    // value came from the alias
+	tokenSourceNone   = "none"             // neither variable set — unauthenticated
+)
+
+// bridgeToken is the bearer token the bridge presents to a remote server,
+// plus which env-var name it was resolved from so callers (and tests) can
+// attribute the decision without parsing logs.
+type bridgeToken struct {
+	Token  string
+	Source string
+}
+
+// resolveBridgeToken picks the shared bearer token for the bridge's remote
+// store (DF-CRIER-195: cmd/server reads CR_AUTH_TOKEN while the bridge read
+// only CRIER_AUTH_TOKEN, so a deployment that set the server's documented
+// variable got an empty token and unattributable 401s).
+//
+// Precedence, additive — neither existing variable is renamed or removed:
+//   - both set to different values: CRIER_AUTH_TOKEN wins, WARN naming both.
+//   - both set to identical values: that value is used, no conflict warning.
+//   - only CRIER_AUTH_TOKEN: used, source is the bridge name.
+//   - only CR_AUTH_TOKEN: used as an alias, WARN naming both variables so the
+//     aliasing is never silent.
+//   - neither: empty token (unauthenticated — the server default), and when
+//     remoteMode is true one INFO line naming the two variables that were
+//     checked, so any 401s that follow are attributable.
+//
+// The secret's value is never logged — only the variable names.
+func resolveBridgeToken(bridgeVar, aliasVar string, remoteMode bool, logger *slog.Logger) bridgeToken {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	switch {
+	case bridgeVar != "" && aliasVar != "" && bridgeVar != aliasVar:
+		logger.Warn("CRIER_AUTH_TOKEN and CR_AUTH_TOKEN are both set to different values — using CRIER_AUTH_TOKEN and ignoring CR_AUTH_TOKEN",
+			"winner", tokenVarBridge, "ignored", tokenVarAlias,
+			"note", "set them to the same value, or unset one, to silence this warning")
+		return bridgeToken{Token: bridgeVar, Source: tokenSourceBridge}
+	case bridgeVar != "":
+		// Covers alias unset and alias set to the identical value: the value
+		// is unambiguous, so no warning.
+		return bridgeToken{Token: bridgeVar, Source: tokenSourceBridge}
+	case aliasVar != "":
+		logger.Warn("CRIER_AUTH_TOKEN is not set — using CR_AUTH_TOKEN (the server's documented variable) as an alias for the same shared bearer token",
+			"bridge_var", tokenVarBridge, "alias_var", tokenVarAlias)
+		return bridgeToken{Token: aliasVar, Source: tokenSourceAlias}
+	default:
+		if remoteMode {
+			logger.Info("neither CRIER_AUTH_TOKEN nor CR_AUTH_TOKEN is set — remote requests will carry no bearer token; a server running with CR_AUTH_TOKEN will answer 401",
+				"checked", tokenVarBridge+", "+tokenVarAlias)
+		}
+		return bridgeToken{Token: "", Source: tokenSourceNone}
+	}
+}
+
 // bridgeCapabilities are the capability tags advertised for the bridge's own
 // identity when it self-registers on a remote server.
 var bridgeCapabilities = []string{"mcp", "bridge"}
@@ -140,7 +202,13 @@ func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error
 				"agent_id", agentID, "key_source", keySourceEphemeral,
 				"note", "the key is regenerated on every run, so a persistent server keeps the first run's registered key; set CRIER_AGENT_PRIVATE_KEY_FILE for a stable identity")
 		}
-		return registry.NewRemoteStore(url, agentID, os.Getenv("CRIER_AUTH_TOKEN"), opts...), identity, func() {}, nil
+		// The bridge accepts its own CRIER_AUTH_TOKEN first, then the
+		// server's documented CR_AUTH_TOKEN as an alias, so a deployment
+		// that set only the server's variable no longer gets an empty
+		// bearer token (DF-CRIER-195).
+		token := resolveBridgeToken(
+			os.Getenv(tokenVarBridge), os.Getenv(tokenVarAlias), true, slog.Default())
+		return registry.NewRemoteStore(url, agentID, token.Token, opts...), identity, func() {}, nil
 	}
 	if cfg.Database.URL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
@@ -252,6 +320,8 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CRIER_HTTP_URL              base URL of the Crier server (e.g. http://localhost:8767)")
 	fmt.Fprintln(out, "  CRIER_AGENT_ID              agent id used on agent-owned routes (required in remote mode)")
 	fmt.Fprintln(out, "  CRIER_AUTH_TOKEN            shared bearer token when the server runs with CR_AUTH_TOKEN")
+	fmt.Fprintln(out, "                              (the bridge's own name; CR_AUTH_TOKEN is accepted as an alias")
+	fmt.Fprintln(out, "                              for the same shared secret)")
 	fmt.Fprintln(out, "  CRIER_AGENT_PRIVATE_KEY_FILE  optional PKCS#8 PEM ed25519 private key (openssl genpkey")
 	fmt.Fprintln(out, "                              -algorithm ED25519). Enables per-agent request signing")
 	fmt.Fprintln(out, "                              (X-Agent-Ts/X-Agent-Sig on every request) for servers with")

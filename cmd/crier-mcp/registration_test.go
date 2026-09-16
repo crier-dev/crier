@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/gorilla/mux"
 )
 
 // ---- logging capture ------------------------------------------------------
@@ -381,8 +381,17 @@ func TestRunRegistersWithSuppliedKeyFile(t *testing.T) {
 	}
 	stderrCh := make(chan string, 1)
 	go func() {
-		b, _ := bufio.NewReader(stderr).ReadString('\n')
-		stderrCh <- b
+		// The resolver's token INFO (DF-CRIER-195) is logged before the
+		// registration line, so scan until the registration outcome
+		// appears rather than reading only the first line.
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			if strings.Contains(sc.Text(), "registered bridge identity") {
+				stderrCh <- sc.Text()
+				return
+			}
+		}
+		stderrCh <- ""
 	}()
 
 	deadline := time.Now().Add(10 * time.Second)

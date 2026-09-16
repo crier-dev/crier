@@ -287,6 +287,10 @@ openssl genpkey -algorithm ED25519 -out ~/.config/crier/mcp-agent.key
 export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
 # Optional shared bearer token, only when the server runs with CR_AUTH_TOKEN:
 # export CRIER_AUTH_TOKEN=...
+# CRIER_AUTH_TOKEN is the bridge's own name; CR_AUTH_TOKEN is accepted as an
+# alias for the same shared secret (setting only CR_AUTH_TOKEN works — the
+# bridge logs which variable it used, and warns if both are set to different
+# values, in which case CRIER_AUTH_TOKEN wins).
 make build-mcp && ./bin/crier-mcp
 ```
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/gorilla/mux"
 )
 
 // TestMCPServerInitialize is an entrypoint smoke test: it builds and starts
@@ -274,6 +275,120 @@ func TestMCPServerCLIFlags(t *testing.T) {
 // segment (which may itself contain dashes, e.g. a git-describe string) and a
 // shortened commit, with the optional dirty marker.
 var mcpIdentityRE = regexp.MustCompile(`^v.+?-([0-9a-f]{8})(-dirty)?$`)
+
+// ---- resolveBridgeToken (DF-CRIER-195) -------------------------------------
+//
+// The bridge must accept the server's documented CR_AUTH_TOKEN as an alias
+// for its own CRIER_AUTH_TOKEN, never silently ignore a set variable, and
+// tell the operator which of the two it used.
+
+// TestResolveBridgeTokenBothSetDifferentValues: (a) both variables set to
+// different values — CRIER_AUTH_TOKEN wins and the source reports the bridge
+// name, with a WARN naming both variables and the winner.
+func TestResolveBridgeTokenBothSetDifferentValues(t *testing.T) {
+	h := &captureHandler{}
+
+	got := resolveBridgeToken("bridge-secret", "server-secret", true, slog.New(h))
+
+	if got.Token != "bridge-secret" {
+		t.Fatalf("Token = %q, want bridge-secret", got.Token)
+	}
+	if got.Source != tokenSourceBridge {
+		t.Fatalf("Source = %q, want %q", got.Source, tokenSourceBridge)
+	}
+	rec, ok := h.find(slog.LevelWarn, "different values")
+	if !ok {
+		t.Fatalf("no WARN about the conflicting pair; got:\n%s", h.joined())
+	}
+	if rec.Attrs["winner"] != tokenVarBridge || rec.Attrs["ignored"] != tokenVarAlias {
+		t.Fatalf("WARN attrs winner=%q ignored=%q, want %q/%q",
+			rec.Attrs["winner"], rec.Attrs["ignored"], tokenVarBridge, tokenVarAlias)
+	}
+	if strings.Contains(h.joined(), "bridge-secret") || strings.Contains(h.joined(), "server-secret") {
+		t.Fatalf("log leaks the secret value:\n%s", h.joined())
+	}
+}
+
+// TestResolveBridgeTokenOnlyAliasSet: (b) only CR_AUTH_TOKEN set — its value
+// is used, the source reports the alias, and the aliasing is logged as WARN
+// naming both variables.
+func TestResolveBridgeTokenOnlyAliasSet(t *testing.T) {
+	h := &captureHandler{}
+
+	got := resolveBridgeToken("", "server-secret", true, slog.New(h))
+
+	if got.Token != "server-secret" {
+		t.Fatalf("Token = %q, want server-secret", got.Token)
+	}
+	if got.Source != tokenSourceAlias {
+		t.Fatalf("Source = %q, want %q", got.Source, tokenSourceAlias)
+	}
+	rec, ok := h.find(slog.LevelWarn, "as an alias")
+	if !ok {
+		t.Fatalf("no WARN about the alias fallback; got:\n%s", h.joined())
+	}
+	if rec.Attrs["bridge_var"] != tokenVarBridge || rec.Attrs["alias_var"] != tokenVarAlias {
+		t.Fatalf("WARN attrs bridge_var=%q alias_var=%q, want %q/%q",
+			rec.Attrs["bridge_var"], rec.Attrs["alias_var"], tokenVarBridge, tokenVarAlias)
+	}
+}
+
+// TestResolveBridgeTokenIdenticalValues: (c) both set to the same value — the
+// value is used with no conflict warning (there is nothing to warn about).
+func TestResolveBridgeTokenIdenticalValues(t *testing.T) {
+	h := &captureHandler{}
+
+	got := resolveBridgeToken("same-secret", "same-secret", true, slog.New(h))
+
+	if got.Token != "same-secret" {
+		t.Fatalf("Token = %q, want same-secret", got.Token)
+	}
+	if got.Source != tokenSourceBridge {
+		t.Fatalf("Source = %q, want %q", got.Source, tokenSourceBridge)
+	}
+	if _, ok := h.find(slog.LevelWarn, "different values"); ok {
+		t.Fatalf("unexpected conflict WARN for identical values:\n%s", h.joined())
+	}
+}
+
+// TestResolveBridgeTokenNeitherSet: (d) neither variable set — empty token,
+// source none, and in remote mode one INFO line naming both checked
+// variables so later 401s are attributable.
+func TestResolveBridgeTokenNeitherSet(t *testing.T) {
+	h := &captureHandler{}
+
+	got := resolveBridgeToken("", "", true, slog.New(h))
+
+	if got.Token != "" {
+		t.Fatalf("Token = %q, want empty", got.Token)
+	}
+	if got.Source != tokenSourceNone {
+		t.Fatalf("Source = %q, want %q", got.Source, tokenSourceNone)
+	}
+	rec, ok := h.find(slog.LevelInfo, "neither")
+	if !ok {
+		t.Fatalf("no INFO naming the checked variables; got:\n%s", h.joined())
+	}
+	if rec.Attrs["checked"] != tokenVarBridge+", "+tokenVarAlias {
+		t.Fatalf("checked attr = %q, want both variable names", rec.Attrs["checked"])
+	}
+}
+
+// TestResolveBridgeTokenNeitherSetNotRemote: the "neither set" INFO is
+// emitted only for remote mode — the token is meaningless without a server
+// to present it to, so non-remote callers stay quiet.
+func TestResolveBridgeTokenNeitherSetNotRemote(t *testing.T) {
+	h := &captureHandler{}
+
+	got := resolveBridgeToken("", "", false, slog.New(h))
+
+	if got.Token != "" || got.Source != tokenSourceNone {
+		t.Fatalf("got %+v, want empty token from %q", got, tokenSourceNone)
+	}
+	if len(h.all()) != 0 {
+		t.Fatalf("non-remote resolution logged; got:\n%s", h.joined())
+	}
+}
 
 // gitShortHead returns the first 8 characters of the repository HEAD, or ""
 // when git is unavailable (the caller then says so instead of failing).
