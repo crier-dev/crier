@@ -251,11 +251,19 @@ claims:
   - id: WEBHOOK-DEFAULT-BLOCKING
     kind: status
     doc: specs/WEBHOOK-DELIVERY.md
-    quote: "- `delivery_mode` — `blocking` (default) | `async` | `batch`."
-    # The spec claims blocking is the default delivery_mode; the live probe
-    # delivers with the mode unset and reports the accept it really gets.
-    expect: "200"
-    xfail: "DF-CRIER-178"
+    quote: "- `delivery_mode` — `async` (default) | `blocking` | `batch`."
+    # RESOLVED by DF-CRIER-178: the spec prose was the stale side, not the code.
+    # async IS the shipped, deliberate default — internal/webhook/driver.go:229-237
+    # (effectiveDeliveryMode: envelope override -> agent config -> "async") and
+    # internal/registry/handler.go:568-573 (req.DeliveryMode -> target.Webhook.
+    # DeliveryMode -> "async"), both landed by commit b1540f2 (CR-FEAT-005:
+    # "Async fire-and-forget enqueues and returns immediately"). The id is
+    # HISTORICAL — it was seeded when the doc claimed a "blocking" default, and is
+    # kept because it keys the live probe in cmd/server/docsclaims_test.go — so a
+    # reader knows why the id no longer says "blocking". The live probe delivers
+    # with the mode unset and reports the accept it really gets.
+    expect: "202"
+    xfail: null
   # CR-GAP-056 removed TTL-SECONDS-CLAIM-IGNORED with the doc line it anchored:
   # DF-CRIER-174 rebuilt the TESTERS.md rough-edges table from live evidence and
   # the row claiming ttl_seconds is ignored is FALSE at HEAD (a deliver with

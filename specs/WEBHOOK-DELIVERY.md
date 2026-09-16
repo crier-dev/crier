@@ -40,7 +40,9 @@ no full-mesh federation (links only).
   in the registry row; resolved at send time). v1: `none` and `bearer`.
 - `schema_template` — one of `generic-custom` (default), `openai-compatible`, `hermes-http-gateway`.
 - `custom_schema` — full override; if present it wins over the named template (bring-your-own schema).
-- `delivery_mode` — `blocking` (default) | `async` | `batch`.
+- `delivery_mode` — `async` (default) | `blocking` | `batch`. A mode left absent on BOTH the agent config and
+  the message resolves to `async` (fire-and-forget: the sender gets the `202` accept); an explicit value on
+  either side wins, the per-message one over the agent default.
 - `batch` — only for `batch` mode: flush at `max_messages` OR `flush_interval_s`, whichever first.
 - `retries` — bounded retries for transient failures (default 5). `timeout_ms` — per POST timeout (default 30000).
 

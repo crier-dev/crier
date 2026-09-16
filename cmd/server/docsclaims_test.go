@@ -597,8 +597,9 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			io.Copy(io.Discard, resp.Body)
 			return resp.StatusCode, nil
 		case "WEBHOOK-DEFAULT-BLOCKING":
-			// specs/WEBHOOK-DELIVERY.md claims delivery_mode defaults to
-			// "blocking"; measure the accept an unset mode really gets.
+			// specs/WEBHOOK-DELIVERY.md now states delivery_mode defaults to
+			// "async" (blocking is opt-in); the probe measures the accept an
+			// unset mode really gets and pins it to that prose.
 			return liveWebhookDefaultMode(client, baseURL)
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
@@ -1260,8 +1261,8 @@ func liveTTLDeliverySeconds(client *http.Client, baseURL string) (any, error) {
 }
 
 // liveWebhookDefaultMode measures the accept a webhook delivery gets when both the
-// request and the agent leave delivery_mode unset — the spec claims that is
-// "blocking (default)".
+// request and the agent leave delivery_mode unset — the spec states that is
+// "async" (default), and this probe proves it live.
 func liveWebhookDefaultMode(client *http.Client, baseURL string) (int, error) {
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
