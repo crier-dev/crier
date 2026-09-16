@@ -345,6 +345,8 @@ docker compose up -d postgres     # project container, port 5437
 CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
 ```
 
+Host port and compose project are env-overridable (`CRIER_PG_HOST_PORT`, `COMPOSE_PROJECT_NAME` — see README § Durable backend).
+
 Migrations apply automatically on startup. With the Postgres backend, agents
 and undelivered messages survive server restarts; without
 `CR_DATABASE_URL` everything is process-lifetime only. The MCP server

@@ -456,7 +456,7 @@ All configuration is via environment variables (defaults shown):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
-| `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
+| `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5437/crier?sslmode=disable`. See [Durable backend (PostgreSQL)](#durable-backend-postgresql) for the runnable compose path. |
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
@@ -495,6 +495,33 @@ All configuration is via environment variables (defaults shown):
 | `CR_WEBHOOK_BATCH_MAX` | `10` | Batch flush size. |
 | `CR_WEBHOOK_BATCH_FLUSH_S` | `5` | Batch flush interval, seconds. |
 | `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
+
+### Durable backend (PostgreSQL)
+
+The `postgres` service in `docker-compose.yml` (image `postgres:16-alpine`, credentials `crier`/`crier`, database `crier`) publishes the container's in-container port 5432 on host port **5437** by default:
+
+```bash
+docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
+```
+
+Migrations apply automatically on startup; agents and undelivered messages then survive restarts. Both the host port and the project (and therefore the container name) are env-overridable — `CRIER_PG_HOST_PORT` picks the host port, `COMPOSE_PROJECT_NAME` scopes the container away from a name collision on a shared host.
+
+When host 5437 is already taken (check with `ss -tlnp | grep :5437`), override it and use the same port in the URL:
+
+```bash
+CRIER_PG_HOST_PORT=5493 docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5493/crier?sslmode=disable' ./bin/crier
+```
+
+When a stale container from an earlier project squats the expected name, rescope the compose project so its container is named after it instead:
+
+```bash
+COMPOSE_PROJECT_NAME=crier-lab docker compose up -d postgres
+# container <project>-postgres-1; the URL still uses localhost:5437 (or your CRIER_PG_HOST_PORT override)
+```
+
+Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume as well.
 
 ## API
 

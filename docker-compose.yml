@@ -1,10 +1,13 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: crier-postgres
+    # No container_name: Compose scopes the container to this project
+    # (directory name / COMPOSE_PROJECT_NAME), so a stale container named
+    # crier-postgres on a shared host can no longer block startup
+    # (DF-CRIER-167). Set a name explicitly only via env-driven overrides.
     restart: unless-stopped
     ports:
-      - "5437:5432"
+      - "${CRIER_PG_HOST_PORT:-5437}:5432"
     environment:
       POSTGRES_USER: crier
       POSTGRES_PASSWORD: crier
