@@ -1000,3 +1000,18 @@ tasks:
   status: complete
   created_at: '2026-09-16T22:28:21.448233+00:00'
   completed_at: '2026-09-16T22:33:10.108355+00:00'
+- id: DF-CRIER-200
+  title: Postgres list errors remain visible to MCP callers
+  criteria:
+  - PostgresStore implements registry.ListErrorReporter without changing Store.List()
+    []*Agent. Each failed query, scan, row iteration, invalid-key or config/capabilities
+    decode returns a non-nil empty slice, preserves existing logging, and records
+    a contextual error; each successful empty or populated List clears it. Synchronize
+    error state. Focused pgxmock tests exercise failure-to-success recovery and failure
+    branches, preserve existing assertions, and demonstrate MCP list_agents distinguishes
+    failure from a truly empty registry using the real PostgresStore path. Go build,
+    vet, full fresh tests and focused race tests pass. No unrelated source or configuration
+    edits.
+  status: complete
+  created_at: '2026-09-16T22:51:22.171973+00:00'
+  completed_at: '2026-09-16T23:17:35.551185+00:00'
