@@ -736,3 +736,21 @@ tasks:
   status: complete
   created_at: '2026-09-16T12:12:20.926038+00:00'
   completed_at: '2026-09-16T12:20:40.844302+00:00'
+- id: DF-CRIER-178
+  title: State the real webhook delivery-mode default (async; blocking is opt-in)
+    in WEBHOOK-DELIVERY.md and un-pin its claims-gate xfail
+  criteria:
+  - specs/WEBHOOK-DELIVERY.md states the unset/absent delivery_mode resolution as
+    async and the claims.yaml anchor quote appears verbatim in the doc
+  - 'docs/claims.yaml WEBHOOK-DEFAULT-BLOCKING carries expect 202 and xfail null,
+    and the docs gate proves the claim holds live (no xfail line; grep -c ''xfail:
+    "'' docs/claims.yaml == 0)'
+  - 'Live proof on a booted binary: a webhook agent delivered with delivery_mode unset
+    answers 202 {transport:webhook, delivery_mode:async}; an explicit blocking delivery
+    answers 200 with the endpoint reply'
+  - make docs-check + go build ./... + go vet ./... + go test ./... -count=1 -timeout
+    60s green on the final tree, with a falsification run showing the new claim FAILS
+    the gate when its quote or expect is wrong
+  status: complete
+  created_at: '2026-09-16T12:32:44.056940+00:00'
+  completed_at: '2026-09-16T12:37:48.708616+00:00'
