@@ -184,12 +184,12 @@ def handle_webhook(raw_body: bytes, headers: dict) -> dict:
     model = body.get("model", "")
     messages = body.get("messages") or []
     session_body = body.get("session_id", "") or ""
-    # Session mapping, envelope contract (spec §3): the X-Crier-Session header
-    # is set directly from the envelope and is authoritative today. The body
-    # slot ({{crier.session_id}} template placeholder) is preferred when the
-    # template engine populates it — see README "known gap" (resolvePath does
-    # not descend into the struct-typed EnvelopeMeta, so named templates
-    # currently render it empty).
+    # Session mapping, envelope contract (spec §3): the X-Crier-Session header is
+    # set directly from the envelope (not through the template) by postBody. The
+    # body slot ({{crier.session_id}} template placeholder) renders the session id
+    # too since CR-GAP-037 — buildContext JSON round-trips the struct-typed
+    # EnvelopeMeta (internal/webhook/schema.go) — so the body slot is preferred
+    # when populated and the header is the fallback.
     session_id = session_body or session_hdr or ""
     thread_id = body.get("thread_id", "") or ""
     stream = body.get("stream", False)

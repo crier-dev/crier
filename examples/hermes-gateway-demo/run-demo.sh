@@ -200,11 +200,11 @@ print("  resolved session_id    : %s" % first.get("session_id"))
 if first.get("session_body"):
     print("PASS: template body carried the session_id (body slot populated)")
 else:
-    print("NOTE: body session_id slot rendered empty — known template-engine gap")
-    print("      (resolvePath cannot descend into struct-typed EnvelopeMeta;")
+    print("NOTE: body session_id slot rendered empty — the server predates CR-GAP-037")
+    print("      (the JSON round-trip in buildContext, internal/webhook/schema.go);")
     print("      X-Crier-Session header carried the session per spec §3).")
-    print("      See README \"Known gap\". Demo continues — continuity proven via")
-    print("      the header channel.")
+    print("      See README \"Session-id body slot\". Demo continues — continuity")
+    print("      proven via the header channel.")
 PY
 
   # 7. Follow-up in the SAME session — proves continuity

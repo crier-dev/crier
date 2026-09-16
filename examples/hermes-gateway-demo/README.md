@@ -35,7 +35,7 @@ correlated, in the same session context.
 | §3 outbound envelope contract | Adapter log shows the POST with `X-Crier-Event` / `X-Crier-Agent` / `X-Crier-Session` headers and a **verified** `X-Crier-Signature` (HMAC-SHA256 over the raw body) |
 | §3 response contract / blocking reply | `POST /agents/gateway-agent/inbox` with `delivery_mode: blocking` returns **200** `{id, reply, session_id, request_id}` |
 | §4 blocking mode | Reply extracted via the template's `response_map`; sender sees the reply inline, correlated by `request_id` |
-| §5 session mapping | `session_id` flows deliver-body → envelope → `X-Crier-Session` header (spec §3) and the template's body slot; **both** messages in the same session hit the same adapter session (turn 1 → turn 2 in one context window) — see *Known gap* below for the body-slot nuance |
+| §5 session mapping | `session_id` flows deliver-body → envelope → `X-Crier-Session` header (spec §3) and the template's body slot; **both** messages in the same session hit the same adapter session (turn 1 → turn 2 in one context window) — see *Session-id body slot* below for the measured body slot |
 | §6 `hermes-http-gateway` template | The template renders `{model, messages, stream, session_id, thread_id}` and maps the reply from `choices.0.message.content` — `internal/webhook/schema.go` |
 | §7 PATCH /agents | Not exercised here (covered by CR-FEAT-007 tests) — this demo focuses on the delivery path |
 | §9 webhook config surface | `CR_WEBHOOK_SECRET` (signing) exercised; `CR_WEBHOOK_TIMEOUT_S`/retries use defaults |
@@ -71,31 +71,33 @@ envelope's `thread_id` (e.g. the mesh bridge), it flows through the template
 unchanged. The adapter echoes both the `session_id` and the `thread_id` it
 receives on the wire inside every reply.
 
-### Known gap — `{{crier.session_id}}` body placeholder renders empty
+### Session-id body slot (fixed by CR-GAP-037)
 
 Found by this demo's first live run (transcript section "envelope session
 mapping evidence"). The `hermes-http-gateway` template body contains
 `"session_id": "{{crier.session_id}}"`, but `expandTemplate`/`resolvePath` in
-`internal/webhook/schema.go` only descend into `map[string]any` / `[]any`
-values — and `TemplateContext.Crier` is the **struct**-typed `EnvelopeMeta`,
-so the placeholder resolves to the default (empty string). The same applies to
-`{{crier.thread_id}}`. Repro (1 file, no deps):
+`internal/webhook/schema.go` only descended into `map[string]any` / `[]any`
+values — and `TemplateContext.Crier` is the **struct**-typed `EnvelopeMeta`, so
+the placeholder resolved to the default (empty string). CR-GAP-037 (commit
+342614b) fixed exactly that: `buildContext` now JSON round-trips the context
+(`internal/webhook/schema.go:176-186`) so struct-typed values become plain map
+nodes keyed by their json tags, with a unit test asserting the placeholder
+renders (`internal/webhook/schema_test.go:64+`). Repro (1 file, no deps):
 
 ```go
 cfg := &webhook.Config{URL: "http://x", SchemaTemplate: "hermes-http-gateway"}
 env := &webhook.Envelope{Crier: webhook.EnvelopeMeta{SessionID: "sess-x"}, ...}
 b, _ := webhook.ResolveTemplate(cfg).BuildBody(cfg, env)
-// b contains "session_id":"" despite SessionID:"sess-x"
+// b contains "session_id":"sess-x"
 ```
 
-**Session continuity in this demo therefore rides the other spec §3 channel —
-the `X-Crier-Session` header**, which `postBody` sets directly from the
-envelope (not through the template) and which the adapter logs + verifies on
-both turns. The blocking API response's `session_id` field (server-side echo)
-is likewise unaffected. Suggested fix (foreman-owned, out of scope for this
-demo's hard rules): marshal the `TemplateContext` to JSON and back into
-`map[string]any` inside `buildContext` (or add a struct-walking case in
-`resolvePath`), plus a unit test asserting `{{crier.session_id}}` renders. The
+**Session continuity in this demo rides both spec §3 channels** — the template's
+body slot, now populated, and the `X-Crier-Session` header, which `postBody` sets
+directly from the envelope (not through the template) and which the adapter logs +
+verifies on both turns. The blocking API response's `session_id` field
+(server-side echo) is likewise unaffected. The body slot's `thread_id` is still
+empty, but that is not a template limitation: no v1 delivery surface populates
+the envelope's `thread_id` — see *thread_id mapping (v1 note)* above. The
 adapter is already forward-compatible: it prefers the body slot when
 populated and falls back to the header.
 

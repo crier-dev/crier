@@ -57,21 +57,24 @@ echo "==> crier demo against ${CRIER_URL} (agent ${AGENT_ID})"
 
 # The LLM message guard (CR-FEAT-010) runs SERVER-side and is ON by default
 # (CR_GUARD_ENABLED=true): every inbound delivery is classified by a guard LLM
-# before webhook POST / inbox store. This demo does not exercise the guard:
-#   - DEEPSEEK_API_KEY set   -> deliveries are LLM-classified; allowed ones
+# before webhook POST / inbox store. CR_GUARD_ENABLED and the provider key
+# belong to the crier SERVER process — this script's environment cannot change
+# the guard state of an already-running server, so the note below describes the
+# server's configuration and how to start it:
+#   - key set on the server   -> deliveries are LLM-classified; allowed ones
 #     carry X-Crier-Guard-* verdict headers on outbound webhook POSTs, blocked
 #     ones return 403 {"error":"GUARD_BLOCKED",...}.
-#   - DEEPSEEK_API_KEY unset -> the guard FAILS OPEN: the deliver below still
+#   - key unset on the server -> the guard FAILS OPEN: the deliver below still
 #     succeeds, but each delivery can burn up to CR_GUARD_TIMEOUT_MS (default
 #     10000ms) on the failing LLM call and the run is flagged
-#     X-Crier-Guard-Error: true. Start the server with CR_GUARD_ENABLED=false
-#     (exported below for keyless shells) to keep the round-trip deterministic.
+#     X-Crier-Guard-Error: true.
+# This demo does not exercise the guard. To keep the round-trip deterministic,
+# start the SERVER with CR_GUARD_ENABLED=false (see the header above).
 if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-  echo "==> note: DEEPSEEK_API_KEY unset — LLM message guard (ON by default) fails open; deliveries may take up to CR_GUARD_TIMEOUT_MS (10s) and are flagged X-Crier-Guard-Error: true"
-  echo "    Tip: start the server with CR_GUARD_ENABLED=false for a deterministic keyless demo."
-  export CR_GUARD_ENABLED=false
+  echo "==> note: DEEPSEEK_API_KEY unset in this shell — if the SERVER also has no provider key, the LLM message guard (ON by default) fails open: deliveries may take up to CR_GUARD_TIMEOUT_MS (10s) and are flagged X-Crier-Guard-Error: true"
+  echo "    Tip: start the server with CR_GUARD_ENABLED=false for a deterministic keyless demo (this script's environment does not affect a running server)."
 else
-  echo "==> note: DEEPSEEK_API_KEY set — deliveries are LLM-guarded (blocked payloads return 403 GUARD_BLOCKED; allowed ones carry X-Crier-Guard-* verdict headers)"
+  echo "==> note: DEEPSEEK_API_KEY set in this shell — the guard runs SERVER-side, so deliveries are LLM-guarded (blocked payloads return 403 GUARD_BLOCKED; allowed ones carry X-Crier-Guard-* verdict headers) only when the server was started from this same environment."
 fi
 
 # 0. Health check
