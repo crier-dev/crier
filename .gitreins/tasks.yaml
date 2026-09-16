@@ -587,3 +587,28 @@ tasks:
   status: complete
   created_at: '2026-09-15T23:52:57.978729+00:00'
   completed_at: '2026-09-16T00:02:42.249603+00:00'
+- id: DF-CRIER-183
+  title: guard circuit breaker never re-arms after a failed probe
+  criteria:
+  - internal/guard/circuit.go recordFailure restamps openedAt when the failure streak
+    is >= threshold and the stored openedAt is absent or older than the cooldown,
+    while a failure recorded inside a still-open window does NOT extend it; the reporter's
+    TestCircuit_FailedProbeReopens passes as a permanent regression test; open()/recordSuccess
+    semantics unchanged; go build ./..., go vet ./... and go test ./... -count=1 all
+    green.
+  status: complete
+  created_at: '2026-09-16T06:39:45.743890+00:00'
+  completed_at: '2026-09-16T06:46:47.801374+00:00'
+- id: DF-CRIER-184
+  title: panicked requests never reach the access log
+  criteria:
+  - internal/middleware Logging writes exactly one access-log line (msg=request with
+    method, path, status=500 and request_id) for a handler that panics under the production
+    chain RequestID(Recovery(Logging(handler))) while Recovery still returns 500 {"error":"internal
+    server error"} and the panic is not swallowed; the reporter's TestLogging_PanickedRequestIsLogged
+    passes as a permanent regression test; normal-path logging unchanged; middleware
+    registration order in cmd/server/main.go unchanged; go build ./..., go vet ./...
+    and go test ./... -count=1 all green.
+  status: complete
+  created_at: '2026-09-16T06:39:55.511989+00:00'
+  completed_at: '2026-09-16T06:48:37.879347+00:00'
