@@ -685,3 +685,18 @@ tasks:
   status: complete
   created_at: '2026-09-16T10:20:56.522079+00:00'
   completed_at: '2026-09-16T10:28:44.359772+00:00'
+- id: cr-gap-059-arch-specs-truth
+  title: '[docs-sweep T5] docs/architecture.md + docs/specs.md truth pass (mesh wire-format
+    pointers for DF-CRIER-3/4; drift fixes)'
+  criteria:
+  - 'docs/architecture.md and docs/specs.md contain no false claim: the stale totalwindupflightsystems
+    module path is gone, the auth line describes bearer-token + ed25519 per-agent
+    signing with HMAC scoped to outbound webhooks, agent identity matches the real
+    client-supplied-id contract, the MCP-tool line matches the hand-registered tool
+    surface, and both docs point at docs/mesh-protocol.md for the REQUEST/RESPONSE
+    wire contract and the KEEPALIVE interleave rule; every changed claim reproduces
+    live (proof command + output in the worker summary); no edit inside the frozen
+    zones (docs/mesh-protocol.md, specs/**, README.md guard bullets)'
+  status: complete
+  created_at: '2026-09-16T10:38:51.645326+00:00'
+  completed_at: '2026-09-16T10:49:36.037218+00:00'
