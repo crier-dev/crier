@@ -67,7 +67,13 @@ evaluator:
   # tokens_in for that tier2 run against the 9M cap (100.2% of budget), a
   # measured burn, not a guess. Fix direction is UP (exact-equality starvation);
   # 12M is one 33% rung above the exhausted one.
-  max_input_tokens: 12M
+  # 12M -> 16M (tick 283, CR-GAP-061): the T7 close-out judge (verdict d4344c19)
+  # starved on the identical signature — .gitreins/usage.jsonl shows 12,010,849
+  # tokens_in against the 12M cap (exact-equality starvation again, and the
+  # off-by-one class gitreins-tier2-input-token-cap-exceeded prescribes raising
+  # the rung rather than splitting criteria). 16M is one rung above the
+  # exhausted budget.
+  max_input_tokens: 16M
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
