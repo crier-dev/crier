@@ -150,9 +150,23 @@ func TestHTTPKanbanWriter_ThroughWorker(t *testing.T) {
 	// The HTTP writer is drop-in through the CardWriter interface: the
 	// guard worker writes a card to the sink for a blocked message, and a
 	// write failure is counted, not surfaced to the delivery path.
-	var gotBody []byte
+	// The handler runs on the httptest server goroutine while the test
+	// goroutine consumes the card, so the body crosses via a buffered
+	// channel: the send never blocks (cap 1, one card expected) and the
+	// test waits on it with a bounded select instead of polling shared
+	// memory — sleeping is not synchronization.
+	bodyCh := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotBody, _ = io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			// No t.Fatal from a handler goroutine: deliver nil so the
+			// test goroutine fails boundedly on unmarshal instead.
+			b = nil
+		}
+		select {
+		case bodyCh <- b:
+		default:
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -165,12 +179,11 @@ func TestHTTPKanbanWriter_ThroughWorker(t *testing.T) {
 	if err != nil || res.Decision != DecisionBlock {
 		t.Fatalf("Check: %v %+v", err, res)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(gotBody) > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	var gotBody []byte
+	select {
+	case gotBody = <-bodyCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker did not POST a card within 3s")
 	}
 	var card Card
 	if err := json.Unmarshal(gotBody, &card); err != nil {
