@@ -19,6 +19,12 @@ make build
 CR_GUARD_ENABLED=false ./bin/crier -port 8767 &
 ```
 
+Shared host? Port 8767 may already be taken by someone else's server. Check
+first (`ss -tlnp | grep :8767` — empty output means free); if it is held,
+start on a free port instead (`./bin/crier -port 8768` — a failed bind now
+names the port and the holder-check command) and confirm the build that
+answered with `curl -s localhost:8768/version`.
+
 Keep that server running — every exercise below assumes `localhost:8767`.
 Anything you send stays on your machine; crier phones home to **nothing**.
 

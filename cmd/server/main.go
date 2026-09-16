@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/federation"
@@ -24,6 +23,7 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
 	"github.com/crier-dev/crier/internal/webhook"
+	"github.com/gorilla/mux"
 )
 
 // The build identity printed by -version and served by GET /version lives in
@@ -371,10 +371,32 @@ func run(args []string) int {
 	slog.Info("crier starting", "port", cfg.Port, "services", "relay+mesh+registry",
 		"version", buildinfo.String())
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		slog.Error("server failed", "error", err)
+		logServeFailure(cfg.Port, err)
 		return 1
 	}
 	return 0
+}
+
+// logServeFailure reports a fatal ListenAndServe error. For the shared-host
+// dead end (DF-CRIER-154) — the port already held by a leftover server from
+// an earlier session — it turns the raw errno into the operator's next two
+// commands instead: who holds the port, and how to start elsewhere. The
+// build identity is repeated on the failure path so the log says WHICH
+// binary failed, even when the "crier starting" line above scrolled away or
+// was filtered out. The raw error stays in error= unchanged; any other
+// failure keeps the one-line shape it always had.
+func logServeFailure(port int, err error) {
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		slog.Error("server failed", "error", err)
+		return
+	}
+	slog.Error("server failed: another process already holds this port "+
+		"(bind: address already in use)",
+		"error", err,
+		"port", port,
+		"hint_holder", fmt.Sprintf("find it with: ss -tlnp | grep :%d", port),
+		"hint_run_elsewhere", "start on a free port instead: -port <n> (or set CRIER_PORT=<n>)",
+		"version", buildinfo.String())
 }
 
 // parseArgs parses crier's CLI flags, writing usage/error output to out.

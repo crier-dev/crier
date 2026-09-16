@@ -155,6 +155,25 @@ override uses `git describe`.
 make run
 ```
 
+On a shared host the default port is often already held by a leftover server
+from an earlier session. Check before starting:
+
+```bash
+ss -tlnp | grep :8767         # who holds the default port? (empty output = free)
+```
+
+If it is taken, start on a free port and confirm which build answered —
+`GET /version` is one of the five unauthenticated paths:
+
+```bash
+./bin/crier -port 8768         # or: CRIER_PORT=8768 ./bin/crier
+curl -s localhost:8768/version # {"version":"...","commit":"..."}
+```
+
+If the bind fails anyway, the server exits non-zero naming the port, the
+holder-check command and the `-port`/`CRIER_PORT` alternative, plus the build
+identity of the binary that failed to start.
+
 > **The LLM message guard is ON by default.** Every inbound delivery is
 > classified by a guard LLM (default model `deepseek-v4-flash`, 10s
 > per-message budget — `CR_GUARD_TIMEOUT_MS`) before it is webhook-POSTed

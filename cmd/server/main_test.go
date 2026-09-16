@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -102,6 +104,99 @@ func freePort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// TestBindFailureDiagnostic is the DF-CRIER-154 regression gate. On this
+// shared host the documented default run path is routinely blocked by
+// leftover servers holding the port, and the pre-fix failure path printed
+// only the raw errno — no port holder to look for, no way to run elsewhere,
+// no build identity on the failing line. The test occupies a port
+// in-process, starts the server on it via run() (the testable entrypoint),
+// and asserts the failure log carries the actionable diagnostic. The
+// listener is kept open for the whole test: closing it would race run()'s
+// bind attempt and could flake green.
+func TestBindFailureDiagnostic(t *testing.T) {
+	// Deterministic environment: no DB, no auth token, no inherited port.
+	t.Setenv("CR_AUTH_TOKEN", "")
+	t.Setenv("CR_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CRIER_DATABASE_URL", "")
+	t.Setenv("CRIER_PORT", "1") // overridden by -port below; never a real target
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// Capture slog output: run() re-installs the default logger itself
+	// (initLogger writes to os.Stderr), so redirect os.Stderr for the call
+	// via a pipe and restore afterwards.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	savedStderr := os.Stderr
+	os.Stderr = w
+
+	done := make(chan int)
+	go func() {
+		done <- run([]string{"-port", strconv.Itoa(port)})
+	}()
+
+	// Drain the pipe in the background so a full pipe buffer cannot block
+	// run()'s logging.
+	var buf bytes.Buffer
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		_, _ = io.Copy(&buf, r)
+	}()
+
+	code := <-done
+	_ = w.Close()
+	os.Stderr = savedStderr
+	<-drained
+	_ = r.Close()
+
+	out := buf.String()
+
+	// (a) non-zero exit code (expected exactly 1).
+	if code == 0 {
+		t.Fatalf("run(-port %d) on an occupied port = 0, want non-zero\nstderr:\n%s", port, out)
+	}
+	if code != 1 {
+		t.Errorf("run(-port %d) = %d, want 1", port, code)
+	}
+
+	// (b) the port number appears on the failure path.
+	if !strings.Contains(out, strconv.Itoa(port)) {
+		t.Errorf("failure output does not name port %d:\n%s", port, out)
+	}
+
+	// (c) the actionable guidance: holder-check command and -port alternative.
+	if !strings.Contains(out, "ss -tlnp | grep :"+strconv.Itoa(port)) {
+		t.Errorf("failure output does not carry the holder-check command (ss -tlnp | grep :%d):\n%s", port, out)
+	}
+	if !strings.Contains(out, "-port <n>") || !strings.Contains(out, "CRIER_PORT") {
+		t.Errorf("failure output does not carry the run-elsewhere guidance (-port <n> / CRIER_PORT):\n%s", out)
+	}
+	if !strings.Contains(out, "another process already holds this port") {
+		t.Errorf("failure output does not state that another process already holds this port:\n%s", out)
+	}
+
+	// (d) the build identity is repeated on the failure path (String()
+	// already carries the leading "v", so the log shows version=v…).
+	if !strings.Contains(out, "version="+buildinfo.String()) {
+		t.Errorf("failure output does not repeat the build identity (version=%s):\n%s", buildinfo.String(), out)
+	}
+
+	// Constraint: the raw errno text must keep matching — log greppers and
+	// the existing "bind: address already in use" expectations stay intact.
+	if !strings.Contains(out, "bind: address already in use") {
+		t.Errorf("failure output dropped the raw error text (bind: address already in use):\n%s", out)
+	}
 }
 
 // TestParseArgs exercises the CLI flag parsing directly (no exec, no server
