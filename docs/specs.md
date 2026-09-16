@@ -6,7 +6,7 @@
 
 ### What to port
 - `RelayClient` — pub/sub with token-bucket rate limiting, channel-based subscribers, HTTP relay POST with Bearer auth, reconnect with exponential backoff
-- `RelayServer` — HTTP server on `/events` (POST) and `/health` (GET), JSON event decode, Bearer auth middleware
+- `RelayServer` — ported as the crier relay: `POST /relay/publish` + JSON event decode, Bearer auth middleware, `GET /health` (the Hivemind source served `/events` (POST); shipped crier registers no `/events` route)
 - `RelayManager` — thin lifecycle wrapper (Start/Stop/Publish/Subscribe)
 - `Event` types — simplified: keep `Type`, `Topic` (was WorkspaceID), `AgentID` (was UserID), `Timestamp`, `Payload`. Drop Hivemind-specific event types (file:*, git:*, presence:*). Add agent-native types: `agent:announce`, `agent:heartbeat`, `agent:message`, `agent:error`
 
@@ -16,7 +16,7 @@
 - Drop `RelayClient.Connect()` stub ("simulate" comment) — wire real WebSocket via gorilla/websocket
 - Replace `net/http` ServeMux with gorilla/mux router
 - Add graceful shutdown (already in our scaffold)
-- Import path: `github.com/totalwindupflightsystems/crier/internal/relay`
+- Import path: `github.com/crier-dev/crier/internal/relay`
 
 ### Acceptance criteria
 1. `POST /relay/publish` accepts `{topic, event}` → 202 Accepted
@@ -44,8 +44,18 @@
 - Remove `collab.PeerStore` dependency — use `internal/registry` (built in CI-003)
 - `controllerID` → `agentID` throughout
 - `workspaces` in Capabilities → `topics`
-- Import path: `github.com/totalwindupflightsystems/crier/internal/mesh`
+- Import path: `github.com/crier-dev/crier/internal/mesh`
 - Drop Deregister message type (use agent unregister from CI-003)
+
+### Wire format
+`docs/mesh-protocol.md` is the authoritative wire reference for this spec: REQUEST and
+RESPONSE frames carry `PeerRef` `source`/`target`, a RESPONSE carries its `status_code`,
+and a RESPONSE's `request_id` MUST echo the originating REQUEST's `message_id` (the
+correlation contract — a non-matching `request_id` is dropped with no error and the
+requester stalls). KEEPALIVE frames ride the same socket as the conversation (the
+client's 30s ticker fires between its REQUEST and its RESPONSE), so a reader MUST
+loop-recv and dispatch each frame on its `type`, buffering frames it is not ready for;
+a naive blocking read stalls or misparses mid-exchange.
 
 ### Acceptance criteria
 1. `PeerConnection.Connect()` dials WebSocket, starts read loop
@@ -88,4 +98,4 @@
 5. Un-ACKed messages return to queue after lease TTL expires
 6. TTL-expired messages auto-purged
 7. Agent unregister cleans up inbox
-8. Concurrent delivery: two retrievers get disjoint message sets
+8. Concurrent delivery is race-free but NOT fairly distributed: no message is leased to two retrievers, yet a retrieve claims up to `max` (default 10) of the currently claimable messages, so a concurrent second retrieve can get an empty batch while the first drains the queue — observed 4/0 starvation, not distribution (DF-CRIER-169). `GET /agents/{id}/inbox/stats` (`queue_depth` vs `leased_count`) is how a starved retriever tells a drained queue from an empty one

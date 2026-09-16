@@ -41,6 +41,12 @@ ignore_paths:
   - /bridge               # component name in prose ("mesh_peers`/bridge list_agents")
   - /v1/chat/completions  # bridge/Hermes-side third-party path in an example
   - /v1/configure         # bridge/Hermes-side third-party path in an example
+  # CR-GAP-059 (docs-sweep T5): docs/specs.md is now scanned. CI-001 keeps the
+  # Hivemind source route (/events) in its history line while stating the shipped
+  # contract; /events is a source path, NOT a crier API route (grep cmd/ internal/
+  # finds no registration), so it is ignored while the shipped route is claimed
+  # live just below.
+  - /events
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
@@ -116,6 +122,15 @@ claims:
     quote: "also served live at"
     expect: "/docs"
     xfail: null
+  # CR-GAP-059 (docs-sweep T5): CI-001 used to state the Hivemind source's /events
+  # route as if the shipped server served it. The corrected line keeps the history
+  # AND names the shipped route, which this claim now probes live.
+  - id: ROUTE-SPECS-CI001-RELAY-PUBLISH
+    kind: route
+    doc: docs/specs.md
+    quote: "ported as the crier relay: `POST /relay/publish`"
+    expect: "/relay/publish"
+    xfail: null
 
   # --- statuses (kind: status) — the status a doc claims the server answers. ---
   - id: STATUS-RELAY-PUBLISH-NO-AGENT-ID
@@ -155,6 +170,15 @@ claims:
     kind: default
     doc: README.md
     quote: "30-second keepalive loop"
+    expect: 30
+    xfail: null
+  # CR-GAP-059 (docs-sweep T5): docs/architecture.md is now scanned and carries the
+  # same production constant as the README claim. The id is shared on purpose —
+  # liveDefault() keys the probe on it, so both docs are pinned to one measurement.
+  - id: DEFAULT-MESH-KEEPALIVE
+    kind: default
+    doc: docs/architecture.md
+    quote: "30s interval; no server-side liveness processing"
     expect: 30
     xfail: null
 
