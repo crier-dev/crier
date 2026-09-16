@@ -883,3 +883,22 @@ tasks:
   status: complete
   created_at: '2026-09-16T17:20:54.790378+00:00'
   completed_at: '2026-09-16T17:43:32.121738+00:00'
+- id: df-crier-197-mcp-keyless-parity
+  title: MCP register_agent mirrors the conditional keyless-registration rule
+  criteria:
+  - internal/mcp register_agent must refuse a keyless call with the unchanged 'public_key
+    is required' error when keyless registration is not allowed (the default for every
+    existing constructor) and store nothing; when allowed (wired from !cfg.RequireAgentSig
+    at cmd/crier-mcp/main.go) the same call must register an agent with an EMPTY public_key
+    (no fabricated key) that list_agents/get_agent return; a supplied key is validated
+    as exactly 64 hex chars in both modes and the other error wordings are unchanged;
+    the register_agent InputSchema no longer lists public_key in required (property+pattern
+    retained) so a schema-validating MCP client may omit it, with presence enforced
+    per mode in the handler; live stdio probes against bin/crier-mcp must show keyless
+    success with CR_REQUIRE_AGENT_SIG=false and the refusal with it unset, transcripts
+    in the commit body; go build/vet, go test ./... -count=1, make docs-check and
+    gitreins guard all green with no test weakened or skipped; README.md MCP table
+    and docs/specs/ci-007-mcp-server.md state the conditional rule.
+  status: complete
+  created_at: '2026-09-16T17:50:11.641223+00:00'
+  completed_at: '2026-09-16T18:02:36.772651+00:00'
