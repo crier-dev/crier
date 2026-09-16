@@ -1,0 +1,183 @@
+# docs/claims.yaml — prose claims the docs make, executed by cmd/server/docsclaims_test.go.
+#
+# CR-GAP-055 (docs-sweep T1): prose docs drift because nothing executes them. This file
+# turns every claim below into a build-failing gate: the test boots the real server,
+# checks every anchor still exists in its doc, probes every route claim live, compares
+# every default against the imported production constant, and re-measures every count
+# from source. Only claims that README.md / TESTERS.md ACTUALLY make may be listed —
+# nothing is invented.
+#
+# Claim shape:
+#   id:   unique string (SCREAMING-KEBAB); status/default/count claims are keyed by id
+#         in the test's probe tables.
+#   kind: route   — expect is a path; GET-probed live, ONLY 404 is failure
+#         status  — expect is the HTTP status the doc claims; probed via the id-keyed
+#                   status probe table in the test
+#         default — expect is the value the doc prints; compared against the imported
+#                   production default via the id-keyed probe table
+#         count   — expect is the number the doc prints; re-measured from source
+#   doc:   path relative to the repo root (README.md / TESTERS.md this tick)
+#   quote: EXACT substring that must still appear in that doc — editing/removing that
+#          line makes the gate FAIL (the load-bearing anchor)
+#   expect: <string or number> — what the claim asserts
+#   xfail: null (claim must HOLD live) or "<BOARD-ID>" (claim currently FALSE, pinned
+#          to the row that will fix it; anchors are still checked, assertions are
+#          reported with t.Logf and never fail the build)
+#
+# ignore_paths: path-looking strings in the docs that are NOT API routes (filesystem
+# paths, /tmp paths, third-party URLs). A scanned path that is neither a live route
+# nor on this list FAILS the gate — nothing is silently skipped.
+ignore_paths:
+  - /dev/null
+  - /tmp/crier-agent.key
+  - /tmp/crier-payload.txt
+
+claims:
+  # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
+  - id: ROUTE-README-RELAY-PUBLISH
+    kind: route
+    doc: README.md
+    quote: "POST /relay/publish"
+    expect: "/relay/publish"
+    xfail: null
+  - id: ROUTE-README-RELAY-SUBSCRIBE
+    kind: route
+    doc: README.md
+    quote: "/relay/subscribe/{topic}"
+    expect: "/relay/subscribe/{topic}"
+    xfail: null
+  - id: ROUTE-README-RELAY-TOPICS
+    kind: route
+    doc: README.md
+    quote: "/relay/topics"
+    expect: "/relay/topics"
+    xfail: null
+  - id: ROUTE-README-MESH-CONNECT
+    kind: route
+    doc: README.md
+    quote: "/mesh/connect/{agentID}"
+    expect: "/mesh/connect/{agentID}"
+    xfail: null
+  - id: ROUTE-README-MESH-PEERS
+    kind: route
+    doc: README.md
+    quote: "/mesh/peers"
+    expect: "/mesh/peers"
+    xfail: null
+  - id: ROUTE-README-FED-PEERS
+    kind: route
+    doc: README.md
+    quote: "/fed/peers"
+    expect: "/fed/peers"
+    xfail: null
+  - id: ROUTE-README-REGISTER
+    kind: route
+    doc: README.md
+    quote: "POST /agents"
+    expect: "/agents"
+    xfail: null
+  - id: ROUTE-README-INBOX-DELIVER
+    kind: route
+    doc: README.md
+    quote: "POST /agents/{id}/inbox"
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-README-INBOX-RETRIEVE
+    kind: route
+    doc: README.md
+    quote: "GET /agents/{id}/inbox"
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-README-INBOX-ACK
+    kind: route
+    doc: README.md
+    quote: "/agents/{id}/inbox/ack"
+    expect: "/agents/{id}/inbox/ack"
+    xfail: null
+  - id: ROUTE-README-INBOX-STATS
+    kind: route
+    doc: README.md
+    quote: "/agents/{id}/inbox/stats"
+    expect: "/agents/{id}/inbox/stats"
+    xfail: null
+  - id: ROUTE-TESTERS-DOCS
+    kind: route
+    doc: TESTERS.md
+    quote: "also served live at"
+    expect: "/docs"
+    xfail: null
+
+  # --- statuses (kind: status) — the status a doc claims the server answers. ---
+  - id: STATUS-RELAY-PUBLISH-NO-AGENT-ID
+    kind: status
+    doc: README.md
+    quote: "requires the `X-Agent-ID` header"
+    expect: "401"
+    xfail: null
+  - id: STATUS-GUARD-BLOCK
+    kind: status
+    doc: README.md
+    quote: "403 GUARD_BLOCKED"
+    expect: "403"
+    xfail: null
+
+  # --- defaults (kind: default) — compared against the imported production constant,
+  # never against a duplicated literal. ---
+  - id: DEFAULT-REQUIRE-AGENT-SIG
+    kind: default
+    doc: README.md
+    quote: "CR_REQUIRE_AGENT_SIG"
+    expect: true
+    xfail: null
+  - id: DEFAULT-GUARD-MAX-PAYLOAD-BYTES
+    kind: default
+    doc: README.md
+    quote: "CR_GUARD_MAX_PAYLOAD_BYTES"
+    expect: 65536
+    xfail: null
+  - id: DEFAULT-RATE-LIMIT-PER-MINUTE
+    kind: default
+    doc: README.md
+    quote: "CR_RATE_LIMIT_PER_MINUTE"
+    expect: 100
+    xfail: null
+  - id: DEFAULT-MESH-KEEPALIVE
+    kind: default
+    doc: README.md
+    quote: "30-second keepalive loop"
+    expect: 30
+    xfail: null
+
+  # --- counts (kind: count) — re-measured from source where measurable (openapi
+  # paths/operations, router registrations, Makefile threshold, live MCP tools/list);
+  # otherwise pinned. ---
+  - id: COUNT-OPENAPI-PATHS
+    kind: count
+    doc: README.md
+    quote: "docs/openapi.yaml"
+    expect: 13
+    xfail: null
+  - id: COUNT-OPENAPI-OPERATIONS
+    kind: count
+    doc: README.md
+    quote: "17 endpoints"
+    expect: 17
+    xfail: null
+  - id: COUNT-MCP-TOOLS
+    kind: count
+    doc: TESTERS.md
+    quote: "13 tools"
+    expect: 13
+    xfail: null
+  - id: COUNT-ROUTER-PATHS
+    kind: count
+    doc: README.md
+    quote: "16 HTTP endpoints"
+    expect: 16
+    xfail: null
+  - id: COUNT-COVERAGE-THRESHOLD
+    kind: count
+    doc: README.md
+    quote: "70% gate"
+    expect: 70
+    xfail: null

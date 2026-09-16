@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run clean docker-build coverage coverage-html coverage-check generate
+.PHONY: help build build-mcp test test-short test-integration lint run clean docker-build coverage coverage-html coverage-check docs-check generate
 
 # Build identity. The linker stamps internal/buildinfo, which both binaries
 # (cmd/server and cmd/crier-mcp) read — one identity, one format, so the CLI,
@@ -31,6 +31,7 @@ help:
 	@echo "  coverage          Run tests and print total coverage"
 	@echo "  coverage-html     Generate coverage.html"
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold"
+	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
@@ -83,6 +84,9 @@ coverage-check:
 	else \
 		echo "PASS: Coverage $${COVERAGE}% meets 70% threshold"; \
 	fi
+
+docs-check:
+	go test -short -count=1 -run 'TestDocsClaims' ./cmd/server
 
 generate:
 	go generate ./...

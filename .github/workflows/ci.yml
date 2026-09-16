@@ -97,4 +97,4 @@ jobs:
           cmp cmd/server/openapi.yaml docs/openapi.yaml
 
       - name: Validate docs/openapi.yaml and served /openapi.json
-        run: go test -short -count=1 -run 'TestOpenAPI' ./cmd/server
+        run: go test -short -count=1 -run 'TestOpenAPI|TestDocsClaims' ./cmd/server
