@@ -19,12 +19,25 @@ func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
 	if in.ID == "" {
 		return nil, fmt.Errorf("id is required")
 	}
+	// The public_key PRESENCE requirement follows signature enforcement
+	// (DF-CRIER-197), mirroring the HTTP handler's rule (DF-CRIER-192):
+	// with enforcement on (the default, Options zero value) a keyless
+	// agent could never authenticate, so it is rejected up front with the
+	// historical error. With keyless registration allowed — the bridge
+	// mirrors !CR_REQUIRE_AGENT_SIG — an omitted key registers a keyless
+	// agent (empty key material, nothing fabricated). A key that IS
+	// supplied is validated identically either way.
+	var rawKey []byte
 	if in.PublicKey == "" {
-		return nil, fmt.Errorf("public_key is required")
-	}
-	rawKey, err := hex.DecodeString(in.PublicKey)
-	if err != nil || len(rawKey) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("public_key must be 64 hex characters (ed25519)")
+		if !s.allowKeylessAgent {
+			return nil, fmt.Errorf("public_key is required")
+		}
+	} else {
+		var err error
+		rawKey, err = hex.DecodeString(in.PublicKey)
+		if err != nil || len(rawKey) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("public_key must be 64 hex characters (ed25519)")
+		}
 	}
 	agent := &registry.Agent{
 		ID:           in.ID,

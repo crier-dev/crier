@@ -93,7 +93,7 @@ All tools follow the MCP `tools/call` protocol. Input validation happens in the 
 
 ### 4.1 Tool: `register_agent`
 
-**Description:** Register a new agent with an ed25519 public key and optional capabilities.
+**Description:** Register a new agent with an ed25519 public key and optional capabilities. `public_key` follows the server's signature-enforcement mode (mirrors the HTTP `POST /agents` rule, DF-CRIER-192): required whenever `CR_REQUIRE_AGENT_SIG` is `true` (the default); when it is `false`, omitting it registers a keyless agent (empty key material) and a supplied key is still validated as exactly 64 hex chars either way. Presence is enforced by the tool handler per mode — the InputSchema lists only `id` as required so a schema-validating client can legally omit `public_key`.
 
 **Input Schema:**
 ```json
@@ -106,7 +106,7 @@ All tools follow the MCP `tools/call` protocol. Input validation happens in the 
     },
     "public_key": {
       "type": "string",
-      "description": "Hex-encoded ed25519 public key (64 hex characters)",
+      "description": "Hex-encoded ed25519 public key (64 hex characters); omit only when the server allows keyless registration (CR_REQUIRE_AGENT_SIG=false)",
       "pattern": "^[0-9a-fA-F]{64}$"
     },
     "capabilities": {
@@ -116,7 +116,7 @@ All tools follow the MCP `tools/call` protocol. Input validation happens in the 
       "default": []
     }
   },
-  "required": ["id", "public_key"]
+  "required": ["id"]
 }
 ```
 
@@ -138,7 +138,7 @@ All tools follow the MCP `tools/call` protocol. Input validation happens in the 
 | Condition | MCP Error |
 |-----------|-----------|
 | `id` missing or empty | `-32602 Invalid params: id is required` |
-| `public_key` missing or empty | `-32602 Invalid params: public_key is required` |
+| `public_key` missing or empty | `-32602 Invalid params: public_key is required` (only when signature enforcement is on, the default; with `CR_REQUIRE_AGENT_SIG=false` an omitted key registers a keyless agent) |
 | `public_key` not 64 hex chars | `-32602 Invalid params: public_key must be 64 hex characters (ed25519)` |
 | `public_key` not valid ed25519 | `-32602 Invalid params: invalid ed25519 public key` |
 | Agent already exists | `-32602 Invalid params: agent already registered` |
@@ -774,12 +774,19 @@ func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
     if in.ID == "" {
         return nil, fmt.Errorf("id is required")
     }
+    // DF-CRIER-197: public_key PRESENCE follows signature enforcement —
+    // with keyless registration allowed (mirrors !CR_REQUIRE_AGENT_SIG) an
+    // omitted key registers a keyless agent (empty key material).
+    var rawKey []byte
     if in.PublicKey == "" {
-        return nil, fmt.Errorf("public_key is required")
-    }
-    rawKey, err := hex.DecodeString(in.PublicKey)
-    if err != nil || len(rawKey) != ed25519.PublicKeySize {
-        return nil, fmt.Errorf("public_key must be 64 hex characters (ed25519)")
+        if !s.allowKeylessAgent {
+            return nil, fmt.Errorf("public_key is required")
+        }
+    } else {
+        rawKey, err := hex.DecodeString(in.PublicKey)
+        if err != nil || len(rawKey) != ed25519.PublicKeySize {
+            return nil, fmt.Errorf("public_key must be 64 hex characters (ed25519)")
+        }
     }
     agent := &registry.Agent{
         ID:           in.ID,

@@ -29,10 +29,11 @@ const (
 // lets harnesses use messaging without touching the transport: leases,
 // acks, correlation ids and the mesh connection are all owned here.
 type MCPServer struct {
-	store  registry.Store
-	tools  map[string]toolHandler
-	stdin  *bufio.Scanner
-	stdout *json.Encoder
+	store             registry.Store
+	tools             map[string]toolHandler
+	stdin             *bufio.Scanner
+	stdout            *json.Encoder
+	allowKeylessAgent bool
 
 	agentID string // bridge identity (own inbox / mesh identity)
 	httpURL string // remote server URL for mesh_peers
@@ -56,6 +57,12 @@ type Options struct {
 	// MeshURL is the WebSocket mesh endpoint (ws://host:port/mesh/connect/<id>).
 	// Enables mesh_request.
 	MeshURL string
+	// AllowKeylessAgents mirrors !CR_REQUIRE_AGENT_SIG (DF-CRIER-197): when
+	// true, register_agent may omit public_key and registers a keyless agent
+	// (empty key material), matching the HTTP handler's conditional rule. The
+	// ZERO value is false and preserves the fail-closed default — public_key
+	// required — for every constructor that does not opt in.
+	AllowKeylessAgents bool
 }
 
 // New creates an MCPServer backed by the given Store.
@@ -66,12 +73,13 @@ func New(store registry.Store) *MCPServer {
 // NewWithOptions creates an MCPServer with bridge options.
 func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 	s := &MCPServer{
-		store:   store,
-		tools:   make(map[string]toolHandler),
-		stdin:   bufio.NewScanner(os.Stdin),
-		stdout:  json.NewEncoder(os.Stdout),
-		agentID: opts.AgentID,
-		httpURL: strings.TrimSuffix(opts.HTTPURL, "/"),
+		store:             store,
+		tools:             make(map[string]toolHandler),
+		stdin:             bufio.NewScanner(os.Stdin),
+		stdout:            json.NewEncoder(os.Stdout),
+		allowKeylessAgent: opts.AllowKeylessAgents,
+		agentID:           opts.AgentID,
+		httpURL:           strings.TrimSuffix(opts.HTTPURL, "/"),
 	}
 	if opts.MeshURL != "" && opts.AgentID != "" {
 		s.bridge = newMeshBridge(opts.AgentID, opts.MeshURL)
@@ -228,8 +236,8 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 	return []toolDefinition{
 		{
 			Name:        "register_agent",
-			Description: "Register a new agent with an ed25519 public key and optional capabilities.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Unique agent identifier"},"public_key":{"type":"string","description":"Hex-encoded ed25519 public key (64 hex characters)","pattern":"^[0-9a-fA-F]{64}$"},"capabilities":{"type":"array","items":{"type":"string"},"description":"Capability tags","default":[]}},"required":["id","public_key"]}`),
+			Description: "Register a new agent with an ed25519 public key and optional capabilities. public_key is required unless the server runs with signature enforcement disabled (CR_REQUIRE_AGENT_SIG=false), in which case it may be omitted to register a keyless agent.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Unique agent identifier"},"public_key":{"type":"string","description":"Hex-encoded ed25519 public key (64 hex characters); omit only when the server allows keyless registration (CR_REQUIRE_AGENT_SIG=false)","pattern":"^[0-9a-fA-F]{64}$"},"capabilities":{"type":"array","items":{"type":"string"},"description":"Capability tags","default":[]}},"required":["id"]}`),
 		},
 		{
 			Name:        "list_agents",

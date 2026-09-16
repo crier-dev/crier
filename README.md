@@ -333,7 +333,7 @@ exchange). The argument names below are the properties of each tool's
 
 | Tool | Arguments |
 |------|-----------|
-| `register_agent` | `id`*, `public_key`* (hex ed25519, 64 chars), `capabilities` (string array, default `[]`) |
+| `register_agent` | `id`*, `public_key` (hex ed25519, 64 chars; required whenever signature enforcement is on — the default. Only an MCP bridge on a server run with `CR_REQUIRE_AGENT_SIG=false` accepts registration without it), `capabilities` (string array, default `[]`) |
 | `list_agents` | _none_ |
 | `get_agent` | `id`* |
 | `unregister_agent` | `id`* |

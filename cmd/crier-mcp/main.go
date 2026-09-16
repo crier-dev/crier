@@ -150,6 +150,11 @@ func run(args []string) int {
 		AgentID: os.Getenv("CRIER_AGENT_ID"),
 		HTTPURL: os.Getenv("CRIER_HTTP_URL"),
 		MeshURL: os.Getenv("CRIER_MESH_URL"),
+		// DF-CRIER-197: the bridge is in the same process and reads the same
+		// CR_REQUIRE_AGENT_SIG variable cmd/server does, so it can know the
+		// registration mode and mirror the HTTP handler's conditional rule —
+		// with enforcement off, register_agent may omit public_key.
+		AllowKeylessAgents: !cfg.RequireAgentSig,
 	})
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
