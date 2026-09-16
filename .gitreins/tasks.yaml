@@ -785,3 +785,16 @@ tasks:
   status: complete
   created_at: '2026-09-16T13:31:18.245250+00:00'
   completed_at: '2026-09-16T14:09:41.391354+00:00'
+- id: DF-CRIER-180
+  title: Reject per-message deliver parameters the server cannot honor (unknown delivery_mode,
+    out-of-range timeout_ms) with 400 instead of silently accepting and echoing them
+  criteria:
+  - POST /agents/{id}/inbox with delivery_mode bogus returns 400 naming blocking|async|batch
+    on both webhook and inbox-only targets, stores nothing, and fires no outbound
+    POST; valid modes unchanged (blocking 200 / async|batch 202 echoed); timeout_ms
+    outside 0..120000 returns 400; blocking timeout_ms=500 against a 3s endpoint returns
+    504 in under 1s (pinned by test); make test + make docs-check green; docs/openapi.yaml
+    enum+400 and the generated cmd/server/openapi.yaml byte-identical
+  status: complete
+  created_at: '2026-09-16T14:18:04.495517+00:00'
+  completed_at: '2026-09-16T14:24:41.256920+00:00'
