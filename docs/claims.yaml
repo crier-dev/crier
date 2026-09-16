@@ -31,6 +31,12 @@ ignore_paths:
   - /dev/null
   - /tmp/crier-agent.key
   - /tmp/crier-payload.txt
+  # CR-GAP-062: docs/mesh-protocol.md and specs/WEBHOOK-DELIVERY.md are now
+  # scanned. These tokens are NOT crier API routes — each is deliberate.
+  - /ping                 # illustrative mesh REQUEST path (the target agent's own path)
+  - /bridge               # component name in prose ("mesh_peers`/bridge list_agents")
+  - /v1/chat/completions  # bridge/Hermes-side third-party path in an example
+  - /v1/configure         # bridge/Hermes-side third-party path in an example
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
@@ -181,3 +187,33 @@ claims:
     quote: "70% gate"
     expect: 70
     xfail: null
+
+  # --- xfail claims (CR-GAP-062): prose that is FALSE at HEAD, pinned to the board
+  # row that will fix it. The anchor is still load-bearing; the assertion is
+  # REPORTED (t.Logf) instead of failing the build. Deleting the xfail line makes
+  # the claim fail for real, naming claimed vs observed — that is the proof the
+  # live probe is not vacuous. xfail must never hide a claim that actually holds.
+  - id: MESH-ROUTE-CAP-4096
+    kind: default
+    doc: docs/mesh-protocol.md
+    quote: "Route table full (4096 entries, flushed wholesale)"
+    # `expect` is the number the DOC prints; the id-keyed probe returns the live
+    # production constant (mesh.DefaultMeshConfig("").MaxPendingRequests).
+    expect: 4096
+    xfail: "DF-CRIER-187"
+  - id: WEBHOOK-DEFAULT-BLOCKING
+    kind: status
+    doc: specs/WEBHOOK-DELIVERY.md
+    quote: "- `delivery_mode` — `blocking` (default) | `async` | `batch`."
+    # The spec claims blocking is the default delivery_mode; the live probe
+    # delivers with the mode unset and reports the accept it really gets.
+    expect: "200"
+    xfail: "DF-CRIER-178"
+  - id: TTL-SECONDS-CLAIM-IGNORED
+    kind: default
+    doc: TESTERS.md
+    quote: "`ttl_seconds` on inbox delivery accepted but ignored (expiry hard-coded 24h)"
+    # `expect` is the 24h the doc claims is hard-coded; the live probe returns the
+    # lifetime the server's own expires_at implies for a ttl_seconds=3600 deliver.
+    expect: 86400
+    xfail: "DF-CRIER-50"

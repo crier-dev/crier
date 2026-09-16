@@ -7,6 +7,11 @@
 // production constant, and every count is re-measured from source. A doc edit that
 // removes or rewrites a claimed line now FAILS the build instead of shipping.
 //
+// CR-GAP-062 adds the recipe-replay detector: a doc block opened by a
+// <!-- doccheck --> marker must carry at least one "curl … # -> NNN" step, and
+// every step is EXECUTED in order against the booted server with its claimed
+// status asserted — a documented HTTP recipe can no longer drift unwatched.
+//
 // The detector is factored so it accepts a claim set + probe functions; the negative
 // control (TestDocsClaimsDetectorNegativeControl) drives the SAME detector against a
 // synthetic claim set on every CI run, proving the detector is alive.
@@ -20,13 +25,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -42,6 +51,13 @@ import (
 // docsClaimsProbeAgent is the identity the gate registers on the booted server and
 // substitutes for every "{...}" placeholder when probing route paths live.
 const docsClaimsProbeAgent = "docsclaims-probe"
+
+// docsClaimsWebhookProbeAgent and docsClaimsTTLProbeAgent are the identities the
+// CR-GAP-062 xfail probes drive (webhook default delivery mode, ttl_seconds).
+const (
+	docsClaimsWebhookProbeAgent = "docsclaims-webhook-probe"
+	docsClaimsTTLProbeAgent     = "docsclaims-ttl-probe"
+)
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
 
@@ -471,6 +487,11 @@ func TestDocsClaims(t *testing.T) {
 	registerAgent(t, client, baseURL, "agent-1")
 	registerAgent(t, client, baseURL, "bob")
 	registerAgent(t, client, baseURL, "alice")
+	// Identity the CR-GAP-062 ttl_seconds xfail probe drives. The webhook
+	// default-mode probe registers its OWN identity with the webhook attached
+	// (an update would need a signed request; the default is only observable
+	// on an agent that carries a webhook and states no delivery_mode).
+	registerAgent(t, client, baseURL, docsClaimsTTLProbeAgent)
 
 	probes := probeSet{
 		readDoc: func(doc string) (string, error) {
@@ -494,10 +515,8 @@ func TestDocsClaims(t *testing.T) {
 			io.Copy(io.Discard, resp.Body)
 			return resp.StatusCode, nil
 		},
-		probeStatus: makeLiveStatusProbes(client, baseURL),
-		probeDefault: func(claimID string) (any, error) {
-			return liveDefault(claimID)
-		},
+		probeStatus:  makeLiveStatusProbes(client, baseURL),
+		probeDefault: makeLiveDefaultProbes(client, baseURL),
 		probeCount: func(claimID string) (any, error) {
 			return liveCount(repoRoot, claimID)
 		},
@@ -514,6 +533,17 @@ func TestDocsClaims(t *testing.T) {
 	})
 	t.Run("counts", func(t *testing.T) {
 		reportFindings(t, probes.verifyCounts(set))
+	})
+	t.Run("recipes", func(t *testing.T) {
+		// Scanned doc set = every doc referenced by a claim, plus README.md and
+		// TESTERS.md (same set the path scanner walks).
+		docs := map[string]bool{"README.md": true, "TESTERS.md": true}
+		for _, c := range set.Claims {
+			docs[c.Doc] = true
+		}
+		res, scanned, executed, verdicts := replayDocSet(docs, repoRoot, baseURL, client)
+		t.Logf("recipe replay: docs=%d executed_steps=%d verdicts=%d", scanned, executed, verdicts)
+		reportFindings(t, res)
 	})
 	all := append(append(append([]claimResult{},
 		probes.verifyAnchors(set)...), probes.verifyRoutesAndScanned(set)...),
@@ -566,6 +596,10 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			defer resp.Body.Close()
 			io.Copy(io.Discard, resp.Body)
 			return resp.StatusCode, nil
+		case "WEBHOOK-DEFAULT-BLOCKING":
+			// specs/WEBHOOK-DELIVERY.md claims delivery_mode defaults to
+			// "blocking"; measure the accept an unset mode really gets.
+			return liveWebhookDefaultMode(client, baseURL)
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
@@ -731,6 +765,551 @@ func countMCPTools() (any, error) {
 	}
 }
 
+// ---------- marked-block recipe replay (CR-GAP-062) ----------
+
+// doccheckMarker opens a replayed recipe. A marker is an HTML comment whose
+// trimmed content is exactly this string; the next fenced code block after the
+// marker in the same file is the recipe. A marker with no following block is a
+// FAILURE, never a silent no-op.
+const doccheckMarker = "<!-- doccheck -->"
+
+// doccheckClaimID labels replay findings so they read like every other claim
+// finding (doc + line + claimed + observed).
+const doccheckClaimID = "DOCCHECK-REPLAY"
+
+// docReplayBudget bounds one doc's whole replay: recipes are stateful HTTP
+// exchanges against an in-process server, so a hang must surface as a failure.
+const docReplayBudget = 30 * time.Second
+
+// docVerdictRE matches a step's trailing status verdict: "#->200", "# -> 200".
+var docVerdictRE = regexp.MustCompile(`#\s*->\s*(\d{3})\b`)
+
+// replayShellRE matches shell constructs a plain HTTP request cannot express
+// (pipes, command substitution, backticks, redirects, chaining). Such a step
+// FAILS loudly rather than being skipped — a recipe the gate cannot execute
+// honestly must be visible.
+var replayShellRE = regexp.MustCompile("[|`;]|\\$\\(|&&|<<|[<>]")
+
+// doccheckResult wraps a replay finding in the same shape as every other claim
+// finding, so reportFindings reports it identically.
+func doccheckResult(doc string, line int, msg string) claimResult {
+	return claimResult{
+		claim: docClaim{ID: doccheckClaimID, Doc: doc, Quote: fmt.Sprintf("%s:%d", doc, line)},
+		kind:  "recipe",
+		msg:   msg,
+	}
+}
+
+// docStep is one executable curl step inside a marked block.
+type docStep struct {
+	doc        string
+	line       int // 1-based line of the curl invocation in its doc
+	raw        string
+	method     string
+	url        string
+	headers    map[string]string
+	body       string
+	claimed    int // the status the "# -> NNN" verdict claims
+	hasVerdict bool
+	parseErr   error
+}
+
+// docBlock is one marked recipe: a marker line plus the fenced block it opens.
+type docBlock struct {
+	doc        string
+	markerLine int
+	steps      []docStep
+}
+
+func isFenceLine(t string) bool { return strings.HasPrefix(t, "```") }
+
+// isCurlLine reports whether a (prompt-stripped) block line is an executable step:
+// the first token must be curl.
+func isCurlLine(t string) bool {
+	return t == "curl" || strings.HasPrefix(t, "curl ") || strings.HasPrefix(t, "curl\t")
+}
+
+// stripShellPrompt removes a leading "$ " or "> " prompt so indented/prompted
+// recipe lines are recognised.
+func stripShellPrompt(s string) string {
+	for {
+		switch {
+		case s == "$" || s == ">":
+			return ""
+		case strings.HasPrefix(s, "$ "), strings.HasPrefix(s, "$\t"):
+			s = strings.TrimSpace(s[1:])
+		case strings.HasPrefix(s, "> "), strings.HasPrefix(s, ">\t"):
+			s = strings.TrimSpace(s[1:])
+		default:
+			return s
+		}
+	}
+}
+
+// parseDoccheckBlocks finds every marker and the fenced block it opens. Every
+// marker must open exactly one block: a marker with no following fenced block
+// (EOF, or another marker first) and an unterminated block are both failures.
+func parseDoccheckBlocks(doc, text string) ([]docBlock, []claimResult) {
+	lines := strings.Split(text, "\n")
+	var blocks []docBlock
+	var fails []claimResult
+
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != doccheckMarker {
+			continue
+		}
+		markerLine := i + 1
+		j := i + 1
+		for ; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if t == doccheckMarker || isFenceLine(t) {
+				break
+			}
+		}
+		if j >= len(lines) || strings.TrimSpace(lines[j]) == doccheckMarker {
+			fails = append(fails, doccheckResult(doc, markerLine, fmt.Sprintf(
+				"doc=%s line=%d marker has no following fenced code block: expected=one marked recipe observed=absent (a %s marker must open exactly one fenced block)",
+				doc, markerLine, doccheckMarker)))
+			continue
+		}
+		k := j + 1
+		for ; k < len(lines); k++ {
+			if isFenceLine(strings.TrimSpace(lines[k])) {
+				break
+			}
+		}
+		if k >= len(lines) {
+			fails = append(fails, doccheckResult(doc, markerLine, fmt.Sprintf(
+				"doc=%s line=%d fenced block opened at line %d is never closed: expected=a closing ``` observed=EOF",
+				doc, markerLine, j+1)))
+			k = len(lines)
+		}
+		blk := docBlock{doc: doc, markerLine: markerLine, steps: parseBlockSteps(doc, lines, j+1, k)}
+		blocks = append(blocks, blk)
+		i = k
+	}
+	return blocks, fails
+}
+
+// parseBlockSteps extracts the executable steps of one fenced block: lines whose
+// first token is curl (after an optional "$ "/"> " prompt). Everything else —
+// prose, comments, python snippets, sample output — is context, not executed.
+// Backslash continuations are joined so a wrapped recipe is one step, keeping the
+// line number of the invocation.
+func parseBlockSteps(doc string, lines []string, from, to int) []docStep {
+	var steps []docStep
+	for i := from; i < to; i++ {
+		raw := stripShellPrompt(strings.TrimSpace(lines[i]))
+		if !isCurlLine(raw) {
+			continue
+		}
+		start := i + 1
+		full := raw
+		for strings.HasSuffix(strings.TrimSpace(full), "\\") && i+1 < to {
+			full = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(full), "\\"))
+			i++
+			full += " " + strings.TrimSpace(lines[i])
+		}
+		step, err := parseCurlStep(doc, start, full)
+		step.parseErr = err
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// replayIgnoredFlags are presentation-only curl flags tolerated (and ignored) in
+// this repo's docs; replayValueFlags are the ignored ones that consume a value.
+var replayIgnoredFlags = map[string]bool{
+	"-s": true, "--silent": true, "-S": true, "--show-error": true,
+	"-i": true, "--include": true, "-v": true, "--verbose": true,
+	"-L": true, "--location": true, "--fail": true, "--fail-with-body": true,
+	"-k": true, "--insecure": true, "--compressed": true, "--http1.1": true,
+	"-O": true, "--remote-name": true, "-g": true, "--globoff": true, "--no-buffer": true,
+}
+
+var replayValueFlags = map[string]bool{
+	"-o": true, "--output": true, "-w": true, "--write-out": true,
+	"-A": true, "--user-agent": true, "-m": true, "--max-time": true,
+	"--connect-timeout": true, "--retry": true, "-e": true, "--referer": true,
+}
+
+// shellTokens splits a command line on whitespace, honouring single/double quotes
+// (curl recipes quote headers and JSON bodies).
+func shellTokens(s string) ([]string, error) {
+	var toks []string
+	var cur strings.Builder
+	inTok := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\'':
+			end := strings.IndexByte(s[i+1:], '\'')
+			if end < 0 {
+				return nil, fmt.Errorf("unterminated single quote")
+			}
+			cur.WriteString(s[i+1 : i+1+end])
+			i += end + 1
+			inTok = true
+		case '"':
+			j := i + 1
+			for j < len(s) && s[j] != '"' {
+				if s[j] == '\\' && j+1 < len(s) {
+					j++
+				}
+				cur.WriteByte(s[j])
+				j++
+			}
+			if j >= len(s) {
+				return nil, fmt.Errorf("unterminated double quote")
+			}
+			i = j
+			inTok = true
+		case ' ', '\t':
+			if inTok {
+				toks = append(toks, cur.String())
+				cur.Reset()
+				inTok = false
+			}
+		default:
+			cur.WriteByte(c)
+			inTok = true
+		}
+	}
+	if inTok {
+		toks = append(toks, cur.String())
+	}
+	return toks, nil
+}
+
+// parseCurlStep turns one curl line into a plain HTTP request. Anything it cannot
+// express (shell pipelines, unknown flags, no URL) is returned as an error so the
+// caller reports a loud failure instead of skipping the step.
+func parseCurlStep(doc string, line int, raw string) (docStep, error) {
+	step := docStep{doc: doc, line: line, raw: raw, headers: map[string]string{}, method: http.MethodGet}
+	if m := docVerdictRE.FindStringSubmatch(raw); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return step, fmt.Errorf("bad verdict %q: %v", m[1], err)
+		}
+		step.claimed = n
+		step.hasVerdict = true
+	}
+	// The shell-construct check runs on the line with the verdict comment removed:
+	// the verdict itself ("->") would otherwise read as a redirect.
+	body := docVerdictRE.ReplaceAllString(raw, "")
+	if bad := replayShellRE.FindString(body); bad != "" {
+		return step, fmt.Errorf("shell construct %q cannot be expressed as one HTTP request", bad)
+	}
+	toks, err := shellTokens(body)
+	if err != nil {
+		return step, err
+	}
+	if len(toks) == 0 || toks[0] != "curl" {
+		return step, fmt.Errorf("not a curl invocation: %q", body)
+	}
+	args := toks[1:]
+	missing := func(flag string) (docStep, error) {
+		return step, fmt.Errorf("flag %s is missing its value", flag)
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-X" || a == "--request":
+			if i+1 >= len(args) {
+				return missing(a)
+			}
+			i++
+			step.method = strings.ToUpper(args[i])
+		case strings.HasPrefix(a, "-X") && len(a) > 2:
+			step.method = strings.ToUpper(a[2:])
+		case a == "-H" || a == "--header":
+			if i+1 >= len(args) {
+				return missing(a)
+			}
+			i++
+			name, value, ok := strings.Cut(args[i], ":")
+			if !ok {
+				return step, fmt.Errorf("header %q is not \"Name: value\"", args[i])
+			}
+			step.headers[strings.TrimSpace(name)] = strings.TrimSpace(value)
+		case a == "-d" || a == "--data" || a == "--data-raw" || a == "--data-binary":
+			if i+1 >= len(args) {
+				return missing(a)
+			}
+			i++
+			step.body = args[i]
+		case a == "--url":
+			if i+1 >= len(args) {
+				return missing(a)
+			}
+			i++
+			step.url = args[i]
+		case replayIgnoredFlags[a]:
+			// tolerated presentation flag — no effect on the request
+		case replayValueFlags[a]:
+			if i+1 >= len(args) {
+				return missing(a)
+			}
+			i++
+		case strings.HasPrefix(a, "-") && a != "-":
+			return step, fmt.Errorf("unsupported curl flag %q: the recipe gate cannot execute this step honestly", a)
+		default:
+			if step.url != "" {
+				return step, fmt.Errorf("unexpected extra argument %q after the URL %q", a, step.url)
+			}
+			step.url = a
+		}
+	}
+	if step.url == "" {
+		return step, fmt.Errorf("curl step carries no URL")
+	}
+	return step, nil
+}
+
+// rewriteStepURL points a step at the booted in-process server: absolute URLs lose
+// their scheme+host, $BASE/${BASE} indirection is resolved, path-only URLs are
+// taken as-is against baseURL.
+func rewriteStepURL(raw, baseURL string) (string, error) {
+	u := strings.TrimSpace(raw)
+	u = strings.ReplaceAll(u, "${BASE}", baseURL)
+	u = strings.ReplaceAll(u, "$BASE", baseURL)
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		parsed, err := url.Parse(u)
+		if err != nil {
+			return "", fmt.Errorf("unparseable URL %q: %v", raw, err)
+		}
+		rest := parsed.RequestURI()
+		if rest == "" {
+			rest = "/"
+		}
+		return baseURL + rest, nil
+	}
+	if strings.HasPrefix(u, "/") {
+		return baseURL + u, nil
+	}
+	return "", fmt.Errorf("URL %q is neither absolute (http://…) nor $BASE-relative", raw)
+}
+
+// executeStep issues one parsed step against the live server. A step that sets no
+// Authorization header gets the gate's own bearer token, so recipes that only
+// document the happy path still exercise the real handlers.
+func executeStep(ctx context.Context, step docStep, baseURL string, client *http.Client) (int, error) {
+	full, err := rewriteStepURL(step.url, baseURL)
+	if err != nil {
+		return 0, err
+	}
+	var body io.Reader
+	if step.body != "" {
+		body = strings.NewReader(step.body)
+	}
+	req, err := http.NewRequestWithContext(ctx, step.method, full, body)
+	if err != nil {
+		return 0, err
+	}
+	hasAuth := false
+	for name, value := range step.headers {
+		if strings.EqualFold(name, "Authorization") {
+			hasAuth = true
+		}
+		req.Header.Set(name, value)
+	}
+	if !hasAuth {
+		req.Header.Set("Authorization", "Bearer test-token")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
+}
+
+// replayDocRecipes is the CR-GAP-062 detector: it parses every marked block in one
+// doc and EXECUTES each curl step in order against the booted server, comparing
+// each observed status to the step's "# -> NNN" verdict. Findings come back in the
+// same shape as every other claim finding. executed/verdicts are returned so the
+// negative control can prove the replay is non-vacuous (requests really were
+// issued) and that verdicts really were counted.
+func replayDocRecipes(doc, text, baseURL string, client *http.Client) (res []claimResult, executed, verdicts int) {
+	blocks, parseFails := parseDoccheckBlocks(doc, text)
+	res = append(res, parseFails...)
+	if len(blocks) == 0 {
+		return res, 0, 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), docReplayBudget)
+	defer cancel()
+
+	for _, blk := range blocks {
+		blockVerdicts := 0
+		for _, s := range blk.steps {
+			if s.hasVerdict {
+				blockVerdicts++
+			}
+		}
+		verdicts += blockVerdicts
+		if blockVerdicts == 0 {
+			res = append(res, doccheckResult(doc, blk.markerLine, fmt.Sprintf(
+				"doc=%s line=%d marked block carries no verdict: expected=at least one curl step with a '# -> NNN' status claim observed=0 (marker %s)",
+				doc, blk.markerLine, doccheckMarker)))
+		}
+		for _, s := range blk.steps {
+			if s.parseErr != nil {
+				res = append(res, doccheckResult(doc, s.line, fmt.Sprintf(
+					"doc=%s line=%d unparseable curl step: %v — raw: %s", doc, s.line, s.parseErr, s.raw)))
+				continue
+			}
+			status, err := executeStep(ctx, s, baseURL, client)
+			if err != nil {
+				res = append(res, doccheckResult(doc, s.line, fmt.Sprintf(
+					"doc=%s line=%d curl step could not be executed: %v (url=%s)", doc, s.line, err, s.url)))
+				continue
+			}
+			executed++
+			if s.hasVerdict && status != s.claimed {
+				res = append(res, doccheckResult(doc, s.line, fmt.Sprintf(
+					"doc=%s line=%d claimed=%03d observed=%d url=%s", doc, s.line, s.claimed, status, s.url)))
+			}
+		}
+		if ctx.Err() != nil {
+			res = append(res, doccheckResult(doc, blk.markerLine, fmt.Sprintf(
+				"doc=%s line=%d recipe replay exceeded the %s deadline: the marked block did not finish", doc, blk.markerLine, docReplayBudget)))
+			break
+		}
+	}
+	return res, executed, verdicts
+}
+
+// replayDocSet runs the recipe replay over a doc set, returning every finding plus
+// the totals the caller logs (docs scanned, steps executed, verdicts counted).
+func replayDocSet(docs map[string]bool, repoRoot, baseURL string, client *http.Client) ([]claimResult, int, int, int) {
+	var res []claimResult
+	executed, verdicts := 0, 0
+	for doc := range docs {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, doc))
+		if err != nil {
+			res = append(res, doccheckResult(doc, 0, fmt.Sprintf(
+				"recipe scan: cannot read %s: %v", doc, err)))
+			continue
+		}
+		r, e, v := replayDocRecipes(doc, string(raw), baseURL, client)
+		res = append(res, r...)
+		executed += e
+		verdicts += v
+	}
+	return res, len(docs), executed, verdicts
+}
+
+// ---------- negative control ----------
+
+// makeLiveDefaultProbes returns the id-keyed kind=default probes. The two
+// CR-GAP-062 claims are measured live (imported production constant / live
+// deliver); everything else falls through to liveDefault.
+func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (any, error) {
+	return func(claimID string) (any, error) {
+		switch claimID {
+		case "MESH-ROUTE-CAP-4096":
+			// docs/mesh-protocol.md claims the route table flushes wholesale at
+			// 4096 entries. The live cap is the production constant, imported —
+			// never a duplicated literal.
+			return mesh.DefaultMeshConfig("").MaxPendingRequests, nil
+		case "TTL-SECONDS-CLAIM-IGNORED":
+			return liveTTLDeliverySeconds(client, baseURL)
+		default:
+			return liveDefault(claimID)
+		}
+	}
+}
+
+// liveTTLDeliverySeconds measures what the live server actually does with a
+// documented ttl_seconds: deliver with ttl_seconds=3600 (the doc claims the
+// setting is ignored and expiry is hard-coded to 24h) and report the lifetime the
+// response's expires_at implies, in seconds.
+func liveTTLDeliverySeconds(client *http.Client, baseURL string) (any, error) {
+	body := `{"payload":{"ttl_probe":true},"ttl_seconds":3600}`
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsTTLProbeAgent+"/inbox", strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var wire struct {
+		Transport string  `json:"transport"`
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode deliver response: %w", err)
+	}
+	if resp.StatusCode != http.StatusCreated || wire.ExpiresAt == nil {
+		return nil, fmt.Errorf("deliver answered %d with expires_at=%v, want 201 + expires_at",
+			resp.StatusCode, wire.ExpiresAt)
+	}
+	exp, err := time.Parse(time.RFC3339, *wire.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("expires_at %q is not RFC 3339: %w", *wire.ExpiresAt, err)
+	}
+	return int(exp.Sub(start).Round(time.Second).Seconds()), nil
+}
+
+// liveWebhookDefaultMode measures the accept a webhook delivery gets when both the
+// request and the agent leave delivery_mode unset — the spec claims that is
+// "blocking (default)".
+func liveWebhookDefaultMode(client *http.Client, baseURL string) (int, error) {
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"echo":true}`)
+	}))
+	defer sink.Close()
+
+	if err := registerAgentWithWebhook(client, baseURL, docsClaimsWebhookProbeAgent, sink.URL+"/hook"); err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsWebhookProbeAgent+"/inbox",
+		strings.NewReader(`{"payload":{"mode_probe":true}}`))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
+}
+
+// registerAgentWithWebhook registers the probe identity with a webhook attached and
+// NO delivery_mode, so the accept the server gives it IS the server's own default.
+// A 409 means the identity was already registered this run — still observable.
+func registerAgentWithWebhook(client *http.Client, baseURL, id, webhookURL string) error {
+	body := fmt.Sprintf(`{"id":%q,"public_key":%q,"webhook":{"url":%q}}`, id, strings.Repeat("ab", 32), webhookURL)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents", strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
+		return fmt.Errorf("register %s with webhook: status %d, want 201", id, resp.StatusCode)
+	}
+	return nil
+}
+
 // ---------- negative control ----------
 
 // TestDocsClaimsDetectorNegativeControl proves the detector is alive on every CI
@@ -796,4 +1375,109 @@ func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
 			t.Errorf("negative control: healthy claim NEG-HEALTHY failed routes: %s", r.msg)
 		}
 	}
+	// ── CR-GAP-062 recipe replay negative control ────────────────────────────────
+	// The SAME replay code is driven against synthetic doc text and the REAL
+	// booted server. Every case below must keep holding or the gate is dead:
+	//   (a) a marked block whose curl step carries no verdict → failure
+	//   (b) a wrong verdict (claimed 404, live 200) → failure naming both
+	//   (c) a correct verdict → NO failure, and a request really reached the
+	//       live server (positive control, non-vacuous)
+	//   (d) a marker with no fenced block → failure
+	msgs := func(rs []claimResult) []string {
+		out := make([]string, 0, len(rs))
+		for _, r := range rs {
+			out = append(out, r.msg)
+		}
+		return out
+	}
+	has := func(rs []claimResult, subs ...string) bool {
+		for _, r := range rs {
+			match := true
+			for _, s := range subs {
+				if !strings.Contains(r.msg, s) {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+		return false
+	}
+
+	baseURL, client := bootDocsClaimsServer(t)
+	var hits atomic.Int64
+	counting := *client
+	counting.Transport = countingTransport{next: client.Transport, n: &hits}
+
+	synthetic := strings.Join([]string{
+		"# synthetic recipe doc",            // 1
+		"",                                  // 2
+		doccheckMarker,                      // 3
+		"```bash",                           // 4
+		"curl -s $BASE/health",              // 5  (a) no verdict
+		"```",                               // 6
+		"",                                  // 7
+		doccheckMarker,                      // 8
+		"```bash",                           // 9
+		"  curl -s $BASE/health   # -> 404", // 10 (b) wrong verdict (indented on purpose)
+		"```",                               // 11
+		"",                                  // 12
+		doccheckMarker,                      // 13
+		"```bash",                           // 14
+		"$ curl -s -o /dev/null -w '%{http_code}' $BASE/health   # -> 200", // 15 (c) correct, prompt-prefixed
+		"```",          // 16
+		"",             // 17
+		doccheckMarker, // 18 (d) no fenced block after it
+	}, "\n")
+
+	res, executed, verdicts := replayDocRecipes("SYNTHETIC-RECIPES.md", synthetic, baseURL, &counting)
+
+	if !has(res, "line=3", "carries no verdict") {
+		t.Errorf("negative control (a): a marked block whose curl step carries no '# -> NNN' verdict was NOT reported: %v", msgs(res))
+	}
+	if !has(res, "line=10", "claimed=404", "observed=200") {
+		t.Errorf("negative control (b): the wrong verdict (claimed=404, live=200) was NOT reported with claimed vs observed: %v", msgs(res))
+	}
+	if has(res, "line=15") || has(res, "line=13") {
+		t.Errorf("negative control (c): the correctly-marked block was reported as a failure: %v", msgs(res))
+	}
+	if !has(res, "line=18", "no following fenced code block") {
+		t.Errorf("negative control (d): a marker with no fenced block was NOT reported: %v", msgs(res))
+	}
+	if executed < 3 {
+		t.Errorf("negative control (c): only %d recipe step(s) executed — the replay never issued the requests", executed)
+	}
+	if verdicts != 2 {
+		t.Errorf("negative control: counted %d verdicts, want 2 (block a has none, b has 1, c has 1, d has none)", verdicts)
+	}
+	if hits.Load() < 1 {
+		t.Error("negative control (c): NO request reached the live server — the positive control is vacuous")
+	}
+	t.Logf("(a) block whose curl step carries no verdict reported=%v", has(res, "line=3", "carries no verdict"))
+	t.Logf("(b) wrong verdict (claimed=404 observed=200) reported=%v", has(res, "line=10", "claimed=404", "observed=200"))
+	t.Logf("(c) correct block clean=%v requests_issued_against_live_server=%d", !has(res, "line=15"), hits.Load())
+	t.Logf("(d) marker with no fenced block reported=%v", has(res, "line=18", "no following fenced code block"))
+	for _, m := range msgs(res) {
+		t.Logf("    synthetic finding: %s", m)
+	}
+	t.Logf("recipe replay negative control: executed=%d verdicts=%d live_server_requests=%d findings=%d",
+		executed, verdicts, hits.Load(), len(res))
+}
+
+// countingTransport records every request that actually reaches the wire, so the
+// recipe negative control can prove it is non-vacuous.
+type countingTransport struct {
+	next http.RoundTripper
+	n    *atomic.Int64
+}
+
+func (c countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	next := c.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return next.RoundTrip(req)
 }
