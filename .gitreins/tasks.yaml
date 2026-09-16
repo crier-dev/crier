@@ -820,3 +820,18 @@ tasks:
   status: complete
   created_at: '2026-09-16T14:49:20.680157+00:00'
   completed_at: '2026-09-16T15:01:03.594445+00:00'
+- id: DF-CRIER-185
+  title: Compare the shared bearer token in constant time (subtle.ConstantTimeCompare)
+    instead of != string equality
+  criteria:
+  - internal/middleware/auth.go no longer compares the presented token with token
+    != authToken; it uses crypto/subtle.ConstantTimeCompare, and a wrong token still
+    answers 401 with body {"error":"invalid token"}
+  - 'internal/middleware/auth_test.go gains table-driven regression coverage: exact
+    token -> 200; same-length token differing in the final byte -> 401; correctly-prefixed
+    longer token (secret-tokenXX) -> 401; 401 body stays {"error":"invalid token"}'
+  - go build ./... && go vet ./... && go test ./internal/middleware/ -count=1 -race
+    && go test ./... -count=1 all pass
+  status: complete
+  created_at: '2026-09-16T15:25:46.498581+00:00'
+  completed_at: '2026-09-16T15:33:50.452502+00:00'
