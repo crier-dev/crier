@@ -40,8 +40,8 @@ evaluator:
   # incident, verdict 22816b13). Full scope lets the judge read the whole repo.
   file_scope: full
   max_iterations: 50
-  max_time: 10m
-  max_input_tokens: 4M
+  max_time: 20m
+  max_input_tokens: 6M
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
