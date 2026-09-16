@@ -52,14 +52,22 @@ evaluator:
   # green. 50 iterations is not enough for a docs row whose criteria each need a
   # grep plus a live probe plus the four gate commands.
   max_iterations: 120
-  max_time: 20m
+  # max_time 20m -> 30m (tick 280, CR-GAP-060): measured burn rate ~1M input
+  # tokens per minute (the 9.0M starved run below ran ~9 min), so a 12M budget
+  # needs headroom past the old 20m wall instead of starving on a third knob.
+  max_time: 30m
   # max_input_tokens 6M -> 9M (tick 278, CR-GAP-058): the CR-GAP-058 judge
   # (verdict 4e647851) collected a full tier1 PASS and then consumed the whole
   # configured budget — "Eval cap exceeded: Input token budget (6.0M) exceeded
   # (6.0M used)" → tier2 INCOMPLETE. used == configured cap is budget
   # STARVATION, not the model window (deepseek-v4-flash is 1M per call), so the
   # rung moves up; 9M is the fleet-proven rung after 6M (hermes-canopy PL-01-P1).
-  max_input_tokens: 9M
+  # 9M -> 12M (tick 280, CR-GAP-060): the T6 judge (verdict cadc2916) starved
+  # again on the same signature — .gitreins/usage.jsonl recorded 9,019,468
+  # tokens_in for that tier2 run against the 9M cap (100.2% of budget), a
+  # measured burn, not a guess. Fix direction is UP (exact-equality starvation);
+  # 12M is one 33% rung above the exhausted one.
+  max_input_tokens: 12M
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
