@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -51,9 +52,39 @@ type connPool interface {
 // PostgresStore is a pgxpool-backeded implementation of Store.
 type PostgresStore struct {
 	pool connPool
+
+	// listMu guards listErr, the recorded failure of the LAST List call
+	// (nil when it succeeded), exposed via ListError so bridge callers
+	// (the MCP list_agents surface) can tell a failing database from an
+	// empty registry (DF-CRIER-200). Same last-call semantics as
+	// RemoteStore (DF-CRIER-199): ListError describes the last call only,
+	// not a request-local atomic pair.
+	listMu  sync.Mutex
+	listErr error
 }
 
 var _ Store = (*PostgresStore)(nil)
+
+// Compile-time capability assertion: PostgresStore implements the optional
+// ListErrorReporter Store capability (store.go, DF-CRIER-199/200).
+var _ ListErrorReporter = (*PostgresStore)(nil)
+
+// setListError records the failure of the current List call.
+func (s *PostgresStore) setListError(err error) {
+	s.listMu.Lock()
+	s.listErr = err
+	s.listMu.Unlock()
+}
+
+// ListError returns the failure of the last List call, nil when it
+// succeeded. It implements the optional ListErrorReporter Store capability
+// (store.go), which callers like the MCP bridge's list_agents handler use
+// to answer with an error instead of a laundered empty agent list.
+func (s *PostgresStore) ListError() error {
+	s.listMu.Lock()
+	defer s.listMu.Unlock()
+	return s.listErr
+}
 
 // NewPostgresStore opens a pgxpool, runs pending migrations, and returns
 // a ready-to-use PostgresStore. Uses DefaultPoolConfig for pool settings.
@@ -271,7 +302,10 @@ WHERE id = $1;`, id).Scan(
 
 // List returns all agents ordered by registration time then ID.
 // Per the Store contract, List cannot return an error; on failure it logs and
-// returns a non-nil empty slice.
+// returns a non-nil empty slice. The failure is also recorded for ListError,
+// so the MCP bridge's list_agents surface can tell a failing database from
+// an empty registry (DF-CRIER-200). ListError describes the LAST call: a
+// successful List clears it.
 func (s *PostgresStore) List() []*Agent {
 	ctx, cancel := s.operationContext()
 	defer cancel()
@@ -282,6 +316,7 @@ FROM agents
 ORDER BY registered_at ASC, id ASC;`)
 	if err != nil {
 		slog.Error("postgres list", "error", err)
+		s.setListError(fmt.Errorf("postgres list: query: %w", err))
 		return []*Agent{}
 	}
 	defer rows.Close()
@@ -298,6 +333,7 @@ ORDER BY registered_at ASC, id ASC;`)
 		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
 			&webhookJSON, &guardJSON); err != nil {
 			slog.Error("postgres list scan", "error", err)
+			s.setListError(fmt.Errorf("postgres list: scan: %w", err))
 			return []*Agent{}
 		}
 		// NULL/empty stored key = keyless agent (DF-CRIER-192): keep the
@@ -305,6 +341,8 @@ ORDER BY registered_at ASC, id ASC;`)
 		// length is corrupt and drops the whole listing, as before.
 		if len(publicKey) != ed25519.PublicKeySize && len(publicKey) != 0 {
 			slog.Warn("postgres list: invalid public key", "len", len(publicKey), "agent_id", agent.ID)
+			s.setListError(fmt.Errorf("postgres list: agent %q: invalid public key: length %d, want %d",
+				agent.ID, len(publicKey), ed25519.PublicKeySize))
 			return []*Agent{}
 		}
 		key := make(HexKey, len(publicKey))
@@ -312,22 +350,27 @@ ORDER BY registered_at ASC, id ASC;`)
 		agent.PublicKey = key
 		if err := json.Unmarshal(capabilitiesJSON, &agent.Capabilities); err != nil {
 			slog.Error("postgres list: unmarshal capabilities", "error", err)
+			s.setListError(fmt.Errorf("postgres list: agent %q: unmarshal capabilities: %w", agent.ID, err))
 			return []*Agent{}
 		}
 		if err := unmarshalOptionalConfig(webhookJSON, &agent.Webhook); err != nil {
 			slog.Error("postgres list: unmarshal webhook", "error", err, "agent_id", agent.ID)
+			s.setListError(fmt.Errorf("postgres list: agent %q: unmarshal webhook: %w", agent.ID, err))
 			return []*Agent{}
 		}
 		if err := unmarshalOptionalConfig(guardJSON, &agent.Guard); err != nil {
 			slog.Error("postgres list: unmarshal guard", "error", err, "agent_id", agent.ID)
+			s.setListError(fmt.Errorf("postgres list: agent %q: unmarshal guard: %w", agent.ID, err))
 			return []*Agent{}
 		}
 		out = append(out, &agent)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Error("postgres list rows", "error", err)
+		s.setListError(fmt.Errorf("postgres list: rows: %w", err))
 		return []*Agent{}
 	}
+	s.setListError(nil)
 	return out
 }
 

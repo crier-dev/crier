@@ -56,12 +56,12 @@ func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
 // handleListAgents — spec §4.2. Takes no arguments.
 //
 // A backend List failure must not masquerade as an empty registry
-// (DF-CRIER-199): when the store implements the optional
-// registry.ListErrorReporter capability and the last List call failed, the
-// failure is returned to the MCP caller as an error. Stores without the
-// capability (MemoryStore, PostgresStore) keep the plain List() contract.
-// A genuinely empty registry is a successful call and still answers
-// {"agents":[]}.
+// (DF-CRIER-199, extended to PostgresStore by DF-CRIER-200): when the store
+// implements the optional registry.ListErrorReporter capability and the last
+// List call failed, the failure is returned to the MCP caller as an error.
+// Stores without the capability (MemoryStore) keep the plain List()
+// contract. A genuinely empty registry is a successful call and still
+// answers {"agents":[]}.
 func (s *MCPServer) handleListAgents(args json.RawMessage) (any, error) {
 	// Declared with an empty schema: any member at all is a caller mistake.
 	if err := decodeArgs(args, &struct{}{}); err != nil {
