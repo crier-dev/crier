@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -72,6 +74,47 @@ type deliverRequest struct {
 // time.Duration (int64 nanoseconds) without overflowing into a negative
 // interval. 9223372036s ≈ 292 years.
 const maxTTLSeconds = int64(math.MaxInt64) / int64(time.Second)
+
+// maxDeliverTimeoutMs is the ceiling of the request-level blocking budget —
+// range parity with the webhook config's own bound
+// (webhook.Config.Validate: "webhook.timeout_ms must be 0..120000"), so a
+// value the agent's config would be rejected for cannot ride in on a single
+// deliver request instead (DF-CRIER-180).
+const maxDeliverTimeoutMs = 120000
+
+// defaultDeliverTimeoutMs is the blocking budget a request that states no
+// usable timeout_ms (0 or absent) gets, as documented on the deliver schema
+// in openapi.yaml.
+const defaultDeliverTimeoutMs = 30000
+
+// deliverModes is the closed set of queue semantics a deliver request may ask
+// for — the same set webhook.Config.Validate enforces on the agent's own
+// webhook config (blocking|async|batch, CR-FEAT-002/005) and the same set
+// documented as the request schema's enum in openapi.yaml.
+var deliverModes = []string{"blocking", "async", "batch"}
+
+// validateDeliverParameters rejects request-level delivery parameters this
+// handler cannot honor, before any transport or store choice is made.
+//
+//   - delivery_mode: "" keeps today's resolution (the target's webhook
+//     default, then "async"); blocking|async|batch are the executable queue
+//     semantics. Anything else — the value accepted verbatim in the accept
+//     body before DF-CRIER-180 — is a 400 naming the allowed set.
+//   - timeout_ms: 0 (or absent) keeps today's meaning on the blocking path
+//     (the defaultDeliverTimeoutMs budget); a negative budget or one above
+//     maxDeliverTimeoutMs is rejected rather than silently coerced.
+//
+// The set here matches webhook.Config.Validate on the agent-config path, so
+// the two surfaces cannot disagree about what is deliverable.
+func validateDeliverParameters(req *deliverRequest) error {
+	if req.DeliveryMode != "" && !slices.Contains(deliverModes, req.DeliveryMode) {
+		return fmt.Errorf("delivery_mode must be %s", strings.Join(deliverModes, "|"))
+	}
+	if req.TimeoutMs < 0 || req.TimeoutMs > maxDeliverTimeoutMs {
+		return fmt.Errorf("timeout_ms must be 0..%d", maxDeliverTimeoutMs)
+	}
+	return nil
+}
 
 // patchRequest is the JSON body for PATCH /agents/{id} — partial update of
 // an agent's registration (spec §7, CR-FEAT-007). capabilities replaces the
@@ -435,6 +478,21 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Request-level delivery parameters must be HONORED or REJECTED, never
+	// silently accepted (DF-CRIER-180). An unknown delivery_mode used to be
+	// echoed in the accept body as if it were the RESOLVED queue semantics
+	// ({"transport":"webhook","delivery_mode":"bogus"}) — the same value is
+	// rejected on the agent-registration/PATCH path (webhook.delivery_mode
+	// must be blocking|async|batch), so a caller could not tell a typo from a
+	// real queue mode — and an out-of-range timeout_ms was taken verbatim as
+	// the blocking budget. Validate BEFORE any transport/store choice, so the
+	// answer is identical for webhook targets, inbox-only targets and
+	// unregistered targets: nothing is dispatched, nothing is stored.
+	if err := validateDeliverParameters(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	msgID := make([]byte, 12)
 	rand.Read(msgID)
 
@@ -589,7 +647,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		if mode == "blocking" {
 			budget := time.Duration(req.TimeoutMs) * time.Millisecond
 			if req.TimeoutMs <= 0 {
-				budget = 30 * time.Second
+				budget = defaultDeliverTimeoutMs * time.Millisecond
 			}
 			reply, err := h.webhooks.DeliverBlocking(r.Context(), id, target.Webhook, env, budget)
 			if err != nil {

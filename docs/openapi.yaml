@@ -489,10 +489,36 @@ paths:
                 delivery_mode:
                   type: string
                   enum: [blocking, async, batch]
-                  description: Overrides the agent's webhook default delivery mode
+                  description: |
+                    Overrides the agent's webhook default delivery mode. The
+                    same set the agent's own `webhook.delivery_mode` config
+                    accepts, so the request cannot ask for queue semantics the
+                    server has no way to execute.
+
+                    Absent (or empty) keeps the existing resolution: the
+                    target's configured webhook default, and `async` when it
+                    states none. Any other value is rejected with 400 —
+                    `{"error":"delivery_mode must be blocking|async|batch"}` —
+                    and nothing is dispatched or stored. Validation runs
+                    BEFORE the transport/store choice, so an unknown value is
+                    refused identically for a webhook target, an agent with no
+                    webhook (`transport: "inbox"`) and an unknown agent; the
+                    accept body never echoes an unresolved mode back as if it
+                    were the resolved semantics.
                 timeout_ms:
                   type: integer
-                  description: Bounds a blocking delivery (default 30000)
+                  minimum: 0
+                  maximum: 120000
+                  default: 30000
+                  description: |
+                    Bounds a BLOCKING delivery, in milliseconds. Range
+                    0..120000 — parity with the agent's `webhook.timeout_ms`
+                    config bound. Absent or 0 means the blocking default
+                    (30000 ms); it is not "no timeout". A negative value or one
+                    above 120000 is rejected with 400
+                    (`{"error":"timeout_ms must be 0..120000"}`) instead of
+                    being coerced to the default. Only the blocking path
+                    consults it; `async`/`batch` queueing is not affected.
                 request_id:
                   type: string
                   description: Sender's correlation id, echoed in the reply
@@ -591,7 +617,30 @@ paths:
                     type: string
                     description: Sender correlation id, echoed back
         "400":
-          description: Invalid request body or store input
+          description: |
+            Invalid request — nothing is dispatched to the target's webhook and
+            no inbox entry is created. Three classes:
+
+            (a) the body is not JSON;
+            (b) a store-level input is invalid (`ttl_seconds` negative, or above
+            the duration bound);
+            (c) a REQUEST-LEVEL DELIVERY PARAMETER cannot be honored
+            (DF-CRIER-180): `delivery_mode` outside the enum, or `timeout_ms`
+            outside 0..120000. The error names the allowed values, e.g.
+            `{"error":"delivery_mode must be blocking|async|batch"}` or
+            `{"error":"timeout_ms must be 0..120000"}`. This validation runs
+            BEFORE the transport/store choice, so the same request is refused
+            with the same 400 for a webhook target, an agent with no webhook,
+            and an unknown agent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: "Human-readable rejection naming the allowed values, e.g. 'delivery_mode must be blocking|async|batch'"
         "403":
           description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict"
           content:
