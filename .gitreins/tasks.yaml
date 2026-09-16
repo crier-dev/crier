@@ -977,3 +977,14 @@ tasks:
   status: complete
   created_at: '2026-09-16T21:28:16.540668+00:00'
   completed_at: '2026-09-16T21:39:17.407081+00:00'
+- id: crier-297-df-crier-199
+  title: DF-CRIER-199 RemoteStore.List launders failures into an empty registry
+  criteria:
+  - 'A bridge caller can distinguish an empty registry from a failed one: the decode/transport
+    failure is surfaced (error return or distinguishable sentinel) or at minimum logged
+    with status/body context, while a genuinely empty registry still returns an empty
+    slice; focused tests cover both paths; go build/vet/test and gitreins guard stay
+    green with no test weakened or skipped.'
+  status: complete
+  created_at: '2026-09-16T21:51:09.289857+00:00'
+  completed_at: '2026-09-16T22:01:54.935836+00:00'
