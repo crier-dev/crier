@@ -77,7 +77,7 @@ const openAPIDocsHTML = `<!DOCTYPE html>
   <li><a href="/openapi.json">/openapi.json</a> — the spec as JSON</li>
   <li><a href="/openapi.yaml">/openapi.yaml</a> — the spec as YAML</li>
 </ul>
-<p>All three endpoints (<code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) are public — no auth token required. This page is self-contained and works offline (no CDN / Swagger-UI dependency).</p>
+<p>This page and the other four auth-exempt endpoints (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) are public — no auth token required. This page is self-contained and works offline (no CDN / Swagger-UI dependency).</p>
 </body>
 </html>
 `

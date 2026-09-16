@@ -11,8 +11,11 @@ messages over topics, direct mesh RPC, durable inboxes, webhooks, and
 bus-to-bus federation — self-hosted, in one Go binary.
 
 > **Testing crier?** Start with [TESTERS.md](TESTERS.md) — a per-mode checklist,
-> the known rough edges, and how to report. Interactive API docs ship at
-> **/docs** on any running server.
+> the known rough edges, and how to report. A **static** spec browser ships at
+> **/docs** on any running server: one self-contained HTML page (no CDN, no
+> Swagger-UI — it works offline) that links the machine-readable
+> **/openapi.json** and **/openapi.yaml**. It is *not* an interactive request
+> console — fire your requests with curl or any HTTP client, as TESTERS.md §1 does.
 
 ![The crier fleet — agents on their own platforms, passing glowing messages along luminous paths](docs/img/agents-wide.png)
 
@@ -157,20 +160,24 @@ make run
 > per-message budget — `CR_GUARD_TIMEOUT_MS`) before it is webhook-POSTed
 > or inbox-stored. For local dev without an API key, set
 > `CR_GUARD_ENABLED=false`; to exercise the guard, set `DEEPSEEK_API_KEY`.
-> Without a key the guard call fails and the guard fails OPEN — the
-> delivery proceeds, marked `X-Crier-Guard-Error: true`. Note the over-cap
+> Without a key the guard call fails (`reason: guard_error: all providers
+> failed: no provider api key`) and the guard fails OPEN — the delivery
+> proceeds, the deliver response carries `"guard":{…,"errored":true}` and the
+> outbound webhook POST carries `X-Crier-Guard-Error: true`. Note the over-cap
 > path is deterministic: it runs regardless of the guard LLM's health, so a
 > keyless deployment still gets it. If a workload legitimately sends
 > machine-generated bodies above the cap, raise
 > `CR_GUARD_MAX_PAYLOAD_BYTES`, or silence the noisy class per policy
 > (`"checks":{"masquerade":false}` — the class's prematch patterns are then
-> suppressed); extra patterns appended via `CR_GUARD_PATTERNS_EXTRA` opt
-> into the low-confidence treatment with `"confidence":"low"`. See
+> suppressed); extra patterns appended via `CR_GUARD_PATTERNS_EXTRA` are
+> high-confidence (able to block an over-cap payload) unless they declare
+> `"confidence":"low"`, which opts them into the report-only treatment.
+> See
 > [Message guard (LLM)](#message-guard-llm).
 
 ### Try it
 
-A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except `/health` and `/version` needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped:
+A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except the **five exempt paths** — `/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` (the list is the switch in `internal/middleware/auth.go`) — needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped. Measured on a running server: all five answer `200` with no token, and `GET /agents` answers `401`:
 
 ```bash
 AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
@@ -196,7 +203,21 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Typ
   -d '{"payload":{"hello":"world"},"ttl_seconds":3600}'
 # 201 {"id":"...","transport":"inbox","expires_at":"..."}  (expires_at = created_at + ttl_seconds)
 
-# 3. Retrieve — agent-scoped endpoints require per-agent request signatures by
+# 3. Publish to a relay topic (pub/sub). `X-Agent-ID` is the header the relay
+#    requires — the per-agent rate limiter keys on it and a publish without it
+#    is 401. The signature trio is NOT verified on this endpoint (measured at
+#    HEAD: a stale `X-Agent-Ts` and a bogus `X-Agent-Sig` both still answer
+#    202); it is enforced on the agent-scoped endpoints in steps 4-6, which is
+#    why the shared `sig` helper is used here too. A publish to a topic with no
+#    live subscriber still answers 202 and drops the event (see §1).
+TS=$(date +%s)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -H 'X-Agent-ID: agent-1' \
+  -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig POST /relay/publish "$TS")" \
+  -d '{"topic":"demo-topic","event":{"hello":"subscribers"}}'
+# 202 — drop the trio and it is still 202; drop `X-Agent-ID` and it is 401.
+
+# 4. Retrieve — agent-scoped endpoints require per-agent request signatures by
 #    default (CR_REQUIRE_AGENT_SIG=true). This covers inbox retrieve/ack/stats
 #    AND DELETE /agents/{id}. Headers:
 #      X-Agent-ID  agent id
@@ -210,7 +231,7 @@ curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
 # 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
 # Note: message payloads are base64-encoded on the wire ([],byte form)
 
-# 4. Ack the message — message_ids is REQUIRED (an ack without it is rejected
+# 5. Ack the message — message_ids is REQUIRED (an ack without it is rejected
 #    with 400: it would otherwise be a silent no-op and the message would be
 #    redelivered after lease expiry). Sign "POST\n/agents/agent-1/inbox/ack\n<ts>".
 TS=$(date +%s)
@@ -224,7 +245,7 @@ CR_REQUIRE_AGENT_SIG=false make run
 curl -s localhost:8767/agents/agent-1/inbox
 # 200 — no signature headers required
 
-# 5. Delete the agent — DELETE /agents/{id} requires the same per-agent
+# 6. Delete the agent — DELETE /agents/{id} requires the same per-agent
 #    signature (not just inbox endpoints). Sign "DELETE\n/agents/agent-1\n<ts>".
 TS=$(date +%s)
 curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
@@ -292,6 +313,28 @@ signing `METHOD\n<path>\n<unix-seconds>` — the query string is excluded.
   bridge at a fresh in-memory server. Set the variable for any long-lived
   bridge.
 
+#### MCP tools
+
+The MCP server exposes **13 tools** (measured live via a `tools/list` stdio
+exchange). The argument names below are the properties of each tool's
+`InputSchema` in `internal/mcp/server.go`; `*` marks a required argument.
+
+| Tool | Arguments |
+|------|-----------|
+| `register_agent` | `id`*, `public_key`* (hex ed25519, 64 chars), `capabilities` (string array, default `[]`) |
+| `list_agents` | _none_ |
+| `get_agent` | `id`* |
+| `unregister_agent` | `id`* |
+| `deliver_message` | `agent_id`*, `payload`* (JSON object) |
+| `retrieve_inbox` | `agent_id`*, `max_messages` (int 1-100, default `10`), `lease_seconds` (int 1-3600, default `30`) |
+| `ack_messages` | `agent_id`*, `lease_id`*, `message_ids`* (string array, min 1) |
+| `inbox_stats` | `agent_id`* |
+| `send_message` | `agent_id`*, `payload`*, `reply_to` (optional correlation id) |
+| `get_messages` | `max` (int 1-100, default `10`) |
+| `ask_agent` | `agent_id`*, `payload`*, `timeout_s` (default `30`, max `300`) |
+| `mesh_peers` | _none_ |
+| `mesh_request` | `target`*, `method`*, `path`*, `body` (opaque JSON), `timeout_ms` (default `15000`) |
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections.
@@ -339,7 +382,7 @@ Every inbound delivery is classified by an LLM message guard before it reaches t
 - **block** — uniform `403 GUARD_BLOCKED` with the full verdict; the message is never queued, never stored, never POSTed.
 - **sanitize** — the guard LLM REWRITES the payload with a fixed neutralization prompt and the **rewritten payload is delivered in place of the original** (validated before delivery: valid JSON, pattern-clean, size-capped). The original rides in `crier.guard.quarantined_payload` (base64) for provenance — the original is never delivered on a sanitize verdict. If the rewrite is unavailable: fail-closed policies block, fail-open policies deliver a deterministic quarantine notice.
 - **Fail-open by default** — an LLM error (provider down, timeout, missing API key) resolves to `allow` with `errored: true`; per-policy `fail_closed: true` flips this to the policy's error action (default `block`). The deterministic pre-scan is the exception and is never disabled by an LLM outage: if it matched a **high-confidence** pattern (explicit injection/jailbreak text, control keys, structural escapes), the fail-open outcome escalates to `block`/`high` with `reason: "guard_error: …; deterministic prematch block: <names>"` — the same evidence that blocks an over-cap payload without any LLM call. Its matches (empty, or low-confidence shape hits only) otherwise ride along in `matched_patterns` instead of being discarded.
-- **Outcome on the wire** — the outbound webhook POST carries `X-Crier-Guard-*` headers: `X-Crier-Guard-Decision`, `X-Crier-Guard-Risk`, `X-Crier-Guard-Reason` (percent-encoded), `X-Crier-Guard-Patterns` (comma-joined), `X-Crier-Guard-Policy`, `X-Crier-Guard-Provider`, `X-Crier-Guard-Model`, and `X-Crier-Guard-Error: true` on the error path. Blocked messages never POST. Inbox entries and deliver responses carry the same verdict as `crier.guard` metadata — on a deliver response the `guard` object is omitted only for a **clean** allow (no error, risk `low`, no `matched_patterns`); an allow that carries any risk marker is surfaced so it can't be mistaken for a clean pass.
+- **Outcome on the wire** — the outbound webhook POST carries `X-Crier-Guard-*` headers: `X-Crier-Guard-Decision`, `X-Crier-Guard-Risk`, `X-Crier-Guard-Reason` (percent-encoded), `X-Crier-Guard-Patterns` (comma-joined), `X-Crier-Guard-Policy`, `X-Crier-Guard-Provider`, `X-Crier-Guard-Model`, and `X-Crier-Guard-Error: true` on the error path. A header whose verdict value is empty is omitted rather than sent blank (`Patterns`/`Policy`/`Provider`/`Model`), and `-Error` appears only when the guard errored. Blocked messages never POST. Inbox entries and deliver responses carry the same verdict as `crier.guard` metadata — on a deliver response the `guard` object is omitted only for a **clean** allow (no error, risk `low`, no `matched_patterns`); an allow that carries any risk marker is surfaced so it can't be mistaken for a clean pass.
 - **Per-agent policy** — guard policy is configured at agent registration: `"guard":{"policies":[{"id":"default"}]}` (at least one policy required; invalid config → 400). A bare id resolves to the built-in named policy; inline policies (`{model, base_url, api_key_ref, fail_closed, action, providers, ...}`) are accepted, and `channel_match` globs (`session:*`, `thread:*`) scope a policy to specific channels. Agents without a guard config use the server-wide default (`CR_GUARD_DEFAULT_POLICY`, built-in `default` when unset).
 - **Providers** — each policy declares a failover chain (`providers`, implicit `[deepseek]` when omitted). Presets: `deepseek` (default, model `deepseek-v4-flash`, thinking disabled — the preset hard-rejects `thinking_enabled`), `groq` (default `gpt-oss-120b`), `nvidia` (default `gemma-4-31b`), or `custom` (requires `base_url` + `api_key_ref`). API keys are referenced as `env:VAR` and never stored inline (deepseek preset → `DEEPSEEK_API_KEY`). The router takes the first healthy provider: one retry (250ms backoff) on 429/5xx/network errors, a per-endpoint circuit breaker (`CR_GUARD_CIRCUIT_*`), a concurrency cap (`CR_GUARD_MAX_CONCURRENT`), and one per-message time budget across the whole chain (`CR_GUARD_TIMEOUT_MS`, default 10s).
 - **Kanban output (opt-in)** — a policy can enable fire-and-forget kanban cards (`"kanban":{"enabled":true,"on":"block"|"all","assignee":...,"board_url":...}`): each scoped verdict posts a card (`[crier-guard] <agent> <decision>: <reason>`, full verdict metadata, sender, truncated payload excerpt) through the `hermes kanban create` CLI or an HTTP sink (`CR_GUARD_KANBAN_URL`). Writes are bounded (queue `CR_GUARD_KANBAN_QUEUE`, default 100; 10s per card) and never fail the delivery — full queue drops + counts, write failures log + count.
@@ -375,7 +418,7 @@ All configuration is via environment variables (defaults shown):
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5432/crier?sslmode=disable` |
-| `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests except `/health` and `/version` require `Authorization: Bearer <token>`; unset = no auth (local dev). |
+| `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
@@ -416,7 +459,15 @@ All configuration is via environment variables (defaults shown):
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec covering 17 endpoints across 7 operation groups:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **13 paths** and **17 operations** (a path carries one entry per HTTP method, so the two counts differ) across 7 operation groups. Every count in this README names its unit; measure them yourself:
+
+```bash
+grep -c '^  /' docs/openapi.yaml                                    # 13 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 17 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 16 router paths
+```
+
+The router registers **16 paths**: those 13 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -450,7 +501,7 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 16 HTTP endpoints wired with middleware, graceful shutdown
+- **API** — 16 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 13 paths / 17 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

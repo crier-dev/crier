@@ -170,7 +170,9 @@ claims:
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
     doc: README.md
-    quote: "17 endpoints"
+    # CR-GAP-057: the README now names the unit ("13 paths and 17 operations")
+    # instead of the old conflatable "17 endpoints"; only the anchor moved.
+    quote: "17 operations"
     expect: 17
     xfail: null
   - id: COUNT-MCP-TOOLS
@@ -179,10 +181,22 @@ claims:
     quote: "13 tools"
     expect: 13
     xfail: null
+  # CR-GAP-057: the README now publishes the same MCP inventory (a tools table
+  # with per-tool arguments). Same id and the same live probe (a real tools/list
+  # stdio exchange) — the claim is anchored in both docs so either can drift
+  # loudly. The id is shared on purpose: liveCount() keys the measurement by id.
+  - id: COUNT-MCP-TOOLS
+    kind: count
+    doc: README.md
+    quote: "13 tools"
+    expect: 13
+    xfail: null
   - id: COUNT-ROUTER-PATHS
     kind: count
     doc: README.md
-    quote: "16 HTTP endpoints"
+    # CR-GAP-057: was "16 HTTP endpoints" — the unit is now explicit (router
+    # registrations in cmd/server/main.go), so the anchor moved with it.
+    quote: "16 router paths"
     expect: 16
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
