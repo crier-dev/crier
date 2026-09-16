@@ -103,7 +103,10 @@ audit) tasks remain open by design.
 - **Blocking mode** = synchronous: the deliver HTTP call waits for the
   receiver's 2xx, extracts the reply per schema `response_map`, and returns
   `{"id","reply","session_id"}` to the sender. Bounded by `timeout_ms`
-  (request-level or agent default). Failure → 504 with last status.
+  (request-level or agent default). Failure → 502 for a permanent reject, 504
+  for timeout/budget exhaustion (corrected 2026-09-16: permanent rejects became
+  502 in DF-CRIER-157; 504 is timeout/budget only — see
+  specs/WEBHOOK-DELIVERY.md:95).
 - **Async/batch** = queue + worker: 202 immediately, POST happens off-thread;
   batch coalesces to `{"messages":[...]}` on `max_messages` or flush interval.
 - **HMAC**: `CR_WEBHOOK_SECRET` → `X-Crier-Signature =
@@ -128,7 +131,9 @@ audit) tasks remain open by design.
    does not exist. Observed cadence 30s (not `CR_WEBHOOK_REDELIVER_S=5`) and
    attempt count from the server default (per-agent `retries` ignored,
    DF-CRIER-9).
-4. **Wrong reply shape for the template** → 504 with a GOOD error message
+4. **Wrong reply shape for the template** → 502 (corrected 2026-09-16: permanent
+   rejects became 502 in DF-CRIER-157; 504 is timeout/budget only — see
+   specs/WEBHOOK-DELIVERY.md:95) with a GOOD error message
    (`response map "choices.0.message.content": missing key "choices"`) —
    this is the model error path; extraction errors are loud, unlike the
    silent drops above.

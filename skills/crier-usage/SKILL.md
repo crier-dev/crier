@@ -76,7 +76,8 @@ DELETE; a PATCH without the sig headers → 401):
 - **blocking** — deliver call waits; receiver's 2xx body becomes `"reply"` in
   the deliver response. Extract via schema `response_map`; `openai-compatible`
   expects `$.choices[0].message.content` (map `payload.text` → the prompt).
-  A wrong reply body → 504 with the exact missing-key path (good error).
+  A wrong reply body → 502 with the exact missing-key path (good error); only a
+  timeout / exhausted budget is 504.
 - **async/batch** — 202 immediately; batch coalesces N deliveries into ONE
   POST (`X-Crier-Event: batch`, body `{"messages":[envelopes]}`).
 - **HMAC**: set `CR_WEBHOOK_SECRET`; every outbound POST carries

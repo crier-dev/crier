@@ -33,7 +33,7 @@ is a starting point.
 | HMAC verification (receiver side) | `X-Crier-Signature` == hex(hmac_sha256(CR_WEBHOOK_SECRET, raw_body)) — verified in Python, exact match |
 | Session/thread context | `X-Crier-Session` header + `crier.session_id` + echoed back in the deliver response |
 | `PATCH /agents/{id}` self-configuration | Signed with the agent's ed25519 key (`"PATCH\n/agents/{id}\n<ts>"`), swapped webhook URL live; next deliver hit the new endpoint |
-| openai-compatible template | `payload.text` → `messages:[{role:user,content:...}]` + default `model`; reply extracted via `$.choices[0].message.content`; a wrong reply body → clean 504 with the exact missing-key path |
+| openai-compatible template | `payload.text` → `messages:[{role:user,content:...}]` + default `model`; reply extracted via `$.choices[0].message.content`; a wrong reply body → clean 502 (corrected 2026-09-16: permanent rejects became 502 in DF-CRIER-157; 504 is timeout/budget only — see specs/WEBHOOK-DELIVERY.md:95) with the exact missing-key path |
 | Async mode | 202 immediately, guard verdict in the response body; receiver POSTed seconds later |
 | Batch mode | 5 batch-mode deliveries → exactly ONE POST (`X-Crier-Event: batch`, `{"messages":[...5 envelopes]}`), worst-case guard verdict in headers, per-message guard metadata inside each envelope |
 | Cross-relay delivery | deliver on A to an agent registered on B → lands in B's inbox with lease + guard metadata intact; agent tables exchanged via `GET /fed/peers` |
