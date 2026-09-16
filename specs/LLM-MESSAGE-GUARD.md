@@ -286,7 +286,11 @@ Rewrite mechanics:
    (base64 std encoding) on the envelope — provenance, always present on sanitize.
 2. The rewrite call asks the LLM to strip all instructions directed at the receiving agent
    while preserving benign intent, questions, or data — and to preserve the original
-   structure (a JSON payload must come back as a JSON object of the same shape).
+   structure (a JSON payload must come back as a JSON object of the same shape). Its own
+   input is bounded exactly like the classifier's (section 6): under the render cap the
+   payload goes through verbatim; above it, valid-JSON payloads get the structure-aware
+   projection and non-JSON payloads a rune-safe truncation, so the rewrite model never
+   receives a cut that breaks JSON shape or splits a UTF-8 rune (DF-CRIER-186).
 3. The rewrite output is **validated before delivery**:
    - must parse (tolerated: code fences stripped, first balanced JSON object);
    - `{"rewritten": null, "block": true}` → no benign content → escalate to `block`;

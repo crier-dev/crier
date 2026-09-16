@@ -5,7 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
+
+// truncateRuneSafe bounds s to maxBytes WITHOUT splitting a multi-byte
+// UTF-8 rune (DF-CRIER-186). When len(s) <= maxBytes s is returned
+// unchanged (ASCII output is therefore byte-identical to a naive
+// s[:maxBytes]). Otherwise the cut backs off from maxBytes to the start
+// of the last COMPLETE rune whose bytes fit, so the result is always
+// valid UTF-8.
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 // Render projects a payload into the guard's user-message payload section
 // (spec §6). JSON payloads get a schema-aware text projection (§6.1);
@@ -35,7 +53,7 @@ func Render(payload []byte, maxBytes int) (string, error) {
 	n := len(payload)
 	trunc := ""
 	if n > maxBytes {
-		payload = payload[:maxBytes]
+		payload = []byte(truncateRuneSafe(string(payload), maxBytes)) // rune-safe cut (DF-CRIER-186)
 		trunc = "\n…(truncated)"
 	}
 	return fmt.Sprintf("<text_envelope length=%d>\n%s%s\n</text_envelope>", n, string(payload), trunc), nil
@@ -168,7 +186,15 @@ func emitLine(w *strings.Builder, line string, budget *int) bool {
 		if rest > 8 {
 			rest = 8
 		}
-		w.WriteString(line[:rest])
+		// Rune-safe partial cut (DF-CRIER-186): a 3-byte rune straddling
+		// the tail boundary must never be split. If the cut would land
+		// mid-rune (backed off to a shorter, still-rune-safe prefix) the
+		// visible tail is dropped rather than show a broken rune.
+		partial := truncateRuneSafe(line, rest)
+		if len(partial) != rest {
+			partial = ""
+		}
+		w.WriteString(partial)
 		w.WriteString("\n")
 		*budget = 0
 		return false

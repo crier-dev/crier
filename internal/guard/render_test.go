@@ -3,6 +3,7 @@ package guard
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestRender_JSONProjection(t *testing.T) {
@@ -139,5 +140,43 @@ func TestRender_Deterministic(t *testing.T) {
 	b, _ := Render(payload, 32768)
 	if a != b {
 		t.Fatalf("projection not deterministic:\n%s\nvs\n%s", a, b)
+	}
+}
+
+// TestRender_TextEnvelopeRuneSafe (T5a): a non-JSON payload whose 3-byte
+// rune straddles the cap must not split the rune — output stays valid
+// UTF-8 and keeps the truncation marker (DF-CRIER-186). With the pre-fix
+// `payload = payload[:maxBytes]` this fails: the cut lands mid-rune and
+// utf8.ValidString is false (verified against the old line once).
+func TestRender_TextEnvelopeRuneSafe(t *testing.T) {
+	payload := []byte(strings.Repeat("a", 30) + "€" + strings.Repeat("b", 10)) // rune starts at byte 30, ends at 33
+	out, err := Render(payload, 32)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !utf8.ValidString(out) {
+		t.Errorf("Render output is not valid UTF-8 — rune split mid-sequence:\n%q", out)
+	}
+	if !strings.Contains(out, "…(truncated)") {
+		t.Errorf("truncation marker missing:\n%q", out)
+	}
+	// The cut backs off to a complete rune boundary: 30 a's, no partial €.
+	if !strings.Contains(out, strings.Repeat("a", 30)) || strings.Contains(out, "aaa€") {
+		t.Errorf("rune-safe backoff wrong:\n%q", out)
+	}
+}
+
+// TestRender_TextEnvelopeASCIIByteIdentical (T5b): an ASCII payload's
+// Render output is byte-identical to the pre-change behavior — the
+// rune-safe helper is a no-op on pure ASCII (hard-coded expectation).
+func TestRender_TextEnvelopeASCIIByteIdentical(t *testing.T) {
+	payload := []byte("plain ascii text, exactly over budget here padding") // 50 bytes
+	out, err := Render(payload, 40)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := "<text_envelope length=50>\n" + string(payload[:40]) + "\n…(truncated)\n</text_envelope>"
+	if out != want {
+		t.Errorf("ASCII envelope changed:\n got %q\nwant %q", out, want)
 	}
 }

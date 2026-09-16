@@ -38,11 +38,30 @@ type rewriteResult struct {
 //     block; fail-open → deterministic quarantine), NEVER delivers the
 //     original on a sanitize decision.
 func (g *Guard) rewritePayload(ctx context.Context, in Input, policy Policy, reason string) (rewritten []byte, block bool, err error) {
-	// User message = the raw payload, preserved as-is so JSON structure
-	// survives; truncated at the render cap.
+	// User message bounding (DF-CRIER-186): the old code took a raw byte
+	// slice at g.renderMaxBytes, which can cut a JSON payload mid-structure
+	// (the model is asked to preserve JSON shape, so it must never receive a
+	// cut that no longer parses) and can split a multi-byte UTF-8 rune
+	// mid-sequence. Bound instead:
+	//   - within the cap → the payload verbatim, no marker (common case,
+	//     byte-for-byte identical to today);
+	//   - above the cap and valid JSON → the same bounded, structure-aware
+	//     Render projection the classifier uses (spec §6.1) — named paths
+	//     plus Render's own visible truncation marker instead of a mangled
+	//     prefix;
+	//   - above the cap and non-JSON → rune-safe raw truncation at the cap
+	//     with a visible truncation marker.
 	user := string(in.Payload)
 	if len(user) > g.renderMaxBytes {
-		user = user[:g.renderMaxBytes] + "\n[truncated]"
+		if json.Valid(in.Payload) {
+			projection, rerr := Render(in.Payload, g.renderMaxBytes)
+			if rerr != nil {
+				return nil, false, fmt.Errorf("rewrite: render: %w", rerr)
+			}
+			user = projection
+		} else {
+			user = truncateRuneSafe(user, g.renderMaxBytes) + "\n[truncated]"
+		}
 	}
 	provider, model, content, err := g.router.Check(ctx, policy, rewriteSystemPrompt, user)
 	if err != nil {
