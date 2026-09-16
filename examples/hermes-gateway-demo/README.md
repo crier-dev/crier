@@ -63,10 +63,17 @@ continuity programmatically, not just visually.
 ### thread_id mapping (v1 note)
 
 The envelope field `crier.thread_id` exists and the template already maps it
-(`"thread_id": "{{crier.thread_id}}"`), but the v1 HTTP deliver API
-(`POST /agents/{id}/inbox`) does not yet carry a `thread_id` field — thread
-context on this surface rides in the **payload** (`payload.thread_id`), which
-is exactly what the demo sends. The moment any delivery surface populates the
+(`"thread_id": "{{crier.thread_id}}"`), and the v1 HTTP deliver API
+(`POST /agents/{id}/inbox`) does carry a top-level `thread_id` field:
+`deliverRequest.ThreadID` is declared at `internal/registry/handler.go:47-51`
+(`json:"thread_id,omitempty"`) and passed straight into the webhook envelope at
+`internal/registry/handler.go:584` (`webhook.EnvelopeMeta.ThreadID`,
+`internal/webhook/webhook.go:128`), which the `{{crier.thread_id}}` body slot
+renders — `docs/openapi.yaml:486-488` documents the field on the deliver body
+(both landed in `ae71cbc`, CR-FEAT-011). This demo nonetheless sends its
+`thread_id` inside the payload (`payload.thread_id` — `run-demo.sh:170,213`),
+so the demo's own body slot reads empty; that is the demo's request shape, not
+an API or template limitation. The moment any delivery surface populates the
 envelope's `thread_id` (e.g. the mesh bridge), it flows through the template
 unchanged. The adapter echoes both the `session_id` and the `thread_id` it
 receives on the wire inside every reply.
@@ -96,8 +103,11 @@ body slot, now populated, and the `X-Crier-Session` header, which `postBody` set
 directly from the envelope (not through the template) and which the adapter logs +
 verifies on both turns. The blocking API response's `session_id` field
 (server-side echo) is likewise unaffected. The body slot's `thread_id` is still
-empty, but that is not a template limitation: no v1 delivery surface populates
-the envelope's `thread_id` — see *thread_id mapping (v1 note)* above. The
+empty, but that is not a template or API limitation: since `ae71cbc`
+(CR-FEAT-011) the deliver API does carry a top-level `thread_id`
+(`internal/registry/handler.go:47-51,584`, `docs/openapi.yaml:486-488`), and
+this demo sends its `thread_id` inside the payload instead
+(`run-demo.sh:170,213`) — see *thread_id mapping (v1 note)* above. The
 adapter is already forward-compatible: it prefers the body slot when
 populated and falls back to the header.
 
