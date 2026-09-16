@@ -10,11 +10,13 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +38,12 @@ type RemoteStore struct {
 	token   string
 	priv    ed25519.PrivateKey
 	client  *http.Client
+
+	// listMu guards listErr, the recorded failure of the LAST List call
+	// (nil when it succeeded), exposed via ListError so bridge callers
+	// can tell a failing backend from an empty registry (DF-CRIER-199).
+	listMu  sync.Mutex
+	listErr error
 }
 
 // RemoteOption customizes a RemoteStore.
@@ -241,17 +249,44 @@ func (s *RemoteStore) Get(id string) (*Agent, error) {
 	return &agent, nil
 }
 
+// List fetches all agents from the remote server.
+//
+// Per the Store contract (the signature Store.List() []*Agent cannot carry
+// an error), a failing request still returns a non-nil empty slice — but
+// unlike before, the failure is no longer silent: it is logged at Error
+// level once per occurrence (status + response body included via the
+// wrapped error from do) and recorded for ListError, so the MCP bridge
+// surface can tell a failing backend from an empty registry
+// (DF-CRIER-199). ListError describes the LAST call: a successful List
+// clears it.
 func (s *RemoteStore) List() []*Agent {
 	var out struct {
 		Agents []*Agent `json:"agents"`
 	}
 	if err := s.do(http.MethodGet, "/agents", nil, &out); err != nil {
+		slog.Error("remote list", "error", err, "store_url", s.baseURL)
+		s.listMu.Lock()
+		s.listErr = err
+		s.listMu.Unlock()
 		return []*Agent{}
 	}
+	s.listMu.Lock()
+	s.listErr = nil
+	s.listMu.Unlock()
 	if out.Agents == nil {
 		return []*Agent{}
 	}
 	return out.Agents
+}
+
+// ListError returns the failure of the last List call, nil when it
+// succeeded. It implements the optional ListErrorReporter Store capability
+// (store.go), which callers like the MCP bridge's list_agents handler use
+// to answer with an error instead of a laundered empty agent list.
+func (s *RemoteStore) ListError() error {
+	s.listMu.Lock()
+	defer s.listMu.Unlock()
+	return s.listErr
 }
 
 func (s *RemoteStore) Unregister(id string) error {

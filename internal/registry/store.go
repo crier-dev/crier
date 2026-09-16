@@ -52,6 +52,17 @@ type updater interface {
 	Update(agent *Agent) error
 }
 
+// ListErrorReporter is an optional Store capability for implementations
+// whose List() cannot return an error but must not launder a failing
+// backend into an indistinguishable empty registry (DF-CRIER-199).
+// ListError reports the failure of the LAST List call: non-nil after a
+// failed one, nil after a successful one. Stores that cannot fail
+// (MemoryStore) simply do not implement it — List() then stays the whole
+// contract.
+type ListErrorReporter interface {
+	ListError() error
+}
+
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store
