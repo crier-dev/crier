@@ -476,6 +476,27 @@ func initStore(cfg config.Config) (registry.Store, func(), error) {
 - Drain any in-flight tool calls (context cancellation)
 - Flush stdout and exit 0
 
+### 5.6 Unknown Arguments Are Rejected (DF-CRIER-190)
+
+Step 3 of §5.2 is strict: a member of `params.arguments` that no field of the
+tool's input struct claims is an error, not a silent drop. `encoding/json`
+discards unknown members by default, so a misspelled or invented argument used
+to yield a SUCCESSFUL call whose parameter was ignored and whose default was
+substituted (`max_messges` answered at `max_messages=10`; `timeout_ms` waited
+the 30s `timeout_s` default) — the caller could not tell.
+
+- The decode is strict at the **top level of the arguments object only**.
+- The error names the offending member(s): `invalid arguments: unknown
+  argument "max_messges"`.
+- It is an **ordinary tool result** — `content: [{type: "text", text: ...}]`
+  with `isError: true` — never a JSON-RPC protocol error, and the server keeps
+  answering subsequent calls.
+- A tool whose schema declares no properties (`list_agents`, `mesh_peers`)
+  rejects any member at all; an absent or `null` `arguments` means `{}`.
+- Nested values stay opaque: `payload`, `body`, `capabilities` and any custom
+  sub-object are decoded into `json.RawMessage` / `map[string]any` / `any` and
+  reach the handler untouched, so unknown keys **inside** them are accepted.
+
 ---
 
 ## 6. Data

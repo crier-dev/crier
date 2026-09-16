@@ -335,6 +335,14 @@ exchange). The argument names below are the properties of each tool's
 | `mesh_peers` | _none_ |
 | `mesh_request` | `target`*, `method`*, `path`*, `body` (opaque JSON), `timeout_ms` (default `15000`) |
 
+Unknown arguments are rejected: a member of `arguments` that is not one of the
+tool's declared properties is a normal tool error naming it — `invalid
+arguments: unknown argument "max_messges"` — instead of being dropped and
+silently replaced by a default. The contract covers the top-level `arguments`
+object only: the value of an opaque `payload` (`deliver_message`,
+`send_message`, `ask_agent`) or `body` (`mesh_request`) is passed through
+untouched, so what lives inside it is the caller's business (DF-CRIER-190).
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections.

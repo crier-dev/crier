@@ -13,8 +13,8 @@ import (
 // handleRegisterAgent — spec §4.1, Appendix B.
 func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
 	var in RegisterAgentInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.ID == "" {
 		return nil, fmt.Errorf("id is required")
@@ -40,8 +40,12 @@ func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
 	return agent, nil
 }
 
-// handleListAgents — spec §4.2.
+// handleListAgents — spec §4.2. Takes no arguments.
 func (s *MCPServer) handleListAgents(args json.RawMessage) (any, error) {
+	// Declared with an empty schema: any member at all is a caller mistake.
+	if err := decodeArgs(args, &struct{}{}); err != nil {
+		return nil, err
+	}
 	agents := s.store.List()
 	if agents == nil {
 		agents = []*registry.Agent{}
@@ -52,8 +56,8 @@ func (s *MCPServer) handleListAgents(args json.RawMessage) (any, error) {
 // handleGetAgent — spec §4.3.
 func (s *MCPServer) handleGetAgent(args json.RawMessage) (any, error) {
 	var in GetAgentInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.ID == "" {
 		return nil, fmt.Errorf("id is required")
@@ -68,8 +72,8 @@ func (s *MCPServer) handleGetAgent(args json.RawMessage) (any, error) {
 // handleUnregisterAgent — spec §4.4.
 func (s *MCPServer) handleUnregisterAgent(args json.RawMessage) (any, error) {
 	var in UnregisterAgentInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.ID == "" {
 		return nil, fmt.Errorf("id is required")
@@ -83,8 +87,8 @@ func (s *MCPServer) handleUnregisterAgent(args json.RawMessage) (any, error) {
 // handleDeliverMessage — spec §4.5.
 func (s *MCPServer) handleDeliverMessage(args json.RawMessage) (any, error) {
 	var in DeliverMessageInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -109,8 +113,8 @@ func (s *MCPServer) handleDeliverMessage(args json.RawMessage) (any, error) {
 // handleRetrieveInbox — spec §4.6, Appendix B.
 func (s *MCPServer) handleRetrieveInbox(args json.RawMessage) (any, error) {
 	var in RetrieveInboxInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -140,8 +144,8 @@ func (s *MCPServer) handleRetrieveInbox(args json.RawMessage) (any, error) {
 // handleAckMessages — spec §4.7.
 func (s *MCPServer) handleAckMessages(args json.RawMessage) (any, error) {
 	var in AckMessagesInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -161,8 +165,8 @@ func (s *MCPServer) handleAckMessages(args json.RawMessage) (any, error) {
 // handleInboxStats — spec §4.8.
 func (s *MCPServer) handleInboxStats(args json.RawMessage) (any, error) {
 	var in InboxStatsInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")

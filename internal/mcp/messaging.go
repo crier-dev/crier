@@ -62,8 +62,8 @@ func (s *MCPServer) requireAgentID() error {
 // set, the payload gains a crier_reply_to field for correlation.
 func (s *MCPServer) handleSendMessage(args json.RawMessage) (any, error) {
 	var in SendMessageInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -98,8 +98,8 @@ func (s *MCPServer) handleGetMessages(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	var in GetMessagesInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	max := in.Max
 	if max <= 0 {
@@ -145,8 +145,8 @@ func (s *MCPServer) handleAskAgent(args json.RawMessage) (any, error) {
 		return nil, err
 	}
 	var in AskAgentInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
@@ -211,10 +211,14 @@ func (s *MCPServer) handleAskAgent(args json.RawMessage) (any, error) {
 // ---- mesh_peers -------------------------------------------------------------
 
 // handleMeshPeers lists the agents currently connected to the mesh, via the
-// server's HTTP API.
+// server's HTTP API. Takes no arguments.
 func (s *MCPServer) handleMeshPeers(args json.RawMessage) (any, error) {
 	if s.httpURL == "" {
 		return nil, fmt.Errorf("mesh_peers requires CRIER_HTTP_URL")
+	}
+	// Declared with an empty schema: any member at all is a caller mistake.
+	if err := decodeArgs(args, &struct{}{}); err != nil {
+		return nil, err
 	}
 	var out struct {
 		Peers []struct {
@@ -250,8 +254,8 @@ func (s *MCPServer) handleMeshRequest(args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("mesh_request requires CRIER_MESH_URL and CRIER_AGENT_ID")
 	}
 	var in MeshRequestInput
-	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if err := decodeArgs(args, &in); err != nil {
+		return nil, err
 	}
 	if in.Target == "" || in.Method == "" || in.Path == "" {
 		return nil, fmt.Errorf("target, method and path are required")
