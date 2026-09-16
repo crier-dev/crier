@@ -66,13 +66,24 @@ func (c *Circuit) recordSuccess(key string) {
 
 // recordFailure counts a consecutive failure; at the threshold the circuit
 // trips for the cooldown window.
+//
+// The trip time is (re-)stamped when the stored openedAt is absent OR is
+// already past its cooldown: the latter is the failed-probe case — the call
+// allowed through after the cooldown expired has now failed, so the circuit
+// must be re-armed for a fresh window. Without the re-stamp the original trip
+// time is kept forever, open() keeps computing now-openedAt >= cooldown, and
+// every subsequent request becomes an unthrottled probe against a dead
+// provider. A failure recorded while the window is still OPEN keeps the
+// original trip time and does not extend it.
 func (c *Circuit) recordFailure(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.failures[key]++
-	if c.failures[key] >= c.threshold {
-		if _, exists := c.openedAt[key]; !exists {
-			c.openedAt[key] = c.now()
-		}
+	if c.failures[key] < c.threshold {
+		return
+	}
+	opened, ok := c.openedAt[key]
+	if !ok || c.now().Sub(opened) >= c.cooldown {
+		c.openedAt[key] = c.now()
 	}
 }
