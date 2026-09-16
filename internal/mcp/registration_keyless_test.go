@@ -14,13 +14,11 @@ func keylessServer() *MCPServer {
 	return NewWithOptions(registry.NewMemoryStore(), Options{AllowKeylessAgents: true})
 }
 
-// wireAgent reads an agent JSON document WITHOUT decoding public_key into
-// registry.HexKey: HexKey.UnmarshalJSON rejects the empty key (DF-CRIER-198
-// owns that read-side decode), so tests here assert on the raw wire form.
-type wireAgent struct {
-	ID        string `json:"id"`
-	PublicKey string `json:"public_key"`
-}
+// wireAgent reads an agent JSON document with the real public_key type:
+// since DF-CRIER-198 registry.HexKey decodes the empty key into the keyless
+// representation, these tests assert on the typed agent — the same decode
+// the HTTP read path performs.
+type wireAgent = registry.Agent
 
 // =============================================================================
 // DF-CRIER-197: register_agent mirrors the HTTP handler's conditional
@@ -85,8 +83,8 @@ func TestRegisterAgent_KeylessAllowedRegistersEmptyKey(t *testing.T) {
 	if agent.ID != "keyless-1" {
 		t.Errorf("expected id keyless-1, got %s", agent.ID)
 	}
-	if agent.PublicKey != "" {
-		t.Errorf("expected empty public_key for keyless agent, got %q", agent.PublicKey)
+	if len(agent.PublicKey) != 0 {
+		t.Errorf("expected empty public_key for keyless agent, got %x", []byte(agent.PublicKey))
 	}
 
 	// list_agents returns it.
@@ -115,7 +113,7 @@ func TestRegisterAgent_KeylessAllowedRegistersEmptyKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(getText), &fetched); err != nil {
 		t.Fatalf("unmarshal fetched agent: %v", err)
 	}
-	if fetched.ID != "keyless-1" || fetched.PublicKey != "" {
+	if fetched.ID != "keyless-1" || len(fetched.PublicKey) != 0 {
 		t.Errorf("expected keyless-1 with empty key via get_agent, got: %s", getText)
 	}
 }

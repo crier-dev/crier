@@ -253,18 +253,16 @@ func TestRegister_KeylessAgentEmptyKey(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	// The wire public_key of a keyless agent is the empty string. It is
-	// asserted on the raw body — HexKey.UnmarshalJSON (correctly) refuses
-	// an empty hex string on the DECODE side, so unmarshalling into Agent
-	// would fail before the assertion could run.
-	var wire struct {
-		PublicKey string `json:"public_key"`
-	}
+	// The wire public_key of a keyless agent is the empty string, asserted
+	// by decoding the response into the real Agent: since DF-CRIER-198 an
+	// empty HexKey decodes to the keyless representation, so the full read
+	// path is exercised — not just the raw wire form.
+	var wire Agent
 	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire.PublicKey != "" {
-		t.Errorf("wire public_key = %q, want empty", wire.PublicKey)
+	if len(wire.PublicKey) != 0 {
+		t.Errorf("wire public_key = %x, want empty", []byte(wire.PublicKey))
 	}
 	stored, err := store.Get("keyless")
 	if err != nil {

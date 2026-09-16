@@ -27,7 +27,11 @@ func (k HexKey) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(k))
 }
 
-// UnmarshalJSON decodes a hex string into the key.
+// UnmarshalJSON decodes a hex string into the key. An EMPTY key ("", zero
+// decoded bytes) decodes to an empty HexKey — the keyless wire form a
+// signature-enforcement-off agent legally carries since DF-CRIER-192 — so
+// the JSON read path (RemoteStore) matches the in-memory and postgres
+// representations. Any other length still fails the 32-byte guard.
 func (k *HexKey) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -37,10 +41,10 @@ func (k *HexKey) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("invalid hex key: %w", err)
 	}
-	if len(raw) != ed25519.PublicKeySize {
+	if len(raw) != ed25519.PublicKeySize && len(raw) != 0 {
 		return fmt.Errorf("invalid key length: %d, want %d", len(raw), ed25519.PublicKeySize)
 	}
-	*k = make(HexKey, ed25519.PublicKeySize)
+	*k = make(HexKey, len(raw))
 	copy(*k, raw)
 	return nil
 }
