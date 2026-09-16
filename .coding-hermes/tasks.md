@@ -272,3 +272,13 @@ Promise: {"entry_point":"A Go HTTP + WebSocket server binary — `bin/crier` bui
 Verdict: UNKNOWN-VALUE
 Promise: {"entry_point":"HTTP + WebSocket relay server, a self-hosted Go binary built from cmd/server to bin/crier (default listen port :8767, CLI flags -port/-db-url/-version, env-driven via CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG); plus a second binary bin/crier-mcp from cmd/crier-
 
+
+## Dogfood Findings (2026-09-16)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Go HTTP/WebSocket server binary: cmd/server built to bin/crier (default listen :8767, endpoints under /relay, /mesh, /agents, /fed, /health, /version, /docs); a second binary bin/crier-mcp from cmd/crier-mcp is an MCP server exposing the registry + inbox tools. Not a library (though 
+
+- [P1] TESTERS.md's literal 5-minute path 401s on the signature-protected endpoints and its fixtures cannot be signed — Built HEAD 9858f6a and ran TESTERS §1's exact command (only CR_GUARD_ENABLED=false added): register alice/bob 201, POST /agents/bob/inbox 201, then the guide's unsigned GET /agents/bob/inbox -> 401 {"
+- [P1] TESTERS 'known rough edges' table contradicts the shipped binary in 5 of 6 rows, telling testers to skip working surface — At HEAD: row 1 wildcard /relay/subscribe/alerts.* handshake 101 and received the frame published 202; row 2 ttl_seconds honored (expires_at = now+2s, gone at 4s); row 3 unacked redelivery measured 30.
+- [P2] Webhook wire contract diverges from its spec: X-Crier-Agent is the SENDER, and the documented guard marker only exists on webhook POSTs — A header-logging sink recorded X-Crier-Agent: alice (the deliver body's sender; empty when sender is omitted) and the envelope body carries no target at all, while specs/WEBHOOK-DELIVERY.md:56 documen
+- [P2] MCP tools ship without README argument docs, and /docs is not the interactive explorer the README promises — tools/list = 13 tools; deliver_message with {} answers a bare 'agent_id is required' with no schema hint, and the argument truth exists only in inputSchema (deliver_message agent_id+payload; send_mess
+- [P2] An all-leased inbox is wire-indistinguishable from an empty one, and malformed mesh REQUESTs still name no peer — A second signed retrieve while message 1 was still leased returned {"messages":[],"lease_id":""} — byte-identical to the post-ack empty-inbox body; only GET /agents/{id}/inbox/stats revealed leased_co
