@@ -765,3 +765,23 @@ tasks:
   status: complete
   created_at: '2026-09-16T12:46:24.602684+00:00'
   completed_at: '2026-09-16T13:13:08.216547+00:00'
+- id: DF-CRIER-186
+  title: guard sanitize rewrite slices raw JSON at the 32KB render cap mid-structure
+    and mid-rune
+  criteria:
+  - The rewrite call input (internal/guard/rewrite.go) must never be a raw byte slice
+    that cuts a JSON payload mid-structure or a UTF-8 rune mid-sequence; payloads
+    in the (CR_GUARD_RENDER_MAX_BYTES, CR_GUARD_MAX_PAYLOAD_BYTES] band must reach
+    the rewrite model through the same bounded, rune-safe, structure-aware bounding
+    used by the classifier path.
+  - New tests in internal/guard cover the sanitize decision in that size band and
+    assert the exact content handed to the rewrite model (valid UTF-8, rune-intact,
+    bounded, structure-aware for JSON) plus full-payload provenance (QuarantinedPayload
+    base64 of the ORIGINAL payload).
+  - No behavior change for payloads at or below CR_GUARD_RENDER_MAX_BYTES (byte-identical
+    model input, no truncation marker).
+  - go test ./... -count=1 -timeout 60s is 13/13 ok 0 FAIL; go vet ./... clean; gofmt
+    clean on touched files; make docs-check rc=0; gitreins tier-1 guard PASS.
+  status: complete
+  created_at: '2026-09-16T13:31:18.245250+00:00'
+  completed_at: '2026-09-16T14:09:41.391354+00:00'
