@@ -555,3 +555,179 @@ func TestMeshRegister(t *testing.T) {
 		t.Fatal("timed out waiting for register message")
 	}
 }
+
+// --- DF-CRIER-187: the route table must be bounded by the CONFIGURED cap ---
+
+// TestMeshAgentRequestRoutePruneHonorsConfiguredCap is the DF-CRIER-187
+// regression. pruneRoutesLocked() only flushed the route table at a hard-coded
+// 4096 entries while handleAgentRequest refuses a new route once
+// len(routes) >= cfg.MaxPendingRequests, so with the default cap of 50 the 4096
+// branch was unreachable: a REQUEST whose RESPONSE never arrives (silent drop /
+// dead target / malformed frame) kept its route FOREVER and the mesh permanently
+// refused new agent-to-agent REQUESTs with ERROR INTERNAL "mesh route table
+// full" until the process restarted.
+//
+// The cap is configured to 2 so the wedge needs two unanswered requests, not
+// fifty. The third REQUEST must be forwarded.
+func TestMeshAgentRequestRoutePruneHonorsConfiguredCap(t *testing.T) {
+	const cap = 2
+
+	upgrader := websocket.Upgrader{}
+	accepted := make(chan *websocket.Conn, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	cfg := DefaultMeshConfig("agent-A")
+	cfg.MaxPendingRequests = cap
+	cfg.KeepaliveInterval = 10 * time.Minute
+	m := NewMesh(cfg)
+	defer m.Stop()
+
+	// acceptPeer dials the scratch server and hands the server-side end to the
+	// mesh, exactly like the server does for an inbound peer connection. The
+	// returned conn is the TEST side of that peer (what the mesh sends it).
+	acceptPeer := func(peerID string) *websocket.Conn {
+		clientConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("dial %s: %v", peerID, err)
+		}
+		var serverConn *websocket.Conn
+		select {
+		case serverConn = <-accepted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s server connection", peerID)
+		}
+		pc := NewAcceptedPeerConnection(peerID, serverConn)
+		pc.StartReadLoop()
+		m.AcceptPeer(peerID, pc)
+		return clientConn
+	}
+
+	targetConn := acceptPeer("target")
+	requesterConn := acceptPeer("requester")
+
+	readFrame := func(conn *websocket.Conn, wait time.Duration) (Envelope, []byte, error) {
+		if err := conn.SetReadDeadline(time.Now().Add(wait)); err != nil {
+			t.Fatalf("SetReadDeadline: %v", err)
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return Envelope{}, nil, err
+		}
+		var env Envelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			return Envelope{}, data, err
+		}
+		return env, data, nil
+	}
+
+	// expectForwarded asserts the REQUEST reached the target peer.
+	expectForwarded := func(messageID string) {
+		env, _, err := readFrame(targetConn, 2*time.Second)
+		if err != nil {
+			t.Fatalf("DF-CRIER-187 repro: REQUEST %s never reached the target within 2s (%v) — the route table was full and the requester was refused instead", messageID, err)
+		}
+		if env.Type != TypeRequest || env.MessageID != messageID {
+			t.Fatalf("target received %s %s, want REQUEST %s", env.Type, env.MessageID, messageID)
+		}
+	}
+
+	// sendAgentRequest injects an agent-to-agent REQUEST from the requester peer.
+	// No RESPONSE is ever produced for it, so its route is never reclaimed by
+	// forwardResponse().
+	sendAgentRequest := func(messageID string) {
+		req := &Request{
+			Envelope: Envelope{
+				Type:      TypeRequest,
+				Version:   1,
+				MessageID: messageID,
+				Timestamp: time.Now(),
+			},
+			Source:  PeerRef{AgentID: "requester"},
+			Target:  PeerRef{AgentID: "target"},
+			Method:  "POST",
+			Path:    "/agent-request",
+			TraceID: messageID + "-trace",
+		}
+		data, err := Marshal(req)
+		if err != nil {
+			t.Fatalf("Marshal(%s): %v", messageID, err)
+		}
+		m.handleMessage("requester", data)
+	}
+
+	// Two unanswered requests fill the configured cap (cap = 2).
+	for _, id := range []string{"req-1", "req-2"} {
+		sendAgentRequest(id)
+		expectForwarded(id)
+	}
+
+	// The cap is now reached by outstanding unanswered routes. The next REQUEST
+	// must still be forwarded — the route table is bounded by the configured cap,
+	// not by a literal the refusal branch makes unreachable.
+	sendAgentRequest("req-3")
+
+	if env, data, err := readFrame(requesterConn, 750*time.Millisecond); err == nil {
+		var errMsg ErrorMessage
+		if jsonErr := json.Unmarshal(data, &errMsg); jsonErr != nil {
+			t.Fatalf("requester received an unparseable frame %s: %v", data, jsonErr)
+		}
+		if env.Type == TypeError && (errMsg.Error.Code == ErrCodeInternal ||
+			strings.Contains(errMsg.Error.Message, "route table full")) {
+			t.Fatalf("DF-CRIER-187 repro: after %d unanswered routes at cap %d the requester was refused with ERROR %s %q — the prune never runs, so this wedge is permanent until restart",
+				cap, cfg.MaxPendingRequests, errMsg.Error.Code, errMsg.Error.Message)
+		}
+		t.Fatalf("unexpected frame at the requester: %s %s", env.Type, data)
+	}
+
+	expectForwarded("req-3")
+}
+
+// TestPruneRoutesLockedConfiguredCap pins the prune contract the DF-CRIER-187 fix
+// relies on: the flush boundary is the cap the caller passes, and a non-positive
+// cap leaves the table untouched so the caller's refusal branch stays the
+// effective guard (fail closed — a misconfigured cap must not silently disable
+// the limit).
+func TestPruneRoutesLockedConfiguredCap(t *testing.T) {
+	fill := func(ids ...string) map[string]string {
+		routes := make(map[string]string, len(ids))
+		for _, id := range ids {
+			routes[id] = "requester"
+		}
+		return routes
+	}
+
+	t.Run("below cap is untouched", func(t *testing.T) {
+		routes := fill("req-1", "req-2")
+		pruneRoutesLocked(routes, time.Now(), 3)
+		if len(routes) != 2 {
+			t.Fatalf("len(routes) = %d, want 2 (below the cap nothing may be flushed)", len(routes))
+		}
+	})
+
+	t.Run("at cap flushes wholesale", func(t *testing.T) {
+		routes := fill("req-1", "req-2", "req-3")
+		pruneRoutesLocked(routes, time.Now(), 3)
+		if len(routes) != 0 {
+			t.Fatalf("len(routes) = %d, want 0 (cap reached must flush wholesale)", len(routes))
+		}
+	})
+
+	t.Run("non-positive cap never flushes", func(t *testing.T) {
+		for _, cap := range []int{0, -1} {
+			routes := fill("req-1", "req-2")
+			pruneRoutesLocked(routes, time.Now(), cap)
+			if len(routes) != 2 {
+				t.Fatalf("cap %d: len(routes) = %d, want 2 (fail closed: the refusal branch is the guard)", cap, len(routes))
+			}
+		}
+	})
+}

@@ -344,9 +344,16 @@ func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
 	}
 
 	// Record the route before forwarding so the response finds its way back.
+	// The table is bounded by the same configured cap that bounds the pending
+	// requests (DF-CRIER-187): flushing only at a higher literal left the
+	// refusal branch below permanently reachable with the default cap.
 	m.routesMu.Lock()
-	pruneRoutesLocked(m.routes, time.Now())
+	pruneRoutesLocked(m.routes, time.Now(), m.config.MaxPendingRequests)
 	if len(m.routes) >= m.config.MaxPendingRequests {
+		// Defensive guard, no longer reachable through the normal path: with a
+		// positive cap the flush above always leaves the table below it, so a
+		// new route is admitted instead of refused. It still fires for a
+		// non-positive cap, where nothing can be bounded (fail closed).
 		m.routesMu.Unlock()
 		slog.Debug("mesh: REQUEST dropped (route table full)",
 			"requester", requesterID, "target", targetID, "message_id", req.MessageID,
@@ -420,13 +427,26 @@ func (m *Mesh) sendErrorTo(peerID, requestID, traceID, code, message string) {
 	_ = conn.Send(data)
 }
 
-// pruneRoutesLocked keeps the route table bounded. Routes are plain requester
-// lookups without timestamps; when the table grows past a hard cap it is
-// flushed wholesale (stale routes are harmless to keep — they are only ever
-// consulted on a matching response, and responses to flushed routes are
-// dropped). Caller holds routesMu.
-func pruneRoutesLocked(routes map[string]string, now time.Time) {
-	if len(routes) < 4096 {
+// pruneRoutesLocked keeps the route table bounded by the configured cap. Routes
+// are plain requester lookups without timestamps; once the table reaches cap
+// entries it is flushed wholesale (stale routes are harmless to keep — they are
+// only ever consulted on a matching response, and responses to flushed routes
+// are dropped). Caller holds routesMu.
+//
+// The cap is the caller's MeshConfig.MaxPendingRequests, passed in because the
+// route table shares that bound: flushing only at a hard-coded 4096 while new
+// routes are refused at MaxPendingRequests made the flush unreachable and let
+// unanswered routes wedge the table forever (DF-CRIER-187). Timestamps are
+// still not tracked, so this remains a wholesale flush rather than an age-based
+// prune.
+//
+// A non-positive cap means the table cannot be bounded at all, so nothing is
+// flushed and the caller's `len(routes) >= cap` refusal branch stays the
+// effective guard, refusing every agent-to-agent REQUEST. That is fail-closed
+// and identical to the behaviour before the cap was plumbed through — a
+// misconfigured cap must not silently disable the limit.
+func pruneRoutesLocked(routes map[string]string, now time.Time, cap int) {
+	if cap <= 0 || len(routes) < cap {
 		return
 	}
 	for k := range routes {
