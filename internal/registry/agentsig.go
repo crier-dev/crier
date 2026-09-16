@@ -83,7 +83,14 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 
 	rawKey := ed25519.PublicKey(agent.PublicKey)
 	if len(rawKey) != ed25519.PublicKeySize {
-		return h.agentSigFail(w, http.StatusInternalServerError, "agent has an invalid stored public key")
+		// Fail closed (DF-CRIER-192): a stored key that is not a valid
+		// 32-byte ed25519 key — in practice a keyless agent, registered
+		// while signature enforcement was off — can never satisfy
+		// signature verification. That is an authorization failure of
+		// this request (401, naming the real reason), not a server
+		// error: it must never 500, and never 200.
+		return h.agentSigFail(w, http.StatusUnauthorized,
+			"agent has no registered public key (registered without a key; signature verification is impossible)")
 	}
 
 	sig, err := hex.DecodeString(sigRaw)

@@ -152,7 +152,10 @@ func (s *PostgresStore) Register(agent *Agent) error {
 	if agent == nil || agent.ID == "" {
 		return fmt.Errorf("%w: nil agent or blank ID", ErrInvalidStoreInput)
 	}
-	if len(agent.PublicKey) != ed25519.PublicKeySize {
+	// An empty key is a keyless agent (DF-CRIER-192): registered while
+	// signature enforcement was off, stored as SQL NULL by migration 004.
+	// Any non-empty key must still be exactly one ed25519 public key.
+	if len(agent.PublicKey) != ed25519.PublicKeySize && len(agent.PublicKey) != 0 {
 		return fmt.Errorf("%w: public key must be %d bytes", ErrInvalidStoreInput, ed25519.PublicKeySize)
 	}
 	if agent.Status != "" && agent.Status != StatusOnline && agent.Status != StatusOffline {
@@ -182,6 +185,15 @@ func (s *PostgresStore) Register(agent *Agent) error {
 		status = StatusOnline
 	}
 
+	// A keyless agent stores SQL NULL, not an empty bytea: migration 004's
+	// CHECK still requires 32 bytes for any non-null value, and NULL is the
+	// canonical "no key" representation (nil slice → pgx encodes NULL, the
+	// same contract as marshalOptionalConfig).
+	var pubKeyArg []byte
+	if len(agent.PublicKey) > 0 {
+		pubKeyArg = []byte(agent.PublicKey)
+	}
+
 	ctx, cancel := s.operationContext()
 	defer cancel()
 
@@ -189,7 +201,7 @@ func (s *PostgresStore) Register(agent *Agent) error {
 INSERT INTO agents (
     id, public_key, capabilities, status, registered_at, last_seen, webhook, guard
 ) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb);`,
-		agent.ID, []byte(agent.PublicKey), capsJSON, string(status), now, now, webhookJSON, guardJSON,
+		agent.ID, pubKeyArg, capsJSON, string(status), now, now, webhookJSON, guardJSON,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -233,10 +245,15 @@ WHERE id = $1;`, id).Scan(
 		return nil, fmt.Errorf("get agent: %w", err)
 	}
 
-	if len(publicKey) != ed25519.PublicKeySize {
+	// A NULL/empty stored key is a keyless agent (DF-CRIER-192): registered
+	// while signature enforcement was off. It decodes as an empty HexKey —
+	// identical to the in-memory backend's representation — and stays
+	// unusable on every signed route (agentsig fails closed). Any other
+	// non-32-byte length is genuinely corrupt data.
+	if len(publicKey) != ed25519.PublicKeySize && len(publicKey) != 0 {
 		return nil, fmt.Errorf("get agent: public key length %d, want %d", len(publicKey), ed25519.PublicKeySize)
 	}
-	key := make(HexKey, ed25519.PublicKeySize)
+	key := make(HexKey, len(publicKey))
 	copy(key, publicKey)
 	agent.PublicKey = key
 
@@ -283,11 +300,14 @@ ORDER BY registered_at ASC, id ASC;`)
 			slog.Error("postgres list scan", "error", err)
 			return []*Agent{}
 		}
-		if len(publicKey) != ed25519.PublicKeySize {
+		// NULL/empty stored key = keyless agent (DF-CRIER-192): keep the
+		// row, decode as an empty HexKey (see Get). Any other non-32-byte
+		// length is corrupt and drops the whole listing, as before.
+		if len(publicKey) != ed25519.PublicKeySize && len(publicKey) != 0 {
 			slog.Warn("postgres list: invalid public key", "len", len(publicKey), "agent_id", agent.ID)
 			return []*Agent{}
 		}
-		key := make(HexKey, ed25519.PublicKeySize)
+		key := make(HexKey, len(publicKey))
 		copy(key, publicKey)
 		agent.PublicKey = key
 		if err := json.Unmarshal(capabilitiesJSON, &agent.Capabilities); err != nil {

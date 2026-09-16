@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	migratepostgres "github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 3, version, "should reflect the three embedded migration files")
+	assert.Equal(t, 4, version, "should reflect the four embedded migration files")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
@@ -95,6 +98,51 @@ func TestRunMigrations_AgentConfigColumns(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, exists, "agents.%s should exist after migration", col)
 	}
+}
+
+// TestRunMigrations_KeylessAgentsConstraint verifies 004
+// (DF-CRIER-192): after migration the agents.public_key column accepts NULL
+// (a keyless agent) while still rejecting a non-null value that is not 32
+// bytes, and down-migrating restores the NOT NULL form.
+func TestRunMigrations_KeylessAgentsConstraint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	clearSchema(ctx, t, db)
+
+	require.NoError(t, RunMigrations(ctx, testConnString))
+
+	// NULL key is storable (keyless agent); empty bytea is NOT (004 keeps
+	// the 32-byte rule for non-null values).
+	now := time.Now().UTC()
+	ins := `INSERT INTO agents (id, public_key, capabilities, status, registered_at, last_seen)
+		VALUES ($1, $2, '[]'::jsonb, 'online', $3, $3);`
+	_, err := db.ExecContext(ctx, ins, "keyless", nil, now)
+	require.NoError(t, err, "NULL public_key (keyless agent) must be storable after 004")
+	_, err = db.ExecContext(ctx, ins, "empty", []byte{}, now)
+	require.Error(t, err, "an empty (non-null) bytea must still violate the 32-byte CHECK")
+	_, err = db.ExecContext(ctx, `DELETE FROM agents WHERE id = 'keyless';`)
+	require.NoError(t, err)
+
+	// Down restores NOT NULL: a NULL insert is rejected again. (Re-dropping
+	// schema_migrations tables by hand would fight golang-migrate's
+	// bookkeeping, so this drives a fresh migrate.NewWithInstance over the
+	// same embedded source, down to 3, then back up to 4.)
+	source, err := iofs.New(migrationFS, "migrations")
+	require.NoError(t, err)
+	drv, err := migratepostgres.WithInstance(db, &migratepostgres.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", drv)
+	require.NoError(t, err)
+	defer m.Close()
+	require.NoError(t, m.Migrate(3))
+	_, err = db.ExecContext(ctx, ins, "null-rejected", nil, now)
+	require.Error(t, err, "after 004-down, public_key is NOT NULL again")
+	require.NoError(t, m.Migrate(4))
+	_, err = db.ExecContext(ctx, ins, "null-ok", nil, now)
+	require.NoError(t, err, "after re-running 004 up, NULL is storable again")
 }
 
 // TestRunMigrations_Idempotent verifies that running migrations twice succeeds.

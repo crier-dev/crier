@@ -168,6 +168,34 @@ func TestAuthorizeAgent_UnknownAgentNotFound(t *testing.T) {
 	}
 }
 
+// TestAuthorizeAgent_KeylessAgentFailsClosed401 pins the DF-CRIER-192
+// fail-closed contract: an agent stored WITHOUT a public key (registered
+// while enforcement was off) that presents signature headers on a server
+// with enforcement ON gets 401 naming the real reason — never a 500 (the
+// pre-fix "invalid stored public key" Internal Server Error), never a 200.
+func TestAuthorizeAgent_KeylessAgentFailsClosed401(t *testing.T) {
+	store := NewMemoryStore()
+	h := newSigHandler(store)
+	// Keyless agent: registered with an empty key (enforcement off at the
+	// time), like the README dev shortcut leaves behind.
+	if err := store.Register(&Agent{ID: "keyless", PublicKey: HexKey(nil), Capabilities: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	_, somePriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	req := signedRequest(t, somePriv, "keyless", http.MethodGet, "/agents/keyless/inbox")
+	rec := httptest.NewRecorder()
+	if err := h.authorizeAgent(rec, req, "keyless"); err == nil {
+		t.Fatal("expected keyless agent authorization to fail")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (never 500, never 200)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "no registered public key") {
+		t.Fatalf("body = %q, want it to name the missing key", rec.Body.String())
+	}
+}
+
 func TestHandleRetrieve_RequiresSignature(t *testing.T) {
 	store := NewMemoryStore()
 	h := newSigHandler(store)

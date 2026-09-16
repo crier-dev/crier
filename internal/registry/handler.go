@@ -255,15 +255,27 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
+	// The public_key PRESENCE requirement follows signature enforcement
+	// (DF-CRIER-192): with enforcement on (the default) a keyless agent
+	// could never authenticate, so it is rejected up front with the
+	// historical 400. With enforcement off — the README dev shortcut
+	// (CR_REQUIRE_AGENT_SIG=false) — the key is optional and an omitted
+	// key registers a keyless agent (empty key material, no fabrication);
+	// it stays unusable on every signed route (agentsig fails closed). A
+	// key that IS supplied is validated identically either way.
+	var rawKey []byte
 	if req.PublicKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "public_key is required"})
-		return
-	}
-
-	rawKey, err := hex.DecodeString(req.PublicKey)
-	if err != nil || len(rawKey) != ed25519.PublicKeySize {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "public_key must be 64 hex characters (ed25519)"})
-		return
+		if h.requireAgentSig {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "public_key is required"})
+			return
+		}
+	} else {
+		decoded, err := hex.DecodeString(req.PublicKey)
+		if err != nil || len(decoded) != ed25519.PublicKeySize {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "public_key must be 64 hex characters (ed25519)"})
+			return
+		}
+		rawKey = decoded
 	}
 
 	agent := &Agent{

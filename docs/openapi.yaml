@@ -277,20 +277,29 @@ paths:
     post:
       operationId: registryRegisterAgent
       summary: Register a new agent
+      description: |
+        The public_key PRESENCE requirement follows signature enforcement
+        (DF-CRIER-192): when CR_REQUIRE_AGENT_SIG=true (the default) an
+        omitted public_key is rejected with 400 "public_key is required";
+        when signing is disabled the key is optional and the agent is
+        registered keyless — unusable on any server that enforces
+        signatures (its agent-scoped calls answer 401). A public_key that
+        IS supplied is validated identically in both modes (64 hex
+        characters, ed25519).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [id, public_key]
+              required: [id]
               properties:
                 id:
                   type: string
                   description: Agent identifier
                 public_key:
                   type: string
-                  description: Ed25519 public key (hex-encoded)
+                  description: "Ed25519 public key (hex-encoded). Required when signature enforcement is enabled (CR_REQUIRE_AGENT_SIG=true, the default); optional when signing is disabled — omitting it then registers a keyless agent that cannot authenticate on any signed route."
                 capabilities:
                   type: array
                   items:

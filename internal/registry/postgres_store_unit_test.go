@@ -122,6 +122,23 @@ func TestPostgresStoreUnit_Register_InvalidPublicKeySize(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+// TestPostgresStoreUnit_Register_KeylessAgentAllowedAndWritesNull pins the
+// DF-CRIER-192 parity: an EMPTY key is a keyless agent, accepted by the
+// store and persisted as SQL NULL (a nil arg) — an empty bytea would fail
+// migration 004's length CHECK. Non-empty keys keep the 32-byte rule.
+func TestPostgresStoreUnit_Register_KeylessAgentAllowedAndWritesNull(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := &Agent{ID: "keyless", PublicKey: HexKey(nil), Capabilities: []string{"relay"}}
+
+	mock.ExpectExec(`INSERT INTO agents`).
+		WithArgs(ag.ID, ([]byte)(nil), []byte(`["relay"]`), string(StatusOnline),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), ([]byte)(nil), ([]byte)(nil)).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	require.NoError(t, s.Register(ag))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestPostgresStoreUnit_Register_InvalidStatus(t *testing.T) {
 	s, mock := newMockStore(t)
 	ag := &Agent{
@@ -351,6 +368,45 @@ func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
 		require.Error(t, err)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
+}
+
+// TestPostgresStoreUnit_Get_KeylessAgentRoundTrips: a stored SQL NULL
+// public_key (a keyless agent, DF-CRIER-192) reads back with an EMPTY key —
+// not an error, matching the in-memory backend's representation.
+func TestPostgresStoreUnit_Get_KeylessAgentRoundTrips(t *testing.T) {
+	s, mock := newMockStore(t)
+	now := time.Now().UTC()
+
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		WithArgs("keyless").
+		WillReturnRows(rows)
+
+	got, err := s.Get("keyless")
+	require.NoError(t, err)
+	require.Equal(t, 0, len(got.PublicKey), "SQL NULL public_key must decode to an empty key")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_List_KeylessAgentKept: a NULL public_key row stays
+// in the listing (pre-fix any non-32-byte key dropped the WHOLE list).
+func TestPostgresStoreUnit_List_KeylessAgentKept(t *testing.T) {
+	s, mock := newMockStore(t)
+	now := time.Now().UTC()
+	pub := make([]byte, ed25519.PublicKeySize)
+
+	rows := pgxmock.NewRows(agentRowColumns()).
+		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil).
+		AddRow("keyed", pub, []byte(`[]`), "online", now, now, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		WillReturnRows(rows)
+
+	agents := s.List()
+	require.Len(t, agents, 2)
+	require.Equal(t, 0, len(agents[0].PublicKey))
+	require.Equal(t, ed25519.PublicKeySize, len(agents[1].PublicKey))
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {

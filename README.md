@@ -190,7 +190,9 @@ PUBKEY_HEX=$(openssl pkey -in /tmp/crier-agent.key -pubout -outform DER 2>/dev/n
 # instead of producing an empty (silently-401-rejected) signature.
 sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
 
-# 1. Register an agent (public_key = hex-encoded ed25519 public key)
+# 1. Register an agent (public_key = hex-encoded ed25519 public key; required
+#    whenever signature enforcement is on — the default. Only a server run
+#    with CR_REQUIRE_AGENT_SIG=false accepts registration without it.)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}"
 # 201
@@ -242,6 +244,12 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content
 
 # Dev shortcut: disable signing for trusted single-user setups
 CR_REQUIRE_AGENT_SIG=false make run
+# With signing disabled, POST /agents no longer needs a public_key either —
+# register with just an id:
+#   curl -s -X POST localhost:8767/agents -d '{"id":"agent-1"}'        # 201
+# A keyless agent registered this way is unusable on a server that enforces
+# signing (its agent-scoped calls answer 401 "no registered public key"), so
+# re-enabling CR_REQUIRE_AGENT_SIG later means re-registering with a key.
 curl -s localhost:8767/agents/agent-1/inbox
 # 200 — no signature headers required
 

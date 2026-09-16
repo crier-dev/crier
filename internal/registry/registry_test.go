@@ -146,6 +146,135 @@ func TestRegister_InvalidPublicKey(t *testing.T) {
 	}
 }
 
+// ----- DF-CRIER-192: public_key presence follows signature enforcement -----
+
+// TestRegister_PublicKeyPresenceConditional pins the conditional gate: with
+// signature enforcement OFF an omitted public_key registers a keyless agent,
+// with enforcement ON (the default) the same request keeps the historical 400.
+// A malformed key is rejected identically in both modes.
+func TestRegister_PublicKeyPresenceConditional(t *testing.T) {
+	hexKey, _ := newTestPubKey(t)
+
+	tests := []struct {
+		name       string
+		enforceSig bool
+		publicKey  string
+		wantStatus int
+		wantErr    string
+	}{
+		{
+			name:       "enforcement off, no public_key registers a keyless agent",
+			enforceSig: false,
+			publicKey:  "",
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "enforcement off, malformed public_key still rejected",
+			enforceSig: false,
+			publicKey:  "abc123",
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "public_key must be 64 hex characters (ed25519)",
+		},
+		{
+			name:       "enforcement on, no public_key rejected",
+			enforceSig: true,
+			publicKey:  "",
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "public_key is required",
+		},
+		{
+			name:       "enforcement on, valid public_key accepted",
+			enforceSig: true,
+			publicKey:  hexKey,
+			wantStatus: http.StatusCreated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := setupTestStore(t)
+			handler := NewHandler(store)
+			handler.SetRequireAgentSig(tt.enforceSig)
+			router := mux.NewRouter()
+			router.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
+			router.HandleFunc("/agents", handler.HandleListAgents).Methods("GET")
+			router.HandleFunc("/agents/{id}", handler.HandleGetAgent).Methods("GET")
+
+			body, _ := json.Marshal(registerRequest{ID: "cond-agent", PublicKey: tt.publicKey})
+			req := httptest.NewRequest("POST", "/agents", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("expected %d, got %d: %s", tt.wantStatus, rec.Code, rec.Body.String())
+			}
+			if tt.wantErr != "" {
+				var errResp map[string]string
+				if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+					t.Fatalf("unmarshal error body: %v", err)
+				}
+				if errResp["error"] != tt.wantErr {
+					t.Fatalf("error = %q, want %q", errResp["error"], tt.wantErr)
+				}
+				return
+			}
+			// Registered: listed and retrievable.
+			lrec := httptest.NewRecorder()
+			router.ServeHTTP(lrec, httptest.NewRequest("GET", "/agents", nil))
+			var list agentsResponse
+			json.Unmarshal(lrec.Body.Bytes(), &list)
+			if len(list.Agents) != 1 || list.Agents[0].ID != "cond-agent" {
+				t.Fatalf("agent not listed: %s", lrec.Body.String())
+			}
+			grec := httptest.NewRecorder()
+			router.ServeHTTP(grec, httptest.NewRequest("GET", "/agents/cond-agent", nil))
+			if grec.Code != http.StatusOK {
+				t.Fatalf("get agent: expected 200, got %d", grec.Code)
+			}
+		})
+	}
+}
+
+// TestRegister_KeylessAgentEmptyKey pins the keyless wire/store shape: with
+// enforcement off, an agent registered without public_key carries an EMPTY
+// key everywhere — no hex decode, no fabricated key material.
+func TestRegister_KeylessAgentEmptyKey(t *testing.T) {
+	store := setupTestStore(t)
+	handler := NewHandler(store)
+	router := mux.NewRouter()
+	router.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
+
+	body, _ := json.Marshal(registerRequest{ID: "keyless"})
+	req := httptest.NewRequest("POST", "/agents", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// The wire public_key of a keyless agent is the empty string. It is
+	// asserted on the raw body — HexKey.UnmarshalJSON (correctly) refuses
+	// an empty hex string on the DECODE side, so unmarshalling into Agent
+	// would fail before the assertion could run.
+	var wire struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.PublicKey != "" {
+		t.Errorf("wire public_key = %q, want empty", wire.PublicKey)
+	}
+	stored, err := store.Get("keyless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.PublicKey) != 0 {
+		t.Errorf("stored key length = %d, want 0", len(stored.PublicKey))
+	}
+}
+
 // ----- AC 2: List agents + get agent detail -----
 
 func TestListAndGetAgent(t *testing.T) {
