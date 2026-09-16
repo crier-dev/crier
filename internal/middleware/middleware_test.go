@@ -227,6 +227,64 @@ func TestResponseWriterDefaultsToOKWhenWritingBody(t *testing.T) {
 	}
 }
 
+// TestLogging_PanickedRequestIsLogged is the regression test supplied by the
+// reporter (GitHub issue #1, item 2): Recovery sits OUTSIDE Logging in the
+// production chain (cmd/server registers RequestID → Auth → Recovery →
+// Logging), so a handler panic unwinds through Logging before a sequential log
+// write could run — the client still gets its 500 from Recovery, but the
+// request was missing from the access log entirely. The write is now deferred,
+// so the panicked request appears with status 500, its path and a correlation
+// id that joins it to the "panic recovered" line.
+func TestLogging_PanickedRequestIsLogged(t *testing.T) {
+	logs := captureLogs(t)
+	handler := RequestID(Recovery(Logging(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	}))))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/agents", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(logs.String(), "msg=request") {
+		t.Fatalf("log = %q, want an access-log line for the panicked request", logs.String())
+	}
+
+	line := logLineContaining(t, logs.String(), "msg=request")
+	if !strings.Contains(line, "status=500") {
+		t.Errorf("access-log line = %q, want status=500", line)
+	}
+	if !strings.Contains(line, "path=/agents") {
+		t.Errorf("access-log line = %q, want path=/agents", line)
+	}
+	id, ok := extractAttr(line, "request_id")
+	if !ok || id == "" {
+		t.Errorf("access-log line = %q, want a non-empty request_id", line)
+	}
+
+	// The panic was not swallowed: Recovery caught it and its line carries the
+	// same correlation id, so the 500 and the access log can be joined.
+	panicLine := logLineContaining(t, logs.String(), "panic recovered")
+	panicID, ok := extractAttr(panicLine, "request_id")
+	if !ok || panicID != id {
+		t.Errorf("panic line request_id = %q, want %q (same id as the access log)", panicID, id)
+	}
+}
+
+// logLineContaining returns the first captured log line containing needle.
+func logLineContaining(t *testing.T, logs, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("no log line containing %q in %q", needle, logs)
+	return ""
+}
+
 // extractAttr pulls the value of a key from a slog text-encoded line.
 // Matches the textual form `<key>=<value>` followed by a space, end of line,
 // or a quote (since slog text format escapes values containing `=` or spaces).
