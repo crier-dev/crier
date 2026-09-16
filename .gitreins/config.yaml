@@ -26,7 +26,13 @@ pipeline:
     true:
     - pre-eval
     condition: 'true'
-    max_iterations: 100
+    # max_iterations 100 -> 250 (tick 277, CR-GAP-057): this per-stage value is
+    # the one that BINDS — the evaluator block below did not loosen the cap. Two
+    # consecutive CR-GAP-057 judge runs (ff564a78, 74c0589f) collected a complete
+    # pass-side evidence set (all five content criteria + docs-check/build/vet/
+    # test/guard) and still ended without a terminal verdict, returning
+    # INCOMPLETE / "evaluation hit resource cap".
+    max_iterations: 250
     tools:
     - read_file
     - run_command
