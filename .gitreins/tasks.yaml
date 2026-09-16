@@ -633,3 +633,15 @@ tasks:
   status: complete
   created_at: '2026-09-16T07:36:17.358606+00:00'
   completed_at: '2026-09-16T08:18:58.610125+00:00'
+- id: CR-GAP-062
+  title: '[docs-sweep T1b] recipe replay detector: execute <!-- doccheck --> marked
+    fenced blocks against the live server and assert every ''# -> NNN'' status; seed
+    currently-FALSE doc claims as xfail'
+  criteria:
+  - make docs-check green on the unmodified tree; a synthetic marked block with no
+    '# -> NNN' verdict FAILS the suite; a marked block with a wrong status FAILS the
+    suite; docs/claims.yaml carries the currently-FALSE claims as xfail rows including
+    the mesh route-cap claim pinned to DF-CRIER-187
+  status: complete
+  created_at: '2026-09-16T08:33:41.353483+00:00'
+  completed_at: '2026-09-16T08:43:36.780320+00:00'
