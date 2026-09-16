@@ -645,3 +645,16 @@ tasks:
   status: complete
   created_at: '2026-09-16T08:33:41.353483+00:00'
   completed_at: '2026-09-16T08:43:36.780320+00:00'
+- id: CR-GAP-056
+  title: "docs-sweep T2: TESTERS.md truth pass \u2014 5-minute path runs verbatim\
+    \ with signatures on, rough-edges rebuilt from live evidence"
+  criteria:
+  - 'TESTERS.md section 1 and section 2 execute verbatim against a freshly built binary
+    on a scratch port with default CR_REQUIRE_AGENT_SIG=true: zero 401s, every documented
+    status observed, transcript pasted. Every <!-- doccheck --> block in TESTERS.md
+    passes make docs-check, and the known-rough-edges table rows are each reproduced
+    live or removed. make docs-check rc=0 and go test -short -count=1 ./... 13/13
+    packages ok.'
+  status: complete
+  created_at: '2026-09-16T08:57:24.419013+00:00'
+  completed_at: '2026-09-16T09:40:51.754839+00:00'
