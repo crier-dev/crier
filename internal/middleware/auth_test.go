@@ -213,3 +213,83 @@ func TestAuthTokenWithTrailingSpacesIsRejected(t *testing.T) {
 		t.Fatalf("status = %d, want %d (token must be exact, no TrimSpace)", recorder.Code, http.StatusUnauthorized)
 	}
 }
+
+// TestAuthConstantTimeComparisonPreservesTokenSemantics pins the accept/reject
+// semantics of the constant-time token comparison (DF-CRIER-185): only the
+// exact configured token reaches the handler; every wrong token — including a
+// same-length token differing in a single byte — answers 401 with the same
+// body. Length mismatch remains observable because
+// subtle.ConstantTimeCompare returns 0 when lengths differ; that is the
+// accepted trade-off for a shared secret.
+func TestAuthConstantTimeComparisonPreservesTokenSemantics(t *testing.T) {
+	cases := []struct {
+		name       string
+		authorized string
+		presented  string
+		wantStatus int
+	}{
+		{
+			name:       "exact token is accepted",
+			authorized: "secret-token",
+			presented:  "secret-token",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "same-length token differing only in final byte is rejected",
+			authorized: "secret-token",
+			presented:  "secret-tokeN",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "longer token is rejected",
+			authorized: "secret-token",
+			presented:  "secret-tokenXX",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "shorter token is rejected",
+			authorized: "secret-token",
+			presented:  "secret-toke",
+			wantStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			handler := Auth(tc.authorized)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("authenticated"))
+			}))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/agents", nil)
+			request.Header.Set("Authorization", "Bearer "+tc.presented)
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusOK {
+				if !called {
+					t.Fatal("handler should have been called for the exact token")
+				}
+				if recorder.Body.String() != "authenticated" {
+					t.Fatalf("body = %q, want %q", recorder.Body.String(), "authenticated")
+				}
+				return
+			}
+			if called {
+				t.Fatal("handler should not be called for a wrong token")
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response body is not valid JSON: %v", err)
+			}
+			if body["error"] != "invalid token" {
+				t.Fatalf("error = %q, want %q", body["error"], "invalid token")
+			}
+		})
+	}
+}

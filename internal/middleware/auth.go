@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -52,7 +53,7 @@ func Auth(authToken string) func(http.Handler) http.Handler {
 			}
 
 			token := strings.TrimPrefix(header, "Bearer ")
-			if token != authToken {
+			if subtle.ConstantTimeCompare([]byte(token), []byte(authToken)) != 1 {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"error":"invalid token"}`))
