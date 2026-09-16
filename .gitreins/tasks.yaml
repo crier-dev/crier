@@ -658,3 +658,17 @@ tasks:
   status: complete
   created_at: '2026-09-16T08:57:24.419013+00:00'
   completed_at: '2026-09-16T09:40:51.754839+00:00'
+- id: CR-GAP-057
+  title: '[docs-sweep T3] README.md truth pass'
+  criteria:
+  - 'Every endpoint/path/count claim in README.md is re-proven against the shipped
+    binary at HEAD: ''Interactive API docs'' wording corrected to static spec browser;
+    the auth exemption list reads the real five paths (/health, /version, /openapi.json,
+    /openapi.yaml, /docs) and the served /docs HTML agrees; endpoint counts carry
+    explicit units (16 router paths / 13 openapi paths / 17 operations); a 13-tool
+    MCP table with per-tool arguments sourced from internal/mcp/server.go; the quickstart
+    publish shape shows the X-Agent-ID/Ts/Sig trio. make docs-check + go build/vet/test
+    + gitreins guard all green.'
+  status: complete
+  created_at: '2026-09-16T09:52:13.244133+00:00'
+  completed_at: '2026-09-16T10:10:59.112173+00:00'
