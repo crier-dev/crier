@@ -216,4 +216,8 @@ claims:
     # `expect` is the 24h the doc claims is hard-coded; the live probe returns the
     # lifetime the server's own expires_at implies for a ttl_seconds=3600 deliver.
     expect: 86400
-    xfail: "DF-CRIER-50"
+    # Pinned to the PENDING row that owns the fix: DF-CRIER-174 rebuilds the
+    # TESTERS.md rough-edges table. DF-CRIER-50 is already complete (superseded
+    # when TTL honouring shipped in ea0d5ea), so pinning there would leave an
+    # entry that can never un-xfail.
+    xfail: "DF-CRIER-174"
