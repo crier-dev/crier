@@ -31,6 +31,10 @@ ignore_paths:
   - /dev/null
   - /tmp/crier-agent.key
   - /tmp/crier-payload.txt
+  # CR-GAP-056: TESTERS.md now generates one keypair per agent (so a tester can
+  # sign as either identity) — these are scratch key files, not API routes.
+  - /tmp/crier-alice.key
+  - /tmp/crier-bob.key
   # CR-GAP-062: docs/mesh-protocol.md and specs/WEBHOOK-DELIVERY.md are now
   # scanned. These tokens are NOT crier API routes — each is deliberate.
   - /ping                 # illustrative mesh REQUEST path (the target agent's own path)
@@ -209,15 +213,10 @@ claims:
     # delivers with the mode unset and reports the accept it really gets.
     expect: "200"
     xfail: "DF-CRIER-178"
-  - id: TTL-SECONDS-CLAIM-IGNORED
-    kind: default
-    doc: TESTERS.md
-    quote: "`ttl_seconds` on inbox delivery accepted but ignored (expiry hard-coded 24h)"
-    # `expect` is the 24h the doc claims is hard-coded; the live probe returns the
-    # lifetime the server's own expires_at implies for a ttl_seconds=3600 deliver.
-    expect: 86400
-    # Pinned to the PENDING row that owns the fix: DF-CRIER-174 rebuilds the
-    # TESTERS.md rough-edges table. DF-CRIER-50 is already complete (superseded
-    # when TTL honouring shipped in ea0d5ea), so pinning there would leave an
-    # entry that can never un-xfail.
-    xfail: "DF-CRIER-174"
+  # CR-GAP-056 removed TTL-SECONDS-CLAIM-IGNORED with the doc line it anchored:
+  # DF-CRIER-174 rebuilt the TESTERS.md rough-edges table from live evidence and
+  # the row claiming ttl_seconds is ignored is FALSE at HEAD (a deliver with
+  # ttl_seconds=3600 returns expires_at = now + 3600s — measured, and still
+  # measured by liveTTLDeliverySeconds, which is simply no longer pinned to a
+  # doc claim). Claiming it again would require a doc line that says the
+  # opposite of what the server does.
