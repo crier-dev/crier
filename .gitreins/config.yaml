@@ -39,7 +39,13 @@ evaluator:
   # a committed task change is invisible to the judge → false FAIL (tick 245
   # incident, verdict 22816b13). Full scope lets the judge read the whole repo.
   file_scope: full
-  max_iterations: 50
+  # max_iterations 50 -> 120 (tick 277, CR-GAP-057): the judge verified all five
+  # content criteria of the README truth pass and then hit the iteration cap
+  # BEFORE it could execute the acceptance gate commands, returning
+  # "INCOMPLETE — Partial verdict" (verdict ff564a78) on work whose gates are
+  # green. 50 iterations is not enough for a docs row whose criteria each need a
+  # grep plus a live probe plus the four gate commands.
+  max_iterations: 120
   max_time: 20m
   max_input_tokens: 6M
   max_output_tokens: 0.4M
