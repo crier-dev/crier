@@ -902,3 +902,27 @@ tasks:
   status: complete
   created_at: '2026-09-16T17:50:11.641223+00:00'
   completed_at: '2026-09-16T18:02:36.772651+00:00'
+- id: crier-293-df-crier-154-bind-isolation
+  title: Startup bind failures name the squatter and the doc path off a busy port
+  criteria:
+  - cmd/server (and any other binary that binds a listener) must, when the listener
+    cannot bind, exit non-zero with an actionable ERROR that names the port, states
+    that another process already holds it, gives the exact command to find the holder
+    (ss -tlnp | grep :<port>) and the way to run elsewhere (-port <n> / CRIER_PORT),
+    and still prints the running build identity (version/commit) so the operator knows
+    which binary answered
+  - The bind-failure diagnostic is covered by a regression test that occupies a port
+    in-process, starts the server on it, and asserts the nonzero exit plus the named-port/actionable-guidance
+    text; the test fails against the pre-fix code (RED proven by reverting the change
+    and re-running it)
+  - 'README.md Quick Start (Run) and TESTERS.md (Get it running) gain a truthful shared-host
+    isolation step: check the port for an existing holder before starting, start on
+    a free port with -port, and confirm which build answers via the existing unauthenticated
+    GET /version; every added prose line matches the shipped binary and docs/claims.yaml
+    stays green (new claims, if any, hold live: make docs-check exit 0)'
+  - go build ./... , go vet ./... , go test ./... -count=1 and make docs-check all
+    exit 0 with no test weakened or skipped; gitreins guard passes; the change touches
+    no pidfile/make-stop work (DF-CRIER-194) and no docker-compose/postgres path (DF-CRIER-167)
+  status: complete
+  created_at: '2026-09-16T18:36:57.784191+00:00'
+  completed_at: '2026-09-16T18:53:18.211647+00:00'
