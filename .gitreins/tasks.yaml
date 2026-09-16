@@ -720,3 +720,19 @@ tasks:
   status: complete
   created_at: '2026-09-16T11:16:52.258538+00:00'
   completed_at: '2026-09-16T11:45:58.807739+00:00'
+- id: DF-CRIER-187
+  title: "mesh: route-table 4096 flush unreachable \u2014 effective cap is MaxPendingRequests\
+    \ (50), so unanswered routes wedge REQUEST forwarding permanently"
+  criteria:
+  - 'pruneRoutesLocked keys off the configured cap (internal/mesh/peer.go), so the
+    route table never permanently wedges: with MaxPendingRequests=N and N outstanding
+    unanswered routes, the next agent-to-agent REQUEST is forwarded (no ERROR INTERNAL
+    ''mesh route table full'').'
+  - A regression test reproduces the wedge at HEAD (fails before the fix) and passes
+    after it.
+  - docs/mesh-protocol.md's route-cap line and its docs/claims.yaml anchor state the
+    real effective cap, proven by the live docs gate (make docs-check) with the xfail
+    marker dropped.
+  status: complete
+  created_at: '2026-09-16T12:12:20.926038+00:00'
+  completed_at: '2026-09-16T12:20:40.844302+00:00'
