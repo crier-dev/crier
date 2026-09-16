@@ -962,3 +962,18 @@ tasks:
   status: complete
   created_at: '2026-09-16T21:02:34.554843+00:00'
   completed_at: '2026-09-16T21:09:34.539030+00:00'
+- id: crier-296-df-crier-198-keyless-hexkey-decode
+  title: 'DF-CRIER-198: HexKey.UnmarshalJSON must accept the empty key a keyless agent
+    legally carries'
+  criteria:
+  - An empty public_key decodes to an empty HexKey (matching the in-memory and postgres
+    representations); a 32-byte key is unchanged; any other length still errors with
+    the existing wording; invalid hex still errors; the DF-CRIER-192/197 fail-closed
+    401 contract on signed routes is untouched; RemoteStore.Get succeeds for a keyless
+    agent and RemoteStore.List returns keyless AND keyed agents instead of silently
+    returning empty; new focused tests cover the decode table and the RemoteStore
+    round-trip (red before the fix), and go build/vet/test plus the repo gates stay
+    green.
+  status: complete
+  created_at: '2026-09-16T21:28:16.540668+00:00'
+  completed_at: '2026-09-16T21:39:17.407081+00:00'
