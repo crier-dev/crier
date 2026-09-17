@@ -1170,3 +1170,14 @@ tasks:
   status: complete
   created_at: '2026-09-17T17:58:03.496135+00:00'
   completed_at: '2026-09-17T18:07:29.933514+00:00'
+- id: DF-CRIER-147
+  title: make the guard sanitize verdict reachable for MIXED content (spec 3.5 rewrite-and-deliver)
+  criteria:
+  - 'Live at worker HEAD: mixed benign+embedded-injection payload -> HTTP 201 decision=sanitize
+    risk=medium (not 403), delivered payload has the directive stripped while benign
+    content survives; attack-only payload still 403 block/high; benign still 201 allow;
+    go build/vet/test -count=1 + make docs-check green; user-message lockstep test
+    pins spec 3.3 user template with a RED proof.'
+  status: complete
+  created_at: '2026-09-17T18:20:34.823081+00:00'
+  completed_at: '2026-09-17T18:32:12.221218+00:00'
