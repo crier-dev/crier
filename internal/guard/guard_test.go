@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -504,14 +507,137 @@ func TestSystemPrompt_CheckPruning(t *testing.T) {
 			t.Errorf("full prompt missing %s", class)
 		}
 	}
+	// The literal word JSON is a provider requirement for json_object mode
+	// (spec §3.2/§3.3) — it must survive every prompt edit.
+	if !strings.Contains(full, "JSON") {
+		t.Errorf(`full prompt lost the literal word "JSON" (json_object requirement)`)
+	}
+	// The %s class substitution must be expanded, never shipped literally.
+	if strings.Contains(full, "%s") {
+		t.Error("prompt still contains an unexpanded class placeholder")
+	}
 	disabled := false
 	pruned := SystemPrompt(Checks{Jailbreak: &disabled})
 	if strings.Contains(pruned, "JAILBREAK") {
 		t.Error("pruned prompt still contains JAILBREAK")
 	}
+	if strings.Contains(pruned, "known jailbreak patterns") {
+		t.Error("pruned prompt still contains the JAILBREAK paragraph body")
+	}
 	if !strings.Contains(pruned, "INSTRUCTION_INJECTION") {
 		t.Error("pruned prompt lost an enabled class")
 	}
+	// DF-CRIER-148: pruning structured_object removes its intent requirement
+	// but must NOT remove the base key-name rule (which is class-independent).
+	soOff := false
+	noSO := SystemPrompt(Checks{StructuredObject: &soOff})
+	if strings.Contains(noSO, "STRUCTURED_OBJECT_ATTACK") || strings.Contains(noSO, "control INTENT") {
+		t.Errorf("pruned prompt still contains the structured_object paragraph:\n%s", noSO)
+	}
+	if !strings.Contains(noSO, "A key NAME is not attack INTENT") {
+		t.Error("pruned prompt lost the base key-name rule")
+	}
+}
+
+// TestSystemPrompt_ControlKeyNameIsNotIntent pins the DF-CRIER-148
+// recalibration: a control-shaped key NAME alone is not attack INTENT, and
+// STRUCTURED_OBJECT_ATTACK requires intent — while the conservative
+// sanitize-when-in-doubt rule survives with a lone control-shaped key ruled
+// explicitly out of "in doubt".
+func TestSystemPrompt_ControlKeyNameIsNotIntent(t *testing.T) {
+	p := SystemPrompt(Checks{})
+	for _, want := range []string{
+		"A key NAME is not attack INTENT",
+		"is NORMAL agent traffic: allow it with risk_level low",
+		"not the presence of a key by itself",
+		"control INTENT, not a lone data key",
+		"holding benign content is NOT this class",
+		// Conservative rule preserved, and non-contradictory.
+		"when in doubt between allow\nand sanitize, choose sanitize with risk_level medium",
+		"A lone control-shaped key carrying benign\ndata is not \"in doubt\"",
+		"Reserve block for clear, high-confidence attacks",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing DF-CRIER-148 guidance %q", want)
+		}
+	}
+	// The intent requirement lives in the structured_object paragraph; the
+	// key-name rule lives in the class-independent base. Assert the order so
+	// a future rewrite cannot bury the rule inside a prunable paragraph.
+	sos := strings.Index(p, "4. STRUCTURED_OBJECT_ATTACK")
+	base := strings.Index(p, "A key NAME is not attack INTENT")
+	if sos < 0 || base < 0 || sos > base {
+		t.Errorf("expected the structured_object paragraph before the base key-name rule (sos=%d base=%d)", sos, base)
+	}
+}
+
+// TestSystemPrompt_SpecSection33InLockstep pins acceptance A3 of DF-CRIER-148:
+// the prompt the code sends and the §3.3 fenced block in the spec are the same
+// bytes. The spec block shows the fully-expanded prompt, so it must carry no
+// %s placeholder.
+func TestSystemPrompt_SpecSection33InLockstep(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "specs", "LLM-MESSAGE-GUARD.md"))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "### 3.3 ") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatal("spec heading '### 3.3 ' not found")
+	}
+	open := -1
+	for i := start + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			open = i
+			break
+		}
+	}
+	if open < 0 {
+		t.Fatal("no fenced block after the §3.3 heading")
+	}
+	end := -1
+	for i := open + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		t.Fatal("unterminated §3.3 fenced block")
+	}
+	block := strings.Join(lines[open+1:end], "\n")
+	if strings.Contains(block, "%s") {
+		t.Error("spec §3.3 block contains an unexpanded placeholder — the spec shows the expanded prompt")
+	}
+	if want := SystemPrompt(Checks{}); block != want {
+		t.Errorf("spec §3.3 block != SystemPrompt(Checks{})\n%s", promptLineDiff(block, want))
+	}
+}
+
+// promptLineDiff reports the first differing line pairs between the spec block
+// and the code prompt (line numbers are 1-based within each text).
+func promptLineDiff(spec, code string) string {
+	sl, cl := strings.Split(spec, "\n"), strings.Split(code, "\n")
+	var b strings.Builder
+	for i := 0; i < len(sl) || i < len(cl); i++ {
+		var sv, cv string
+		if i < len(sl) {
+			sv = sl[i]
+		}
+		if i < len(cl) {
+			cv = cl[i]
+		}
+		if sv != cv {
+			fmt.Fprintf(&b, "line %d:\n  spec: %q\n  code: %q\n", i+1, sv, cv)
+		}
+	}
+	return b.String()
 }
 
 func TestUserMessage_Shape(t *testing.T) {
