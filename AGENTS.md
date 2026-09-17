@@ -14,7 +14,7 @@ make test-integration # integration tests (build tag): internal/registry
 make lint             # go vet ./...
 make coverage-check   # 70% coverage gate
 make docs-check       # execute the prose claims in docs/claims.yaml against a live in-process server — prose drift fails the build (CR-GAP-055)
-make shell-yaml-check # bash -n every tracked shell script + actionlint (or PyYAML fallback) every .github/workflows/*.yml (DF-CRIER-206)
+make shell-yaml-check # bash -n every tracked shell script + actionlint (or PyYAML fallback) every .github/workflows/*.yml (DF-CRIER-206); an explicit file list fails closed (DF-CRIER-206, DF-CRIER-208)
 make shell-yaml-selftest # prove that checker still rejects a broken script/workflow and accepts a clean pair (DF-CRIER-206)
 make install-hooks    # install scripts/hooks/pre-commit into .git/hooks (idempotent; DF-CRIER-206)
 make generate         # go generate ./... (regenerates cmd/server/openapi.yaml from docs/openapi.yaml)
@@ -76,6 +76,14 @@ neither validator exits 2 rather than skipping. actionlint validates `runs-on:`
 labels, so this repo declares its `bunker` self-hosted runner label in
 `.github/actionlint.yaml` — that is a declaration, not a silencer: an undeclared
 label is still reported.
+
+Given an EXPLICIT file list the checker fails closed (DF-CRIER-208): a named
+`*.yml`/`*.yaml` that is not under `.github/workflows/`, or a list in which
+nothing classifies as shell or workflow, is rejected (exit 1) with every such
+path named — it never prints `PASS — 0 file(s) checked` over a list it read
+nothing from. The hook cannot trip either rule: it passes only files its own copy
+of the same two predicates already classified, and the default (no-argument)
+whole-repo mode is unchanged.
 
 Not covered by any of this: Markdown/prose drift (`make docs-check` covers the
 claims in `docs/claims.yaml`), Dockerfile contents, Makefile recipe semantics
