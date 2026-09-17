@@ -44,7 +44,9 @@ no full-mesh federation (links only).
   the message resolves to `async` (fire-and-forget: the sender gets the `202` accept); an explicit value on
   either side wins, the per-message one over the agent default.
 - `batch` — only for `batch` mode: flush at `max_messages` OR `flush_interval_s`, whichever first.
-- `retries` — bounded retries for transient failures (default 5). `timeout_ms` — per POST timeout (default 30000).
+- `retries` — bounded retries for transient failures, resolved per endpoint. Absent or 0 uses the server
+  budget `CR_WEBHOOK_MAX_RETRIES` (default 5); 1..10 is the budget for this endpoint; a value above the server
+  setting is capped by it. `timeout_ms` — per POST timeout (default 30000).
 
 Registration with a webhook does NOT disable the durable inbox or mesh identity — an agent can be reached by
 any of its surfaces; the webhook is the *preferred push surface* for `deliver` when configured.
@@ -139,8 +141,10 @@ only that class can still land on a later attempt. (Timeout and budget exhaustio
   also carries `expires_at` (no inbox entry exists on the webhook paths, so no expiry applies there).
   `delivery_mode` is echoed on the 202 accept (`async` | `batch`, the RESOLVED mode — a per-message
   `delivery_mode` override wins over the agent default) so the sender learns the queue semantics it entered.
-- Async exhaustion notification (DF-CRIER-8): when a queued delivery exceeds `CR_WEBHOOK_MAX_RETRIES`, the
-  driver drops it AND emits exactly one notification into the originating sender's durable inbox (direct
+- Async exhaustion notification (DF-CRIER-8): when a queued delivery exceeds its endpoint's resolved
+  redelivery budget (§2 `retries`; the server setting `CR_WEBHOOK_MAX_RETRIES` is both its default and its
+  ceiling), the driver
+  drops it AND emits exactly one notification into the originating sender's durable inbox (direct
   store write — never webhook-routed, so it cannot recurse, and it lands there even when the SENDER itself is
   a webhook-configured agent). Payload:
   `{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<agent>","retries":N,"status_code":S,"error":"…"}`
@@ -148,7 +152,8 @@ only that class can still land on a later attempt. (Timeout and budget exhaustio
   or a failed notification write is logged best-effort: the delivery is not requeued and the notification is
   not retried or duplicated.
   Timing: one attempt per `CR_WEBHOOK_REDELIVER_S` tick (default 30s) and the item is dropped once
-  `item.Retries > CR_WEBHOOK_MAX_RETRIES`, so with the defaults (5 / 30s) the notification arrives roughly
+  `item.Retries > budget` for that endpoint (§2 `retries`, capped by `CR_WEBHOOK_MAX_RETRIES`), so with the
+  defaults (5 / 30s) the notification arrives roughly
   two to three minutes after the accept. While the endpoint is degraded (circuit open after
   `CR_WEBHOOK_CIRCUIT_THRESHOLD` consecutive failures) queued items are re-queued WITHOUT a POST, so
   exhaustion is delayed until the probe (`CR_WEBHOOK_PROBE_S`, default 60s) succeeds and drains the queue.
@@ -295,7 +300,7 @@ completed with `202`; the recovery is logged and the terminal case is the FEDERA
 |---|---|---|
 | `CR_WEBHOOK_SECRET` | unset | HMAC signing of outbound webhooks |
 | `CR_WEBHOOK_TIMEOUT_S` | 30 | per-POST timeout |
-| `CR_WEBHOOK_MAX_RETRIES` | 5 | transient retries |
+| `CR_WEBHOOK_MAX_RETRIES` | 5 | transient retries — the default and ceiling for the per-endpoint `retries` budget |
 | `CR_WEBHOOK_REDELIVER_S` | 30 | queue redelivery interval |
 | `CR_WEBHOOK_PROBE_S` | 60 | degraded-endpoint healthcheck interval |
 | `CR_WEBHOOK_CIRCUIT_THRESHOLD` | 10 | consecutive failures → degraded |

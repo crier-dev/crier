@@ -578,7 +578,7 @@ paths:
           description: |
             Accepted, not yet delivered. Two shapes — branch on the body, not on the status code (DF-CRIER-157, DF-CRIER-7).
 
-            (a) WEBHOOK async/batch accept (`transport: "webhook"`): the message was handed to the target's webhook queue and is NOT stored in its inbox, so the target's inbox stays EMPTY by design — an empty retrieve does not mean the delivery was lost. `delivery_mode` echoes the RESOLVED queue semantics (`async` = one queued POST; `batch` = coalesced into the endpoint's next batch flush). Failure recovery: when the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable `WEBHOOK_FAILED` message is written into the SENDER's own inbox — a direct store write that never routes back through webhook delivery.
+            (a) WEBHOOK async/batch accept (`transport: "webhook"`): the message was handed to the target's webhook queue and is NOT stored in its inbox, so the target's inbox stays EMPTY by design — an empty retrieve does not mean the delivery was lost. `delivery_mode` echoes the RESOLVED queue semantics (`async` = one queued POST; `batch` = coalesced into the endpoint's next batch flush). Failure recovery: when the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts — or the endpoint's smaller `retries` budget — one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable `WEBHOOK_FAILED` message is written into the SENDER's own inbox — a direct store write that never routes back through webhook delivery.
 
             (b) HELD federation delivery (`status: "held"`): every link is failing transiently, so the request is queued at this relay and retried inside `CR_FED_MAX_HOLD_S`; a terminal failure is reported once as `FEDERATION_FAILED` in the sender's own inbox.
           content:
@@ -1158,6 +1158,10 @@ components:
           type: integer
           minimum: 0
           maximum: 10
+          description: |
+            Bounded redelivery budget for THIS endpoint. Absent or 0 uses the server budget
+            `CR_WEBHOOK_MAX_RETRIES` (default 5); 1..10 is the budget for this endpoint; a value above the
+            server setting is capped by it.
         timeout_ms:
           type: integer
           minimum: 0
@@ -1165,7 +1169,7 @@ components:
     WebhookDeliverAccept:
       type: object
       required: [id, transport, delivery_mode]
-      description: "Accept body for an async/batch webhook delivery (DF-CRIER-157). The message is queued for the target's webhook endpoint and is NOT stored in its inbox, so GET /agents/{id}/inbox stays empty by design. When the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable WEBHOOK_FAILED message — {\"kind\":\"error\",\"code\":\"WEBHOOK_FAILED\",\"message_id\":\"<original>\",\"target\":\"<agent>\",\"retries\":N,\"status_code\":S,\"error\":\"…\"} — is written into the SENDER's own inbox (direct store write, never webhook-routed; `status_code` omitted and `error` carrying the string on a transport failure)."
+      description: "Accept body for an async/batch webhook delivery (DF-CRIER-157). The message is queued for the target's webhook endpoint and is NOT stored in its inbox, so GET /agents/{id}/inbox stays empty by design. When the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts — or the endpoint's smaller `retries` budget — one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable WEBHOOK_FAILED message — {\"kind\":\"error\",\"code\":\"WEBHOOK_FAILED\",\"message_id\":\"<original>\",\"target\":\"<agent>\",\"retries\":N,\"status_code\":S,\"error\":\"…\"} — is written into the SENDER's own inbox (direct store write, never webhook-routed; `status_code` omitted and `error` carrying the string on a transport failure)."
       properties:
         id:
           type: string

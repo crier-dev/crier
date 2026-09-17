@@ -483,7 +483,7 @@ curl -s -X PATCH localhost:8767/agents/agent-1 "${AUTH[@]}" -H 'Content-Type: ap
 | `custom_schema` | object | `{"request_shape":{"method","headers","body"},"response_map"}` | wins over `schema_template` when present; `body` is a JSON template with `{{payload.x}}` / `{{crier.…}}` placeholders; `response_map` is `raw` (the whole response body) or a dot path such as `choices.0.message.content` |
 | `delivery_mode` | string | `blocking`, `async` (default), `batch` | the agent's default mode; a delivery request can override it per message (§8.3) |
 | `batch` | object | `{"max_messages","flush_interval_s"}` | batch mode only; a value > 0 wins over the server defaults (`CR_WEBHOOK_BATCH_MAX` = 10, `CR_WEBHOOK_BATCH_FLUSH_S` = 5s) |
-| `retries` | integer | 0..10 | range-checked at registration; the retry budget the driver actually applies is the server setting `CR_WEBHOOK_MAX_RETRIES` (default 5) |
+| `retries` | integer | 0..10 | range-checked at registration; the redelivery budget for this endpoint. Absent or 0 uses the server budget `CR_WEBHOOK_MAX_RETRIES` (default 5); 1..10 is the budget for this endpoint; a value above the server setting is capped by it |
 | `timeout_ms` | integer | 0..120000 | range-checked at registration; the blocking budget actually applied comes from the delivery request's own `timeout_ms` (default 30000, ceiling 120000) |
 
 Registration is strict about its own vocabulary: an unknown or misnamed key

@@ -472,12 +472,18 @@ func (d *Driver) drainQueue() {
 		}
 		d.recordFailure(item.AgentID, res)
 		item.Retries++
-		if item.Retries <= d.cfg.MaxRetries {
+		// Budget is resolved PER ITEM from the agent config already in scope
+		// (DF-CRIER-9): cfg.Retries is the endpoint's own budget, capped by
+		// the server setting, which is also the default when it is absent/0.
+		budget := d.retryBudget(cfg)
+		if item.Retries <= budget {
 			_ = d.queue.Push(item)
 			webhookOutcomeTotal.With("failed").Inc()
 		} else {
 			logf("webhook: delivery dropped (retries exhausted)",
-				"agent", item.AgentID, "retries", item.Retries)
+				"agent", item.AgentID, "retries", item.Retries,
+				"budget", budget, "agent_retries", cfg.Retries,
+				"max_retries", d.cfg.MaxRetries)
 			webhookOutcomeTotal.With("dropped").Inc()
 			d.notifyExhausted(item, res)
 		}
@@ -621,6 +627,20 @@ func (d *Driver) agentConfig(id string) *Config {
 		return nil
 	}
 	return cfg
+}
+
+// retryBudget resolves the redelivery budget for ONE endpoint (DF-CRIER-9).
+//
+// The per-agent Config.Retries knob is the budget that endpoint gets;
+// CR_WEBHOOK_MAX_RETRIES (d.cfg.MaxRetries) is both its DEFAULT (the agent
+// left the knob absent or 0) and its CEILING (a larger agent value is capped
+// by it). Registration bounds the knob at 0..10 (Config.Validate); this
+// resolver bounds it at the server setting.
+func (d *Driver) retryBudget(cfg *Config) int {
+	if cfg != nil && cfg.Retries > 0 && cfg.Retries < d.cfg.MaxRetries {
+		return cfg.Retries
+	}
+	return d.cfg.MaxRetries
 }
 
 // batchBuffer accumulates envelopes for one agent's batch-mode endpoint
