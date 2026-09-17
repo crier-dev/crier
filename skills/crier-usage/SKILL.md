@@ -86,10 +86,14 @@ DELETE; a PATCH without the sig headers → 401):
 - Envelope body: `crier.{version,message_id,session_id,thread_id,
   delivery_mode,sender,kind,guard}` + `payload`. NOTE: `sender` is a plain
   STRING on the wire (spec §3 draws an object — drift, DF-CRIER-11).
-- ⚠️ **Failure paths are lossy** (as of 2026-09-08): async retries exhaust →
-  silent drop, no ERROR to sender (DF-CRIER-8); per-agent `retries` is
-  ignored (server default wins, DF-CRIER-9). For must-not-lose messages, use
-  inbox pull or wrap async sends with your own correlation+timeout.
+- ⚠️ **Failure paths were lossy** (2026-09-08 snapshot; both findings fixed —
+  DF-CRIER-8 and DF-CRIER-9, re-verified live 2026-09-17): an exhausted async
+  queue now writes exactly one durable `WEBHOOK_FAILED` into the sender's inbox
+  instead of dropping silently, and the per-agent `retries` knob is honored per
+  endpoint (1..10, capped by the server `CR_WEBHOOK_MAX_RETRIES`, which is also
+  the default when the knob is absent or 0). A delivery with no `sender` still
+  has no inbox to notify, so keep inbox pull or your own
+  correlation+timeout for must-not-lose messages.
 
 ## Federation (CR_FED_LINKS) — proven outage-safe at HEAD 2026-09-14
 

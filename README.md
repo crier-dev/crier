@@ -104,9 +104,10 @@ answers `502` — retrying the identical message cannot succeed. Only a timeout
 or an exhausted budget answers `504`, where a later attempt can still land.
 
 **Recovery when an async/batch delivery dies.** After the queue exhausts its
-bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, one per
-`CR_WEBHOOK_REDELIVER_S` tick — 5 failed attempts / 30s by default, i.e.
-roughly two to three minutes after the accept), the item is dropped and
+bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts, or the endpoint's
+own smaller `webhook.retries` budget, one per `CR_WEBHOOK_REDELIVER_S` tick —
+5 failed attempts / 30s by default, i.e. roughly two to three minutes after the
+accept), the item is dropped and
 exactly one durable notification is written into the **sender's own inbox**. It
 is a direct store write: it never routes back through webhook delivery, so it
 cannot recurse — even when the sender itself is a webhook-configured agent.

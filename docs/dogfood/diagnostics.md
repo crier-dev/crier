@@ -130,7 +130,10 @@ audit) tasks remain open by design.
    only a server-log line; the promised ERROR `WEBHOOK_FAILED` to the sender
    does not exist. Observed cadence 30s (not `CR_WEBHOOK_REDELIVER_S=5`) and
    attempt count from the server default (per-agent `retries` ignored,
-   DF-CRIER-9).
+   DF-CRIER-9). *(Both findings closed 2026-09-17: DF-CRIER-8 shipped the
+   `WEBHOOK_FAILED` notification, DF-CRIER-9 made the per-endpoint `retries`
+   budget real — 1..10, capped by `CR_WEBHOOK_MAX_RETRIES`. The paragraph above
+   stays as the record of what the 2026-08-09 build did.)*
 4. **Wrong reply shape for the template** → 502 (corrected 2026-09-16: permanent
    rejects became 502 in DF-CRIER-157; 504 is timeout/budget only — see
    specs/WEBHOOK-DELIVERY.md:95) with a GOOD error message

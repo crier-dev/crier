@@ -311,7 +311,8 @@ with the endpoint's reply in the same body.
 So an empty `GET /agents/{id}/inbox` for a webhook-configured agent is the
 documented behavior — do not report it. Instead, watch the SENDER's inbox: when
 a queued async/batch delivery exhausts its bounded retries
-(`CR_WEBHOOK_MAX_RETRIES`, default 5 — one attempt per `CR_WEBHOOK_REDELIVER_S`
+(`CR_WEBHOOK_MAX_RETRIES`, default 5 — or the endpoint's own smaller
+`webhook.retries` budget — one attempt per `CR_WEBHOOK_REDELIVER_S`
 tick, default 30s, so ~2-3 minutes after the accept by default; longer while
 the endpoint is degraded and redeliveries pause until a probe
 (`CR_WEBHOOK_PROBE_S`) succeeds), exactly one durable notification lands there:
