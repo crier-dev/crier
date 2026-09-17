@@ -1259,3 +1259,28 @@ tasks:
   status: complete
   created_at: '2026-09-17T21:24:32.576415+00:00'
   completed_at: '2026-09-17T21:52:58.891702+00:00'
+- id: DF-CRIER-129
+  title: A federated delivery with no sender is held (202) and can never be reported
+    terminally - stop holding an unreportable delivery and answer the bounded 502
+    FEDERATION_FAILED synchronously
+  criteria:
+  - 'DEFECT: a delivery held at the source because every link failed transiently whose
+    deliver body carries no sender can never be reported - after CR_FED_MAX_HOLD_S
+    the hold manager invokes FederationFailureSink, which refuses with ''no sender
+    on message'' and the terminal outcome survives only as one log line (TESTERS.md:258
+    documents this as the status quo). FIX: a delivery that cannot be reported must
+    not be held - when every link fails transiently AND the request carries no sender,
+    ForwardOrHold must not enqueue it; the deliver handler answers the bounded 502
+    FEDERATION_FAILED synchronously (the same shape it already returns when no hold
+    queue exists), so the outcome reaches the caller instead of being lost. PROOF:
+    a test through the real HTTP deliver handler proves (i) no-sender + transient
+    outage returns 502 FEDERATION_FAILED with correlation context and leaves the hold
+    queue EMPTY, (ii) a body WITH a sender is still held (202) with no regression
+    to the existing exactly-once notification test, (iii) the RED behaviour reproduced
+    on the pre-fix tree. Docs move with the code (specs/WEBHOOK-DELIVERY.md section
+    8, TESTERS.md, README federation rows, docs/openapi.yaml plus its generated cmd/server
+    copy), and go build ./..., go vet ./..., go test -count=1 ./..., make docs-check
+    and gitreins guard are all green.'
+  status: complete
+  created_at: '2026-09-17T22:16:10.236381+00:00'
+  completed_at: '2026-09-17T22:27:24.341198+00:00'
