@@ -1284,3 +1284,16 @@ tasks:
   status: complete
   created_at: '2026-09-17T22:16:10.236381+00:00'
   completed_at: '2026-09-17T22:27:24.341198+00:00'
+- id: DF-CRIER-208
+  title: Shell/YAML checker must fail closed in explicit-file-list mode instead of
+    reporting a blank PASS
+  criteria:
+  - scripts/check-shell-yaml.sh exits nonzero and names the paths when (a) a named
+    .yml/.yaml file is outside .github/workflows/ or (b) an explicit file list classifies
+    nothing; a mixed list with >=1 classified file still exits 0; 'make shell-yaml-check'
+    on the clean tracked tree still exits 0 with its real scope line (11 shell, 3
+    workflow); 'make shell-yaml-selftest' exits 0 and covers the new cases; AGENTS.md
+    and the script header state the new rule
+  status: complete
+  created_at: '2026-09-17T22:43:43.761900+00:00'
+  completed_at: '2026-09-17T22:58:15.818501+00:00'
