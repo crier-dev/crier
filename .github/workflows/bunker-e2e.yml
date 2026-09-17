@@ -49,9 +49,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Ensure bunker agent exists + heartbeat
         run: |
-          $HOME/go/bin/bunker info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
-            || $HOME/go/bin/bunker spawn "$BUNKER_AGENT" --server "$BUNKER_SERVER" --ttl 720h
-          $HOME/go/bin/bunker heartbeat "$BUNKER_AGENT" --server "$BUNKER_SERVER"
+          "$HOME/go/bin/bunker" info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
+            || "$HOME/go/bin/bunker" spawn "$BUNKER_AGENT" --server "$BUNKER_SERVER" --ttl 720h
+          "$HOME/go/bin/bunker" heartbeat "$BUNKER_AGENT" --server "$BUNKER_SERVER"
       - name: Deploy container to bunker + run config-matrix battery
         run: |
           bash scripts/bunker-matrix.sh --host "$BUNKER_HOST" --port 30011 \
