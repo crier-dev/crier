@@ -451,9 +451,10 @@ func pgTimestamptz(expiry time.Time) pgtype.Timestamptz {
 
 // expiryFromTimestamptz is the read-side inverse of pgTimestamptz: a stored
 // `infinity` decodes back to the zero time, so the Postgres backend reports
-// the same never-expires representation as the in-memory backend and the
-// documented wire contract (expires_at 0001-01-01T00:00:00Z when
-// ttl_seconds was 0). Reading into a plain time.Time would fail outright:
+// the same never-expires representation as the in-memory backend. Since
+// DF-CRIER-182 that zero time is rendered as JSON null on the wire (the key
+// present, the value null) — it is never sent as the zero time
+// 0001-01-01T00:00:00Z. Reading into a plain time.Time would fail outright:
 // pgx refuses `infinity` for a *time.Time destination.
 func expiryFromTimestamptz(ts pgtype.Timestamptz) time.Time {
 	switch ts.InfinityModifier {

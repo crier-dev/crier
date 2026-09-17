@@ -170,13 +170,14 @@ type deliverResponse struct {
 	// "async" (one queued POST) or "batch" (coalesced into the endpoint's
 	// next batch flush). Absent for inbox and blocking deliveries.
 	DeliveryMode string `json:"delivery_mode,omitempty"`
-	// ExpiresAt is the RESOLVED message expiry (RFC 3339) of a stored inbox
-	// message, so a sender can see what the requested ttl_seconds actually
-	// became; the zero time (0001-01-01T00:00:00Z) means the message never
-	// expires (DF-CRIER-37). Absent on the webhook paths, where no inbox
-	// entry is created and expiry does not apply.
-	ExpiresAt *time.Time  `json:"expires_at,omitempty"`
-	Guard     *guard.Meta `json:"guard,omitempty"`
+	// ExpiresAt is the RESOLVED message expiry of a stored inbox message, so
+	// a sender can see what the requested ttl_seconds actually became. The
+	// wire form is tri-state (DF-CRIER-182): ABSENT on the webhook paths,
+	// where no inbox entry is created and expiry does not apply; JSON null
+	// when the message never expires (ttl_seconds=0 — the zero time
+	// internally, DF-CRIER-37); RFC 3339 otherwise.
+	ExpiresAt *MessageExpiry `json:"expires_at,omitempty"`
+	Guard     *guard.Meta    `json:"guard,omitempty"`
 }
 
 // guardBlockedResponse is the uniform 403 body for blocked deliveries
@@ -767,10 +768,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		"transport", "inbox",
 		"request_id", middleware.RequestIDFromContext(r.Context()),
 	)
+	// The expiry is resolved into the tri-state wire type (DF-CRIER-182): a
+	// never-expiring message reports null instead of the zero time.
+	expiresAt := MessageExpiry(entry.ExpiresAt)
 	writeJSON(w, http.StatusCreated, deliverResponse{
 		ID:        entry.ID,
 		Transport: "inbox",
-		ExpiresAt: &entry.ExpiresAt,
+		ExpiresAt: &expiresAt,
 		Guard:     guardInDeliverResponse(guardMeta),
 	})
 	deliveriesTotal.Inc()

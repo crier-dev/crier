@@ -202,6 +202,18 @@ claims:
     quote: "30s interval; no server-side liveness processing"
     expect: 30
     xfail: null
+  # DF-CRIER-182: a message that never expires (ttl_seconds=0) reports
+  # `expires_at` as JSON null — the key stays present, only its value is null —
+  # on the 201 accept AND on the retrieve body. The probe reads the RAW wire
+  # value, so the pre-fix zero time 0001-01-01T00:00:00Z arrives here as a
+  # non-nil string and fails the claim; a missing key is a probe error, because
+  # absent (no inbox entry: webhook deliveries) is a different state from null.
+  - id: DEFAULT-NEVER-EXPIRES-WIRE-VALUE
+    kind: default
+    doc: TESTERS.md
+    quote: 'never expires and is reported as `"expires_at":null`'
+    expect: null
+    xfail: null
 
   # --- counts (kind: count) — re-measured from source where measurable (openapi
   # paths/operations, router registrations, Makefile threshold, live MCP tools/list);

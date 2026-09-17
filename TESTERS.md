@@ -126,11 +126,23 @@ curl -s -X POST $BASE/agents/bob/inbox/ack -H 'Content-Type: application/json' \
 # -> 204
 
 # A delivery may carry an explicit lifetime. ttl_seconds is honoured; 0 means
-# never expires:
+# never expires, which the wire reports as "expires_at":null (the key is
+# present, the value is null — not the zero time 0001-01-01T00:00:00Z):
 curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
   -d '{"payload":{"ping":1},"ttl_seconds":3600}'
 # -> 201 with expires_at = now + 3600s
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"ping":2},"ttl_seconds":0}'
+# -> 201 {"id":"...","transport":"inbox","expires_at":null}
 ```
+
+The marked block below is executed by `make docs-check` against its own server:
+
+<!-- doccheck -->
+```bash
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"never":1},"ttl_seconds":0}'   # -> 201
+```
+
 
 The retrieve above is the one **intentional negative** in this guide: drop the
 headers and the default configuration rejects the call with
@@ -271,7 +283,8 @@ Verified good since the last revision of this file (do not report as broken):
   segment, and a terminal `alerts.>` receives `alerts.fire.deep`.
 - **`ttl_seconds` on inbox delivery is honoured.** A deliver with
   `"ttl_seconds":3600` returns `201` with `expires_at` = now + 3600s; `0` means
-  never expires.
+  never expires and is reported as `"expires_at":null` (the key is present, the
+  value is null — not the zero time `0001-01-01T00:00:00Z`).
 - **Unacked messages redeliver at the 30-second lease boundary**, not on a lagging
   purge tick (measured: a message retrieved at T is retrievable again at T+30s).
 - **Two retrievers do not both get everything.** A retrieve leases its batch: an
@@ -290,7 +303,8 @@ A delivery to an agent that has a webhook configured goes to that endpoint and
 **bypasses the durable inbox** (`specs/WEBHOOK-DELIVERY.md` §4). The accept
 tells you which: `202` + `"transport":"webhook"` (plus `"delivery_mode":
 "async"|"batch"`) means the message was queued for the endpoint and is NOT in
-the target's inbox; `201` + `"transport":"inbox"` (plus `expires_at`) means it
+the target's inbox; `201` + `"transport":"inbox"` (plus `expires_at`, an RFC
+3339 instant or `null` when the message never expires) means it
 is stored and retrievable; `200` + `"transport":"webhook"` is blocking mode,
 with the endpoint's reply in the same body.
 

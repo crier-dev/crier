@@ -546,11 +546,11 @@ paths:
                   description: |
                     Message expiry in seconds. Absent leaves the server default
                     (24h). 0 means the message never expires: `expires_at` is
-                    reported as the zero time 0001-01-01T00:00:00Z and the
-                    message is never TTL-purged. A value above the duration
-                    bound (or a negative one) is rejected with 400. Applies to
-                    messages stored in the target's inbox — a webhook delivery
-                    is not stored, so it has no expiry.
+                    reported as JSON null — the key is present, its value is
+                    null — and the message is never TTL-purged. A value above
+                    the duration bound (or a negative one) is rejected with 400.
+                    Applies to messages stored in the target's inbox — a webhook
+                    delivery is not stored, so it has no expiry.
       responses:
         "201":
           description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157)."
@@ -568,9 +568,9 @@ paths:
                     enum: [inbox]
                     description: "Where the message went (DF-CRIER-157): \"inbox\" — it is in the target's durable inbox and retrievable with GET /agents/{id}/inbox. The field is always present, so a sender branches on it instead of inferring the destination from the status code."
                   expires_at:
-                    type: string
+                    type: [string, "null"]
                     format: date-time
-                    description: "Resolved expiry of the stored message (RFC 3339) — it reflects the requested ttl_seconds, never a fixed default; the zero time 0001-01-01T00:00:00Z when ttl_seconds was 0 (never expires). Absent on webhook deliveries (blocking 200, async/batch 202), where no inbox entry is created."
+                    description: "Resolved expiry of the stored message — it reflects the requested ttl_seconds, never a fixed default. RFC 3339 for a finite lifetime; JSON null when ttl_seconds was 0 (the message never expires, and the key is still present — null is the value, not the absence). Absent on webhook deliveries (blocking 200, async/batch 202), where no inbox entry is created; absent and null are therefore distinct states."
                   guard:
                     $ref: "#/components/schemas/GuardVerdictMeta"
                     description: "Guard verdict metadata whenever the verdict is not a CLEAN pass (decision allow + no error + risk low + no matched patterns) — visibility for async senders. Surfaced for sanitize, errored fail-open, and any allow carrying a risk marker (e.g. the over-cap `oversize` marker); a clean allow omits it (CR-FEAT-010, spec §9.3, DF-CRIER-158)"
@@ -945,9 +945,9 @@ components:
           format: date-time
           description: Enqueue time (RFC 3339)
         expires_at:
-          type: string
+          type: [string, "null"]
           format: date-time
-          description: Expiry time (RFC 3339); 0001-01-01T00:00:00Z when ttl_seconds was 0
+          description: Expiry time (RFC 3339) for a finite lifetime, or null when the message never expires (ttl_seconds was 0). The key is always present (see the required list), so null — never the zero time 0001-01-01T00:00:00Z — is how "never expires" reaches a client; a date-parsing client must read null, not a timestamp.
         leased_at:
           type: string
           format: date-time

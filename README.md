@@ -68,7 +68,7 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
-- TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires)
+- TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires, reported on the wire as `"expires_at":null`)
 - Every message is leased to exactly one retriever; a concurrent retriever receives only what the first did not lease (`queue_depth`/`leased_count` on the retrieve body disambiguate an empty `messages` array: `leased_count` > 0 means HELD, not lost — DF-CRIER-177)
 
 ### 5. Webhook delivery (bypasses the inbox)
@@ -91,7 +91,7 @@ the status code (DF-CRIER-157):
 |--------|-------------|-----------------|---------|
 | `200` | `webhook` | — | blocking: the endpoint's reply is in `reply` |
 | `202` | `webhook` | `async` \| `batch` | accepted for **webhook delivery, queued — not stored** |
-| `201` | `inbox` | — | stored in the durable inbox (`expires_at` present) |
+| `201` | `inbox` | — | stored in the durable inbox (`expires_at` present: RFC 3339, or `null` when it never expires) |
 
 A `202` is a promise about the queue, not about delivery: the endpoint can
 still fail afterwards. A blocking delivery the endpoint permanently rejects
@@ -271,7 +271,9 @@ curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application
 # 201
 
 # 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
-#    24h default, 0 means the message never expires. `transport` in the body is
+#    24h default, 0 means the message never expires and is reported as
+#    "expires_at":null (the key is present, the value is null — never the zero
+#    time). `transport` in the body is
 #    always present: "inbox" here, "webhook" when the target has a webhook
 #    configured (then the inbox is bypassed — see §5 of the architecture notes).
 curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \

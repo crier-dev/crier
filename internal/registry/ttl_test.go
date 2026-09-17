@@ -21,19 +21,22 @@ import (
 // The contract now:
 //
 //   - absent           → 24h default (unchanged pre-existing behavior);
-//   - ttl_seconds = 0  → never expires: ExpiresAt stays the zero time
-//     (0001-01-01T00:00:00Z), which every consumption path treats as "no
-//     expiry" — retrieve, stats and purge must all skip the expiry check;
-//   - ttl_seconds > 0  → CreatedAt + n seconds;
+//   - ttl_seconds = 0  → never expires: internally ExpiresAt stays the zero
+//     time (0001-01-01T00:00:00Z), which every consumption path treats as
+//     "no expiry" — retrieve, stats and purge must all skip the expiry check —
+//     while the WIRE renders it as JSON null (DF-CRIER-182): the key is
+//     present and its value is null, never the zero time;
+//   - ttl_seconds > 0  → CreatedAt + n seconds, RFC 3339 on the wire;
 //   - ttl_seconds < 0, or so large it would overflow time.Duration → 400.
 //
 // The expiry is read back through the SAME observable surface a client uses
 // (deliver response `expires_at`, then GET /agents/{id}/inbox), so a fix that
 // set the store field but left the response at the old default would fail.
 
-// zeroTimeRFC3339 is how the API documents the never-expires representation
-// (openapi.yaml, InboxEntry.expires_at: "0001-01-01T00:00:00Z when
-// ttl_seconds was 0").
+// zeroTimeRFC3339 is the OLD never-expires wire representation (openapi.yaml
+// documented InboxEntry.expires_at as "0001-01-01T00:00:00Z when ttl_seconds
+// was 0"). Since DF-CRIER-182 it must not appear anywhere in a response body:
+// the never-expires state is JSON null instead.
 const zeroTimeRFC3339 = "0001-01-01T00:00:00Z"
 
 // deliverBody builds a deliver request body, omitting ttl_seconds entirely
@@ -49,7 +52,10 @@ func deliverBody(t *testing.T, payload string, ttl any) string {
 	return string(raw)
 }
 
-// deliverResponseBody is the wire shape of a 201 delivery.
+// deliverResponseBody is the wire shape of a 201 delivery. ExpiresAt decodes
+// to nil for BOTH the absent (webhook) form and the present-and-null
+// (never-expires) form — a *time.Time cannot tell them apart, so the tests that
+// care read the raw body (wireField).
 type deliverResponseBody struct {
 	ID        string     `json:"id"`
 	ExpiresAt *time.Time `json:"expires_at"`
@@ -117,18 +123,26 @@ func TestDeliver_TTLSeconds_ZeroNeverExpires(t *testing.T) {
 
 	rec, resp := deliverAndDecode(t, router, "agent-1", deliverBody(t, `{"n":1}`, 0))
 
-	// The zero time IS the documented never-expires representation.
-	require.NotNil(t, resp.ExpiresAt, "expires_at is present (explicitly) for ttl_seconds=0")
-	require.True(t, resp.ExpiresAt.IsZero(), "expires_at = %s, want the zero time", resp.ExpiresAt)
-	require.Contains(t, rec.Body.String(), zeroTimeRFC3339)
+	// DF-CRIER-182: the never-expires state is JSON null on the wire — the key
+	// is PRESENT and its value is null (a *time.Time decodes null to nil, which
+	// is exactly why the raw form is asserted below it).
+	require.Nil(t, resp.ExpiresAt, "expires_at = %v, want null for ttl_seconds=0", resp.ExpiresAt)
+	raw, present := wireField(t, rec.Body.Bytes(), "expires_at")
+	require.True(t, present, "expires_at is present (explicitly) for ttl_seconds=0 — body: %s", rec.Body.String())
+	require.JSONEq(t, `null`, string(raw), "expires_at = %s, want null", raw)
+	require.NotContains(t, rec.Body.String(), zeroTimeRFC3339,
+		"the zero time is no longer a wire value — body: %s", rec.Body.String())
 
-	// Premise for the store-side guards: the zero time is before now, so a
-	// plain `ExpiresAt.Before(now)` check would call this message expired.
-	require.True(t, resp.ExpiresAt.Before(time.Now()))
-
+	// The internal representation is unchanged: retrieve decodes the null back
+	// to the zero ExpiresAt (the same round trip RemoteStore depends on).
 	msgs, _ := decodeRetrieve(t, doInboxRequest(t, router, http.MethodGet, "/agents/agent-1/inbox?max=10", ""))
 	require.Len(t, msgs, 1, "a never-expiring message must be retrievable")
-	require.True(t, msgs[0].ExpiresAt.IsZero())
+	require.True(t, msgs[0].ExpiresAt.IsZero(), "in-process ExpiresAt = %s, want the zero time", msgs[0].ExpiresAt)
+
+	// Premise for the store-side guards: the zero time is before now, so a
+	// plain `ExpiresAt.Before(now)` check would call this message expired —
+	// which is exactly why it must never reach a client as a timestamp.
+	require.True(t, msgs[0].ExpiresAt.Before(time.Now()))
 
 	stats := doInboxRequest(t, router, http.MethodGet, "/agents/agent-1/inbox/stats", "")
 	require.Equal(t, http.StatusOK, stats.Code)

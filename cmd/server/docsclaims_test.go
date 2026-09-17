@@ -54,9 +54,13 @@ const docsClaimsProbeAgent = "docsclaims-probe"
 
 // docsClaimsWebhookProbeAgent and docsClaimsTTLProbeAgent are the identities the
 // CR-GAP-062 xfail probes drive (webhook default delivery mode, ttl_seconds).
+// docsClaimsNeverExpiresProbeAgent is the identity the DF-CRIER-182 claim
+// drives: a ttl_seconds=0 delivery whose RAW expires_at value is the
+// measurement.
 const (
-	docsClaimsWebhookProbeAgent = "docsclaims-webhook-probe"
-	docsClaimsTTLProbeAgent     = "docsclaims-ttl-probe"
+	docsClaimsWebhookProbeAgent      = "docsclaims-webhook-probe"
+	docsClaimsTTLProbeAgent          = "docsclaims-ttl-probe"
+	docsClaimsNeverExpiresProbeAgent = "docsclaims-never-expires-probe"
 )
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
@@ -499,6 +503,9 @@ func TestDocsClaims(t *testing.T) {
 	// (an update would need a signed request; the default is only observable
 	// on an agent that carries a webhook and states no delivery_mode).
 	registerAgent(t, client, baseURL, docsClaimsTTLProbeAgent)
+	// DF-CRIER-182: the identity whose never-expiring delivery reports the
+	// raw wire value of expires_at.
+	registerAgent(t, client, baseURL, docsClaimsNeverExpiresProbeAgent)
 
 	probes := probeSet{
 		readDoc: func(doc string) (string, error) {
@@ -1225,10 +1232,55 @@ func makeLiveDefaultProbes(client *http.Client, baseURL string) func(string) (an
 			return mesh.DefaultMeshConfig("").MaxPendingRequests, nil
 		case "TTL-SECONDS-CLAIM-IGNORED":
 			return liveTTLDeliverySeconds(client, baseURL)
+		case "DEFAULT-NEVER-EXPIRES-WIRE-VALUE":
+			return liveNeverExpiresWireValue(client, baseURL)
 		default:
 			return liveDefault(claimID)
 		}
 	}
+}
+
+// liveNeverExpiresWireValue measures the RAW JSON value the live server puts in
+// expires_at for a stored message that never expires (ttl_seconds=0) — the
+// DF-CRIER-182 contract: nil, because the wire value is JSON null and the key
+// stays present. The pre-fix zero time reaches this claim as a non-nil string
+// and fails it, which is what makes the claim non-vacuous. A MISSING key is a
+// probe error, never a null: absent means "no expiry applies" (the webhook
+// paths), a different state from null.
+func liveNeverExpiresWireValue(client *http.Client, baseURL string) (any, error) {
+	body := `{"payload":{"never_expires_probe":true},"ttl_seconds":0}`
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsNeverExpiresProbeAgent+"/inbox", strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var wire struct {
+		ExpiresAt json.RawMessage `json:"expires_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode deliver response: %w", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("deliver answered %d, want 201 + expires_at", resp.StatusCode)
+	}
+	got := strings.TrimSpace(string(wire.ExpiresAt))
+	if got == "" {
+		return nil, fmt.Errorf("expires_at key is ABSENT on a stored delivery; want present-and-null")
+	}
+	if got == "null" {
+		return nil, nil
+	}
+	var iso string
+	if err := json.Unmarshal(wire.ExpiresAt, &iso); err != nil {
+		return nil, fmt.Errorf("expires_at = %s, want null or an RFC 3339 string", got)
+	}
+	return iso, nil
 }
 
 // liveTTLDeliverySeconds measures what the live server actually does with a

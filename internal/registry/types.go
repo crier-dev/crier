@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -87,4 +88,69 @@ type InboxEntry struct {
 	// (CR-FEAT-010, spec §9.3). Present on guarded deliveries; absent when
 	// the guard is disabled.
 	Guard *guard.Meta `json:"guard,omitempty"`
+}
+
+// MessageExpiry is the tri-state WIRE encoding of a message expiry
+// (DF-CRIER-182). Storage is untouched: every consumption path — retrieve,
+// stats, purge (DF-CRIER-37) — keeps reading the plain time.Time on
+// InboxEntry, where the zero time means "never expires".
+//
+// That zero time is a perfectly valid time.Time, and time.Time's own JSON
+// encoding renders it as "0001-01-01T00:00:00Z" — a syntactically valid
+// RFC 3339 instant that any date-parsing client reads as broken or
+// long-expired. On the wire the three states are therefore:
+//
+//   - ABSENT   — no expiry applies because no inbox entry was created (the
+//     webhook delivery paths). Expressed by the carrying field being a nil
+//     *MessageExpiry with omitempty, never by this type.
+//   - null     — the message never expires (ttl_seconds=0): the key is
+//     present, the value is JSON null.
+//   - RFC 3339 — the resolved finite instant (ttl_seconds>0, or the 24h
+//     default), byte-identical to what time.Time emitted before.
+type MessageExpiry time.Time
+
+// MarshalJSON encodes a never-expires expiry as JSON null and any other
+// instant exactly as time.Time would (so a finite expiry is unchanged).
+func (e MessageExpiry) MarshalJSON() ([]byte, error) {
+	t := time.Time(e)
+	if t.IsZero() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(t)
+}
+
+// UnmarshalJSON accepts the two forms this type emits on the wire: null
+// (never expires → the zero time) and an RFC 3339 instant.
+func (e *MessageExpiry) UnmarshalJSON(b []byte) error {
+	if string(bytes.TrimSpace(b)) == "null" {
+		*e = MessageExpiry(time.Time{})
+		return nil
+	}
+	var t time.Time
+	if err := json.Unmarshal(b, &t); err != nil {
+		return err
+	}
+	*e = MessageExpiry(t)
+	return nil
+}
+
+// MarshalJSON renders an inbox entry with the tri-state expiry (DF-CRIER-182):
+// a never-expiring message (the zero ExpiresAt) goes out as
+// "expires_at": null instead of the zero time. This is the ONE seam every
+// surface that renders an entry — the HTTP retrieve body and the MCP bridge
+// alike — goes through, so no two of them can disagree about the wire.
+//
+// The embedded alias keeps every other field exactly as its struct tag
+// declares it (including fields added later), and the outer ExpiresAt field
+// shadows the alias's own field of the same JSON name — encoding/json
+// prefers the shallowest field for a duplicated name.
+func (e InboxEntry) MarshalJSON() ([]byte, error) {
+	type inboxEntry InboxEntry
+	return json.Marshal(struct {
+		inboxEntry
+		ExpiresAt MessageExpiry `json:"expires_at"`
+	}{
+		inboxEntry: inboxEntry(e),
+		ExpiresAt:  MessageExpiry(e.ExpiresAt),
+	})
 }
