@@ -1056,3 +1056,13 @@ tasks:
   status: complete
   created_at: '2026-09-17T12:47:12.639448+00:00'
   completed_at: '2026-09-17T12:58:41.910326+00:00'
+- id: DF-CRIER-156
+  title: PATCH /agents/{id} must return and persist an advanced last_seen on both
+    backends
+  criteria:
+  - A PATCH /agents/{id} 200 response body carries a last_seen equal to what the immediately
+    following GET /agents/{id} returns, last_seen advances on update on BOTH the memory
+    and postgres backends, and tests assert it.
+  status: complete
+  created_at: '2026-09-17T13:17:07.441159+00:00'
+  completed_at: '2026-09-17T13:31:09.447913+00:00'
