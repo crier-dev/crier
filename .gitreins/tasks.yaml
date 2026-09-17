@@ -1015,3 +1015,15 @@ tasks:
   status: complete
   created_at: '2026-09-16T22:51:22.171973+00:00'
   completed_at: '2026-09-16T23:17:35.551185+00:00'
+- id: DF-CRIER-142
+  title: 'obs: optional pprof + Prometheus /metrics surface'
+  criteria:
+  - CR_ENABLE_PPROF=true serves /debug/pprof/ and CR_ENABLE_METRICS=true serves a
+    Prometheus text /metrics exposing deliveries_total, webhook_deliveries_total{outcome},
+    guard_decisions_total{decision}, federation_held_current, relay_events_total,
+    ws_subscribers, http_requests_total{code}; both default off (404 when unset);
+    README Configuration table documents both; make docs-check and go test ./... -count=1
+    green
+  status: complete
+  created_at: '2026-09-17T10:04:10.520597+00:00'
+  completed_at: '2026-09-17T10:59:14.382055+00:00'
