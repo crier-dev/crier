@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/crier-dev/crier/config"
 )
 
 // unsetAll clears every env var consumed by config.Load() so each test
@@ -32,6 +32,8 @@ func unsetAll(t *testing.T) {
 		"CR_FED_TOKEN",
 		"CR_FED_MAX_HOLD_S",
 		"CR_FED_QUEUE_FILE",
+		"CR_ENABLE_PPROF",
+		"CR_ENABLE_METRICS",
 	} {
 		t.Setenv(k, "")
 	}
@@ -745,4 +747,81 @@ func TestLoad_GuardKanbanURL(t *testing.T) {
 	cfg, err = config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, "ftp://cards.example.com/x", cfg.Guard.KanbanURL)
+}
+
+// ---------- Observability (DF-CRIER-142) ----------
+
+// TestLoad_ObservabilityDefaults pins the OFF-by-default contract: with
+// neither flag set, both live-inspection surfaces stay disabled.
+func TestLoad_ObservabilityDefaults(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("CR_ENABLE_PPROF", "")
+	t.Setenv("CR_ENABLE_METRICS", "")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.Observability.EnablePProf, "default: pprof surface OFF")
+	assert.False(t, cfg.Observability.EnableMetrics, "default: metrics surface OFF")
+}
+
+// TestLoad_ObservabilityTolerantBools is the table for the tolerant bool
+// dialect the two flags share with CR_REQUIRE_AGENT_SIG/CR_GUARD_ENABLED:
+// true/1/yes on, false/0/no off, case-insensitive, anything else fails
+// loudly naming the variable.
+func TestLoad_ObservabilityTolerantBools(t *testing.T) {
+	cases := []struct {
+		value   string
+		pprof   bool
+		metrics bool
+	}{
+		{"true", true, true},
+		{"TRUE", true, true},
+		{"1", true, true},
+		{"yes", true, true},
+		{"Yes", true, true},
+		{"false", false, false},
+		{"0", false, false},
+		{"no", false, false},
+		{"NO", false, false},
+	}
+	for _, tc := range cases {
+		unsetAll(t)
+		t.Setenv("CR_ENABLE_PPROF", tc.value)
+		t.Setenv("CR_ENABLE_METRICS", tc.value)
+		cfg, err := config.Load()
+		require.NoError(t, err, "value %q", tc.value)
+		assert.Equal(t, tc.pprof, cfg.Observability.EnablePProf, "CR_ENABLE_PPROF=%q", tc.value)
+		assert.Equal(t, tc.metrics, cfg.Observability.EnableMetrics, "CR_ENABLE_METRICS=%q", tc.value)
+	}
+
+	// Garbage values fail loudly, naming the variable.
+	unsetAll(t)
+	t.Setenv("CR_ENABLE_PPROF", "maybe")
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CR_ENABLE_PPROF")
+
+	unsetAll(t)
+	t.Setenv("CR_ENABLE_METRICS", "on-tuesdays")
+	_, err = config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CR_ENABLE_METRICS")
+}
+
+// TestLoad_ObservabilityIndependent pins that each flag gates its own
+// surface — enabling one never drags the other on.
+func TestLoad_ObservabilityIndependent(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("CR_ENABLE_METRICS", "true")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.Observability.EnableMetrics)
+	assert.False(t, cfg.Observability.EnablePProf)
+
+	unsetAll(t)
+	t.Setenv("CR_ENABLE_PPROF", "1")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.Observability.EnablePProf)
+	assert.False(t, cfg.Observability.EnableMetrics)
 }

@@ -8,8 +8,14 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
+	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 )
+
+// relayEventsTotal counts accepted relay publishes (DF-CRIER-142): one Inc
+// per publish the handler accepts (202), rejections are not deliveries.
+var relayEventsTotal = metrics.Default.NewCounter("relay_events_total",
+	"Relay events accepted and fanned out to subscribers (POST /relay/publish accepts).")
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -101,6 +107,7 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		"bytes", len(body.Event),
 		"request_id", rid,
 	)
+	relayEventsTotal.Inc()
 	w.WriteHeader(http.StatusAccepted)
 }
 

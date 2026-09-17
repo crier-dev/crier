@@ -395,6 +395,13 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Setenv("CR_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CRIER_DATABASE_URL", "")
+	// DF-CRIER-142: the README documents live paths GET /metrics and
+	// GET /debug/pprof/ (both opt-in via CR_ENABLE_METRICS /
+	// CR_ENABLE_PPROF, off by default). The docs claim these paths, so the
+	// booted server must expose them for the route claims and the scanned
+	// README path tokens to probe.
+	t.Setenv("CR_ENABLE_METRICS", "true")
+	t.Setenv("CR_ENABLE_PPROF", "true")
 
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))

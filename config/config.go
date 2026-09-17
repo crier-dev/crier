@@ -38,6 +38,25 @@ type Config struct {
 	// Guard holds LLM message-guard tuning (specs/LLM-MESSAGE-GUARD.md
 	// §9.1, CR-FEAT-010).
 	Guard GuardConfig
+	// Observability holds the opt-in live-inspection surfaces
+	// (DF-CRIER-142). Both default to false: with the flags unset the
+	// server registers neither /metrics nor /debug/pprof and both answer
+	// 404 like any unregistered path.
+	Observability ObservabilityConfig
+}
+
+// ObservabilityConfig holds the opt-in live-inspection surfaces
+// (DF-CRIER-142). Neither surface is auth-exempt: with CR_AUTH_TOKEN set
+// they require the Bearer header like every other authenticated route;
+// with auth off they are open. The exempt-path list in
+// internal/middleware/auth.go is unchanged.
+type ObservabilityConfig struct {
+	// EnablePProf registers GET /debug/pprof/* (net/http/pprof) when true
+	// (CR_ENABLE_PPROF). Default false.
+	EnablePProf bool
+	// EnableMetrics registers GET /metrics (Prometheus text format) when
+	// true (CR_ENABLE_METRICS). Default false.
+	EnableMetrics bool
 }
 
 // GuardConfig holds LLM message-guard tuning (spec §9.1, CR-FEAT-010).
@@ -265,14 +284,11 @@ func Load() (Config, error) {
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.
 	if v := os.Getenv("CR_REQUIRE_AGENT_SIG"); v != "" {
-		switch strings.ToLower(v) {
-		case "true", "1", "yes":
-			cfg.RequireAgentSig = true
-		case "false", "0", "no":
-			cfg.RequireAgentSig = false
-		default:
-			return cfg, fmt.Errorf("invalid CR_REQUIRE_AGENT_SIG: %q (want true/false)", v)
+		parsed, err := parseTolerantBool("CR_REQUIRE_AGENT_SIG", v)
+		if err != nil {
+			return cfg, err
 		}
+		cfg.RequireAgentSig = parsed
 	}
 
 	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
@@ -331,14 +347,11 @@ func Load() (Config, error) {
 
 	// LLM message guard (CR-FEAT-010, spec §9.1).
 	if v := os.Getenv("CR_GUARD_ENABLED"); v != "" {
-		switch strings.ToLower(v) {
-		case "true", "1", "yes":
-			cfg.Guard.Enabled = true
-		case "false", "0", "no":
-			cfg.Guard.Enabled = false
-		default:
-			return cfg, fmt.Errorf("invalid CR_GUARD_ENABLED: %q (want true/false)", v)
+		parsed, err := parseTolerantBool("CR_GUARD_ENABLED", v)
+		if err != nil {
+			return cfg, err
 		}
+		cfg.Guard.Enabled = parsed
 	}
 	if v := os.Getenv("CR_GUARD_TIMEOUT_MS"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -409,7 +422,40 @@ func Load() (Config, error) {
 	// guard.New at startup (a broken server default fails fast, spec §9.1).
 	cfg.Guard.DefaultPolicy = os.Getenv("CR_GUARD_DEFAULT_POLICY")
 
+	// Opt-in live-inspection surfaces (DF-CRIER-142). Same tolerant bool
+	// dialect as CR_REQUIRE_AGENT_SIG / CR_GUARD_ENABLED; default false, so
+	// an unset flag leaves the surface unregistered (404).
+	if v := os.Getenv("CR_ENABLE_PPROF"); v != "" {
+		parsed, err := parseTolerantBool("CR_ENABLE_PPROF", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Observability.EnablePProf = parsed
+	}
+	if v := os.Getenv("CR_ENABLE_METRICS"); v != "" {
+		parsed, err := parseTolerantBool("CR_ENABLE_METRICS", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Observability.EnableMetrics = parsed
+	}
+
 	return cfg, nil
+}
+
+// parseTolerantBool is the single tolerant boolean dialect crier reads env
+// vars with (CR_REQUIRE_AGENT_SIG, CR_GUARD_ENABLED, CR_ENABLE_PPROF,
+// CR_ENABLE_METRICS): true/1/yes and false/0/no, case-insensitive, anything
+// else fails loudly naming the variable.
+func parseTolerantBool(name, v string) (bool, error) {
+	switch strings.ToLower(v) {
+	case "true", "1", "yes":
+		return true, nil
+	case "false", "0", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid %s: %q (want true/false)", name, v)
+	}
 }
 
 // BuildCheckOrigin returns a CheckOrigin function for gorilla/websocket.

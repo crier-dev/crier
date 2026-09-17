@@ -8,8 +8,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 )
+
+// webhookOutcomeTotal counts webhook push deliveries by terminal outcome
+// (DF-CRIER-142). Outcome vocabulary is the driver's own: delivered = the
+// endpoint answered 2xx; failed = a retryable failure was queued for
+// redelivery; deadlettered = the endpoint answered a permanent (4xx)
+// rejection; dropped = the delivery left the queue without a POST attempt
+// (agent gone or retries exhausted). One child per outcome, incremented at
+// the exact site that decides it — the counter set is the audit trail.
+var webhookOutcomeTotal = metrics.Default.NewCounterVec("webhook_deliveries_total",
+	"Webhook push deliveries by terminal outcome (delivered/failed/deadlettered/dropped).", "outcome")
 
 // CodeWebhookFailed is the machine-readable error code carried by the
 // durable sender notification emitted when an async delivery exhausts its
@@ -217,6 +228,7 @@ func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config
 	d.logOutcome(agentID, cfg, env, 0, res, rid)
 	if res.Err == nil && !res.Retryable && res.StatusCode >= 200 && res.StatusCode < 300 {
 		d.recordSuccess(agentID)
+		webhookOutcomeTotal.With("delivered").Inc()
 		return true, nil
 	}
 	d.recordFailure(agentID, res)
@@ -315,6 +327,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 				return nil, fmt.Errorf("%w: reply extraction: %w", ErrPermanent, err)
 			}
 			d.recordSuccess(agentID)
+			webhookOutcomeTotal.With("delivered").Inc()
 			return reply, nil
 		}
 		if res.Err != nil {
@@ -324,9 +337,11 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		}
 		if !res.Retryable {
 			d.recordFailure(agentID, res)
+			webhookOutcomeTotal.With("deadlettered").Inc()
 			return nil, fmt.Errorf("%w: %w", ErrPermanent, lastErr)
 		}
 		d.recordFailure(agentID, res)
+		webhookOutcomeTotal.With("failed").Inc()
 		// Backoff within the remaining budget.
 		wait := backoff(attempt + 1)
 		if rem := time.Until(deadline); wait > rem {
@@ -406,12 +421,15 @@ func (d *Driver) redeliverLoop() {
 
 // drainQueue attempts every queued item once; permanent failures and
 // retry-exhausted items are dropped with a log (dead-letter v1 = log + event).
+// Every terminal outcome increments webhook_deliveries_total{outcome}
+// (DF-CRIER-142): delivered / failed (requeued) / deadlettered / dropped.
 func (d *Driver) drainQueue() {
 	items := d.queue.PopBatch(100)
 	for _, item := range items {
 		cfg := d.agentConfig(item.AgentID)
 		if cfg == nil {
 			logf("webhook: queue item dropped (agent gone)", "agent", item.AgentID)
+			webhookOutcomeTotal.With("dropped").Inc()
 			continue
 		}
 		d.mu.Lock()
@@ -436,6 +454,7 @@ func (d *Driver) drainQueue() {
 		}
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			d.recordSuccess(item.AgentID)
+			webhookOutcomeTotal.With("delivered").Inc()
 			continue
 		}
 		if !res.Retryable {
@@ -443,15 +462,18 @@ func (d *Driver) drainQueue() {
 			logf("webhook: delivery dead-lettered (permanent failure)",
 				"agent", item.AgentID, "status", res.StatusCode)
 			d.recordSuccess(item.AgentID) // reset failure streak
+			webhookOutcomeTotal.With("deadlettered").Inc()
 			continue
 		}
 		d.recordFailure(item.AgentID, res)
 		item.Retries++
 		if item.Retries <= d.cfg.MaxRetries {
 			_ = d.queue.Push(item)
+			webhookOutcomeTotal.With("failed").Inc()
 		} else {
 			logf("webhook: delivery dropped (retries exhausted)",
 				"agent", item.AgentID, "retries", item.Retries)
+			webhookOutcomeTotal.With("dropped").Inc()
 			d.notifyExhausted(item, res)
 		}
 	}
@@ -755,6 +777,7 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 	if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 		d.recordSuccess(agentID)
 		logf("webhook: batch delivered", "agent", agentID, "messages", len(envs), "status", res.StatusCode)
+		webhookOutcomeTotal.With("delivered").Inc()
 		return
 	}
 	if !res.Retryable {
@@ -762,10 +785,12 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		logf("webhook: batch dead-lettered (permanent failure)",
 			"agent", agentID, "status", res.StatusCode, "messages", len(envs))
 		d.recordSuccess(agentID)
+		webhookOutcomeTotal.With("deadlettered").Inc()
 		return
 	}
 	d.logBatchOutcome(agentID, cfg, len(envs), 0, res, batchRequestID(items))
 	d.recordFailure(agentID, res)
+	webhookOutcomeTotal.With("failed").Inc()
 	d.requeueBatch(agentID, items)
 }
 

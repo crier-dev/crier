@@ -322,9 +322,24 @@ func run(args []string) int {
 	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
 
+	// Opt-in live-inspection surfaces (DF-CRIER-142): GET /metrics and
+	// GET /debug/pprof/* exist ONLY when CR_ENABLE_METRICS /
+	// CR_ENABLE_PPROF is set; unset flags leave both 404. Neither is
+	// auth-exempt. This must run after relay/mesh/federation exist (the
+	// gauges read them) and returns the handler the server serves (the
+	// metrics flag wraps the mux with the request counter).
+	srvHandler := registerObservability(r, observabilityFlags{
+		EnableMetrics: cfg.Observability.EnableMetrics,
+		EnablePProf:   cfg.Observability.EnablePProf,
+	}, observabilityDeps{
+		relaySvc: relaySvc,
+		meshSvc:  meshSvc,
+		fedHold:  fedHold,
+	})
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      r,
+		Handler:      srvHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
@@ -617,6 +632,8 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_GUARD_DEFAULT_POLICY     JSON Policy — server-wide default when the agent has none (fail-fast)")
 	fmt.Fprintln(out, "  CR_GUARD_KANBAN_QUEUE       kanban worker queue capacity, opt-in per policy.kanban (default 100)")
 	fmt.Fprintln(out, "  CR_GUARD_KANBAN_URL         HTTP kanban sink base URL; empty = hermes kanban CLI writer (default empty)")
+	fmt.Fprintln(out, "  CR_ENABLE_PPROF             opt-in: register GET /debug/pprof/* (default false = 404; not auth-exempt)")
+	fmt.Fprintln(out, "  CR_ENABLE_METRICS           opt-in: register GET /metrics, Prometheus text format (default false = 404; not auth-exempt)")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

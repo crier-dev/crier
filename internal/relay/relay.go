@@ -192,6 +192,20 @@ func (r *Relay) Topics() []TopicInfo {
 	return out
 }
 
+// SubscriberCount returns the number of live topic subscribers across all
+// topics and patterns (DF-CRIER-142). It backs the ws_subscribers gauge in
+// cmd/server; a topic's channel is counted once per subscription
+// registration, matching how Topics() reports per-topic counts.
+func (r *Relay) SubscriberCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := 0
+	for _, m := range r.subs {
+		n += len(m)
+	}
+	return n
+}
+
 // validateTopic checks that a published topic is a non-empty dot-separated name
 // of letters, digits, underscore, hyphen, and dots. Publish topics are literal:
 // the wildcard tokens "*" and ">" are rejected here, so wildcards apply to

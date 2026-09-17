@@ -20,9 +20,23 @@ import (
 
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/webhook"
 )
+
+// deliveriesTotal counts accepted inbox deliveries (DF-CRIER-142): one Inc
+// per delivery that lands somewhere durable — the inbox store (201) or a
+// webhook transport accept (202/200). Rejections (400/403/404/…) do not
+// count: they are visible on http_requests_total{code} instead.
+var deliveriesTotal = metrics.Default.NewCounter("deliveries_total",
+	"Inbox deliveries accepted (stored to inbox or accepted for webhook push).")
+
+// guardDecisionsTotal counts guard verdicts by decision at the choke point
+// where the verdict is applied (DF-CRIER-142): allow / block / sanitize —
+// the three decisions the pipeline's switch already distinguishes.
+var guardDecisionsTotal = metrics.Default.NewCounterVec("guard_decisions_total",
+	"LLM message-guard verdicts by decision (allow/block/sanitize).", "decision")
 
 // registerRequest is the JSON body for POST /agents.
 type registerRequest struct {
@@ -614,6 +628,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			case guard.DecisionBlock:
 				// Uniform 403 across ALL modes (spec §2.1): the sender
 				// learns immediately that the message was not accepted.
+				guardDecisionsTotal.With("block").Inc()
 				writeJSON(w, http.StatusForbidden, guardBlockedResponse{
 					Error: "GUARD_BLOCKED",
 					Guard: res.Meta(),
@@ -622,12 +637,14 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			case guard.DecisionSanitize:
 				// Deterministic quarantine (§3.5): deliver the notice,
 				// original rides in crier.guard.quarantined_payload.
+				guardDecisionsTotal.With("sanitize").Inc()
 				if len(res.DeliveredPayload) > 0 {
 					payload = res.DeliveredPayload
 				}
 				m := res.Meta()
 				guardMeta = &m
 			default:
+				guardDecisionsTotal.With("allow").Inc()
 				m := res.Meta()
 				guardMeta = &m
 			}
@@ -682,6 +699,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				SessionID: req.SessionID,
 				RequestID: req.RequestID,
 			})
+			deliveriesTotal.Inc()
 			return
 		}
 		// DeliverContext carries the request's correlation id into the
@@ -716,6 +734,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			DeliveryMode: mode,
 			Guard:        guardInDeliverResponse(guardMeta),
 		})
+		deliveriesTotal.Inc()
 		return
 	}
 
@@ -747,6 +766,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: &entry.ExpiresAt,
 		Guard:     guardInDeliverResponse(guardMeta),
 	})
+	deliveriesTotal.Inc()
 }
 
 // guardInDeliverResponse surfaces guard metadata on success responses

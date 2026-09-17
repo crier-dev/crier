@@ -136,6 +136,22 @@ claims:
     quote: "ported as the crier relay: `POST /relay/publish`"
     expect: "/relay/publish"
     xfail: null
+  # DF-CRIER-142: the README's observability section names the two opt-in
+  # live-inspection paths. Both are claimed live — the docsclaims harness
+  # boots the server with CR_ENABLE_METRICS/CR_ENABLE_PPROF on precisely
+  # because the docs claim them (the shipped default is off).
+  - id: ROUTE-README-METRICS
+    kind: route
+    doc: README.md
+    quote: "GET /metrics` (`CR_ENABLE_METRICS=true`)"
+    expect: "/metrics"
+    xfail: null
+  - id: ROUTE-README-PPROF
+    kind: route
+    doc: README.md
+    quote: "GET /debug/pprof/` (`CR_ENABLE_PPROF=true`)"
+    expect: "/debug/pprof/"
+    xfail: null
 
   # --- statuses (kind: status) — the status a doc claims the server answers. ---
   - id: STATUS-RELAY-PUBLISH-NO-AGENT-ID
