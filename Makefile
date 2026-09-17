@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest shell-yaml-check shell-yaml-selftest install-hooks
+.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -41,6 +41,8 @@ help:
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
+	@echo "  make-docker-check  Check every tracked Makefile (make -n dry-parse) and Dockerfile (hadolint, or the built-in python3 parse) — DF-CRIER-209"
+	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -126,6 +128,32 @@ shell-yaml-check:
 
 shell-yaml-selftest:
 	bash scripts/check-shell-yaml.sh --selftest
+
+# DF-CRIER-209: the other half of the gate's blind spot. Tier 1 reads Go source
+# only and the shell/YAML arm (above) reads shell scripts and workflow YAML, so a
+# Makefile-only or Dockerfile-only diff still landed on a green that verified
+# nothing about it. make-docker-check covers the tracked Makefiles and
+# Dockerfiles: every makefile is dry-parsed (`make -n -f <file> <target>` over a
+# target list derived from the file — .PHONY, else the first non-special target,
+# else make's own default goal), so a spaces-indented recipe, an unterminated
+# `define`, a bad `include` or an unresolvable prerequisite is a rejection that
+# names the file:line; every dockerfile is checked with hadolint when it is on
+# PATH and otherwise with a built-in python3 (stdlib-only) structural parse that
+# catches an unknown instruction, a FROM with no image reference, a bad/duplicate
+# stage alias, a continuation dangling at EOF, and a COPY --from that
+# forward-references a stage defined later. The engines that ran are printed
+# every run; a missing validator (no make, or neither hadolint nor python3) is
+# exit 2, never a silent skip. This does NOT check the shell inside a recipe (a
+# recipe calling a tracked script is covered by the shell/YAML arm instead).
+# make-docker-selftest proves the checker still rejects a broken Makefile and a
+# malformed Dockerfile and accepts a clean set, on fixtures it creates under
+# ${TMPDIR:-/tmp} — including a NEUTER proof that the rejection is caused by the
+# arm under test and not by accident.
+make-docker-check:
+	bash scripts/check-make-docker.sh
+
+make-docker-selftest:
+	bash scripts/check-make-docker.sh --selftest
 
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target

@@ -56,6 +56,25 @@ jobs:
           make shell-yaml-check
           make shell-yaml-selftest
 
+      # DF-CRIER-209: Tier 1 never reads a Makefile recipe or a Dockerfile, and
+      # the shell/YAML step above reads only shell scripts and workflow YAML — so
+      # a Makefile-only or Dockerfile-only push used to get a green that verified
+      # nothing about it. This checks every tracked Makefile (a `make -n`
+      # dry-parse over a target list derived from the file) and every Dockerfile
+      # (hadolint when it is on PATH, otherwise the built-in python3 structural
+      # parse). The engine that ran is printed every run and a missing validator
+      # is exit 2, never a silent skip. hadolint is not preinstalled on the
+      # runner, so it is fetched here when the toolchain allows — if that fails,
+      # the built-in parse still runs and says so in the log. The selftest then
+      # proves the checker still rejects a broken Makefile / malformed Dockerfile
+      # on this runner.
+      - name: Makefile + Dockerfile check
+        run: |
+          command -v hadolint >/dev/null 2>&1 || { mkdir -p "$HOME/.local/bin" && curl -fsSL -o "$HOME/.local/bin/hadolint" https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 && chmod +x "$HOME/.local/bin/hadolint"; } || true
+          export PATH="$HOME/.local/bin:$PATH"
+          make make-docker-check
+          make make-docker-selftest
+
   test-coverage:
     name: Coverage (Go 1.26.6)
     runs-on: ubuntu-latest
