@@ -616,8 +616,12 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 // today; sanitize → the delivered payload is replaced with the quarantine
 // notice and guard metadata rides on the envelope/entry; block → uniform
 // 403 GUARD_BLOCKED with the verdict (never queued, never stored, never
-// POSTed). Guard errors fail open (deliver, X-Crier-Guard-Error: true)
-// unless the policy is fail_closed.
+// POSTed). Guard errors fail open (the delivery proceeds with the errored
+// verdict attached) unless the policy is fail_closed. Where that verdict is
+// observable depends on the surface (DF-CRIER-175): an inbox delivery answers
+// 201 with the verdict in the RESPONSE BODY (`"guard":{…,"errored":true}` —
+// there is no guard response header), while the X-Crier-Guard-* headers exist
+// only on the OUTBOUND webhook POST.
 func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
@@ -817,10 +821,16 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				RequestID:    req.RequestID,
 				DeliveryMode: mode,
 				Sender:       req.Sender,
-				Kind:         kind,
-				SessionID:    req.SessionID,
-				ThreadID:     req.ThreadID,
-				Guard:        guardMeta,
+				// The delivery is FOR the agent in the path, so the target is
+				// this handler's own `id` — the one place both the envelope
+				// body (crier.target) and the outbound X-Crier-Target header
+				// can be sourced from without deriving anything from the
+				// webhook URL (DF-CRIER-175, spec §3).
+				Target:    id,
+				Kind:      kind,
+				SessionID: req.SessionID,
+				ThreadID:  req.ThreadID,
+				Guard:     guardMeta,
 			},
 			Payload: payload,
 		}

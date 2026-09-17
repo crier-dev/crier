@@ -297,6 +297,20 @@ claims:
     # with the mode unset and reports the accept it really gets.
     expect: "202"
     xfail: null
+  # DF-CRIER-175: §3 documented the outbound header block as
+  # `X-Crier-Agent: {target_agent_id}`, but the wire has always carried the
+  # SENDER there and the envelope named no target at all — a sink author could
+  # not tell which agent a delivery was FOR. The corrected §3 separates the two
+  # identities (X-Crier-Agent = the sender, X-Crier-Target = the target agent)
+  # and the claim below anchors the new line AND measures it live: the probe
+  # delivers to a webhook-registered probe agent and asserts the POST that
+  # reached the sink named that agent in the header and in `crier.target`.
+  - id: WEBHOOK-OUTBOUND-TARGET-HEADER
+    kind: status
+    doc: specs/WEBHOOK-DELIVERY.md
+    quote: "X-Crier-Target: {target_agent_id}"
+    expect: "202"
+    xfail: null
   # CR-GAP-056 removed TTL-SECONDS-CLAIM-IGNORED with the doc line it anchored:
   # DF-CRIER-174 rebuilt the TESTERS.md rough-edges table from live evidence and
   # the row claiming ttl_seconds is ignored is FALSE at HEAD (a deliver with

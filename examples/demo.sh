@@ -66,12 +66,14 @@ echo "==> crier demo against ${CRIER_URL} (agent ${AGENT_ID})"
 #     ones return 403 {"error":"GUARD_BLOCKED",...}.
 #   - key unset on the server -> the guard FAILS OPEN: the deliver below still
 #     succeeds, but each delivery can burn up to CR_GUARD_TIMEOUT_MS (default
-#     10000ms) on the failing LLM call and the run is flagged
-#     X-Crier-Guard-Error: true.
+#     10000ms) on the failing LLM call. On an INBOX delivery that verdict
+#     rides in the RESPONSE BODY as "guard":{…,"errored":true} — an inbox
+#     delivery answers no X-Crier-Guard-* header; those exist only on an
+#     outbound webhook POST, which this demo's agent never gets (no webhook).
 # This demo does not exercise the guard. To keep the round-trip deterministic,
 # start the SERVER with CR_GUARD_ENABLED=false (see the header above).
 if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-  echo "==> note: DEEPSEEK_API_KEY unset in this shell — if the SERVER also has no provider key, the LLM message guard (ON by default) fails open: deliveries may take up to CR_GUARD_TIMEOUT_MS (10s) and are flagged X-Crier-Guard-Error: true"
+  echo "==> note: DEEPSEEK_API_KEY unset in this shell — if the SERVER also has no provider key, the LLM message guard (ON by default) fails open: deliveries may take up to CR_GUARD_TIMEOUT_MS (10s), and the deliver RESPONSE carries the verdict in its body (\"guard\":{…,\"errored\":true}). X-Crier-Guard-* headers appear only on outbound webhook POSTs, never on a deliver response."
   echo "    Tip: start the server with CR_GUARD_ENABLED=false for a deterministic keyless demo (this script's environment does not affect a running server)."
 else
   echo "==> note: DEEPSEEK_API_KEY set in this shell — the guard runs SERVER-side, so deliveries are LLM-guarded (blocked payloads return 403 GUARD_BLOCKED; allowed ones carry X-Crier-Guard-* verdict headers) only when the server was started from this same environment."

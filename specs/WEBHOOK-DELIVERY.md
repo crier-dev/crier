@@ -55,7 +55,8 @@ any of its surfaces; the webhook is the *preferred push surface* for `deliver` w
 POST {url} HTTP/1.1
 Content-Type: application/json
 X-Crier-Event: message | reply | configure | batch
-X-Crier-Agent: {target_agent_id}
+X-Crier-Agent: {sender_agent_id}         # the agent this delivery came FROM; omitted when it names none
+X-Crier-Target: {target_agent_id}        # the agent this delivery is FOR (the endpoint's own agent)
 X-Crier-Session: {session_id}            # when session context exists
 X-Crier-Signature: {hmac-sha256 hex}     # when CR_WEBHOOK_SECRET set
 X-Crier-Retry: {n}                       # 0 on first attempt
@@ -68,6 +69,7 @@ X-Crier-Retry: {n}                       # 0 on first attempt
     "session_id": "…", "thread_id": "…",
     "delivery_mode": "blocking|async|batch",
     "sender": {"agent_id": "agent-a"},
+    "target": "agent-b",
     "kind": "message|reply|configure"
   },
   "payload": {…}
@@ -76,6 +78,29 @@ X-Crier-Retry: {n}                       # 0 on first attempt
 
 `X-Crier-Signature` = `hex(hmac_sha256(secret, canonical_body))` where `canonical_body` is the raw POST body.
 Endpoints may verify; server always sends when `CR_WEBHOOK_SECRET` is set (env, server-wide v1).
+
+### Which agent a delivery is for (DF-CRIER-175)
+
+Two identities travel with every outbound POST, and they answer different questions:
+
+- **FOR whom** — `X-Crier-Target` on the wire, `crier.target` in the body. This is the agent whose endpoint
+  was POSTed: the same id the sender addressed, known to the server at the deliver call (the `{id}` of
+  `POST /agents/{id}/inbox`) and at a batch flush (the endpoint the coalesced POST goes to). It is never
+  derived from the webhook URL — one endpoint may serve several agents, and a URL path is not an identity.
+- **FROM whom** — `X-Crier-Agent` on the wire, `crier.sender` in the body. This is the agent the delivery
+  came FROM and its meaning is unchanged (it has always carried the sender). `crier.sender` stays omitted
+  from the body when the delivery names no sender, and the header is then **omitted entirely — never sent
+  blank**: a blank `X-Crier-Agent` would read downstream as a real-but-empty identity instead of as
+  "unknown", so absence is the only signal for it.
+
+A sink that serves several agents therefore never has to guess from the URL or the payload: the endpoint
+receives "this delivery is for me" (`X-Crier-Target` / `crier.target`) and "it came from this agent"
+(`X-Crier-Agent` / `crier.sender`) on the wire itself.
+
+**Batch.** A batch POST is one POST to one endpoint, so it carries that endpoint's single `X-Crier-Target`
+(the sender header keeps its existing meaning: the first inner envelope's sender) and every inner envelope
+of `{"messages":[…]}` repeats its own `crier.target` — a sink that fans the batch back out to several
+identities still sees, per message, which agent it was addressed to.
 
 ### Response contract
 
@@ -180,6 +205,20 @@ Template = JSON object with three sections; stored under `templates/` and refere
 - `openai-compatible`: messages[] mapping, reply from first choice, `session_map` → `user` field.
 - Custom schemas supplied at registration REPLACE the named template entirely (merge = shallow; unknown
   keys rejected at registration — 400).
+
+**Where the target identity is available per template (DF-CRIER-175).** The two identity headers
+(`X-Crier-Target`, `X-Crier-Agent`) are set on the outbound request for EVERY template — a schema shapes the
+request BODY, not the contract headers — so any endpoint can identify a delivery regardless of the template
+it registered:
+
+- `generic-custom` (the default; also what a `custom_schema` with no `request_shape` falls back to) POSTs the
+  full envelope, so the body carries the `crier` object and with it `crier.target` **and** `crier.sender`.
+- `openai-compatible` and `hermes-http-gateway` render their own body and carry **no `crier` object at all**:
+  for them the target identity is available on the header only (they map session/thread context, not
+  identity — this spec does not change their bodies).
+- A `custom_schema.request_shape.headers` entry with one of those names is applied AFTER the server-set
+  headers and wins. That is the documented bring-your-own-schema override: the integrator who sets it owns
+  the consequence.
 
 ## 7. Self-configuration directives (CR-FEAT-007)
 

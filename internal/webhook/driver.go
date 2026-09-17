@@ -444,6 +444,11 @@ func (d *Driver) drainQueue() {
 		if len(item.Batch) > 0 {
 			// CR-FEAT-005: queued batch items redeliver as ONE batch POST
 			// (the flush failed while the endpoint was down).
+			//
+			// The queued batch may predate the target-stamping below it, so
+			// its identity is (re)stamped here too: the item's AgentID is the
+			// endpoint the coalesced POST goes to (DF-CRIER-175, spec §3).
+			setBatchTarget(item.AgentID, item.Batch)
 			d.logBatchDispatch(item.AgentID, cfg, len(item.Batch), item.Retries, item.RequestID)
 			res = d.client.PostBatch(cfg, item.Batch, item.Retries)
 			d.logBatchOutcome(item.AgentID, cfg, len(item.Batch), item.Retries, res, item.RequestID)
@@ -549,10 +554,12 @@ func (d *Driver) probeDegraded() {
 		}
 		// Probe = HEAD-style empty POST is not safe for arbitrary endpoints;
 		// instead we try one queued delivery (if any) or a minimal envelope.
+		// The probe is delivered TO this agent, so it names it as the target
+		// (DF-CRIER-175) — the sender stays the server's own "crier" identity.
 		probe := &Envelope{
 			Crier: EnvelopeMeta{
 				Version: 1, MessageID: "probe", Kind: "probe",
-				Sender: "crier", DeliveryMode: "async",
+				Sender: "crier", Target: id, DeliveryMode: "async",
 			},
 			Payload: []byte(`{}`),
 		}
@@ -759,6 +766,15 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		return
 	}
 	agentID := buf.agentID
+	envs := make([]*Envelope, 0, len(items))
+	for _, it := range items {
+		envs = append(envs, it.Envelope)
+	}
+	// Identity (spec §3, DF-CRIER-175): one flush = one endpoint = one target,
+	// so every inner envelope carries the endpoint's own agent id. Stamped
+	// BEFORE the degraded check because the requeued batch travels on to the
+	// drain loop, which must still be able to name its target when it POSTs.
+	setBatchTarget(agentID, envs)
 
 	d.mu.Lock()
 	_, deg := d.degraded[agentID]
@@ -768,10 +784,6 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		return
 	}
 
-	envs := make([]*Envelope, 0, len(items))
-	for _, it := range items {
-		envs = append(envs, it.Envelope)
-	}
 	d.logBatchDispatch(agentID, cfg, len(envs), 0, batchRequestID(items))
 	res := d.client.PostBatch(cfg, envs, 0)
 	if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -792,6 +804,21 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 	d.recordFailure(agentID, res)
 	webhookOutcomeTotal.With("failed").Inc()
 	d.requeueBatch(agentID, items)
+}
+
+// setBatchTarget stamps the delivery target onto every envelope of a batch
+// (spec §3, DF-CRIER-175): a coalesced POST goes to ONE endpoint, so that
+// endpoint's agent id IS the target of every inner message. This is
+// authoritative rather than best-effort — the id comes from the buffer/queue
+// item the POST is built around, not from the envelope (which may carry no
+// target at all when it was built by an embedding caller) and never from the
+// webhook URL.
+func setBatchTarget(agentID string, envs []*Envelope) {
+	for _, env := range envs {
+		if env != nil {
+			env.Crier.Target = agentID
+		}
+	}
 }
 
 // requeueBatch pushes a failed batch into the durable queue as ONE batch

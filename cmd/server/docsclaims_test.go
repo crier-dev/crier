@@ -61,6 +61,9 @@ const (
 	docsClaimsWebhookProbeAgent      = "docsclaims-webhook-probe"
 	docsClaimsTTLProbeAgent          = "docsclaims-ttl-probe"
 	docsClaimsNeverExpiresProbeAgent = "docsclaims-never-expires-probe"
+	// docsClaimsTargetProbeAgent is the identity the DF-CRIER-175 claim drives:
+	// a webhook-configured agent whose outbound POST must name it as the target.
+	docsClaimsTargetProbeAgent = "docsclaims-target-probe"
 )
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
@@ -615,6 +618,12 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// "async" (blocking is opt-in); the probe measures the accept an
 			// unset mode really gets and pins it to that prose.
 			return liveWebhookDefaultMode(client, baseURL)
+		case "WEBHOOK-OUTBOUND-TARGET-HEADER":
+			// specs/WEBHOOK-DELIVERY.md §3 now describes BOTH identities of an
+			// outbound POST (X-Crier-Agent = the sender, X-Crier-Target = the
+			// agent the delivery is FOR); this probe measures the target half
+			// on a live delivery to a webhook-configured agent.
+			return liveWebhookTargetIdentity(client, baseURL)
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
@@ -1347,6 +1356,82 @@ func liveWebhookDefaultMode(client *http.Client, baseURL string) (int, error) {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
+}
+
+// liveWebhookTargetIdentity measures the DF-CRIER-175 claim: a delivery to a
+// webhook-configured agent is accepted with 202, and the POST that reaches the
+// sink names the agent it is FOR — X-Crier-Target on the request and
+// crier.target in the envelope — while X-Crier-Agent carries the SENDER, whose
+// meaning must not have changed.
+func liveWebhookTargetIdentity(client *http.Client, baseURL string) (int, error) {
+	var mu sync.Mutex
+	var gotHeader http.Header
+	var gotBody []byte
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotHeader, gotBody = r.Header.Clone(), b
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"echo":true}`)
+	}))
+	defer sink.Close()
+
+	if err := registerAgentWithWebhook(client, baseURL, docsClaimsTargetProbeAgent, sink.URL+"/hook"); err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsTargetProbeAgent+"/inbox",
+		strings.NewReader(`{"payload":{"target_probe":true},"sender":"agent-a"}`))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	status := resp.StatusCode
+
+	// The agent's delivery mode is the server default (async), so the POST
+	// arrives in the background — wait for the sink, then assert on what it saw.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		seen := gotHeader
+		body := gotBody
+		mu.Unlock()
+		if seen != nil {
+			if got := seen.Get("X-Crier-Target"); got != docsClaimsTargetProbeAgent {
+				return 0, fmt.Errorf("outbound X-Crier-Target = %q, want %q (spec §3: the header must name the agent the delivery is FOR)", got, docsClaimsTargetProbeAgent)
+			}
+			if got := seen.Get("X-Crier-Agent"); got != "agent-a" {
+				return 0, fmt.Errorf("outbound X-Crier-Agent = %q, want the SENDER agent-a (its meaning must not change)", got)
+			}
+			var wire struct {
+				Crier struct {
+					Target string `json:"target"`
+					Sender string `json:"sender"`
+				} `json:"crier"`
+			}
+			if err := json.Unmarshal(body, &wire); err != nil {
+				return 0, fmt.Errorf("decode outbound envelope %q: %w", body, err)
+			}
+			if wire.Crier.Target != docsClaimsTargetProbeAgent {
+				return 0, fmt.Errorf("envelope crier.target = %q, want %q", wire.Crier.Target, docsClaimsTargetProbeAgent)
+			}
+			if wire.Crier.Sender != "agent-a" {
+				return 0, fmt.Errorf("envelope crier.sender = %q, want agent-a", wire.Crier.Sender)
+			}
+			return status, nil
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("no POST reached the sink for %s within 5s (status %d)", docsClaimsTargetProbeAgent, status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // registerAgentWithWebhook registers the probe identity with a webhook attached and

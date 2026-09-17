@@ -530,9 +530,15 @@ passthrough, `X-Crier-Event: message`):
 
 ```json
 {"crier":{"version":1,"message_id":"1fb5798c3e0fbf1c21d4a399","request_id":"r-1",
-          "delivery_mode":"blocking","kind":"message"},
+          "delivery_mode":"blocking","target":"blocking-agent","kind":"message"},
  "payload":{"hello":"world"}}
 ```
+
+The POST names both identities: `"target"` (and `X-Crier-Target` on the request)
+is the agent the delivery is FOR — here `blocking-agent`, the agent in the
+deliver URL — while `"sender"` (and `X-Crier-Agent`) is the agent it came from,
+omitted from both when the delivery names no sender. One endpoint can serve
+several agents, so the identity never has to be inferred from the URL.
 
 `reply` is the endpoint's response body extracted per the schema:
 `raw` hands back the whole body (above), `choices.0.message.content` hands back

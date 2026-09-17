@@ -127,8 +127,18 @@ type EnvelopeMeta struct {
 	SessionID    string `json:"session_id,omitempty"`
 	ThreadID     string `json:"thread_id,omitempty"`
 	DeliveryMode string `json:"delivery_mode,omitempty"`
-	Sender       string `json:"sender,omitempty"`
-	Kind         string `json:"kind,omitempty"`
+	// Sender is the agent the delivery came FROM (the deliver request's
+	// sender). Emitted as X-Crier-Agent; omitted from the header when empty
+	// — a blank X-Crier-Agent would read as a real-but-empty identity
+	// (DF-CRIER-175).
+	Sender string `json:"sender,omitempty"`
+	// Target is the agent the delivery is FOR — the endpoint's own agent id,
+	// known where the delivery is built (the deliver handler's path id, the
+	// batch buffer's agent id). Emitted as X-Crier-Target; omitted when
+	// unknown. Additive to Sender: nothing that carried the sender changed
+	// meaning (DF-CRIER-175, spec §3).
+	Target string `json:"target,omitempty"`
+	Kind   string `json:"kind,omitempty"`
 	// Guard carries the LLM message-guard verdict for this message
 	// (CR-FEAT-010, spec §2.2/§9.3): present on every guarded delivery
 	// (allow/sanitize — blocked messages never POST), absent when the
@@ -182,7 +192,7 @@ func (c *Client) PostContext(ctx context.Context, cfg *Config, env *Envelope, re
 	if err != nil {
 		return Result{Err: fmt.Errorf("build body: %w", err)}
 	}
-	return c.postBody(ctx, cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.SessionID, retry, env.Crier.Guard)
+	return c.postBody(ctx, cfg, body, env.Crier.Kind, env.Crier.Sender, env.Crier.Target, env.Crier.SessionID, retry, env.Crier.Guard)
 }
 
 // batchEnvelopeBody is the spec §4 batch payload: {"messages": [envelope, …]}.
@@ -212,12 +222,28 @@ func (c *Client) PostBatchContext(ctx context.Context, cfg *Config, envs []*Enve
 	if err != nil {
 		return Result{Err: fmt.Errorf("build batch body: %w", err)}
 	}
-	sender, session := "", ""
+	sender, target, session := "", "", ""
 	if envs[0] != nil {
 		sender = envs[0].Crier.Sender
 		session = envs[0].Crier.SessionID
 	}
-	return c.postBody(ctx, cfg, body, "batch", sender, session, retry, batchGuardMeta(envs))
+	target = batchTarget(envs)
+	return c.postBody(ctx, cfg, body, "batch", sender, target, session, retry, batchGuardMeta(envs))
+}
+
+// batchTarget is the target agent id of a coalesced batch POST (spec §3): the
+// batch goes to ONE endpoint, so the endpoint's agent id is the target of
+// every inner message. The scan takes the first envelope that NAMES a target
+// rather than blindly trusting envs[0] (a nil or target-less leading envelope
+// must not blank the identity of the POST); the driver stamps every inner
+// envelope at flush time, so the normal case is that all of them agree.
+func batchTarget(envs []*Envelope) string {
+	for _, env := range envs {
+		if env != nil && env.Crier.Target != "" {
+			return env.Crier.Target
+		}
+	}
+	return ""
 }
 
 // batchGuardMeta computes the worst-case guard metadata across inner
@@ -289,14 +315,25 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 // postBody performs the POST with the webhook contract headers (spec §3)
 // and classifies the response. ctx bounds the request: the caller's deadline
 // aborts the attempt (INT-CI-004).
-func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, session string, retry int, gm *guard.Meta) Result {
+//
+// sender and target are the two IDENTITIES of the POST (DF-CRIER-175): the
+// agent the delivery came from and the agent it is for. Each header is set
+// only when its value is known — an empty value is never sent, because a
+// blank X-Crier-Agent reads downstream as a real-but-empty identity rather
+// than as "unknown".
+func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, target, session string, retry int, gm *guard.Meta) Result {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, strings.NewReader(string(body)))
 	if err != nil {
 		return Result{Err: fmt.Errorf("build request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Crier-Event", event)
-	req.Header.Set("X-Crier-Agent", sender)
+	if sender != "" {
+		req.Header.Set("X-Crier-Agent", sender)
+	}
+	if target != "" {
+		req.Header.Set("X-Crier-Target", target)
+	}
 	req.Header.Set("X-Crier-Retry", fmt.Sprintf("%d", retry))
 	if session != "" {
 		req.Header.Set("X-Crier-Session", session)
