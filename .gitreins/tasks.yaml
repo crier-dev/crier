@@ -1066,3 +1066,19 @@ tasks:
   status: complete
   created_at: '2026-09-17T13:17:07.441159+00:00'
   completed_at: '2026-09-17T13:31:09.447913+00:00'
+- id: DF-CRIER-149
+  title: groq/nvidia guard presets are dead on the live providers and failover is
+    silent
+  criteria:
+  - 'Presets in internal/guard/router.go carry model ids that exist on the live providers
+    (groq: openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b; nvidia: google/gemma-4-31b-it)
+    so a groq-only or nvidia-only guard policy returns a verdict from that provider
+    instead of failing through; the router emits one INFO log line per skipped or
+    failed provider naming provider, model and reason (no key / circuit open / provider
+    error) so a degraded failover lane is distinguishable from a healthy one; a live
+    env-isolated probe proves provider=groq and provider=nvidia verdicts against the
+    real APIs; go vet, go test ./... -count=1 and gitreins guard stay green; README
+    and specs/LLM-MESSAGE-GUARD.md list the corrected ids.'
+  status: complete
+  created_at: '2026-09-17T14:04:10.298373+00:00'
+  completed_at: '2026-09-17T14:29:53.757447+00:00'
