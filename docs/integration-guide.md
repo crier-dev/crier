@@ -198,16 +198,39 @@ sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR:
 SIG=$(sig)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}"
-# → 200 {"messages":[{"id":"...","payload":"<base64>",...}],"lease_id":"..."}
+# → 200 {"messages":[{"id":"...","payload":"<base64>",...}],"lease_id":"...","queue_depth":1,"leased_count":1}
 ```
+
+Both query spellings are accepted (the documented and the historical):
+
+| Parameter | Alias | Default | Notes |
+|---|---|---|---|
+| `limit` | `max` | `10` | max messages claimed per retrieve; `> 100` → `400` |
+| `lease_seconds` | `lease` | `30` | lease duration in seconds |
+
+When both spellings of the same parameter appear in one request, the
+historical one (`max` / `lease`) wins and the alias fills in only what it
+left absent (DF-CRIER-177).
 
 An empty or fully-leased inbox is a **successful read with nothing to claim** —
 not an error, and not a lease:
 
 ```bash
 # second retrieve while everything is still leased (or a fresh agent)
-# → 200 {"messages":[],"lease_id":""}
+# → 200 {"messages":[],"lease_id":"","queue_depth":3,"leased_count":3}
 ```
+
+The `queue_depth` / `leased_count` counters on every retrieve response carry
+the same numbers `GET /agents/{id}/inbox/stats` reports, taken after the
+retrieve itself (DF-CRIER-177). They exist so an empty `messages` array is
+never ambiguous:
+
+- `queue_depth == 0 && leased_count == 0` — the inbox is genuinely empty
+  (nothing was ever delivered, or everything was acked / expired).
+- `leased_count > 0` — the messages are HELD under unexpired leases by other
+  retrievers. They are not lost: they return after lease expiry (or are
+  removed by their holder's ack). Before DF-CRIER-177 this state was
+  byte-identical on the wire to an empty inbox.
 
 The rules that follow from that (DF-CRIER-32):
 

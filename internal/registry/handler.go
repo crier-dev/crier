@@ -243,6 +243,13 @@ func federationFailure(req deliverRequest, messageID, target string, err error) 
 type retrieveResponse struct {
 	Messages []*InboxEntry `json:"messages"`
 	LeaseID  string        `json:"lease_id"`
+	// QueueDepth and LeasedCount mirror the counters GET
+	// /agents/{id}/inbox/stats reports (DF-CRIER-177): an empty messages
+	// array with leased_count > 0 means everything queued is HELD under an
+	// unexpired lease, not lost — without them, an all-leased inbox was
+	// byte-identical to a genuinely empty one.
+	QueueDepth  int `json:"queue_depth"`
+	LeasedCount int `json:"leased_count"`
 }
 
 // ackRequest is the JSON body for POST /agents/{id}/inbox/ack.
@@ -795,16 +802,28 @@ func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
 // Agent-owned: requires a valid per-agent signature when enabled.
 //
 // Zero claimed messages is a successful read: the body carries
-// {"messages":[],"lease_id":""} and the caller must not ack. A non-empty
-// lease_id is returned exactly when messages were leased (DF-CRIER-32).
+// {"messages":[],"lease_id":""} plus queue_depth / leased_count (DF-CRIER-177)
+// and the caller must not ack. A non-empty lease_id is returned exactly when
+// messages were leased (DF-CRIER-32).
 func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if !h.requireAgent(w, r, id) {
 		return
 	}
 
+	// Query spellings: the spec'd `limit`/`lease_seconds`
+	// (docs/openapi.yaml) alias the historical `max`/`lease`. All four
+	// work. Precedence when both spellings appear in one request: the
+	// historical `max`/`lease` wins — the alias fills in only what the
+	// historical name left absent, so a request that uses the historical
+	// spellings behaves byte-identically to pre-DF-CRIER-177 (DF-CRIER-180
+	// family: a documented parameter must never be silently ignored).
 	maxMsgs := 10
 	if v := r.URL.Query().Get("max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxMsgs = n
+		}
+	} else if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxMsgs = n
 		}
@@ -817,6 +836,10 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 
 	leaseSecs := 30 * time.Second
 	if v := r.URL.Query().Get("lease"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			leaseSecs = time.Duration(n) * time.Second
+		}
+	} else if v := r.URL.Query().Get("lease_seconds"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			leaseSecs = time.Duration(n) * time.Second
 		}
@@ -837,9 +860,22 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		messages = []*InboxEntry{}
 	}
 
+	// Post-retrieve counters (DF-CRIER-177): the same Stats call the
+	// /inbox/stats handler makes, taken AFTER the retrieve so the body
+	// reflects the state this response just produced (the leased batch is
+	// counted as leased, not queued-free). A Stats failure must not fail a
+	// successful retrieve: the counters degrade to 0 and the error is
+	// logged, mirroring writeStoreError's degradation posture.
+	depth, leased, _, err := h.store.Stats(id)
+	if err != nil {
+		slog.Error("registry stats after retrieve", "error", err)
+	}
+
 	writeJSON(w, http.StatusOK, retrieveResponse{
-		Messages: messages,
-		LeaseID:  leaseID,
+		Messages:    messages,
+		LeaseID:     leaseID,
+		QueueDepth:  depth,
+		LeasedCount: leased,
 	})
 }
 

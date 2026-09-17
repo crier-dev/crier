@@ -729,12 +729,21 @@ paths:
           schema:
             type: integer
             default: 10
+          description: >-
+            Maximum messages to claim per retrieve (1..100; >100 answers 400
+            "max must be <= 100"). Alias of the historical `max` — both
+            spellings are accepted; when both appear in one request, `max`
+            wins and `limit` fills in only what it left absent.
         - name: lease_seconds
           in: query
           schema:
             type: integer
             default: 30
             description: Duration to lease messages (prevents double delivery)
+          description: >-
+            Lease duration in seconds. Alias of the historical `lease` — both
+            spellings are accepted; when both appear in one request, `lease`
+            wins and `lease_seconds` fills in only what it left absent.
       security:
         - bearerAuth: []
           agentSignature: []
@@ -745,7 +754,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [messages, lease_id]
+                required: [messages, lease_id, queue_depth, leased_count]
                 properties:
                   messages:
                     type: array
@@ -756,6 +765,12 @@ paths:
                     type: string
                     description: |-
                       Lease covering the returned messages — pass it to inboxAck together with IDs from THIS response to release them. It is an EMPTY STRING exactly when no messages were claimed (empty inbox, or every queued message is already leased and unexpired): no lease is minted, the messages array is empty, and there is nothing to ack. Do not reuse a lease ID from an earlier retrieval, and do not ack an empty batch.
+                  queue_depth:
+                    type: integer
+                    description: "Undelivered messages in the queue — same value GET /agents/{id}/inbox/stats reports, taken immediately after this retrieve (DF-CRIER-177). An empty messages array with queue_depth > 0 means messages exist but none were claimable now."
+                  leased_count:
+                    type: integer
+                    description: "Messages currently held under unexpired leases — same value GET /agents/{id}/inbox/stats reports, taken immediately after this retrieve (DF-CRIER-177). An empty messages array with leased_count > 0 means everything queued is HELD by other retrievers, not lost — the messages return after lease expiry or are removed by their holder's ack."
         "401":
           description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
         "403":

@@ -69,7 +69,7 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
 - TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires)
-- Concurrent retrievers get disjoint message sets
+- Every message is leased to exactly one retriever; a concurrent retriever receives only what the first did not lease (`queue_depth`/`leased_count` on the retrieve body disambiguate an empty `messages` array: `leased_count` > 0 means HELD, not lost — DF-CRIER-177)
 
 ### 5. Webhook delivery (bypasses the inbox)
 
@@ -79,6 +79,10 @@ durable inbox (CR-FEAT-001, [`specs/WEBHOOK-DELIVERY.md`](specs/WEBHOOK-DELIVERY
 The inbox is **not** written: `GET /agents/{id}/inbox` for a webhook-configured
 agent is empty by design, so an empty retrieve is not evidence that a message
 was never sent — the message may have gone to the endpoint (or failed there).
+The same holds for leased messages on a non-webhook agent: an empty `messages`
+array with `leased_count` > 0 means another retriever holds an unexpired lease
+(the message returns after lease expiry or ack), not that it was never
+delivered (DF-CRIER-177).
 
 The deliver accept names the transport, so a sender never has to infer it from
 the status code (DF-CRIER-157):
@@ -299,7 +303,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "$
 TS=$(date +%s)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig GET /agents/agent-1/inbox "$TS")"
-# 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"..."}
+# 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"...","queue_depth":1,"leased_count":1}
+# queue_depth/leased_count disambiguate an empty batch: messages=[] with
+# leased_count>0 = everything queued is HELD under a lease (DF-CRIER-177)
 # Note: message payloads are base64-encoded on the wire ([],byte form)
 
 # 5. Ack the message — message_ids is REQUIRED (an ack without it is rejected
