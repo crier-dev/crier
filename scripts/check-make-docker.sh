@@ -44,9 +44,18 @@
 #               `-n`. Parsing a Makefile therefore runs its `$(shell …)` calls,
 #               exactly as GNU make does. Only tracked, reviewed files are
 #               parsed here; nothing downloads or executes a recipe body.
-#   dockerfile  `hadolint <file>` when hadolint is on PATH (its version is
-#               printed), otherwise a built-in python3 (stdlib-only) structural
-#               parse. The engine that ran is printed. The built-in parse
+#   dockerfile  `hadolint --failure-threshold error <file>` when hadolint is on
+#               PATH (its version is printed), otherwise a built-in python3
+#               (stdlib-only) structural parse. The engine that ran is printed.
+#               SEVERITY POLICY (measured: CI run 35288203740, 2026-09-17): a
+#               hadolint run WITHOUT `--failure-threshold` exits NONZERO on
+#               warning-level findings (DL3018 `apk add` pinning, DL3013 pip,
+#               DL3016 npm), which rejected this repo's own Dockerfile,
+#               Dockerfile.mcp and 6 example images — a clean tree red. This arm
+#               therefore fails on ERROR-level findings only and PRINTS
+#               warning/info/style findings as `advisory (not fatal):` lines, so
+#               the lint signal survives without breaking the build.
+#               The built-in parse
 #               checks: (a) the first token of a logical line is a known
 #               Dockerfile instruction; (b) FROM has an image reference; (c)
 #               `AS <alias>` is present-and-valid, and aliases are unique; (d)
@@ -153,6 +162,12 @@
 #  15. a `hadolint` that is on PATH but CANNOT RUN (bad interpreter) does not turn
 #      every Dockerfile into a rejection: auto falls back to the built-in parse
 #      (rc 0), while an explicit --engine hadolint exits 2 naming the tool
+#  16. the hadolint SEVERITY POLICY: a WARNING-level finding is reported as
+#      `advisory (not fatal)` and does NOT fail the run (hadolint's DEFAULT
+#      threshold fails on warnings — that reddened CI run 35288203740 against
+#      this repo's own Dockerfiles), while an ERROR-level finding still rejects.
+#      Proven with a hadolint shim that honours --failure-threshold, so the check
+#      runs on a host with no hadolint installed.
 #   `make make-docker-selftest` exits 0 only when all of them behaved.
 #
 # DEPENDENCIES: bash, git (only for the default file list), grep/sed/mktemp;
@@ -296,8 +311,19 @@ _check_dockerfile() {
   local f="$1" out="" rc=0
   case "$ENGINE_RESOLVED" in
     hadolint)
-      out="$("$HADOLINT_BIN" "$f" 2>&1)"
+      # SEVERITY POLICY (measured on CI run 35288203740, 2026-09-17): hadolint
+      # WITHOUT --failure-threshold exits NONZERO on warning-level findings
+      # (DL3018 `apk add` pinning, DL3013 pip, DL3016 npm), which rejected this
+      # repo's own Dockerfile, Dockerfile.mcp and 6 example images — a clean tree
+      # turned red and every later Makefile/Dockerfile commit was blocked. The
+      # gate fails on ERROR-level findings only; warning/info/style findings are
+      # still reported (as `advisory (not fatal):` lines) so the signal survives
+      # without breaking the build. hadolint's exit code stays the verdict.
+      out="$("$HADOLINT_BIN" --failure-threshold error "$f" 2>&1)"
       rc=$?
+      if [ "$rc" -eq 0 ] && [ -n "$out" ]; then
+        printf '%s\n' "$out" | sed 's/^/      advisory (not fatal): /'
+      fi
       ;;
     builtin)
       # stdlib-only structural parse; diagnostics are `path:line: message`.
@@ -520,7 +546,7 @@ resolve_docker_engine() { # <mode> -> sets ENGINE_RESOLVED / HADOLINT_BIN / DOCK
       HADOLINT_BIN="$(command -v hadolint)"
       ver="$("$HADOLINT_BIN" --version 2>/dev/null | head -n 1)"
       [ -n "$ver" ] || ver="unknown version"
-      DOCKER_ENGINE_DESC="hadolint $ver"
+      DOCKER_ENGINE_DESC="hadolint $ver (failure-threshold error; warnings advisory)"
       ;;
     builtin)
       ver="$(python3 -c 'import platform; print(platform.python_version())' 2>/dev/null)"
@@ -551,7 +577,9 @@ A makefile is dry-parsed with `make -n -f <file> <target>` over a target list
 derived from the file (.PHONY, else the first non-special target, else make's own
 default goal). A dockerfile is checked with hadolint when it is on PATH,
 otherwise with a built-in python3 structural parse. A missing validator is exit
-2, never a silent skip.
+2, never a silent skip. hadolint runs with --failure-threshold error: an
+error-level finding rejects the file, while warning/info/style findings are
+printed as advisory lines and do not fail the run.
 
 An explicit FILE list fails closed: a list in which nothing classifies as a
 makefile or a dockerfile is rejected (exit 1) with the paths named — a list that
@@ -1048,6 +1076,63 @@ MK
     fails=$((fails + 1))
   else
     printf 'PASS: an unusable hadolint does not cause a false rejection — auto falls back to the built-in parse (rc=%d) and --engine hadolint exits 2 (rc=%d)\n' "$rc" "$rc2"
+  fi
+
+  # 17. hadolint's SEVERITY POLICY: a WARNING-level finding must not fail the run
+  #     and an ERROR-level finding must. CI caught the opposite (run
+  #     35288203740, 2026-09-17: DL3018/DL3013/DL3016 warnings rejected this
+  #     repo's own Dockerfiles because no --failure-threshold was passed). The
+  #     shim below behaves like real hadolint: it reports the warning and exits
+  #     nonzero UNLESS `--failure-threshold error` is passed, and it always exits
+  #     nonzero for an error-level finding. So this check fails if the arm ever
+  #     stops passing that flag — which is the regression that broke CI.
+  checks=$((checks + 1))
+  local hl_bin="$tmp/hadolint-severity-shim"
+  mkdir -p "$hl_bin"
+  cat >"$hl_bin/hadolint" <<'SHIM'
+#!/usr/bin/env bash
+# minimal hadolint stand-in: honours --failure-threshold
+thr="warning"
+prev=""
+f=""
+for a in "$@"; do
+  case "$a" in
+    --version) echo "hadolint SHIM 0.0.1"; exit 0 ;;
+    --failure-threshold=*) thr="${a#*=}" ;;
+  esac
+  if [ "$prev" = "--failure-threshold" ]; then thr="$a"; fi
+  case "$a" in -*) ;; *) f="$a" ;; esac
+  prev="$a"
+done
+if grep -q 'SHIM_ERROR_LEVEL_FINDING' "$f" 2>/dev/null; then
+  echo "$f:2 DL3000 error: shim error-level finding"
+  exit 1
+fi
+if grep -Eq 'apk add|apt-get install|pip install|npm install' "$f" 2>/dev/null; then
+  echo "$f:3 DL3018 warning: Pin versions in apk add."
+  [ "$thr" = "error" ] || exit 1
+  exit 0
+fi
+exit 0
+SHIM
+  chmod +x "$hl_bin/hadolint"
+  printf 'FROM alpine\nRUN apk add curl\n' >"$tmp/warn.Dockerfile"
+  printf 'FROM alpine\nSHIM_ERROR_LEVEL_FINDING\n' >"$tmp/err.Dockerfile"
+  out="$(env PATH="$hl_bin:$PATH" bash "$SELF" --engine hadolint "$tmp/warn.Dockerfile" 2>&1)"
+  rc=$?
+  out2="$(env PATH="$hl_bin:$PATH" bash "$SELF" --engine hadolint "$tmp/err.Dockerfile" 2>&1)"
+  rc2=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s selftest: FAIL: a WARNING-level finding REJECTED the file (rc=%d) — the severity policy regressed, which is the CI-red class\n  output: %s\n' "$PROG" "$rc" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q 'advisory (not fatal)'; then
+    printf '%s selftest: FAIL: the warning-level finding was neither fatal nor reported as advisory\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif [ "$rc2" -eq 0 ]; then
+    printf '%s selftest: FAIL: an ERROR-level finding did NOT reject the file (rc=0) — the arm is now toothless\n  output: %s\n' "$PROG" "$out2" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: hadolint severity policy holds — a warning-level finding is advisory (rc=%d, reported, not fatal) while an error-level finding still rejects (rc=%d)\n' "$rc" "$rc2"
   fi
 
   if [ "$fails" -ne 0 ]; then

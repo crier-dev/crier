@@ -102,8 +102,15 @@ It checks every tracked Makefile and Dockerfile, and prints the engines it used:
   text extraction is implemented (a recipe that calls a tracked script IS
   covered, by the shell arm on that script). Note that parsing a Makefile runs
   its `$(shell …)` calls, exactly as GNU make does even under `-n`.
-- **dockerfile** — `hadolint <file>` when hadolint is on PATH (version printed),
-  otherwise a built-in python3 (stdlib-only) structural parse. The built-in parse
+- **dockerfile** — `hadolint --failure-threshold error <file>` when hadolint is on
+  PATH (version printed), otherwise a built-in python3 (stdlib-only) structural
+  parse. **Severity policy (measured, CI run 35288203740):** a hadolint run
+  *without* `--failure-threshold` exits nonzero on warning-level findings
+  (DL3018 `apk add` pinning, DL3013 pip, DL3016 npm), which rejected this repo's
+  own `Dockerfile`, `Dockerfile.mcp` and six example images — a clean tree red.
+  This arm therefore fails on **error-level** findings only and prints
+  warning/info/style findings as `advisory (not fatal):` lines, so the lint
+  signal survives without breaking the build. The built-in parse
   catches an unknown/misspelled instruction, a `FROM` with no image reference, a
   missing/invalid `AS` alias, a duplicate stage alias, a line-continuation
   dangling at EOF, and a `COPY/ADD --from=<ref>` that is empty or
@@ -114,7 +121,10 @@ It checks every tracked Makefile and Dockerfile, and prints the engines it used:
 `make make-docker-selftest` proves that checker still behaves — including two
 NEUTER proofs (a copy of the checker with one arm's verdict call forced to
 success must ACCEPT the same fixture the real arm rejects) so a green selftest
-cannot be vacuous. The `make` binary is required whenever a makefile is in
+cannot be vacuous, and a hadolint severity-policy check (a warning-level finding
+is advisory and must not fail the run; an error-level finding must still reject)
+driven through a hadolint shim so it runs where hadolint is not installed. The
+`make` binary is required whenever a makefile is in
 scope, and one of hadolint/python3 whenever a dockerfile is: a missing validator
 is exit 2 naming the tool, never a silent skip.
 
@@ -132,7 +142,9 @@ Not covered by any of this: Markdown/prose drift (`make docs-check` covers the
 claims in `docs/claims.yaml`); the shell inside a Makefile recipe (a recipe that
 invokes a tracked script is covered on that script, but inline shell in a recipe
 is not); Dockerfile semantics beyond structure (no base-image existence, no lint
-rules when hadolint is absent); `$(shell …)` side effects of parsing a Makefile;
+rules when hadolint is absent, and warning/info/style hadolint findings are
+reported as advisory but deliberately do not fail the gate — only error-level
+findings do); `$(shell …)` side effects of parsing a Makefile;
 and anything outside the tracked file set.
 
 ## Board
