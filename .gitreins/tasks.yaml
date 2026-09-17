@@ -1224,3 +1224,15 @@ tasks:
   status: complete
   created_at: '2026-09-17T20:20:05.910218+00:00'
   completed_at: '2026-09-17T20:30:04.490909+00:00'
+- id: QA-CRIER-9
+  title: Port-ownership guard for the repo demo harnesses (QA-CRIER-9)
+  criteria:
+  - Each example harness that starts a crier server refuses to start when its port
+    is occupied (nonzero exit naming the holder pid), asserts the listening port holder
+    pid equals the pid it started, and fails loudly when the started process exits;
+    a shared scripts/lib/port-guard.sh provides the guards plus a --selftest that
+    exercises all three, wired into make and CI; the two tracked harnesses still pass
+    end-to-end on free ports.
+  status: complete
+  created_at: '2026-09-17T20:53:16.390288+00:00'
+  completed_at: '2026-09-17T21:06:10.813598+00:00'
