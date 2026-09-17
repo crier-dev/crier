@@ -69,8 +69,14 @@ func (s *MemoryStore) Unregister(id string) error {
 
 // Update replaces the mutable registration fields of an existing agent
 // (capabilities, webhook) with the caller's copy — the PATCH /agents/{id}
-// path (CR-FEAT-007). Registration identity and timestamps are preserved
-// from the stored record. Returns an error if the agent is not found.
+// path (CR-FEAT-007). Registration identity and registration time are
+// preserved from the stored record; last_seen is ADVANCED to the moment of
+// the update, mirroring PostgresStore.Update (DF-CRIER-156: a PATCH is the
+// only activity the registry observes, so the response's last_seen must be
+// the value that is now persisted — a client can use it to confirm the
+// write). The registry has no heartbeat, so an agent that never PATCHes
+// keeps its registration-time last_seen. Returns an error if the agent is
+// not found.
 func (s *MemoryStore) Update(agent *Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,7 +90,7 @@ func (s *MemoryStore) Update(agent *Agent) error {
 	}
 	agent.Status = existing.Status
 	agent.RegisteredAt = existing.RegisteredAt
-	agent.LastSeen = existing.LastSeen
+	agent.LastSeen = time.Now()
 	s.agents[agent.ID] = agent
 	return nil
 }

@@ -932,6 +932,53 @@ func TestPostgresStore_Update_NilWebhookClears(t *testing.T) {
 	require.True(t, guardNull, "cleared guard column must be SQL NULL")
 }
 
+// TestPostgresStore_Update_AdvancesLastSeenBothSides pins DF-CRIER-156
+// against a real postgres (the unit test proves the statement's argument; this
+// proves the row and the caller's object agree end-to-end). Pre-fix the UPDATE
+// advanced the row but left the caller's agent at its registration value, so
+// the PATCH 200 body — rendered from that object — disagreed with a following
+// GET.
+//
+// Baseline note: the comparison uses the READ-BACK registration values, not the
+// ones Register stamped into the caller's struct. Postgres truncates timestamps
+// to microseconds, so a value that round-tripped through the database is the
+// authoritative one; Register's own object still carries nanoseconds (that
+// render-side difference is pre-existing and out of this ticket's scope).
+func TestPostgresStore_Update_AdvancesLastSeenBothSides(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "updseen")
+	callerRegisteredAt := agent.RegisteredAt
+
+	before, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	preUpdate := before.LastSeen
+	require.False(t, preUpdate.IsZero(), "Register must stamp last_seen")
+
+	// Make the update instant distinguishable from registration's.
+	time.Sleep(2 * time.Millisecond)
+
+	agent.Capabilities = []string{"solver"}
+	require.NoError(t, store.Update(agent))
+
+	require.True(t, agent.LastSeen.After(preUpdate),
+		"Update must advance the caller's last_seen (pre-update %v, got %v)", preUpdate, agent.LastSeen)
+	require.True(t, agent.RegisteredAt.Equal(callerRegisteredAt),
+		"Update must leave the caller's registered_at alone (%v), got %v",
+		callerRegisteredAt, agent.RegisteredAt)
+	require.Equal(t, StatusOnline, agent.Status)
+
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.True(t, got.LastSeen.After(preUpdate),
+		"the stored row must advance (pre-update %v, stored %v)", preUpdate, got.LastSeen)
+	require.True(t, got.LastSeen.Equal(agent.LastSeen),
+		"stored last_seen %v != caller last_seen %v — PATCH response would diverge from the row",
+		got.LastSeen, agent.LastSeen)
+	require.True(t, got.RegisteredAt.Equal(before.RegisteredAt),
+		"the stored row must keep the registration time (%v), got %v",
+		before.RegisteredAt, got.RegisteredAt)
+}
+
 // TestPostgresStore_Get_StoredJSONNullReadsNil: a column holding the JSON value
 // `null` (rather than SQL NULL) is the same absent config on the wire — no
 // error, no empty object.

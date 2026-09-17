@@ -285,6 +285,73 @@ func TestUpdateAgent_Errors(t *testing.T) {
 	}
 }
 
+// TestUpdateAgent_AdvancesLastSeen is the DF-CRIER-156 regression at the
+// endpoint: the PATCH 200 body must report the last_seen that is NOW
+// persisted (a following GET returns the same instant) and it must be
+// strictly after the registration-time value. Pre-fix the memory backend
+// echoed the registration value forever, so the response could not be used
+// to confirm the write.
+func TestUpdateAgent_AdvancesLastSeen(t *testing.T) {
+	store := setupTestStore(t)
+	registered := registerTestAgent(t, store) // agent-1
+	router := selfConfigRouter(NewHandler(store))
+
+	registeredAt := registered.RegisteredAt
+	registeredStatus := registered.Status
+	registeredSeen := registered.LastSeen
+
+	// A fresh timestamp must be distinguishable from the registration one.
+	time.Sleep(2 * time.Millisecond)
+
+	req := httptest.NewRequest("PATCH", "/agents/agent-1",
+		bytes.NewReader([]byte(`{"capabilities":["t303-probe"]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var patched Agent
+	if err := json.Unmarshal(rec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode PATCH body: %v", err)
+	}
+
+	req = httptest.NewRequest("GET", "/agents/agent-1", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var fetched Agent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("decode GET body: %v", err)
+	}
+
+	if !patched.LastSeen.After(registeredSeen) {
+		t.Fatalf("PATCH body last_seen = %v, want strictly after the registration value %v",
+			patched.LastSeen, registeredSeen)
+	}
+	if !patched.LastSeen.Equal(fetched.LastSeen) {
+		t.Fatalf("PATCH body last_seen = %v, GET body last_seen = %v — the response must equal the persisted value",
+			patched.LastSeen, fetched.LastSeen)
+	}
+	// The rest of the endpoint's contract is unchanged (AC3).
+	if !patched.RegisteredAt.Equal(registeredAt) {
+		t.Fatalf("PATCH body registered_at = %v, want the registration-time %v",
+			patched.RegisteredAt, registeredAt)
+	}
+	if patched.Status != registeredStatus {
+		t.Fatalf("PATCH body status = %q, want %q", patched.Status, registeredStatus)
+	}
+	if len(patched.Capabilities) != 1 || patched.Capabilities[0] != "t303-probe" {
+		t.Fatalf("PATCH body capabilities = %v, want [t303-probe]", patched.Capabilities)
+	}
+	if !fetched.RegisteredAt.Equal(registeredAt) {
+		t.Fatalf("GET body registered_at = %v, want the registration-time %v",
+			fetched.RegisteredAt, registeredAt)
+	}
+}
+
 // nonUpdatableStore wraps a Store without implementing the optional updater
 // capability — the handler must answer 501, not panic.
 type nonUpdatableStore struct {

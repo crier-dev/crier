@@ -12,6 +12,7 @@ import (
 	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pashagolub/pgxmock/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -580,6 +581,74 @@ func TestPostgresStoreUnit_Update_SQLError(t *testing.T) {
 	require.False(t, errors.Is(err, ErrAgentNotFound))
 	require.False(t, errors.Is(err, ErrInvalidStoreInput))
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// capturedTimeArg is a pgxmock Argument matcher that records the value handed
+// to the driver, so a unit test can prove the statement and the caller's
+// object carry the SAME instant (the pgxmock equivalent of inspecting $5).
+type capturedTimeArg struct {
+	got   any
+	calls int
+}
+
+func (c *capturedTimeArg) Match(v any) bool {
+	c.got = v
+	c.calls++
+	return true
+}
+
+// asTime normalises the recorded driver value. pgx hands the time.Time
+// straight through; a pgtype.Timestamptz conversion is accepted too so the
+// assertion stays about the instant, not about the Go type pgx chose.
+func (c *capturedTimeArg) asTime(t *testing.T) time.Time {
+	t.Helper()
+	if c.calls == 0 {
+		t.Fatal("the last_seen argument was never handed to the driver")
+	}
+	switch v := c.got.(type) {
+	case time.Time:
+		return v
+	case pgtype.Timestamptz:
+		if !v.Valid {
+			t.Fatalf("last_seen argument = %+v, want a valid timestamp", v)
+		}
+		return v.Time
+	default:
+		t.Fatalf("last_seen argument type = %T (%v), want time.Time", c.got, c.got)
+		return time.Time{}
+	}
+}
+
+// TestPostgresStoreUnit_Update_AdvancesCallerLastSeen pins DF-CRIER-156 on
+// the postgres backend: the UPDATE already wrote time.Now() into last_seen,
+// but the value was never assigned back to the caller's agent — and
+// HandleUpdateAgent renders exactly that object, so the PATCH 200 body
+// reported the PRE-write last_seen while the stored row had the new one. The
+// timestamp must be generated once and visible in both places.
+func TestPostgresStoreUnit_Update_AdvancesCallerLastSeen(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+	ag.RegisteredAt = time.Now().UTC().Add(-time.Hour)
+	ag.LastSeen = time.Now().UTC().Add(-time.Hour)
+	registeredAt := ag.RegisteredAt
+	preUpdate := ag.LastSeen
+	cap := &capturedTimeArg{}
+
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), cap).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	require.NoError(t, s.Update(ag))
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	require.True(t, ag.LastSeen.After(preUpdate),
+		"Update must advance the caller's last_seen (pre-update %v, got %v)", preUpdate, ag.LastSeen)
+	require.True(t, cap.asTime(t).Equal(ag.LastSeen),
+		"driver last_seen %v != caller last_seen %v — the response would diverge from the row",
+		cap.asTime(t), ag.LastSeen)
+	require.True(t, ag.RegisteredAt.Equal(registeredAt),
+		"Update must preserve registered_at (%v), got %v", registeredAt, ag.RegisteredAt)
+	require.Equal(t, StatusOnline, ag.Status)
 }
 
 // ---------------------------------------------------------------------------

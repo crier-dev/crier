@@ -56,9 +56,13 @@ Every agent has a discoverable identity with capability cards.
 
 > **What `status` means — registration-liveness only.** An agent's `status` is
 > set to `"online"` at registration and never changes until unregistration; it
-> is NOT live-connection health. The registry has no heartbeat source today
+> is NOT live-connection health. `last_seen` is set at registration and
+> advanced by a successful `PATCH /agents/{id}` — that PATCH is the only
+> activity the registry records, and the value it returns is the value now
+> persisted. The registry has no heartbeat source today
 > (mesh KEEPALIVE frames are sent but not processed server-side), so an agent
-> whose process crashed still reports `"online"` with a frozen `last_seen`.
+> that never PATCHes — including one whose process crashed — still reports
+> `"online"` with a `last_seen` frozen at its registration or last PATCH.
 > For live-connection truth, use the mesh: `GET /mesh/peers` lists agents with
 > an active WebSocket connection (see [Try the Mesh](#try-the-mesh)).
 

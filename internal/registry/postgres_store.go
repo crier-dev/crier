@@ -397,6 +397,11 @@ WHERE id = $1;`, id)
 // their column, and an explicit nil (webhook absent or null in the PATCH
 // body, spec §7) writes SQL NULL — so "removes the webhook" means removed on
 // this backend, not accepted-and-ignored (DF-CRIER-151).
+// last_seen is advanced to the moment of the write and assigned back to the
+// caller's agent, so a caller rendering the returned object (HandleUpdateAgent
+// does) reports the value that is now persisted rather than the pre-write one
+// (DF-CRIER-156). The timestamp is generated once and used both for the
+// statement and for the caller.
 // Returns ErrAgentNotFound when the agent does not exist.
 func (s *PostgresStore) Update(agent *Agent) error {
 	if agent == nil || agent.ID == "" {
@@ -422,16 +427,28 @@ func (s *PostgresStore) Update(agent *Agent) error {
 	ctx, cancel := s.operationContext()
 	defer cancel()
 
+	// Postgres timestamps have microsecond resolution and TRUNCATE the
+	// nanoseconds (measured against real PG: 300/300 samples stored
+	// now.Truncate(time.Microsecond), 153/300 diverged from now.Round).
+	// Truncating here means the value handed back to the caller is exactly the
+	// instant the row holds — a nanosecond-precision value would make the
+	// PATCH 200 body differ from the next GET by sub-microsecond precision.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	tag, err := s.pool.Exec(ctx, `
 UPDATE agents
 SET capabilities = $2::jsonb, webhook = $3::jsonb, guard = $4::jsonb, last_seen = $5
-WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, time.Now().UTC())
+WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, now)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("%w: %q", ErrAgentNotFound, agent.ID)
 	}
+	// The row now carries `now`; hand the same instant back to the caller so
+	// the PATCH response equals what a following GET returns (DF-CRIER-156).
+	// Assigned only after the write succeeded — a failed update must not
+	// report a last_seen that was never persisted.
+	agent.LastSeen = now
 	return nil
 }
 

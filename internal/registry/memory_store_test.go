@@ -144,3 +144,62 @@ func TestAck_EmptyMessageIDs(t *testing.T) {
 		t.Fatalf("expected ErrInvalidStoreInput for empty message_ids, got %v", err)
 	}
 }
+
+// TestMemoryStore_Update_AdvancesLastSeen pins DF-CRIER-156 on the in-memory
+// backend: a successful PATCH must move last_seen forward. Pre-fix Update
+// copied the stored value back into the caller's agent, so the registry's
+// last_seen stayed frozen at registration and a client could not use the
+// PATCH response to confirm the write.
+func TestMemoryStore_Update_AdvancesLastSeen(t *testing.T) {
+	store := NewMemoryStore()
+	agent := &Agent{ID: "agent-patch", Capabilities: []string{"relay", "mesh"}}
+	if err := store.Register(agent); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	registeredAt := agent.RegisteredAt
+	registeredStatus := agent.Status
+	before := agent.LastSeen
+
+	// Make the update's instant distinguishable from registration's.
+	time.Sleep(2 * time.Millisecond)
+
+	agent.Capabilities = []string{"solver"}
+	if err := store.Update(agent); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	if !agent.LastSeen.After(before) {
+		t.Fatalf("last_seen = %v after Update, want strictly after the pre-update %v",
+			agent.LastSeen, before)
+	}
+	if !agent.RegisteredAt.Equal(registeredAt) {
+		t.Fatalf("registered_at = %v after Update, want the registration-time %v",
+			agent.RegisteredAt, registeredAt)
+	}
+	if agent.Status != registeredStatus {
+		t.Fatalf("status = %q after Update, want %q", agent.Status, registeredStatus)
+	}
+	if len(agent.Capabilities) != 1 || agent.Capabilities[0] != "solver" {
+		t.Fatalf("capabilities = %v after Update, want [solver]", agent.Capabilities)
+	}
+
+	// The store now holds the advanced instant: the value a PATCH returns and
+	// the value a following GET returns must agree.
+	got, err := store.Get("agent-patch")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.LastSeen.Equal(agent.LastSeen) {
+		t.Fatalf("stored last_seen = %v, want the updated %v", got.LastSeen, agent.LastSeen)
+	}
+}
+
+// TestMemoryStore_Update_NotFound keeps the missing-agent contract (404) with
+// the new write semantics in place.
+func TestMemoryStore_Update_NotFound(t *testing.T) {
+	store := NewMemoryStore()
+	err := store.Update(&Agent{ID: "ghost"})
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected ErrAgentNotFound for an unknown agent, got %v", err)
+	}
+}
