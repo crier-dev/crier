@@ -1236,3 +1236,26 @@ tasks:
   status: complete
   created_at: '2026-09-17T20:53:16.390288+00:00'
   completed_at: '2026-09-17T21:06:10.813598+00:00'
+- id: DF-CRIER-206
+  title: "Tier-1 guard green is vacuous for shell/YAML-only diffs \u2014 give .sh\
+    \ and workflow YAML a real gate"
+  criteria:
+  - make shell-yaml-check exits 0 on the clean tracked tree and prints a scope line
+    naming how many shell files and how many workflow files it verified
+  - a syntactically broken .sh and a malformed .github/workflows/*.yml are each rejected
+    with a nonzero exit and an error naming the offending file; make shell-yaml-selftest
+    proves both rejections plus the clean-accept case and fails if the checker stops
+    detecting either
+  - 'the local commit path states its scope: with no Go source staged the pre-commit
+    wrapper prints which shell/YAML files it checked, or that nothing guardable was
+    staged, while gitreins guard keeps its unchanged block-on-failure semantics; a
+    tracked scripts/hooks/pre-commit plus make install-hooks installs it'
+  - CI gains a real step running the shell/YAML checks so a .sh/.yml-only push has
+    non-vacuous evidence and no existing CI step is removed or weakened
+  - docs move with the code (AGENTS.md commands + what the gate does and does not
+    cover) and make docs-check, go build ./..., go vet ./..., go test -count=1 ./...
+    (15/15 packages) and gitreins guard are all green on the committed tree with no
+    new gofmt drifters
+  status: complete
+  created_at: '2026-09-17T21:24:32.576415+00:00'
+  completed_at: '2026-09-17T21:52:58.891702+00:00'
