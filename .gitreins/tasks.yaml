@@ -1082,3 +1082,14 @@ tasks:
   status: complete
   created_at: '2026-09-17T14:04:10.298373+00:00'
   completed_at: '2026-09-17T14:29:53.757447+00:00'
+- id: DF-CRIER-204
+  title: A provider that dies at the per-message budget emits no router line
+  criteria:
+  - 'With a single-provider policy whose endpoint hangs past CR_GUARD_TIMEOUT_MS,
+    the server log emits exactly one ''guard router: provider failed'' line naming
+    that provider and model with reason ''per-message budget exhausted''; no wire
+    contract change; new unit test fails pre-fix and passes post-fix; build/vet/test/docs-check/gitreins
+    guard green.'
+  status: complete
+  created_at: '2026-09-17T14:43:01.395473+00:00'
+  completed_at: '2026-09-17T14:58:37.567623+00:00'
