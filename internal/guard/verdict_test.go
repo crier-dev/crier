@@ -98,6 +98,7 @@ func TestEscalation(t *testing.T) {
 		{"allow low under high", DecisionAllow, RiskLow, high, DecisionAllow},
 		{"allow high at high", DecisionAllow, RiskHigh, high, DecisionBlock},
 		{"sanitize low under high", DecisionSanitize, RiskLow, high, DecisionSanitize},
+		{"sanitize medium under high", DecisionSanitize, RiskMedium, high, DecisionSanitize},
 		{"sanitize high at high", DecisionSanitize, RiskHigh, high, DecisionBlock},
 		{"block low stays block", DecisionBlock, RiskLow, high, DecisionBlock},
 		{"block high stays block", DecisionBlock, RiskHigh, high, DecisionBlock},

@@ -263,6 +263,14 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 			res.RiskLevel = RiskHigh
 			res.Reason = "sanitize rewrite failed; fail_closed: " + rerr.Error()
 		default:
+			// The fail-open fallback still never delivers the original, but it
+			// DEGRADES the message to a quarantine notice — which loses the
+			// benign content the rewrite was supposed to preserve. Name the
+			// cause on its own warn line: the reason string only says
+			// "(rewrite unavailable)", which made this class invisible
+			// (DF-CRIER-147: the real cause was the rewrite shape).
+			g.logfWarn("guard sanitize rewrite unavailable",
+				"msg", in.MessageID, "fallback", "quarantine_notice", "err", rerr.Error())
 			res.Quarantined = true
 			res.DeliveredPayload, res.QuarantinedPayload = quarantinePayload(in, res.Reason+" (rewrite unavailable)")
 		}

@@ -16,19 +16,49 @@ import (
 // records the last request (for body/auth assertions) and serves a canned
 // completion. Handlers may override the response.
 type mockLLMServer struct {
-	mu       sync.Mutex
-	requests int
-	lastBody map[string]any
-	lastAuth string
-	lastPath string
-	status   int
-	response string
-	delay    time.Duration
+	mu          sync.Mutex
+	requests    int
+	lastBody    map[string]any
+	lastAuth    string
+	lastPath    string
+	status      int
+	response    string
+	responseSeq []string // optional: replies served in call order, last one repeats
+	delay       time.Duration
+}
+
+// nextReply returns the reply for call n (1-based), honouring responseSeq.
+func (m *mockLLMServer) nextReply() string {
+	if len(m.responseSeq) == 0 {
+		return m.response
+	}
+	i := m.requests - 1
+	if i >= len(m.responseSeq) {
+		i = len(m.responseSeq) - 1
+	}
+	return m.responseSeq[i]
 }
 
 func newMockLLM(t *testing.T, status int, response string) (*mockLLMServer, *httptest.Server) {
 	t.Helper()
 	m := &mockLLMServer{status: status, response: response}
+	return m, startMockLLM(t, m)
+}
+
+// newMockLLMSeq serves one reply per LLM call in order (the last reply
+// repeats). Needed for the sanitize path, which makes TWO calls: the
+// classifier verdict, then the §3.5 rewrite.
+func newMockLLMSeq(t *testing.T, replies ...string) (*mockLLMServer, *httptest.Server) {
+	t.Helper()
+	if len(replies) == 0 {
+		t.Fatal("newMockLLMSeq needs at least one reply")
+	}
+	m := &mockLLMServer{responseSeq: replies}
+	return m, startMockLLM(t, m)
+}
+
+func startMockLLM(t *testing.T, m *mockLLMServer) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		m.requests++
@@ -36,6 +66,7 @@ func newMockLLM(t *testing.T, status int, response string) (*mockLLMServer, *htt
 		m.lastAuth = r.Header.Get("Authorization")
 		m.lastBody = map[string]any{}
 		_ = json.NewDecoder(r.Body).Decode(&m.lastBody)
+		reply := m.nextReply()
 		m.mu.Unlock()
 		if m.delay > 0 {
 			time.Sleep(m.delay)
@@ -46,10 +77,10 @@ func newMockLLM(t *testing.T, status int, response string) (*mockLLMServer, *htt
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(m.response))
+		w.Write([]byte(reply))
 	}))
 	t.Cleanup(srv.Close)
-	return m, srv
+	return srv
 }
 
 func (m *mockLLMServer) body() map[string]any {

@@ -23,10 +23,44 @@ Respond ONLY with JSON, no commentary, one of:
 {"rewritten": "<the rewritten message>"}
 {"rewritten": null, "block": true}`
 
-// rewriteResult is the parsed outcome of the rewrite call.
+// rewriteResult is the parsed outcome of the rewrite call. Rewritten is kept
+// as raw JSON because the model legitimately answers with the rewritten
+// message in one of two shapes (see decodeRewritten): a JSON *string* carrying
+// the payload, or the payload object/array inlined. Decoding into a *string
+// rejects the second shape and drops the benign content of a mixed payload
+// onto the fail-open quarantine path (DF-CRIER-147).
 type rewriteResult struct {
-	Rewritten *string `json:"rewritten"`
-	Block     bool    `json:"block"`
+	Rewritten json.RawMessage `json:"rewritten"`
+	Block     bool            `json:"block"`
+}
+
+// decodeRewritten normalizes the two shapes the rewrite model emits for the
+// rewritten message into the text that is delivered:
+//
+//  1. a JSON string carrying the payload — {"rewritten":"{\"text\":\"hi\"}"}
+//     (the shape the §3.5 contract asks for; unquoted here);
+//  2. the payload itself as a JSON object/array — {"rewritten":{"text":"hi"}}
+//     (models routinely inline it, and a JSON message must come back as a JSON
+//     object of the same shape, so this is the same content, not an error).
+//
+// null / empty (either shape) reports empty = true, which the caller treats
+// exactly as before: an empty rewrite is a rewrite failure.
+func decodeRewritten(raw json.RawMessage) (text string, empty bool, err error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", true, nil
+	}
+	if strings.HasPrefix(trimmed, `"`) {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", false, err
+		}
+		if strings.TrimSpace(s) == "" {
+			return "", true, nil
+		}
+		return s, false, nil
+	}
+	return trimmed, false, nil
 }
 
 // rewritePayload performs the sanitize-rewrite: the guard LLM rewrites the
@@ -76,15 +110,19 @@ func (g *Guard) rewritePayload(ctx context.Context, in Input, policy Policy, rea
 	if rr.Block {
 		return nil, true, nil
 	}
-	if rr.Rewritten == nil || strings.TrimSpace(*rr.Rewritten) == "" {
+	text, empty, err := decodeRewritten(rr.Rewritten)
+	if err != nil {
+		return nil, false, fmt.Errorf("rewrite: parse: %w", err)
+	}
+	if empty {
 		return nil, false, fmt.Errorf("rewrite: empty rewritten payload")
 	}
 
-	out := []byte(*rr.Rewritten)
+	out := []byte(text)
 	// Delivery contract: payloads are JSON. If the rewrite is not valid JSON,
 	// wrap it so consumers keep a parseable object.
 	if !json.Valid(out) {
-		wrapped, werr := json.Marshal(map[string]string{"text": *rr.Rewritten})
+		wrapped, werr := json.Marshal(map[string]string{"text": text})
 		if werr != nil {
 			return nil, false, fmt.Errorf("rewrite: wrap: %w", werr)
 		}
