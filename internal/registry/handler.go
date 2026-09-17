@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -311,12 +312,83 @@ type statsResponse struct {
 	OldestAgeMs int64 `json:"oldest_age_ms"`
 }
 
+// strictWebhookMember strict-decodes the top-level `webhook` member of an
+// agent registration/update body (DF-CRIER-150): an unknown or misnamed key
+// inside the webhook object is an error instead of being dropped by
+// encoding/json. present=false means the body carries no webhook member at
+// all; present=true with a nil config means the member was an explicit JSON
+// null, which both paths read as "remove the webhook". Strictness covers the
+// webhook object only — the surrounding agent body and the guard object stay
+// permissive.
+func strictWebhookMember(body []byte) (cfg *webhook.Config, present bool, err error) {
+	raw, ok := agentWebhookRaw(body)
+	if !ok {
+		return nil, false, nil
+	}
+	cfg, err = webhook.DecodeConfig(raw)
+	if err != nil {
+		return nil, true, err
+	}
+	return cfg, true, nil
+}
+
+// agentWebhookRaw returns the raw JSON of the top-level `webhook` member of an
+// agent body. ok=false when the body carries no such member (or is not a JSON
+// object). The LAST occurrence wins, mirroring encoding/json's
+// later-key-wins decode, and the name is matched case-insensitively like the
+// decoder matches the struct field.
+func agentWebhookRaw(body []byte) (json.RawMessage, bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, false
+	}
+	if delim, isDelim := tok.(json.Delim); !isDelim || delim != '{' {
+		return nil, false
+	}
+	var (
+		raw     json.RawMessage
+		present bool
+	)
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, isString := kt.(string)
+		if !isString {
+			return nil, false
+		}
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return nil, false
+		}
+		if strings.EqualFold(key, "webhook") {
+			raw, present = val, true
+		}
+	}
+	return raw, present
+}
+
 // HandleRegister handles POST /agents — registers a new agent.
 func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
+	}
+	var req registerRequest
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	// The webhook object is held to its declared contract even though the
+	// body around it is decoded permissively (DF-CRIER-150).
+	if cfg, present, err := strictWebhookMember(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	} else if present {
+		req.Webhook = cfg
 	}
 	if req.ID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
@@ -449,10 +521,24 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req patchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
+	}
+	var req patchRequest
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	// Same strict webhook contract as POST /agents (DF-CRIER-150): a
+	// misnamed key inside the object is a 400, and the agent is left
+	// untouched. Absent or explicit null still means "remove the webhook".
+	if cfg, present, err := strictWebhookMember(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	} else if present {
+		req.Webhook = cfg
 	}
 
 	agent, err := h.store.Get(id)

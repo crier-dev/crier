@@ -1131,7 +1131,7 @@ components:
           $ref: "#/components/schemas/GuardVerdictMeta"
     WebhookConfig:
       type: object
-      description: "Webhook endpoint configuration (CR-FEAT-001, spec WEBHOOK-DELIVERY.md) — the object accepted by POST /agents (`webhook` at creation) and PATCH /agents/{id} (`webhook` object registers/updates it). `url` is required when registering; the remaining fields fall back to the server defaults."
+      description: "Webhook endpoint configuration (CR-FEAT-001, spec WEBHOOK-DELIVERY.md) — the object accepted by POST /agents (`webhook` at creation) and PATCH /agents/{id} (`webhook` object registers/updates it). `url` is required when registering; the remaining fields fall back to the server defaults. Registration is strict about this object's vocabulary: an unknown or misnamed member — nested objects (`batch`, `custom_schema`, `request_shape`) included — is refused with 400 naming the member and the members that are accepted (DF-CRIER-150), so a caller that wrote e.g. `mode` instead of `delivery_mode` is told rather than silently given the default."
       properties:
         url:
           type: string

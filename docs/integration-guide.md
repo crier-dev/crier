@@ -133,6 +133,11 @@ Every delivery first passes the LLM message guard (see below) — the response
 body adds `"guard":{...}` whenever the verdict was not a plain allow, including
 errored fail-open runs.
 
+An agent that has registered a webhook is **pushed** to instead of stored: the
+message is POSTed to the agent's endpoint and the inbox stays empty — see
+§8 *Push delivery (webhooks)* for the registration object and the three
+delivery modes.
+
 ### The LLM message guard
 
 The guard is **ON by default** (`CR_GUARD_ENABLED=true`) and sits at ONE choke
@@ -436,3 +441,176 @@ make run
 CR_AUTH_TOKEN=secret ./examples/demo.sh     # config B or C
 ./examples/demo.sh                          # config A
 ```
+
+---
+
+## 8. Push delivery (webhooks)
+
+An agent can register its own HTTP endpoint and have deliveries **pushed** to
+it instead of being stored in its durable inbox. The endpoint is part of the
+agent registration: pass a `webhook` object on `POST /agents` (at creation) or
+on `PATCH /agents/{id}` (register/update it later); on PATCH an **absent or
+explicit `null`** `webhook` removes it. Every delivery answer names where the
+message actually went: `"transport":"webhook"` when it was pushed,
+`"transport":"inbox"` when it was stored.
+
+### 8.1 The registration object
+
+```bash
+# at creation (delivery_mode is optional — async is the default)
+curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"id":"agent-1","capabilities":["relay"],
+       "webhook":{"url":"http://127.0.0.1:9000/hook","delivery_mode":"blocking"}}'
+# → 201 {"id":"agent-1","public_key":"","capabilities":["relay"],"status":"online",
+#        "registered_at":"…","last_seen":"…",
+#        "webhook":{"url":"http://127.0.0.1:9000/hook","delivery_mode":"blocking"}}
+
+# or later on an existing agent → 200 with the updated agent
+curl -s -X PATCH localhost:8767/agents/agent-1 "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"webhook":{"url":"http://127.0.0.1:9000/hook","delivery_mode":"async"}}'
+
+# remove it again: absent or null both drop the webhook → 200, no "webhook" key
+curl -s -X PATCH localhost:8767/agents/agent-1 "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"webhook":null}'
+```
+
+| key | type | accepted values / range | notes |
+|-----|------|-------------------------|-------|
+| `url` | string | **required**, `http://` or `https://` | anything else → 400 `webhook.url must be http(s)://` |
+| `auth_type` | string | `none` (default), `bearer` | `bearer` requires `auth_value_ref`; any other value → 400 |
+| `auth_value_ref` | string | `env:VAR` | resolved from the server's environment at delivery time and sent as `Authorization: Bearer <value>`; the secret itself is never part of the registration, and any ref that is not `env:…` sends no Authorization header |
+| `schema_template` | string | `generic-custom` (default), `openai-compatible`, `hermes-http-gateway` | picks how the outbound request is shaped and where the reply is read from; an unrecognised name falls back to `generic-custom` |
+| `custom_schema` | object | `{"request_shape":{"method","headers","body"},"response_map"}` | wins over `schema_template` when present; `body` is a JSON template with `{{payload.x}}` / `{{crier.…}}` placeholders; `response_map` is `raw` (the whole response body) or a dot path such as `choices.0.message.content` |
+| `delivery_mode` | string | `blocking`, `async` (default), `batch` | the agent's default mode; a delivery request can override it per message (§8.3) |
+| `batch` | object | `{"max_messages","flush_interval_s"}` | batch mode only; a value > 0 wins over the server defaults (`CR_WEBHOOK_BATCH_MAX` = 10, `CR_WEBHOOK_BATCH_FLUSH_S` = 5s) |
+| `retries` | integer | 0..10 | range-checked at registration; the retry budget the driver actually applies is the server setting `CR_WEBHOOK_MAX_RETRIES` (default 5) |
+| `timeout_ms` | integer | 0..120000 | range-checked at registration; the blocking budget actually applied comes from the delivery request's own `timeout_ms` (default 30000, ceiling 120000) |
+
+Registration is strict about its own vocabulary: an unknown or misnamed key
+**inside the `webhook` object** — nested objects (`batch`, `custom_schema`,
+`request_shape`) included — is a 400 that names the offending key and the keys
+that are accepted. `"mode"` is not a key; the field is `delivery_mode`:
+
+```bash
+curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"id":"oops","webhook":{"url":"http://127.0.0.1:9000/hook","mode":"blocking"}}'
+# → 400 {"error":"webhook: unknown field \"mode\" (accepted: url, auth_type, auth_value_ref,
+#          schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms)"}
+
+curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"id":"oops","webhook":{"url":"http://127.0.0.1:9000/hook","batch":{"max_msgs":5}}}'
+# → 400 {"error":"webhook.batch: unknown field \"max_msgs\" (accepted: max_messages, flush_interval_s)"}
+```
+
+A refused `POST /agents` registers nothing, and a refused PATCH leaves the
+agent's existing webhook untouched. This hold applies to the `webhook` object
+only — the rest of the registration body is not held to it.
+
+### 8.2 The three modes and their wire contracts
+
+| mode | answer to the sender | what the endpoint receives | durable inbox |
+|------|----------------------|----------------------------|----------------|
+| `blocking` | 200 + the endpoint's inline `reply` | one envelope POST; the delivery waits for the answer | bypassed |
+| `async` | 202 `{"id":…,"transport":"webhook","delivery_mode":"async"}` | one envelope POST from the background queue | bypassed |
+| `batch` | 202 `{"id":…,"transport":"webhook","delivery_mode":"batch"}` | ONE coalesced POST of `{"messages":[envelope, …]}` when `max_messages` or `flush_interval_s` is reached | bypassed |
+
+**`blocking`** — the sender gets the endpoint's reply inline (200):
+
+```bash
+curl -s -X POST localhost:8767/agents/blocking-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"hello":"world"},"request_id":"r-1"}'
+# → 200 {"id":"1fb5798c3e0fbf1c21d4a399","transport":"webhook",
+#        "reply":{"echo":"sink-reply-1","choices":[{"message":{"content":"sink-content-1"}}]},
+#        "request_id":"r-1"}
+```
+
+The endpoint received one POST of the Crier envelope (`generic-custom`
+passthrough, `X-Crier-Event: message`):
+
+```json
+{"crier":{"version":1,"message_id":"1fb5798c3e0fbf1c21d4a399","request_id":"r-1",
+          "delivery_mode":"blocking","kind":"message"},
+ "payload":{"hello":"world"}}
+```
+
+`reply` is the endpoint's response body extracted per the schema:
+`raw` hands back the whole body (above), `choices.0.message.content` hands back
+just that string — the same endpoint with
+`"schema_template":"hermes-http-gateway"` answers
+`"reply":"sink-content-9"` and the endpoint receives the template-rendered body
+`{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hello-from-df150"}],"stream":false,…}`.
+
+**`async`** — accepted immediately (202), pushed from the background queue:
+
+```bash
+curl -s -X POST localhost:8767/agents/async-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"hello":"async"},"request_id":"r-2"}'
+# → 202 {"id":"449b05958da0c2a5ef75d30d","transport":"webhook","delivery_mode":"async"}
+
+# the message was PUSHED, not queued — the inbox stays empty:
+curl -s "localhost:8767/agents/async-agent/inbox" "${AUTH[@]}"
+# → 200 {"messages":[],"lease_id":"","queue_depth":0,"leased_count":0}
+```
+
+**`batch`** — accepted immediately (202), coalesced into one flush:
+
+```bash
+curl -s -X POST localhost:8767/agents/batch-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"payload":{"n":1},"request_id":"r-3"}'
+# → 202 {"id":"364186823e5afc7a39a3475b","transport":"webhook","delivery_mode":"batch"}
+curl -s -X POST localhost:8767/agents/batch-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"payload":{"n":2},"request_id":"r-4"}'
+# → 202 {"id":"71fa491f0fcf4b7f0731ba81","transport":"webhook","delivery_mode":"batch"}
+```
+
+— with `"batch":{"max_messages":2,"flush_interval_s":1}` the endpoint then
+receives ONE POST with `X-Crier-Event: batch`:
+
+```json
+{"messages":[
+  {"crier":{"version":1,"message_id":"364186823e5afc7a39a3475b","request_id":"r-3","delivery_mode":"batch","kind":"message"},"payload":{"n":1}},
+  {"crier":{"version":1,"message_id":"71fa491f0fcf4b7f0731ba81","request_id":"r-4","delivery_mode":"batch","kind":"message"},"payload":{"n":2}}]}
+```
+
+The batch wrapper is always that raw `{"messages":[…]}` array of envelopes —
+schema templates shape the individual messages, not the batch. A single
+message flushes on the timer alone (`"batch":{"flush_interval_s":1}` sends
+`{"messages":[ … ]}` with one element after ~1s).
+
+### 8.3 Per-message override
+
+A delivery request may carry its own `delivery_mode`, which beats the agent's
+registered default. It is validated against the same three values — anything
+else is a 400 and nothing is dispatched:
+
+```bash
+# the agent's default is async, this delivery asks for blocking → 200 + inline reply
+curl -s -X POST localhost:8767/agents/async-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"hello":"override"},"delivery_mode":"blocking","request_id":"req-ovr-block"}'
+# → 200 {"id":"0d8b9798cd6722c4bfc5d3ba","transport":"webhook","reply":{…},"request_id":"req-ovr-block"}
+
+# the agent's default is blocking, this delivery asks for async → 202, RESOLVED mode echoed
+curl -s -X POST localhost:8767/agents/blocking-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"hello":"agent-default-blocking"},"delivery_mode":"async"}'
+# → 202 {"id":"b2d9715db5c153e6034f98cd","transport":"webhook","delivery_mode":"async"}
+
+# a value outside the set is refused before any dispatch or store
+curl -s -X POST localhost:8767/agents/async-agent/inbox "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"payload":{"hello":"typo"},"delivery_mode":"sequential"}'
+# → 400 {"error":"delivery_mode must be blocking|async|batch"}
+```
+
+The 202 accept body echoes the **resolved** mode (`async` or `batch`) whatever
+the agent default was; a `blocking` delivery answers 200 with `transport` and
+the inline `reply` instead, so it carries no `delivery_mode` field.
+
+### 8.4 Retries, redelivery and federation
+
+Retry/backoff, the offline queue for unreachable endpoints, the per-endpoint
+circuit breaker, and relay-to-relay (federated) delivery are specified in
+`specs/WEBHOOK-DELIVERY.md` and `docs/specs.md` — this section covers the
+registration object and the wire contracts only.
