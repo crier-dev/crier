@@ -32,7 +32,18 @@ pipeline:
     # pass-side evidence set (all five content criteria + docs-check/build/vet/
     # test/guard) and still ended without a terminal verdict, returning
     # INCOMPLETE / "evaluation hit resource cap".
-    max_iterations: 250
+    # max_iterations 250 -> 400 (tick 301, DF-CRIER-177): the 250 rung starved
+    # again on a 6-criterion code+docs row — "Cap exceeded: Iteration cap (250)
+    # reached (250.9 used)" with tier1 PASS and a COMPLETE-looking evidence set
+    # (verdict 4056747b / printed id 26025e26). MEASURED burn from
+    # .gitreins/usage.jsonl for that run: 13,434,405 tokens_in / 250 iterations
+    # = ~53.7K tokens per iteration. The exhausted knob was ITERATIONS only
+    # (13.4M < the 16M token budget), so the rung moves on both knobs in ONE
+    # commit: 400 iterations projects ~21.5M tokens_in, which is why the input
+    # budget below moved to 24M in the SAME change instead of burning a second
+    # 6-minute judge on the token cap (fleet doctrine: raise the starved rung
+    # and size the neighbouring knob from measured burn, never from a guess).
+    max_iterations: 400
     tools:
     - read_file
     - run_command
@@ -51,7 +62,13 @@ evaluator:
   # "INCOMPLETE — Partial verdict" (verdict ff564a78) on work whose gates are
   # green. 50 iterations is not enough for a docs row whose criteria each need a
   # grep plus a live probe plus the four gate commands.
-  max_iterations: 120
+  # max_iterations 120 -> 400 (tick 301, DF-CRIER-177): aligned with the tier2
+  # stage block in the same commit. The MIN(stage, evaluator) gate means a
+  # smaller value here could silently re-cap the stage knob it was just raised
+  # to (warpfs lesson), so every iteration knob moves together — one place
+  # stating 400 and another still stating 120 is exactly the shape that makes a
+  # raise invisible.
+  max_iterations: 400
   # max_time 20m -> 30m (tick 280, CR-GAP-060): measured burn rate ~1M input
   # tokens per minute (the 9.0M starved run below ran ~9 min), so a 12M budget
   # needs headroom past the old 20m wall instead of starving on a third knob.
@@ -73,7 +90,16 @@ evaluator:
   # off-by-one class gitreins-tier2-input-token-cap-exceeded prescribes raising
   # the rung rather than splitting criteria). 16M is one rung above the
   # exhausted budget.
-  max_input_tokens: 16M
+  # 16M -> 24M (tick 301, DF-CRIER-177): sized from MEASURED burn, not a guess.
+  # The 250-iteration rung was exhausted at 13,434,405 tokens_in (84% of the
+  # 16M budget), i.e. ~53.7K tokens/iteration; the 400-iteration rung set in the
+  # stage block above projects ~21.5M, so 16M would have starved the very next
+  # run on the neighbouring knob. 24M carries ~12% headroom over that
+  # projection. This rung is a PROBE: the next crier judge run that completes
+  # with NO "Cap exceeded" line settles it — record its tokens_in and step the
+  # budget down to the smallest sufficient value rather than leaving an
+  # untested 24M in place.
+  max_input_tokens: 24M
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
