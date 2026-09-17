@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -337,6 +338,7 @@ func TestHandleDeliver_DocsMatchTheValidatedParameters(t *testing.T) {
 	}
 
 	type param struct {
+		Type    string   `yaml:"type"`
 		Enum    []string `yaml:"enum"`
 		Minimum *int     `yaml:"minimum"`
 		Maximum *int     `yaml:"maximum"`
@@ -347,6 +349,8 @@ func TestHandleDeliver_DocsMatchTheValidatedParameters(t *testing.T) {
 			RequestBody struct {
 				Content map[string]struct {
 					Schema struct {
+						Type       string           `yaml:"type"`
+						Required   []string         `yaml:"required"`
 						Properties map[string]param `yaml:"properties"`
 					} `yaml:"schema"`
 				} `yaml:"content"`
@@ -397,13 +401,249 @@ func TestHandleDeliver_DocsMatchTheValidatedParameters(t *testing.T) {
 			"undocumented delivery_mode %q is accepted by the handler", mode)
 	}
 
+	// The REQUIRED payload is the other half of the same contract
+	// (DF-CRIER-112): the schema has always declared `required: [payload]`
+	// with `payload: type: object`, so the handler must enforce exactly that
+	// — and the docs must keep saying it, or the next reader of the schema
+	// cannot tell what the boundary accepts.
+	pl, ok := schema.Properties["payload"]
+	if !ok {
+		t.Fatal("deliver request schema documents no payload")
+	}
+	require.Equal(t, "object", pl.Type,
+		"the documented payload type must be the JSON type the handler enforces")
+	require.Contains(t, schema.Required, "payload",
+		"the documented request schema must mark payload required — the handler refuses the key when it is absent")
+
+	require.NoError(t, validateDeliverPayload(&deliverRequest{Payload: json.RawMessage(`{"x":1}`)}),
+		"a documented JSON-object payload is rejected by the handler")
+	require.NoError(t, validateDeliverPayload(&deliverRequest{Payload: json.RawMessage(`{}`)}),
+		"an empty JSON object is still an object — the contract refuses a MISSING payload, not an empty one")
+	require.EqualError(t, validateDeliverPayload(&deliverRequest{}), deliverPayloadRequiredError,
+		"the handler must refuse a payload-less request with the documented text")
+	require.EqualError(t, validateDeliverPayload(&deliverRequest{Payload: json.RawMessage(`null`)}), deliverPayloadObjectError,
+		"the handler must refuse an explicit null payload with the documented text")
+
 	// The 400 the handler returns must be documented for this operation.
 	bad, ok := post.Responses["400"]
 	if !ok {
 		t.Fatal("the deliver operation documents no 400 response")
 	}
-	for _, want := range []string{"delivery_mode", "timeout_ms", "blocking|async|batch"} {
+	for _, want := range []string{
+		"delivery_mode", "timeout_ms", "blocking|async|batch",
+		deliverPayloadRequiredError, deliverPayloadObjectError,
+	} {
 		require.Contains(t, bad.Description, want,
 			"the documented 400 must explain the %q rejection", want)
 	}
+}
+
+// DF-CRIER-112 — the deliver API must refuse a request its own published
+// contract calls invalid.
+//
+// POST /agents/{id}/inbox used to accept a body that omits `payload` (e.g.
+// `{}`, or the mistyped `{"payloads":{"x":1}}`) with 201, storing an empty
+// message, even though docs/openapi.yaml declares the deliver requestBody
+// `required: [payload]` with `payload: type: object`. The client got a
+// success it could not act on: nothing useful was ever stored, and the typo
+// was indistinguishable from a message that genuinely had no content.
+//
+// The refusal happens at the HTTP boundary, BEFORE any transport/store
+// choice — the same call site and the same reasoning as DF-CRIER-180 — so the
+// answer is identical for a webhook target (nothing dispatched), an
+// inbox-only target (nothing stored) and an unregistered target.
+func TestHandleDeliver_RejectsMissingOrNonObjectPayload(t *testing.T) {
+	// The refused inputs: one named case per shape. `{}` is the reproduced
+	// defect; the `payloads` row is the client-bug shape the contract exists
+	// to catch (a typo'd key must not read as a content-less success).
+	refusals := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{"key_absent", `{}`, deliverPayloadRequiredError},
+		{"key_absent_typo_payloads", `{"payloads":{"x":1}}`, deliverPayloadRequiredError},
+		{"key_present_explicit_null", `{"payload":null}`, deliverPayloadObjectError},
+		{"value_is_a_string", `{"payload":"x"}`, deliverPayloadObjectError},
+		{"value_is_an_array", `{"payload":[{"x":1}]}`, deliverPayloadObjectError},
+		{"value_is_a_number", `{"payload":5}`, deliverPayloadObjectError},
+		{"value_is_a_bool", `{"payload":true}`, deliverPayloadObjectError},
+	}
+
+	// The three target kinds the deliver path can be asked to serve.
+	targets := []struct {
+		name       string
+		hasWebhook bool
+		agentMode  string
+		targetID   string // "" = the registered agent itself
+	}{
+		{"webhook_target", true, "async", ""},
+		{"inbox_only_target", false, "", ""},
+		{"unregistered_target", true, "async", "agent-nowhere"},
+	}
+
+	for _, tc := range refusals {
+		for _, tg := range targets {
+			t.Run(tc.name+"/"+tg.name, func(t *testing.T) {
+				var posts atomic.Int32
+				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					posts.Add(1)
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{"pong":true}`))
+				}))
+				defer endpoint.Close()
+
+				agentID := "agent-" + strings.ReplaceAll(tc.name, "_", "-")
+				var cfg *webhook.Config
+				if tg.hasWebhook {
+					cfg = &webhook.Config{URL: endpoint.URL, DeliveryMode: tg.agentMode, TimeoutMs: 5000}
+				}
+				h, store := deliverHarness(t, agentID, cfg)
+
+				targetID := tg.targetID
+				if targetID == "" {
+					targetID = agentID
+				}
+
+				rec, _ := postDeliver(t, h, targetID, tc.body)
+
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400 — body: %s", rec.Code, rec.Body.String())
+				}
+				// The error must name the field AND the reason, so a client
+				// can fix its body instead of guessing.
+				for _, want := range []string{"payload", tc.wantErr} {
+					if !strings.Contains(rec.Body.String(), want) {
+						t.Errorf("400 body = %s, want it to name %q", rec.Body.String(), want)
+					}
+				}
+
+				// Nothing was dispatched: give the driver's queue worker room
+				// to (not) send before concluding.
+				time.Sleep(300 * time.Millisecond)
+				if n := posts.Load(); n != 0 {
+					t.Errorf("endpoint received %d POST(s), want 0 — a refused request must never reach the endpoint", n)
+				}
+
+				// Nothing was stored: the registered agent's own inbox stays
+				// empty, and an unknown target has no inbox to store into at
+				// all (its retrieve is "agent not found", not an entry).
+				for _, id := range []string{targetID, agentID} {
+					entries, _, err := store.Retrieve(id, time.Minute, 10)
+					if errors.Is(err, ErrAgentNotFound) {
+						continue // no inbox exists — nothing can have been stored
+					}
+					if err != nil {
+						t.Fatalf("retrieve %s: %v", id, err)
+					}
+					if len(entries) != 0 {
+						t.Errorf("inbox %s = %d entr(ies), want an EMPTY message list — a refused "+
+							"request must not be silently parked in the durable inbox", id, len(entries))
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestHandleDeliver_ValidObjectPayloadUnchanged is the no-regression control
+// for DF-CRIER-112: the refusal must be about the MISSING/INVALID required
+// key, never about valid senders. A JSON object payload — including the empty
+// object `{}` — still delivers on every transport, and the stored bytes are
+// the sender's bytes.
+func TestHandleDeliver_ValidObjectPayloadUnchanged(t *testing.T) {
+	const valid = `{"payload":{"x":1}}`
+
+	t.Run("inbox_only_stores_the_payload_intact", func(t *testing.T) {
+		h, store := deliverHarness(t, "agent-valid-inbox", nil)
+
+		rec, wire := postDeliver(t, h, "agent-valid-inbox", valid)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 — body: %s", rec.Code, rec.Body.String())
+		}
+		if wire.Transport != "inbox" {
+			t.Errorf("transport = %q, want inbox — body: %s", wire.Transport, rec.Body.String())
+		}
+
+		entries, _, err := store.Retrieve("agent-valid-inbox", time.Minute, 10)
+		if err != nil {
+			t.Fatalf("retrieve: %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("inbox = %d entr(ies), want 1", len(entries))
+		}
+		if got := string(entries[0].Payload); got != `{"x":1}` {
+			t.Errorf("stored payload = %s, want the sender's bytes {\"x\":1}", got)
+		}
+	})
+
+	t.Run("empty_object_is_still_an_object", func(t *testing.T) {
+		h, store := deliverHarness(t, "agent-valid-empty", nil)
+
+		rec, _ := postDeliver(t, h, "agent-valid-empty", `{"payload":{}}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 — the contract refuses a MISSING payload, not an empty one — body: %s",
+				rec.Code, rec.Body.String())
+		}
+		entries, _, err := store.Retrieve("agent-valid-empty", time.Minute, 10)
+		if err != nil {
+			t.Fatalf("retrieve: %v", err)
+		}
+		if len(entries) != 1 || string(entries[0].Payload) != `{}` {
+			t.Fatalf("inbox = %d entr(ies) (first payload %q), want exactly one entry carrying {}",
+				len(entries), firstPayload(entries))
+		}
+	})
+
+	t.Run("webhook_async_still_accepted", func(t *testing.T) {
+		var posts atomic.Int32
+		endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			posts.Add(1)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"pong":true}`))
+		}))
+		defer endpoint.Close()
+
+		h, _ := deliverHarness(t, "agent-valid-webhook", &webhook.Config{
+			URL: endpoint.URL, DeliveryMode: "async", TimeoutMs: 5000,
+		})
+
+		rec, wire := postDeliver(t, h, "agent-valid-webhook", valid)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 — body: %s", rec.Code, rec.Body.String())
+		}
+		if wire.Transport != "webhook" || wire.DeliveryMode != "async" {
+			t.Errorf("transport/mode = %q/%q, want webhook/async — body: %s",
+				wire.Transport, wire.DeliveryMode, rec.Body.String())
+		}
+		waitForEndpointPosts(t, &posts, 1, "valid payload async")
+	})
+
+	t.Run("blocking_still_returns_the_reply", func(t *testing.T) {
+		endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"pong":true}`))
+		}))
+		defer endpoint.Close()
+
+		h, _ := deliverHarness(t, "agent-valid-blocking", &webhook.Config{
+			URL: endpoint.URL, DeliveryMode: "blocking", TimeoutMs: 5000,
+		})
+
+		rec, wire := postDeliver(t, h, "agent-valid-blocking", valid)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 — body: %s", rec.Code, rec.Body.String())
+		}
+		if string(wire.Reply) != `{"pong":true}` {
+			t.Errorf("reply = %s, want the endpoint's body {\"pong\":true}", wire.Reply)
+		}
+	})
+}
+
+// firstPayload reports the first entry's payload for failure messages.
+func firstPayload(entries []*InboxEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	return string(entries[0].Payload)
 }

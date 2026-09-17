@@ -485,7 +485,7 @@ paths:
               properties:
                 payload:
                   type: object
-                  description: Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve
+                  description: "Message payload — arbitrary JSON object, stored as raw bytes and returned base64-encoded on retrieve. The key is REQUIRED and must be a JSON object: a body that omits it (`{}`, or a typo'd `payloads`/`paylaod` key), sends an explicit `null`, or sends a non-object value (string, array, number, bool) is rejected with 400 (`{\"error\":\"payload is required\"}` / `{\"error\":\"payload must be a JSON object\"}`) and nothing is dispatched or stored. An empty object `{}` is a valid payload — the contract refuses a MISSING payload, not an empty one."
                 sender:
                   type: string
                   description: Originating agent id (webhook envelope metadata)
@@ -628,7 +628,7 @@ paths:
         "400":
           description: |
             Invalid request — nothing is dispatched to the target's webhook and
-            no inbox entry is created. Three classes:
+            no inbox entry is created. Four classes:
 
             (a) the body is not JSON;
             (b) a store-level input is invalid (`ttl_seconds` negative, or above
@@ -641,6 +641,19 @@ paths:
             BEFORE the transport/store choice, so the same request is refused
             with the same 400 for a webhook target, an agent with no webhook,
             and an unknown agent.
+            (d) the REQUIRED `payload` key is missing or is not a JSON object
+            (DF-CRIER-112): the requestBody schema declares
+            `required: [payload]` with `payload: type: object`, so a body that
+            omits the key (`{}`, or the same client typo under another name —
+            `payloads`, `paylaod`) is rejected with
+            `{"error":"payload is required"}`, and an explicit `null`, a
+            string, an array, a number or a bool is rejected with
+            `{"error":"payload must be a JSON object"}`. Nothing is dispatched
+            or stored — an empty object `{}` IS a valid payload, so the
+            refusal is about the missing/invalid key, never about content.
+            Like (c), this check runs BEFORE the transport/store choice and is
+            therefore identical for a webhook target, an inbox-only agent and
+            an unknown agent.
           content:
             application/json:
               schema:
@@ -649,7 +662,7 @@ paths:
                 properties:
                   error:
                     type: string
-                    description: "Human-readable rejection naming the allowed values, e.g. 'delivery_mode must be blocking|async|batch'"
+                    description: "Human-readable rejection naming the offending field and its allowed values, e.g. 'delivery_mode must be blocking|async|batch', 'payload is required', 'payload must be a JSON object'"
         "403":
           description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict"
           content:

@@ -130,6 +130,51 @@ func validateDeliverParameters(req *deliverRequest) error {
 	return nil
 }
 
+// The published deliver contract's required `payload` field, as the 400 error
+// texts the handler returns (DF-CRIER-112). Kept as constants so the docs
+// check and the tests assert the same strings the wire carries.
+const (
+	// deliverPayloadRequiredError is returned when the key is ABSENT — the
+	// client never sent a payload at all (the typo'd `paylaod`/`payloads`
+	// case), which used to be accepted and stored as an empty message.
+	deliverPayloadRequiredError = "payload is required"
+	// deliverPayloadObjectError is returned for anything present-but-not-an-
+	// object — `null`, a string, an array, a number, a bool.
+	deliverPayloadObjectError = "payload must be a JSON object"
+)
+
+// validateDeliverPayload enforces the published contract on the deliver
+// request's REQUIRED `payload` field, before any transport or store choice.
+//
+// docs/openapi.yaml has declared the deliver requestBody `required: [payload]`
+// with `payload: type: object` since the request schema existed, and
+// cmd/server/openapi.yaml (the generated copy) says the same — but the handler
+// decoded the body into a struct whose `json.RawMessage` payload defaults to
+// absent for BOTH a missing key and an explicit null, so `{"payloads":{"x":1}}`
+// (or `{}`, or `{"payload":5}`) was accepted with 201 and silently stored
+// nothing useful (DF-CRIER-112, the same class of contract weakening
+// DF-CRIER-180 fixed for delivery_mode/timeout_ms).
+//
+// This is an HTTP-BOUNDARY contract: store.Deliver keeps accepting an empty
+// payload, because internal callers (the MCP bridge, federation, the guard
+// notice path) and their tests construct InboxEntry values directly and the
+// store never had — and does not gain — an opinion about wire-required keys.
+func validateDeliverPayload(req *deliverRequest) error {
+	payload := bytes.TrimSpace(req.Payload)
+	if len(payload) == 0 {
+		return errors.New(deliverPayloadRequiredError)
+	}
+	// The decoder has already proven the value is syntactically valid JSON
+	// (the enclosing object could not have decoded otherwise), so the opening
+	// byte decides the JSON TYPE: `{` is an object, and every other value —
+	// null, a string, an array, a number, a bool — is refused by the same
+	// class of rejection.
+	if payload[0] != '{' {
+		return errors.New(deliverPayloadObjectError)
+	}
+	return nil
+}
+
 // patchRequest is the JSON body for PATCH /agents/{id} — partial update of
 // an agent's registration (spec §7, CR-FEAT-007). capabilities replaces the
 // advertised list when present; webhook registers/updates when present and
@@ -510,6 +555,18 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// The required `payload` key is part of the same contract (DF-CRIER-112):
+	// docs/openapi.yaml declares `required: [payload]` + `type: object`, and a
+	// body that omits it (or sends null / a non-object) used to be accepted
+	// with 201 and stored as an empty message — so a client that mistyped the
+	// key got a success it could not act on. Same place as the parameter
+	// validation below, for the same reason: the answer cannot depend on the
+	// target.
+	if err := validateDeliverPayload(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// Request-level delivery parameters must be HONORED or REJECTED, never
