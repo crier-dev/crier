@@ -537,8 +537,8 @@ explicit `base_url` + `api_key_ref` (validation error otherwise).
 | Provider | base_url (default) | api_key_ref (default) | Models |
 |---|---|---|---|
 | `deepseek` | `https://api.deepseek.com/v1` (env override `CR_GUARD_DEEPSEEK_BASE_URL`) | `env:DEEPSEEK_API_KEY` | `deepseek-v4-flash` (DEFAULT guard model; `thinking_enabled` must be false — the client enforces this for the deepseek preset, see below) |
-| `groq` | `https://api.groq.com/openai/v1` | `env:GROQ_API_KEY` | `gpt-oss-120b`, `gpt-oss-20b`, `qwen3.6-27b` |
-| `nvidia` | `https://integrate.api.nvidia.com/v1` | `env:NVIDIA_API_KEY` | `gemma-4-31b`, `deepseek-v4-flash-0731` |
+| `groq` | `https://api.groq.com/openai/v1` | `env:GROQ_API_KEY` | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b` |
+| `nvidia` | `https://integrate.api.nvidia.com/v1` | `env:NVIDIA_API_KEY` | `google/gemma-4-31b-it` |
 
 Free-limit lanes (groq, nvidia NIM) are usable per-policy exactly as any other provider — the
 policy just names them. The `deepseek` preset is the **default for every policy that omits

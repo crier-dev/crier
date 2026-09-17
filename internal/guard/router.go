@@ -21,6 +21,15 @@ type Preset struct {
 // is the default for every policy that omits providers and is the fleet's
 // low-latency, thinking-disabled lane (CR-FEAT-012: free-limit lanes
 // groq/nvidia are usable per-policy exactly as any other provider).
+//
+// Model ids are the providers' own qualified ids, vendor prefix included
+// (DF-CRIER-149). Both free-limit lanes serve chat only under the fully
+// qualified id — measured against the live APIs on 2026-09-17:
+//
+//	groq:   gpt-oss-120b -> 404 model_not_found; openai/gpt-oss-120b -> 200
+//	nvidia: gemma-4-31b  -> 404 page not found;  google/gemma-4-31b-it -> 200
+//
+// The bare ids shipped before this fix made both presets 100% dead.
 var Presets = map[string]Preset{
 	"deepseek": {
 		Name:      "deepseek",
@@ -32,13 +41,22 @@ var Presets = map[string]Preset{
 		Name:      "groq",
 		BaseURL:   "https://api.groq.com/openai/v1",
 		APIKeyRef: "env:GROQ_API_KEY",
-		Models:    []string{"gpt-oss-120b", "gpt-oss-20b", "qwen3.6-27b"},
+		// Models[0] is the preset default (proven live end-to-end).
+		// qwen/qwen3.8-27b is a real live id but the on-demand tier caps
+		// output tokens/min at 1000 while the model's default output
+		// budget is ~1359, so it answers 429 for an uncapped request —
+		// usable only with an explicit lower max_tokens.
+		Models: []string{"openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"},
 	},
 	"nvidia": {
 		Name:      "nvidia",
 		BaseURL:   "https://integrate.api.nvidia.com/v1",
 		APIKeyRef: "env:NVIDIA_API_KEY",
-		Models:    []string{"gemma-4-31b", "deepseek-v4-flash-0731"},
+		// deepseek-ai/deepseek-v4-flash-0731 IS in the live /v1/models
+		// list but did not answer a probe request within 60s from this
+		// host (curl http=000), so its serviceability is unproven and it
+		// is NOT shipped as a fallback slot (DF-CRIER-149).
+		Models: []string{"google/gemma-4-31b-it"},
 	},
 }
 

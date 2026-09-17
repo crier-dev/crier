@@ -307,10 +307,10 @@ func TestRouter_PresetRequestBuilding(t *testing.T) {
 		envVal   string
 	}{
 		{"deepseek", "deepseek", "deepseek-v4-flash", "DEEPSEEK_API_KEY", "ds-key"},
-		{"groq default model", "groq", "gpt-oss-120b", "GROQ_API_KEY", "gq-key"},
-		{"nvidia default model", "nvidia", "gemma-4-31b", "NVIDIA_API_KEY", "nv-key"},
-		{"groq explicit model", "groq", "gpt-oss-20b", "GROQ_API_KEY", "gq-key"},
-		{"nvidia explicit model", "nvidia", "deepseek-v4-flash-0731", "NVIDIA_API_KEY", "nv-key"},
+		{"groq default model", "groq", "openai/gpt-oss-120b", "GROQ_API_KEY", "gq-key"},
+		{"nvidia default model", "nvidia", "google/gemma-4-31b-it", "NVIDIA_API_KEY", "nv-key"},
+		{"groq explicit model", "groq", "openai/gpt-oss-20b", "GROQ_API_KEY", "gq-key"},
+		{"nvidia explicit model", "nvidia", "google/gemma-3-12b-it", "NVIDIA_API_KEY", "nv-key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
