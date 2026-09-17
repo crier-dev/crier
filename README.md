@@ -143,10 +143,11 @@ Or build directly:
 go build -o bin/crier ./cmd/server
 ```
 
-Both stamp the build identity (`version`, `commit`, `build_time`) into the
-binary via `-ldflags`; a build with no ldflags at all still reports the git
-commit, because `internal/buildinfo` falls back to the VCS metadata the Go
-toolchain embeds. Ask a binary or a running server what it is:
+`make build` stamps the build identity (`version`, `commit`, `build_time`) into
+the binary via `-ldflags`. A build with no ldflags at all — the bare `go build`
+above — still reports the git commit, because `internal/buildinfo` falls back to
+the VCS metadata the Go toolchain embeds. Ask a binary or a running server what
+it is:
 
 ```bash
 ./bin/crier -version          # crier v1.2.3-1a2b3c4d   (TAGGED build: tag v1.2.3 at commit 1a2b3c4d)
@@ -164,9 +165,12 @@ identity — all 4 build paths that compile a crier binary (`make build`,
 | Build | `-version` prints | Version segment comes from |
 |-------|-------------------|----------------------------|
 | `make build`, tagged commit | `crier v1.2.3-1a2b3c4d` | the tag, via `git describe --tags` |
-| `make build`, untagged checkout | `crier v740ec81-dirty-740ec816` | `git describe --always --dirty`: the short commit, `-dirty` when the tree had uncommitted changes |
-| bare `go build -o bin/crier ./cmd/server` | `crier dev-740ec816-dirty` | nothing stamped, so the version segment is the `dev` sentinel — rendered bare, never `vdev` — and the commit comes from the Go toolchain's VCS metadata |
-| `docker build .` / `make docker-build` | `crier v740ec81-dirty-740ec816` | the image build derives the same `git describe` values and stamps them; `--build-arg VERSION=… COMMIT=… BUILD_TIME=…` overrides |
+| `make build`, untagged checkout | `crier v<describe>-<commit>`, e.g. `crier v9c74185-dirty-9c741850` | `git describe --always --dirty`: the short commit, `-dirty` when the tree had uncommitted changes |
+| bare `go build -o bin/crier ./cmd/server` | `crier dev-<commit>`, e.g. `crier dev-9c741850-dirty` | nothing stamped, so the version segment is the `dev` sentinel — rendered bare, never `vdev` — and the commit comes from the Go toolchain's VCS metadata |
+| `docker build .` / `make docker-build` | the same string `make build` prints for the same tree | the image build derives the same `git describe` values and stamps them; `--build-arg VERSION=… COMMIT=… BUILD_TIME=…` overrides |
+
+(`<describe>` and `<commit>` are placeholders — the shas shown are one example
+checkout, so yours will differ; the shape is the stable part.)
 
 The MCP server carries no identity of its own either: `crier-mcp --version`
 prints the full identity, and its `initialize` result answers
