@@ -1195,3 +1195,17 @@ tasks:
   status: complete
   created_at: '2026-09-17T18:50:13.043684+00:00'
   completed_at: '2026-09-17T19:04:10.830173+00:00'
+- id: DF-CRIER-171
+  title: 'One build identity across every artifact: MCP initialize advertises 0.1.0
+    while -version prints a real identity, the Docker image reports version dev, and
+    a bare go build prints vdev-<sha>'
+  criteria:
+  - 'A single checkout yields ONE identity: crier-mcp -version and the MCP initialize
+    result serverInfo.version agree and both come from internal/buildinfo; the Docker
+    image reports a non-dev version naming the built commit; a bare go build prints
+    a commit-bearing identity with no ''vdev'' glue; README documents the four real
+    cases and matches live output; build/vet/test -count=1, docs-check, gofmt clean
+    on touched files.'
+  status: complete
+  created_at: '2026-09-17T19:22:18.693579+00:00'
+  completed_at: '2026-09-17T19:42:13.909798+00:00'
