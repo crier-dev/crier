@@ -583,6 +583,7 @@ type Router struct {
     sem        chan struct{}       // concurrency cap
     timeout    time.Duration
     maxConcurrent int
+    logf       func(msg string, args ...any) // audit sink; nil = silent
 }
 
 // Check runs the policy chain: for each ProviderSpec in order, resolve preset
@@ -590,6 +591,18 @@ type Router struct {
 // success wins. All failed → guard error (result assembled by the caller).
 func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string) (provider, model string, content string, err error)
 ```
+
+- **Skip/failover visibility:** the router audits through the guard's own log sink
+  (`RouterOptions.Logf`, wired in `guard.New`), so a degraded lane is not indistinguishable
+  from a healthy one. Every provider that is skipped — unknown preset, custom provider
+  missing `base_url`/`api_key_ref`, missing key (the line names the `env:VAR` the preset
+  wanted, never the value), open circuit, the defensive deepseek-thinking rejection — or
+  that exhausts its attempts logs exactly ONE INFO line, `guard router: provider skipped`
+  / `guard router: provider failed` with `provider`, `model` and `reason`; a failure line
+  additionally carries the provider's own signal (`status`, `error_code`, `error_message`,
+  e.g. `model_not_found`). A chain that lands on a later provider adds ONE summary line
+  `guard router: failover landed on a later provider` (`from` → `to`). Payloads, request
+  bodies and key material are never logged.
 
 - **Failover order:** `p.Providers` order is authoritative; `[deepseek]` is the implicit chain
   when `providers` is empty. Per-provider: one retry on 429/5xx/network (250ms backoff), then

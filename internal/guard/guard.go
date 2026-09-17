@@ -111,6 +111,10 @@ func New(opts Options) (*Guard, error) {
 			DeepSeekBaseURL:  opts.DeepSeekBaseURL,
 			DefaultModel:     opts.DefaultModel,
 			LookupEnv:        opts.LookupEnv,
+			// DF-CRIER-149: the router audits through the same sink the
+			// guard uses, so a skipped provider / failover is visible in
+			// the server log next to the verdict lines.
+			Logf: logf,
 		}),
 		scanner:         scanner,
 		defaultPolicy:   defaultPolicy,

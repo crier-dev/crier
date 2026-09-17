@@ -3,6 +3,7 @@ package guard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -392,5 +393,261 @@ func TestRouter_Unauthorized401FailsOver(t *testing.T) {
 	}
 	if n := h2.count(); n != 1 {
 		t.Errorf("provider 2 request count = %d, want 1", n)
+	}
+}
+
+// ── DF-CRIER-149: provider skip / failover visibility ───────────────────
+
+// logCapture is a Logf sink that renders every line to one string
+// ("msg k=v k=v") so a test can assert on exactly what an operator would see.
+type logCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logCapture) logf(msg string, args ...any) {
+	var b strings.Builder
+	b.WriteString(msg)
+	for i := 0; i+1 < len(args); i += 2 {
+		fmt.Fprintf(&b, " %v=%v", args[i], args[i+1])
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, b.String())
+}
+
+// find returns every captured line containing substr.
+func (l *logCapture) find(substr string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for _, ln := range l.lines {
+		if strings.Contains(ln, substr) {
+			out = append(out, ln)
+		}
+	}
+	return out
+}
+
+func (l *logCapture) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.lines...)
+}
+
+// assertOneLine fails unless exactly one line matches substr, and returns it.
+func (l *logCapture) assertOneLine(t *testing.T, substr string) string {
+	t.Helper()
+	got := l.find(substr)
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 log line containing %q, got %d: %v", substr, len(got), l.all())
+	}
+	return got[0]
+}
+
+// TestRouter_SkipLogNoKey: a provider skipped for a missing key emits ONE
+// line naming the provider, the model and the env VAR the preset wanted, and
+// the chain landing on a later provider emits ONE summary line from → to.
+func TestRouter_SkipLogNoKey(t *testing.T) {
+	h2, s2 := newCountingServer(0, verdictAllowJSON)
+	env := envMap{"KEY2": "k2"} // KEY1 has no key at all
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{Timeout: 5 * time.Second, LookupEnv: env.get, Logf: cap.logf})
+	p := policyWith(
+		ProviderSpec{Provider: "custom", BaseURL: "http://127.0.0.1:1", APIKeyRef: "env:KEY1", Model: "m1"},
+		ProviderSpec{Provider: "custom", BaseURL: s2.URL, APIKeyRef: "env:KEY2", Model: "m2"},
+	)
+	provider, model, _, err := r.Check(context.Background(), p, "sys", "user")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if provider != "custom" || model != "m2" {
+		t.Fatalf("provider/model = %s/%s, want custom/m2 (fallback)", provider, model)
+	}
+	if n := h2.count(); n != 1 {
+		t.Errorf("provider 2 count = %d, want 1", n)
+	}
+
+	line := cap.assertOneLine(t, "provider skipped")
+	for _, want := range []string{"provider=custom", "model=m1", "reason=no api key", "key_ref=env:KEY1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("skip line %q missing %q", line, want)
+		}
+	}
+	// The key VALUE never appears — only the env var NAME.
+	if strings.Contains(line, "KVALUE") {
+		t.Errorf("skip line leaked a key value: %q", line)
+	}
+	if n := len(cap.find("provider failed")); n != 0 {
+		t.Errorf("no provider was called: want 0 'provider failed' lines, got %d: %v", n, cap.all())
+	}
+
+	sum := cap.assertOneLine(t, "failover landed on a later provider")
+	for _, want := range []string{"from=custom", "to=custom", "index=1"} {
+		if !strings.Contains(sum, want) {
+			t.Errorf("summary line %q missing %q", sum, want)
+		}
+	}
+	// Exactly the two lines — one per skip, one summary.
+	if n := len(cap.all()); n != 2 {
+		t.Errorf("want exactly 2 log lines, got %d: %v", n, cap.all())
+	}
+}
+
+// TestRouter_SkipLogCircuitOpen: a provider skipped because its circuit is
+// open emits ONE line with reason=circuit open, and no HTTP call happens.
+func TestRouter_SkipLogCircuitOpen(t *testing.T) {
+	h, srv := newCountingServer(http.StatusInternalServerError, "")
+	env := envMap{"K": "k"}
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{
+		Timeout:          2 * time.Second,
+		CircuitThreshold: 2,
+		CircuitCooldown:  50 * time.Millisecond,
+		LookupEnv:        env.get,
+		Logf:             cap.logf,
+	})
+	p := policyWith(ProviderSpec{Provider: "custom", BaseURL: srv.URL, APIKeyRef: "env:K", Model: "m"})
+
+	for i := 0; i < 2; i++ {
+		if _, _, _, err := r.Check(context.Background(), p, "s", "u"); err == nil {
+			t.Fatalf("iteration %d: want error", i)
+		}
+	}
+	before := h.count()
+	cap.lines = nil // only the circuit-open Check is under test
+	if _, _, _, err := r.Check(context.Background(), p, "s", "u"); err == nil {
+		t.Fatal("want error while circuit open")
+	}
+	if n := h.count(); n != before {
+		t.Fatalf("circuit open must skip HTTP calls: count %d → %d", before, n)
+	}
+	line := cap.assertOneLine(t, "provider skipped")
+	for _, want := range []string{"provider=custom", "model=m", "reason=circuit open"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("skip line %q missing %q", line, want)
+		}
+	}
+	if n := len(cap.all()); n != 1 {
+		t.Errorf("want exactly 1 log line, got %d: %v", n, cap.all())
+	}
+}
+
+// TestRouter_ProviderErrorLogCarriesProviderSignal: a provider that exhausts
+// its attempts logs ONE line carrying the provider's own signal — HTTP status
+// and the provider's error code (the shape Groq uses for a model id that does
+// not exist).
+func TestRouter_ProviderErrorLogCarriesProviderSignal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":{"message":"The model ` + "`nope`" + ` does not exist or you do not have access to it.","code":"model_not_found"}}`))
+	}))
+	defer srv.Close()
+	env := envMap{"K": "k"}
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{Timeout: 5 * time.Second, LookupEnv: env.get, Logf: cap.logf})
+	p := policyWith(ProviderSpec{Provider: "custom", BaseURL: srv.URL, APIKeyRef: "env:K", Model: "nope"})
+
+	if _, _, _, err := r.Check(context.Background(), p, "s", "u"); err == nil {
+		t.Fatal("want error from a 404 provider")
+	}
+	line := cap.assertOneLine(t, "provider failed")
+	for _, want := range []string{
+		"provider=custom", "model=nope", "reason=provider error",
+		"status=404", "error_code=model_not_found",
+		"error_message=The model `nope` does not exist",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("provider-failure line %q missing %q", line, want)
+		}
+	}
+	if n := len(cap.all()); n != 1 {
+		t.Errorf("attempt + retry must log exactly 1 line, got %d: %v", n, cap.all())
+	}
+}
+
+// TestRouter_SkipLogRemainingReasons covers the other skip code paths so the
+// "one line per skipped provider" contract holds for every branch of Check.
+func TestRouter_SkipLogRemainingReasons(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    ProviderSpec
+		env     envMap
+		wantSub string
+	}{
+		{"unknown provider", ProviderSpec{Provider: "wat"}, envMap{}, "reason=unknown provider"},
+		{"custom without base_url/api_key_ref", ProviderSpec{Provider: "custom"}, envMap{}, "reason=custom provider requires base_url and api_key_ref"},
+		{"deepseek preset forbids thinking", ProviderSpec{Provider: "deepseek", ThinkingEnabled: true}, envMap{"DEEPSEEK_API_KEY": "k"}, "reason=deepseek preset forbids thinking"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &logCapture{}
+			r := NewRouter(RouterOptions{Timeout: 2 * time.Second, LookupEnv: tc.env.get, Logf: cap.logf})
+			if _, _, _, err := r.Check(context.Background(), policyWith(tc.spec), "s", "u"); err == nil {
+				t.Fatal("want error (every provider in the chain was skipped)")
+			}
+			line := cap.assertOneLine(t, "provider skipped")
+			if !strings.Contains(line, tc.wantSub) {
+				t.Errorf("line %q missing %q", line, tc.wantSub)
+			}
+			if n := len(cap.all()); n != 1 {
+				t.Errorf("want exactly 1 log line, got %d: %v", n, cap.all())
+			}
+		})
+	}
+}
+
+// TestRouter_LogNeverLeaksKeyMaterial: the router's audit lines carry no part
+// of a configured API key, on any path (a call that sent the key, a skip, a
+// failure).
+func TestRouter_LogNeverLeaksKeyMaterial(t *testing.T) {
+	// A fixture value, NOT a credential: assembled from words so no secret
+	// scanner (and no reader) mistakes it for key material. What the test
+	// pins is that the exact value the router read out of the env — the one
+	// it sent as a Bearer token — never reaches the audit lines.
+	secret := strings.Join([]string{"t304", "fixture", "key", "value"}, "-")
+	_, s500 := newCountingServer(http.StatusInternalServerError, "")
+	env := envMap{"K1": secret} // K2 missing → skip path
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{Timeout: 2 * time.Second, LookupEnv: env.get, Logf: cap.logf})
+	p := policyWith(
+		ProviderSpec{Provider: "custom", BaseURL: s500.URL, APIKeyRef: "env:K1", Model: "m1"},
+		ProviderSpec{Provider: "custom", BaseURL: "http://127.0.0.1:1", APIKeyRef: "env:K2", Model: "m2"},
+	)
+	if _, _, _, err := r.Check(context.Background(), p, "sys", "user"); err == nil {
+		t.Fatal("want error (both providers fail)")
+	}
+	if len(cap.all()) == 0 {
+		t.Fatal("expected audit lines to assert against")
+	}
+	// Both providers logged (one failure + one skip) — the assertion below is
+	// only meaningful if the key was actually used on the wire.
+	for _, probe := range []string{secret, secret[:12], secret[6:20], "fixture-key"} {
+		for _, ln := range cap.all() {
+			if strings.Contains(ln, probe) {
+				t.Fatalf("log line leaked key material %q: %q", probe, ln)
+			}
+		}
+	}
+}
+
+// TestGuard_RouterLogfWired: guard.New must hand the guard's own logf to the
+// router — without it the router's audit lines are silently discarded and a
+// degraded lane stays invisible.
+func TestGuard_RouterLogfWired(t *testing.T) {
+	cap := &logCapture{}
+	g, err := New(Options{Timeout: 2 * time.Second, LookupEnv: envMap{}.get, Logf: cap.logf})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// groq preset, no GROQ_API_KEY → the router skips it and must audit.
+	if _, _, _, err := g.router.Check(context.Background(), policyWith(ProviderSpec{Provider: "groq"}), "s", "u"); err == nil {
+		t.Fatal("want error (no key)")
+	}
+	line := cap.assertOneLine(t, "provider skipped")
+	for _, want := range []string{"provider=groq", "model=openai/gpt-oss-120b", "reason=no api key", "key_ref=env:GROQ_API_KEY"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("guard-wired line %q missing %q", line, want)
+		}
 	}
 }
