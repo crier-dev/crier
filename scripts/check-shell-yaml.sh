@@ -35,6 +35,27 @@
 #             available the checker exits 2 — a missing tool is never a silent
 #             skip.
 #
+# EXPLICIT FILE LISTS FAIL CLOSED (DF-CRIER-208)
+# ---------------------------------------------
+# The default (no FILE arguments) mode is scope-tolerant: a tracked file that is
+# neither shell nor workflow is counted as out of scope and the run can still
+# pass on the files that ARE in scope — a tree with zero shell/workflow files
+# behaves exactly as it always did.
+#
+# An explicit file list is different: the caller ASSERTED that every named path is
+# something to check. Two shapes make that assertion false, and both are now
+# rejected (exit 1, the paths named) instead of ending in a green:
+#   (1) a named *.yml/*.yaml that is NOT a workflow — a workflow is recognised
+#       ONLY under .github/workflows/, so a .yml/.yaml anywhere else is a mis-named
+#       file or a typo in the caller's list and nothing in this run reads it;
+#   (2) a list in which NOTHING classified as shell or workflow — the run verified
+#       nothing, so `PASS — 0 file(s) checked` is not printed for it at all.
+# A MIXED list that carries at least one classified file keeps the historic
+# note-and-continue behaviour for its unclassifiable NON-YAML entries. That is the
+# property the tracked pre-commit wrapper (scripts/hooks/pre-commit) relies on: it
+# passes exactly the files its own copy of these two predicates already
+# classified, so neither rule above is reachable from the hook path.
+#
 # YAML MODES (--yaml-mode, or CHECK_SHELL_YAML_MODE)
 #   auto        (default) actionlint if present, else PyYAML, else exit 2
 #   actionlint  require actionlint (exit 2 when absent) — the strict linter
@@ -49,7 +70,10 @@
 #
 # EXIT CODES
 #   0  every file in scope passed
-#   1  at least one file was rejected (also: a NAMED file is missing/unreadable)
+#   1  at least one file was rejected — which also covers a NAMED file that is
+#      missing/unreadable, and an explicit file list whose assertion cannot hold
+#      (a named *.yml/*.yaml outside .github/workflows/, or a list in which
+#      nothing classified as shell or workflow; DF-CRIER-208)
 #   2  misuse (bad option / bad --yaml-mode) or a missing dependency
 #
 # A tracked file that is ABSENT from the worktree is named in a note and left out
@@ -73,6 +97,14 @@
 #      real counts (1 shell file, 1 workflow file) — the anti-vacuous check
 #   5. a broken extensionless file with a shell shebang is REJECTED (proves the
 #      shebang clause, not just the *.sh suffix)
+#   6. an explicit list in which NOTHING classifies is REJECTED, the paths are
+#      named, and no green is printed at all (DF-CRIER-208)
+#   7. a .yml/.yaml OUTSIDE .github/workflows/ is REJECTED and named — valid and
+#      malformed content alike, because the rule that rejects it is the PATH
+#      (DF-CRIER-208)
+#   8. a MIXED explicit list (one clean .sh + one unclassifiable non-YAML file) is
+#      still ACCEPTED — the property the tracked pre-commit wrapper depends on,
+#      since it passes only files it already classified (DF-CRIER-208)
 #   `make shell-yaml-selftest` exits 0 only when all of them behaved.
 #
 # DEPENDENCIES: bash, git (only for the default file list), grep/sed/mktemp;
@@ -249,7 +281,12 @@ With no FILE arguments every tracked file is considered (git ls-files); only the
 shell scripts and .github/workflows/*.yml|*.yaml inside that set are checked,
 and the real counts are printed:
 
-  scope: 9 shell file(s), 3 workflow file(s) verified
+  scope: 11 shell file(s), 3 workflow file(s) verified
+
+An explicit FILE list fails closed (DF-CRIER-208): a named *.yml/*.yaml that is
+not under .github/workflows/, or a list in which nothing classifies as shell or
+workflow, is rejected (exit 1) with the paths named — a list that verified nothing
+never prints a PASS.
 
 Exit codes: 0 all passed, 1 at least one rejected, 2 misuse/missing dependency.
 EOF
@@ -343,6 +380,50 @@ run_check() { # <files...>
     fi
   fi
 
+  # ── fail-closed rules for an EXPLICIT file list (DF-CRIER-208) ───────────────
+  # The default mode names nothing, so a tracked file that is neither shell nor
+  # workflow is simply out of scope (unchanged). An explicit list is a caller
+  # ASSERTION that every named path is something to check, and two shapes make
+  # that assertion false — both are refused here instead of ending in a green,
+  # because "PASS — 0 file(s) checked" is precisely the blank green this script
+  # exists to remove (DF-CRIER-206):
+  #   (1) a named *.yml/*.yaml that is NOT a workflow (workflows are recognised
+  #       only under .github/workflows/) — it is named, with the rule;
+  #   (2) nothing in the list classified at all — the paths are named.
+  # A MIXED list carrying at least one classified file keeps the historic
+  # note-and-continue treatment for its unclassifiable NON-YAML entries: the
+  # tracked pre-commit wrapper passes exactly the files it already classified
+  # with these same two predicates, so neither rule fires from the hook path.
+  local policy_rejected=0
+  if [ "$from_default" -eq 0 ]; then
+    local -a bad_yaml=() bad_other=() implicated=()
+    local n_classified=$((${#shell_files[@]} + ${#yaml_files[@]}))
+    for f in "${other_files[@]}"; do
+      case "$f" in
+        *.yml | *.yaml) bad_yaml+=("$f") ;;
+        *) bad_other+=("$f") ;;
+      esac
+    done
+    if [ "${#bad_yaml[@]}" -gt 0 ]; then
+      implicated+=("${bad_yaml[@]}")
+      _err "explicit file list: ${#bad_yaml[@]} named *.yml/*.yaml file(s) are NOT workflows — a workflow is only recognised under .github/workflows/, so nothing in this run checks them:"
+      for f in "${bad_yaml[@]}"; do
+        _err "  not a workflow: $f"
+      done
+      _err "  fix: move it under .github/workflows/ if it is a workflow, or drop it from the list."
+    fi
+    if [ "$n_classified" -eq 0 ] && [ "${#other_files[@]}" -gt 0 ]; then
+      implicated+=("${bad_other[@]}")
+      if [ "${#bad_other[@]}" -gt 0 ]; then
+        _err "explicit file list: none of the ${#files[@]} named file(s) is a shell script or a .github/workflows/*.yml|*.yaml workflow — refusing to report an empty green over a list it verified nothing in:"
+        for f in "${bad_other[@]}"; do
+          _err "  not shell, not a workflow: $f"
+        done
+      fi
+    fi
+    policy_rejected="${#implicated[@]}"
+  fi
+
   # Resolve + announce the YAML mode BEFORE checking, so the evidence is
   # attributable even if a later check aborts.
   if [ "${#yaml_files[@]}" -gt 0 ]; then
@@ -381,11 +462,15 @@ run_check() { # <files...>
   done
 
   # Anything handed to the checker that is neither: say so out loud (a silent
-  # skip is the defect class this script exists to close).
+  # skip is the defect class this script exists to close). In explicit-list mode
+  # this note-and-continue is kept ONLY for a list that still carries at least one
+  # classified file — when the list asserted something uncheckable the failure
+  # above already named those paths (DF-CRIER-208), so a second "not checked" note
+  # would contradict it.
   if [ "${#other_files[@]}" -gt 0 ]; then
     if [ "$from_default" -eq 1 ]; then
       _info "note: $((n_tracked - checked - ${#missing_tracked_list[@]})) tracked file(s) are neither shell scripts nor workflow YAML and are out of scope"
-    else
+    elif [ "$policy_rejected" -eq 0 ]; then
       local shown=0
       printf 'note: %d supplied file(s) are neither shell scripts nor workflow YAML (not checked):' "${#other_files[@]}" >&2
       for f in "${other_files[@]}"; do
@@ -401,14 +486,14 @@ run_check() { # <files...>
     fi
   fi
 
-  if [ "$fails" -eq 0 ] && [ "$missing" -eq 0 ]; then
+  if [ "$fails" -eq 0 ] && [ "$missing" -eq 0 ] && [ "$policy_rejected" -eq 0 ]; then
     _info "scope: ${#shell_files[@]} shell file(s), ${#yaml_files[@]} workflow file(s) verified"
     _info "PASS — $checked file(s) checked, 0 rejected"
     return 0
   fi
 
-  _info "scope: ${#shell_files[@]} shell file(s), ${#yaml_files[@]} workflow file(s) in scope — $((fails + missing)) rejected"
-  _err "FAIL — $checked file(s) checked, $((fails + missing)) rejected"
+  _info "scope: ${#shell_files[@]} shell file(s), ${#yaml_files[@]} workflow file(s) in scope — $((fails + missing + policy_rejected)) rejected"
+  _err "FAIL — $checked file(s) checked, $((fails + missing + policy_rejected)) rejected"
   return 1
 }
 
@@ -453,6 +538,22 @@ YAML
   printf '#!/usr/bin/env bash\nif [ 1 -eq 1 ]; then\necho no fi\n' >"$tmp/broken-tool"
   chmod +x "$tmp/broken-tool"
   printf 'name: broken\non: [push\n' >"$tmp/.github/workflows/broken.yml"
+
+  # fixtures for the explicit-file-list rules (DF-CRIER-208): a plain file that
+  # classifies as neither, and workflow-SHAPED YAML outside .github/workflows/ —
+  # once malformed and once perfectly valid, because the rule that rejects them
+  # both is the PATH, not the syntax.
+  printf 'a plain text file: neither shell nor workflow\n' >"$tmp/notes.md"
+  printf 'name: broken\non: [push\n' >"$tmp/loose.yml"
+  cat >"$tmp/loose.yaml" <<'YAML'
+name: loose
+on: push
+jobs:
+  ok:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
 
   local out="" rc=0
 
@@ -530,6 +631,66 @@ YAML
     fails=$((fails + 1))
   else
     printf 'PASS: a broken extensionless script with a shell shebang is detected and rejected\n'
+  fi
+
+  # 6. an explicit list in which NOTHING classifies is REJECTED, names the path,
+  #    and prints no green at all (DF-CRIER-208)
+  checks=$((checks + 1))
+  out="$(bash "$SELF" "$tmp/notes.md" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s selftest: FAIL: an explicit list in which nothing classifies was ACCEPTED (rc=0)\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q "not shell, not a workflow: $tmp/notes.md"; then
+    printf '%s selftest: FAIL: the unclassifiable list was rejected but the path was not named\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif printf '%s' "$out" | grep -q 'PASS'; then
+    printf '%s selftest: FAIL: the unclassifiable list was rejected but a PASS line was printed anyway\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: an explicit list in which nothing classifies is rejected (rc=%d) with the path named and no green printed\n' "$rc"
+  fi
+
+  # 7. a .yml/.yaml outside .github/workflows/ is REJECTED and named — the rule is
+  #    the PATH, so this must hold for valid content as well as malformed
+  checks=$((checks + 1))
+  out="$(bash "$SELF" "$tmp/loose.yml" 2>&1)"
+  rc=$?
+  out2="$(bash "$SELF" "$tmp/loose.yaml" 2>&1)"
+  rc2=$?
+  if [ "$rc" -eq 0 ] || [ "$rc2" -eq 0 ]; then
+    printf '%s selftest: FAIL: YAML outside .github/workflows/ was ACCEPTED (rc=%d for .yml, rc=%d for .yaml)\n  output: %s\n  output: %s\n' \
+      "$PROG" "$rc" "$rc2" "$out" "$out2" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q "not a workflow: $tmp/loose.yml"; then
+    printf '%s selftest: FAIL: the .yml outside .github/workflows/ was rejected but not named\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out2" | grep -q "not a workflow: $tmp/loose.yaml"; then
+    printf '%s selftest: FAIL: the (valid) .yaml outside .github/workflows/ was rejected but not named\n  output: %s\n' "$PROG" "$out2" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q 'only recognised under .github/workflows/'; then
+    printf '%s selftest: FAIL: the rejection did not state the classification rule\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: a .yml and a .yaml outside .github/workflows/ are both rejected (rc=%d, rc=%d) and named, with the rule stated\n' "$rc" "$rc2"
+  fi
+
+  # 8. the mixed shape the pre-commit wrapper produces is still ACCEPTED — a
+  #    classified .sh plus an unclassifiable non-YAML entry (DF-CRIER-208)
+  checks=$((checks + 1))
+  out="$(bash "$SELF" "$tmp/clean.sh" "$tmp/notes.md" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s selftest: FAIL: a mixed explicit list (1 shell + 1 plain file) was REJECTED (rc=%d)\n  output: %s\n' "$PROG" "$rc" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q "PASS  shell     $tmp/clean.sh"; then
+    printf '%s selftest: FAIL: the mixed list passed without reporting the shell file it checked\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  elif ! printf '%s' "$out" | grep -q 'scope: 1 shell file(s), 0 workflow file(s) verified'; then
+    printf '%s selftest: FAIL: the mixed list passed without a real scope line\n  output: %s\n' "$PROG" "$out" >&2
+    fails=$((fails + 1))
+  else
+    printf 'PASS: a mixed list (1 clean .sh + 1 unclassifiable plain file) is still accepted (rc=%d)\n' "$rc"
   fi
 
   if [ "$fails" -ne 0 ]; then

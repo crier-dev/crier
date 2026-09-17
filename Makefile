@@ -115,6 +115,12 @@ port-guard-selftest:
 # tool version are printed, never a silent skip). shell-yaml-selftest proves the
 # checker still rejects a broken script and a malformed workflow and accepts a
 # clean pair, on fixtures it creates under ${TMPDIR:-/tmp}.
+# DF-CRIER-208: given an EXPLICIT file list the checker fails closed — a named
+# *.yml/*.yaml outside .github/workflows/, or a list in which nothing classifies
+# as shell or workflow, exits 1 with the paths named instead of reporting a green
+# over files it never read. The default (no-argument) whole-repo mode is unchanged,
+# and the pre-commit wrapper's list is always already-classified, so neither rule
+# is reachable from the gate.
 shell-yaml-check:
 	bash scripts/check-shell-yaml.sh
 
