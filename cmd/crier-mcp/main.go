@@ -147,20 +147,52 @@ func run(args []string) int {
 	ensureBridgeIdentity(store, identity, slog.Default())
 
 	server := mcp.NewWithOptions(store, mcp.Options{
-		AgentID: os.Getenv("CRIER_AGENT_ID"),
-		HTTPURL: os.Getenv("CRIER_HTTP_URL"),
-		MeshURL: os.Getenv("CRIER_MESH_URL"),
+		AgentID: os.Getenv(mcp.EnvAgentID),
+		HTTPURL: os.Getenv(mcp.EnvHTTPURL),
+		MeshURL: os.Getenv(mcp.EnvMeshURL),
 		// DF-CRIER-197: the bridge is in the same process and reads the same
 		// CR_REQUIRE_AGENT_SIG variable cmd/server does, so it can know the
 		// registration mode and mirror the HTTP handler's conditional rule —
 		// with enforcement off, register_agent may omit public_key.
 		AllowKeylessAgents: !cfg.RequireAgentSig,
 	})
+
+	// DF-CRIER-153: in the default in-process mode four of the advertised
+	// tools cannot work at all (get_messages / ask_agent need a bridge
+	// identity, mesh_peers a server URL, mesh_request a mesh URL), and a
+	// client only discovers that at call time. tools/list is the only
+	// metadata it sees, so those tools name their variables in their own
+	// descriptions (internal/mcp) — and the operator gets ONE line here,
+	// before the first client call. slog writes to stderr by default, so the
+	// JSON-RPC wire on stdout stays clean.
+	reportMsg, reportAttrs := mcp.ToolSurfaceReport(
+		modeName(os.Getenv(mcp.EnvHTTPURL) != "", cfg.Database.URL != ""),
+		server.ToolCount(),
+		os.Getenv(mcp.EnvAgentID), os.Getenv(mcp.EnvHTTPURL), os.Getenv(mcp.EnvMeshURL),
+	)
+	slog.Info(reportMsg, reportAttrs...)
+
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// modeName labels the store mode the bridge started in, for the startup tool
+// report (DF-CRIER-153): "remote/bridge" when CRIER_HTTP_URL selected a
+// RemoteStore, "postgres" when CR_DATABASE_URL did, "in-process" otherwise. It
+// mirrors initStore's selection order, which is what decides whether a tool
+// that needs a bridge identity or a server URL can work.
+func modeName(remote, postgres bool) string {
+	switch {
+	case remote:
+		return "remote/bridge"
+	case postgres:
+		return "postgres"
+	default:
+		return "in-process"
+	}
 }
 
 // initStore creates a Store backend: a RemoteStore against a running Crier

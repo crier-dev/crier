@@ -88,6 +88,11 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 	return s
 }
 
+// ToolCount reports how many tools tools/list advertises, so a caller (the
+// startup report) can state the size of the surface without duplicating the
+// definition list.
+func (s *MCPServer) ToolCount() int { return len(s.toolDefinitions()) }
+
 // registerTools populates the tool registry (spec §4).
 func (s *MCPServer) registerTools() {
 	s.tools["register_agent"] = s.handleRegisterAgent
@@ -232,6 +237,11 @@ func (s *MCPServer) handleToolsCall(ctx context.Context, req *jsonRPCRequest) *j
 }
 
 // toolDefinitions returns the MCP tool list (spec §4).
+//
+// A tool that cannot work in the mode the server started in must say so in its
+// Description: tools/list is the only metadata an MCP client sees before it
+// calls anything (DF-CRIER-153). The prerequisites themselves are owned by
+// toolPrerequisites in prereqs.go, which the startup report reads too.
 func (s *MCPServer) toolDefinitions() []toolDefinition {
 	return []toolDefinition{
 		{
@@ -251,8 +261,8 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "unregister_agent",
-			Description: "Remove an agent and clean up its inbox.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Agent identifier to remove"}},"required":["id"]}`),
+			Description: "Remove an agent and clean up its inbox. Scope: with a remote bridge (CRIER_HTTP_URL set) against a server running signature enforcement on (CR_REQUIRE_AGENT_SIG=true, the default) the caller may only act on its own identity (CRIER_AGENT_ID) — the server rejects any other agent with 403.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Agent identifier to remove (own identity only on a remote signed bridge — the server answers 403 for any other agent)"}},"required":["id"]}`),
 		},
 		{
 			Name:        "deliver_message",
@@ -261,18 +271,18 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "retrieve_inbox",
-			Description: "Retrieve leased messages from an agent's inbox.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier"},"max_messages":{"type":"integer","description":"Maximum messages to retrieve (1-100)","default":10,"minimum":1,"maximum":100},"lease_seconds":{"type":"integer","description":"Lease duration in seconds","default":30,"minimum":1,"maximum":3600}},"required":["agent_id"]}`),
+			Description: "Retrieve leased messages from an agent's inbox. Scope: with a remote bridge (CRIER_HTTP_URL set) against a server running signature enforcement on (CR_REQUIRE_AGENT_SIG=true, the default) agent_id may only be the bridge's own identity (CRIER_AGENT_ID) — the server rejects any other agent with 403 (agent may only access its own resources).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier (own identity only on a remote signed bridge — the server answers 403 for any other agent)"},"max_messages":{"type":"integer","description":"Maximum messages to retrieve (1-100)","default":10,"minimum":1,"maximum":100},"lease_seconds":{"type":"integer","description":"Lease duration in seconds","default":30,"minimum":1,"maximum":3600}},"required":["agent_id"]}`),
 		},
 		{
 			Name:        "ack_messages",
-			Description: "Acknowledge previously retrieved messages — permanently removes them from the inbox.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier"},"lease_id":{"type":"string","description":"Lease ID from retrieve_inbox response"},"message_ids":{"type":"array","items":{"type":"string"},"description":"Message IDs to acknowledge","minItems":1}},"required":["agent_id","lease_id","message_ids"]}`),
+			Description: "Acknowledge previously retrieved messages — permanently removes them from the inbox. Scope: with a remote bridge (CRIER_HTTP_URL set) against a server running signature enforcement on (CR_REQUIRE_AGENT_SIG=true, the default) agent_id may only be the bridge's own identity (CRIER_AGENT_ID) — the server rejects any other agent with 403.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier (own identity only on a remote signed bridge — the server answers 403 for any other agent)"},"lease_id":{"type":"string","description":"Lease ID from retrieve_inbox response"},"message_ids":{"type":"array","items":{"type":"string"},"description":"Message IDs to acknowledge","minItems":1}},"required":["agent_id","lease_id","message_ids"]}`),
 		},
 		{
 			Name:        "inbox_stats",
-			Description: "Get inbox statistics for an agent — queue depth, leased count, oldest message age.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier"}},"required":["agent_id"]}`),
+			Description: "Get inbox statistics for an agent — queue depth, leased count, oldest message age. Scope: with a remote bridge (CRIER_HTTP_URL set) against a server running signature enforcement on (CR_REQUIRE_AGENT_SIG=true, the default) agent_id may only be the bridge's own identity (CRIER_AGENT_ID) — the server rejects any other agent with 403.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent identifier (own identity only on a remote signed bridge — the server answers 403 for any other agent)"}},"required":["agent_id"]}`),
 		},
 		{
 			Name:        "send_message",
@@ -281,22 +291,22 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "get_messages",
-			Description: "Get the messages in this agent's own inbox (the bridge owns the lease and acks them for you).",
+			Description: "Get the messages in this agent's own inbox (the bridge owns the lease and acks them for you). Requires a bridge identity: set CRIER_AGENT_ID, otherwise the call fails before it reaches the inbox.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"max":{"type":"integer","description":"Maximum messages to return","default":10,"minimum":1,"maximum":100}},"required":[]}`),
 		},
 		{
 			Name:        "ask_agent",
-			Description: "Blocking request/reply to another agent over the durable inbox: sends the payload (merged with a correlation id) and waits for a reply that answers it. Use this to ask an agent a question and get its answer in one call.",
+			Description: "Blocking request/reply to another agent over the durable inbox: sends the payload (merged with a correlation id) and waits for a reply that answers it. Use this to ask an agent a question and get its answer in one call. Requires a bridge identity: set CRIER_AGENT_ID — the reply is read from that agent's own inbox.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Target agent identifier"},"payload":{"type":"object","description":"The question payload"},"timeout_s":{"type":"integer","description":"How long to wait for the reply (default 30, max 300)"}},"required":["agent_id","payload"]}`),
 		},
 		{
 			Name:        "mesh_peers",
-			Description: "List the agents currently connected to the live mesh.",
+			Description: "List the agents currently connected to the live mesh. Requires CRIER_HTTP_URL (the Crier server base URL), otherwise the call fails.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
 		},
 		{
 			Name:        "mesh_request",
-			Description: "Live REQUEST/RESPONSE round-trip to another agent over the mesh (requires the bridge's own WebSocket connection). Use for liveness/RPC; LLM content should ride the durable inbox (ask_agent).",
+			Description: "Live REQUEST/RESPONSE round-trip to another agent over the mesh (requires the bridge's own WebSocket connection). Use for liveness/RPC; LLM content should ride the durable inbox (ask_agent). Requires CRIER_MESH_URL and CRIER_AGENT_ID — the bridge opens its own mesh connection only when both are set, so without them the call fails.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","description":"Target agent identifier"},"method":{"type":"string","description":"Application-level method, e.g. GET or PING"},"path":{"type":"string","description":"Application-level path, e.g. /ping"},"body":{"description":"Opaque JSON body"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 15000)"}},"required":["target","method","path"]}`),
 		},
 	}

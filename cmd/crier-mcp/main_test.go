@@ -666,3 +666,25 @@ func TestHelpDocumentsRemoteMode(t *testing.T) {
 		}
 	}
 }
+
+// TestModeName pins the store-mode label the startup tool report carries
+// (DF-CRIER-153): it mirrors initStore's selection order, which is what decides
+// whether a bridge identity or a server URL exists at all.
+func TestModeName(t *testing.T) {
+	cases := []struct {
+		remote, postgres bool
+		want             string
+	}{
+		{remote: false, postgres: false, want: "in-process"},
+		{remote: false, postgres: true, want: "postgres"},
+		{remote: true, postgres: false, want: "remote/bridge"},
+		// CRIER_HTTP_URL wins in initStore, so a deployment with both set is
+		// reported as the remote bridge it actually is.
+		{remote: true, postgres: true, want: "remote/bridge"},
+	}
+	for _, tc := range cases {
+		if got := modeName(tc.remote, tc.postgres); got != tc.want {
+			t.Errorf("modeName(%v, %v) = %q, want %q", tc.remote, tc.postgres, got, tc.want)
+		}
+	}
+}

@@ -436,6 +436,36 @@ object only: the value of an opaque `payload` (`deliver_message`,
 `send_message`, `ask_agent`) or `body` (`mesh_request`) is passed through
 untouched, so what lives inside it is the caller's business (DF-CRIER-190).
 
+##### What each tool needs
+
+`tools/list` is the only metadata an MCP client sees before it calls a tool, so
+every tool whose handler needs environment says so in its own description, and
+`crier-mcp` logs **one line at startup** naming the tools that cannot work in the
+mode it started in (`mode`, `tools`, `available_tools`, `unavailable_tools`,
+`missing_env`). "Needs" is the environment the handler checks before it does
+anything; "bridge scope" is the server-side rule for a remote bridge — the
+bridge presents its own identity (`CRIER_AGENT_ID`) on every agent-scoped
+request, and a server running with signature enforcement on
+(`CR_REQUIRE_AGENT_SIG=true`, the default) answers 403
+`agent "<bridge>" may only access its own resources` for any other agent.
+
+| Tool | Needs | Notes |
+|------|-------|-------|
+| `register_agent`, `list_agents`, `get_agent`, `deliver_message`, `send_message` | _nothing_ | work in every mode; delivery and reads of the registry are not restricted to the bridge's own agent |
+| `retrieve_inbox`, `ack_messages`, `inbox_stats` | _nothing_ | bridge scope: on a remote bridge `agent_id` must be the bridge's own identity (403 otherwise) |
+| `unregister_agent` | _nothing_ | bridge scope: same rule — `id` must be the bridge's own identity on a remote bridge |
+| `get_messages` | `CRIER_AGENT_ID` | reads the bridge's own inbox and acks what it returns; fails immediately without it |
+| `ask_agent` | `CRIER_AGENT_ID` | sends to another agent, but the reply is read from the bridge's own inbox |
+| `mesh_peers` | `CRIER_HTTP_URL` | queries `GET /mesh/peers` on that server |
+| `mesh_request` | `CRIER_MESH_URL`, `CRIER_AGENT_ID` | the bridge opens its own WebSocket connection only when both are set |
+
+With no environment at all — the default in-process stdio mode — four tools
+cannot work, and startup says exactly which:
+
+```text
+INFO MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them mode=in-process tools=13 available_tools=9 unavailable_tools="[get_messages ask_agent mesh_peers mesh_request]" missing_env="[CRIER_AGENT_ID CRIER_HTTP_URL CRIER_MESH_URL]"
+```
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections.
