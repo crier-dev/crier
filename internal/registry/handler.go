@@ -711,9 +711,12 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	// Failure contract (spec §8): a DEFINITIVE all-links-404 stays
 	// agent-not-found, but a TRANSIENT link outage (unreachable / retryable
 	// status) is never reported as 404 — the delivery is held at the source
-	// and retried inside CR_FED_MAX_HOLD_S (202 Accepted), and only when no
-	// hold queue is available (or it refuses the delivery) is an explicit
-	// bounded 502 FEDERATION_FAILED returned.
+	// and retried inside CR_FED_MAX_HOLD_S (202 Accepted). The bounded 502
+	// FEDERATION_FAILED below (this switch's default arm) is returned when no
+	// hold queue is available, when the queue refuses the delivery, and when
+	// the request names no sender: an unreportable delivery is never held
+	// (DF-CRIER-129) — the terminal FEDERATION_FAILED is addressed to the
+	// sender, so a 202 "held" could never be followed by any outcome.
 	if h.fed != nil && r.Header.Get(federation.HopHeader) == "" && errors.Is(getErr, ErrAgentNotFound) {
 		reqBytes, merr := json.Marshal(req)
 		if merr != nil {
@@ -750,8 +753,11 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			// caller sees the same 404 a single relay would answer.
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
 		default:
-			// Transient failure with no hold queue to hold it: an explicit
-			// bounded failure with the correlation context, never a 404.
+			// Transient failure that cannot be held: no queue to hold it,
+			// a queue that refused it, or a request that names no sender
+			// (nothing could receive its terminal FEDERATION_FAILED —
+			// DF-CRIER-129). An explicit bounded failure with the
+			// correlation context, never a 404.
 			writeJSON(w, http.StatusBadGateway, federationFailure(req, entry.ID, id, ferr))
 		}
 		return

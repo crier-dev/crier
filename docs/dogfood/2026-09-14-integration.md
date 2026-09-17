@@ -65,6 +65,15 @@ original deliver. Filed as **DF-CRIER-129** (doc/contract gap) and
 **DF-CRIER-130** (no handler-level E2E test covers body→HoldMeta→report,
 which is why the trap survived).
 
+> **Fixed (DF-CRIER-129, 2026-09-17).** The paragraph above is the measurement
+> as taken on 2026-09-14 and is kept as history. The contract it found is gone:
+> a deliver request that names no `sender` is no longer held at the source — the
+> source relay answers `502 {"error":"FEDERATION_FAILED","message_id":…,
+> "target":…,"attempts":…,"detail":"…no sender…"}` synchronously and enqueues
+> nothing, so the outcome can no longer be lost (pinned by
+> `TestHandleDeliverFederationSenderlessTransientIsNeverHeld` and
+> `TestForwardOrHoldSenderlessTransientIsNotHeld`).
+
 ## Right way (operator recipe that worked)
 
 ```bash

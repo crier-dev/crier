@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -425,4 +426,97 @@ func TestFederationFailureSinkWritesDurableNotification(t *testing.T) {
 	if err := sink(federation.FailureReport{Code: federation.CodeFederationFailed, MessageID: "m", Target: "t", Sender: "ghost-sender"}); err == nil {
 		t.Error("an unregistered sender must return an error")
 	}
+}
+
+// TestHandleDeliverFederationSenderlessTransientIsNeverHeld is the
+// DF-CRIER-129 contract at the HTTP boundary: the terminal FEDERATION_FAILED
+// report is addressed to the deliver body's `sender`, so a delivery that names
+// no sender could never deliver its own outcome. An unreportable delivery is
+// never held — the transient link failure is answered synchronously with the
+// same bounded 502 the no-hold-queue path already returns. The paired subtest
+// proves the hold is unchanged when a sender IS named.
+func TestHandleDeliverFederationSenderlessTransientIsNeverHeld(t *testing.T) {
+	relay := newHoldRelay(t, http.StatusServiceUnavailable, `{"error":"relay overloaded"}`)
+	srv := httptest.NewServer(relay.handler())
+	defer srv.Close()
+
+	// The link is transiently down (retryable 503) for both subtests, so the
+	// ONLY difference is whether the request names a sender.
+	t.Run("no sender on the request: bounded 502, nothing held", func(t *testing.T) {
+		store := setupTestStore(t)
+		registerTestAgent(t, store)
+		router, _, mgr, queue := holdRouter(t, store, []string{srv.URL}, time.Minute)
+		defer mgr.Stop()
+
+		reqBody := []byte(`{"payload":{"text":"ping"},"request_id":"req-129","session_id":"sess-129"}`)
+		rec := deliverTo(t, router, "agent-remote", reqBody, nil)
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d with queue Len = %d (body: %s), want 502 FEDERATION_FAILED answered synchronously: "+
+				"the request names no sender, so a terminal FEDERATION_FAILED could never be delivered — an unreportable delivery must not be held",
+				rec.Code, queue.Len(), rec.Body.String())
+		}
+		var failure federationFailureResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+			t.Fatalf("failure response is not JSON: %v (%s)", err, rec.Body.String())
+		}
+		if failure.Error != federation.CodeFederationFailed {
+			t.Errorf("error = %q, want %q", failure.Error, federation.CodeFederationFailed)
+		}
+		if failure.MessageID == "" {
+			t.Error("failure body must carry the assigned message id")
+		}
+		if failure.Target != "agent-remote" {
+			t.Errorf("target = %q, want the addressed agent agent-remote", failure.Target)
+		}
+		if failure.Attempts < 1 {
+			t.Errorf("attempts = %d, want at least 1 (the forward pass that found the link down)", failure.Attempts)
+		}
+		if failure.Detail == "" {
+			t.Fatal("failure body must explain why the request was not held")
+		}
+		if !strings.Contains(failure.Detail, "sender") {
+			t.Errorf("detail = %q, want it to name the missing sender as the reason", failure.Detail)
+		}
+		// Absent means absent: nothing may be attributed on the sender's behalf.
+		if failure.Sender != "" {
+			t.Errorf("sender = %q, want empty (no sender attribution is invented)", failure.Sender)
+		}
+		// Nothing was enqueued, and no hold is pending.
+		if queue.Len() != 0 {
+			t.Errorf("hold queue Len = %d, want 0 — the delivery must not be held", queue.Len())
+		}
+		if items := queue.List(); len(items) != 0 {
+			t.Errorf("hold queue List = %+v, want empty", items)
+		}
+		// The synchronous failure is still backed by a real attempt.
+		if calls, _, _, _ := relay.snapshot(); calls < 1 {
+			t.Errorf("linked-relay calls = %d, want at least 1 (the forward pass that discovered the outage)", calls)
+		}
+	})
+
+	t.Run("sender named: still held 202 and enqueued", func(t *testing.T) {
+		store := setupTestStore(t)
+		registerTestAgent(t, store)
+		router, _, mgr, queue := holdRouter(t, store, []string{srv.URL}, time.Minute)
+		defer mgr.Stop()
+
+		reqBody := []byte(`{"payload":{"text":"ping"},"sender":"agent-1","request_id":"req-129","session_id":"sess-129"}`)
+		rec := deliverTo(t, router, "agent-remote", reqBody, nil)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d (body: %s), want 202 held for a reportable delivery — no regression", rec.Code, rec.Body.String())
+		}
+		var held federationHeldResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &held); err != nil {
+			t.Fatalf("held response is not JSON: %v (%s)", err, rec.Body.String())
+		}
+		if held.Status != "held" || held.Target != "agent-remote" || held.MaxHoldS != 60 || held.ID == "" {
+			t.Errorf("held response = %+v, want {status:held, id:<non-empty>, target:agent-remote, max_hold_s:60}", held)
+		}
+		if queue.Len() != 1 {
+			t.Fatalf("hold queue Len = %d, want 1 enqueued delivery", queue.Len())
+		}
+		if item := queue.List()[0]; item.Sender != "agent-1" || item.ID != held.ID {
+			t.Errorf("held item = %+v, want the sender and message id carried for the terminal report", item)
+		}
+	})
 }

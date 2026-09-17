@@ -120,8 +120,11 @@ DELETE; a PATCH without the sig headers → 401):
   `FEDERATION_FAILED` entry in its OWN inbox (`{kind:error, code, message_id,
   target, sender, attempts, status, error}`). ⚠️ **This only happens if the
   original deliver body carried `"sender":"<agent-id>"`** — the report is
-  routed via that field; with no sender the outcome is refused with a log
-  line only (DF-CRIER-129). The distinct 404-vs-budget failure reasons are
+  routed via that field. With no sender the delivery is NOT held at all
+  (DF-CRIER-129, fixed 2026-09-17): the relay answers `502
+  {"error":"FEDERATION_FAILED",...,"detail":"...no sender..."}` synchronously
+  and queues nothing, so a `202 "held"` accept always has a deliverable
+  outcome. The distinct 404-vs-budget failure reasons are
   preserved in the report's `error` field.
 - `GET /fed/peers` requires the Bearer header on an auth-enabled relay (it is
   not exempt like `/health`) and lists YOUR OWN relay as a peer

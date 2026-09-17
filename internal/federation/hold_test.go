@@ -258,6 +258,38 @@ func TestForwardOrHoldDefinitiveAllLinks404IsNotHeld(t *testing.T) {
 	}
 }
 
+// TestForwardOrHoldSenderlessTransientIsNotHeld is the DF-CRIER-129 rule at
+// the classification layer: the terminal FEDERATION_FAILED report is addressed
+// to the sender carried in the correlation context, so a delivery whose HoldMeta
+// names no sender could never deliver its own outcome. It is therefore NOT
+// enqueued — the transient error is returned for the caller to answer
+// synchronously (the handler's bounded 502), and the detail says why.
+func TestForwardOrHoldSenderlessTransientIsNotHeld(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	dead.Close() // unreachable link
+
+	client := NewClient([]string{dead.URL}, time.Second, "")
+	queue := NewMemoryHoldQueue()
+	client.SetHoldManager(NewHoldManager(client, queue, testHoldConfig(time.Minute)))
+
+	_, _, held, err := client.ForwardOrHold(context.Background(), "agent-remote", []byte(`{"payload":{"text":"hi"},"request_id":"req-1"}`), HoldMeta{
+		MessageID: "msg-8", RequestID: "req-1",
+	})
+	if held != nil {
+		t.Errorf("held = %+v (queue Len = %d), want nil: the context names no sender, so a terminal FEDERATION_FAILED could never be delivered", held, queue.Len())
+	}
+	var transient *TransientError
+	if !asTransient(err, &transient) {
+		t.Fatalf("err = %v (%T), want the *TransientError the caller answers synchronously", err, err)
+	}
+	if !strings.Contains(err.Error(), "sender") {
+		t.Errorf("err = %q, want a detail naming the absent sender as the reason", err)
+	}
+	if queue.Len() != 0 {
+		t.Errorf("queue Len = %d, want 0 — an unreportable delivery is never enqueued", queue.Len())
+	}
+}
+
 func TestForwardOrHoldWithoutQueueReportsTransient(t *testing.T) {
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	dead.Close()
@@ -454,7 +486,12 @@ func TestHoldManagerSweepOnceDrivesDeterministicExhaustion(t *testing.T) {
 		return nil
 	})
 
-	_, _, held, err := client.ForwardOrHold(context.Background(), "agent-remote", []byte(`{"payload":{}}`), HoldMeta{MessageID: "m"})
+	// DF-CRIER-129: a held delivery is only reportable when its correlation
+	// context names a sender, so this fixture carries one — a sender-less
+	// delivery is answered synchronously and never enqueued (pinned by
+	// TestForwardOrHoldSenderlessTransientIsNotHeld). The assertions below
+	// are unchanged; only the fixture gained the required precondition.
+	_, _, held, err := client.ForwardOrHold(context.Background(), "agent-remote", []byte(`{"payload":{}}`), HoldMeta{MessageID: "m", Sender: "agent-local"})
 	mustHold(t, held, err)
 	if len(reports) != 0 {
 		t.Fatalf("holding must not report a failure yet: %+v", reports)

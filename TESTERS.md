@@ -255,8 +255,11 @@ curl -s -X POST localhost:8768/agents/alice/inbox -H 'Content-Type: application/
 # "sender" explicitly, exactly as §2.3 does — receives {"kind":"error","code":
 # "FEDERATION_FAILED","message_id":"...","target":"alice","sender":"...",
 # "attempts":9,"error":"federation: no link reachable (last error: ...)"}.
-# A held request with no "sender" is logged, never delivered: it has no inbox
-# to be addressed to. Stop the guest bus with `make stop PIDFILE=.crier-fed.pid`
+# A request with no "sender" is NOT held at all (DF-CRIER-129): the terminal
+# FEDERATION_FAILED is addressed to the sender, so an unreportable delivery is
+# answered synchronously instead — the guest returns 502 {"error":
+# "FEDERATION_FAILED",...,"detail":"...no sender..."} immediately and queues
+# nothing. Stop the guest bus with `make stop PIDFILE=.crier-fed.pid`
 # (its own pidfile: the default `.crier.pid` belongs to the §1 server).
 ```
 

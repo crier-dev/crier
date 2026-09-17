@@ -312,6 +312,15 @@ func (c *Client) ForwardToAny(ctx context.Context, agentID string, body []byte) 
 // error is still non-nil, so only err == nil means "relayed". With no queue
 // the transient error is returned unchanged (held == nil), and the caller
 // reports an explicit synchronous failure (HTTP 502) — never a 404.
+//
+// An unreportable delivery is never held (DF-CRIER-129): the terminal
+// FEDERATION_FAILED report is addressed to the sender carried in meta, so a
+// delivery whose correlation context names no sender could never deliver its
+// own outcome — the hold budget would be spent, the failure sink would refuse
+// the report ("no sender on message"), and the caller that was told
+// 202 {"status":"held"} would never hear anything again. Such a delivery is
+// answered synchronously instead (held == nil, same bounded 502 as the
+// no-queue path), with a detail naming the absent sender.
 func (c *Client) ForwardOrHold(ctx context.Context, agentID string, body []byte, meta HoldMeta) (int, []byte, *HoldItem, error) {
 	status, respBody, err := c.forwardPass(ctx, agentID, body)
 	if err == nil {
@@ -323,6 +332,13 @@ func (c *Client) ForwardOrHold(ctx context.Context, agentID string, body []byte,
 	}
 	if c.hold == nil {
 		return 0, nil, nil, err
+	}
+	if meta.Sender == "" {
+		// Unreportable: never enqueue, answer synchronously (wrapping keeps
+		// errors.As(*TransientError) working for the caller's 502 body).
+		return 0, nil, nil, fmt.Errorf(
+			"federation: no sender on the deliver request (target %q): a terminal FEDERATION_FAILED could never be delivered to an inbox, so the transient link failure is reported synchronously instead of held: %w",
+			agentID, err)
 	}
 	item := &HoldItem{
 		ID:         meta.MessageID,

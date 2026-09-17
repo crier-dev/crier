@@ -252,7 +252,8 @@ source relay classifies a failed forward attempt into exactly three outcomes:
 |---|---|---|
 | **Relayed** | a link answers anything except 404 with a non-retryable status | that link's status + body verbatim (unchanged blocking-webhook reply behavior) |
 | **Agent not found** | every link answers 404 and none failed transiently | `404` immediately — the hold budget is never waited out |
-| **Held** | at least one link was unreachable or answered a retryable status (5xx, 408, 429) and none delivered | `202 Accepted` `{"status":"held","id":…,"target":…,"max_hold_s":…}`; retried in the background |
+| **Held** | at least one link was unreachable or answered a retryable status (5xx, 408, 429), none delivered, **and the request names a sender** | `202 Accepted` `{"status":"held","id":…,"target":…,"max_hold_s":…}`; retried in the background |
+| **Unreportable** | at least one link failed transiently and the deliver body names no `sender` | `502` immediately, never held — the terminal notification is addressed to the sender, so it could never be delivered and the request is answered synchronously (DF-CRIER-129) |
 
 - Retry runs until delivery succeeds or the hold budget (`CR_FED_MAX_HOLD_S`) expires. A retry re-POSTs the
   **same bytes** as the original attempt (same hop header, same link auth) and the delivery is removed from
@@ -269,10 +270,17 @@ source relay classifies a failed forward attempt into exactly three outcomes:
 
   Correlation fields (`message_id`, `target`, `sender`, `request_id`, `session_id`, `attempts`, `status`,
   `error`) are required; the message body is never echoed.
+- **A delivery that names no sender is never held** (DF-CRIER-129). That terminal report is addressed to the
+  `sender` on the deliver body, so a delivery whose body names no sender can never deliver its own outcome:
+  the hold budget would be spent and the report refused (`no sender on message`). Such a request is answered
+  synchronously instead — the same bounded `502 FEDERATION_FAILED` the no-hold-queue path returns, with
+  `detail` naming the absent sender — and nothing is enqueued. **Absent means absent:** no sender is ever
+  inferred from a header, a remote address or a default agent.
 - With **no hold queue configured** (a bare `SetFederationClient` in an embedder, or a queue that refuses the
   delivery because it is full / the body exceeds the cap) the transient failure is reported synchronously as
   `502` with the stable body `{"error":"FEDERATION_FAILED","message_id":…,"target":…,"sender":…,
-  "request_id":…,"session_id":…,"attempts":…,"status":…,"detail":…}`.
+  "request_id":…,"session_id":…,"attempts":…,"status":…,"detail":…}`. The same synchronous `502` answers a
+  request that names no sender (previous bullet) — a hold that could never be reported is not taken.
 - Retry backoff is exponential (2s doubling, capped at 60s) inside the budget; every retry re-runs the same
   per-link classification as the first attempt, so a link that comes back is used immediately.
 

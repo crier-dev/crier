@@ -468,7 +468,10 @@ paths:
         the delivery still cannot be made it gets exactly one
         FEDERATION_FAILED notification in its own inbox. A definitive
         all-links-404 is answered 404 immediately. With no hold queue
-        available the transient failure is reported synchronously as 502.
+        available the transient failure is reported synchronously as 502 —
+        and so is a request that names no `sender`, because that terminal
+        notification is addressed to the sender's inbox and the delivery
+        would otherwise be held with no possible outcome (DF-CRIER-129).
       parameters:
         - name: id
           in: path
@@ -580,7 +583,7 @@ paths:
 
             (a) WEBHOOK async/batch accept (`transport: "webhook"`): the message was handed to the target's webhook queue and is NOT stored in its inbox, so the target's inbox stays EMPTY by design — an empty retrieve does not mean the delivery was lost. `delivery_mode` echoes the RESOLVED queue semantics (`async` = one queued POST; `batch` = coalesced into the endpoint's next batch flush). Failure recovery: when the queue exhausts its bounded retries (`CR_WEBHOOK_MAX_RETRIES` failing attempts — or the endpoint's smaller `retries` budget — one per `CR_WEBHOOK_REDELIVER_S` tick), exactly one durable `WEBHOOK_FAILED` message is written into the SENDER's own inbox — a direct store write that never routes back through webhook delivery.
 
-            (b) HELD federation delivery (`status: "held"`): every link is failing transiently, so the request is queued at this relay and retried inside `CR_FED_MAX_HOLD_S`; a terminal failure is reported once as `FEDERATION_FAILED` in the sender's own inbox.
+            (b) HELD federation delivery (`status: "held"`): every link is failing transiently, so the request is queued at this relay and retried inside `CR_FED_MAX_HOLD_S`; a terminal failure is reported once as `FEDERATION_FAILED` in the sender's own inbox. This held shape REQUIRES a `sender` on the request: the terminal report is addressed to that inbox, so a request that names no sender can never deliver its own outcome and is never held — it is answered synchronously with the `502` FEDERATION_FAILED shape below (DF-CRIER-129).
           content:
             application/json:
               schema:
@@ -592,7 +595,7 @@ paths:
                       status:
                         type: string
                         enum: [held]
-                        description: "held — the federation delivery is queued at the source and retried"
+                        description: "held — the federation delivery is queued at the source and retried (only when the request names a `sender`; a sender-less request is answered 502 FEDERATION_FAILED instead, DF-CRIER-129)"
                       id:
                         type: string
                         description: Assigned message id (also the correlation id of the FEDERATION_FAILED notification, if any)
@@ -670,14 +673,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/GuardBlockedResponse"
         "404":
-          description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) or reported as 502 FEDERATION_FAILED."
+          description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) when the request names a sender, or reported as 502 FEDERATION_FAILED (no hold queue, queue refused, or no sender on the request — DF-CRIER-129)."
         "502":
           description: |
             Bad gateway — the delivery was rejected upstream; a rejection is never reported as 404.
 
             (a) BLOCKING webhook delivery permanently rejected (`error: "webhook: permanent failure: …"`): the endpoint answered a non-retryable status (4xx other than 408/429 — bad auth, wrong URL, bad request) or answered 2xx with a body the agent's reply schema cannot map (`reply extraction: …`). Retrying the identical message cannot succeed, so it fails fast instead of burning the caller's budget (DF-CRIER-157). A timeout or an exhausted budget stays `504`, where a later attempt can still land.
 
-            (b) FEDERATION_FAILED — link failure with no hold queue available: every link is unreachable or answered a retryable status.
+            (b) FEDERATION_FAILED — a transient link failure that is NOT held: every link is unreachable or answered a retryable status (5xx/408/429), and no hold was taken because there is no hold queue available, the queue refused the delivery, or the request names no `sender` (an unreportable delivery — the terminal FEDERATION_FAILED is addressed to the sender's inbox, so it is answered synchronously instead of being held, DF-CRIER-129). `detail` states the reason.
           content:
             application/json:
               schema:
