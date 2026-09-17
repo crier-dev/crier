@@ -61,6 +61,15 @@ A reference harness that exercises all of these automatically lives in
 `scripts/bunker-matrix.sh`; the manual curl versions below are the same
 probes it runs.
 
+The demo harnesses under `examples/` are guarded the same way this file tells you
+to check a port: they refuse to run while anything already listens on their
+scratch port (naming the holder's pid, its command line and the
+`ss -tlnp | grep :<port>` audit command), assert after `/health` that the
+listening process is the one they started, and abort if that process dies — so a
+demo pass can never have been measured against someone else's server.
+`make port-guard-selftest` exercises all three guards on a free port it picks
+itself.
+
 **0. Register two agents** (every exercise needs them). Signatures are ON by
 default, so an agent is only reachable with the private key whose public half it
 was registered with — **keep the private key**, a public key on its own cannot

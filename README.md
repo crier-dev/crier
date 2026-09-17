@@ -529,6 +529,25 @@ make test-short
 make lint
 ```
 
+### The demo harnesses never measure a server they did not start
+
+The three runnable harnesses (`examples/federation-demo`,
+`examples/hermes-gateway-demo`, `examples/ws-mesh-demo`) each start their own
+crier server on a scratch port and then poll it, so a stale or foreign process
+squatting that port would make a run report success for a binary it never built.
+They are guarded against exactly that: `federation-demo` and
+`hermes-gateway-demo` refuse to start while anything already listens on their
+ports — naming the holder's pid, its command line and the `ss -tlnp | grep :<port>`
+audit command — and, once a server answers `/health`, they assert that the process
+holding the port is the pid they started; `ws-mesh-demo` refuses the same way and
+additionally requires an empty peer list at startup. A started process that dies
+before answering aborts the run with the tail of its log instead of being papered
+over. Which build is answering can be confirmed at any time — `GET /version`
+returns the running server's identity (version, commit, build time, dirty). The
+three guards live in `scripts/lib/port-guard.sh`; `make port-guard-selftest`
+exercises all of them on a port the selftest picks as free itself, and CI runs
+that selftest on every push.
+
 ## Message guard (LLM)
 
 Every inbound delivery is classified by an LLM message guard before it reaches the receiver (CR-FEAT-010..014). The guard sits at ONE choke point in `POST /agents/{id}/inbox` — after the deliver request is decoded, before BOTH downstream branches (webhook POST and inbox store) — so webhook (blocking/async/batch) and inbox deliveries get identical treatment. The verdict is computed exactly once per message; redelivery and batch flush never re-run the guard.

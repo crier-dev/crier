@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate
+.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -38,6 +38,7 @@ help:
 	@echo "  coverage-html     Generate coverage.html"
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
+	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
@@ -96,6 +97,12 @@ coverage-check:
 
 docs-check:
 	go test -short -count=1 -run 'TestDocsClaims' ./cmd/server
+
+# QA-CRIER-9: the example harnesses refuse to run while their scratch port is
+# occupied and assert that the process answering /health is the one they started.
+# The selftest picks its own free port, so a busy runner cannot make it flake.
+port-guard-selftest:
+	bash scripts/lib/port-guard.sh --selftest
 
 generate:
 	go generate ./...

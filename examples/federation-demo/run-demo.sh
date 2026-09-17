@@ -19,7 +19,10 @@
 # discovery. relay-2's own /fed/peers lists just itself (no links — no full
 # mesh required).
 #
-# Requirements: go, python3 (stdlib only), openssl, curl.
+# Requirements: go, python3 (stdlib only), openssl, curl, ss (iproute2).
+#   Port guards (QA-CRIER-9): refuses to start while anything listens on one of
+#   the three scratch ports, and asserts after /health that each listener is the
+#   pid this script started.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG is forced false (no per-agent signing in the demo)
 #   RELAY1_PORT          override relay-1 port (default 18771)
@@ -41,6 +44,13 @@ WEBHOOK_URL="http://127.0.0.1:${WEBHOOK_PORT}/webhook"
 WORKDIR="$(mktemp -d)"
 TRANSCRIPT="$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md"
 
+# Port guards (QA-CRIER-9): this harness starts all three servers it measures.
+# The guards come from the shared library — require_free_port refuses to start on
+# a taken port, assert_port_owned proves after /health that the listener is the
+# pid started here, and wait_http_or_die aborts when a started process dies
+# instead of letting the poll be answered by a stale or foreign server.
+. "$REPO_ROOT/scripts/lib/port-guard.sh"
+
 RELAY1_PID=""
 RELAY2_PID=""
 WEBHOOK_PID=""
@@ -52,6 +62,20 @@ cleanup() {
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
+
+# ── Pre-flight (before the transcript redirect, so aborts are plainly visible) ──
+for tool in go python3 openssl curl ss; do
+  command -v "$tool" >/dev/null 2>&1 \
+    || { echo "FAIL: '$tool' is required on PATH" >&2; exit 1; }
+done
+
+# Refuse to start while anything already listens on one of our three scratch
+# ports: the freshly built relay would die on "bind: address already in use" and
+# the /health poll below would be answered by the squatter, so the run would
+# report success for a server it never started (QA-CRIER-9).
+require_free_port "$RELAY1_PORT" "relay-1"
+require_free_port "$RELAY2_PORT" "relay-2"
+require_free_port "$WEBHOOK_PORT" "echo webhook"
 
 # Everything below is teed into the transcript (real output, not simulated).
 exec > >(tee "$TRANSCRIPT") 2>&1
@@ -73,17 +97,25 @@ echo
 echo "==> [2/8] start echo webhook on :${WEBHOOK_PORT}"
 python3 "$DEMO_DIR/echo_webhook.py" "$WEBHOOK_PORT" &
 WEBHOOK_PID=$!
-sleep 0.5
+# The echo webhook has no health route (it answers POST /webhook), so readiness
+# is "the port became a listener", with the started pid checked for survival —
+# then assert_port_owned proves the listener is that pid.
+for _ in $(seq 1 50); do
+  [ -n "$(port_holder_pid "$WEBHOOK_PORT")" ] && break
+  kill -0 "$WEBHOOK_PID" 2>/dev/null || break
+  sleep 0.2
+done
+assert_port_owned "$WEBHOOK_PORT" "$WEBHOOK_PID" "echo webhook"
 echo "    webhook pid $WEBHOOK_PID"
 echo
 
 echo "==> [3/8] start relay-2 on :${RELAY2_PORT} (no federation links)"
 CRIER_PORT="$RELAY2_PORT" CR_REQUIRE_AGENT_SIG=false "$WORKDIR/crier" &
 RELAY2_PID=$!
-for _ in $(seq 1 50); do
-  curl -sfS "$RELAY2/health" >/dev/null 2>&1 && break
-  sleep 0.2
-done
+# The relays log straight into this transcript (it is tee'd live), so the
+# transcript is their log — a died relay is reported with its last lines.
+wait_http_or_die "$RELAY2/health" "$RELAY2_PID" "$TRANSCRIPT" "relay-2"
+assert_port_owned "$RELAY2_PORT" "$RELAY2_PID" "relay-2"
 curl -sS "$RELAY2/health" && echo " <- relay-2 healthy"
 echo
 
@@ -92,10 +124,8 @@ CRIER_PORT="$RELAY1_PORT" CR_REQUIRE_AGENT_SIG=false \
   CR_FED_LINKS="http://127.0.0.1:${RELAY2_PORT}" CR_FED_NAME="relay-1" \
   "$WORKDIR/crier" &
 RELAY1_PID=$!
-for _ in $(seq 1 50); do
-  curl -sfS "$RELAY1/health" >/dev/null 2>&1 && break
-  sleep 0.2
-done
+wait_http_or_die "$RELAY1/health" "$RELAY1_PID" "$TRANSCRIPT" "relay-1"
+assert_port_owned "$RELAY1_PORT" "$RELAY1_PID" "relay-1"
 curl -sS "$RELAY1/health" && echo " <- relay-1 healthy"
 echo
 

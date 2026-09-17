@@ -32,6 +32,12 @@ jobs:
       - name: Test
         run: go test -short -count=1 ./...
 
+      # QA-CRIER-9: the example harnesses must refuse to run against a server
+      # they did not start. The selftest picks its own free port (never a fixed
+      # one), so this cannot flake on a busy runner.
+      - name: Demo-harness port-guard selftest
+        run: make port-guard-selftest
+
   test-coverage:
     name: Coverage (Go 1.26.6)
     runs-on: ubuntu-latest

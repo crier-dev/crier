@@ -25,7 +25,9 @@
 # continuity (the adapter sees the same session_id and answers turn 2 with the
 # turn-1 context in the window).
 #
-# Requirements: go, python3 (stdlib only), curl.
+# Requirements: go, python3 (stdlib only), curl, ss (iproute2).
+#   Port guards (QA-CRIER-9): refuses to start while anything listens on either
+#   port, and asserts after /health that the listener is the pid it started.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG is forced false (no per-agent signing in the demo)
 #   CRIER_PORT           override crier port (default 18788)
@@ -47,6 +49,13 @@ CRIER_PORT="${CRIER_PORT:-18788}"
 ADAPTER_PORT="${ADAPTER_PORT:-18789}"
 WEBHOOK_URL="http://127.0.0.1:${ADAPTER_PORT}/webhook"
 CRIER_BASE="http://127.0.0.1:${CRIER_PORT}"
+
+# Port guards (QA-CRIER-9): this harness starts BOTH servers it measures.
+# require_free_port refuses to start on a taken port; assert_port_owned proves,
+# after /health answers, that the listener is the pid started here; and
+# wait_http_or_die aborts if a started process dies before answering instead of
+# letting the poll be answered by a stale or foreign server.
+. "$REPO_ROOT/scripts/lib/port-guard.sh"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 SESSION_ID="sess-demo-${TS}"
@@ -77,14 +86,6 @@ assert_eq() { # name got want
 }
 # pyget <json-file> <python-expr> — print a field, e.g. pyget f "['request_id']"
 pyget() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d$2)" "$1"; }
-wait_http() { # url label
-  local url="$1" label="$2" up=0
-  for _ in $(seq 1 60); do
-    if curl -sf -m 1 "$url" >/dev/null 2>&1; then up=1; break; fi
-    sleep 0.2
-  done
-  [ "$up" = 1 ] || fail "$label did not come up at $url"
-}
 
 main() {
   trap cleanup EXIT
@@ -101,15 +102,15 @@ main() {
   command -v go >/dev/null || fail "go not on PATH"
   command -v python3 >/dev/null || fail "python3 not on PATH"
   command -v curl >/dev/null || fail "curl not on PATH"
+  command -v ss >/dev/null || fail "ss not on PATH (iproute2 — the port guards need it)"
   if [ -n "${CR_AUTH_TOKEN:-}" ]; then
     fail "CR_AUTH_TOKEN is set in the environment — the demo runs auth-disabled (unset it)"
   fi
-  if curl -s -m 1 "$CRIER_BASE/health" >/dev/null 2>&1; then
-    fail "port $CRIER_PORT already answers — set CRIER_PORT to a free port"
-  fi
-  if curl -s -m 1 "http://127.0.0.1:$ADAPTER_PORT/healthz" >/dev/null 2>&1; then
-    fail "port $ADAPTER_PORT already answers — set ADAPTER_PORT to a free port"
-  fi
+  # Refuse to start while anything already listens on our two ports: a stale or
+  # foreign server would answer the /health polls below and this run would then
+  # measure a binary it never started (QA-CRIER-9).
+  require_free_port "$CRIER_PORT" "the crier server"
+  require_free_port "$ADAPTER_PORT" "the gateway adapter"
 
   # 1. Build the crier server binary
   step "[1/7] build crier server"
@@ -137,7 +138,8 @@ main() {
   [ -n "$DEEPSEEK_KEY" ] && ADAPTER_ENV+=(DEEPSEEK_API_KEY="$DEEPSEEK_KEY")
   env "${ADAPTER_ENV[@]}" python3 "$DEMO_DIR/adapter.py" >"$ADAPTER_LOG" 2>&1 &
   ADAPTER_PID=$!
-  wait_http "http://127.0.0.1:$ADAPTER_PORT/healthz" "gateway adapter"
+  wait_http_or_die "http://127.0.0.1:$ADAPTER_PORT/healthz" "$ADAPTER_PID" "$ADAPTER_LOG" "gateway adapter"
+  assert_port_owned "$ADAPTER_PORT" "$ADAPTER_PID" "gateway adapter"
   echo "  adapter up: $WEBHOOK_URL (pid $ADAPTER_PID, log $ADAPTER_LOG)"
 
   # 4. Start the crier server
@@ -147,7 +149,8 @@ main() {
       CR_WEBHOOK_SECRET=demo-webhook-secret \
       "$CRIER_BIN" >"$CRIER_LOG" 2>&1 &
   CRIER_PID=$!
-  wait_http "$CRIER_BASE/health" "crier server"
+  wait_http_or_die "$CRIER_BASE/health" "$CRIER_PID" "$CRIER_LOG" "crier server"
+  assert_port_owned "$CRIER_PORT" "$CRIER_PID" "crier server"
   echo "  crier up: $CRIER_BASE (pid $CRIER_PID, log $CRIER_LOG)"
 
   # 5. Register the two agents (different backends)
