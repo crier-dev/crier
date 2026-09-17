@@ -1093,3 +1093,16 @@ tasks:
   status: complete
   created_at: '2026-09-17T14:43:01.395473+00:00'
   completed_at: '2026-09-17T14:58:37.567623+00:00'
+- id: DF-CRIER-153
+  title: MCP tool surface must be truthful about mode prerequisites (13 tools, 3 unreachable
+    in-process, 2 advertise a bridge-denied capability)
+  criteria:
+  - For every tool advertised by crier-mcp tools/list, the description names the exact
+    env var(s) the tool needs and, for bridge-scoped arguments, the scope restriction;
+    the in-process stdio server logs one startup line listing the tools unavailable
+    in the current mode; tool behavior and error text are unchanged; a deterministic
+    test asserts the description invariant for all 13 tools; README's MCP section
+    carries the same prerequisites table.
+  status: complete
+  created_at: '2026-09-17T15:26:37.435964+00:00'
+  completed_at: '2026-09-17T15:49:22.149086+00:00'
