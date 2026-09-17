@@ -1297,3 +1297,32 @@ tasks:
   status: complete
   created_at: '2026-09-17T22:43:43.761900+00:00'
   completed_at: '2026-09-17T22:58:15.818501+00:00'
+- id: DF-CRIER-209
+  title: Makefile and Dockerfile arm for the commit gate
+  criteria:
+  - A tracked Makefile with a broken recipe and a Dockerfile with invalid syntax are
+    each rejected with a nonzero exit by the repo's own gate (scripts/check-make-docker.sh),
+    named per file; the selftest fails when detection is neutered; the arm is fail-closed
+    (missing validator exits 2, explicit list that classifies nothing exits 1); wired
+    into make + .github/workflows/ci.yml + scripts/hooks/pre-commit scope line; clean
+    tracked tree still passes with an honest scope line.
+  status: complete
+  created_at: '2026-09-17T23:27:11.664007+00:00'
+  completed_at: '2026-09-17T23:44:31.591932+00:00'
+- id: DF-CRIER-209b
+  title: 'Rework round: hadolint severity policy for the make/docker gate (the CI-red
+    fix on cd4f31b)'
+  criteria:
+  - 'On the shipping commit cd4f31b: with real hadolint 2.15.1 on PATH the whole tracked
+    tree passes (11 files checked, 0 rejected) and the warning-level findings appear
+    as ''advisory (not fatal)'' lines; an error-level finding (unknown instruction)
+    is still REJECTED by the same arm (rc=1); --selftest reports 17/17 including a
+    severity-policy check that fails if the arm stops passing --failure-threshold;
+    the built-in python3 arm still rejects a malformed Dockerfile and accepts the
+    clean tree; the pre-commit hook refuses a commit with an error-level Dockerfile
+    and permits a warning-only one; the shell/YAML arm, go build/vet/test and make
+    docs-check are unregressed; AGENTS.md states the severity policy and lists advisory-not-fatal
+    in the honest-residue paragraph.'
+  status: complete
+  created_at: '2026-09-17T23:54:29.644043+00:00'
+  completed_at: '2026-09-17T23:54:32.312753+00:00'
