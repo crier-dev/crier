@@ -14,6 +14,9 @@ make test-integration # integration tests (build tag): internal/registry
 make lint             # go vet ./...
 make coverage-check   # 70% coverage gate
 make docs-check       # execute the prose claims in docs/claims.yaml against a live in-process server — prose drift fails the build (CR-GAP-055)
+make shell-yaml-check # bash -n every tracked shell script + actionlint (or PyYAML fallback) every .github/workflows/*.yml (DF-CRIER-206)
+make shell-yaml-selftest # prove that checker still rejects a broken script/workflow and accepts a clean pair (DF-CRIER-206)
+make install-hooks    # install scripts/hooks/pre-commit into .git/hooks (idempotent; DF-CRIER-206)
 make generate         # go generate ./... (regenerates cmd/server/openapi.yaml from docs/openapi.yaml)
 ```
 
@@ -29,6 +32,55 @@ Config is env-driven (`CRIER_PORT`, `CR_DATABASE_URL`, `CR_AUTH_TOKEN`, `CR_REQU
 - `examples/demo.sh` — runnable register → deliver → signed retrieve → ack round-trip
 
 `docs/openapi.yaml` is the OpenAPI source; `cmd/server/openapi.yaml` is a GENERATED copy — `//go:generate cp ../../docs/openapi.yaml openapi.yaml` in `cmd/server/openapi.go:16-19` (go:embed cannot reach outside the package dir), asserted byte-identical by `TestOpenAPIDocsSpec` and by CI. Edit the source, run `make generate`, and stage both.
+
+## The commit gate — what it covers, and what it does not
+
+The gate is `gitreins guard` run from `.git/hooks/pre-commit` (Tier 1: secrets /
+go_build / go_lint / go_tests). Those checks read Go source and the staged diff —
+they do NOT read a shell script, a Makefile recipe or a workflow YAML. On a diff
+made only of such files the gate used to print `Tier 1 Guards: PASS` having
+verified nothing about it (DF-CRIER-206: measured with an unterminated `if` in a
+`.sh` and an unclosed flow sequence in a workflow — both PASSed).
+
+The tracked wrapper `scripts/hooks/pre-commit` closes that gap and states the
+scope of every green:
+
+- it runs `gitreins guard` first, unchanged (a nonzero guard still stops the
+  commit before anything else runs), then
+- runs `scripts/check-shell-yaml.sh` on the staged shell/workflow files and exits
+  nonzero if it rejects one, and
+- prints which of those Tier 1 actually covers, e.g.
+  `gate scope: no Go source staged — shell/YAML checks ran on 2 file(s): …` or
+  `gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff`.
+
+`.git/hooks/pre-commit` is generated and untracked, so the tracked wrapper is the
+source of truth: `make install-hooks` copies it into place (idempotent; it backs
+up any existing hook first) and is the repair path after any of these, all of
+which are MEASURED to clobber the installed hook:
+
+| command | effect on the installed hook |
+| --- | --- |
+| `gitreins install` | overwrites `.git/hooks/pre-commit` unconditionally |
+| `gitreins init --reset` | overwrites it (`if not isfile(hook) or args.reset`) |
+| `gitreins init` | leaves an existing hook alone |
+
+Never install the hook as a SYMLINK: `gitreins install` opens the hook for
+writing, which writes THROUGH a symlink and destroys the tracked file it points
+at (measured). `make install-hooks` copies, then verifies with `cmp`.
+
+`make shell-yaml-check` is also a CI step (`.github/workflows/ci.yml`), so a
+`.sh`/`.yml`-only push gets real evidence instead of a vacuous green. Workflows
+are checked with `actionlint` when it is on PATH, otherwise with a python3 +
+PyYAML parse; the mode and tool version are printed every run, and a run with
+neither validator exits 2 rather than skipping. actionlint validates `runs-on:`
+labels, so this repo declares its `bunker` self-hosted runner label in
+`.github/actionlint.yaml` — that is a declaration, not a silencer: an undeclared
+label is still reported.
+
+Not covered by any of this: Markdown/prose drift (`make docs-check` covers the
+claims in `docs/claims.yaml`), Dockerfile contents, Makefile recipe semantics
+(`bash -n` only sees the shell commands a recipe invokes if they are themselves
+scripts), and anything outside the tracked file set.
 
 ## Board
 
