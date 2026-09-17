@@ -99,7 +99,16 @@ evaluator:
   # with NO "Cap exceeded" line settles it — record its tokens_in and step the
   # budget down to the smallest sufficient value rather than leaving an
   # untested 24M in place.
-  max_input_tokens: 24M
+  # 24M -> 48M (tick 309, DF-CRIER-150): the probe rung above starved on a
+  # 7-file / +892-line change set (a 178-line guide section + 431 lines of new
+  # tests): usage.jsonl recorded 24,030,089 tokens_in against the 24M cap and
+  # tier2 returned INCOMPLETE with "Eval cap exceeded: Input token budget
+  # (24.0M) exceeded (24.0M used)" after having PASSED two of the three
+  # criteria — exact-equality starvation again, so the rung moves UP. This
+  # run's measured burn was ~5M tokens_in/min (~5 min wall for 24M), so the
+  # 30m max_time below still carries ~3x headroom and moves in the same commit
+  # only if a future run starves on time.
+  max_input_tokens: 48M
   max_output_tokens: 0.4M
   tool_call_weight: 0.1
   fast_track: auto
