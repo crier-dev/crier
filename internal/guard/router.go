@@ -167,13 +167,28 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 	anyKey := false
 	var lastErr error
 	for i, spec := range specs {
-		if err := ctx.Err(); err != nil {
-			return "", "", "", err
-		}
+		// DF-CRIER-204: preset/model resolution is pure and runs BEFORE the
+		// budget check below, so the pre-attempt audit line can name the
+		// model as well as the provider it could not attempt.
 		preset, known := r.presets[spec.Provider]
 		model := spec.Model
 		if known && model == "" && len(preset.Models) > 0 {
 			model = preset.Models[0]
+		}
+		if err := ctx.Err(); err != nil {
+			// The per-message budget covers the entire chain (retries
+			// included), so it can already be spent when the chain advances
+			// to this provider. Returning here silently left the chain's
+			// death unattributable from the log alone (DF-CRIER-204), so the
+			// provider that could not be attempted is named. Not reachable by
+			// a deterministic test — it needs the budget to expire in the
+			// window between a provider's terminal outcome and the next
+			// iteration — so this line is pinned by review only; no flaky
+			// timing test is written for it.
+			r.logf("guard router: provider failed",
+				"provider", spec.Provider, "model", model,
+				"reason", "per-message budget exhausted before attempt")
+			return "", "", "", err
 		}
 		// DF-CRIER-149: a degraded lane must be visible in the log. Exactly
 		// ONE line per provider that is skipped or that exhausts its
@@ -185,6 +200,16 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 			r.logf("guard router: provider skipped", args...)
 		}
 		failed := func(err error) {
+			// DF-CRIER-204: the reason is read from the error so a budget
+			// death (or a caller disconnect) is attributable from the line
+			// itself, instead of every failure reading "provider error".
+			reason := "provider error"
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				reason = "per-message budget exhausted"
+			case errors.Is(err, context.Canceled):
+				reason = "context canceled"
+			}
 			extra := []any{}
 			if status, code, msg := providerSignal(err); status != "" || code != "" || msg != "" {
 				if status != "" {
@@ -197,7 +222,7 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 					extra = append(extra, "error_message", msg)
 				}
 			}
-			args := append([]any{"provider", spec.Provider, "model", model, "reason", "provider error"}, extra...)
+			args := append([]any{"provider", spec.Provider, "model", model, "reason", reason}, extra...)
 			r.logf("guard router: provider failed", args...)
 		}
 		landed := func() {
@@ -279,6 +304,12 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 		select {
 		case <-time.After(250 * time.Millisecond):
 		case <-ctx.Done():
+			// The budget can expire during the backoff — for a chain that
+			// dies at the budget this was the ONLY reachable terminal path,
+			// and it returned silently, so the failure was unattributable to
+			// a provider from the log alone (DF-CRIER-204). Exactly one line:
+			// the attempt above was retryable and therefore logged nothing.
+			failed(ctx.Err())
 			return "", "", "", ctx.Err()
 		}
 		content, cerr2 := client.Complete(ctx, messages)

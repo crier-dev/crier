@@ -566,6 +566,114 @@ func TestRouter_ProviderErrorLogCarriesProviderSignal(t *testing.T) {
 	}
 }
 
+// ── DF-CRIER-204: a chain that dies at the per-message budget ────────────
+
+// TestRouter_BudgetExhaustedOnSingleProviderIsLogged: a policy with a SINGLE
+// provider whose endpoint outlives the per-message budget dies inside the
+// retry backoff's ctx.Done() branch — the one terminal path that returned
+// with no router line at all, so the failure could not be attributed to a
+// provider from the log alone. Asserts the caller-visible error is unchanged
+// AND that exactly ONE line names the provider, the model and the reason.
+func TestRouter_BudgetExhaustedOnSingleProviderIsLogged(t *testing.T) {
+	// The endpoint outlives the budget by an order of magnitude. It is
+	// released by the test (not by the request context: once the body is
+	// consumed the server does not observe the client's disconnect, which
+	// would make httptest's Close wait out the sleep).
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer srv.Close()    // runs LAST
+	defer close(release) // LIFO: releases the handler before Close waits on it
+
+	env := envMap{"K": "k"} // env: prefix is mandatory for the key ref
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{Timeout: 300 * time.Millisecond, LookupEnv: env.get, Logf: cap.logf})
+	p := policyWith(ProviderSpec{Provider: "custom", BaseURL: srv.URL, APIKeyRef: "env:K", Model: "m"})
+
+	start := time.Now()
+	_, _, _, err := r.Check(context.Background(), p, "s", "u")
+	if err == nil {
+		t.Fatal("want error (budget exhausted)")
+	}
+	// Wire invariance: the error the caller saw before this fix is still the
+	// error the caller sees.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("per-message budget not honored: Check took %s", elapsed)
+	}
+
+	line := cap.assertOneLine(t, "guard router: provider failed")
+	for _, want := range []string{"provider=custom", "model=m", "reason=per-message budget exhausted"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("budget line %q missing %q", line, want)
+		}
+	}
+	// Exactly one line for the one provider: the retryable first attempt
+	// logs nothing, so the terminal line must not duplicate.
+	if n := len(cap.all()); n != 1 {
+		t.Errorf("want exactly 1 log line for one provider, got %d: %v", n, cap.all())
+	}
+}
+
+// TestRouter_ContextCanceledReason: when it is the CALLER's context that dies
+// (client disconnect, spec §7.4) the terminal line maps to
+// reason=context canceled — it must not claim the budget was exhausted.
+func TestRouter_ContextCanceledReason(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release // held until the test is done asserting
+	}))
+	defer srv.Close()    // runs LAST
+	defer close(release) // LIFO: releases the handler before Close waits on it
+
+	env := envMap{"K": "k"}
+	cap := &logCapture{}
+	r := NewRouter(RouterOptions{Timeout: 10 * time.Second, LookupEnv: env.get, Logf: cap.logf})
+	p := policyWith(ProviderSpec{Provider: "custom", BaseURL: srv.URL, APIKeyRef: "env:K", Model: "m"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := r.Check(ctx, p, "s", "u")
+		done <- err
+	}()
+
+	select {
+	case <-started: // the attempt is in flight, so the cancel lands mid-call
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider never received the attempt")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Check did not return after the caller canceled")
+	}
+
+	line := cap.assertOneLine(t, "guard router: provider failed")
+	for _, want := range []string{"provider=custom", "model=m", "reason=context canceled"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("cancel line %q missing %q", line, want)
+		}
+	}
+	if n := len(cap.all()); n != 1 {
+		t.Errorf("want exactly 1 log line, got %d: %v", n, cap.all())
+	}
+}
+
 // TestRouter_SkipLogRemainingReasons covers the other skip code paths so the
 // "one line per skipped provider" contract holds for every branch of Check.
 func TestRouter_SkipLogRemainingReasons(t *testing.T) {

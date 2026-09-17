@@ -600,7 +600,15 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
   that exhausts its attempts logs exactly ONE INFO line, `guard router: provider skipped`
   / `guard router: provider failed` with `provider`, `model` and `reason`; a failure line
   additionally carries the provider's own signal (`status`, `error_code`, `error_message`,
-  e.g. `model_not_found`). A chain that lands on a later provider adds ONE summary line
+  e.g. `model_not_found`). A provider whose attempt is cut off by the per-message budget also
+  logs exactly ONE `guard router: provider failed` line with `reason: per-message budget
+  exhausted` — the budget covers the whole chain, retries included, so a chain that dies at
+  the budget (a single-provider policy included) is attributable to its provider from the log
+  alone. A provider the chain never reached because the budget was already spent emits ONE
+  line with `reason: per-message budget exhausted before attempt`, naming the provider and the
+  model that could not be attempted; when the CALLER's context is canceled instead (client
+  disconnect, §7.4) those failure lines read `reason: context canceled`. A chain that lands on
+  a later provider adds ONE summary line
   `guard router: failover landed on a later provider` (`from` → `to`). Payloads, request
   bodies and key material are never logged.
 
