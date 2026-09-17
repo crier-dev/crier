@@ -1181,3 +1181,17 @@ tasks:
   status: complete
   created_at: '2026-09-17T18:20:34.823081+00:00'
   completed_at: '2026-09-17T18:32:12.221218+00:00'
+- id: DF-CRIER-175
+  title: make the outbound webhook delivery identifiable (X-Crier-Target + crier.target)
+    and correct the X-Crier-Agent spec divergence
+  criteria:
+  - 'Live sink capture: an outbound webhook POST for agent <target> carries X-Crier-Target
+    == <target> and a body crier.target == <target>, while X-Crier-Agent stays the
+    SENDER (omitted entirely when the sender is empty); specs/WEBHOOK-DELIVERY.md
+    section 3 no longer documents X-Crier-Agent as target_agent_id; the inbox-deliver
+    guard claim in examples/demo.sh matches the wire (response body crier.guard, X-Crier-Guard-*
+    headers outbound-webhook-only); go build/vet/test -count=1 and make docs-check
+    green with a RED proof for the new header assertion.'
+  status: complete
+  created_at: '2026-09-17T18:50:13.043684+00:00'
+  completed_at: '2026-09-17T19:04:10.830173+00:00'
