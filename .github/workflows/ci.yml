@@ -38,6 +38,24 @@ jobs:
       - name: Demo-harness port-guard selftest
         run: make port-guard-selftest
 
+      # DF-CRIER-206: Tier 1 (secrets/go_build/go_lint/go_tests) never reads a
+      # shell script or a workflow YAML, so before this step a .sh/.yml-only push
+      # got a `Tier 1 Guards: PASS` that verified nothing about it. The checker
+      # runs over every tracked file: `bash -n` on each shell script and
+      # actionlint (or the PyYAML parse fallback) on each workflow. It PRINTS the
+      # mode and tool version it used and exits 2 when neither validator exists,
+      # so the fallback is never a silent skip. actionlint is not preinstalled on
+      # the runner, so it is built here when the toolchain allows — if that fails,
+      # the PyYAML arm runs and says so in the log. The selftest then proves the
+      # checker still rejects a broken script/workflow on this runner.
+      - name: Shell + workflow YAML check
+        run: |
+          command -v actionlint >/dev/null 2>&1 || GOBIN="$HOME/go/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || true
+          export PATH="$HOME/go/bin:$PATH"
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --user pyyaml || true
+          make shell-yaml-check
+          make shell-yaml-selftest
+
   test-coverage:
     name: Coverage (Go 1.26.6)
     runs-on: ubuntu-latest

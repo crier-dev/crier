@@ -1,0 +1,15 @@
+# .github/actionlint.yaml — actionlint config (DF-CRIER-206).
+#
+# actionlint validates `runs-on:` labels against the list of GitHub-hosted
+# runners and REJECTS any label it does not know, which is what it does to the
+# `bunker` self-hosted runner this fleet targets (`.github/workflows/bunker-e2e.yml`
+# uses `runs-on: [self-hosted, bunker]`). Declaring the label here is the
+# remediation actionlint itself prints, and it is a DECLARATION, not a silencer:
+# an undeclared label is still reported (measured — `bunker` declared here is
+# accepted, `some-other-label` is still rejected with the same [runner-label]
+# error). scripts/check-shell-yaml.sh runs actionlint on every workflow file and
+# fails the check on any finding, so without this file the checker cannot pass
+# this repo's own committed workflows.
+self-hosted-runner:
+  labels:
+    - bunker
