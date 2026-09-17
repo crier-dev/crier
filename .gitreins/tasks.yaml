@@ -1027,3 +1027,20 @@ tasks:
   status: complete
   created_at: '2026-09-17T10:04:10.520597+00:00'
   completed_at: '2026-09-17T10:59:14.382055+00:00'
+- id: DF-CRIER-177
+  title: 'Inbox retrieve: an all-leased inbox must be distinguishable from an empty
+    one, and the documented limit/lease_seconds params must work'
+  criteria:
+  - GET /agents/{id}/inbox 200 body carries queue_depth + leased_count matching /inbox/stats;
+    a second retrieve while all messages are leased is distinguishable from a genuinely
+    empty inbox (leased_count>0) with messages/lease_id semantics unchanged; documented
+    query params limit + lease_seconds are honored as aliases of max + lease; limit=101
+    -> 400; RED-first tests in internal/registry; README + docs/integration-guide.md
+    lease-honesty correction (disjoint-claim replaced); docs/openapi.yaml retrieve
+    200 schema gains the two properties with make generate byte-identity kept, no
+    path/operation count change; gofmt clean on touched files; go build/vet/test ./...
+    green; make docs-check green; gitreins guard tier-1 PASS; one commit addressing
+    DF-CRIER-177
+  status: complete
+  created_at: '2026-09-17T11:26:09.385860+00:00'
+  completed_at: '2026-09-17T12:14:27.760479+00:00'
