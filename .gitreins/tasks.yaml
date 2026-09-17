@@ -1106,3 +1106,14 @@ tasks:
   status: complete
   created_at: '2026-09-17T15:26:37.435964+00:00'
   completed_at: '2026-09-17T15:49:22.149086+00:00'
+- id: DF-CRIER-205
+  title: 'Docs-verification tick: run TESTERS.md verbatim at HEAD and close the superseded
+    truth rows from measurement'
+  criteria:
+  - TESTERS.md sections 1 and 2 execute verbatim against a fresh HEAD build on a free
+    port (health/version 200, register/deliver/signed-retrieve/ack round-trip, base64
+    payload decode); each row in scope (DF-CRIER-126/160/168/170/173/174/176/181/193)
+    is either reproduced live at HEAD or closed as superseded with the measured evidence
+    recorded; make docs-check green; go build/vet/test green; gitreins guard PASS
+  status: in_progress
+  created_at: '2026-09-17T16:18:37.739052+00:00'
