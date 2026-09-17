@@ -1044,3 +1044,15 @@ tasks:
   status: complete
   created_at: '2026-09-17T11:26:09.385860+00:00'
   completed_at: '2026-09-17T12:14:27.760479+00:00'
+- id: DF-CRIER-182
+  title: Never-expiring inbox messages must not serialize the zero time as expires_at
+  criteria:
+  - deliver ttl_seconds=0 returns 201 with expires_at present and JSON null (never
+    0001-01-01T00:00:00Z), and retrieve of that message reports null too; ttl_seconds>0
+    and omitted ttl keep RFC3339; webhook paths still omit the key entirely; docs/openapi.yaml
+    plus regenerated cmd/server/openapi.yaml, docs/integration-guide.md and docs/claims.yaml
+    stay consistent and make docs-check green; RED-first tests in internal/registry;
+    go build and go vet and go test ./... green; gitreins guard tier-1 PASS
+  status: complete
+  created_at: '2026-09-17T12:47:12.639448+00:00'
+  completed_at: '2026-09-17T12:58:41.910326+00:00'
