@@ -1209,3 +1209,18 @@ tasks:
   status: complete
   created_at: '2026-09-17T19:22:18.693579+00:00'
   completed_at: '2026-09-17T19:42:13.909798+00:00'
+- id: DF-CRIER-9
+  title: 'honor the per-agent webhook retries knob: the driver applies only CR_WEBHOOK_MAX_RETRIES
+    today, so a registered retries:3 does nothing'
+  criteria:
+  - With CR_WEBHOOK_MAX_RETRIES at its default 5, an agent whose webhook config sets
+    retries:3 is retried exactly 3 times (attempts X-Crier-Retry 0..3, 4 POSTs total)
+    and the exhaustion line names the budget used and the configured value; retries
+    absent or 0 keeps the server budget unchanged while retries:10 is capped at the
+    server setting; specs/WEBHOOK-DELIVERY.md, docs/integration-guide.md and docs/openapi.yaml
+    (with the go:generate copy byte-identical) document the resolution in the same
+    commit as the code; go build/vet/test -count=1 and make docs-check green with
+    a RED proof at the pre-fix source.
+  status: complete
+  created_at: '2026-09-17T20:20:05.910218+00:00'
+  completed_at: '2026-09-17T20:30:04.490909+00:00'
