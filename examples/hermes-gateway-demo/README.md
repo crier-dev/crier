@@ -13,7 +13,8 @@ correlated, in the same session context.
  crier server (memory backend · CRIER_PORT=18788 · webhook driver enabled)
       |
       |  POST http://127.0.0.1:18789/webhook   (hermes-http-gateway schema)
-      |  X-Crier-Event: message · X-Crier-Agent: gateway-agent
+      |  X-Crier-Event: message · X-Crier-Agent: harness-agent (the SENDER)
+      |  X-Crier-Target: gateway-agent (the agent this delivery is FOR)
       |  X-Crier-Session: sess-… · X-Crier-Signature: hmac-sha256
       v
  adapter.py — fake Hermes gateway (this demo's "api_server")
@@ -32,7 +33,7 @@ correlated, in the same session context.
 | CR-SPEC-001 section | Demonstrated by |
 |---|---|
 | §2 registration `webhook` object | `gateway-agent` registered with `schema_template: hermes-http-gateway`, `delivery_mode: blocking` |
-| §3 outbound envelope contract | Adapter log shows the POST with `X-Crier-Event` / `X-Crier-Agent` / `X-Crier-Session` headers and a **verified** `X-Crier-Signature` (HMAC-SHA256 over the raw body) |
+| §3 outbound envelope contract | Adapter log shows the POST with `X-Crier-Event` / `X-Crier-Agent` (the sender) / `X-Crier-Target` (the agent the delivery is for) / `X-Crier-Session` headers and a **verified** `X-Crier-Signature` (HMAC-SHA256 over the raw body) |
 | §3 response contract / blocking reply | `POST /agents/gateway-agent/inbox` with `delivery_mode: blocking` returns **200** `{id, reply, session_id, request_id}` |
 | §4 blocking mode | Reply extracted via the template's `response_map`; sender sees the reply inline, correlated by `request_id` |
 | §5 session mapping | `session_id` flows deliver-body → envelope → `X-Crier-Session` header (spec §3) and the template's body slot; **both** messages in the same session hit the same adapter session (turn 1 → turn 2 in one context window) — see *Session-id body slot* below for the measured body slot |
