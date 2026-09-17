@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/gorilla/mux"
 )
@@ -250,13 +251,19 @@ func TestMCPServerCLIFlags(t *testing.T) {
 			t.Fatalf("--version output %q does not start with %q", out, "crier-mcp ")
 		}
 
-		// DF-CRIER-127: the printed identity must carry a real commit, not
-		// the "dev" placeholder that shipped before. Canonical form:
-		// "crier-mcp v<version>-<commit>[-dirty]".
+		// DF-CRIER-127/171: the printed identity must carry a real commit,
+		// not the "dev" placeholder that shipped before. Canonical forms:
+		//
+		//	crier-mcp v<version>-<commit>[-dirty]   a version was stamped
+		//	crier-mcp dev-<commit>[-dirty]          nothing stamped — the
+		//	    sentinel is rendered BARE, never glued to a "v" ("vdev-…")
 		identity := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "crier-mcp"))
+		if strings.Contains(identity, "v"+buildinfo.DefaultVersion) {
+			t.Fatalf("--version identity %q glues the version prefix onto the %q sentinel (want %q)", identity, buildinfo.DefaultVersion, "dev-<commit>[-dirty]")
+		}
 		match := mcpIdentityRE.FindStringSubmatch(identity)
 		if match == nil {
-			t.Fatalf("--version identity %q is not the canonical form %q", identity, "v<version>-<commit>[-dirty]")
+			t.Fatalf("--version identity %q is neither canonical form: %q or %q", identity, "v<version>-<commit>[-dirty]", "dev-<commit>[-dirty]")
 		}
 		commit := match[1]
 		switch {
@@ -273,8 +280,11 @@ func TestMCPServerCLIFlags(t *testing.T) {
 
 // mcpIdentityRE matches the canonical identity printed by -version: a version
 // segment (which may itself contain dashes, e.g. a git-describe string) and a
-// shortened commit, with the optional dirty marker.
-var mcpIdentityRE = regexp.MustCompile(`^v.+?-([0-9a-f]{8})(-dirty)?$`)
+// shortened commit, with the optional dirty marker. An unstamped build renders
+// the DefaultVersion sentinel BARE ("dev-<commit>") rather than gluing the
+// version prefix onto it — DF-CRIER-171, enforced explicitly at the call site
+// too, since `v.+?` alone would accept "vdev-<commit>".
+var mcpIdentityRE = regexp.MustCompile(`^(?:v.+|dev)-([0-9a-f]{8})(-dirty)?$`)
 
 // ---- resolveBridgeToken (DF-CRIER-195) -------------------------------------
 //

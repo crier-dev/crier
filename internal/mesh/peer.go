@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crier-dev/crier/internal/buildinfo"
 )
 
 type Mesh struct {
@@ -207,7 +209,10 @@ func (m *Mesh) register(ctx context.Context, conn *PeerConnection) error {
 		LeaseID:    "",
 		LeaseTTLMs: 3600000,
 		Capabilities: Capabilities{
-			Version:               "0.1.0",
+			// The build identity, not a literal (DF-CRIER-171): the mesh
+			// REGISTER is another place where one checkout introduces
+			// itself, and the MCP bridge sends the same segment.
+			Version:               buildinfo.VersionSegment(),
 			MaxConcurrentSessions: 10,
 		},
 	}

@@ -15,14 +15,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
 const (
 	protocolVersion = "2024-11-05"
 	serverName      = "crier-mcp"
-	serverVersion   = "0.1.0"
 )
+
+// serverVersion is the version the MCP handshake advertises as
+// serverInfo.version, and the version the startup line logs. It is the version
+// segment of the ONE build identity (internal/buildinfo), never a literal: the
+// handshake used to answer a hardcoded "0.1.0" while `crier-mcp --version`
+// printed the real stamped identity, so the same binary introduced itself two
+// different ways (DF-CRIER-171). The MCP catalogue convention for
+// serverInfo.version is a bare version with no commit suffix, which is exactly
+// the segment buildinfo.String() carries between its leading "v" and the
+// commit — so the two surfaces are slices of one format, not two formats.
+func serverVersion() string { return buildinfo.VersionSegment() }
 
 // MCPServer reads JSON-RPC from stdin and writes to stdout.
 // It is a thin wrapper around a registry.Store, plus the bridge layer that
@@ -115,7 +126,7 @@ func (s *MCPServer) Serve(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	slog.Info("crier-mcp starting", "version", serverVersion, "transport", "stdio")
+	slog.Info("crier-mcp starting", "version", serverVersion(), "transport", "stdio")
 
 	if s.bridge != nil {
 		go s.bridge.connectWithRetry(5, 2*time.Second)
@@ -179,7 +190,7 @@ func (s *MCPServer) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 			ProtocolVersion: protocolVersion,
 			ServerInfo: serverInfo{
 				Name:    serverName,
-				Version: serverVersion,
+				Version: serverVersion(),
 			},
 			Capabilities: serverCapabilities{
 				Tools: toolsCapability{},

@@ -149,9 +149,30 @@ commit, because `internal/buildinfo` falls back to the VCS metadata the Go
 toolchain embeds. Ask a binary or a running server what it is:
 
 ```bash
-./bin/crier -version          # crier v1.2.3-1a2b3c4d
+./bin/crier -version          # crier v1.2.3-1a2b3c4d   (TAGGED build: tag v1.2.3 at commit 1a2b3c4d)
 curl -s localhost:8767/version # {"version":"1.2.3","commit":"1a2b3c4d",...}
 ```
+
+The `v1.2.3-1a2b3c4d` line is what a TAGGED build prints, so it is not what a
+fresh untagged clone shows. One source (`internal/buildinfo`) and one format
+(`v<version>-<commit>[-dirty]`, the `v` glued on only for a real stamped
+version) produce these, and no artifact of one checkout can report a different
+identity — all 4 build paths that compile a crier binary (`make build`,
+`make build-mcp`, `Dockerfile`, `Dockerfile.mcp`) stamp it, and a
+`make docs-check` claim fails if one of them stops:
+
+| Build | `-version` prints | Version segment comes from |
+|-------|-------------------|----------------------------|
+| `make build`, tagged commit | `crier v1.2.3-1a2b3c4d` | the tag, via `git describe --tags` |
+| `make build`, untagged checkout | `crier v740ec81-dirty-740ec816` | `git describe --always --dirty`: the short commit, `-dirty` when the tree had uncommitted changes |
+| bare `go build -o bin/crier ./cmd/server` | `crier dev-740ec816-dirty` | nothing stamped, so the version segment is the `dev` sentinel — rendered bare, never `vdev` — and the commit comes from the Go toolchain's VCS metadata |
+| `docker build .` / `make docker-build` | `crier v740ec81-dirty-740ec816` | the image build derives the same `git describe` values and stamps them; `--build-arg VERSION=… COMMIT=… BUILD_TIME=…` overrides |
+
+The MCP server carries no identity of its own either: `crier-mcp --version`
+prints the full identity, and its `initialize` result answers
+`serverInfo.version` with the version segment of that same identity (never a
+literal version), so a client and the CLI can never disagree about which build
+is running.
 
 Override the version with `make build VERSION=1.2.3`; `make build` with no
 override uses `git describe`.

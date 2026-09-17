@@ -708,11 +708,124 @@ func liveCount(repoRoot, claimID string) (any, error) {
 			return nil, fmt.Errorf("Makefile no longer carries the 70.0%% coverage threshold")
 		}
 		return 70, nil
+	case "COUNT-BUILD-PATHS-STAMPED":
+		return countStampedBuildPaths(repoRoot)
 	case "COUNT-MCP-TOOLS":
 		return countMCPTools()
 	default:
 		return nil, fmt.Errorf("no live count probe for claim %q", claimID)
 	}
+}
+
+// countStampedBuildPaths re-measures the DF-CRIER-171 build-identity claim from
+// source: every shipped build path (Makefile, Dockerfile, Dockerfile.mcp) that
+// runs `go build` for a crier binary must stamp internal/buildinfo, so no
+// artifact of one checkout can report a different identity. It returns how many
+// such invocations are stamped and FAILS when one is not — the defect the claim
+// exists for: Dockerfile built with `-ldflags "-s -w"` alone, so the reference
+// image's /version answered the "dev" sentinel and named no commit.
+//
+// No Docker required: this reads the recipe text. A Makefile recipe stamps
+// through its CRIER_LDFLAGS variable, so `$(VAR)` references are resolved
+// against the file's own variable definitions before the stamp is looked for.
+func countStampedBuildPaths(repoRoot string) (any, error) {
+	const stamp = "internal/buildinfo.Version="
+	binaries := []string{"./cmd/server", "./cmd/crier-mcp"}
+
+	total := 0
+	for _, name := range []string{"Makefile", "Dockerfile", "Dockerfile.mcp"} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, name))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		text := string(raw)
+
+		vars := map[string]string{}
+		if name == "Makefile" {
+			for _, line := range strings.Split(text, "\n") {
+				if m := makeAssignmentRE.FindStringSubmatch(line); m != nil {
+					vars[m[1]] = m[2]
+				}
+			}
+		}
+
+		for _, line := range logicalShellLines(text) {
+			if !strings.Contains(line, "go build") {
+				continue
+			}
+			producesBinary := false
+			for _, b := range binaries {
+				if strings.Contains(line, b) {
+					producesBinary = true
+				}
+			}
+			if !producesBinary {
+				continue
+			}
+			total++
+
+			if !strings.Contains(expandMakeVars(line, vars), stamp) {
+				return nil, fmt.Errorf("%s: `go build` produces a crier binary without stamping the build identity (want %s): %s",
+					name, stamp, strings.TrimSpace(line))
+			}
+		}
+	}
+	if total == 0 {
+		return nil, fmt.Errorf("no `go build` invocation for a crier binary found in Makefile/Dockerfile/Dockerfile.mcp — the scanner measured nothing")
+	}
+	return total, nil
+}
+
+var (
+	// makeAssignmentRE matches a Makefile variable assignment
+	// (VAR = / ?= / += / :=), which recipes reference as `$(VAR)`.
+	makeAssignmentRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*[:+?]?=\s*(.*)$`)
+	// makeVarRefRE matches a `$(VAR)` reference in a recipe line.
+	makeVarRefRE = regexp.MustCompile(`\$\(([A-Za-z_][A-Za-z0-9_]*)\)`)
+)
+
+// expandMakeVars resolves `$(VAR)` references against the file's own
+// assignments. It repeats, because one variable is defined in terms of another
+// (CRIER_LDFLAGS -> BUILDINFO_PKG -> the module path); a reference to a
+// variable the file does not define (a make builtin such as `$(shell …)`) is
+// left as written, so an unresolved stamp cannot pass by accident.
+func expandMakeVars(line string, vars map[string]string) string {
+	for i := 0; i < 5; i++ {
+		next := line
+		for _, ref := range makeVarRefRE.FindAllStringSubmatch(next, -1) {
+			if v, ok := vars[ref[1]]; ok {
+				next = strings.ReplaceAll(next, ref[0], v)
+			}
+		}
+		if next == line {
+			break
+		}
+		line = next
+	}
+	return line
+}
+
+// logicalShellLines joins backslash continuations so a multi-line Dockerfile
+// RUN reads as the single command the shell will execute — the stamping flags
+// live on a continuation line.
+func logicalShellLines(text string) []string {
+	var out []string
+	var cur strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimRight(line, "\r")
+		if cut := strings.TrimRight(trimmed, " 	"); strings.HasSuffix(cut, `\`) {
+			cur.WriteString(strings.TrimSuffix(cut, `\`))
+			cur.WriteString(" ")
+			continue
+		}
+		cur.WriteString(trimmed)
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 // countMCPTools measures the MCP tool count the way a real MCP client sees it: a
@@ -1627,4 +1740,65 @@ func (c countingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		next = http.DefaultTransport
 	}
 	return next.RoundTrip(req)
+}
+
+// TestCountStampedBuildPathsNegativeControl proves the DF-CRIER-171 build-path
+// claim's probe is alive, on the same files the real claim reads: a copy of the
+// Makefile + both Dockerfiles measures 4 stamped build paths; dropping the
+// stamp from one file (the pre-fix Dockerfile, which built with `-ldflags
+// "-s -w"` alone) must FAIL naming that file; and a scan that finds no `go
+// build` at all must fail as vacuous rather than report 0 successes.
+func TestCountStampedBuildPathsNegativeControl(t *testing.T) {
+	repoRoot := resolveRepoRoot(t)
+	files := []string{"Makefile", "Dockerfile", "Dockerfile.mcp"}
+
+	stage := func(t *testing.T, transform func(name, text string) string) string {
+		t.Helper()
+		dir := t.TempDir()
+		for _, name := range files {
+			raw, err := os.ReadFile(filepath.Join(repoRoot, name))
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(transform(name, string(raw))), 0o644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+		return dir
+	}
+
+	t.Run("healthy tree measures every build path", func(t *testing.T) {
+		dir := stage(t, func(_, text string) string { return text })
+		got, err := countStampedBuildPaths(dir)
+		if err != nil {
+			t.Fatalf("healthy copy: %v", err)
+		}
+		if n, ok := got.(int); !ok || n != 4 {
+			t.Errorf("healthy copy measured %v, want 4 stamped build paths", got)
+		}
+	})
+
+	t.Run("unstamped dockerfile fails", func(t *testing.T) {
+		// The pre-fix Dockerfile: no buildinfo stamp at all.
+		dir := stage(t, func(name, text string) string {
+			if name == "Dockerfile" {
+				return strings.ReplaceAll(text, "internal/buildinfo.Version=", "internal/buildinfo.NOT_STAMPED=")
+			}
+			return text
+		})
+		if _, err := countStampedBuildPaths(dir); err == nil {
+			t.Error("probe passed a Dockerfile that stamps nothing — the DF-CRIER-171 gate is dead")
+		} else if !strings.Contains(err.Error(), "Dockerfile") {
+			t.Errorf("probe error does not name the unstamped file: %v", err)
+		}
+	})
+
+	t.Run("no build path at all fails as vacuous", func(t *testing.T) {
+		dir := stage(t, func(_, text string) string {
+			return strings.ReplaceAll(text, "go build", "go-build")
+		})
+		if _, err := countStampedBuildPaths(dir); err == nil {
+			t.Error("probe reported success with no build path found — a vacuous 0 is not evidence")
+		}
+	})
 }

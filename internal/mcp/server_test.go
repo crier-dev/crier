@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -615,8 +616,11 @@ func TestInitialize(t *testing.T) {
 	if result.ServerInfo.Name != "crier-mcp" {
 		t.Errorf("expected server name crier-mcp, got %s", result.ServerInfo.Name)
 	}
-	if result.ServerInfo.Version != "0.1.0" {
-		t.Errorf("expected version 0.1.0, got %s", result.ServerInfo.Version)
+	// DF-CRIER-171: the handshake advertises the build identity, not a
+	// hardcoded literal — TestInitializeAdvertisesBuildinfoVersion is the
+	// regression proof, this pins the value the same way.
+	if want := buildinfo.VersionSegment(); result.ServerInfo.Version != want {
+		t.Errorf("expected version %s, got %s", want, result.ServerInfo.Version)
 	}
 	if result.ProtocolVersion != "2024-11-05" {
 		t.Errorf("expected protocol 2024-11-05, got %s", result.ProtocolVersion)

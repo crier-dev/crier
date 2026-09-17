@@ -940,8 +940,14 @@ func TestServerVersionCLIFlags(t *testing.T) {
 			t.Fatalf("-version exited with error: %v\n%s", err, out)
 		}
 		identity := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "crier"))
-		if !strings.HasPrefix(identity, "v") {
-			t.Fatalf("-version output %q is not the canonical identity (want %q)", out, "crier v<version>-<commit>")
+		// DF-CRIER-171: an unstamped build renders the version sentinel BARE
+		// ("dev-<commit>"), never glued to a "v" ("vdev-<commit>"). A stamped
+		// version keeps its prefix ("v9.9.9-<commit>").
+		if strings.Contains(identity, "v"+buildinfo.DefaultVersion) {
+			t.Fatalf("-version output %q glues the version prefix onto the %q sentinel (want %q)", out, buildinfo.DefaultVersion, "dev-<commit>[-dirty]")
+		}
+		if !strings.HasPrefix(identity, "v") && !strings.HasPrefix(identity, buildinfo.DefaultVersion+"-") {
+			t.Fatalf("-version output %q is neither canonical form: %q or %q", out, "crier v<version>-<commit>", "crier dev-<commit>")
 		}
 		if identity == "v"+buildinfo.DefaultVersion {
 			t.Fatalf("-version printed %q — the placeholder version with no commit (DF-CRIER-127)", strings.TrimSpace(string(out)))

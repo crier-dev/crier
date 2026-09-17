@@ -262,6 +262,20 @@ claims:
     quote: "70% gate"
     expect: 70
     xfail: null
+  # DF-CRIER-171: the README's build-identity section promises that every build
+  # path stamps the one identity. The probe re-measures it from source: it scans
+  # the shipped build paths (Makefile, Dockerfile, Dockerfile.mcp) for `go build`
+  # invocations that produce a crier binary, counts the stamped ones, and FAILS
+  # when one of them does not stamp internal/buildinfo — the exact defect the
+  # claim exists for (the reference image shipped with `-ldflags "-s -w"` only, so
+  # its /version answered the "dev" sentinel and named no commit). Run without
+  # Docker: it reads the files, it does not build images.
+  - id: COUNT-BUILD-PATHS-STAMPED
+    kind: count
+    doc: README.md
+    quote: "4 build paths that compile a crier binary"
+    expect: 4
+    xfail: null
 
   # --- xfail claims (CR-GAP-062): prose that is FALSE at HEAD, pinned to the board
   # row that will fix it. The anchor is still load-bearing; the assertion is

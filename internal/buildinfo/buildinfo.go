@@ -15,7 +15,10 @@
 //
 // Both binaries (cmd/server, cmd/crier-mcp) and the server's GET /version
 // route read their identity from here, so crier has exactly one build
-// identity and one identity format.
+// identity and one identity format. The MCP handshake advertises nothing of
+// its own either: internal/mcp serves VersionSegment() (the version half of
+// the identity) as serverInfo.version, so an MCP client and `crier-mcp
+// --version` can never disagree (DF-CRIER-171).
 package buildinfo
 
 import (
@@ -129,12 +132,19 @@ func Resolve() Info {
 //
 //	v<version>-<commit>            e.g. v1.2.3-1a2b3c4d
 //	v<version>-<commit>-dirty      working tree had uncommitted changes
-//	vdev-1a2b3c4d                  no version stamped, commit known
-//	vdev                           nothing stamped, no VCS metadata
+//	dev-<commit>                   no version stamped, commit known (dev-1a2b3c4d)
+//	dev                            nothing stamped, no VCS metadata
+//	dev-dirty                      nothing stamped, no VCS metadata, dirty tree
 //
 // The version segment keeps a single leading "v" even when the injected
 // version already carried the git-describe "-dirty" suffix, so a describe
 // string and the vcs.modified flag never produce "-dirty-dirty".
+//
+// The leading "v" is glued on only for a real stamped version. The
+// DefaultVersion sentinel is rendered bare, because "vdev" is not a version —
+// it reads as a release named "dev" and hides the commit that actually
+// identifies the build (DF-CRIER-171: `go build -o bin/crier ./cmd/server`
+// printed "crier vdev-740ec816-dirty").
 func String() string { return Resolve().String() }
 
 // String returns the canonical one-line identity (see the package-level
@@ -142,7 +152,7 @@ func String() string { return Resolve().String() }
 func (i Info) String() string {
 	version := strings.TrimPrefix(i.Version, "v")
 	versionDirty := strings.HasSuffix(version, "-dirty")
-	out := "v" + version
+	out := prefixedVersion(version)
 	if i.Commit != "" && i.Commit != DefaultCommit {
 		out += "-" + i.Commit
 	}
@@ -151,6 +161,29 @@ func (i Info) String() string {
 	}
 	return out
 }
+
+// prefixedVersion renders the version segment of the identity. A real stamped
+// version keeps its single leading "v" ("1.2.3" -> "v1.2.3"); the
+// DefaultVersion sentinel is rendered bare, because "vdev" is not a version —
+// gluing a prefix onto a placeholder made a bare `go build` print
+// "crier vdev-740ec816-dirty" instead of naming the commit (DF-CRIER-171).
+func prefixedVersion(version string) string {
+	if version == DefaultVersion {
+		return version
+	}
+	return "v" + version
+}
+
+// VersionSegment returns the bare version segment of the identity — the
+// stamped version with its leading "v" trimmed, or DefaultVersion when nothing
+// was stamped. It exists for a surface that must advertise a version and
+// nothing else, with no room for the commit suffix String() appends: the MCP
+// initialize result's serverInfo.version (DF-CRIER-171, whose catalogue
+// convention for that field is a bare version). Callers must NOT concatenate a
+// second identity out of Version and Commit — the segment is a slice of the
+// one canonical format, so `crier-mcp --version` and the handshake stay
+// derivable from each other by construction.
+func VersionSegment() string { return Resolve().Version }
 
 // Shorten trims a git revision to the commitLen characters an identity
 // carries. Values already short enough, empty, or not a hex revision (an

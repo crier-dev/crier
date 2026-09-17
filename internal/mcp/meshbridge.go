@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/mesh"
 )
 
@@ -145,7 +146,11 @@ func (b *meshBridge) ensureConnected() error {
 		LeaseID:    "",
 		LeaseTTLMs: 3600000,
 		Capabilities: mesh.Capabilities{
-			Version:               "0.1.0",
+			// The bridge identifies itself with the same build identity the
+			// rest of crier serves (DF-CRIER-171): a hardcoded literal here
+			// would be one more place where one checkout introduces itself
+			// as a different build.
+			Version:               buildinfo.VersionSegment(),
 			Topics:                []string{},
 			MaxConcurrentSessions: 4,
 		},

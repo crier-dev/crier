@@ -3,6 +3,7 @@ package buildinfo
 import (
 	"encoding/json"
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -72,12 +73,15 @@ func TestResolveFallsBackToVCS(t *testing.T) {
 		t.Error("Modified = true, want false (vcs.modified=false)")
 	}
 
-	want := "vdev-" + shortPrefix
+	want := "dev-" + shortPrefix
 	if got.String() != want {
 		t.Errorf("String() = %q, want %q", got.String(), want)
 	}
 	if String() != want {
 		t.Errorf("package String() = %q, want %q", String(), want)
+	}
+	if strings.Contains(got.String(), "vdev") {
+		t.Errorf("String() = %q carries the sentinel glued to a \"v\" — the commit segment is the identity in an unstamped build (DF-CRIER-171)", got.String())
 	}
 }
 
@@ -149,9 +153,9 @@ func TestResolveWithoutBuildInfoReturnsSentinels(t *testing.T) {
 			if got.BuildTime != DefaultBuildTime {
 				t.Errorf("BuildTime = %q, want %q", got.BuildTime, DefaultBuildTime)
 			}
-			// No commit segment when there is no commit: "vdev", not
-			// "vdev-unknown".
-			if want := "v" + DefaultVersion; got.String() != want {
+			// No commit segment when there is no commit: "dev", not
+			// "dev-unknown" — and no "v" glued to the sentinel.
+			if want := DefaultVersion; got.String() != want {
 				t.Errorf("String() = %q, want %q", got.String(), want)
 			}
 		})
@@ -173,7 +177,7 @@ func TestResolveIgnoresModulePseudoVersion(t *testing.T) {
 	if got.Version != DefaultVersion {
 		t.Errorf("Version = %q, want %q (Main.Version must not leak in)", got.Version, DefaultVersion)
 	}
-	if want := "vdev-" + shortPrefix + "-dirty"; got.String() != want {
+	if want := "dev-" + shortPrefix + "-dirty"; got.String() != want {
 		t.Errorf("String() = %q, want %q", got.String(), want)
 	}
 
@@ -213,15 +217,105 @@ func TestStringCanonicalFormat(t *testing.T) {
 	}{
 		{name: "tagged release", info: Info{Version: "1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
 		{name: "dirty release", info: Info{Version: "1.2.3", Commit: "1a2b3c4d", Modified: true}, want: "v1.2.3-1a2b3c4d-dirty"},
-		{name: "untagged commit", info: Info{Version: "dev", Commit: "1a2b3c4d"}, want: "vdev-1a2b3c4d"},
-		{name: "no version no commit", info: Info{Version: "dev", Commit: "unknown"}, want: "vdev"},
-		{name: "no version dirty", info: Info{Version: "dev", Commit: "unknown", Modified: true}, want: "vdev-dirty"},
+		{name: "untagged commit", info: Info{Version: "dev", Commit: "1a2b3c4d"}, want: "dev-1a2b3c4d"},
+		{name: "no version no commit", info: Info{Version: "dev", Commit: "unknown"}, want: "dev"},
+		{name: "no version dirty", info: Info{Version: "dev", Commit: "unknown", Modified: true}, want: "dev-dirty"},
 		{name: "describe string with dirty", info: Info{Version: "e9eb006-dirty", Commit: "1a2b3c4d"}, want: "ve9eb006-dirty-1a2b3c4d"},
 		{name: "version already prefixed", info: Info{Version: "v1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.info.String(); got != tc.want {
 				t.Errorf("String() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStringSentinelNeverGluesV is the DF-CRIER-171 format clause: the "v"
+// prefix belongs to a real stamped version. The DefaultVersion sentinel is
+// rendered bare, so no identity an unstamped build prints can read "vdev" —
+// the send-off form ("dev-<commit>") names the commit, and the only zero-commit
+// form is the bare "dev" / "dev-dirty" pair.
+func TestStringSentinelNeverGluesV(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		info Info
+		want string
+	}{
+		{name: "sentinel with commit", info: Info{Version: DefaultVersion, Commit: "1a2b3c4d"}, want: "dev-1a2b3c4d"},
+		{name: "sentinel with commit, dirty tree", info: Info{Version: DefaultVersion, Commit: "1a2b3c4d", Modified: true}, want: "dev-1a2b3c4d-dirty"},
+		{name: "sentinel with sentinel commit", info: Info{Version: DefaultVersion, Commit: DefaultCommit}, want: "dev"},
+		{name: "sentinel with sentinel commit, dirty tree", info: Info{Version: DefaultVersion, Commit: DefaultCommit, Modified: true}, want: "dev-dirty"},
+		// A sentinel stamped WITH a leading "v" (an operator passing
+		// VERSION=vdev, say) is normalised to the same bare form.
+		{name: "sentinel stamped with a v", info: Info{Version: "v" + DefaultVersion, Commit: "1a2b3c4d"}, want: "dev-1a2b3c4d"},
+		// Real versions are untouched: the prefix still belongs to them.
+		{name: "tagged", info: Info{Version: "1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
+		{name: "describe string", info: Info{Version: "740ec81-dirty", Commit: "740ec816"}, want: "v740ec81-dirty-740ec816"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.info.String()
+			if got != tc.want {
+				t.Errorf("String() = %q, want %q", got, tc.want)
+			}
+			if strings.Contains(got, "vdev") {
+				t.Errorf("String() = %q contains \"vdev\" — the sentinel must never carry the version prefix (DF-CRIER-171)", got)
+			}
+		})
+	}
+}
+
+// TestBareBuildIdentityIsCommitBearing is the acceptance proof for the bare
+// `go build` artifact: no ldflags, no version — the identity the binary prints
+// must still name the commit the Go toolchain recorded for a checkout
+// (vcs.revision) and must not glue a "v" onto the sentinel. Measured at HEAD
+// before the fix: `go build -o /tmp/bare ./cmd/server && /tmp/bare -version`
+// -> "crier vdev-740ec816-dirty".
+func TestBareBuildIdentityIsCommitBearing(t *testing.T) {
+	stubVars(t, DefaultVersion, DefaultCommit, DefaultBuildTime)
+	stubBuildInfo(t, vcsBuildInfo(fullRevision, commitTime, true), true)
+
+	got := String()
+	if !strings.Contains(got, shortPrefix) {
+		t.Errorf("bare-build identity %q does not name the commit %q", got, shortPrefix)
+	}
+	if strings.Contains(got, "vdev") {
+		t.Errorf("bare-build identity %q contains \"vdev\"", got)
+	}
+	if want := "dev-" + shortPrefix + "-dirty"; got != want {
+		t.Errorf("bare-build identity = %q, want %q", got, want)
+	}
+}
+
+// TestVersionSegment pins the accessor the MCP handshake serves as
+// serverInfo.version (DF-CRIER-171): the version half of the one identity,
+// bare, so it is a slice of buildinfo.String() rather than a second format.
+func TestVersionSegment(t *testing.T) {
+	// readBuildInfo is stubbed out so the version can only come from the
+	// linker-injected variables.
+	stubBuildInfo(t, nil, false)
+
+	for _, tc := range []struct {
+		name            string
+		version, commit string
+		want            string
+	}{
+		{name: "stamped version", version: "1.2.3", commit: "1a2b3c4d", want: "1.2.3"},
+		{name: "stamped version with v", version: "v1.2.3", commit: "1a2b3c4d", want: "1.2.3"},
+		{name: "describe string", version: "740ec81-dirty", commit: "740ec816", want: "740ec81-dirty"},
+		{name: "sentinel", version: DefaultVersion, commit: "1a2b3c4d", want: DefaultVersion},
+		{name: "empty stamp", version: "", commit: "", want: DefaultVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubVars(t, tc.version, tc.commit, DefaultBuildTime)
+			if got := VersionSegment(); got != tc.want {
+				t.Errorf("VersionSegment() = %q, want %q", got, tc.want)
+			}
+			// The segment must appear verbatim inside the canonical
+			// identity — that is what makes the two surfaces derivable
+			// from one another.
+			if identity := String(); !strings.Contains(identity, VersionSegment()) {
+				t.Errorf("identity %q does not carry the version segment %q", identity, VersionSegment())
 			}
 		})
 	}

@@ -73,8 +73,8 @@ clean:
 	rm -rf bin/
 
 docker-build:
-	docker build -t crier:latest .
-	docker build -f Dockerfile.mcp -t crier-mcp:latest .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t crier:latest .
+	docker build -f Dockerfile.mcp --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t crier-mcp:latest .
 
 coverage:
 	go test -short -count=1 -coverprofile=coverage.out ./...
