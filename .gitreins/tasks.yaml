@@ -1133,3 +1133,17 @@ tasks:
   status: complete
   created_at: '2026-09-17T16:40:42.080485+00:00'
   completed_at: '2026-09-17T16:51:42.747545+00:00'
+- id: DF-CRIER-150
+  title: 'webhook registration: refuse unknown keys + document push delivery'
+  criteria:
+  - POST /agents and PATCH /agents/{id} answer 400 naming the unknown webhook key
+    and the accepted keys, so a misnamed 'mode' can no longer silently degrade to
+    async
+  - docs/integration-guide.md documents webhook registration, blocking/async/batch
+    wire contracts and the per-message delivery_mode override, matching live-probed
+    behavior
+  - go build ./..., go vet ./..., go test ./... -count=1 and make docs-check are green
+    with the new tests
+  status: complete
+  created_at: '2026-09-17T17:10:49.007748+00:00'
+  completed_at: '2026-09-17T17:36:26.925244+00:00'
