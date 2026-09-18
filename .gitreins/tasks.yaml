@@ -1431,3 +1431,17 @@ tasks:
   status: complete
   created_at: '2026-09-18T06:17:40.682146+00:00'
   completed_at: '2026-09-18T06:26:48.885440+00:00'
+- id: int-ci-001-transport-retry
+  title: 'INT-CI-001: retry + classify the bunker deploy transport leg'
+  criteria:
+  - A transient ssh/scp transport reset on the bunker deploy leg is retried with a
+    bounded backoff (TRANSPORT_RETRIES default 3) and the cell either completes or
+    fails with a NAMED transport-vs-non-transport verdict naming the attempt budget;
+    a non-transport deploy failure is NOT retried (exactly one attempt); the harness
+    still fails closed when the budget is exhausted; scripts/lib/transport-retry.sh
+    --selftest proves all of it deterministically with PATH shims plus a NEUTER proof,
+    make transport-retry-selftest runs it in CI next to port-guard-selftest, and bash
+    -n / shell-yaml-check / gofmt-check / make test / gitreins guard stay green.
+  status: complete
+  created_at: '2026-09-18T06:41:52.899120+00:00'
+  completed_at: '2026-09-18T07:00:34.417350+00:00'
