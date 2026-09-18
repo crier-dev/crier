@@ -54,3 +54,4 @@
 
 2026-09-16 | PROMISING-BUT-ROUGH | 12s t2fs | friction 10 | 5 findings
 
+2026-09-18 | PROMISING-BUT-ROUGH | ~90s t2fs (build 1.3s + health + register) | friction 5 | 4 findings (DOGFOOD-RELAY-1/4, DOGFOOD-MESH-2/3) — real-use relay+mesh+MCP run; bunker install 66s, smoke ok, agent destroyed
