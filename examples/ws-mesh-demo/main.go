@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -66,7 +67,11 @@ Commands:
              KEEPALIVE frames arriving on the same socket are ignored. Prints
              "ROUNDTRIP OK request_id=… status_code=… response_message_id=…
              keepalives_ignored=…" and exits 0 only when the reply correlated
-             and carried the expected status code.
+             and carried the expected status code — plus, with
+             -require-keepalive-before-reply, only when a KEEPALIVE was ignored
+             while that reply was pending. The wait for the RESPONSE has two
+             bounds: -timeout (a wall-clock hang guard) and -max-keepalives (a
+             progress bound that advances only while the server keeps ticking).
 
 Flags:
   -url   server base URL (default %s)
@@ -356,8 +361,10 @@ func cmdPeer(wsBase string, args []string) int {
 //
 // Exit status is the whole assertion the shell driver needs: 0 only when a
 // RESPONSE correlated with the REQUEST's message_id and carried
-// -expect-status, and — when -keepalive-wait is set — only after at least one
-// live KEEPALIVE frame arrived on the same socket and was ignored.
+// -expect-status; — when -require-keepalive-before-reply is set — only when at
+// least one KEEPALIVE frame was ignored while that RESPONSE was pending; and —
+// when -keepalive-wait is set — only after one further live KEEPALIVE frame
+// arrived on the same socket and was ignored.
 func cmdRoundtrip(wsBase string, args []string) int {
 	fs := flag.NewFlagSet("roundtrip", flag.ExitOnError)
 	agent := fs.String("agent", "", "agent ID to connect as (required)")
@@ -366,11 +373,15 @@ func cmdRoundtrip(wsBase string, args []string) int {
 	path := fs.String("path", "/ping", "REQUEST path (the target's own application route)")
 	body := fs.String("body", "", "raw JSON body for the REQUEST, e.g. '{\"hello\":\"world\"}' (empty omits the field)")
 	expectStatus := fs.Int("expect-status", 200, "status_code the RESPONSE must carry")
-	timeout := fs.Duration("timeout", 15*time.Second, "how long to wait for the RESPONSE")
+	timeout := fs.Duration("timeout", 15*time.Second, "how long to wait for the RESPONSE (a hang guard, not a pass condition: the reply is correlated by request_id, so a wrong frame is rejected at once instead of at this bound)")
+	maxKeepalives := fs.Int("max-keepalives", 0,
+		"give up on the RESPONSE after this many KEEPALIVE frames have been ignored (0 = no progress bound; -timeout still bounds the wait). The server ticks a KEEPALIVE every keepalive_interval_ms while it is alive, so this bound advances with real progress instead of with the clock")
+	requireKeepalive := fs.Bool("require-keepalive-before-reply", false,
+		"exit 0 only if at least one KEEPALIVE frame was ignored while the RESPONSE was pending — proves the reply was correlated out of an interleaved stream rather than being the only frame on the socket")
 	keepaliveWait := fs.Duration("keepalive-wait", 0,
 		"after the RESPONSE, hold the socket up to this long for at least one live KEEPALIVE frame (0 = return as soon as the RESPONSE is correlated; KEEPALIVE frames are ignored either way)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: ws-mesh-demo roundtrip -agent AGENT -target AGENT [-method M -path P -body JSON -expect-status N -timeout D -keepalive-wait D]\n")
+		fmt.Fprintf(os.Stderr, "Usage: ws-mesh-demo roundtrip -agent AGENT -target AGENT [-method M -path P -body JSON -expect-status N -timeout D -max-keepalives N -require-keepalive-before-reply -keepalive-wait D]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(args)
@@ -437,56 +448,14 @@ func cmdRoundtrip(wsBase string, args []string) int {
 	// any other frame that is not our reply) must be ignored, and the reply is
 	// the one whose request_id is this REQUEST's message_id — not simply the
 	// next frame that arrives.
-	keepalives := 0
-	if err := conn.SetReadDeadline(time.Now().Add(*timeout)); err != nil {
-		log.Printf("roundtrip: set read deadline: %v", err)
+	resp, keepalives, err := awaitReply(conn, os.Stdout, req.MessageID, awaitLimits{
+		Budget:           *timeout,
+		MaxKeepalives:    *maxKeepalives,
+		RequireKeepalive: *requireKeepalive,
+	})
+	if err != nil {
+		fmt.Printf("ROUNDTRIP FAIL %v\n", err)
 		return 1
-	}
-	var resp mesh.Response
-	for {
-		_, frame, err := conn.ReadMessage()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				fmt.Printf("ROUNDTRIP FAIL no RESPONSE for message_id=%s within %s (keepalives_ignored=%d)\n",
-					req.MessageID, *timeout, keepalives)
-				return 1
-			}
-			fmt.Printf("ROUNDTRIP FAIL read: %v (keepalives_ignored=%d)\n", err, keepalives)
-			return 1
-		}
-
-		var env lightEnvelope
-		if err := json.Unmarshal(frame, &env); err != nil {
-			fmt.Printf("FRAME IGNORED unparseable (%d bytes)\n", len(frame))
-			continue
-		}
-		if classifyInbound(env.Type, env.RequestID, req.MessageID) == frameIgnore {
-			if env.Type == mesh.TypeKeepalive {
-				keepalives++
-				fmt.Printf("KEEPALIVE IGNORED message_id=%s (awaiting RESPONSE request_id=%s)\n",
-					env.MessageID, req.MessageID)
-			} else {
-				fmt.Printf("FRAME IGNORED type=%s message_id=%s request_id=%s (awaiting %s)\n",
-					env.Type, env.MessageID, env.RequestID, req.MessageID)
-			}
-			continue
-		}
-
-		if env.Type == mesh.TypeError {
-			var errMsg mesh.ErrorMessage
-			if err := json.Unmarshal(frame, &errMsg); err != nil {
-				fmt.Printf("ROUNDTRIP FAIL uncodable ERROR frame: %v\n", err)
-				return 1
-			}
-			fmt.Printf("ROUNDTRIP FAIL ERROR RECEIVED request_id=%s code=%s message=%q\n",
-				errMsg.RequestID, errMsg.Error.Code, errMsg.Error.Message)
-			return 1
-		}
-		if err := json.Unmarshal(frame, &resp); err != nil {
-			fmt.Printf("ROUNDTRIP FAIL correlated frame does not decode as a RESPONSE: %v\n", err)
-			return 1
-		}
-		break
 	}
 
 	fmt.Printf("RESPONSE RECEIVED request_id=%s response_message_id=%s status_code=%d body=%s\n",
@@ -515,32 +484,151 @@ func cmdRoundtrip(wsBase string, args []string) int {
 	// server's interval is mesh.DefaultMeshConfig().KeepaliveInterval (30s,
 	// internal/mesh/peer.go) — callers pass a bound larger than that.
 	fmt.Printf("KEEPALIVE WAIT up to %s for one live server KEEPALIVE\n", *keepaliveWait)
-	if err := conn.SetReadDeadline(time.Now().Add(*keepaliveWait)); err != nil {
-		log.Printf("roundtrip: set read deadline: %v", err)
+	keepalives, err = awaitKeepalive(conn, os.Stdout, *keepaliveWait, keepalives)
+	if err != nil {
+		fmt.Printf("ROUNDTRIP FAIL %v\n", err)
 		return 1
+	}
+	fmt.Printf("ROUNDTRIP OK request_id=%s status_code=%d response_message_id=%s keepalives_ignored=%d\n",
+		resp.RequestID, resp.StatusCode, resp.MessageID, keepalives)
+	return 0
+}
+
+// frameConn is the subset of *websocket.Conn the two awaits below need. It is an
+// interface so the correlation loop can be driven by a scripted frame source in
+// tests: the interleaving rule is a property of the loop, not of the socket.
+type frameConn interface {
+	ReadMessage() (messageType int, p []byte, err error)
+	SetReadDeadline(t time.Time) error
+}
+
+// awaitLimits bounds the wait for the correlated RESPONSE. There are TWO
+// independent bounds, and the distinction is the point:
+//
+//   - Budget is a wall-clock HANG GUARD. It is deliberately NOT the pass
+//     condition. A host can stall a process for seconds (measured: under a
+//     concurrent `go test ./...` run the same no-op path that takes ~1s here has
+//     been seen to miss a 5s deadline, DF-CRIER-252), and a stall consumes this
+//     budget without the peer having done anything wrong. It exists only so the
+//     command cannot hang forever.
+//   - MaxKeepalives is a PROGRESS bound (0 = none). The server ticks every
+//     keepalive_interval_ms for as long as it is alive, so a requester that has
+//     ignored that many KEEPALIVE frames without its RESPONSE arriving has
+//     demonstrably moved far past the moment the reply was due. Under host load
+//     the count advances only with real progress, so this bound stretches
+//     exactly when the box is slow — the give-up decision is evidence-based
+//     instead of clock-based.
+type awaitLimits struct {
+	Budget           time.Duration
+	MaxKeepalives    int
+	RequireKeepalive bool
+}
+
+// awaitReply reads frames until the one whose request_id is requestID arrives.
+// Every other frame — KEEPALIVE included — is ignored: "the next frame" is not
+// "the reply" (docs/mesh-protocol.md). It returns the correlated RESPONSE
+// together with the number of KEEPALIVE frames it ignored on the way.
+//
+// With RequireKeepalive set, a correlated RESPONSE that arrives before ANY
+// KEEPALIVE was ignored is an error, not a pass: exit 0 must prove the reply was
+// correlated out of an interleaved stream, not that it happened to be the only
+// frame on the socket.
+//
+// The error text is the body of the caller's `ROUNDTRIP FAIL` line, so it names
+// the frame that failed and the KEEPALIVE count observed so far.
+func awaitReply(conn frameConn, out io.Writer, requestID string, limits awaitLimits) (mesh.Response, int, error) {
+	var resp mesh.Response
+	keepalives := 0
+	started := time.Now()
+	if err := conn.SetReadDeadline(started.Add(limits.Budget)); err != nil {
+		return resp, keepalives, fmt.Errorf("set read deadline: %w", err)
 	}
 	for {
 		_, frame, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Printf("ROUNDTRIP FAIL no KEEPALIVE within %s (keepalives_ignored=%d) — the server sends one every keepalive_interval_ms\n",
-				*keepaliveWait, keepalives)
-			return 1
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return resp, keepalives, fmt.Errorf(
+					"no RESPONSE for message_id=%s within %s (keepalives_ignored=%d)",
+					requestID, limits.Budget, keepalives)
+			}
+			return resp, keepalives, fmt.Errorf("read: %v (keepalives_ignored=%d)", err, keepalives)
+		}
+
+		var env lightEnvelope
+		if err := json.Unmarshal(frame, &env); err != nil {
+			fmt.Fprintf(out, "FRAME IGNORED unparseable (%d bytes)\n", len(frame))
+			continue
+		}
+		if classifyInbound(env.Type, env.RequestID, requestID) == frameIgnore {
+			if env.Type == mesh.TypeKeepalive {
+				keepalives++
+				fmt.Fprintf(out, "KEEPALIVE IGNORED message_id=%s (awaiting RESPONSE request_id=%s)\n",
+					env.MessageID, requestID)
+				if limits.MaxKeepalives > 0 && keepalives >= limits.MaxKeepalives {
+					return resp, keepalives, fmt.Errorf(
+						"no RESPONSE for message_id=%s after %d ignored KEEPALIVE frames in %s (progress bound, not a clock — the peer is demonstrably alive and answering keepalives, so the reply is not coming)",
+						requestID, keepalives, time.Since(started).Round(time.Millisecond))
+				}
+			} else {
+				fmt.Fprintf(out, "FRAME IGNORED type=%s message_id=%s request_id=%s (awaiting %s)\n",
+					env.Type, env.MessageID, env.RequestID, requestID)
+			}
+			continue
+		}
+
+		if env.Type == mesh.TypeError {
+			var errMsg mesh.ErrorMessage
+			if err := json.Unmarshal(frame, &errMsg); err != nil {
+				return resp, keepalives, fmt.Errorf("uncodable ERROR frame: %v", err)
+			}
+			return resp, keepalives, fmt.Errorf("ERROR RECEIVED request_id=%s code=%s message=%q",
+				errMsg.RequestID, errMsg.Error.Code, errMsg.Error.Message)
+		}
+		if err := json.Unmarshal(frame, &resp); err != nil {
+			return resp, keepalives, fmt.Errorf("correlated frame does not decode as a RESPONSE: %v", err)
+		}
+		if limits.RequireKeepalive && keepalives == 0 {
+			return resp, keepalives, fmt.Errorf(
+				"correlated RESPONSE for message_id=%s arrived before any KEEPALIVE was ignored — the interleaved-KEEPALIVE proof needs at least one KEEPALIVE ignored while the RESPONSE was pending, and this run saw none (the reply was the only frame on the socket)",
+				requestID)
+		}
+		return resp, keepalives, nil
+	}
+}
+
+// awaitKeepalive holds the socket open until one live KEEPALIVE frame arrives,
+// bounded by budget (a hang guard, same contract as awaitLimits.Budget). prior is
+// the count of KEEPALIVE frames already ignored while the RESPONSE was pending;
+// the returned count includes it.
+func awaitKeepalive(conn frameConn, out io.Writer, budget time.Duration, prior int) (int, error) {
+	keepalives := prior
+	if err := conn.SetReadDeadline(time.Now().Add(budget)); err != nil {
+		return keepalives, fmt.Errorf("set read deadline: %w", err)
+	}
+	for {
+		_, frame, err := conn.ReadMessage()
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return keepalives, fmt.Errorf(
+					"no KEEPALIVE within %s (keepalives_ignored=%d) — the server sends one every keepalive_interval_ms",
+					budget, keepalives)
+			}
+			return keepalives, fmt.Errorf("read: %v (keepalives_ignored=%d)", err, keepalives)
 		}
 		var env lightEnvelope
 		if err := json.Unmarshal(frame, &env); err != nil {
-			fmt.Printf("FRAME IGNORED unparseable (%d bytes)\n", len(frame))
+			fmt.Fprintf(out, "FRAME IGNORED unparseable (%d bytes)\n", len(frame))
 			continue
 		}
 		if env.Type != mesh.TypeKeepalive {
-			fmt.Printf("FRAME IGNORED type=%s message_id=%s (waiting for KEEPALIVE)\n", env.Type, env.MessageID)
+			fmt.Fprintf(out, "FRAME IGNORED type=%s message_id=%s (waiting for KEEPALIVE)\n",
+				env.Type, env.MessageID)
 			continue
 		}
 		keepalives++
-		fmt.Printf("KEEPALIVE OBSERVED message_id=%s agent_id=%s keepalives_ignored=%d\n",
+		fmt.Fprintf(out, "KEEPALIVE OBSERVED message_id=%s agent_id=%s keepalives_ignored=%d\n",
 			env.MessageID, keepaliveAgentID(frame), keepalives)
-		fmt.Printf("ROUNDTRIP OK request_id=%s status_code=%d response_message_id=%s keepalives_ignored=%d\n",
-			resp.RequestID, resp.StatusCode, resp.MessageID, keepalives)
-		return 0
+		return keepalives, nil
 	}
 }
 

@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -355,15 +361,152 @@ func meshPeerCount(t *testing.T, base, agentID string) bool {
 // keepalive interval far below the responder's answer delay. KEEPALIVE frames
 // therefore reach the requester's socket WHILE its RESPONSE is still pending.
 //
-// The assertion is the client's exit status: cmdRoundtrip writes the frame that
-// satisfied classifyInbound as the reply and exits 0 only when it carried the
-// expected status_code, so an exit of 0 with a delayed responder is only
-// possible if every interleaved KEEPALIVE was ignored. A client that treated
-// the next frame as the answer would decode a KEEPALIVE as a RESPONSE, read
-// status_code 0, and exit 1.
+// The assertion is the client's exit status: cmdRoundtrip exits 0 only when the
+// frame that satisfied classifyInbound carried the expected status_code AND
+// (-require-keepalive-before-reply) at least one KEEPALIVE was ignored while
+// that RESPONSE was pending. A client that treated the next frame as the answer
+// would decode a KEEPALIVE as a RESPONSE, read status_code 0, and exit 1; a run
+// in which no KEEPALIVE interleaved at all cannot go green either.
+//
+// The wait for the RESPONSE is bounded twice (DF-CRIER-252): -timeout is a
+// wall-clock HANG GUARD — a host stall of more than the old 5s was measured
+// here once a full `go test ./...` run puts ~16 test binaries, two of them
+// compiling the tree, on the same box — and -max-keepalives is a PROGRESS
+// bound, which advances only while the server keeps ticking, so it stretches
+// with the host instead of against it. Neither one is the pass condition: a
+// mis-correlated or KEEPALIVE-shaped reply is rejected the moment it is read.
 func TestRoundtripIgnoresKeepaliveFramesMidAwait(t *testing.T) {
+	if rc := liveRoundtrip(t, startTestMesh(t, 120*time.Millisecond), "test-agent-a"); rc != 0 {
+		t.Fatalf("roundtrip exited %d, want 0: a frame that was not the correlated RESPONSE was accepted as the reply (a KEEPALIVE mistaken for the answer), the reply did not echo the REQUEST's message_id, or no KEEPALIVE was ignored while it was pending", rc)
+	}
+}
+
+// liveRoundtrip is the exchange both the test above and the stall fixture drive:
+// a real in-process mesh (keepalive tick 120ms), the demo's own `peer -respond`
+// client answering 900ms later, and one roundtrip whose exit status is the
+// assertion. Sharing it keeps the fixture from drifting away from the flow it is
+// supposed to guard.
+func liveRoundtrip(t *testing.T, tm *testMesh, requesterID string) int {
+	t.Helper()
+
+	responderDone := make(chan int, 1)
+	go func() {
+		responderDone <- cmdPeer(tm.wsBase, []string{
+			"-agent", "test-agent-b",
+			"-respond",
+			"-status", "200",
+			"-body", `{"pong":true,"from":"test-agent-b"}`,
+			"-respond-delay", "900ms",
+		})
+	}()
+
+	// The responder must be on the mesh before the REQUEST is sent, or the
+	// server answers CONTROLLER_OFFLINE and the wrong path is measured.
+	waitForPeer(t, tm.httpBase, "test-agent-b", 20*time.Second)
+
+	rc := cmdRoundtrip(tm.wsBase, []string{
+		"-agent", requesterID,
+		"-target", "test-agent-b",
+		"-method", "GET",
+		"-path", "/ping",
+		"-body", `{"hello":"world"}`,
+		"-expect-status", "200",
+		"-timeout", "30s",
+		"-max-keepalives", "128",
+		"-require-keepalive-before-reply",
+		"-keepalive-wait", "10s",
+	})
+
+	// Unblock the responder's read loop so its goroutine ends here.
+	tm.stop()
+	select {
+	case <-responderDone:
+	case <-time.After(10 * time.Second):
+		t.Error("the responder never exited after the mesh stopped")
+	}
+	return rc
+}
+
+// TestRoundtripRequiresAnInterleavedKeepaliveOnTheLiveMesh is the DIFFERENTIAL
+// proof of the pass condition above, end to end (real listener, real
+// /mesh/connect handler, the demo's own `peer -respond` client): with the
+// server's own 30s keepalive interval and a responder that answers at once, the
+// correlated RESPONSE is the FIRST frame on the requester's socket.
+// -require-keepalive-before-reply must then refuse to exit 0, and the identical
+// run without the flag must exit 0 — so it is the flag, not the setup, that
+// demands an ignored KEEPALIVE mid-await, and a "reply was the only frame"
+// green cannot pass for an interleaving proof.
+//
+// The two runs use different requester ids on purpose: a second socket under one
+// agent id replaces the first in the server's connection map, and the old
+// socket's late OnClose would then delete the new entry and drop the RESPONSE
+// (the race run-demo.sh documents and works around).
+func TestRoundtripRequiresAnInterleavedKeepaliveOnTheLiveMesh(t *testing.T) {
+	tm := startTestMesh(t, 30*time.Second) // the server's default: no tick before the reply
+
+	responderDone := make(chan int, 1)
+	go func() {
+		responderDone <- cmdPeer(tm.wsBase, []string{
+			"-agent", "test-agent-b",
+			"-respond",
+			"-status", "200",
+			"-body", `{"pong":true,"from":"test-agent-b"}`,
+		})
+	}()
+	defer func() {
+		tm.stop()
+		select {
+		case <-responderDone:
+		case <-time.After(10 * time.Second):
+			t.Error("the responder never exited after the mesh stopped")
+		}
+	}()
+	waitForPeer(t, tm.httpBase, "test-agent-b", 20*time.Second)
+
+	base := []string{
+		"-target", "test-agent-b",
+		"-method", "GET",
+		"-path", "/ping",
+		"-body", `{"hello":"world"}`,
+		"-expect-status", "200",
+		"-timeout", "20s",
+		"-max-keepalives", "128",
+	}
+
+	// Half 1: no KEEPALIVE interleaves, and the flag is not asked for — the reply
+	// correlates on its own, so this run must pass. Without this half a refusal
+	// below would prove nothing about the flag.
+	if rc := cmdRoundtrip(tm.wsBase, append([]string{"-agent", "test-agent-a1"}, base...)); rc != 0 {
+		t.Fatalf("roundtrip exited %d without -require-keepalive-before-reply, want 0: the differential needs this half green", rc)
+	}
+
+	// Half 2: same flow, same socket shape, one flag more.
+	if rc := cmdRoundtrip(tm.wsBase, append([]string{"-agent", "test-agent-a2", "-require-keepalive-before-reply"}, base...)); rc == 0 {
+		t.Fatal("a correlated RESPONSE that arrived before any KEEPALIVE was ignored exited 0 with -require-keepalive-before-reply set: the interleaving proof this test exists for was vacuous")
+	}
+}
+
+// --- the await loop, driven deterministically (DF-CRIER-252) ---------------
+//
+// The live test above is the integration half of the proof; these are the
+// deterministic half. awaitReply is the loop the demo client actually runs, so
+// the interleaving rule and the request_id correlation can be pinned frame by
+// frame, with no listener, no clock and no load average — a run of this file
+// cannot go green because the box happened to be fast.
+
+// testMesh is an in-process mesh the tests drive: a real listener serving the
+// same handler cmd/server mounts, plus the handle that stops it exactly once.
+type testMesh struct {
+	wsBase   string
+	httpBase string
+	m        *mesh.Mesh
+	stop     func()
+}
+
+func startTestMesh(t *testing.T, keepalive time.Duration) *testMesh {
+	t.Helper()
 	cfg := mesh.DefaultMeshConfig("test-mesh")
-	cfg.KeepaliveInterval = 120 * time.Millisecond // ticks 4x before the reply
+	cfg.KeepaliveInterval = keepalive
 	m := mesh.NewMesh(cfg)
 
 	r := mux.NewRouter()
@@ -376,56 +519,490 @@ func TestRoundtripIgnoresKeepaliveFramesMidAwait(t *testing.T) {
 	}
 	srv := &http.Server{Handler: r}
 	go func() { _ = srv.Serve(ln) }()
-	defer srv.Close()
-	// mesh.Stop closes m.stopCh, so it must run exactly once on every path.
-	var stopOnce sync.Once
-	stopMesh := func() { stopOnce.Do(m.Stop) }
-	defer stopMesh()
 
-	wsBase := "ws://" + ln.Addr().String()
-	httpBase := "http://" + ln.Addr().String()
-
-	responderDone := make(chan int, 1)
-	go func() {
-		responderDone <- cmdPeer(wsBase, []string{
-			"-agent", "test-agent-b",
-			"-respond",
-			"-status", "200",
-			"-body", `{"pong":true,"from":"test-agent-b"}`,
-			"-respond-delay", "900ms",
+	// mesh.Stop closes m.stopCh, so it must run exactly once on every path —
+	// including the tests that stop the mesh mid-test and again at cleanup.
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			_ = srv.Close()
+			m.Stop()
 		})
-	}()
+	}
+	t.Cleanup(stop)
+	return &testMesh{
+		wsBase:   "ws://" + ln.Addr().String(),
+		httpBase: "http://" + ln.Addr().String(),
+		m:        m,
+		stop:     stop,
+	}
+}
 
-	// The responder must be on the mesh before the REQUEST is sent, or the
-	// server answers CONTROLLER_OFFLINE and this test would measure the wrong
-	// path.
-	deadline := time.Now().Add(5 * time.Second)
-	for !meshPeerCount(t, httpBase, "test-agent-b") {
+// waitForPeer blocks until agentID appears in /mesh/peers (the precondition
+// both roundtrip tests need, or the server answers CONTROLLER_OFFLINE and the
+// wrong path is measured). within is a hang guard, not a timing assertion.
+func waitForPeer(t *testing.T, httpBase, agentID string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for !meshPeerCount(t, httpBase, agentID) {
 		if time.Now().After(deadline) {
-			t.Fatal("responder never appeared on /mesh/peers")
+			t.Fatalf("%s never appeared on /mesh/peers within %s", agentID, within)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
 
-	rc := cmdRoundtrip(wsBase, []string{
-		"-agent", "test-agent-a",
-		"-target", "test-agent-b",
-		"-method", "GET",
-		"-path", "/ping",
-		"-body", `{"hello":"world"}`,
-		"-expect-status", "200",
-		"-timeout", "5s",
-		"-keepalive-wait", "3s",
-	})
-	if rc != 0 {
-		t.Fatalf("roundtrip exited %d, want 0: a frame that was not the correlated RESPONSE was accepted as the reply (a KEEPALIVE mistaken for the answer, or the reply did not echo the REQUEST's message_id)", rc)
+// scriptedConn is a frameConn replaying a scripted sequence. Once the script is
+// exhausted it returns a read-deadline error — exactly what a real socket does
+// when the await's hang guard passes — so an await that never correlates still
+// terminates and a test never sleeps.
+type scriptedConn struct {
+	script    []scriptFrame
+	pos       int
+	deadlines []time.Time
+}
+
+type scriptFrame struct {
+	frame []byte
+	err   error
+}
+
+// scriptTimeout is a net.Error whose Timeout() is true, standing in for the
+// os.ErrDeadlineExceeded a gorilla connection returns after SetReadDeadline.
+type scriptTimeout struct{}
+
+func (scriptTimeout) Error() string   { return "read tcp 127.0.0.1:0->127.0.0.1:0: i/o timeout" }
+func (scriptTimeout) Timeout() bool   { return true }
+func (scriptTimeout) Temporary() bool { return true }
+
+func (c *scriptedConn) SetReadDeadline(deadline time.Time) error {
+	c.deadlines = append(c.deadlines, deadline)
+	return nil
+}
+
+func (c *scriptedConn) ReadMessage() (int, []byte, error) {
+	if c.pos >= len(c.script) {
+		return 0, nil, scriptTimeout{}
+	}
+	f := c.script[c.pos]
+	c.pos++
+	if f.err != nil {
+		return 0, nil, f.err
+	}
+	return 1, f.frame, nil // 1 == websocket.TextMessage
+}
+
+func frames(items ...scriptFrame) *scriptedConn {
+	return &scriptedConn{script: items}
+}
+
+func wireFrame(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := mesh.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", v, err)
+	}
+	return data
+}
+
+func keepaliveFrame(t *testing.T, messageID string) scriptFrame {
+	t.Helper()
+	return scriptFrame{frame: wireFrame(t, &mesh.Keepalive{
+		Envelope: mesh.Envelope{Type: mesh.TypeKeepalive, Version: 1, MessageID: messageID, Timestamp: time.Now()},
+		AgentID:  "test-mesh",
+	})}
+}
+
+func responseFrame(t *testing.T, requestID, messageID string, statusCode int) scriptFrame {
+	t.Helper()
+	return scriptFrame{frame: wireFrame(t, &mesh.Response{
+		Envelope:   mesh.Envelope{Type: mesh.TypeResponse, Version: 1, MessageID: messageID, Timestamp: time.Now()},
+		RequestID:  requestID,
+		StatusCode: statusCode,
+		Body:       json.RawMessage(`{"pong":true,"from":"test-agent-b"}`),
+	})}
+}
+
+// TestAwaitReplyIgnoresInterleavedKeepalivesAndCorrelatesByRequestID pins both
+// halves of the contract in one pass: a KEEPALIVE is not the answer, another
+// agent's RESPONSE is not my answer, and my answer is recognised by
+// request_id — never by being the next frame on the socket.
+func TestAwaitReplyIgnoresInterleavedKeepalivesAndCorrelatesByRequestID(t *testing.T) {
+	const (
+		ours      = "9cb0fb27f650afead3734c03"
+		foreignID = "116bdfb85f15c004180f65b3"
+	)
+
+	conn := frames(
+		keepaliveFrame(t, "ka-1"),
+		keepaliveFrame(t, "ka-2"),
+		responseFrame(t, foreignID, "resp-foreign", 200), // another REQUEST's reply
+		keepaliveFrame(t, "ka-3"),
+		responseFrame(t, ours, "resp-ours", 200),
+	)
+	var out bytes.Buffer
+	resp, keepalives, err := awaitReply(conn, &out, ours, awaitLimits{Budget: time.Second})
+	if err != nil {
+		t.Fatalf("awaitReply: %v (the correlated RESPONSE was the 5th frame and must be found)", err)
+	}
+	if resp.MessageID != "resp-ours" || resp.RequestID != ours {
+		t.Errorf("accepted RESPONSE message_id=%s request_id=%s, want the one correlated with our REQUEST (resp-ours/%s)",
+			resp.MessageID, resp.RequestID, ours)
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("status_code = %d, want 200", resp.StatusCode)
+	}
+	if keepalives != 3 {
+		t.Errorf("keepalives_ignored = %d, want 3 (one per KEEPALIVE before the correlated reply)", keepalives)
+	}
+	if got := strings.Count(out.String(), "KEEPALIVE IGNORED "); got != 3 {
+		t.Errorf("transcript carries %d KEEPALIVE IGNORED lines, want 3:\n%s", got, out.String())
+	}
+	if !strings.Contains(out.String(), "FRAME IGNORED type=RESPONSE ") {
+		t.Errorf("the other agent's RESPONSE was not reported as ignored:\n%s", out.String())
+	}
+	if len(conn.deadlines) != 1 {
+		t.Errorf("SetReadDeadline called %d times, want 1 (the hang guard is armed once)", len(conn.deadlines))
+	}
+}
+
+// TestAwaitReplyNeverAcceptsAKEEPALIVEAsTheResponse: a socket that only ever
+// carries KEEPALIVEs must end in a failure, never in a reply.
+func TestAwaitReplyNeverAcceptsAKEEPALIVEAsTheResponse(t *testing.T) {
+	const ours = "9cb0fb27f650afead3734c03"
+
+	conn := frames(keepaliveFrame(t, "ka-1"), keepaliveFrame(t, "ka-2"))
+	var out bytes.Buffer
+	resp, keepalives, err := awaitReply(conn, &out, ours, awaitLimits{Budget: time.Second})
+	if err == nil {
+		t.Fatalf("a KEEPALIVE-only stream was accepted as the reply (status_code=%d)", resp.StatusCode)
+	}
+	if resp.MessageID != "" || resp.RequestID != "" || resp.StatusCode != 0 {
+		t.Errorf("a refused await returned a populated RESPONSE: %+v", resp)
+	}
+	if keepalives != 2 {
+		t.Errorf("keepalives_ignored = %d, want 2", keepalives)
+	}
+	if !strings.Contains(err.Error(), "no RESPONSE for message_id="+ours) {
+		t.Errorf("error does not name the REQUEST it waited for: %v", err)
+	}
+}
+
+// TestAwaitReplyIgnoresAResponseForAnotherRequestID is the correlation
+// assertion on its own: a well-formed RESPONSE carrying someone else's
+// request_id is not this REQUEST's answer, however long we wait.
+func TestAwaitReplyIgnoresAResponseForAnotherRequestID(t *testing.T) {
+	const (
+		ours    = "9cb0fb27f650afead3734c03"
+		someone = "116bdfb85f15c004180f65b3"
+	)
+
+	conn := frames(responseFrame(t, someone, "resp-foreign", 200))
+	var out bytes.Buffer
+	resp, _, err := awaitReply(conn, &out, ours, awaitLimits{Budget: time.Second})
+	if err == nil {
+		t.Fatalf("a RESPONSE with request_id=%s was accepted as the reply to %s (status_code=%d)",
+			someone, ours, resp.StatusCode)
+	}
+	if resp.RequestID == someone {
+		t.Errorf("the refused await still returned the foreign RESPONSE: %+v", resp)
+	}
+	if !strings.Contains(out.String(), "FRAME IGNORED type=RESPONSE ") {
+		t.Errorf("the foreign RESPONSE was not reported as ignored:\n%s", out.String())
+	}
+}
+
+// TestAwaitReplyInterleavingRequirement is the flag's whole meaning: exit 0
+// must prove an ignored KEEPALIVE, not assume one.
+func TestAwaitReplyInterleavingRequirement(t *testing.T) {
+	const (
+		ours     = "9cb0fb27f650afead3734c03"
+		pending  = "arrived before any KEEPALIVE was ignored"
+		frameSet = "the reply was the only frame on the socket"
+	)
+
+	cases := []struct {
+		name            string
+		require         bool
+		keepaliveFirst  bool
+		wantErrContains string
+	}{
+		{"correlated reply after an ignored KEEPALIVE passes", true, true, ""},
+		{"correlated reply with no KEEPALIVE fails when required", true, false, pending},
+		{"same socket without the requirement passes", false, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			script := []scriptFrame{}
+			if tc.keepaliveFirst {
+				script = append(script, keepaliveFrame(t, "ka-1"))
+			}
+			script = append(script, responseFrame(t, ours, "resp-ours", 200))
+
+			var out bytes.Buffer
+			resp, keepalives, err := awaitReply(frames(script...), &out, ours, awaitLimits{
+				Budget:           time.Second,
+				RequireKeepalive: tc.require,
+			})
+			if tc.wantErrContains == "" {
+				if err != nil {
+					t.Fatalf("awaitReply: %v", err)
+				}
+				if resp.RequestID != ours {
+					t.Errorf("accepted RESPONSE request_id=%s, want %s", resp.RequestID, ours)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("awaitReply passed with keepalives_ignored=%d although an interleaved KEEPALIVE is required", keepalives)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) || !strings.Contains(err.Error(), frameSet) {
+				t.Errorf("error %q does not explain the missing interleaving", err)
+			}
+			if resp.RequestID != ours {
+				t.Errorf("the diagnostic RESPONSE was not returned to the caller: %+v", resp)
+			}
+		})
+	}
+}
+
+// TestAwaitReplyProgressBoundEndsAFruitlessWaitWithoutAClock: the give-up
+// decision can be driven by the peer's own progress. With a budget of an hour
+// (which must NOT be what ends it) and a bound of 3 ignored KEEPALIVEs, the
+// await stops after the third — and with the bound above the scripted count the
+// same socket ends on the clock instead, so the knob is the bound and not
+// something else.
+func TestAwaitReplyProgressBoundEndsAFruitlessWaitWithoutAClock(t *testing.T) {
+	const ours = "9cb0fb27f650afead3734c03"
+
+	script := []scriptFrame{
+		keepaliveFrame(t, "ka-1"), keepaliveFrame(t, "ka-2"), keepaliveFrame(t, "ka-3"),
+		keepaliveFrame(t, "ka-4"), keepaliveFrame(t, "ka-5"), keepaliveFrame(t, "ka-6"),
 	}
 
-	// Unblock the responder's read loop so its goroutine ends here.
-	stopMesh()
-	select {
-	case <-responderDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the responder never exited after the mesh stopped")
+	var out bytes.Buffer
+	_, keepalives, err := awaitReply(frames(script...), &out, ours, awaitLimits{
+		Budget:        time.Hour,
+		MaxKeepalives: 3,
+	})
+	if err == nil {
+		t.Fatal("six ignored KEEPALIVEs with a bound of three did not end the await")
+	}
+	if keepalives != 3 {
+		t.Errorf("keepalives_ignored = %d, want 3 (the bound, not the script)", keepalives)
+	}
+	if !strings.Contains(err.Error(), "progress bound") {
+		t.Errorf("error %q does not name the bound that fired", err)
+	}
+	if got := strings.Count(out.String(), "KEEPALIVE IGNORED "); got != 3 {
+		t.Errorf("transcript carries %d KEEPALIVE IGNORED lines, want 3:\n%s", got, out.String())
+	}
+
+	var out2 bytes.Buffer
+	_, keepalives, err = awaitReply(frames(script...), &out2, ours, awaitLimits{
+		Budget:        time.Second,
+		MaxKeepalives: 7, // above the scripted count: the clock has to end this one
+	})
+	if err == nil {
+		t.Fatal("the await did not end after the scripted frames ran out")
+	}
+	if keepalives != 6 {
+		t.Errorf("keepalives_ignored = %d, want 6", keepalives)
+	}
+	if !strings.Contains(err.Error(), "within 1s") {
+		t.Errorf("error %q is not the hang-guard message", err)
+	}
+}
+
+// TestAwaitKeepaliveObservesALiveFrameAndCountsIt pins the second leg: it
+// ignores everything that is not a KEEPALIVE, returns the running count
+// (including the frames the reply await had already ignored), and ends on the
+// hang guard when no KEEPALIVE ever arrives.
+func TestAwaitKeepaliveObservesALiveFrameAndCountsIt(t *testing.T) {
+	const ours = "9cb0fb27f650afead3734c03"
+
+	var out bytes.Buffer
+	n, err := awaitKeepalive(frames(
+		responseFrame(t, ours, "resp-ours", 200), // a stray reply is not a KEEPALIVE
+		keepaliveFrame(t, "ka-live"),
+	), &out, time.Second, 3)
+	if err != nil {
+		t.Fatalf("awaitKeepalive: %v", err)
+	}
+	if n != 4 {
+		t.Errorf("keepalives_ignored = %d, want 4 (3 already ignored + the live one)", n)
+	}
+	if !strings.Contains(out.String(), "FRAME IGNORED type=RESPONSE message_id=resp-ours (waiting for KEEPALIVE)") {
+		t.Errorf("the stray frame was not reported:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "KEEPALIVE OBSERVED message_id=ka-live") {
+		t.Errorf("the live KEEPALIVE was not reported:\n%s", out.String())
+	}
+
+	var out2 bytes.Buffer
+	n, err = awaitKeepalive(frames(responseFrame(t, ours, "resp-ours", 200)), &out2, time.Second, 2)
+	if err == nil {
+		t.Fatal("a socket with no KEEPALIVE frame passed the live-KEEPALIVE leg")
+	}
+	if n != 2 {
+		t.Errorf("keepalives_ignored = %d, want the prior count 2", n)
+	}
+	if !strings.Contains(err.Error(), "no KEEPALIVE within 1s") {
+		t.Errorf("error %q does not name the bound", err)
+	}
+}
+
+// --- DF-CRIER-252: the crash-in-slow-motion fixture -------------------------
+
+const (
+	// df252ChildEnv marks the CHILD half of the stall fixture below.
+	df252ChildEnv = "CRIER_DF252_STALL_CHILD"
+	// df252ChildRun is load-bearing: the child must run ONLY the fixture test.
+	// A child that ran the package would report several PASS lines, and the
+	// parent's "exactly one test, and it is this one" check could not tell a
+	// suspended child from a suite that merely finished slowly.
+	df252ChildRun = "^TestRoundtripSurvivesAStalledProcess$"
+	// df252StallFor is how long the parent suspends the child. It has to exceed
+	// the 5s wall-clock budget the pre-fix test armed (DF-CRIER-252: `-timeout
+	// 5s`), or the fixture could not go red on the code it exists to guard; 6s
+	// is that budget plus a second, and ~7x the 900ms the reply is due after.
+	df252StallFor = 6 * time.Second
+	// df252Awaiting is the child's own transcript line that proves its read
+	// deadline is armed and its RESPONSE is still pending: the requester reads
+	// nothing before the await, so the first frame it reports is a KEEPALIVE it
+	// ignored while waiting. The parent suspends the child on this line, so the
+	// stall lands inside the await by construction rather than by sleeping and
+	// hoping.
+	df252Awaiting = "KEEPALIVE IGNORED "
+	// df252Answered is the line that proves the exchange completed after the
+	// stall — the reply correlated and its status matched.
+	df252Answered = "ROUNDTRIP OK "
+)
+
+var df252PassLine = regexp.MustCompile(`--- PASS: TestRoundtripSurvivesAStalledProcess \(([0-9.]+)s\)`)
+
+// TestRoundtripSurvivesAStalledProcess is the DF-CRIER-252 gate, and it is the
+// same live exchange as TestRoundtripIgnoresKeepaliveFramesMidAwait with one
+// thing added: the test PROCESS is suspended for 6s in the middle of it.
+//
+// WHY IT EXISTS. The flake this ticket is about was never a protocol bug. QA
+// measured 4 failures in 24 full-suite runs of the live test at loadavg ~19,
+// each one reporting
+//
+//	ROUNDTRIP FAIL no RESPONSE ... within 5s
+//
+// with a healthy server, a healthy client, and a host that had simply not run
+// the test process for the better part of five seconds. The test's whole
+// pass/fail decision rested on that one constant. A stop-the-world stall is the
+// smallest deterministic model of that shape, and unlike a load average it can be
+// injected on demand: pre-fix the suspended child reads nothing before its 5s
+// deadline, prints exactly the QA message, and fails; the fixed client keeps a
+// wall-clock hang guard (30s) that is not the pass condition and a PROGRESS bound
+// that only advances while the peer actually ticks, so it survives the stall and
+// still correlates the reply.
+//
+// WHY A CHILD PROCESS. The failure is that the process does not run, which cannot
+// be observed from inside it — something outside has to suspend and resume it.
+// The child is spawned with -test.run pinned to this one test, so the parent's
+// assertions ("exactly one PASS, no FAIL/SKIP, and that PASS names this test")
+// cannot be satisfied by an unrelated run.
+//
+// It costs ~7s of wall time: the stall is real time, not a mock.
+func TestRoundtripSurvivesAStalledProcess(t *testing.T) {
+	if os.Getenv(df252ChildEnv) == "1" {
+		df252StalledChild(t)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run="+df252ChildRun, "-test.v", "-test.timeout=120s")
+	cmd.Env = append(os.Environ(), df252ChildEnv+"=1")
+	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe for the child test binary: %v", err)
+	}
+
+	started := time.Now()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the child test binary: %v", err)
+	}
+
+	// Suspend the child the moment it proves the await is live, hold it past the
+	// budget the pre-fix test used, then let it finish. Reading its stdout line by
+	// line is what makes the injection point deterministic.
+	var transcript strings.Builder
+	suspended := false
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		transcript.WriteString(line)
+		transcript.WriteString("\n")
+		if suspended || !strings.HasPrefix(line, df252Awaiting) {
+			continue
+		}
+		suspended = true
+		if err := cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+			t.Fatalf("suspend the child (SIGSTOP): %v", err)
+		}
+		time.Sleep(df252StallFor)
+		if err := cmd.Process.Signal(syscall.SIGCONT); err != nil {
+			t.Fatalf("resume the child (SIGCONT): %v", err)
+		}
+	}
+	waitErr := cmd.Wait()
+	elapsed := time.Since(started)
+	out := transcript.String()
+
+	if !suspended {
+		t.Fatalf("the child never reported %q, so no stall was injected and this fixture proved nothing after %s:\n%s",
+			df252Awaiting, elapsed.Round(time.Millisecond), out)
+	}
+	if waitErr != nil {
+		t.Fatalf("the child failed after a %s suspension (%v): the await could not survive the process not running, which is the DF-CRIER-252 failure mode — a wall clock was the pass condition:\n%s",
+			df252StallFor, waitErr, out)
+	}
+
+	// Non-vacuity, in three parts: the child's OWN test clock has to include the
+	// suspension (this flow takes ~1s when it is not stopped), it has to have
+	// correlated the reply afterwards, and it has to have done so having ignored a
+	// KEEPALIVE first — in that order, which is the interleaving the test is named
+	// for.
+	m := df252PassLine.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("the child never reported its own PASS duration, so the suspension cannot be proven from this transcript:\n%s", out)
+	}
+	secs, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		t.Fatalf("unparseable child duration %q: %v", m[1], err)
+	}
+	if secs < df252StallFor.Seconds() {
+		t.Fatalf("the child's test took %.2fs, less than the %s suspension it was supposed to suffer: it was not stopped, so this fixture proved nothing",
+			secs, df252StallFor)
+	}
+	if !strings.Contains(out, df252Answered) {
+		t.Fatalf("the child exited 0 but never printed %q, so the exchange did not complete after the stall:\n%s", df252Answered, out)
+	}
+	if passes := strings.Count(out, "--- PASS: "); passes != 1 {
+		t.Fatalf("the child ran %d tests, wanted exactly the fixture test: an unrelated PASS would make this fixture vacuous:\n%s", passes, out)
+	}
+	if strings.Contains(out, "--- FAIL: ") || strings.Contains(out, "--- SKIP: ") {
+		t.Fatalf("the child reported a FAIL/SKIP line, so this fixture proves nothing:\n%s", out)
+	}
+	kept := strings.Index(out, "KEEPALIVE IGNORED ")
+	replied := strings.Index(out, "RESPONSE RECEIVED ")
+	if kept < 0 || replied < 0 || kept > replied {
+		t.Fatalf("the transcript does not show an ignored KEEPALIVE before the correlated RESPONSE (KEEPALIVE at %d, RESPONSE at %d):\n%s",
+			kept, replied, out)
+	}
+}
+
+// df252StalledChild is the child half: one live roundtrip, no stall injection of
+// its own — the parent owns the suspension, because a stopped process cannot
+// resume itself.
+func df252StalledChild(t *testing.T) {
+	t.Helper()
+	tm := startTestMesh(t, 120*time.Millisecond)
+	if rc := liveRoundtrip(t, tm, "test-agent-a"); rc != 0 {
+		t.Fatalf("roundtrip exited %d, want 0: the await did not survive the suspension (a frame that was not the correlated RESPONSE was accepted as the reply, the reply did not echo the REQUEST's message_id, or no KEEPALIVE was ignored while it was pending)", rc)
 	}
 }

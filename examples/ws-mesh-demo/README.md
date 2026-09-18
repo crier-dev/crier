@@ -123,6 +123,35 @@ in-process mesh whose KEEPALIVE interval is far below the responder's answer
 delay, so KEEPALIVE frames land while the RESPONSE is pending — the client's exit
 status is the assertion).
 
+`-require-keepalive-before-reply` moves that from a property of the timing to a
+condition of the exit status: with it set, `roundtrip` exits 0 only if at least
+one KEEPALIVE was ignored *while the RESPONSE was pending*, so "the reply was the
+only frame on the socket" can no longer pass for an interleaving proof. The Go
+tests pass it; `run-demo.sh` does not (its server ticks at 30s, so its reply is
+normally the first frame — the live KEEPALIVE it asserts arrives afterwards).
+`TestRoundtripRequiresAnInterleavedKeepaliveOnTheLiveMesh` is the differential
+proof: the same flow exits 0 without the flag and non-zero with it.
+
+The wait for the RESPONSE has **two** bounds, and neither is the pass condition
+(DF-CRIER-252):
+
+- `-timeout` is a wall-clock **hang guard**. A loaded box can stall a process for
+  seconds — measured here: `TestRoundtripIgnoresKeepaliveFramesMidAwait` runs its
+  ~0.9s path in 1.00s wall at loadavg 33, yet once a full `go test ./...` run puts
+  ~16 test binaries on the same host (two of them compiling the tree) the same
+  path has been seen to miss a 5s deadline, which is what this ticket is about.
+  The cap exists so the command cannot hang, not so it can time a healthy peer.
+- `-max-keepalives` is a **progress** bound: the server ticks a KEEPALIVE every
+  `keepalive_interval_ms` for as long as it is alive, so a requester that has
+  ignored that many frames without its reply arriving has demonstrably moved past
+  the moment the answer was due. The count advances only with the host's real
+  progress, so this bound stretches exactly when the box is slow and fires fast
+  when the peer is healthy and simply not answering.
+
+A reply that is not the correlated RESPONSE — a KEEPALIVE, another REQUEST's
+RESPONSE — is rejected the moment it is read, so neither bound is what catches a
+broken correlation.
+
 Deeper protocol reference (all message types, error codes, silent-drop rules):
 [`docs/mesh-protocol.md`](../../docs/mesh-protocol.md).
 
@@ -145,7 +174,9 @@ ws-mesh-demo [-url BASE] roundtrip -agent AGENT -target AGENT
 | roundtrip  | `-agent` / `-target` | Connect as `-agent`, send one REQUEST to `-target` (both required). |
 | roundtrip  | `-method` / `-path` / `-body` | The REQUEST's application payload (`GET /ping`, no body, by default). |
 | roundtrip  | `-expect-status` | `status_code` the RESPONSE must carry (default 200). |
-| roundtrip  | `-timeout` | How long to wait for the RESPONSE (default 15s). |
+| roundtrip  | `-timeout` | Wall-clock hang guard on the wait for the RESPONSE (default 15s). |
+| roundtrip  | `-max-keepalives` | Give up after this many ignored KEEPALIVE frames (0 = no progress bound). |
+| roundtrip  | `-require-keepalive-before-reply` | Exit 0 only if a KEEPALIVE was ignored while the RESPONSE was pending. |
 | roundtrip  | `-keepalive-wait` | After the RESPONSE, hold the socket up to this long for at least one live KEEPALIVE frame (0 = no wait). |
 | (all)      | `-url`  | Server base URL, default `http://127.0.0.1:18961`.              |
 
@@ -156,7 +187,8 @@ relay fans out). `peer` prints `PEER CONNECTED <agentID>`, sends the one-way
 default ping handler keeps auto-ponging and the relay's keepalive never drops the
 peer — a closed WS removes the peer from `/mesh/peers`, see
 `internal/mesh/peer.go` `OnClose`). `roundtrip` exits 0 only on a correlated
-RESPONSE carrying the expected status code, and prints
+RESPONSE carrying the expected status code (plus an ignored KEEPALIVE while it was
+pending, with `-require-keepalive-before-reply`), and prints
 `ROUNDTRIP OK request_id=… status_code=… response_message_id=… keepalives_ignored=…`
 so a shell driver can assert the whole contract from one line.
 
