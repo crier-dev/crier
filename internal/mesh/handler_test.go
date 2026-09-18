@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,9 +57,24 @@ func TestHandleConnectMissingAgentID(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("StatusCode = %d, want 400", resp.StatusCode)
 	}
+	// DF-CRIER-212: the rejection body is JSON, so the response must declare
+	// it. net/http's Error helper hard-codes "text/plain; charset=utf-8" (and
+	// overwrites any Content-Type set before it), which is what this endpoint
+	// used to answer.
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json — the rejection body is JSON", ct)
+	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "agentID is required") {
-		t.Errorf("body = %q, want agentID is required", body)
+	var payload map[string]string
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("response body %q is not valid JSON: %v", body, err)
+	}
+	if payload["error"] != "agentID is required" {
+		t.Errorf("error = %q, want agentID is required", payload["error"])
+	}
+	// Byte-identical wire body, captured from the pre-fix build (b140a6f).
+	if got, want := string(body), "{\"error\":\"agentID is required\"}\n"; got != want {
+		t.Errorf("body = %q, want %q (pre-fix wire bytes)", got, want)
 	}
 }
 

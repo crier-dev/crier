@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
+	"github.com/crier-dev/crier/internal/httperr"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 )
@@ -71,23 +72,26 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// The rejection bodies are JSON: net/http's Error helper would hard-code
+	// "text/plain; charset=utf-8" over any Content-Type set here, which is
+	// exactly what these four sites used to answer (DF-CRIER-212).
 	var body publishRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		slog.Warn("relay: publish rejected", "reason", "invalid json",
 			"sender", agentID, "request_id", rid)
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		httperr.WriteJSONError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	if body.Topic == "" {
 		slog.Warn("relay: publish rejected", "reason", "topic is required",
 			"sender", agentID, "request_id", rid)
-		http.Error(w, `{"error":"topic is required"}`, http.StatusBadRequest)
+		httperr.WriteJSONError(w, http.StatusBadRequest, "topic is required")
 		return
 	}
 	if len(body.Event) == 0 {
 		slog.Warn("relay: publish rejected", "reason", "event is required",
 			"topic", body.Topic, "sender", agentID, "request_id", rid)
-		http.Error(w, `{"error":"event is required"}`, http.StatusBadRequest)
+		httperr.WriteJSONError(w, http.StatusBadRequest, "event is required")
 		return
 	}
 
@@ -146,11 +150,14 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	rid := middleware.RequestIDFromContext(req.Context())
 	subscriber := req.Header.Get("X-Agent-ID")
 
+	// The rejection body is JSON, so it is written with httperr rather than
+	// net/http's Error helper, which would label it
+	// "text/plain; charset=utf-8" (DF-CRIER-212).
 	pattern, err := parseSubscriptionPattern(topic)
 	if err != nil {
 		slog.Warn("relay: subscribe rejected", "reason", "invalid topic",
 			"topic", topic, "agent_id", subscriber, "request_id", rid)
-		http.Error(w, `{"error":"invalid topic"}`, http.StatusBadRequest)
+		httperr.WriteJSONError(w, http.StatusBadRequest, "invalid topic")
 		return
 	}
 

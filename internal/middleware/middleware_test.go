@@ -136,6 +136,19 @@ func TestRecoveryCatchesPanicAndReturnsJSONError(t *testing.T) {
 	if body["error"] != "internal server error" {
 		t.Fatalf("error = %q, want %q", body["error"], "internal server error")
 	}
+	// DF-CRIER-212: the body is JSON, so the response has to say so. net/http's
+	// Error helper hard-codes "text/plain; charset=utf-8" and OVERWRITES any
+	// Content-Type set before it, so a JSON body served that way reaches the
+	// client mislabelled — the half the body assertion above could not see.
+	if ct := recorder.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q — the recovered-panic body is JSON", ct, "application/json")
+	}
+	// The wire body is byte-identical to what the pre-fix build (b140a6f)
+	// wrote: the literal below was captured from that build, so this pins the
+	// migration off the stdlib helper as headers-only.
+	if got, want := recorder.Body.String(), "{\"error\":\"internal server error\"}\n"; got != want {
+		t.Errorf("body = %q, want %q (pre-fix wire bytes)", got, want)
+	}
 	if !strings.Contains(logs.String(), `error=boom`) {
 		t.Fatalf("log = %q, want recovered panic", logs.String())
 	}

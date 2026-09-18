@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
+	"github.com/crier-dev/crier/internal/httperr"
 	"github.com/crier-dev/crier/internal/middleware"
 )
 
@@ -29,7 +30,9 @@ func HandleConnect(m *Mesh) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentID := mux.Vars(r)["agentID"]
 		if agentID == "" {
-			http.Error(w, `{"error":"agentID is required"}`, http.StatusBadRequest)
+			// The rejection body is JSON: net/http's Error helper would answer
+			// "text/plain; charset=utf-8" (DF-CRIER-212).
+			httperr.WriteJSONError(w, http.StatusBadRequest, "agentID is required")
 			return
 		}
 

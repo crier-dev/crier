@@ -208,15 +208,28 @@ func TestHealthDeclaresJSONContentType(t *testing.T) {
 // /health was the only JSON surface in the repo that let net/http sniff its
 // Content-Type, and this table makes that class of drift loud on every route
 // the in-process harness can actually reach (auth disabled, in-memory
-// registry, no guard). Each entry asserts a 200, the exact
+// registry, no guard). Each entry asserts its expected status, the exact
 // application/json header, and a JSON body — an entry that asserted nothing
 // would be a failed test, not a pass.
 //
+// DF-CRIER-212 extends the same class to the ERROR surface: six handlers
+// answered a JSON error body as text/plain; charset=utf-8 because net/http's
+// Error(w, body, code) helper hard-codes that Content-Type (and overwrites any
+// Content-Type set before it). The rejection rows below reach those handlers
+// through the real router.
+//
 // Deliberately NOT in the table, with the reason each is outside the JSON
-// class (both are reachable here and pinned by TestOpenAPIServed):
+// class or unreachable from this harness:
 //
 //	/openapi.yaml — serves YAML (application/yaml)
 //	/docs         — serves HTML (text/html; charset=utf-8)
+//	GET /mesh/connect/ with no agentID — the registered route pattern is
+//	              /mesh/connect/{agentID} (gorilla/mux compiles it to
+//	              [^/]+), so an empty segment does not match and the harness
+//	              would assert the wrong thing against a 404. The mesh
+//	              rejection is covered at the package level, where the test
+//	              router mounts {agentID:.*} to reach the handler
+//	              (TestHandleConnectMissingAgentID, DF-CRIER-212).
 //
 // and the routes whose JSON contract already has a dedicated gate:
 // /version (TestVersionEndpointServed) and /openapi.json (TestOpenAPIServed)
@@ -225,42 +238,81 @@ func TestJSONRoutesDeclareJSONContentType(t *testing.T) {
 	baseURL := startTestServer(t)
 
 	routes := []struct {
-		name string
-		path string
+		name       string
+		method     string
+		path       string
+		body       string
+		headers    map[string]string
+		wantStatus int
 	}{
-		{"health", "/health"},
-		{"version", "/version"},
-		{"openapi_json", "/openapi.json"},
-		{"relay_topics", "/relay/topics"},
-		{"mesh_peers", "/mesh/peers"},
-		{"fed_peers", "/fed/peers"},
-		{"agents", "/agents"},
+		{name: "health", method: http.MethodGet, path: "/health", wantStatus: http.StatusOK},
+		{name: "version", method: http.MethodGet, path: "/version", wantStatus: http.StatusOK},
+		{name: "openapi_json", method: http.MethodGet, path: "/openapi.json", wantStatus: http.StatusOK},
+		{name: "relay_topics", method: http.MethodGet, path: "/relay/topics", wantStatus: http.StatusOK},
+		{name: "mesh_peers", method: http.MethodGet, path: "/mesh/peers", wantStatus: http.StatusOK},
+		{name: "fed_peers", method: http.MethodGet, path: "/fed/peers", wantStatus: http.StatusOK},
+		{name: "agents", method: http.MethodGet, path: "/agents", wantStatus: http.StatusOK},
+
+		// DF-CRIER-212 rejection rows. X-Agent-ID is set on the publish rows so
+		// the rate-limit rejection cannot become the reason for a failure that
+		// is supposed to be about the body.
+		{
+			name: "relay_publish_invalid_json", method: http.MethodPost, path: "/relay/publish",
+			body: "not-json", headers: map[string]string{"X-Agent-ID": "probe"},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "relay_publish_missing_topic", method: http.MethodPost, path: "/relay/publish",
+			body: `{"event":{"a":1}}`, headers: map[string]string{"X-Agent-ID": "probe"},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "relay_publish_missing_event", method: http.MethodPost, path: "/relay/publish",
+			body: `{"topic":"x"}`, headers: map[string]string{"X-Agent-ID": "probe"},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "relay_subscribe_invalid_topic", method: http.MethodGet,
+			path: "/relay/subscribe/bad%20topic%21", wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, rt := range routes {
 		t.Run(rt.name, func(t *testing.T) {
-			client := &http.Client{Timeout: 2 * time.Second}
-			resp, err := client.Get(baseURL + rt.path)
+			var reqBody io.Reader
+			if rt.body != "" {
+				reqBody = strings.NewReader(rt.body)
+			}
+			req, err := http.NewRequest(rt.method, baseURL+rt.path, reqBody)
 			if err != nil {
-				t.Fatalf("GET %s: %v", rt.path, err)
+				t.Fatalf("%s %s: build request: %v", rt.method, rt.path, err)
+			}
+			for k, v := range rt.headers {
+				req.Header.Set(k, v)
+			}
+
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", rt.method, rt.path, err)
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("GET %s: status %d, want %d", rt.path, resp.StatusCode, http.StatusOK)
+			if resp.StatusCode != rt.wantStatus {
+				t.Fatalf("%s %s: status %d, want %d", rt.method, rt.path, resp.StatusCode, rt.wantStatus)
 			}
 			if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
-				t.Errorf("GET %s: Content-Type %q, want %q — a JSON resource must declare it, never leave net/http to sniff the body", rt.path, ct, "application/json")
+				t.Errorf("%s %s: Content-Type %q, want %q — a JSON resource must declare it, never leave net/http to sniff the body", rt.method, rt.path, ct, "application/json")
 			}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				t.Fatalf("read %s body: %v", rt.path, err)
 			}
 			if len(body) == 0 {
-				t.Fatalf("GET %s: empty body — the JSON assertion below would be vacuous", rt.path)
+				t.Fatalf("%s %s: empty body — the JSON assertion below would be vacuous", rt.method, rt.path)
 			}
 			if !json.Valid(body) {
-				t.Errorf("GET %s: body %q is not valid JSON", rt.path, body)
+				t.Errorf("%s %s: body %q is not valid JSON", rt.method, rt.path, body)
 			}
 		})
 	}

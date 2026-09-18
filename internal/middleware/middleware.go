@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/crier-dev/crier/internal/httperr"
 )
 
 // Logging logs each request with method, path, status, duration and the
@@ -55,7 +57,10 @@ func Recovery(next http.Handler) http.Handler {
 		defer func() {
 			if err := recover(); err != nil {
 				slog.Error("panic recovered", "error", err, "request_id", RequestIDFromContext(r.Context()))
-				http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+				// The 500 body is JSON, so it is written with httperr rather
+				// than net/http's Error helper, which hard-codes
+				// "text/plain; charset=utf-8" (DF-CRIER-212).
+				httperr.WriteJSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
