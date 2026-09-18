@@ -1396,3 +1396,13 @@ tasks:
   status: complete
   created_at: '2026-09-18T02:59:37.455840+00:00'
   completed_at: '2026-09-18T03:09:08.417234+00:00'
+- id: DF-CRIER-213
+  title: JSON 404/405 on the gorilla router (was text/plain + empty body)
+  criteria:
+  - GET /nope answers 404 application/json with the {"error":...} envelope and an
+    X-Request-Id; a wrong-method request on a method-restricted route answers 405
+    with the same JSON contract; a matched route (/health, /version) is unchanged;
+    make lint, make test and make docs-check are green
+  status: complete
+  created_at: '2026-09-18T03:54:42.402378+00:00'
+  completed_at: '2026-09-18T04:05:15.430806+00:00'
