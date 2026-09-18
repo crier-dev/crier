@@ -1421,3 +1421,13 @@ tasks:
   status: complete
   created_at: '2026-09-18T04:54:00.598955+00:00'
   completed_at: '2026-09-18T05:24:25.974303+00:00'
+- id: INT-CI-005
+  title: make port-guard-selftest survives a port stolen inside the pick->bind window
+  criteria:
+  - scripts/lib/port-guard.sh rotates to a fresh candidate and retries the bind (bounded,
+    fail-closed when the budget is exhausted); the started listener must be proven
+    to be OUR pid; a deterministic fixture that fails the first bind reproduces CI
+    run 35310987548 and now PASSES
+  status: complete
+  created_at: '2026-09-18T06:17:40.682146+00:00'
+  completed_at: '2026-09-18T06:26:48.885440+00:00'
