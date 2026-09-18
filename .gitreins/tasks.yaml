@@ -1376,3 +1376,12 @@ tasks:
   status: complete
   created_at: '2026-09-18T01:15:18.878027+00:00'
   completed_at: '2026-09-18T01:15:23.868538+00:00'
+- id: DF-CRIER-102
+  title: /health serves its JSON body as Content-Type text/plain
+  criteria:
+  - 'Live GET /health returns HTTP 200 with header Content-Type: application/json
+    and body {"status":"ok"}; a regression test asserts the header and fails on the
+    pre-fix tree; go build/vet/test green and make docs-check rc=0.'
+  status: complete
+  created_at: '2026-09-18T02:38:14.179346+00:00'
+  completed_at: '2026-09-18T02:46:20.437885+00:00'
