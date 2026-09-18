@@ -1385,3 +1385,14 @@ tasks:
   status: complete
   created_at: '2026-09-18T02:38:14.179346+00:00'
   completed_at: '2026-09-18T02:46:20.437885+00:00'
+- id: DF-CRIER-212
+  title: six http.Error sites serve a JSON error body as Content-Type text/plain (relay
+    x4, mesh x1, recovery middleware x1)
+  criteria:
+  - 'grep -rn ''http.Error'' --include=*.go . returns no non-test hits; every one
+    of the six rejection paths answers Content-Type: application/json with a byte-identical
+    JSON body and unchanged status; new per-package tests assert status+header+JSON
+    body and FAIL on the pre-fix source; full suite + gofmt + make docs-check green'
+  status: complete
+  created_at: '2026-09-18T02:59:37.455840+00:00'
+  completed_at: '2026-09-18T03:09:08.417234+00:00'
