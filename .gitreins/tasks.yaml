@@ -1580,3 +1580,16 @@ tasks:
   status: complete
   created_at: '2026-09-18T17:36:45.203475+00:00'
   completed_at: '2026-09-18T17:57:20.451442+00:00'
+- id: DF-CRIER-251
+  title: docs/mesh-protocol.md claims no server-initiated keepalive while the shipped
+    server sends one every 30s
+  criteria:
+  - "docs/mesh-protocol.md's KEEPALIVE section documents BOTH directions \u2014 the\
+    \ client loop (unprocessed server-side) AND the server's own KEEPALIVE to every\
+    \ accepted peer every 30s with the server's mesh identity crier (peer.go:42/186\
+    \ + handler.go:46 + main.go:149) \u2014 with the corrected prose pinned by a live\
+    \ docs claim in docs/claims.yaml, proven live and falsifiable in both directions;\
+    \ frozen zones (route-cap line, 'Error handling and silent drops') byte-identical."
+  status: complete
+  created_at: '2026-09-18T18:26:54.843931+00:00'
+  completed_at: '2026-09-18T18:43:18.042563+00:00'
