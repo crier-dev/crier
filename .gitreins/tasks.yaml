@@ -1445,3 +1445,21 @@ tasks:
   status: complete
   created_at: '2026-09-18T06:41:52.899120+00:00'
   completed_at: '2026-09-18T07:00:34.417350+00:00'
+- id: df-crier-236-empty-signature-401
+  title: 'DF-CRIER-236: the 401 for an empty agent signature must name the empty signature,
+    not the headers'
+  criteria:
+  - 'Live-probed at HEAD d337b3f with signature enforcement on: a request carrying
+    X-Agent-ID and X-Agent-Ts with an EMPTY (or whitespace-only) X-Agent-Sig returns
+    401 whose JSON error names the empty signature and its cause (a piped/redirected
+    payload makes openssl pkeyutl -sign -rawin emit a zero-byte signature), and does
+    NOT contain the substring ''missing agent signature headers''; a request with
+    no signature headers at all still returns that original message; a non-hex or
+    wrong-length signature gets its own 401 message naming the malformed value; unit
+    tests cover each branch and go build/vet/test ./... -count=1 plus gitreins guard
+    PASS; the three signing helpers (README, docs/integration-guide.md, TESTERS.md)
+    gain a zero-output guard naming the non-seekable-payload cause and stay consistent
+    with each other (make docs-check PASS).'
+  status: complete
+  created_at: '2026-09-18T07:24:10.879103+00:00'
+  completed_at: '2026-09-18T07:32:30.006859+00:00'
