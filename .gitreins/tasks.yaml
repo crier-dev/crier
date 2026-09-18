@@ -1593,3 +1593,15 @@ tasks:
   status: complete
   created_at: '2026-09-18T18:26:54.843931+00:00'
   completed_at: '2026-09-18T18:43:18.042563+00:00'
+- id: QA-CRIER-17
+  title: Name and fix the intermittent cmd/server package FAIL that leaves no failing
+    test name
+  criteria:
+  - A captured -v log names the failing test (or a deterministic fixture reproduces
+    the failure on old code and passes on new); the root cause is stated with log/source
+    evidence; the fix is not a retry band-aid; 20+ consecutive go test ./cmd/server
+    -count=1 runs are green, plus go test ./... -count=1, go vet ./..., make gofmt-check
+    and gitreins guard
+  status: complete
+  created_at: '2026-09-18T18:56:18.692588+00:00'
+  completed_at: '2026-09-18T19:24:16.945278+00:00'
