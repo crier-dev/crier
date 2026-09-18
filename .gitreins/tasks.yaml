@@ -1498,3 +1498,29 @@ tasks:
   status: complete
   created_at: '2026-09-18T08:17:50.834790+00:00'
   completed_at: '2026-09-18T08:26:20.449814+00:00'
+- id: DOGFOOD-RELAY-1
+  title: Relay WebSocket frames identify the published topic
+  criteria:
+  - Publish to wildcard and exact relay subscriptions emits a JSON frame with literal
+    topic and unchanged event value; repeated topic publishes and non-object event
+    types retain correct shape; delivery is exactly once per matching subscription;
+    document the wire shape in OpenAPI and integration guide; regression tests cover
+    channel and live WebSocket; build, vet, and tests pass without changing the HTTP
+    publish response.
+  status: complete
+  created_at: '2026-09-18T15:41:02.398911+00:00'
+  completed_at: '2026-09-18T15:50:46.713964+00:00'
+- id: DOGFOOD-MESH-2
+  title: Mesh RESPONSE body contract matches the shipped wire
+  criteria:
+  - 'docs/mesh-protocol.md RESPONSE body row and example state the shipped truth:
+    the body is an opaque JSON value relayed verbatim (json.RawMessage server-side,
+    never re-encoded), so an object body arrives as an object and a string body arrives
+    as a string; the misleading ''encode your body as a JSON string'' instruction
+    is corrected in both docs/mesh-protocol.md and examples/llm-mesh/README.md; a
+    Go regression test proves verbatim passthrough over the real relayed path; go
+    build, go vet, go test ./... -count=1, make docs-check, make gofmt-check and the
+    Tier-1 guard all pass with no change to shipped server behavior.'
+  status: complete
+  created_at: '2026-09-18T16:12:12.516701+00:00'
+  completed_at: '2026-09-18T16:24:22.085016+00:00'
