@@ -1341,3 +1341,38 @@ tasks:
   status: complete
   created_at: '2026-09-18T00:11:59.398163+00:00'
   completed_at: '2026-09-18T00:26:02.484536+00:00'
+- id: df-crier-196-docs-endpoint-index
+  title: 'DF-CRIER-196 clauses 1+2: /docs serves a real endpoint index; agent-ecosystem
+    quickstart names its port overrides'
+  criteria:
+  - GET /docs on a fresh build returns 200 text/html listing EVERY path in the embedded
+    docs/openapi.yaml (13 API paths) with its method(s), still linking /openapi.json
+    and /openapi.yaml, self-contained with no external asset references; a Go test
+    pins the index to the embedded spec and is proven to fail when a path is missing;
+    examples/agent-ecosystem/README.md quickstart names the *_HOST_PORT overrides
+    and the -p project flag; go build/vet, the full go test suite, make docs-check
+    and gitreins tier-1 guard all green; no version-stamp, handler, mesh-protocol
+    or examples/llm-mesh changes.
+  status: complete
+  created_at: '2026-09-18T00:54:06.047848+00:00'
+  completed_at: '2026-09-18T01:02:32.772119+00:00'
+- id: df-crier-196-docs-gate-mechanical-proof
+  title: 'DF-CRIER-196 rework: the /docs index gate''s failure property is proven
+    mechanically in-repo'
+  criteria:
+  - On top of d95fc82, cmd/server/openapi_docs_test.go factors the /docs drift check
+    into the pure function docsIndexGaps(specJSON, body) and adds TestDocsIndexGateDetectsOperationMissingFromPage,
+    which drives the real handler, deletes the GET /fed/peers row from the served
+    page body, and requires exactly one gap naming that operation while the unmutated
+    body yields zero gaps and the page's operation-row count equals the spec's operation
+    count in the same run; the gate is proven to fail when it reports nothing (making
+    docsIndexGaps return nil turns the self-test RED, verified by the foreman); the
+    rendered /docs page, the template, the handler behaviour, the README quickstart
+    and main_test.go's assertions are unchanged (the served /docs body is byte-identical
+    between d95fc82 and the rework commit, sha256 02bcb3dc13d932ecc32958521b5964d266294b503a670bc12c0d1c13a0520e8d);
+    the spec-shrink case is documented in-repo as not-drift because the page is generated
+    from the same embedded spec; go build/vet, the full go test suite (15 packages),
+    make docs-check, gofmt on the changed file and gitreins tier-1 guard are all green.
+  status: complete
+  created_at: '2026-09-18T01:15:18.878027+00:00'
+  completed_at: '2026-09-18T01:15:23.868538+00:00'
