@@ -111,8 +111,29 @@ response can find its way back.
 | `request_id` | string | **Must echo the REQUEST's `message_id`** — see correlation contract |
 | `source` | `PeerRef` | Responding agent |
 | `status_code` | int | HTTP-style status code |
-| `body` | string | JSON-encoded payload (the field is `json.RawMessage`; encode your body as a JSON string) |
+| `body` | any | Opaque JSON value (`json.RawMessage` server-side), relayed verbatim — the responder decides the JSON type: an object body arrives as an object, a string body as a string (see below) |
 | `trace_id` | string | Echo of the request's `trace_id` |
+
+**Bodies are responder-controlled.** A RESPONSE `body` is an opaque JSON value, not a
+string: the server holds the frame's raw bytes (`Response.Body json.RawMessage`,
+`internal/mesh/message.go:79`) and hands the frame it received to the requester's
+connection unchanged (`forwardResponse` calls `conn.Send(data)` with those bytes,
+`internal/mesh/peer.go:402-420`). Nothing unwraps the body, re-encodes it, or
+stringifies it, so the requester decodes the bytes the responder wrote and the JSON
+type is the responder's choice. A responder that puts an object in the field
+(`{"pong": true}`, as in the example above) sends an object and the requester gets an
+object back; a responder that stringifies its own payload — Python
+`json.dumps({"pong": True})`, as the worked example at the end of this document sends —
+puts a JSON **string** on the wire, and a string is what the requester gets back. Both
+are valid frames; neither is the server "encoding" anything. `TestResponseBodyRelayedVerbatim`
+pins this over the relayed path in `internal/mesh`, including that the body bytes come
+back unchanged.
+
+Consumer note: an MCP client can read the body only when it is an object — the
+`mesh_request` tool decodes `reply.body` into a `map[string]any`
+(`internal/mcp/messaging.go:266-271`, `internal/mcp/types.go:204-208`) and discards the
+decode error, so a STRING body reaches that client as a `null` `body` field rather than
+as a string.
 
 ### ERROR (server → agent, or agent → agent)
 
@@ -127,6 +148,14 @@ full). Also used by agents to fail a request.
  "trace_id":"f1e2d3c4b5a69788796a5b4c"}
 ```
 
+`request_id` carries the failed REQUEST's `message_id` — the same value a RESPONSE
+echoes, because the server routes by the original `message_id` and looks the frame up
+by its `request_id` on the one `forwardResponse` path that serves both types. ERROR
+frames are therefore correlated exactly like RESPONSE frames: match on `request_id`
+(the reply's correlation field), never on `message_id` (the frame's own id). A client
+that correlates on `message_id` alone never matches a server-sent ERROR and hangs
+until its own timeout.
+
 `error` is an `ErrorDetail`: `{code, message, retry_after_ms?}`. Defined codes:
 
 | Code | Meaning |
@@ -140,18 +169,20 @@ full). Also used by agents to fail a request.
 
 ## Correlation contract (read this first)
 
-The server routes responses **by the request's `message_id`**, but looks responses
-up **by their `request_id`** (`internal/mesh/peer.go`: routes keyed on
-`req.MessageID`, `forwardResponse` looks up `resp.RequestID`).
+The server routes replies **by the request's `message_id`**, but looks them up **by
+their `request_id`**. That is one rule for both reply types — RESPONSE and ERROR frames
+take the same `forwardResponse` path (`internal/mesh/peer.go`: routes keyed on
+`req.MessageID`, `forwardResponse` looks up the reply's `request_id`).
 
 **A responder MUST set `request_id` to the exact `message_id` of the REQUEST it is
 answering.** If it does not, the response is silently dropped and the requester
 hangs until its own timeout. This is live-verified: a RESPONSE carrying a
-non-matching `request_id` never reaches the requester.
+non-matching `request_id` never reaches the requester. The server's own ERROR frames
+already follow this rule (see §ERROR).
 
 The server-side flow: REQUEST arrives → route `message_id → requester` recorded →
-frame forwarded to target. RESPONSE arrives → `request_id` looked up in the route
-table → frame forwarded back to the original requester → route deleted. A RESPONSE
+frame forwarded to target. A RESPONSE or ERROR arrives → `request_id` looked up in the
+route table → frame forwarded back to the original requester → route deleted. A reply
 with an unknown `request_id` is dropped with no error and no log.
 
 ## Error handling and silent drops

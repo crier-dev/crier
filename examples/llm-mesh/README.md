@@ -87,8 +87,13 @@ Config for the bridge: `CRIER_HTTP_URL` (remote-server mode), `CRIER_AGENT_ID`
 - Incoming mesh REQUESTs to a bridge are auto-answered `bridge_alive` — the
   mesh is the liveness lane, the durable inbox is the content lane for LLM
   traffic. That split is a design decision this demo makes explicit.
-- RESPONSE `body` is a JSON-encoded string on the wire (RawMessage quirk) —
-  the bridge hides this from harnesses.
+- RESPONSE `body` is **responder-controlled and relayed verbatim**: the server keeps
+  the frame's raw bytes (`json.RawMessage`) and never re-encodes the value, so an
+  object body comes back as an object. This demo sees a JSON *string* only because
+  its own client stringifies the payload (`mesh/crier_mesh.py`:
+  `"body": json.dumps(body)`). The `mesh_request` bridge decodes the body into a map,
+  so a string body reaches an MCP client as `"body": null`, not as a string
+  (DOGFOOD-MESH-2 — see the RESPONSE section of docs/mesh-protocol.md).
 - With `CR_REQUIRE_AGENT_SIG=false`, `crier-mcp`'s remote mode needs only the
   agent id header; with signing enabled, the bridge would hold the agent key
   and sign on the harness's behalf (not yet implemented).

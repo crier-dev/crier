@@ -60,9 +60,15 @@ Verify with `GET .../inbox/stats` (`queue_depth: 0`), never with a re-retrieve
   `message_id`, or the server drops it and the requester times out.
 - The server never sends REGISTER_ACK and ignores KEEPALIVE (claims in
   README/specs are overstated — see CR-GAP-016).
-- RESPONSE `body` goes on the wire as a JSON-encoded STRING (json.RawMessage):
-  send `body: json.dumps({...})` and expect a string back (2026-09-18 live run;
-  the mesh-protocol.md example showing an object contradicts the wire — DOGFOOD-MESH-2).
+- RESPONSE `body` is an opaque JSON value relayed VERBATIM (server-side
+  `json.RawMessage`): the responder chooses the JSON type, so an object body comes
+  back as an object and a string body comes back as a string — the server never
+  re-encodes it. A string reply is what a responder that stringifies its own body
+  (`body: json.dumps({...})`) sent; that is what the 2026-09-18 live run saw, and the
+  mesh-protocol.md example is consistent with it, not contradicted by it
+  (DOGFOOD-MESH-2). Consequence: the MCP `mesh_request` bridge decodes the body into
+  a map, so only an OBJECT body survives to that client — a string body arrives there
+  as `"body": null`, never as a string.
 - REQUEST to an offline/unknown peer → ERROR `CONTROLLER_OFFLINE` whose
   `request_id` is the failed REQUEST's `message_id`; correlate ERROR frames by
   `request_id`, not by `message_id` (DOGFOOD-MESH-3).

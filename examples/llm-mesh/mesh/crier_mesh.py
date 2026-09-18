@@ -11,7 +11,9 @@ Implements the full client side of docs/mesh-protocol.md:
     server, so the client MUST echo the request's message_id as request_id)
   * ERROR frames surfaced as synthetic 500-style MeshError exceptions
   * responder dispatch: incoming REQUESTs go to a handler; RESPONSEs are built
-    and sent automatically (body JSON-encoded as a string, per the wire quirk)
+    and sent automatically (this client stringifies its own body with json.dumps,
+    so it receives a JSON string back — the server relays whatever body the
+    responder sends, see the RESPONSE section of docs/mesh-protocol.md)
 
 Thread model: each MeshClient owns one asyncio loop in a background thread;
 the public API (request / respond / close) is synchronous and safe to call
@@ -171,7 +173,7 @@ class MeshClient:
             "request_id": frame["message_id"],          # THE correlation contract
             "source": {"agent_id": self.agent_id},
             "status_code": 200,
-            "body": json.dumps(body),                   # wire quirk: string-encoded
+            "body": json.dumps(body),                   # a STRING body — ours to choose
             "trace_id": frame.get("trace_id", ""),
         }
         self._log(">>", resp)
