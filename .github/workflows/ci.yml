@@ -49,6 +49,17 @@ jobs:
       - name: Deploy-leg transport retry selftest
         run: make transport-retry-selftest
 
+      # DF-CRIER-254: the repo had no bounded load path, so a load-dependent
+      # reproduction was driven by an ad-hoc burn loop whose units outlived
+      # every caller (loadavg 220-346 on the shared host). This selftest proves
+      # the harness that replaces it: worker/lifetime caps REFUSE out-of-range
+      # requests, the load-average gate SKIPS with a recorded reason, teardown
+      # leaves no survivor even after SIGKILL of the runner, and a NEUTER proof
+      # keeps the no-survivor reading non-vacuous. Fixtures are <= 2 workers /
+      # <= 2 s, so the step adds seconds, not load.
+      - name: Bounded load-harness selftest
+        run: make load-repro-selftest
+
       # DF-CRIER-206: Tier 1 (secrets/go_build/go_lint/go_tests) never reads a
       # shell script or a workflow YAML, so before this step a .sh/.yml-only push
       # got a `Tier 1 Guards: PASS` that verified nothing about it. The checker
