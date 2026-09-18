@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest transport-retry-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest transport-retry-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -28,6 +28,7 @@ help:
 	@echo "Available targets:"
 	@echo "  build             Compile the main server binary into bin/crier"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
+	@echo "  mcp               Build and run the MCP bridge in one command (stdio; the documented launcher — its stdout carries only JSON-RPC frames)"
 	@echo "  run               Build and run the server (default :8767, pidfile $(PIDFILE))"
 	@echo "  stop              Stop the server started by make run (reads $(PIDFILE); no pidfile = nothing to stop, exit 0)"
 	@echo "  test              Full test suite, no caching (go test ./... -count=1 -timeout 60s)"
@@ -46,6 +47,8 @@ help:
 	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
 	@echo "  gofmt-check       Check every tracked .go file with gofmt (go vet does not read formatting) — a drifting file fails (DF-CRIER-189)"
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
+	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
+	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -57,8 +60,23 @@ help:
 build:
 	go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier ./cmd/server
 
+# DF-CRIER-137: the `@` keeps make from echoing this recipe line to STDOUT. The
+# documented launcher `make build-mcp && ./bin/crier-mcp` feeds a strict MCP stdio
+# client, and without the `@` make's recipe echo landed on that client's stdout
+# before any JSON-RPC frame (measured; the same finding was filed as DF-CRIER-66,
+# DF-CRIER-91 and DF-CRIER-137). Build FAILURES still print — make's own error
+# line and go's compiler output go to stderr — and the exit status is unchanged.
+# `make mcp-stdout-check` gates this; do not drop the `@` or re-prefix the recipe.
 build-mcp:
-	go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-mcp ./cmd/crier-mcp
+	@go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-mcp ./cmd/crier-mcp
+
+# DF-CRIER-137: the same launcher as ONE command, so a client config does not
+# need a shell `&&`. Each recipe line runs in its own shell, so `exec` replaces
+# that shell and the bridge inherits make's stdin/stdout/stderr; a failed build
+# stops make before the exec line (and its output stays on stderr). This is
+# additive: `build-mcp` and the compound documented form keep working.
+mcp: build-mcp
+	@exec ./bin/crier-mcp
 
 test:
 	go test ./... -count=1 -timeout 60s
@@ -192,6 +210,23 @@ gofmt-check:
 
 gofmt-selftest:
 	bash scripts/check-gofmt.sh --selftest
+
+# DF-CRIER-137: the documented MCP launcher's stdout contract. `make build-mcp && ./bin/crier-mcp`
+# is what README.md and docs/integration-guide.md tell a client to run, and a strict
+# stdio MCP client fails the handshake on any line that is not a JSON-RPC frame. The
+# bridge has always been clean; the launcher was not — make echoed the `build-mcp`
+# recipe to stdout (three filings: DF-CRIER-66/91/137). mcp-stdout-check runs the
+# documented launcher(s) for real with one initialize frame on stdin and requires the
+# FIRST stdout line to be the initialize response; a timeout is a failure, a launcher
+# that prints nothing on stdout is exit 2 (never a green), and a missing tool
+# (make/go/timeout) is exit 2 too. mcp-stdout-selftest proves the checker still
+# rejects a contaminated launcher and refuses a silent one, including a NEUTER proof
+# that the rejection comes from the checker's own verdict.
+mcp-stdout-check:
+	bash scripts/check-mcp-stdout.sh
+
+mcp-stdout-selftest:
+	bash scripts/check-mcp-stdout-selftest.sh
 
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target

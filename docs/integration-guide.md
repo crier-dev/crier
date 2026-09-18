@@ -414,7 +414,7 @@ Host port and compose project are env-overridable (`CRIER_PG_HOST_PORT`, `COMPOS
 Migrations apply automatically on startup. With the Postgres backend, agents
 and undelivered messages survive server restarts; without
 `CR_DATABASE_URL` everything is process-lifetime only. The MCP server
-(`make build-mcp && ./bin/crier-mcp`, stdio, 8 tools) shares the same
+(`make build-mcp && ./bin/crier-mcp`, stdio, 13 tools) shares the same
 backend, so agents registered over HTTP are visible over MCP and vice versa.
 
 ### 6.1 Remote MCP mode (crier-mcp against a running server)
@@ -442,6 +442,10 @@ export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
 # export CRIER_AUTH_TOKEN=...
 make build-mcp && ./bin/crier-mcp
 ```
+
+The launcher's stdout carries only JSON-RPC frames — the build's own diagnostics go
+to stderr — so a strict stdio client may launch that line as-is; `make mcp` does the
+same in a single command.
 
 - `CRIER_AGENT_PRIVATE_KEY_FILE` must hold a **PKCS#8 PEM ed25519** private
   key (`openssl genpkey -algorithm ED25519`). Unreadable, malformed,

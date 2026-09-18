@@ -101,6 +101,23 @@ jobs:
           make gofmt-check
           make gofmt-selftest
 
+      # DF-CRIER-137: the documented way to launch the MCP bridge
+      # (`make build-mcp && ./bin/crier-mcp`, README + integration guide) feeds a
+      # strict MCP stdio client, and the `build-mcp` recipe was not prefixed with
+      # `@` — so make echoed the recipe line to STDOUT before any JSON-RPC frame
+      # and the handshake failed (the same finding was filed three times:
+      # DF-CRIER-66, DF-CRIER-91, DF-CRIER-137). This runs the documented
+      # launcher(s) for real, with one `initialize` frame on stdin, and requires
+      # the FIRST stdout line to be the initialize response — the bridge's own
+      # logging is on stderr, where a client cannot read it. The selftest proves
+      # the checker still rejects a launcher that contaminates stdout, refuses one
+      # that prints nothing at all (never a green over nothing), and includes a
+      # neuter proof, so this step cannot pass vacuously.
+      - name: MCP launcher stdout check
+        run: |
+          make mcp-stdout-selftest
+          make mcp-stdout-check
+
   test-coverage:
     name: Coverage (Go 1.26.6)
     runs-on: ubuntu-latest

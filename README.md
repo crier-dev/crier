@@ -408,6 +408,10 @@ export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
 make build-mcp && ./bin/crier-mcp
 ```
 
+The launcher's stdout carries only JSON-RPC frames — the build's own diagnostics go
+to stderr — so a strict stdio client may launch that line as-is; `make mcp` does the
+same in a single command.
+
 **Automatic registration (no operator step).** On startup in remote mode
 crier-mcp registers `CRIER_AGENT_ID` on the server with its public key and the
 `mcp`/`bridge` capability tags, then logs the outcome. Registration is
