@@ -35,6 +35,16 @@ Config is env-driven (`CRIER_PORT`, `CR_DATABASE_URL`, `CR_AUTH_TOKEN`, `CR_REQU
 
 `docs/openapi.yaml` is the OpenAPI source; `cmd/server/openapi.yaml` is a GENERATED copy — `//go:generate cp ../../docs/openapi.yaml openapi.yaml` in `cmd/server/openapi.go:16-19` (go:embed cannot reach outside the package dir), asserted byte-identical by `TestOpenAPIDocsSpec` and by CI. Edit the source, run `make generate`, and stage both.
 
+### `.vfs/` — local hilo code-graph cache (not shipped)
+
+`.vfs/` is a LOCAL hilo code-graph cache and is never shipped; the graph is rebuilt
+locally by the hilo CLI, so its generated files — `.vfs/.dirty`,
+`.vfs/graph/edges.jsonl`, `.vfs/graph/.last_reconcile` and
+`.vfs/graph/.parse_cache.json` — are untracked and gitignored. `.vfs/manifest.yaml`
+stays tracked because it is the hilo project manifest (config, not generated
+output). The dev tree is therefore expected to read clean after a local graph
+rebuild (DF-CRIER-211).
+
 ## The commit gate — what it covers, and what it does not
 
 The gate is `gitreins guard` run from `.git/hooks/pre-commit` (Tier 1: secrets /

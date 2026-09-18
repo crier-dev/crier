@@ -35,6 +35,14 @@ dist/
 .vfs/graph/graph.duckdb
 .vfs/graph/.last_warm
 
+# Hilo — generated code-graph index, untracked (DF-CRIER-211). The graph is rebuilt
+# locally by the hilo CLI and is never shipped; .vfs/manifest.yaml stays tracked
+# (it is the hilo project manifest — config, not generated output).
+.vfs/.dirty
+.vfs/graph/edges.jsonl
+.vfs/graph/.last_reconcile
+.vfs/graph/.parse_cache.json
+
 # GitReins history
 .gitreins/history/
 .gitreins/usage.jsonl
