@@ -63,16 +63,35 @@ The `REGISTER_ACK` **type exists in the codebase** (`internal/mesh/message.go`) 
 emits it**. Treat any received `REGISTER_ACK` as a protocol extension, not part of
 the contract.
 
-### KEEPALIVE (client → server)
+### KEEPALIVE (both directions)
 
 Sent by each connected client every 30 seconds (`KeepaliveInterval`,
 `internal/mesh/peer.go:keepaliveLoop`). The server **does not process it** — there is
-no liveness bookkeeping, no reply, and no server-initiated keepalive. The loop keeps
-the socket warm and detects dead connections via read errors; it has no other effect.
+no liveness bookkeeping and no reply: an inbound KEEPALIVE reaches the `default`
+branch of the message switch (`internal/mesh/handleMessage`,
+`internal/mesh/peer.go:267`). The loop keeps the socket warm and detects dead
+connections via read errors; it has no other effect.
+
+The server sends a KEEPALIVE to every accepted peer every 30 seconds: the accept
+path starts the same loop (`internal/mesh/handler.go:46` →
+`internal/mesh/peer.go:186`), on the same `KeepaliveInterval`
+(`internal/mesh/peer.go:42`) the client loop ticks on. The frame's `agent_id` is the
+SERVER's mesh identity (`internal/mesh/peer.go:237-243` builds it from `m.agentID`;
+the server runs `mesh.DefaultMeshConfig("crier")`, `cmd/server/main.go:149`) — not
+the peer's id — so a raw WebSocket client accepted as some other agent still reads
+`"agent_id":"crier"` on its own socket:
 
 ```json
 {"type":"KEEPALIVE","version":1,"message_id":"9d8f0a1b2c3d4e5f6a7b8c9d",
  "timestamp":"2026-08-10T01:55:00.123456789-05:00","lease_id":"","agent_id":"agent-a"}
+```
+
+The same frame as the server sends it, captured live from a raw client (nothing
+below is a placeholder — this is a frame observed arriving on the socket):
+
+```json
+{"type":"KEEPALIVE","version":1,"message_id":"13f7ac9931a32857e537d1fe",
+ "timestamp":"2026-09-18T13:33:50.921105103-05:00","lease_id":"","agent_id":"crier"}
 ```
 
 ### REQUEST (agent → agent, relayed by server)

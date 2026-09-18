@@ -202,6 +202,20 @@ claims:
     quote: "30s interval; no server-side liveness processing"
     expect: 30
     xfail: null
+  # DF-CRIER-251: docs/mesh-protocol.md claimed "no server-initiated keepalive"
+  # while the shipped accept path started the same 30s loop for every accepted
+  # peer (handler.go:46 → peer.go:186). The anchor below is the corrected sentence,
+  # so putting the old wording back fails the gate with "anchor missing". The id is
+  # shared with the two claims above ON PURPOSE — liveDefault() keys the probe on
+  # it, so all THREE docs are pinned to one measurement of the production default
+  # mesh.DefaultMeshConfig("").KeepaliveInterval (the probe lives in
+  # cmd/server/docsclaims_test.go and is not duplicated here).
+  - id: DEFAULT-MESH-KEEPALIVE
+    kind: default
+    doc: docs/mesh-protocol.md
+    quote: "The server sends a KEEPALIVE to every accepted peer every 30 seconds"
+    expect: 30
+    xfail: null
   # DF-CRIER-182: a message that never expires (ttl_seconds=0) reports
   # `expires_at` as JSON null — the key stays present, only its value is null —
   # on the 201 accept AND on the retrieve body. The probe reads the RAW wire
