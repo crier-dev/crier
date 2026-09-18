@@ -88,6 +88,170 @@ func TestAuthorizeAgent_MissingHeaders(t *testing.T) {
 	}
 }
 
+// --- DF-CRIER-236: a PRESENT but unusable X-Agent-Sig must be reported as
+// itself, not as a missing header. The three client mistakes below used to
+// share one message ("missing agent signature headers …"), which sent the
+// reader to debug headers that were all present and correct. The pre-fix
+// shape was a client whose signing helper produced NO output: `openssl pkeyutl
+// -sign -rawin` is a one-shot operation that needs a SEEKABLE payload, so a
+// piped or redirected payload makes it fail with "unable to determine file
+// size for oneshot operation" and emit zero bytes — which the helper's
+// `2>/dev/null` hid, so the client sent `X-Agent-Sig:` empty.
+
+// sigHeaderRequest builds a request with valid X-Agent-ID and X-Agent-Ts but a
+// verbatim X-Agent-Sig value — including "" (header present, no value) and
+// whitespace-only, the exact shape a broken signing helper produces.
+func sigHeaderRequest(t *testing.T, agentID, sig string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/agents/"+agentID+"/inbox", nil)
+	req.Header.Set(HeaderAgentID, agentID)
+	req.Header.Set(HeaderAgentTS, fmt.Sprintf("%d", time.Now().Unix()))
+	req.Header.Set(HeaderAgentSig, sig) // Set stores the value verbatim, "" included
+	return req
+}
+
+// deniedMessage drives authorizeAgent against req (expected to be rejected) and
+// returns the status, the DECODED error string, and the raw body. Assertions
+// read the decoded string on purpose: the raw wire body is JSON with the
+// default HTML escaping, so "<file>" arrives as "\u003cfile\u003e" and a quoted
+// value as \"-escaped — a raw-body Contains on those shapes fails on a correct
+// response.
+func deniedMessage(t *testing.T, h *Handler, req *http.Request, targetID string) (int, string, string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := h.authorizeAgent(rec, req, targetID); err == nil {
+		t.Fatal("expected the request to be rejected")
+	}
+	raw := rec.Body.String()
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body is not the {\"error\": \"…\"} shape: %v (raw body %q)", err, raw)
+	}
+	return rec.Code, resp["error"], raw
+}
+
+// TestAuthorizeAgent_EmptySignatureNamesTheCause pins the empty (and
+// whitespace-only) X-Agent-Sig branch: 401, NOT the missing-headers message,
+// and a body that names the empty signature and the non-seekable-payload cause.
+func TestAuthorizeAgent_EmptySignatureNamesTheCause(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sig  string
+	}{
+		{"empty value", ""},
+		{"whitespace only", "   "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			h := newSigHandler(store)
+			_, _ = testAgentKeypair(t, store, "agent-1")
+
+			status, msg, raw := deniedMessage(t, h, sigHeaderRequest(t, "agent-1", tc.sig), "agent-1")
+			if status != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", status)
+			}
+			if strings.Contains(raw, "missing agent signature headers") {
+				t.Fatalf("body = %q: a PRESENT but empty signature must not be reported as a missing header", raw)
+			}
+			for _, want := range []string{
+				"X-Agent-Sig is present but empty",
+				"seekable",
+				"-in <file>",
+				"zero-byte signature",
+			} {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("error = %q, want it to name the cause (missing %q)", msg, want)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthorizeAgent_ShortSignatureNamesTheLength pins the wrong-length branch:
+// 6 hex chars is not hex rubbish, so the message must report the expected
+// 128-char length AND the actual value/length rather than a generic line.
+func TestAuthorizeAgent_ShortSignatureNamesTheLength(t *testing.T) {
+	store := NewMemoryStore()
+	h := newSigHandler(store)
+	_, _ = testAgentKeypair(t, store, "agent-1")
+
+	status, msg, raw := deniedMessage(t, h, sigHeaderRequest(t, "agent-1", "abcdef"), "agent-1")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", status)
+	}
+	for _, want := range []string{"expected 128 hex chars", "got 6 character(s)", `"abcdef"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error = %q, want it to contain %q", msg, want)
+		}
+	}
+	for _, unwanted := range []string{"missing agent signature headers", "not hex"} {
+		if strings.Contains(msg, unwanted) {
+			t.Fatalf("error = %q, want the wrong-length message (unexpected %q)", msg, unwanted)
+		}
+	}
+	if strings.Contains(raw, "missing agent signature headers") {
+		t.Fatalf("body = %q, want the malformed-signature message", raw)
+	}
+}
+
+// TestAuthorizeAgent_NonHexSignatureSaysNotHex pins the non-hex branch: the
+// message must say the value is not hex, not merely report a length.
+func TestAuthorizeAgent_NonHexSignatureSaysNotHex(t *testing.T) {
+	store := NewMemoryStore()
+	h := newSigHandler(store)
+	_, _ = testAgentKeypair(t, store, "agent-1")
+
+	status, msg, raw := deniedMessage(t, h, sigHeaderRequest(t, "agent-1", "zzzz"), "agent-1")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", status)
+	}
+	for _, want := range []string{"not hex", `"zzzz"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error = %q, want it to contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "character(s)") {
+		t.Fatalf("error = %q: a non-hex value must be reported as not-hex, not as a wrong length", msg)
+	}
+	if strings.Contains(raw, "missing agent signature headers") {
+		t.Fatalf("body = %q, want the malformed-signature message", raw)
+	}
+}
+
+// TestAuthorizeAgent_MissingSignatureHeaderMessageUnchanged guards the other
+// side of the split: with X-Agent-ID (and X-Agent-Ts) truly absent the original
+// message must survive verbatim — a caller with no signature at all must not be
+// told to debug an empty signing step.
+func TestAuthorizeAgent_MissingHeaderMessageUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		setHeaders func(*http.Request)
+	}{
+		{"no headers at all", func(*http.Request) {}},
+		{"X-Agent-Ts absent", func(r *http.Request) { r.Header.Set(HeaderAgentID, "agent-1") }},
+		{"X-Agent-ID absent", func(r *http.Request) { r.Header.Set(HeaderAgentTS, "1700000000") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			h := newSigHandler(store)
+			_, _ = testAgentKeypair(t, store, "agent-1")
+
+			req := httptest.NewRequest(http.MethodGet, "/agents/agent-1/inbox", nil)
+			tc.setHeaders(req)
+			rec := httptest.NewRecorder()
+			if err := h.authorizeAgent(rec, req, "agent-1"); err == nil {
+				t.Fatal("expected missing headers to be rejected")
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+			if body := rec.Body.String(); !strings.Contains(body, "missing agent signature headers") {
+				t.Fatalf("body = %q, want the original missing-headers message", body)
+			}
+		})
+	}
+}
+
 func TestAuthorizeAgent_CrossAgentRejected(t *testing.T) {
 	store := NewMemoryStore()
 	h := newSigHandler(store)

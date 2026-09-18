@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -44,15 +45,38 @@ func (e *agentSigError) Error() string { return e.message }
 // can only read/ack/delete its own inbox. Callers that lack a registered key
 // (or present a mismatched key) are rejected with 401/403.
 //
+// The header check distinguishes three separate client mistakes instead of
+// collapsing them into one message (DF-CRIER-236): a header that is ABSENT
+// ("missing agent signature headers"), an X-Agent-Sig that is PRESENT but
+// empty or whitespace-only — the signature of a signing helper that produced
+// no output (openssl pkeyutl -sign -rawin needs a seekable payload supplied
+// with -in <file>; a piped or redirected payload fails and yields zero bytes,
+// and the helper's discarded stderr hid it) — and an X-Agent-Sig that is
+// present but malformed (not hex, or hex of the wrong length). All three fail
+// closed with 401; only the message differs, so a caller debugs the real
+// cause instead of the headers.
+//
 // It writes the error response and returns a non-nil error when unauthorized.
 func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetID string) error {
 	callerID := r.Header.Get(HeaderAgentID)
 	tsRaw := r.Header.Get(HeaderAgentTS)
 	sigRaw := r.Header.Get(HeaderAgentSig)
 
-	if callerID == "" || tsRaw == "" || sigRaw == "" {
+	if callerID == "" || tsRaw == "" {
 		return h.agentSigFail(w, http.StatusUnauthorized,
 			"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)")
+	}
+
+	// X-Agent-ID and X-Agent-Ts are here, so a blank X-Agent-Sig is not a
+	// missing header — it is a signing step that produced no output. Name it,
+	// and name the cause, because the empty string is what a non-seekable
+	// payload looks like from the client side (DF-CRIER-236).
+	if strings.TrimSpace(sigRaw) == "" {
+		return h.agentSigFail(w, http.StatusUnauthorized,
+			"X-Agent-Sig is present but empty — the client's signing step produced no output. "+
+				"openssl pkeyutl -sign -rawin needs OpenSSL >= 3 AND a seekable payload passed with -in <file>: "+
+				"a piped or redirected payload fails with \"unable to determine file size for oneshot operation\" "+
+				"and yields a zero-byte signature.")
 	}
 
 	// Resolve the target agent first. An unknown target returns 404 — no
@@ -95,7 +119,17 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 
 	sig, err := hex.DecodeString(sigRaw)
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return h.agentSigFail(w, http.StatusUnauthorized, "X-Agent-Sig must be hex-encoded ed25519 signature (128 hex chars)")
+		// Two different client bugs, two different messages (DF-CRIER-236):
+		// rubbish that is not hex at all, and hex of the wrong length. The
+		// reject decision is unchanged — only the message is specific.
+		if !isHexSignature(sigRaw) {
+			return h.agentSigFail(w, http.StatusUnauthorized,
+				fmt.Sprintf("X-Agent-Sig is malformed: %q is not hex "+
+					"(expected the hex encoding of a 64-byte ed25519 signature)", sigRaw))
+		}
+		return h.agentSigFail(w, http.StatusUnauthorized,
+			fmt.Sprintf("X-Agent-Sig is malformed: expected 128 hex chars "+
+				"(64-byte ed25519 signature), got %d character(s) (%q)", len(sigRaw), sigRaw))
 	}
 
 	payload := []byte(r.Method + "\n" + r.URL.Path + "\n" + tsRaw)
@@ -109,6 +143,26 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 func (h *Handler) agentSigFail(w http.ResponseWriter, status int, message string) error {
 	writeJSON(w, status, map[string]string{"error": message})
 	return &agentSigError{status: status, message: message}
+}
+
+// isHexSignature reports whether s is non-empty and made only of hexadecimal
+// digits. It exists so authorizeAgent can tell "the client sent something that
+// is not hex at all" (isHexSignature false) apart from "the client sent hex of
+// the wrong length" — two different client bugs that used to share one
+// message. Uppercase hex is accepted, matching encoding/hex.
+func isHexSignature(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // requireAgent writes the authorization error if per-agent signing is enabled

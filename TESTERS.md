@@ -90,8 +90,10 @@ BOB_PUB=$(openssl pkey -in /tmp/crier-bob.key   -pubout -outform DER 2>/dev/null
 # >= 3 for `pkeyutl -sign -rawin`: on older OpenSSL it errors loudly instead of
 # producing an empty (silently-401) signature. The payload is written to a FILE
 # and signed with -in — piping it into openssl yields an empty signature and a
-# misleading 401 (DF-CRIER-2).
-sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$2" "$3" "$4" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey "$1" -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
+# misleading 401 (DF-CRIER-2). `-rawin` is a ONE-SHOT operation: it needs that
+# seekable file, so the helper refuses a zero-byte signature loudly (rather than
+# sending it and getting a 401 whose message names the empty X-Agent-Sig header).
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$2" "$3" "$4" > /tmp/crier-payload.txt; _sig=$(openssl pkeyutl -sign -rawin -inkey "$1" -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
 
 # Register both agents with the public half of their own keypair.
 curl -s -X POST $BASE/agents -H 'Content-Type: application/json' \

@@ -130,7 +130,7 @@ than the default cadence to reach exhaustion.
 ### Prerequisites
 
 - Go 1.26.6 or later
-- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below)
+- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below). That flag is also a ONE-SHOT operation: the payload must be a seekable file (the helper writes it and signs it with `-in`), because a piped or redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper refuses that too, instead of sending it
 
 ### Build
 
@@ -290,8 +290,11 @@ openssl genpkey -algorithm ED25519 -out /tmp/crier-agent.key >/dev/null 2>&1
 PUBKEY_HEX=$(openssl pkey -in /tmp/crier-agent.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
 # sig helper: hex(ed25519_sign("METHOD\nPATH\nTS", key)) — same wire format as examples/demo.sh.
 # Requires OpenSSL >= 3 for pkeyutl -sign -rawin; on older OpenSSL it errors loudly
-# instead of producing an empty (silently-401-rejected) signature.
-sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128; }
+# instead of producing an empty (silently-401-rejected) signature. That flag is also a
+# ONE-SHOT operation: the payload must be a seekable file passed with -in, so the helper
+# refuses a zero-byte signature rather than sending it (a piped payload fails with
+# "unable to determine file size for oneshot operation" and would 401 blaming the headers).
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; _sig=$(openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
 
 # 1. Register an agent (public_key = hex-encoded ed25519 public key; required
 #    whenever signature enforcement is on — the default. Only a server run

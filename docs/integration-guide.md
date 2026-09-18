@@ -198,8 +198,10 @@ TS=$(date +%s)
 printf 'GET\n/agents/agent-1/inbox\n%s' "$TS" > payload.txt
 # Signing helper — requires OpenSSL >= 3 for pkeyutl -sign -rawin; on older
 # OpenSSL it errors loudly instead of producing an empty (silently-401-rejected)
-# signature.
-sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt 2>/dev/null | xxd -p -c 128; }
+# signature. `-rawin` is also one-shot: it needs a SEEKABLE payload, so a piped
+# payload yields a zero-byte signature — the helper now refuses that loudly too,
+# instead of letting the server 401 with a message blaming the headers.
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; _sig=$(openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
 SIG=$(sig)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}"
