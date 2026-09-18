@@ -106,6 +106,15 @@ func run(args []string) int {
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 
+	// Router-default 404/405 answers (DF-CRIER-213). gorilla/mux applies the
+	// Use chain above only to MATCHED route handlers, so its two defaults —
+	// net/http's text/plain "404 page not found" and a body-less 405 — ran
+	// with no X-Request-Id and no access-log line on an API that is JSON
+	// everywhere else. The fallbacks replace both and carry their own
+	// RequestID/Logging wrapping; see fallback.go for why Auth and Recovery
+	// are deliberately not part of that wrapping.
+	registerRouterFallbacks(r)
+
 	// Health check. The body is JSON and docs/openapi.yaml declares the 200
 	// response as application/json, so the header is set explicitly: without
 	// it net/http sniffs the body and labels a documented JSON resource
