@@ -328,9 +328,27 @@ curl -s -X POST localhost:8767/relay/publish "${AUTH[@]}" -H 'Content-Type: appl
   -d '{"topic":"my-topic","event":{"kind":"alert","level":5}}'
 ```
 
-The event arrives on the subscriber socket. `GET /relay/topics` lists topics
-with live subscribers. Publishing is rate-limited
-(`CR_RATE_LIMIT_PER_MINUTE`, default 100/min).
+The subscriber receives one text frame per published event, carrying the
+literal published topic next to the event itself:
+
+```json
+{"topic":"my-topic","event":{"kind":"alert","level":5}}
+```
+
+- `event` is the event exactly as published — an object, a string, an array, a
+  number or `null` — not a string-encoded copy of it.
+- `topic` is always the **literal published topic**, never the subscription
+  pattern. Subscribing with a wildcard (`alerts.*` matches one segment,
+  `alerts.>` matches one or more trailing segments) therefore still tells you
+  which topic matched: a publish to `alerts.fire` arrives as
+  `{"topic":"alerts.fire","event":{...}}`.
+- This is a deliberate breaking frame change (DOGFOOD-RELAY-1): frames used to
+  be the bare event (`{"kind":"alert","level":5}`) with no topic. The publish
+  call itself is unchanged — `POST /relay/publish` still answers `202` with an
+  empty body.
+
+`GET /relay/topics` lists topics with live subscribers. Publishing is
+rate-limited (`CR_RATE_LIMIT_PER_MINUTE`, default 100/min).
 
 ---
 

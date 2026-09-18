@@ -25,8 +25,12 @@ const (
 	dropTimeout = 150 * time.Millisecond
 )
 
-func mustReceive(t *testing.T, ch <-chan []byte, want string) {
+// mustReceive asserts the subscriber receives exactly the DOGFOOD-RELAY-1
+// frame for a publish to topic carrying event: the literal topic plus the
+// event as its own JSON value.
+func mustReceive(t *testing.T, ch <-chan []byte, topic, event string) {
 	t.Helper()
+	want := wantFrame(topic, event)
 	select {
 	case got, ok := <-ch:
 		if !ok {
@@ -63,7 +67,7 @@ func TestWildcardStarMatchesExactlyOneSegment(t *testing.T) {
 	if err := r.Publish("demo.one", json.RawMessage(`{"n":1}`)); err != nil {
 		t.Fatalf("Publish demo.one: %v", err)
 	}
-	mustReceive(t, ch, `{"n":1}`)
+	mustReceive(t, ch, "demo.one", `{"n":1}`)
 
 	for _, topic := range []string{"demo", "demo.one.two", "other.one"} {
 		if err := r.Publish(topic, json.RawMessage(`{"n":2}`)); err != nil {
@@ -84,7 +88,7 @@ func TestWildcardTerminalGTMatchesTrailingSegments(t *testing.T) {
 		if err := r.Publish(topic, json.RawMessage(`{"n":3}`)); err != nil {
 			t.Fatalf("Publish %s: %v", topic, err)
 		}
-		mustReceive(t, ch, `{"n":3}`)
+		mustReceive(t, ch, topic, `{"n":3}`)
 	}
 
 	for _, topic := range []string{"demo", "other.one"} {
@@ -107,14 +111,14 @@ func TestWildcardBareTokens(t *testing.T) {
 	if err := r.Publish("one", json.RawMessage(`{"n":5}`)); err != nil {
 		t.Fatalf("Publish one: %v", err)
 	}
-	mustReceive(t, star, `{"n":5}`)
-	mustReceive(t, gt, `{"n":5}`)
+	mustReceive(t, star, "one", `{"n":5}`)
+	mustReceive(t, gt, "one", `{"n":5}`)
 
 	if err := r.Publish("one.two", json.RawMessage(`{"n":6}`)); err != nil {
 		t.Fatalf("Publish one.two: %v", err)
 	}
 	mustNotReceive(t, star, `"*" must not match a two-segment topic`)
-	mustReceive(t, gt, `{"n":6}`)
+	mustReceive(t, gt, "one.two", `{"n":6}`)
 }
 
 // TestPublishRejectsWildcardTopics: wildcards are subscriber-side only.
@@ -251,9 +255,9 @@ func TestPublishFansOutExactlyOnce(t *testing.T) {
 	if err := r.Publish("demo.one", json.RawMessage(`{"n":7}`)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	mustReceive(t, exact, `{"n":7}`)
-	mustReceive(t, star, `{"n":7}`)
-	mustReceive(t, gt, `{"n":7}`)
+	mustReceive(t, exact, "demo.one", `{"n":7}`)
+	mustReceive(t, star, "demo.one", `{"n":7}`)
+	mustReceive(t, gt, "demo.one", `{"n":7}`)
 
 	// No duplicate fan-out.
 	mustNotReceive(t, exact, "exact duplicate delivery")
@@ -299,7 +303,7 @@ func TestWildcardUnsubscribeAndTopicInventory(t *testing.T) {
 	if err := r.Publish("demo.two", json.RawMessage(`{"n":8}`)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	mustReceive(t, ch, `{"n":8}`)
+	mustReceive(t, ch, "demo.two", `{"n":8}`)
 }
 
 // TestHandlePublishWildcardTopicBadRequest: POST /relay/publish with a
@@ -433,8 +437,9 @@ func TestHandleSubscribeWildcardWebSocket(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s read: %v", name, err)
 		}
-		if !strings.Contains(string(msg), `"n":9`) {
-			t.Fatalf("%s message = %s", name, msg)
+		// The literal published topic, not the subscription pattern.
+		if want := wantFrame("demo.one", `{"n":9}`); string(msg) != want {
+			t.Fatalf("%s message = %s, want %s", name, msg, want)
 		}
 	}
 
@@ -442,8 +447,9 @@ func TestHandleSubscribeWildcardWebSocket(t *testing.T) {
 	publish("demo.one.two", `{"n":10}`)
 
 	_ = gt.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, msg, err := gt.ReadMessage(); err != nil || !strings.Contains(string(msg), `"n":10`) {
-		t.Fatalf("demo.> deeper read: msg=%s err=%v", msg, err)
+	deeperWant := wantFrame("demo.one.two", `{"n":10}`)
+	if _, msg, err := gt.ReadMessage(); err != nil || string(msg) != deeperWant {
+		t.Fatalf("demo.> deeper read: msg=%s err=%v, want %s", msg, err, deeperWant)
 	}
 	_ = star.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	if _, msg, err := star.ReadMessage(); err == nil {

@@ -61,12 +61,52 @@ func (r *Relay) CheckRateLimit(agentID string) bool {
 	return r.RateLimiter.Allow(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
 }
 
+// Frame is the JSON object a relay subscription delivers: the LITERAL
+// published topic plus the published event, unchanged.
+//
+// Every subscriber of a publish — exact topic or wildcard pattern — receives
+// this same shape, so a wildcard subscriber (which only knows its own pattern)
+// can always tell which topic actually matched. The frame is the relay's
+// WebSocket wire contract (DOGFOOD-RELAY-1): before it, subscribers received
+// the bare event with no topic, which made the matched topic unknowable for
+// patterns such as "dogfood.*".
+type Frame struct {
+	Topic string          `json:"topic"`
+	Event json.RawMessage `json:"event"`
+}
+
+// buildFrame returns the exact bytes sent to every subscriber of a publish to
+// topic: {"topic":"<literal topic>","event":<event>}.
+//
+// The two fields are spliced in by hand rather than handed to json.Marshal
+// precisely so the event stays byte-for-byte the JSON value the publisher sent
+// — an object, string, array, number or null — and is never re-encoded as a
+// JSON string (no double-encoding) nor re-escaped/compacted by the encoder. The
+// topic is JSON-quoted here; topics are validated by validateTopic first.
+func buildFrame(topic string, event json.RawMessage) []byte {
+	f := Frame{Topic: topic, Event: event}
+
+	quoted, err := json.Marshal(f.Topic)
+	if err != nil {
+		// json.Marshal of a string cannot fail; keep the frame valid JSON.
+		quoted = []byte(`""`)
+	}
+	frame := make([]byte, 0, len(quoted)+len(f.Event)+len(`{"topic":,"event":}`))
+	frame = append(frame, `{"topic":`...)
+	frame = append(frame, quoted...)
+	frame = append(frame, `,"event":`...)
+	frame = append(frame, f.Event...)
+	return append(frame, '}')
+}
+
 // Publish sends an event to a topic. Every matching subscriber receives it
 // exactly once: exact-topic subscribers via one map lookup, plus every
 // subscription pattern (literal or wildcard) that matches. Topic names are
 // always literal — wildcard tokens are subscriber-side only, so a publish to
 // "demo.*" or "demo.>" is rejected.
-// Returns an error if the topic is invalid.
+//
+// Subscribers receive the topic-bearing frame built by buildFrame, not the bare
+// event. Returns an error if the topic is invalid.
 func (r *Relay) Publish(topic string, event json.RawMessage) error {
 	if err := validateTopic(topic); err != nil {
 		return err
@@ -75,10 +115,10 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 		event = json.RawMessage("null")
 	}
 
-	// Copy payload so subscribers own independent slices: every fan-out below
-	// sends this same immutable copy.
-	payload := make([]byte, len(event))
-	copy(payload, event)
+	// One immutable frame per publish, shared by every subscriber below: the
+	// envelope is identical for all of them (the topic is the published one, not
+	// the subscription pattern), so it is built and allocated exactly once.
+	frame := buildFrame(topic, event)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -90,7 +130,7 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 	for ch := range r.subs[topic] {
 		// Non-blocking send: drop if subscriber is slow / full.
 		select {
-		case ch <- payload:
+		case ch <- frame:
 		default:
 		}
 	}
@@ -106,7 +146,7 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 			}
 			for ch := range r.subs[pattern] {
 				select {
-				case ch <- payload:
+				case ch <- frame:
 				default:
 				}
 			}
@@ -115,10 +155,15 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 	return nil
 }
 
-// Subscribe registers a channel to receive events for a topic name or a
+// Subscribe registers a channel to receive frames for a topic name or a
 // wildcard subscription pattern ("*" = exactly one segment, ">" = one or more
 // trailing segments in final position).
-// Returns a channel that receives events. Call the returned function to unsubscribe.
+//
+// Each channel value is a complete wire frame (see Frame): the LITERAL
+// published topic plus the event exactly as it was published. The frame is
+// what the WebSocket subscriber receives, so a wildcard subscriber can read the
+// matched topic off it.
+// Call the returned function to unsubscribe.
 func (r *Relay) Subscribe(topic string) (<-chan []byte, func()) {
 	pattern, err := parseSubscriptionPattern(topic)
 	if err != nil {

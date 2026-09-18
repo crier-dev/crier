@@ -7,7 +7,8 @@ WebSocket surfaces, proven end-to-end against one real server it starts itself:
    (`POST /agents` → `201`), so they exist in the agent registry as well as on
    the mesh.
 2. **Relay pub/sub fan-out** — `POST /relay/publish` → subscriber receives the
-   event over `ws://…/relay/subscribe/<topic>`.
+   event over `ws://…/relay/subscribe/<topic>`, framed as
+   `{"topic":"<published topic>","event":<event>}`.
 3. **Mesh peer registration** — the two registered peers connect via
    `ws://…/mesh/connect/<agentID>` and appear in `GET /mesh/peers` with
    `"count":2`.
@@ -119,7 +120,7 @@ files; new runs never dirty `git status`. The historical, tracked
 | `/agents` | POST | Register an agent: `{"id","capabilities","public_key"}` → 201 | `cmd/server/main.go:306` |
 | `/agents` | GET | List registered agents | `cmd/server/main.go:307` |
 | `/relay/publish` | POST | Publish `{"topic","event"}`; 202 on success | `cmd/server/main.go:105` |
-| `/relay/subscribe/{topic}` | WS | Fan out raw event JSON as text frames | `cmd/server/main.go:106` |
+| `/relay/subscribe/{topic}` | WS | Fan out `{"topic":…,"event":…}` frames | `cmd/server/main.go:106` |
 | `/mesh/connect/{agentID}` | WS | Register a peer on upgrade | `cmd/server/main.go:112` |
 | `/mesh/peers` | GET | `{"peers":[{"agent_id":...}],"count":N}` | `cmd/server/main.go:113` |
 

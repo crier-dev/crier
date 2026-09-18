@@ -141,6 +141,9 @@ paths:
         Each matching published event is delivered to a subscription exactly
         once. A subscription appears in `GET /relay/topics` under the pattern
         name it subscribed with.
+
+        Every frame names the LITERAL published topic (see the 101 response),
+        which is what makes a wildcard subscription usable.
       parameters:
         - name: topic
           in: path
@@ -149,7 +152,30 @@ paths:
             type: string
       responses:
         "101":
-          description: WebSocket upgrade — events streamed as JSON frames
+          description: |
+            WebSocket upgrade. Each published event arrives as ONE text frame
+            whose payload is a JSON object naming the LITERAL published topic
+            and carrying the event unchanged:
+
+            ```json
+            {"topic":"dogfood.news","event":{"from":"publisher","body":"hello bus"}}
+            ```
+
+            - `topic` is always the literal published topic — never the
+              subscription pattern — so a wildcard subscriber (`dogfood.*`,
+              `dogfood.>`) can tell which topic matched.
+            - `event` is the published event as its own JSON value: an object,
+              a string, an array, a number or `null`. It is spliced in verbatim
+              and is never re-encoded as a JSON string, so a subscriber can
+              decode it directly.
+            - The same shape is delivered to exact and wildcard subscriptions
+              alike, and exactly once per matching subscription.
+
+            This is a deliberate breaking wire change (DOGFOOD-RELAY-1): frames
+            used to be the bare event (`{"from":"publisher","body":"hello bus"}`)
+            with no topic field, which made the matched topic unknowable for a
+            wildcard subscriber. `POST /relay/publish` is unchanged — still
+            `202` with an empty body.
         "400":
           description: Invalid subscription pattern (rejected before the upgrade)
 

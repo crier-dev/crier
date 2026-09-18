@@ -32,6 +32,10 @@ Central message relay. Agents publish events to topics; subscribers receive them
 
 - HTTP + WebSocket transport
 - Topic-based routing with subscriber counts
+- Every subscription frame names the literal published topic:
+  `{"topic":"<published topic>","event":<event>}` — the event is delivered
+  exactly as published (never string-encoded), and the topic field is what lets
+  a wildcard subscriber know which topic matched
 - Publishing is fire-and-forget: `POST /relay/publish` returns 202 as soon as the event is accepted, and if the topic has **zero subscribers** the event is dropped by design — publishes to empty topics are not queued or retained. A topic only appears in `GET /relay/topics` after at least one subscriber connects (subscribe first, then publish; a publish to an empty topic does not create it)
 - Rate limiting per agent (100 events/minute) — requires the `X-Agent-ID` header when enabled; `0` disables both
 - Bearer token authentication

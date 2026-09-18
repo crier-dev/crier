@@ -269,6 +269,8 @@ echo
 
 echo "==> [8/8] subscriber must receive the event over WS /relay/subscribe"
 wait "$SUB_PID" || { echo "FAIL: subscriber exited non-zero" >&2; exit 1; }
+grep -q '"topic":"demo"' "$WORKDIR/sub.out" \
+  || { echo "FAIL: subscriber frame did not name the literal topic (got: $(grep '^EVENT ' "$WORKDIR/sub.out"))" >&2; exit 1; }
 grep -q 'hello from run-demo' "$WORKDIR/sub.out" \
   || { echo "FAIL: subscriber did not receive the published event" >&2; exit 1; }
 echo "    subscriber received: $(grep '^EVENT ' "$WORKDIR/sub.out")"

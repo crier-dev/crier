@@ -57,10 +57,11 @@ func TestPublishSubscribe(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
+	want := wantFrame("agent.status", `{"state":"online"}`)
 	select {
 	case got := <-ch:
-		if string(got) != string(event) {
-			t.Fatalf("got %s, want %s", got, event)
+		if string(got) != want {
+			t.Fatalf("got %s, want %s", got, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
@@ -79,11 +80,12 @@ func TestMultipleSubscribers(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
+	want := wantFrame("agent.heartbeat", `{"ts":1}`)
 	for i, ch := range []<-chan []byte{ch1, ch2} {
 		select {
 		case got := <-ch:
-			if string(got) != string(event) {
-				t.Fatalf("sub %d: got %s, want %s", i, got, event)
+			if string(got) != want {
+				t.Fatalf("sub %d: got %s, want %s", i, got, want)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("sub %d: timeout", i)
@@ -353,8 +355,8 @@ func TestHandleSubscribeWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ws: %v", err)
 	}
-	if !strings.Contains(string(msg), `"hello":"world"`) {
-		t.Fatalf("unexpected ws message: %s", msg)
+	if want := wantFrame("agent.status", `{"hello":"world"}`); string(msg) != want {
+		t.Fatalf("ws message = %s, want %s", msg, want)
 	}
 }
 

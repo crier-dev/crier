@@ -142,6 +142,11 @@ func eventID(event json.RawMessage) string {
 // position). The pattern is validated before the upgrade, so an invalid
 // subscription is refused with HTTP 400 and never holds a socket.
 //
+// Each event is written as one text frame carrying the topic envelope produced
+// by Relay.Publish — {"topic":"<literal published topic>","event":<event>} — so
+// a wildcard subscriber knows which topic matched. The frame bytes are written
+// verbatim; the event is never re-encoded here.
+//
 // The subscribe/unsubscribe lifecycle is logged (DF-CRIER-141): connect at
 // info, disconnect at debug, both carrying the topic pattern, the subscriber's
 // X-Agent-ID when the client sent one, and the request id.
@@ -195,11 +200,13 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 		select {
 		case <-done:
 			return
-		case payload, ok := <-events:
+		case frame, ok := <-events:
 			if !ok {
 				return
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			// The frame already names the published topic and carries the event:
+			// it goes on the wire exactly as Publish built it.
+			if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
 				return
 			}
 		}
