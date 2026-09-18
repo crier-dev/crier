@@ -1541,3 +1541,27 @@ tasks:
   status: complete
   created_at: '2026-09-18T16:41:14.974948+00:00'
   completed_at: '2026-09-18T16:48:46.824241+00:00'
+- id: DF-CRIER-137
+  title: Stop make's recipe echo contaminating the documented MCP launcher's stdout
+    (class fix + gate)
+  criteria:
+  - make build-mcp writes zero bytes to stdout (recipe echo suppressed via @) and
+    BOTH documented launchers (make mcp, and 'make build-mcp && ./bin/crier-mcp')
+    deliver a JSON-RPC initialize response as the FIRST stdout line
+  - scripts/check-mcp-stdout.sh exists, is bash -n clean, exercises both documented
+    launchers, and fails closed (exit 2) rather than printing a green when it cannot
+    run/verify
+  - 'scripts/check-mcp-stdout-selftest.sh proves non-vacuity: contaminated fixture
+    REJECTED, clean fixture ACCEPTED, silent fixture refused, and a NEUTER copy of
+    the checker ACCEPTS the same contaminated fixture the real checker rejects; wired
+    as make mcp-stdout-selftest plus a CI step in .github/workflows/ci.yml'
+  - README.md and docs/integration-guide.md state the launcher stdout contract truthfully;
+    frozen zones, docs/claims.yaml and cmd/server/docsclaims_test.go untouched; no
+    path-looking token added
+  - make test, make lint, make docs-check, make shell-yaml-check, make shell-yaml-selftest,
+    make make-docker-check, make make-docker-selftest, make gofmt-check all green;
+    diff touches only Makefile, scripts/check-mcp-stdout.sh, scripts/check-mcp-stdout-selftest.sh,
+    .github/workflows/ci.yml, README.md, docs/integration-guide.md
+  status: complete
+  created_at: '2026-09-18T17:09:38.671885+00:00'
+  completed_at: '2026-09-18T17:21:57.534882+00:00'
