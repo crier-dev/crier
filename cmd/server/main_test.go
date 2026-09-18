@@ -768,6 +768,9 @@ func TestOpenAPIServed(t *testing.T) {
 		if !strings.Contains(html, "/openapi.json") || !strings.Contains(html, "/openapi.yaml") {
 			t.Error("GET /docs: page does not link to both /openapi.json and /openapi.yaml")
 		}
+		// DF-CRIER-196: the page must be a real index of the API — every path
+		// and operation of the embedded spec, taken from the live response.
+		assertDocsIndexesSpec(t, html)
 	})
 
 	t.Run("protected routes still require auth", func(t *testing.T) {

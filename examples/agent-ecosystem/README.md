@@ -36,6 +36,17 @@ DEEPSEEK_API_KEY=sk-... docker compose up -d
 docker compose run --rm --build battery
 ```
 
+The stack publishes eight host ports — crier `18767`, sink `19002`,
+pi-agent/opencode/claude-code/codex/aider/goose `19101`–`19106` — and each one is an
+**override, not a requirement**: set `CRIER_HOST_PORT`, `SINK_HOST_PORT`,
+`PI_HOST_PORT`, `OPENCODE_HOST_PORT`, `CLAUDE_CODE_HOST_PORT`, `CODEX_HOST_PORT`,
+`AIDER_HOST_PORT`, `GOOSE_HOST_PORT` to move any of them (defaults in the
+[Config knobs](#config-knobs) table), e.g.
+`CRIER_HOST_PORT=30001 SINK_HOST_PORT=30002 docker compose up -d --build` on a host
+where a default is already taken. To run two stacks side by side, also give each one
+its own project name — `docker compose -p lab-a up -d --build` (repeat `-p lab-a` on
+every compose command for that stack).
+
 Expect (key set → real guard verdicts; no key → guard runs fail-open, matrix skipped):
 
 ```
