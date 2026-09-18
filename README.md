@@ -618,16 +618,19 @@ and nothing on the server side rewrites it. `TestResponseBodyRelayedVerbatim` in
 is outstanding.** The server sends a KEEPALIVE to every connected peer every
 30 seconds (`KeepaliveInterval = 30 * time.Second`,
 `internal/mesh/peer.go:42`, the value `cmd/server/main.go:149` runs with; the
-accepted-connection loop is `internal/mesh/peer.go:230`), and each client sends
-its own every 30 seconds on the same socket its reply arrives on. So the frame
-after your REQUEST is not necessarily the answer: read frames one at a time,
-dispatch on `type`, and ignore everything that is not the `RESPONSE` you are
-waiting for (correlated as above) or an `ERROR`. A KEEPALIVE carries no
-`request_id` at all, which is what makes the filter safe — but a client that
-treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE and sees
-`status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the server
-sent to the requester (`"agent_id":"crier"` — the server's own mesh identity) and
-the RESPONSE it accepted instead.
+accepted-connection loop is `internal/mesh/peer.go:230`), and a client built on
+this repo's own mesh package sends one on the same cadence and on the same socket
+its reply arrives on (`Mesh.ConnectPeer` → `keepaliveLoop`,
+`internal/mesh/peer.go:94`). A raw WebSocket client does not have to send any —
+the server never processes an inbound KEEPALIVE — but every client has to read
+past them. So the frame after your REQUEST is not necessarily the answer: read
+frames one at a time, dispatch on `type`, and ignore everything that is not the
+`RESPONSE` you are waiting for (correlated as above) or an `ERROR`. A KEEPALIVE
+carries no `request_id` at all, which is what makes the filter safe — but a
+client that treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE
+and sees `status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the
+server sent to the requester (`"agent_id":"crier"` — the server's own mesh
+identity) and the RESPONSE it accepted instead.
 
 For the deeper reference — every message type, the error codes, the silent-drop
 rules, a verified Python round-trip — see
