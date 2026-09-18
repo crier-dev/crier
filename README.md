@@ -505,27 +505,133 @@ INFO MCP tool surface: some advertised tools cannot work in this mode — set th
 
 ### Try the Mesh
 
-The mesh is the second primitive: direct agent-to-agent WebSocket connections.
-Unlike the registry/inboxes it needs no signing setup — just a WebSocket client
-([websocat](https://github.com/vi/websocat), or `npx wscat -c <url>`):
+The mesh is the second primitive: direct agent-to-agent WebSocket connections
+over `GET /mesh/connect/{agentID}`. Unlike the registry and the inboxes it needs
+no signing setup — but it does have a frame contract, and a client that gets the
+correlation wrong hangs instead of erroring.
+
+**The zero-install path is this repo's own demo.** It builds this server and a Go
+WebSocket client (gorilla/websocket, already in `go.mod`), starts its own relay on
+a scratch port and runs the whole exchange below live — REGISTER, REQUEST,
+RESPONSE, and the KEEPALIVE frames a client must ignore — asserting the result:
 
 ```bash
-# Terminal A — connect as agent-1, then send one REGISTER frame (fire-and-forget:
-# any RFC3339 timestamp works, the server never replies)
-websocat ws://localhost:8767/mesh/connect/agent-1
-{"type":"REGISTER","version":1,"message_id":"0123456789abcdef01234567","timestamp":"2026-08-10T18:00:00.123456789-05:00","agent_id":"agent-1","lease_id":"","lease_ttl_ms":3600000,"capabilities":{"version":"0.1.0","topics":[],"max_concurrent_sessions":10}}
+bash examples/ws-mesh-demo/run-demo.sh                          # scratch port 18961
+DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh    # skip the ~30s keepalive wait
+```
 
-# Terminal B — the peer is now visible:
+It exits 0 only when the RESPONSE's `request_id` equals the REQUEST's
+`message_id`, its `status_code` is what the responder sent, and a KEEPALIVE frame
+that arrived on the same socket was ignored instead of being taken for the reply.
+Flags and the step-by-step transcript: `examples/ws-mesh-demo/README.md`.
+
+**Manual alternative — any WebSocket client works.** Neither `websocat` nor
+`wscat` ships with crier, so install one first (`cargo install websocat`, or Node
+≥ 16 for `npx wscat -c <url>`). The agent ID in the path *is* the peer identity:
+`ws://localhost:8767/mesh/connect/agent-1`. Two terminals, one frame each:
+
+```bash
+# Terminal A — connect as agent-1 and paste the REGISTER frame below. It is
+# fire-and-forget: any RFC3339 timestamp works and the server never replies.
+websocat ws://localhost:8767/mesh/connect/agent-1
+
+# Terminal B — the peer is now visible (no token needed unless CR_AUTH_TOKEN is set):
 curl -s localhost:8767/mesh/peers
 # {"peers":[{"agent_id":"agent-1"}],"count":1}
 ```
 
 A peer shows up as soon as the socket connects and stays listed while the
-connection is open (keepalive frames are exchanged every 30s); close Terminal A
-and it disappears. If you started the server with `CR_AUTH_TOKEN` set, add the
-Bearer header to the `curl` as in the section above. For the full wire protocol —
-REQUEST/RESPONSE correlation, error frames, a verified two-agent round-trip —
-see [`docs/mesh-protocol.md`](docs/mesh-protocol.md).
+connection is open; close Terminal A and it disappears. Driving the *exchange* by
+hand needs a loop that filters frames by `type`, so use
+`bash examples/ws-mesh-demo/run-demo.sh` (or the Python worked example in
+[`docs/mesh-protocol.md`](docs/mesh-protocol.md)) rather than pasting frames into
+two `websocat` sessions.
+
+#### The frames
+
+Every frame is one JSON object in one WebSocket **text** frame with a trailing
+newline (`json.Marshal` + `\n`, `internal/mesh/message.go:107`). These five are
+the whole wire contract; every field name exists in `internal/mesh/message.go`
+and only the marked values are yours to generate:
+
+<!-- mesh-frames:start -->
+```json
+{"type":"REGISTER","version":1,"message_id":"f0e1d2c3b4a5968778695a4b","timestamp":"2026-09-18T09:15:00.123456789-05:00","agent_id":"agent-1","lease_id":"","lease_ttl_ms":3600000,"capabilities":{"version":"0.1.0","topics":[],"max_concurrent_sessions":10}}
+{"type":"REQUEST","version":1,"message_id":"9d8f0a1b2c3d4e5f6a7b8c9d","timestamp":"2026-09-18T09:15:01.123456789-05:00","source":{"agent_id":"agent-1"},"target":{"agent_id":"agent-2"},"method":"GET","path":"/ping","body":{"hello":"world"},"trace_id":"f1e2d3c4b5a69788796a5b4c","timeout_ms":5000}
+{"type":"KEEPALIVE","version":1,"message_id":"7c6b5a493827160514233241","timestamp":"2026-09-18T09:15:31.123456789-05:00","lease_id":"","agent_id":"agent-1"}
+{"type":"RESPONSE","version":1,"message_id":"3f2a1b0c9d8e7f6a5b4c3d2e","timestamp":"2026-09-18T09:15:01.234567890-05:00","request_id":"9d8f0a1b2c3d4e5f6a7b8c9d","source":{"agent_id":"agent-2"},"status_code":200,"body":{"pong":true},"trace_id":"f1e2d3c4b5a69788796a5b4c"}
+{"type":"ERROR","version":1,"message_id":"e57206b16d39e6e28a01e286","timestamp":"2026-09-18T09:15:01.345678901-05:00","request_id":"9d8f0a1b2c3d4e5f6a7b8c9d","error":{"code":"CONTROLLER_OFFLINE","message":"peer agent-2 not connected"},"trace_id":"f1e2d3c4b5a69788796a5b4c"}
+```
+<!-- mesh-frames:end -->
+
+The ids above are literals so the correlation between the frames is visible; a
+real client generates a fresh 24-hex `message_id` per frame (`openssl rand -hex
+12`) and a `trace_id` for the REQUEST it can echo. What each frame's fields mean
+and who fills them:
+
+| Frame | Field | Filled by / meaning |
+|-------|-------|---------------------|
+| all | `type` | The message type: `REGISTER`, `REGISTER_ACK`, `KEEPALIVE`, `REQUEST`, `RESPONSE`, `ERROR`. Dispatch on this. |
+| all | `version` | Protocol version, `1`. |
+| all | `message_id` | Per-frame unique id (24 hex chars). Yours. **Not** the correlation field. |
+| all | `timestamp` | RFC3339 with nanoseconds (Go `time.Time`). Yours; any parseable value works. |
+| `REGISTER` | `agent_id` | The connecting agent — should match the id in the connect URL. |
+| `REGISTER` | `lease_id` / `lease_ttl_ms` | Registry lease; empty / requested TTL on connect. |
+| `REGISTER` | `capabilities` | `{version, topics[], max_concurrent_sessions}` — informational. |
+| `KEEPALIVE` | `lease_id` / `agent_id` | Sender's lease (empty) and identity. No `request_id`. |
+| `REQUEST` | `source` / `target` | `{"agent_id": "<id>"}` — you and the peer you address. `target.agent_id` is what the server routes on; a REQUEST without one is answered `INVALID_MESSAGE`. |
+| `REQUEST` | `method` / `path` | Your application-level route (e.g. `GET` / `/ping`). The server does not interpret them. |
+| `REQUEST` | `body` | Opaque JSON payload, omitted when empty. |
+| `REQUEST` | `trace_id` | Yours; the responder echoes it in the reply. |
+| `REQUEST` | `timeout_ms` | Yours; the server does not enforce it — your client does. |
+| `RESPONSE` | `request_id` | **The `message_id` of the REQUEST being answered.** This is the correlation field. |
+| `RESPONSE` | `source` | The answering peer. |
+| `RESPONSE` | `status_code` | HTTP-style code from the responder. |
+| `RESPONSE` | `body` | Whatever the responder wrote, relayed verbatim (see below). |
+| `ERROR` | `request_id` | Same field, same rule: the failed REQUEST's `message_id`. |
+| `ERROR` | `error` | `{code, message, retry_after_ms?}`; `CONTROLLER_OFFLINE` means the target peer is not connected, `INTERNAL` means the route table is full. |
+
+#### Two rules a client must implement
+
+**Correlate the reply on `request_id`, never on the frame's own `message_id` and
+never on arrival order.** A responder MUST set `request_id` to the exact
+`message_id` of the REQUEST it is answering (`internal/mesh/message.go:76`). The
+server records `message_id → requester` when it forwards the REQUEST and looks
+the reply up by `request_id` (`internal/mesh/peer.go` `forwardResponse`, `:402`);
+a reply that does not echo it is dropped with no error and no log, and the caller
+hangs until its own `timeout_ms`. `ERROR` frames correlate identically — they take
+the same forwarding path, so the server's own `CONTROLLER_OFFLINE` answer also
+carries your `message_id` in `request_id`. The reply's own `message_id` is a
+fresh id of its own, as in the example above, so comparing *that* to your
+REQUEST's id matches nothing: `request_id` is the only field that links a reply
+to its request.
+
+**`body` is relayed verbatim, and its JSON type is the responder's choice.** The
+RESPONSE's `body` is held as raw bytes (`json.RawMessage`,
+`internal/mesh/message.go:79`) and the frame is handed back unchanged, so an
+object stays an object and a string stays a string — a responder that puts a JSON
+*string* on the wire (Python's `json.dumps({...})` is the classic) sends a string,
+and nothing on the server side rewrites it. `TestResponseBodyRelayedVerbatim` in
+`internal/mesh` pins this over the relayed path.
+
+**Read in a loop and dispatch on `type` — ignore `KEEPALIVE` frames while a reply
+is outstanding.** The server sends a KEEPALIVE to every connected peer every
+30 seconds (`KeepaliveInterval = 30 * time.Second`,
+`internal/mesh/peer.go:42`, the value `cmd/server/main.go:149` runs with; the
+accepted-connection loop is `internal/mesh/peer.go:230`), and each client sends
+its own every 30 seconds on the same socket its reply arrives on. So the frame
+after your REQUEST is not necessarily the answer: read frames one at a time,
+dispatch on `type`, and ignore everything that is not the `RESPONSE` you are
+waiting for (correlated as above) or an `ERROR`. A KEEPALIVE carries no
+`request_id` at all, which is what makes the filter safe — but a client that
+treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE and sees
+`status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the server
+sent to the requester (`"agent_id":"crier"` — the server's own mesh identity) and
+the RESPONSE it accepted instead.
+
+For the deeper reference — every message type, the error codes, the silent-drop
+rules, a verified Python round-trip — see
+[`docs/mesh-protocol.md`](docs/mesh-protocol.md).
 
 ### Test
 
