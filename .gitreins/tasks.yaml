@@ -1406,3 +1406,18 @@ tasks:
   status: complete
   created_at: '2026-09-18T03:54:42.402378+00:00'
   completed_at: '2026-09-18T04:05:15.430806+00:00'
+- id: DF-CRIER-189
+  title: Add a gofmt arm to the commit gate (DF-CRIER-189)
+  criteria:
+  - gofmt -l over every tracked .go file prints nothing; scripts/check-gofmt.sh exists,
+    checks a whole-repo default scope and an explicit file list, fails closed on an
+    empty/unclassifiable/missing-file list, exits 2 when gofmt is absent, and its
+    --selftest proves a drifting file is rejected AND that a neuter copy accepts the
+    same fixture; the tracked scripts/hooks/pre-commit runs the arm on exactly the
+    staged .go files and its printed scope lines name it; make gofmt-check + make
+    gofmt-selftest + a CI step exist; AGENTS.md documents the arm and its limits;
+    go build/vet/test, make docs-check, make shell-yaml-selftest, make make-docker-selftest
+    and gitreins guard all green.
+  status: complete
+  created_at: '2026-09-18T04:54:00.598955+00:00'
+  completed_at: '2026-09-18T05:24:25.974303+00:00'
