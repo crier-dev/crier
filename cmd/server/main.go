@@ -45,6 +45,28 @@ func main() {
 // exit code and is the testable entrypoint (main() is a thin wrapper), so
 // TestServerHealth can invoke it without os.Args carrying go test's flags.
 func run(args []string) int {
+	// Arm the process-wide SIGINT/SIGTERM handler BEFORE anything else
+	// (QA-CRIER-17). Every in-process user of run() — the startTestServer /
+	// bootDocsClaimsServer helpers here and in the sibling test files, and
+	// any embedder — shuts a booted server down by signalling the PROCESS,
+	// because that is the only handle they have on it. That contract is only
+	// safe while SOME run() has registered a handler: until then SIGTERM
+	// takes its default action and kills the caller. Several paths below
+	// return early (bad flags, load configuration, an unreachable database,
+	// an invalid guard URL, a federation hold queue that cannot be opened),
+	// so registering at the old site — after all of them, just before the
+	// serve loop — left the window open, and a caller that signalled after
+	// such a return died with no failure line: the testing package cannot
+	// flush a dead process's buffered output, which is why the failure
+	// showed up as a bare package FAIL with no test name.
+	//
+	// The channel is buffered (size 1) precisely so a signal that arrives
+	// before the shutdown goroutine below is started is delivered to it
+	// rather than dropped, so moving this call earlier changes no ordering
+	// guarantee the shutdown path relied on.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
 	help, showVersion, stop, port, dbURL, pidfilePath, err := parseArgs(args, os.Stdout)
 	if err != nil {
 		// The flag package already printed the error and usage to stdout.
@@ -374,19 +396,16 @@ func run(args []string) int {
 		}
 	}()
 
-	// Graceful shutdown. signal.Notify is registered synchronously BEFORE
-	// the serve loop so the handler is guaranteed installed by the time the
-	// server accepts traffic — otherwise a SIGTERM arriving before the wait
-	// goroutine runs (e.g. from TestServerHealth's cleanup) hits the default
-	// handler and kills the process with "signal: terminated" instead of
-	// shutting down gracefully.
+	// Graceful shutdown. The signal handler was registered at the TOP of run
+	// (QA-CRIER-17) so it is installed for every path that can return early,
+	// not just the ones that get this far; the wait goroutine starts here,
+	// after srv/regStore/fedHold exist, and the buffered channel holds a
+	// signal that arrived while the server was still being wired up.
 	//
 	// The pidfile is REMOVED on this same graceful path (DF-CRIER-194): by
 	// the time the shutdown finishes, the listener is gone, so the pidfile
 	// must not outlive the server it names. It is written only after the
 	// bind succeeded (see the listen call below).
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 

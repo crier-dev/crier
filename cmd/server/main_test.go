@@ -168,6 +168,136 @@ func startTestServer(t *testing.T) string {
 	return baseURL
 }
 
+// ---------------------------------------------------------------------------
+// QA-CRIER-17 — the intermittent cmd/server FAIL that names no test.
+// ---------------------------------------------------------------------------
+
+const (
+	// qa17ChildEnv marks the CHILD half of the fixture below.
+	qa17ChildEnv = "CRIER_QA17_EARLY_BOOT_FAILURE_CHILD"
+	// qa17ChildMarker is printed by the child only AFTER it has signalled
+	// itself, so the parent can prove the child reached the far side of the
+	// signal instead of passing for an unrelated reason.
+	qa17ChildMarker = "QA17-CHILD-SURVIVED-THE-SIGTERM"
+	// qa17ChildRun is load-bearing: the child must run ONLY the fixture test.
+	// An earlier successful boot in the same binary is exactly what arms the
+	// process-wide handler and masks the window this fixture drives, so a
+	// child that ran the whole suite could never go red.
+	qa17ChildRun = "^TestSigtermAfterEarlyBootFailureIsNotFatal$"
+)
+
+// TestSigtermAfterEarlyBootFailureIsNotFatal is the QA-CRIER-17 gate.
+//
+// WHY IT EXISTS. Every in-process helper in this package — startTestServer and
+// TestServerHealth here, bootDocsClaimsServer in docsclaims_test.go,
+// bootObservabilityServer in observability_test.go — shuts its server down by
+// sending SIGTERM to the WHOLE TEST PROCESS (run()'s handler calls
+// srv.Shutdown; the test process is the only handle the harness has). That is
+// safe ONLY while a run() has already registered the process-wide handler. If
+// the handler is not registered, SIGTERM takes its DEFAULT action and kills the
+// test binary, and a signal death is reported as a bare package FAIL: the
+// testing package buffers each test's output and cannot flush a dead process,
+// so the failing test's name and message are destroyed. That is exactly the
+// observed QA-CRIER-17 shape (an intermittent
+// "FAIL github.com/crier-dev/crier/cmd/server 8.337s" with no "--- FAIL:"
+// line, so the failure could never be named — and 25 re-runs of the package
+// passed because the window is a per-process, per-boot-startup condition).
+//
+// WHAT IT DRIVES. run() has several paths that return before the handler is
+// armed (flag parse, config load, PostgreSQL store, the guard's kanban sink,
+// the federation hold queue). The fixture forces one of them (an invalid
+// CR_GUARD_KANBAN_URL is rejected immediately), then replays the harness's
+// cleanup — SIGTERM to self — and asserts the process survives.
+//
+// WHY A CHILD PROCESS. The failure being reproduced is the death of the test
+// binary, which by construction cannot be observed from inside it. The child
+// (helper-process pattern) is spawned isolated with -test.run pinned to this
+// one test, so it has no earlier boot to arm a handler: pre-fix it is
+// terminated by its own SIGTERM and the parent fails naming the signal;
+// post-fix it survives, prints the marker and exits 0.
+func TestSigtermAfterEarlyBootFailureIsNotFatal(t *testing.T) {
+	if os.Getenv(qa17ChildEnv) == "1" {
+		qa17EarlyBootFailureChild(t)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run="+qa17ChildRun, "-test.v", "-test.timeout=60s")
+	cmd.Env = append(os.Environ(), qa17ChildEnv+"=1")
+	out, err := cmd.CombinedOutput()
+
+	if err != nil {
+		t.Fatalf("the child test binary did not survive its own SIGTERM: %v\n"+
+			"  The child is the pre-fix shape of every in-process helper's cleanup: run()\n"+
+			"  returned 1 before it armed the process-wide SIGINT/SIGTERM handler, so the\n"+
+			"  harness's shutdown signal took its default action and killed the test binary.\n"+
+			"  A signal death is reported as a bare package FAIL — everything the testing\n"+
+			"  package had buffered for the failing test, including its name, is lost.\n"+
+			"child output:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), qa17ChildMarker) {
+		t.Fatalf("the child exited 0 but never printed %q, so it did not reach the far side of the signal:\n%s",
+			qa17ChildMarker, out)
+	}
+
+	// The child must have run the fixture test and nothing else: with more tests
+	// in the child, a successful earlier boot would arm the handler and the red
+	// direction would become unreachable.
+	if passes := strings.Count(string(out), "--- PASS: "); passes != 1 ||
+		!strings.Contains(string(out), "--- PASS: TestSigtermAfterEarlyBootFailureIsNotFatal") {
+		t.Fatalf("the child did not run exactly the fixture test (--- PASS lines: %d, wanted 1):\n%s", passes, out)
+	}
+	if strings.Contains(string(out), "--- FAIL: ") || strings.Contains(string(out), "--- SKIP: ") {
+		t.Fatalf("the child reported a FAIL/SKIP line, so this fixture proves nothing:\n%s", out)
+	}
+}
+
+// qa17EarlyBootFailureChild is the child half: drive a boot that fails before
+// the signal handler exists, then do what the harness cleanup does.
+func qa17EarlyBootFailureChild(t *testing.T) {
+	t.Helper()
+
+	// Deterministic environment: no DB, no auth token, no pidfile.
+	t.Setenv("CR_AUTH_TOKEN", "")
+	t.Setenv("CR_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CRIER_DATABASE_URL", "")
+	t.Setenv("CR_PIDFILE", "")
+
+	// The early return under test: the guard is enabled and its kanban sink URL
+	// is not http(s), which main.go rejects before it reaches the shutdown
+	// wiring. Any other early return has the same consequence; this one needs
+	// no database and no network, so the fixture is fast and hermetic.
+	t.Setenv("CR_GUARD_ENABLED", "true")
+	t.Setenv("CR_GUARD_KANBAN_URL", "ftp://not-a-http-sink")
+
+	done := make(chan int, 1)
+	go func() { done <- run(nil) }()
+
+	var code int
+	select {
+	case code = <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("run() did not return within 20s for the forced early-failure input")
+	}
+	if code != 1 {
+		t.Fatalf("PREMISE BROKEN: run() = %d, want 1 — this input no longer drives the early-return path this fixture exists for", code)
+	}
+
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find own process: %v", err)
+	}
+	// Exactly what every in-process helper's t.Cleanup does to a booted server.
+	if err := self.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal self: %v", err)
+	}
+
+	// Reaching the next statement at all is the assertion: with no handler
+	// armed the SIGTERM is fatal right here and none of this output happens.
+	time.Sleep(250 * time.Millisecond)
+	fmt.Fprintln(os.Stdout, qa17ChildMarker)
+}
+
 // TestHealthDeclaresJSONContentType is the DF-CRIER-102 regression gate. The
 // /health handler wrote its JSON body without setting a Content-Type, so
 // net/http sniffed the bytes and labelled a documented application/json
