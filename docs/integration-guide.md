@@ -325,6 +325,7 @@ websocat "ws://localhost:8767/relay/subscribe/my-topic" "${AUTH[@]}"
 
 # publish — another terminal → 202
 curl -s -X POST localhost:8767/relay/publish "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -H 'X-Agent-ID: agent-1' \
   -d '{"topic":"my-topic","event":{"kind":"alert","level":5}}'
 ```
 
@@ -348,7 +349,22 @@ literal published topic next to the event itself:
   empty body.
 
 `GET /relay/topics` lists topics with live subscribers. Publishing is
-rate-limited (`CR_RATE_LIMIT_PER_MINUTE`, default 100/min).
+rate-limited **per agent** (`CR_RATE_LIMIT_PER_MINUTE`, default 100/min), so
+the limiter keys on the `X-Agent-ID` header and a publish has to carry it:
+while rate limiting is on, the call above without that header is rejected with
+`401` and `{"error":"X-Agent-ID header required for rate-limited publish"}`
+before the body is read. `CR_RATE_LIMIT_PER_MINUTE=0` turns the limiter off and
+the header requirement off with it.
+
+The header requirement is pinned both ways by `make docs-check` against its own
+default-config server (rate limiting on), so the example above and this
+requirement cannot drift apart again:
+
+<!-- doccheck -->
+```bash
+curl -s -X POST $BASE/relay/publish -H 'Content-Type: application/json' -H 'X-Agent-ID: agent-1' -d '{"topic":"my-topic","event":{"kind":"alert","level":5}}'   # -> 202
+curl -s -X POST $BASE/relay/publish -H 'Content-Type: application/json' -d '{"topic":"my-topic","event":{"kind":"alert","level":5}}'   # -> 401
+```
 
 ---
 

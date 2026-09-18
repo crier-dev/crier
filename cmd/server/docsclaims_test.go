@@ -552,9 +552,19 @@ func TestDocsClaims(t *testing.T) {
 		reportFindings(t, probes.verifyCounts(set))
 	})
 	t.Run("recipes", func(t *testing.T) {
-		// Scanned doc set = every doc referenced by a claim, plus README.md and
-		// TESTERS.md (same set the path scanner walks).
-		docs := map[string]bool{"README.md": true, "TESTERS.md": true}
+		// Recipe-replay set: every doc referenced by a claim, plus the docs whose
+		// marked blocks are gated but carry no claims.yaml claim — README.md,
+		// TESTERS.md, and docs/integration-guide.md (a superset of the set the
+		// path scanner walks, which reads claim docs only).
+		// docs/integration-guide.md joins for DOGFOOD-RELAY-4: its §4 publish
+		// example carried the same unstated X-Agent-ID requirement the row
+		// records (a verbatim reader got a 401), so the guide's publish
+		// contract is replayed here rather than left to prose.
+		docs := map[string]bool{
+			"README.md":                 true,
+			"TESTERS.md":                true,
+			"docs/integration-guide.md": true,
+		}
 		for _, c := range set.Claims {
 			docs[c.Doc] = true
 		}
