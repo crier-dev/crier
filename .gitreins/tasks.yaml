@@ -1483,3 +1483,18 @@ tasks:
   status: complete
   created_at: '2026-09-18T07:49:27.859024+00:00'
   completed_at: '2026-09-18T07:58:17.158212+00:00'
+- id: DF-CRIER-217
+  title: MCP register_agent echoes zero-value status/registered_at/last_seen in remote-bridge
+    mode
+  criteria:
+  - In remote-bridge mode (CRIER_HTTP_URL set), tools/call register_agent returns
+    the locally built registry.Agent with status="" and registered_at/last_seen="0001-01-01T00:00:00Z",
+    while get_agent for the same id (and the server's own GET /agents/<id>) report
+    status=online with real timestamps. After the fix, register_agent's response in
+    BOTH remote-bridge and in-process modes carries the same status/registered_at/last_seen
+    the store reports (get_agent parity), with a test proving the handler returns
+    the stored row rather than the caller-supplied struct, and no change to error
+    paths (keyless refusal, malformed key, duplicate id).
+  status: complete
+  created_at: '2026-09-18T08:17:50.834790+00:00'
+  completed_at: '2026-09-18T08:26:20.449814+00:00'
