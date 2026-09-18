@@ -1565,3 +1565,18 @@ tasks:
   status: complete
   created_at: '2026-09-18T17:09:38.671885+00:00'
   completed_at: '2026-09-18T17:21:57.534882+00:00'
+- id: DF-CRIER-3
+  title: 'README mesh section is not self-sufficient: it stops at REGISTER and never
+    documents the REQUEST/RESPONSE wire shape, the request_id correlation rule, or
+    the KEEPALIVE-frame filtering every mesh client must do'
+  criteria:
+  - 'README.md''s Try-the-Mesh section alone lets a reader complete a two-agent REQUEST/RESPONSE
+    exchange: it quotes the shipped frame shapes (PeerRef source/target, status_code,
+    request_id echoing message_id, KEEPALIVE), states the filter-by-type rule, and
+    points at a repo-shipped zero-install round-trip that a new Go test keeps honest
+    by decoding every quoted frame into internal/mesh''s wire types. Gates: go build/vet,
+    go test ./... -count=1, make docs-check, make gofmt-check, bash examples/ws-mesh-demo/run-demo.sh
+    all green.'
+  status: complete
+  created_at: '2026-09-18T17:36:45.203475+00:00'
+  completed_at: '2026-09-18T17:57:20.451442+00:00'
