@@ -1,0 +1,27 @@
+{
+  "title": "The Community Garden",
+  "public_prompt": "Four plots (A, B, C, D) hold four vegetables, one per plot: tomato, lettuce, carrot, pepper. You and your peer each hold private clues. Work together until both of you can state the full assignment with certainty. Submit your final answer exactly in this format: A=<vegetable>, B=<vegetable>, C=<vegetable>, D=<vegetable>",
+  "agents": {
+    "agent-a": {
+      "clues": [
+        "Plot C is lettuce.",
+        "Plot A is not pepper."
+      ],
+      "responder_rules": "Answer questions using ONLY these facts. Be concise (one sentence). Do not guess and do not invent anything. If the question is not covered by your facts, answer exactly: I don't know."
+    },
+    "agent-b": {
+      "clues": [
+        "The tomato is in plot A.",
+        "Plot B is not tomato.",
+        "Tomato and carrot are in plots A and D, in some order."
+      ],
+      "responder_rules": "Answer questions using ONLY these facts. Be concise (one sentence). Do not guess and do not invent anything. If the question is not covered by your facts, answer exactly: I don't know."
+    }
+  },
+  "solution": {
+    "A": "tomato",
+    "B": "pepper",
+    "C": "lettuce",
+    "D": "carrot"
+  }
+}
