@@ -1524,3 +1524,20 @@ tasks:
   status: complete
   created_at: '2026-09-18T16:12:12.516701+00:00'
   completed_at: '2026-09-18T16:24:22.085016+00:00'
+- id: DOGFOOD-RELAY-4
+  title: 'Integration-guide publish example omits X-Agent-ID: fix the doc and gate
+    the contract'
+  criteria:
+  - "docs/integration-guide.md \xA74 publish example carries -H 'X-Agent-ID: agent-1'\
+    \ and the prose states the header requirement, the default (CR_RATE_LIMIT_PER_MINUTE=100)\
+    \ and the 0-disables-both rule"
+  - docs/integration-guide.md carries a <!-- doccheck --> marked block that executes
+    both halves of the contract (202 with the header, 401 without) and cmd/server/docsclaims_test.go
+    replays that doc (make docs-check green, recipe replay doc count +1)
+  - 'Non-vacuity: removing the header from the marked step makes make docs-check fail
+    naming claimed=202 observed=401; restoring it is green again (both observed lines
+    reported)'
+  - make test green, make lint clean, make gofmt-check clean; no other file modified
+  status: complete
+  created_at: '2026-09-18T16:41:14.974948+00:00'
+  completed_at: '2026-09-18T16:48:46.824241+00:00'
