@@ -1326,3 +1326,18 @@ tasks:
   status: complete
   created_at: '2026-09-17T23:54:29.644043+00:00'
   completed_at: '2026-09-17T23:54:32.312753+00:00'
+- id: df-crier-211-vfs-tracking
+  title: 'DF-CRIER-211: the .vfs code-graph cache is half-tracked (tracked file absent
+    from the worktree) so the tree can never read clean'
+  criteria:
+  - git status --short shows no deleted tracked file (no ' D .vfs/.dirty'); git ls-files
+    .vfs lists only files that are present in the worktree; AGENTS.md states ONE .vfs/
+    handling (generated cache untracked+ignored, any remaining tracked .vfs file present);
+    scripts/check-shell-yaml.sh and scripts/check-make-docker.sh in default whole-repo
+    mode no longer print the 'tracked file(s) are absent from the worktree' note and
+    neither checker source is special-cased for .vfs; a fresh clone of HEAD has an
+    empty git status --short; go build ./... , go vet ./... , go test ./... -count=1
+    , make docs-check , make shell-yaml-check , make make-docker-check all stay green
+  status: complete
+  created_at: '2026-09-18T00:11:59.398163+00:00'
+  completed_at: '2026-09-18T00:26:02.484536+00:00'
