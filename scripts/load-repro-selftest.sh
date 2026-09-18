@@ -30,7 +30,12 @@
 #  10. the wrapper relays the generator's SKIPPED verdict (exit 3) and does NOT
 #      run the target at all
 #  11. SIGTERMing the WRAPPER mid-run leaves no generator, no burner and no
-#      target behind, and its summary records the signal
+#      target behind, and its summary records the signal.  This is the one
+#      assertion whose GENERATOR window is 10 s rather than 2 s: its premise
+#      (generator alive with >= 2 burners AND the wrapper's target alive) exists
+#      only while the generator runs, so a window no longer than one poll
+#      iteration can close before the poll observes it and the assertion fails
+#      for the wrong reason on a loaded box.  See "FIXTURE LIFETIMES"
 #  12. a second concurrent run is refused by the lockfile, naming the holder
 #  13. NEUTER PROOF: a copy of the survivor check with its verdict call forced to
 #      success ACCEPTS a fixture process that IS still alive, while the real
@@ -47,12 +52,47 @@
 # and its children were alive at the moment of the kill), retry once on a slow
 # box, and FAIL loudly rather than passing for the wrong reason.
 #
+# ONE PROCESS SCAN PER POLL — NOT ONE FORK PER PID
+# -----------------------------------------------
+# Finding a run's children means reading the process tree, and the obvious
+# implementation — `for d in /proc/[0-9]*; do ppid=$(sed -n 's/^PPid:…' \
+# "/proc/$pid/status"); done` — forks two processes for EVERY pid on the machine
+# on EVERY iteration.  Measured on this box (1672 pids), ONE such pass cost
+# 6.38 / 7.24 / 6.84 s wall (2.5 s user, 7.0 s sys).  The polls in assertions 8
+# and 11 run up to 60-100 iterations and two of these passes per iteration, so a
+# single assertion could sit for minutes: tick 341 reached assertion 10 in ~3 min
+# and then spent > 25 min inside assertion 11 without producing a verdict.  That
+# makes local verification of this harness unusable on a fleet box, and it costs
+# CI the same — and because one iteration could OUTLAST the fixture it was
+# observing, the premise could be missed and the assertion failed for the wrong
+# reason.
+#
+# So the tree is read in ONE interpreter invocation: proc_snapshot() reads
+# /proc/*/stat once and writes `pid ppid` lines (sorted by pid) to
+# $TMP/proc.snapshot — 0.05-0.09 s for the whole machine.  ppid_of() and
+# children_of() answer from that file with bash builtins only (no fork at all),
+# and every poll loop refreshes it at the top of each ITERATION, so a pid that
+# appears mid-poll is still discovered.  No snapshot is carried across
+# assertions.  python3 is already a hard dependency of this harness
+# (scripts/loadgen.py) and is checked before the battery starts; if the snapshot
+# cannot be taken the selftest exits 2 naming the tool rather than reading a
+# stale tree or skipping the check.
+#
+# FIXTURE LIFETIMES
+# -----------------
+# Every fixture run is tiny and bounded: <= 2 workers and <= 2 s of generator
+# lifetime — EXCEPT assertion 11, whose generator window is 10 s because its
+# premise must be observable: the wrapper starts the target only after the
+# generator announces its children, so a 2 s window smaller than one poll
+# iteration can close before the poll catches it.  10 s leaves the premise
+# catchable while the test still SIGTERMs the wrapper genuinely mid-flight
+# (the premise itself is asserted; nothing here is weakened into a vacuous
+# pass).  The threshold cases always read a SYNTHETIC --loadavg-file so the gate
+# itself is exercised without depending on (or adding to) the real load.
+#
 # SHARED-HOST DISCIPLINE (this box runs the Hermes gateway, the scheduler and
 # DuckBrain)
 # ---------------------------------------------------------------------------
-# Every fixture run is tiny and bounded: <= 2 workers and <= 2 s of generator
-# lifetime, and the threshold cases always read a SYNTHETIC --loadavg-file so the
-# gate itself is exercised without depending on (or adding to) the real load.
 # No fixture contains or executes the busy-wait idiom the host reaper kills — the
 # "burner" fixtures are a bounded python CPU loop and `sleep`s, all invoked as
 # FILE paths, so no process command line ever carries the idiom.  Every fixture
@@ -163,25 +203,113 @@ _on_signal() {
 
 # ── small helpers ────────────────────────────────────────────────────────────
 
-ppid_of() { sed -n 's/^PPid:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null | head -n 1; }
-
 cmdline_of() { tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null; }
 
-children_of() { # pid -> child pids, space separated (empty when none)
-  local want="$1" d pid out=""
-  for d in /proc/[0-9]*; do
-    pid="${d#/proc/}"
-    if [ "$(ppid_of "$pid")" = "$want" ]; then
+# ── the process-tree snapshot: ONE scan for the whole machine ────────────────
+#
+# proc_snapshot() reads /proc/*/stat ONCE (a single python3 invocation) and
+# writes `pid ppid` lines, sorted by pid, to $TMP/proc.snapshot.  That is the
+# only whole-machine scan in this file; ppid_of/children_of answer from the file
+# with bash builtins and fork nothing.  Every poll loop calls it at the top of
+# each ITERATION — so a pid that appears mid-poll is still discovered — and
+# nothing carries a snapshot across assertions.
+#
+# Read the two readers as "the tree as of the last proc_snapshot call": a pid
+# that is not in the snapshot is reported as unknown/dead, which is why freshness
+# is the CALLER's job (a poll loop), not theirs.
+#
+# Why not `for d in /proc/[0-9]*` plus a per-pid `sed` on /proc/<pid>/status:
+# measured on this 1672-pid host, one such pass cost 6.38/7.24/6.84 s wall
+# (2.5 s user, 7.0 s sys) — minutes inside a single 60-iteration poll.  The
+# snapshot is 0.05-0.09 s for the same machine and children_of is then ~0.014 s.
+PROC_SNAPSHOT=""
+_SNAP_FILE=""
+
+proc_snapshot() { # (re)build the whole-machine pid/ppid view; exit 2 if it fails
+  local out=""
+  if [ -z "$TMP" ] || [ ! -d "$TMP" ]; then
+    printf '%s: ERROR: no scratch directory to hold the process snapshot — refusing to guess at the process tree\n' \
+      "$PROG" >&2
+    exit 2
+  fi
+  out="$TMP/proc.snapshot"
+  if ! "$PYTHON" - >"$out" 2>/dev/null <<'PY'
+import os
+import sys
+
+rows = []
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    try:
+        with open("/proc/%s/stat" % name, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        continue
+    # The comm field is parenthesised and may itself contain spaces and
+    # parentheses, so the fields after the LAST ')' are state, ppid, ...
+    close = data.rfind(b")")
+    if close < 0:
+        continue
+    fields = data[close + 2:].split()
+    if len(fields) < 2:
+        continue
+    rows.append((int(name), fields[1].decode("ascii", "replace")))
+
+rows.sort()
+sys.stdout.write("".join("%d %s\n" % row for row in rows))
+PY
+  then
+    printf '%s: ERROR: the process snapshot failed (%s could not read /proc/*/stat) — refusing to run the process-tree checks on a guess\n' \
+      "$PROG" "$PYTHON" >&2
+    exit 2
+  fi
+  PROC_SNAPSHOT="$out"
+  return 0
+}
+
+# Point _SNAP_FILE at the current snapshot, taking one if none exists yet (a
+# direct call outside a poll loop must still be correct).  Returns 1 when there
+# is no snapshot to read.  Deliberately assignment-free of subshells: the readers
+# below call it directly so its `exit 2` on failure reaches the battery.
+_snapshot_path() {
+  if [ -z "${PROC_SNAPSHOT:-}" ] || [ ! -f "$PROC_SNAPSHOT" ]; then
+    proc_snapshot || return 1
+  fi
+  _SNAP_FILE="$PROC_SNAPSHOT"
+  return 0
+}
+
+ppid_of() { # pid -> the parent pid, empty when the pid is unknown/dead
+  local pid="$1" p pp
+  _snapshot_path || return 0
+  while read -r p pp; do
+    if [ "$p" = "$pid" ]; then
+      printf '%s\n' "$pp"
+      return 0
+    fi
+  done <"$_SNAP_FILE"
+  return 0
+}
+
+children_of() { # pid -> direct child pids, space separated (empty line when none)
+  local want="$1" pid ppid out=""
+  _snapshot_path || return 0
+  while read -r pid ppid; do
+    if [ "$ppid" = "$want" ]; then
       out="$out $pid"
     fi
-  done
+  done <"$_SNAP_FILE"
   printf '%s\n' "${out# }"
 }
 
 # Find (by polling) a direct child of <pid> whose command line contains <marker>.
+# The whole-machine snapshot is refreshed at the top of every iteration (one
+# scan per poll, never one fork per pid) and children_of then reads it.
 wait_child_matching() { # <parent-pid> <marker> <tenths>
   local parent="$1" marker="$2" budget="${3:-100}" i=0 p
   while [ "$i" -lt "$budget" ]; do
+    proc_snapshot
     for p in $(children_of "$parent"); do
       case "$(cmdline_of "$p")" in
         *"$marker"*)
@@ -197,10 +325,13 @@ wait_child_matching() { # <parent-pid> <marker> <tenths>
 }
 
 # Find (by polling) a direct child of <parent> that is NOT the generator: the
-# wrapper's target.  Returns nothing (rc 1) if it never appeared.
+# wrapper's target.  Returns nothing (rc 1) if it never appeared.  Like
+# wait_child_matching it takes its own snapshot at the top of each iteration, so
+# it is correct whether or not the caller refreshed one first.
 wait_target_matching() { # <parent-pid> <tenths> <exclude-pid>
   local parent="$1" budget="${2:-40}" exclude="${3:-}" i=0 p
   while [ "$i" -lt "$budget" ]; do
+    proc_snapshot
     for p in $(children_of "$parent"); do
       [ "$p" = "$exclude" ] && continue
       printf '%s\n' "$p"
@@ -212,7 +343,22 @@ wait_target_matching() { # <parent-pid> <tenths> <exclude-pid>
   return 1
 }
 
-read_started_pids() { sed -n 's/.* pids=//p' "$1" 2>/dev/null | head -n 1; }
+read_started_pids() { # <file> -> the csv on the generator's "started" line
+  # Read the file with the shell builtin: this is called once per iteration of
+  # assertion 8's premise poll, and nothing in a poll loop should fork per call
+  # when a builtin does the same job (same discipline as proc_snapshot).
+  local line=""
+  [ -f "$1" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      *' pids='*)
+        printf '%s\n' "${line##* pids=}"
+        return 0
+        ;;
+    esac
+  done <"$1"
+  return 0
+}
 
 all_gone() { # pids... -> 0 when none is alive, 1 when any is alive
   local p
@@ -270,7 +416,7 @@ run_battery() {
   local gen_out="$TMP/gen.out" gen_err="$TMP/gen.err"
   local all=()
 
-  printf '\n%s: bounded load harness selftest (fixtures are <= 2 workers / <= 2 s)\n\n' "$PROG"
+  printf '\n%s: bounded load harness selftest (fixtures are <= 2 workers, <= 10 s, one process snapshot per poll)\n\n' "$PROG"
 
   # ── 1. worker cap ──────────────────────────────────────────────────────────
   out="$("$PYTHON" "$LOADGEN" --workers 9 --seconds 1 --loadavg-file "$low" --json 2>&1)"
@@ -449,13 +595,20 @@ run_battery() {
   fi
 
   # ── 11. SIGTERM the WRAPPER mid-run: generator, burners and target all gone ─
+  # The generator window here is 10 s (not the 2 s the other fixtures use): the
+  # premise below — generator alive with >= 2 burners AND the wrapper's target
+  # alive — exists only while the generator runs, so a window no longer than one
+  # poll iteration can close before the poll observes it and this assertion fails
+  # for the wrong reason.  The target sleeps longer (20 s) than the generator
+  # runs, so the wrapper itself cannot exit before the premise is observed; the
+  # premise is still asserted and nothing here is weakened into a vacuous pass.
   premise_ok=0
   survivors=""
   burners=()
   for attempt in 1 2; do
     w_out="$TMP/run11.out"
     w_err="$TMP/run11.err"
-    bash "$WRAPPER" --workers 2 --seconds 2 --loadavg-file "$low" -- sleep 10 \
+    bash "$WRAPPER" --workers 2 --seconds 10 --loadavg-file "$low" -- sleep 20 \
       >"$w_out" 2>"$w_err" &
     wrap_pid=$!
     _track "$wrap_pid"
@@ -467,10 +620,15 @@ run_battery() {
     fi
     # Poll until the generator has at least 2 burner children (its start line is
     # printed once they exist AND have armed PDEATHSIG), and until the wrapper's
-    # target child exists too.
+    # target child exists too.  One whole-machine snapshot per iteration covers
+    # this loop's own children_of read; wait_target_matching takes its own for
+    # the single iteration it polls, so an iteration costs two O(1) scans
+    # (~0.07 s each) instead of two per-pid fork storms (~12.9 s).
     burners=()
+    target_pid=""
     waited=0
     while [ "$waited" -lt 60 ]; do
+      proc_snapshot
       burners=($(children_of "$gen_pid"))
       target_pid="$(wait_target_matching "$wrap_pid" 1 "$gen_pid")" || target_pid=""
       if [ "${#burners[@]}" -ge 2 ] && [ -n "$target_pid" ]; then
@@ -671,9 +829,12 @@ Usage:
   bash scripts/load-repro-selftest.sh
 
 Runs the real scripts/loadgen.py and scripts/load-repro.sh against tiny fixtures
-(<= 2 workers, <= 2 s) with a synthetic --loadavg-file, prints one PASS/FAIL line
-per assertion, and exits nonzero if any of them failed. Fixture pids are tracked
-and torn down on EXIT/INT/TERM/HUP, so an interrupted run leaves no burner.
+(<= 2 workers, <= 2 s of generator lifetime except assertion 11, whose generator
+window is 10 s so its mid-flight premise stays observable) with a synthetic
+--loadavg-file, prints one PASS/FAIL line per assertion, and exits nonzero if any
+of them failed. The process tree is read with one whole-machine snapshot per poll
+iteration (never one fork per pid). Fixture pids are tracked and torn down on
+EXIT/INT/TERM/HUP, so an interrupted run leaves no burner.
 
 Exit codes: 0 all behaved, 1 at least one failed, 2 a dependency is missing.
 EOF

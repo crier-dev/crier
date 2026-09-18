@@ -81,5 +81,13 @@ synthetic `--loadavg-file`, zero survivors after a normal exit, zero survivors a
 `SIGKILL` of the runner mid-run, the wrapper's signal teardown, the lock refusing a
 second concurrent run, and a **NEUTER proof** (a copy of the survivor check with its
 verdict forced to success must accept a live burner, so a green reading cannot be
-vacuous). Every fixture run is `<= 2 workers / <= 2 s`; the selftest never loads the box
+vacuous). Every fixture run is `<= 2 workers`; the generator window is `2 s` except in
+assertion 11, which uses `10 s` so its mid-flight premise (generator alive with >= 2
+burners AND the wrapper's target alive) stays observable — the premise itself is still
+asserted, so the wider window is not a weaker test. The selftest never loads the box
 and never leaves a burner behind, even when it is interrupted.
+
+The selftest finds those processes with **one whole-machine snapshot per poll
+iteration** — a single `python3` invocation over `/proc/*/stat` — and never one fork per
+pid. The fork-per-pid shape it replaced cost 6.4–20.6 s per pass on a 1672-pid box (and
+166.8 s once under load), so a single poll could outlive the fixture it was observing.
