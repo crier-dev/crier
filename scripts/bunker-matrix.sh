@@ -14,6 +14,12 @@
 #   --server bunker server name, if using bunker (optional)
 #   --sink   webhook sink URL for the blocking cell
 #   DEEPSEEK_API_KEY env var supplies the guard key (guard-on cell skips without it).
+#
+# Every cell is deployed through scripts/lib/transport-retry.sh (INT-CI-001): one
+# transient ssh/scp reset is retried instead of truncating the battery (CI run
+# 35302932314 lost the whole `blocking` cell that way), and a leg that does fail
+# fatals with the wrapper's verdict — transport-vs-non-transport PLUS the budget —
+# so the log is attributable without re-running it.
 set -uo pipefail
 
 HOST=127.0.0.1
@@ -36,8 +42,38 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BUNKER="$HOME/go/bin/bunker"
+BUNKER="${BUNKER_BIN:-$HOME/go/bin/bunker}"
 fatal() { echo "FATAL: $*" >&2; exit 1; }
+
+# INT-CI-001: the retry + classifier for the deploy legs below.
+# shellcheck source=lib/transport-retry.sh
+. "$REPO/scripts/lib/transport-retry.sh"
+
+# deploy_leg <cell> <env-file|-> [extra bunker-deploy.sh args...]
+#   One cell's deploy, through the transport retry wrapper. A transient ssh/scp
+#   reset is retried (and again INSIDE bunker-deploy.sh for the transfer itself,
+#   which is where run 35302932314 died); a non-transport failure is attempted
+#   exactly once, because retrying a real deploy error only hides it. Either way
+#   the FATAL names the class, the budget and the evidence — the verdict is read
+#   from the wrapper's own result variables, not reconstructed from a log scrape.
+#   Both levels read TRANSPORT_RETRIES: with the default 3 the worst case for one
+#   cell is 3 leg retries x 4 transfer attempts, so TRANSPORT_RETRIES is the knob
+#   to turn down (1 bounds a cell at 2 x 2 attempts).
+deploy_leg() { # <cell> <env-file|-> [extra args...]
+  local cell="$1" envfile="$2"
+  shift 2
+  local rc=0
+  if [[ "$envfile" == "-" ]]; then
+    retry_transport "cell deploy: $cell" -- \
+      bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" \
+      "$@" || rc=$?
+  else
+    retry_transport "cell deploy: $cell" -- \
+      env CR_ENV_FILE="$envfile" bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" \
+      "$@" || rc=$?
+  fi
+  [[ $rc -eq 0 ]] || fatal "cell deploy failed: $cell — ${TRANSPORT_RESULT_VERDICT}: ${TRANSPORT_RESULT_REASON}"
+}
 
 # Optional bunker preflight — only when --agent/--server were supplied.
 if [[ -n "$AGENT" && -n "$SERVER" ]]; then
@@ -98,7 +134,7 @@ echo "--- cell guard-on (default guard, real deepseek) ---"
 printf 'CR_REQUIRE_AGENT_SIG=false\nDEEPSEEK_API_KEY=%s\nCR_GUARD_DEFAULT_POLICY={"id":"default","providers":[{"provider":"deepseek","model":"deepseek-v4-flash","base_url":"https://api.deepseek.com/v1","api_key_ref":"env:DEEPSEEK_API_KEY"}]}\n' "$DEEPSEEK_KEY" > /tmp/mx-guard-on.env
 EXTRA_DEPLOY_ARGS=""
 [[ $SKIP_BUILD -eq 1 ]] && EXTRA_DEPLOY_ARGS="--skip-build"
-CR_ENV_FILE=/tmp/mx-guard-on.env bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" $EXTRA_DEPLOY_ARGS || fatal "cell deploy failed: guard-on — no probes against stale container"
+deploy_leg guard-on /tmp/mx-guard-on.env $EXTRA_DEPLOY_ARGS
 register guard-on '{"id":"default","providers":[{"provider":"deepseek","model":"deepseek-v4-flash","base_url":"https://api.deepseek.com/v1","api_key_ref":"env:DEEPSEEK_API_KEY"}]}'
 probe "guard-on clean" 201 "" POST "/agents/guard-on/inbox" "$CLEAN"
 probe "guard-on injection" 403 "GUARD_BLOCKED" POST "/agents/guard-on/inbox" "$INJECT"
@@ -110,7 +146,7 @@ printf 'CR_REQUIRE_AGENT_SIG=false\nCR_GUARD_ENABLED=false\n' > /tmp/mx-guard-of
 # below): without CR_ENV_FILE the container keeps the guard ENABLED, and the
 # cell then only passed because a keyless guard failed open on the injection —
 # i.e. it was green because of the very defect DF-CRIER-158 fixes.
-CR_ENV_FILE=/tmp/mx-guard-off.env bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" --skip-build || fatal "cell deploy failed: guard-off — no probes against stale container"
+deploy_leg guard-off /tmp/mx-guard-off.env --skip-build
 register guard-off ''
 probe "guard-off clean" 201 "" POST "/agents/guard-off/inbox" "$CLEAN"
 probe "guard-off injection delivered" 201 "" POST "/agents/guard-off/inbox" "$INJECT"
@@ -118,7 +154,7 @@ probe "guard-off injection delivered" 201 "" POST "/agents/guard-off/inbox" "$IN
 # ---- cell: fail-closed ----
 echo "--- cell fail-closed (dead provider + fail_closed) ---"
 printf 'CR_REQUIRE_AGENT_SIG=false\n' > /tmp/mx-fail-closed.env
-CR_ENV_FILE=/tmp/mx-fail-closed.env bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" --skip-build || fatal "cell deploy failed: fail-closed — no probes against stale container"
+deploy_leg fail-closed /tmp/mx-fail-closed.env --skip-build
 register fail-closed '{"id":"dead","fail_closed":true,"providers":[{"provider":"custom","model":"m","base_url":"http://127.0.0.1:9","api_key_ref":"env:DEEPSEEK_API_KEY"}]}'
 probe "fail-closed clean blocked" 403 "GUARD_BLOCKED" POST "/agents/fail-closed/inbox" "$CLEAN"
 probe "fail-closed injection blocked" 403 "GUARD_BLOCKED" POST "/agents/fail-closed/inbox" "$INJECT"
@@ -127,7 +163,7 @@ probe "fail-closed injection blocked" 403 "GUARD_BLOCKED" POST "/agents/fail-clo
 if [[ -n "$SINK" ]]; then
   echo "--- cell blocking (webhook round-trip through guard) ---"
   printf 'CR_REQUIRE_AGENT_SIG=false\n' > /tmp/mx-blocking.env
-  CR_ENV_FILE=/tmp/mx-blocking.env bash "$REPO/scripts/bunker-deploy.sh" --agent "$AGENT" --host "$HOST" --port "$PORT" --server "$SERVER" --skip-build || fatal "cell deploy failed: blocking — no probes against stale container"
+  deploy_leg blocking /tmp/mx-blocking.env --skip-build
   register blocking ''
   curl -s -o /dev/null -X PATCH "$BASE/agents/blocking" -H 'Content-Type: application/json' \
     -d "{\"webhook\":{\"url\":\"$SINK/hooks/blocking\",\"delivery_mode\":\"blocking\",\"schema_template\":\"openai-compatible\"}}"

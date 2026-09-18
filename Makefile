@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest
+.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest transport-retry-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -39,6 +39,7 @@ help:
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
+	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
 	@echo "  make-docker-check  Check every tracked Makefile (make -n dry-parse) and Dockerfile (hadolint, or the built-in python3 parse) — DF-CRIER-209"
@@ -110,6 +111,16 @@ docs-check:
 # The selftest picks its own free port, so a busy runner cannot make it flake.
 port-guard-selftest:
 	bash scripts/lib/port-guard.sh --selftest
+
+# INT-CI-001: one transient ssh/scp reset on the deploy leg used to kill the whole
+# bunker-e2e battery with no retry and no attribution (CI run 35302932314). This
+# exercises scripts/lib/transport-retry.sh on PATH shims only — no ssh, no scp, no
+# docker, no bunker host, no network — and proves each arm by COUNTING the shim's
+# calls, so it cannot flake and cannot pass vacuously: a neuter proof (transient
+# predicate forced false) must make ARM A fail, and restoring it must make ARM A
+# pass again.
+transport-retry-selftest:
+	bash scripts/lib/transport-retry.sh --selftest
 
 # DF-CRIER-206: the Tier-1 guard battery (secrets/go_build/go_lint/go_tests) never
 # reads a shell script or a workflow YAML, so a .sh/.yml-only diff used to get a
