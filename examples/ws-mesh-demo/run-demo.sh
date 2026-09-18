@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 #
-# CR-GAP-050 / DF-CRIER-152 — no-install WebSocket subscribe + mesh demo.
+# CR-GAP-050 / DF-CRIER-152 / DF-CRIER-3 — no-install WebSocket subscribe + mesh
+# REQUEST/RESPONSE demo.
 #
 # Proves live end-to-end against ONE real crier relay that this script starts
 # itself on 127.0.0.1:${DEMO_PORT} (scratch port; override with DEMO_PORT):
 #
-#   [3/8] POST /agents {"id":"demo-agent-a","capabilities":[...],"public_key":"<64-hex>"} -> 201
-#         POST /agents {"id":"demo-agent-b", ...}                                         -> 201
-#   [4/8] subscriber   ws://127.0.0.1:<port>/relay/subscribe/demo   (-once)
-#           ^
-#           |  POST /relay/publish  {"topic":"demo","event":{"msg":"hello from run-demo",...}}
-#           |  (X-Agent-ID: demo-publisher — required when rate limiting is on)
-#   [5/8] peer A       ws://127.0.0.1:<port>/mesh/connect/demo-agent-a
-#         peer B       ws://127.0.0.1:<port>/mesh/connect/demo-agent-b
-#           -> GET /mesh/peers returns count 2 with both agent IDs
+#   [3/10] POST /agents {"id":"demo-agent-a","capabilities":[...],"public_key":"<64-hex>"} -> 201
+#          POST /agents {"id":"demo-agent-b", ...}                                         -> 201
+#   [4/10] subscriber   ws://127.0.0.1:<port>/relay/subscribe/demo   (-once)
+#            ^
+#            |  POST /relay/publish  {"topic":"demo","event":{"msg":"hello from run-demo",...}}
+#            |  (X-Agent-ID: demo-publisher — required when rate limiting is on)
+#   [5/10] peer A       ws://127.0.0.1:<port>/mesh/connect/demo-agent-a
+#          peer B       ws://127.0.0.1:<port>/mesh/connect/demo-agent-b
+#            -> GET /mesh/peers returns count 2 with both agent IDs
+#            (peer B runs with -respond: it answers inbound REQUEST frames)
+#   [9/10] the exchange the README documents (DF-CRIER-3), driven by the
+#          repo-shipped client — nothing to install:
+#            REQUEST  demo-agent-a -> demo-agent-b   (message_id=<id>)
+#            RESPONSE demo-agent-b -> demo-agent-a   (request_id=<the same id>)
+#          The requester loop-receives and switches on `type`, so the server's
+#          own KEEPALIVE frames arriving on the same socket are ignored instead
+#          of being mistaken for the reply.
 #
 # Every demo client is spawned with `-url "$BASE"`, so DEMO_PORT moves the
 # server and the clients together. (Regression DF-CRIER-152: the clients used to
@@ -32,6 +41,10 @@
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG forced false (no per-agent signing in the demo)
 #   DEMO_PORT            override relay port (default 18961 — a scratch port)
+#   DEMO_KEEPALIVE_WAIT  bound for the live KEEPALIVE observation in [9/10]
+#                        (default 35s — the server's keepalive interval is 30s,
+#                        internal/mesh/peer.go; set 0 to skip that ~30s wait)
+#   DEMO_REQUEST_TIMEOUT how long the requester waits for the RESPONSE (20s)
 #   DEMO_TRANSCRIPT      override transcript path (default below)
 #
 # Output: the transcript is teed OUTSIDE the repo, to
@@ -46,6 +59,15 @@ REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
 DEMO_PORT="${DEMO_PORT:-18961}"
 BASE="http://127.0.0.1:${DEMO_PORT}"
 WORKDIR="$(mktemp -d)"
+
+# The server's mesh keepalive interval is mesh.DefaultMeshConfig().KeepaliveInterval
+# = 30s (internal/mesh/peer.go:39-48, used by cmd/server/main.go:149), and it
+# sends one to every accepted peer. [9/10] holds the socket slightly longer than
+# that so the transcript carries a real KEEPALIVE frame being ignored, not just a
+# description of the rule. DEMO_KEEPALIVE_WAIT=0 keeps the run short and leans on
+# the Go test for that proof instead (the script says so out loud when it does).
+DEMO_KEEPALIVE_WAIT="${DEMO_KEEPALIVE_WAIT:-35s}"
+DEMO_REQUEST_TIMEOUT="${DEMO_REQUEST_TIMEOUT:-20s}"
 
 SERVER_PID=""
 SUB_PID=""
@@ -63,30 +85,41 @@ trap cleanup EXIT
 
 usage() {
   cat <<EOF
-ws-mesh-demo run-demo.sh — crier relay pub/sub + mesh demo (CR-GAP-050)
+ws-mesh-demo run-demo.sh — crier relay pub/sub + mesh REQUEST/RESPONSE demo
+(CR-GAP-050, DF-CRIER-3)
 
 Usage:
   bash run-demo.sh [-h|--help]
 
 What it does — one crier relay started by this script on 127.0.0.1:${DEMO_PORT}
 (override the port: DEMO_PORT=<free port> bash run-demo.sh):
-  [1/8] build ./cmd/server and ./examples/ws-mesh-demo into a mktemp dir
-  [2/8] abort if anything already listens on :${DEMO_PORT}, then start the relay
-        auth-disabled and verify it answers /health with an EMPTY peer list
-  [3/8] HTTP-register demo-agent-a and demo-agent-b: POST /agents -> 201, so
-        both peers exist in the agent registry BEFORE they join the mesh
-  [4/8] spawn the subscriber on /relay/subscribe/demo
-  [5/8] spawn the two mesh peers on /mesh/connect/<agent>   (each with -url \$BASE)
-  [6/8] assert GET /mesh/peers reports count 2 listing both agent ids
-  [7/8] publish one event to topic demo (POST /relay/publish)
-  [8/8] assert the subscriber received that event over WebSocket
+  [1/10] build ./cmd/server and ./examples/ws-mesh-demo into a mktemp dir
+  [2/10] abort if anything already listens on :${DEMO_PORT}, then start the relay
+         auth-disabled and verify it answers /health with an EMPTY peer list
+  [3/10] HTTP-register demo-agent-a and demo-agent-b: POST /agents -> 201, so
+         both peers exist in the agent registry BEFORE they join the mesh
+  [4/10] spawn the subscriber on /relay/subscribe/demo
+  [5/10] spawn peer B with -respond (it answers inbound REQUESTs) and peer A on
+         /mesh/connect/<agent>   (each with -url \$BASE)
+  [6/10] assert GET /mesh/peers reports count 2 listing both agent ids
+  [7/10] publish one event to topic demo (POST /relay/publish)
+  [8/10] assert the subscriber received that event over WebSocket
+  [9/10] run the mesh exchange: REQUEST demo-agent-a -> demo-agent-b, then assert
+         the RESPONSE's request_id is the REQUEST's message_id, its status_code
+         is 200, and that a KEEPALIVE frame arriving on the same socket was
+         ignored rather than mistaken for the reply
+  [10/10] cross-check the responder's log: it received that same message_id and
+         echoed it as request_id
 
 Notes:
-  * registration in [3/8] is done by this demo so each peer is a known agent as
+  * registration in [3/10] is done by this demo so each peer is a known agent as
     well as a mesh connection; /mesh/peers itself reports live WebSocket
     connections (a peer that never registered still shows up there).
   * every demo client is passed -url \$BASE, so DEMO_PORT moves the server and
     the clients together.
+  * [9/10] waits up to \$DEMO_KEEPALIVE_WAIT (default 35s) for the server's real
+    30s KEEPALIVE so the probe is a live frame, not an assertion about one;
+    DEMO_KEEPALIVE_WAIT=0 skips the wait.
   * transcript (live tee, written outside the repo):
       \${TMPDIR:-/tmp}/ws-mesh-demo-TRANSCRIPT-<date>.XXXXXX.md
     override with DEMO_TRANSCRIPT=/path/to/file; the path is printed at the end.
@@ -156,21 +189,22 @@ fi
 # Everything below is teed into the transcript (real output, not simulated).
 exec > >(tee "$TRANSCRIPT") 2>&1
 
-echo "# CR-GAP-050 WS subscribe + mesh demo — TRANSCRIPT"
+echo "# CR-GAP-050 WS subscribe + mesh REQUEST/RESPONSE demo — TRANSCRIPT"
 echo
 echo "- date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "- repo: $(cd "$REPO_ROOT" && git rev-parse --short HEAD) ($(cd "$REPO_ROOT" && git log -1 --format=%s))"
 echo "- relay: ${BASE} (auth-disabled)"
+echo "- keepalive wait bound: ${DEMO_KEEPALIVE_WAIT}"
 echo "- transcript: ${TRANSCRIPT}"
 echo
 
-echo "==> [1/8] build crier + demo client (go toolchain only)"
+echo "==> [1/10] build crier + demo client (go toolchain only)"
 ( cd "$REPO_ROOT" && go build -o "$WORKDIR/crier" ./cmd/server )
 ( cd "$REPO_ROOT" && go build -o "$WORKDIR/ws-mesh-demo" ./examples/ws-mesh-demo )
 echo "    built $WORKDIR/crier and $WORKDIR/ws-mesh-demo"
 echo
 
-echo "==> [2/8] start relay on :${DEMO_PORT} (auth-disabled)"
+echo "==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)"
 echo "    port :${DEMO_PORT} was free before startup (checked with port_in_use)"
 env -u CR_AUTH_TOKEN CR_AUTH_TOKEN= CR_REQUIRE_AGENT_SIG=false \
   CRIER_PORT="$DEMO_PORT" CR_LOG_LEVEL=warn "$WORKDIR/crier" &
@@ -190,7 +224,7 @@ echo "$PEERS0" | grep -q '"count":0' \
 echo "    GET /mesh/peers -> $PEERS0 (empty: measured server is the one we started)"
 echo
 
-echo "==> [3/8] HTTP-register demo-agent-a and demo-agent-b (POST /agents)"
+echo "==> [3/10] HTTP-register demo-agent-a and demo-agent-b (POST /agents)"
 for AGENT in demo-agent-a demo-agent-b; do
   # 64-hex ed25519-style public key derived from the id — deterministic, no keys
   # to manage, and it satisfies the registry's 64-hex validation.
@@ -211,7 +245,7 @@ echo "    GET /agents -> $(echo "$REGISTERED" | grep -o '"id":"[^"]*"' | paste -
 echo "    demo-agent-a and demo-agent-b are registered before any mesh connection"
 echo
 
-echo "==> [4/8] spawn subscriber on /relay/subscribe/demo (-url $BASE)"
+echo "==> [4/10] spawn subscriber on /relay/subscribe/demo (-url $BASE)"
 "$WORKDIR/ws-mesh-demo" -url "$BASE" subscribe -topic demo -once > "$WORKDIR/sub.out" 2>&1 &
 SUB_PID=$!
 for _ in $(seq 1 50); do
@@ -223,11 +257,15 @@ grep -q '^SUBSCRIBED demo' "$WORKDIR/sub.out" \
 echo "    subscriber ready (pid $SUB_PID)"
 echo
 
-echo "==> [5/8] spawn two mesh peers (-url $BASE, agents from step 3)"
+echo "==> [5/10] spawn two mesh peers (-url $BASE, agents from step 3)"
+# Peer B is the RESPONDER: -respond makes it answer every inbound REQUEST with a
+# RESPONSE whose request_id is the REQUEST's message_id (the correlation
+# contract), carrying -body verbatim as an object.
+"$WORKDIR/ws-mesh-demo" -url "$BASE" peer -agent demo-agent-b -respond -status 200 \
+  -body '{"pong":true,"from":"demo-agent-b"}' > "$WORKDIR/peer-b.out" 2>&1 &
+PEER_B_PID=$!
 "$WORKDIR/ws-mesh-demo" -url "$BASE" peer -agent demo-agent-a > "$WORKDIR/peer-a.out" 2>&1 &
 PEER_A_PID=$!
-"$WORKDIR/ws-mesh-demo" -url "$BASE" peer -agent demo-agent-b > "$WORKDIR/peer-b.out" 2>&1 &
-PEER_B_PID=$!
 for _ in $(seq 1 50); do
   grep -q '^PEER CONNECTED demo-agent-a' "$WORKDIR/peer-a.out" 2>/dev/null \
     && grep -q '^PEER CONNECTED demo-agent-b' "$WORKDIR/peer-b.out" 2>/dev/null && break
@@ -237,10 +275,10 @@ grep -q '^PEER CONNECTED demo-agent-a' "$WORKDIR/peer-a.out" \
   || { echo "FAIL: peer A (demo-agent-a) did not connect ($(cat "$WORKDIR/peer-a.out"))" >&2; exit 1; }
 grep -q '^PEER CONNECTED demo-agent-b' "$WORKDIR/peer-b.out" \
   || { echo "FAIL: peer B (demo-agent-b) did not connect ($(cat "$WORKDIR/peer-b.out"))" >&2; exit 1; }
-echo "    demo-agent-a and demo-agent-b connected to $BASE"
+echo "    demo-agent-a and demo-agent-b connected to $BASE (B answers REQUESTs)"
 echo
 
-echo "==> [6/8] GET /mesh/peers (must show count 2 with both agent IDs)"
+echo "==> [6/10] GET /mesh/peers (must show count 2 with both agent IDs)"
 PEERS=""
 for _ in $(seq 1 50); do
   PEERS=$(curl -sS "$BASE/mesh/peers")
@@ -259,7 +297,7 @@ echo "    $PEERS"
 echo "    PASS: both mesh peers connected, count 2"
 echo
 
-echo "==> [7/8] publish an event (X-Agent-ID: demo-publisher)"
+echo "==> [7/10] publish an event (X-Agent-ID: demo-publisher)"
 PUB=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: demo-publisher' \
   -d '{"topic":"demo","event":{"msg":"hello from run-demo","ts":"crier-demo"}}')
@@ -267,7 +305,7 @@ echo "    POST /relay/publish -> HTTP $PUB"
 [ "$PUB" = "202" ] || { echo "FAIL: expected 202 from publish, got $PUB" >&2; exit 1; }
 echo
 
-echo "==> [8/8] subscriber must receive the event over WS /relay/subscribe"
+echo "==> [8/10] subscriber must receive the event over WS /relay/subscribe"
 wait "$SUB_PID" || { echo "FAIL: subscriber exited non-zero" >&2; exit 1; }
 grep -q '"topic":"demo"' "$WORKDIR/sub.out" \
   || { echo "FAIL: subscriber frame did not name the literal topic (got: $(grep '^EVENT ' "$WORKDIR/sub.out"))" >&2; exit 1; }
@@ -277,5 +315,111 @@ echo "    subscriber received: $(grep '^EVENT ' "$WORKDIR/sub.out")"
 echo "    PASS: event fanned out to subscriber over WebSocket"
 echo
 
-echo "==> DEMO PASS: WS subscribe fan-out + mesh peer registration verified live"
+echo "==> [9/10] mesh REQUEST/RESPONSE round-trip, demo-agent-a -> demo-agent-b"
+# The request leg reconnects as demo-agent-a, so its holding socket is closed
+# first and the mesh must have forgotten it: the server keys connections by agent
+# ID (internal/mesh/handler.go -> Mesh.AcceptPeer), so a second socket under the
+# same id replaces the first in the map — and a late OnClose from the old socket
+# would then delete the NEW entry and drop the RESPONSE.
+kill "$PEER_A_PID" 2>/dev/null || true
+wait "$PEER_A_PID" 2>/dev/null || true
+PEER_A_PID=""
+PEERS_AFTER=""
+for _ in $(seq 1 50); do
+  PEERS_AFTER=$(curl -sS "$BASE/mesh/peers")
+  echo "$PEERS_AFTER" | grep -q '"agent_id":"demo-agent-a"' || break
+  sleep 0.2
+done
+echo "$PEERS_AFTER" | grep -q '"agent_id":"demo-agent-a"' \
+  && { echo "FAIL: demo-agent-a is still listed after its socket closed (got: $PEERS_AFTER)" >&2; exit 1; }
+echo "$PEERS_AFTER" | grep -q '"agent_id":"demo-agent-b"' \
+  || { echo "FAIL: the responder demo-agent-b left the mesh when peer A closed (got: $PEERS_AFTER)" >&2; exit 1; }
+echo "    peer A's holding socket closed -> $(echo "$PEERS_AFTER" | grep -o '"count":[0-9]*'), responder still connected"
+
+ROUNDTRIP_OUT="$WORKDIR/roundtrip.out"
+set +e
+"$WORKDIR/ws-mesh-demo" -url "$BASE" roundtrip -agent demo-agent-a -target demo-agent-b -method GET -path /ping -body '{"hello":"world"}' -expect-status 200 -timeout "$DEMO_REQUEST_TIMEOUT" -keepalive-wait "$DEMO_KEEPALIVE_WAIT" > "$ROUNDTRIP_OUT" 2>&1
+ROUNDTRIP_RC=$?
+set -e
+sed 's/^/    /' "$ROUNDTRIP_OUT"
+[ "$ROUNDTRIP_RC" = "0" ] \
+  || { echo "FAIL: the roundtrip client exited $ROUNDTRIP_RC (see the transcript above)" >&2; exit 1; }
+
+REQ_ID=$(sed -n 's/^REQUEST SENT message_id=\([0-9a-f][0-9a-f]*\).*/\1/p' "$ROUNDTRIP_OUT" | head -1)
+[ -n "$REQ_ID" ] \
+  || { echo "FAIL: no 'REQUEST SENT message_id=…' line in the requester output" >&2; exit 1; }
+[ "${#REQ_ID}" = "24" ] \
+  || { echo "FAIL: the REQUEST's message_id is not a 24-hex id: '$REQ_ID'" >&2; exit 1; }
+
+OK_LINE=$(grep -m1 '^ROUNDTRIP OK ' "$ROUNDTRIP_OUT" || true)
+[ -n "$OK_LINE" ] \
+  || { echo "FAIL: the requester never reported ROUNDTRIP OK" >&2; exit 1; }
+RESP_REQUEST_ID=$(printf '%s\n' "$OK_LINE" | sed -n 's/.* request_id=\([0-9a-f][0-9a-f]*\).*/\1/p')
+RESP_MSG_ID=$(printf '%s\n' "$OK_LINE" | sed -n 's/.* response_message_id=\([0-9a-f][0-9a-f]*\).*/\1/p')
+RESP_STATUS=$(printf '%s\n' "$OK_LINE" | sed -n 's/.* status_code=\([0-9][0-9]*\).*/\1/p')
+
+# (a) the documented correlation: RESPONSE.request_id == REQUEST.message_id
+[ "$RESP_REQUEST_ID" = "$REQ_ID" ] \
+  || { echo "FAIL: RESPONSE.request_id ($RESP_REQUEST_ID) != REQUEST.message_id ($REQ_ID)" >&2; exit 1; }
+# (b) the status code the responder was told to send
+[ "$RESP_STATUS" = "200" ] \
+  || { echo "FAIL: RESPONSE.status_code is '$RESP_STATUS', expected 200" >&2; exit 1; }
+# (c) the reply's OWN message_id must differ from the correlation id — otherwise
+#     this run could not tell `request_id` from `message_id` and would pass on a
+#     frame that correlates on the wrong field.
+[ -n "$RESP_MSG_ID" ] && [ "$RESP_MSG_ID" != "$REQ_ID" ] \
+  || { echo "FAIL: RESPONSE.message_id ('$RESP_MSG_ID') is not distinct from the correlation id ('$REQ_ID') — the assertion cannot distinguish the two fields" >&2; exit 1; }
+# (d) the frame the requester accepted was a RESPONSE frame, and the body was
+#     relayed verbatim as an object (never stringified).
+grep -q "^RESPONSE RECEIVED request_id=${REQ_ID} " "$ROUNDTRIP_OUT" \
+  || { echo "FAIL: the requester did not report a RESPONSE correlated with $REQ_ID" >&2; exit 1; }
+grep -q 'body={"pong":true,"from":"demo-agent-b"}' "$ROUNDTRIP_OUT" \
+  || { echo "FAIL: the RESPONSE body was not relayed verbatim as an object (got: $(grep '^RESPONSE RECEIVED' "$ROUNDTRIP_OUT"))" >&2; exit 1; }
+
+echo "    PASS: RESPONSE.request_id == REQUEST.message_id == $REQ_ID, status_code=200, body object relayed verbatim"
+
+# (e) KEEPALIVE frames on the same socket must be ignored, never mistaken for
+#     the reply. With DEMO_KEEPALIVE_WAIT>0 the client holds the socket past the
+#     server's 30s keepalive tick and exits 0 only after one really arrived.
+#     Both lines count: KEEPALIVE IGNORED is a frame classified during the await
+#     phase, KEEPALIVE OBSERVED is the live one from the wait phase — either way
+#     the frame was classified as a KEEPALIVE, never accepted as the RESPONSE.
+KEEPALIVE_FRAMES=$(grep -Ec '^KEEPALIVE (IGNORED|OBSERVED) ' "$ROUNDTRIP_OUT" || true)
+case "$DEMO_KEEPALIVE_WAIT" in
+  "0"|"0s"|"0m"|"0h")
+    echo "    KEEPALIVE live wait DISABLED (DEMO_KEEPALIVE_WAIT=$DEMO_KEEPALIVE_WAIT): no KEEPALIVE frame was"
+    echo "      observed in this run ($KEEPALIVE_FRAMES classified). The filter itself is still exercised"
+    echo "      live by the Go tests that drive the same code paths on an in-process mesh"
+    echo "      (examples/ws-mesh-demo: TestClassifyInboundFiltersKeepaliveAndForeignReplies,"
+    echo "      TestRoundtripIgnoresKeepaliveFramesMidAwait)."
+    ;;
+  *)
+    OBSERVED=$(grep -m1 '^KEEPALIVE OBSERVED ' "$ROUNDTRIP_OUT" || true)
+    [ -n "$OBSERVED" ] \
+      || { echo "FAIL: no live KEEPALIVE frame within $DEMO_KEEPALIVE_WAIT (keepalives classified: $KEEPALIVE_FRAMES) — the server sends one every keepalive_interval_ms" >&2; exit 1; }
+    [ "$KEEPALIVE_FRAMES" -ge 1 ] \
+      || { echo "FAIL: a KEEPALIVE was observed but no frame was classified as ignored" >&2; exit 1; }
+    echo "    $OBSERVED"
+    echo "    PASS: a live KEEPALIVE frame arrived on the requester's socket and was ignored ($KEEPALIVE_FRAMES classified, 0 mistaken for the reply)"
+    ;;
+esac
+echo
+
+echo "==> [10/10] cross-check the responder's log (peer B echoed the REQUEST's message_id)"
+# The responder is a separate process: it must have seen the SAME message_id and
+# put it in request_id, which is what the server's route table keys on.
+B_REQ_ID=$(sed -n 's/^REQUEST RECEIVED message_id=\([0-9a-f][0-9a-f]*\).*/\1/p' "$WORKDIR/peer-b.out" | head -1)
+B_SENT_ID=$(sed -n 's/^RESPONSE SENT request_id=\([0-9a-f][0-9a-f]*\).*/\1/p' "$WORKDIR/peer-b.out" | head -1)
+[ -n "$B_REQ_ID" ] && [ "$B_REQ_ID" = "$REQ_ID" ] \
+  || { echo "FAIL: responder saw message_id '$B_REQ_ID', requester sent '$REQ_ID'" >&2; exit 1; }
+[ -n "$B_SENT_ID" ] && [ "$B_SENT_ID" = "$REQ_ID" ] \
+  || { echo "FAIL: responder answered with request_id '$B_SENT_ID', expected '$REQ_ID'" >&2; exit 1; }
+echo "    $(grep -m1 '^REQUEST RECEIVED ' "$WORKDIR/peer-b.out")"
+echo "    $(grep -m1 '^RESPONSE SENT ' "$WORKDIR/peer-b.out")"
+echo "    PASS: the responder echoed $REQ_ID as request_id"
+B_KEEPALIVES=$(grep -c '^PEER KEEPALIVE IGNORED ' "$WORKDIR/peer-b.out" || true)
+echo "    responder also ignored $B_KEEPALIVES server KEEPALIVE frame(s) (same rule, other socket)"
+echo
+
+echo "==> DEMO PASS: WS subscribe fan-out + mesh peer registration + REQUEST/RESPONSE"
 echo "    transcript: ${TRANSCRIPT}"
