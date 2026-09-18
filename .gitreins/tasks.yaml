@@ -1463,3 +1463,23 @@ tasks:
   status: complete
   created_at: '2026-09-18T07:24:10.879103+00:00'
   completed_at: '2026-09-18T07:32:30.006859+00:00'
+- id: df-crier-241-demo-guard-truth
+  title: 'DF-CRIER-241: examples/demo.sh must report the guard state it MEASURED,
+    not infer protection from the caller shell''s DEEPSEEK_API_KEY'
+  criteria:
+  - "Live-probed at HEAD on a scratch-port server: with CR_GUARD_ENABLED=false examples/demo.sh\
+    \ still prints the 'guard enabled and failing open' note; with CR_GUARD_ENABLED=true\
+    \ and DEEPSEEK_API_KEY=sk-placeholder-invalid it prints 'deliveries are LLM-guarded'\
+    \ while the deliver response's guard object shows errored=true (provider 401)\
+    \ \u2014 the shipped output claims protection the server did not provide. PASS\
+    \ when the note is derived from the deliver RESPONSE's guard object (decision/errored/reason\
+    \ printed verbatim when present; an explicit 'no guard verdict in this response\
+    \ \u2014 the demo does not claim the guard ran' when absent), never from env-var\
+    \ presence; the three server modes (guard off / enabled with a placeholder key\
+    \ / enabled with a usable key) each print a statement consistent with what the\
+    \ response carried; the demo still completes its round-trip with exit 0; bash\
+    \ -n + make shell-yaml-check + go build/vet/test ./... -count=1 + make docs-check\
+    \ are green and gitreins guard PASSes."
+  status: complete
+  created_at: '2026-09-18T07:49:27.859024+00:00'
+  completed_at: '2026-09-18T07:58:17.158212+00:00'
