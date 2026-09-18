@@ -60,6 +60,12 @@ Verify with `GET .../inbox/stats` (`queue_depth: 0`), never with a re-retrieve
   `message_id`, or the server drops it and the requester times out.
 - The server never sends REGISTER_ACK and ignores KEEPALIVE (claims in
   README/specs are overstated — see CR-GAP-016).
+- RESPONSE `body` goes on the wire as a JSON-encoded STRING (json.RawMessage):
+  send `body: json.dumps({...})` and expect a string back (2026-09-18 live run;
+  the mesh-protocol.md example showing an object contradicts the wire — DOGFOOD-MESH-2).
+- REQUEST to an offline/unknown peer → ERROR `CONTROLLER_OFFLINE` whose
+  `request_id` is the failed REQUEST's `message_id`; correlate ERROR frames by
+  `request_id`, not by `message_id` (DOGFOOD-MESH-3).
 
 ## Webhook push delivery (verified 2026-09-08)
 
@@ -188,6 +194,15 @@ live run proved:
 5. Register endpoint is `POST /agents` (id in body), NOT `POST /agents/{id}` (405).
 6. `./bin/crier-mcp --help` starts the server (no flags — CR-GAP-017).
 7. Python: use websockets v17 `additional_headers` for the Bearer header.
+8. Relay subscriber receives the BARE event payload — no `{topic, event}`
+   envelope — so a wildcard/multi-topic subscriber cannot route frames
+   (DOGFOOD-RELAY-1, 2026-09-18).
+9. `POST /relay/publish` needs `X-Agent-ID` on default config (rate limit on);
+   the integration-guide example omits it → 401 (DOGFOOD-RELAY-4).
+10. crier-mcp ephemeral key: a SECOND bridge run with the same CRIER_AGENT_ID
+    and a fresh ephemeral key gets 401 on every inbox read (the server kept the
+    first run's key). Use CRIER_AGENT_PRIVATE_KEY_FILE for anything persistent
+    (README documents this; it still bites — 2026-09-18 run).
 
 ## Verified-good examples (2026-08-09 live run)
 
