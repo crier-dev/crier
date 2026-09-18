@@ -18,23 +18,33 @@
 # the guard exactly as it was and adds the missing half + an explicit statement
 # of what the green does and does not cover.
 #
-# WHAT THE GATE COVERS, AND WHAT IT DOES NOT (DF-CRIER-206, DF-CRIER-209)
-# -----------------------------------------------------------------------
+# WHAT THE GATE COVERS, AND WHAT IT DOES NOT (DF-CRIER-206, DF-CRIER-209, DF-CRIER-189)
+# ------------------------------------------------------------------------------------
 # COVERS: `gitreins guard` Tier 1 — secrets, go_build, go_lint, go_tests — over
 #         the staged Go work, plus (added here) `bash -n` on every staged shell
 #         script and actionlint/PyYAML on every staged .github/workflows/*.yml,
 #         plus (DF-CRIER-209) a `make -n` dry-parse of every staged Makefile and
 #         a hadolint / built-in-python3 structural parse of every staged
-#         Dockerfile.
+#         Dockerfile, plus (DF-CRIER-189) `gofmt -l` on every staged .go file.
+#         The gofmt arm is a real addition, not a re-run of Tier 1: go_lint is
+#         `go vet`, which reports suspicious constructs and says NOTHING about
+#         formatting. Measured at HEAD 973f5e1, two files drifted
+#         (`gofmt -l $(git ls-files '*.go')` named internal/guard/types.go and
+#         internal/webhook/schema.go) while the guard printed `Tier 1 Guards:
+#         PASS`, so a drifting file could be committed on a green that verified
+#         nothing about it.
 # DOES NOT COVER: Markdown/prose drift (that is `make docs-check`, which executes
 #         the claims in docs/claims.yaml); the shell INSIDE a Makefile recipe (the
 #         dry-parse PRINTS recipes, it does not run them — a recipe that calls a
 #         tracked script is covered by the shell arm on that script); Dockerfile
 #         semantics beyond structure (no base-image existence check, no
 #         hadolint-style lint rules when hadolint is absent, no `# escape=`
-#         directive handling); and any file outside the tracked set. A Tier-1
-#         PASS over a diff with no Go source still verified nothing about that
-#         diff, and the printed scope line says so.
+#         directive handling); formatting beyond gofmt's own rules (the gofmt arm
+#         is not a linter, it does not replace `go vet`, and it reads only
+#         TRACKED .go files — a generated or untracked .go file is outside it);
+#         and any file outside the tracked set. A Tier-1 PASS over a diff with no
+#         Go source still verified nothing about that diff, and the printed scope
+#         line says so.
 #
 # INSTALLING / REPAIRING
 # ----------------------
@@ -57,26 +67,34 @@
 #  (2) scope disclosure. The staged set is read once (`git diff --cached
 #      --name-only --diff-filter=ACMR`) and split into Go files, shell/workflow
 #      files, Makefile/Dockerfile files, and everything else; the line printed
-#      says which of those Tier 1 actually covers, e.g.
-#        gate scope: no Go source staged — shell/YAML checks ran on 3 file(s): ...
+#      says which of those Tier 1 actually covers, and names the arms added here,
+#      e.g.
+#        gate scope: no Go source staged (no gofmt arm to run) — shell/YAML checks ran on 3 file(s): ...
 #        gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff
-#  (3) the shell/YAML checker (scripts/check-shell-yaml.sh) is run on EXACTLY the
+#  (3) the gofmt checker (scripts/check-gofmt.sh, DF-CRIER-189) is run on EXACTLY
+#      the staged .go files. It runs whenever a .go file is staged — a Go-only
+#      diff is the shape whose green said "this gate had nothing to add" while
+#      Tier-1 never read formatting at all. A failure exits nonzero, naming the
+#      drifting file and showing its (bounded) `gofmt -d` diff.
+#      A missing checker is itself a failure (exit 1): the gate must not degrade
+#      into silence if someone deletes it.
+#  (4) the shell/YAML checker (scripts/check-shell-yaml.sh) is run on EXACTLY the
 #      staged shell/workflow files. It runs whenever such a file is staged — the
 #      no-Go case is the one the vacuous PASS was measured on, and a Go diff that
 #      also carries a shell script is covered too, because a green must never be
 #      readable as "everything was verified". A failure exits nonzero.
-#      A missing checker is itself a failure (exit 1): the gate must not degrade
-#      into silence if someone deletes it.
-#  (4) the Makefile/Dockerfile checker (scripts/check-make-docker.sh,
+#      A missing checker is itself a failure (exit 1), same rule as (3).
+#  (5) the Makefile/Dockerfile checker (scripts/check-make-docker.sh,
 #      DF-CRIER-209) is run on EXACTLY the staged Makefile/Dockerfile files, with
 #      the same two rules: a missing checker is a hard failure (exit 1), and a
 #      nonzero checker exit stops the commit. It runs whenever such a file is
-#      staged, for the same reason as (3).
+#      staged, for the same reason as (4).
 #
-# The classification below MIRRORS scripts/check-shell-yaml.sh (_is_shell /
-# _is_workflow) and scripts/check-make-docker.sh (_is_makefile / _is_dockerfile).
-# Drift here can only narrow what this hook pre-checks, never hide a file from
-# the gate: `make shell-yaml-check` and `make make-docker-check` (CI, and any
+# The classification below MIRRORS scripts/check-gofmt.sh (_is_go),
+# scripts/check-shell-yaml.sh (_is_shell / _is_workflow) and
+# scripts/check-make-docker.sh (_is_makefile / _is_dockerfile). Drift here can
+# only narrow what this hook pre-checks, never hide a file from the gate: `make
+# gofmt-check`, `make shell-yaml-check` and `make make-docker-check` (CI, and any
 # local run) check every tracked file of their kind regardless of what is staged.
 #
 # NOTHING HERE WEAKENS THE GUARD: `gitreins guard` is still the first and
@@ -101,6 +119,7 @@ fi
 # ── (2) derive the staged scope ───────────────────────────────────────────────
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 go_count=0
+go_files=()
 shell_yaml=()
 make_docker=()
 
@@ -108,6 +127,8 @@ while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
     *.go)
+      # MIRRORS scripts/check-gofmt.sh (_is_go): the .go suffix is the whole rule.
+      go_files+=("$path")
       go_count=$((go_count + 1))
       continue
       ;;
@@ -153,35 +174,38 @@ while IFS= read -r path; do
   esac
 done <<<"$staged"
 
+n_go="${#go_files[@]}"
 n_shell_yaml="${#shell_yaml[@]}"
 n_make_docker="${#make_docker[@]}"
 
-# ── (3) state the scope, then check it ────────────────────────────────────────
+# ── (2) state the scope, then check it ────────────────────────────────────────
 # The scope line is printed BEFORE the checkers' per-file output so the gate log
 # reads scope-then-evidence; each checker is always invoked right after it, and
 # the hook cannot reach an exit below without having run the checkers it claims.
-# The four wordings below are unchanged from DF-CRIER-206 for the shapes they
-# describe (nothing Makefile/Dockerfile staged); a staged Makefile/Dockerfile
-# takes the composed line, which names the new arm.
+# The wordings keep every shape they described before — `gate scope: nothing
+# guardable staged …` verbatim, and the DF-CRIER-206 / DF-CRIER-209 sentences
+# unchanged — and now NAME the gofmt arm (DF-CRIER-189): a Go-only diff used to
+# read "this gate had nothing to add", which stopped being true once an arm that
+# reads formatting existed.
 if [ "$n_make_docker" -eq 0 ]; then
   if [ "$go_count" -eq 0 ]; then
     if [ "$n_shell_yaml" -eq 0 ]; then
       echo "gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff"
       exit 0
     fi
-    echo "gate scope: no Go source staged — shell/YAML checks ran on $n_shell_yaml file(s): ${shell_yaml[*]}"
+    echo "gate scope: no Go source staged (so no gofmt arm to run) — shell/YAML checks ran on $n_shell_yaml file(s): ${shell_yaml[*]}"
   else
     if [ "$n_shell_yaml" -eq 0 ]; then
-      echo "gate scope: $go_count Go file(s) staged — Tier-1 go_build/go_vet/go_tests cover them; no shell/YAML file staged, so this gate had nothing to add"
-      exit 0
+      echo "gate scope: $go_count Go file(s) staged — Tier-1 go_build/go_vet/go_tests cover them and the gofmt arm checked those $n_go Go file(s) for formatting drift; no shell/YAML file staged, so those are this gate's whole addition"
+    else
+      echo "gate scope: $go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them; the gofmt arm checked those $n_go Go file(s) too) + $n_shell_yaml shell/YAML file(s) staged — those are checked here too: ${shell_yaml[*]}"
     fi
-    echo "gate scope: $go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them) + $n_shell_yaml shell/YAML file(s) staged — those are checked here too: ${shell_yaml[*]}"
   fi
 else
   if [ "$go_count" -eq 0 ]; then
-    scope_prefix="no Go source staged"
+    scope_prefix="no Go source staged (so no gofmt arm to run)"
   else
-    scope_prefix="$go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them)"
+    scope_prefix="$go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them; the gofmt arm checked those $n_go Go file(s) too)"
   fi
   if [ "$n_shell_yaml" -eq 0 ]; then
     scope_shell="no shell/YAML file staged"
@@ -189,6 +213,24 @@ else
     scope_shell="shell/YAML checks ran on $n_shell_yaml file(s): ${shell_yaml[*]}"
   fi
   echo "gate scope: $scope_prefix — $scope_shell + $n_make_docker makefile/Dockerfile file(s) staged — those are checked here too: ${make_docker[*]}"
+fi
+
+# ── (3) gofmt on exactly the staged .go files (DF-CRIER-189) ──────────────────
+if [ "$n_go" -gt 0 ]; then
+  GO_CHECKER="$REPO_ROOT/scripts/check-gofmt.sh"
+  if [ ! -f "$GO_CHECKER" ]; then
+    echo "gate: ERROR: $GO_CHECKER is missing — refusing to let this commit through with the gofmt check unavailable" >&2
+    exit 1
+  fi
+
+  bash "$GO_CHECKER" "${go_files[@]}"
+  go_checker_rc=$?
+  if [ "$go_checker_rc" -ne 0 ]; then
+    echo "gate: gofmt check FAILED (exit $go_checker_rc) — fix the file(s) named above (gofmt -w <file>) and re-run; do not bypass this gate with --no-verify" >&2
+    exit "$go_checker_rc"
+  fi
+
+  echo "gate: gofmt check PASS"
 fi
 
 if [ "$n_shell_yaml" -gt 0 ]; then

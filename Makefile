@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest
+.PHONY: help build build-mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -43,6 +43,8 @@ help:
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
 	@echo "  make-docker-check  Check every tracked Makefile (make -n dry-parse) and Dockerfile (hadolint, or the built-in python3 parse) — DF-CRIER-209"
 	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
+	@echo "  gofmt-check       Check every tracked .go file with gofmt (go vet does not read formatting) — a drifting file fails (DF-CRIER-189)"
+	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -154,6 +156,31 @@ make-docker-check:
 
 make-docker-selftest:
 	bash scripts/check-make-docker.sh --selftest
+
+# DF-CRIER-189: the third blind spot. Tier 1 reads Go source but its go_lint is
+# `go vet`, which reports suspicious constructs and says nothing about
+# FORMATTING, and neither of the two arms above reads a .go file — so a drifting
+# file landed on a green that verified nothing about it (measured at HEAD
+# 973f5e1: `gofmt -l` named internal/guard/types.go and
+# internal/webhook/schema.go while the guard printed `Tier 1 Guards: PASS`).
+# gofmt-check runs `gofmt -l` over every tracked .go file and rejects each file
+# whose path comes back, printing its (bounded) `gofmt -d` diff and the fix line
+# `gofmt -w <file>`; the verdict is gofmt's OUTPUT, never its exit status
+# (`gofmt -l` exits 0 while reporting drift — only an unparseable source makes it
+# exit nonzero, and that is reported too, with gofmt's own message). The resolved
+# gofmt path and Go toolchain version are printed every run; gofmt missing from
+# PATH is exit 2, never a silent skip. Given an EXPLICIT file list the checker
+# fails closed (a list in which nothing classifies as a .go file, or a named .go
+# path that does not exist, exits 1 with the paths named), and a DEFAULT run whose
+# .go scope is empty is refused rather than reported as a PASS over 0 files.
+# gofmt-selftest proves the checker still rejects a drifting fixture and accepts a
+# clean one, on fixtures it creates under ${TMPDIR:-/tmp} — including a NEUTER
+# proof that the rejection is caused by the arm under test and not by accident.
+gofmt-check:
+	bash scripts/check-gofmt.sh
+
+gofmt-selftest:
+	bash scripts/check-gofmt.sh --selftest
 
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target

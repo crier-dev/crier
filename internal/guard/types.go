@@ -117,9 +117,9 @@ func (m Meta) Result() Result {
 		PolicyID:           m.Policy,
 		Provider:           m.Provider,
 		Model:              m.Model,
-		Errored:           m.Errored,
-		Quarantined:       m.Quarantined,
-		Sanitized:         m.Sanitized,
+		Errored:            m.Errored,
+		Quarantined:        m.Quarantined,
+		Sanitized:          m.Sanitized,
 		QuarantinedPayload: m.QuarantinedPayload,
 	}
 }

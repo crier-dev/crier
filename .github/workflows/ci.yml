@@ -75,6 +75,21 @@ jobs:
           make make-docker-check
           make make-docker-selftest
 
+      # DF-CRIER-189: Tier 1 never read formatting — go_lint is `go vet`, which
+      # reports suspicious constructs, not layout — so a drifting file could be
+      # pushed on a green that verified nothing about it (measured: `gofmt -l`
+      # named two files while the guard printed PASS). This runs `gofmt -l` over
+      # every tracked .go file and rejects any file whose path comes back, with
+      # its bounded diff; gofmt ships with the Go toolchain set up above, and the
+      # checker prints the gofmt path and Go version it used, exits 2 when gofmt
+      # is missing, and refuses a vacuous PASS over 0 files. The selftest then
+      # proves the checker still rejects a drifting fixture (including a neuter
+      # proof) on this runner.
+      - name: Go formatting check (gofmt)
+        run: |
+          make gofmt-check
+          make gofmt-selftest
+
   test-coverage:
     name: Coverage (Go 1.26.6)
     runs-on: ubuntu-latest

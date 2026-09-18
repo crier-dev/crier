@@ -32,9 +32,9 @@ type RequestShape struct {
 
 // TemplateContext is what {{path}} placeholders resolve against.
 type TemplateContext struct {
-	Crier   EnvelopeMeta   `json:"crier"`
-	Payload map[string]any `json:"payload"`
-	Agent   TemplateAgent  `json:"agent"`
+	Crier   EnvelopeMeta      `json:"crier"`
+	Payload map[string]any    `json:"payload"`
+	Agent   TemplateAgent     `json:"agent"`
 	Auth    map[string]string `json:"auth"`
 }
 

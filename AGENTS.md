@@ -18,6 +18,8 @@ make shell-yaml-check # bash -n every tracked shell script + actionlint (or PyYA
 make shell-yaml-selftest # prove that checker still rejects a broken script/workflow and accepts a clean pair (DF-CRIER-206)
 make make-docker-check # make -n dry-parse every tracked Makefile + hadolint (or the built-in python3 parse) every tracked Dockerfile (DF-CRIER-209); an explicit file list fails closed
 make make-docker-selftest # prove that checker still rejects a broken Makefile / malformed Dockerfile and accepts a clean set, incl. a neuter proof (DF-CRIER-209)
+make gofmt-check      # gofmt -l every tracked .go file — go vet does not read formatting, so a drifting file fails (DF-CRIER-189); an explicit file list fails closed and a 0-file scope is refused, never a vacuous PASS
+make gofmt-selftest   # prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)
 make install-hooks    # install scripts/hooks/pre-commit into .git/hooks (idempotent; DF-CRIER-206)
 make generate         # go generate ./... (regenerates cmd/server/openapi.yaml from docs/openapi.yaml)
 ```
@@ -55,21 +57,30 @@ verified nothing about it (DF-CRIER-206: measured with an unterminated `if` in a
 `.sh` and an unclosed flow sequence in a workflow — both PASSed). A
 Makefile-only or Dockerfile-only diff had the same problem until DF-CRIER-209:
 the shell/YAML arm reads no Makefile and no Dockerfile, so that green was only
-*labelled*, not earned.
+*labelled*, not earned. Tier 1's own `go_lint` is `go vet`, which reports
+suspicious constructs and says **nothing about formatting** — so a *drifting* Go
+file earned the same unearned full-Tier-1 green until DF-CRIER-189: measured at
+HEAD `973f5e1`, `gofmt -l $(git ls-files '*.go')` named
+`internal/guard/types.go` and `internal/webhook/schema.go` while the guard printed
+PASS. Both files are formatted now, and the gofmt arm keeps it that way.
 
-The tracked wrapper `scripts/hooks/pre-commit` closes that gap and states the
+The tracked wrapper `scripts/hooks/pre-commit` closes those gaps and states the
 scope of every green:
 
 - it runs `gitreins guard` first, unchanged (a nonzero guard still stops the
   commit before anything else runs), then
+- runs `scripts/check-gofmt.sh` on the staged `.go` files and exits nonzero if it
+  rejects one (DF-CRIER-189) — a Go-only diff no longer exits early, because that
+  is exactly the shape whose green used to claim the gate had nothing to add,
 - runs `scripts/check-shell-yaml.sh` on the staged shell/workflow files and exits
   nonzero if it rejects one,
 - runs `scripts/check-make-docker.sh` on the staged Makefile/Dockerfile files and
   exits nonzero if it rejects one (a checker that is missing on disk is itself
   exit 1, so the gate cannot degrade into silence), and
 - prints which of those Tier 1 actually covers, e.g.
-  `gate scope: no Go source staged — shell/YAML checks ran on 2 file(s): …`,
-  `gate scope: no Go source staged — no shell/YAML file staged + 1 makefile/Dockerfile file(s) staged — those are checked here too: Makefile`
+  `gate scope: no Go source staged (so no gofmt arm to run) — shell/YAML checks ran on 2 file(s): …`,
+  `gate scope: 3 Go file(s) staged — Tier-1 go_build/go_vet/go_tests cover them and the gofmt arm checked those 3 Go file(s) for formatting drift; no shell/YAML file staged, so those are this gate's whole addition`,
+  `gate scope: no Go source staged (so no gofmt arm to run) — no shell/YAML file staged + 1 makefile/Dockerfile file(s) staged — those are checked here too: Makefile`
   or
   `gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff`.
 
@@ -129,6 +140,29 @@ It checks every tracked Makefile and Dockerfile, and prints the engines it used:
   `nginx:alpine` is not rejected). It is not a linter: no base-image existence
   check, no hadolint rules, no `# escape=` directive handling.
 
+`make gofmt-check` is the third arm (DF-CRIER-189) and is a CI step too. It runs
+`gofmt -l` over every tracked `.go` file and rejects each file whose path comes
+back, printing its `gofmt -d` diff (bounded to the first 40 lines per file, so one
+drifting file cannot bury the log) plus the fix line `gofmt -w <file>`. Two
+properties are load-bearing and measured:
+
+- **the verdict is gofmt's OUTPUT, never its exit status** — `gofmt -l <drifting
+  file>` exits 0 while printing the path, so an arm trusting the return code would
+  pass every drifting file. Only a source gofmt cannot PARSE makes it exit
+  nonzero, and that is reported as a rejection carrying gofmt's own
+  `file:line: message`;
+- **it is a formatter, not a linter** — it says nothing about correctness, it does
+  not replace `go vet` (Tier-1 go_lint), and it reads only tracked `.go` files.
+
+The resolved `gofmt` path and the Go toolchain version are printed every run, and
+`gofmt` missing from PATH is exit 2 naming the tool and the mode — never a silent
+skip.
+
+`make gofmt-selftest` proves the gofmt checker still behaves on fixtures it
+creates under `${TMPDIR:-/tmp}` — including a NEUTER proof (a copy of the checker
+with the arm's verdict call forced to success must ACCEPT the same drifting
+fixture the real arm rejects) and the zero-file refusal below.
+
 `make make-docker-selftest` proves that checker still behaves — including two
 NEUTER proofs (a copy of the checker with one arm's verdict call forced to
 success must ACCEPT the same fixture the real arm rejects) so a green selftest
@@ -139,15 +173,19 @@ driven through a hadolint shim so it runs where hadolint is not installed. The
 scope, and one of hadolint/python3 whenever a dockerfile is: a missing validator
 is exit 2 naming the tool, never a silent skip.
 
-Given an EXPLICIT file list both checkers fail closed (DF-CRIER-208,
-DF-CRIER-209): for the shell/YAML checker a named `*.yml`/`*.yaml` that is not
-under `.github/workflows/`, or a list in which nothing classifies as shell or
-workflow; for the make/docker checker a list in which nothing classifies as a
-makefile or dockerfile. Either is rejected (exit 1) with every such path named —
-neither ever prints `PASS — 0 file(s) checked` over a list it read nothing from.
-The hook cannot trip these rules: it passes only files its own copy of the same
-predicates already classified, and the default (no-argument) whole-repo mode is
-unchanged.
+Given an EXPLICIT file list every checker fails closed (DF-CRIER-208,
+DF-CRIER-209, DF-CRIER-189): for the shell/YAML checker a named `*.yml`/`*.yaml`
+that is not under `.github/workflows/`, or a list in which nothing classifies as
+shell or workflow; for the make/docker checker a list in which nothing classifies
+as a makefile or dockerfile; for the gofmt checker a list in which nothing
+classifies as a `.go` file, or a named `.go` path that does not exist. Each is
+rejected (exit 1) with every such path named — none of them ever prints
+`PASS — 0 file(s) checked` over a list it read nothing from. The gofmt checker
+refuses a vacuous green in its DEFAULT mode as well: a run whose `.go` scope comes
+out empty (no tracked `.go` file at all) exits 2 instead of reporting a PASS over
+0 files. The hook cannot trip these rules: it passes only files its own copy of the
+same predicates already classified, and the default (no-argument) whole-repo mode
+of the other two arms is unchanged.
 
 Not covered by any of this: Markdown/prose drift (`make docs-check` covers the
 claims in `docs/claims.yaml`); the shell inside a Makefile recipe (a recipe that
@@ -155,8 +193,10 @@ invokes a tracked script is covered on that script, but inline shell in a recipe
 is not); Dockerfile semantics beyond structure (no base-image existence, no lint
 rules when hadolint is absent, and warning/info/style hadolint findings are
 reported as advisory but deliberately do not fail the gate — only error-level
-findings do); `$(shell …)` side effects of parsing a Makefile;
-and anything outside the tracked file set.
+findings do); `$(shell …)` side effects of parsing a Makefile; formatting beyond
+gofmt's own rules (the gofmt arm is not a linter and does not replace `go vet`, and
+it reads only and exactly the TRACKED `.go` files — a generated or untracked `.go`
+file is outside it); and anything outside the tracked file set.
 
 ## Board
 
