@@ -746,7 +746,7 @@ paths:
                         description: Last retryable remote status observed (absent when the failure was transport-level)
                       detail:
                         type: string
-                        description: Last transport/status error (never carries the link token)
+                        description: "Why the delivery was NOT held, plus the last transport/status error behind it — one of: \"federation: no link reachable|no link delivered …\" (every link unreachable or answering a retryable status, and no hold queue available), \"federation: hold delivery: …\" (the hold queue refused the delivery), \"federation: no sender on the deliver request (target …): …\" (the request names no sender, so a terminal FEDERATION_FAILED could never be reported — an unreportable delivery is never held, DF-CRIER-129). Never carries the link token."
     get:
       operationId: inboxRetrieve
       summary: Retrieve undelivered messages from inbox
