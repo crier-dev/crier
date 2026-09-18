@@ -106,8 +106,12 @@ func run(args []string) int {
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 
-	// Health check
+	// Health check. The body is JSON and docs/openapi.yaml declares the 200
+	// response as application/json, so the header is set explicitly: without
+	// it net/http sniffs the body and labels a documented JSON resource
+	// "text/plain; charset=utf-8" (DF-CRIER-102).
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")

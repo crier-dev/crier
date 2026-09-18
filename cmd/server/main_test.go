@@ -108,6 +108,164 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
+// startTestServer boots the server in-process via run(nil) on a free port
+// with auth disabled and no database, waits until it answers /health, and
+// registers the same SIGTERM shutdown the smoke tests use. It returns the
+// base URL, so an endpoint contract can be asserted against the REAL router
+// (middleware included) instead of a hand-built handler under test.
+func startTestServer(t *testing.T) string {
+	t.Helper()
+
+	// Deterministic environment: no DB, no auth token, no inherited port.
+	// The guard is off so the registry routes do not depend on an external
+	// model service being reachable.
+	t.Setenv("CR_AUTH_TOKEN", "")
+	t.Setenv("CR_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CRIER_DATABASE_URL", "")
+	t.Setenv("CR_GUARD_ENABLED", "false")
+
+	port := freePort(t)
+	t.Setenv("CRIER_PORT", strconv.Itoa(port))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(nil)
+	}()
+
+	// Graceful shutdown: main() installs a SIGINT/SIGTERM handler that calls
+	// srv.Shutdown. Send SIGTERM to our own process and wait for main to return.
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find own process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = self.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Errorf("server did not shut down within 10s of SIGTERM")
+		}
+	})
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Wait for the server to come up (bounded).
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp, err := client.Get(baseURL + "/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not start within 10s: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return baseURL
+}
+
+// TestHealthDeclaresJSONContentType is the DF-CRIER-102 regression gate. The
+// /health handler wrote its JSON body without setting a Content-Type, so
+// net/http sniffed the bytes and labelled a documented application/json
+// resource as "text/plain; charset=utf-8" — visible only to a client that
+// checks the header (a strict decoder, a monitoring probe) before decoding.
+// docs/openapi.yaml declares the 200 response as application/json, and every
+// other JSON surface in the repo sets the header explicitly; this test pins
+// the contract on the wire, and the body byte-for-byte so the fix cannot
+// change what the endpoint returns.
+func TestHealthDeclaresJSONContentType(t *testing.T) {
+	baseURL := startTestServer(t)
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	resp, err := client.Get(baseURL + "/health")
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /health: status %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	// The load-bearing assertion: the header, not a sniffed guess.
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("GET /health: Content-Type %q, want %q — docs/openapi.yaml declares the 200 response as application/json", ct, "application/json")
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /health body: %v", err)
+	}
+	if string(body) != `{"status":"ok"}` {
+		t.Errorf("GET /health: body %q, want exactly %q", body, `{"status":"ok"}`)
+	}
+}
+
+// TestJSONRoutesDeclareJSONContentType is the class guard for DF-CRIER-102:
+// /health was the only JSON surface in the repo that let net/http sniff its
+// Content-Type, and this table makes that class of drift loud on every route
+// the in-process harness can actually reach (auth disabled, in-memory
+// registry, no guard). Each entry asserts a 200, the exact
+// application/json header, and a JSON body — an entry that asserted nothing
+// would be a failed test, not a pass.
+//
+// Deliberately NOT in the table, with the reason each is outside the JSON
+// class (both are reachable here and pinned by TestOpenAPIServed):
+//
+//	/openapi.yaml — serves YAML (application/yaml)
+//	/docs         — serves HTML (text/html; charset=utf-8)
+//
+// and the routes whose JSON contract already has a dedicated gate:
+// /version (TestVersionEndpointServed) and /openapi.json (TestOpenAPIServed)
+// are listed here anyway so one table covers the reachable JSON surface.
+func TestJSONRoutesDeclareJSONContentType(t *testing.T) {
+	baseURL := startTestServer(t)
+
+	routes := []struct {
+		name string
+		path string
+	}{
+		{"health", "/health"},
+		{"version", "/version"},
+		{"openapi_json", "/openapi.json"},
+		{"relay_topics", "/relay/topics"},
+		{"mesh_peers", "/mesh/peers"},
+		{"fed_peers", "/fed/peers"},
+		{"agents", "/agents"},
+	}
+
+	for _, rt := range routes {
+		t.Run(rt.name, func(t *testing.T) {
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Get(baseURL + rt.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", rt.path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("GET %s: status %d, want %d", rt.path, resp.StatusCode, http.StatusOK)
+			}
+			if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+				t.Errorf("GET %s: Content-Type %q, want %q — a JSON resource must declare it, never leave net/http to sniff the body", rt.path, ct, "application/json")
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read %s body: %v", rt.path, err)
+			}
+			if len(body) == 0 {
+				t.Fatalf("GET %s: empty body — the JSON assertion below would be vacuous", rt.path)
+			}
+			if !json.Valid(body) {
+				t.Errorf("GET %s: body %q is not valid JSON", rt.path, body)
+			}
+		})
+	}
+}
+
 // TestBindFailureDiagnostic is the DF-CRIER-154 regression gate. On this
 // shared host the documented default run path is routinely blocked by
 // leftover servers holding the port, and the pre-fix failure path printed
