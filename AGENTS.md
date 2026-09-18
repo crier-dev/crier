@@ -75,8 +75,9 @@ scope of every green:
 
 `.git/hooks/pre-commit` is generated and untracked, so the tracked wrapper is the
 source of truth: `make install-hooks` copies it into place (idempotent; it backs
-up any existing hook first) and is the repair path after any of these, all of
-which are MEASURED to clobber the installed hook:
+up any existing hook first, and keeps only the 5 most recent backups — the backup
+set was unbounded until DF-CRIER-211) and is the repair path after any of these, all
+of which are MEASURED to clobber the installed hook:
 
 | command | effect on the installed hook |
 | --- | --- |

@@ -164,6 +164,12 @@ make-docker-selftest:
 # `make install-hooks` after either. The hook is installed as a COPY, not a
 # symlink: writing to a symlinked hook writes THROUGH the link, so
 # `gitreins install` would clobber the tracked file itself (measured).
+#
+# DF-CRIER-211 residue: the backup was unbounded — every install wrote a new
+# `<hook>.bak-<utc-ts>` and nothing ever pruned, so a dev box accumulated one per
+# repair run (3 on 2026-09-17 alone). The 5 most recent are kept; older ones are
+# removed AFTER the new backup is written, so the target can never make the
+# situation worse if the prune fails.
 install-hooks:
 	@root="$$(git rev-parse --show-toplevel 2>/dev/null || echo '$(CURDIR)')"; \
 	src="$$root/scripts/hooks/pre-commit"; \
@@ -184,6 +190,10 @@ install-hooks:
 		bak="$$dst.bak-$$(date -u +%Y%m%dT%H%M%SZ)"; \
 		cp "$$dst" "$$bak" || exit 1; \
 		echo "install-hooks: backed up the previous hook to $$bak"; \
+		keep=5; \
+		ls -1t "$$dst".bak-* 2>/dev/null | tail -n +$$((keep + 1)) | while IFS= read -r old; do \
+			rm -f "$$old" && echo "install-hooks: pruned hook backup $$old (keeping the $$keep most recent)"; \
+		done; \
 	fi; \
 	cp "$$src" "$$dst" || exit 1; \
 	chmod +x "$$dst" || exit 1; \
