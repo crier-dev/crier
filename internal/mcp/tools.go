@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
@@ -50,7 +51,29 @@ func (s *MCPServer) handleRegisterAgent(args json.RawMessage) (any, error) {
 	if err := s.store.Register(agent); err != nil {
 		return nil, err
 	}
-	return agent, nil
+	// The tool's answer is the STORE's view of the row, never the
+	// caller-supplied struct we just built (DF-CRIER-217 / DF-CRIER-242).
+	// The stored row carries status / registered_at / last_seen that only the
+	// backend can know. The in-process backends write them back into the
+	// passed struct (MemoryStore.Register, PostgresStore.Register), but the
+	// remote bridge's RemoteStore POSTs to /agents and discards the response
+	// body, so echoing `agent` answered {"status":"", "registered_at":
+	// "0001-01-01T00:00:00Z"} in bridge mode while the SAME session's
+	// get_agent and the server's own GET /agents/<id> answered the real row.
+	// Reading the row back makes the invariant structural for every backend —
+	// including one that persists what it was handed without mutating the
+	// caller's struct — instead of a per-backend discipline that RemoteStore
+	// silently broke. Cost: one read on the success path only (on the remote
+	// bridge that is one extra HTTP round trip on a one-per-agent operation).
+	// A failed read-back never fails a registration that already succeeded:
+	// the constructed struct is answered as before, with the miss logged.
+	stored, getErr := s.store.Get(agent.ID)
+	if getErr != nil || stored == nil {
+		slog.Warn("register_agent: could not read the stored agent back — answering the constructed registration",
+			"agent_id", agent.ID, "error", getErr)
+		return agent, nil
+	}
+	return stored, nil
 }
 
 // handleListAgents — spec §4.2. Takes no arguments.
