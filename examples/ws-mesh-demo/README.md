@@ -24,13 +24,25 @@ Everything is asserted: the script exits 0 only when all of it holds.
 
 - Go toolchain only (the repo's `go.mod` requires go 1.26.6; `GOTOOLCHAIN=auto`
   resolves it from the module cache).
-- `curl` (health/register/peers/publish probes) and `sha256sum` (coreutils —
-  derives each agent's 64-hex registry `public_key` from its id).
+- `curl` (health/register/peers/publish probes), `sha256sum` (coreutils —
+  derives each agent's 64-hex registry `public_key` from its id) and `ss`
+  (iproute2 — how the port guards find the process holding the port).
 - `github.com/gorilla/websocket` v1.5.3 — **already in `go.mod`/`go.sum`**.
-  No `go get`, no pip/npm/apt, no new dependencies. Nothing outside `examples/`
-  is touched, and the demo writes **nothing** into the repo.
+  No `go get`, no pip/npm/apt, no new dependencies, and **no external WebSocket
+  client** (no `websocat`, no `wscat`) — the subscriber and both mesh peers are
+  this directory's own Go client. Nothing outside `examples/` is touched, and the
+  demo writes **nothing** into the repo.
 
 ## Quick start
+
+From the repo root — the script builds the server and this client itself, so
+there is nothing to install first:
+
+```bash
+bash examples/ws-mesh-demo/run-demo.sh  # scratch port 18961
+```
+
+From this directory (equivalent, with the port/keepalive overrides):
 
 ```bash
 cd examples/ws-mesh-demo
@@ -39,6 +51,29 @@ DEMO_PORT=19999 bash run-demo.sh        # or any free port
 DEMO_KEEPALIVE_WAIT=0 bash run-demo.sh  # skip the ~30s live KEEPALIVE wait
 bash run-demo.sh -h                     # usage + the registration precondition
 ```
+
+If the scratch port is already taken the run refuses (exit 1) and names the
+holder's pid, its command line and the `ss -tlnp | grep :<port>` audit command —
+pick another port with `DEMO_PORT=<free port>`. Expected success output (the
+step headers and the lines each step asserts on):
+
+```text
+==> [6/10] GET /mesh/peers (must show count 2 with both agent IDs)
+    {"count":2,"peers":[{"agent_id":"demo-agent-b"},{"agent_id":"demo-agent-a"}]}
+    PASS: both mesh peers connected, count 2
+==> [7/10] publish: X-Agent-ID requirement + exact-topic fan-out
+    POST /relay/publish without X-Agent-ID -> HTTP 401 (expected 401)
+    POST /relay/publish topic=demo-other -> HTTP 202 (202: accepted, no subscriber for it)
+    POST /relay/publish topic=demo with X-Agent-ID: demo-publisher -> HTTP 202
+==> [8/10] subscriber must receive that one event over WS /relay/subscribe
+    subscriber received: EVENT {"topic":"demo","event":{"msg":"hello from run-demo","ts":"crier-demo"}}
+    PASS: exactly one event, on the exact subscribed topic demo, fanned out over WebSocket
+==> DEMO PASS: relay WS subscribe/publish (exact topic + X-Agent-ID 401) + mesh peers + REQUEST/RESPONSE
+    transcript: /tmp/ws-mesh-demo-TRANSCRIPT-<date>.XXXXXX.md
+```
+
+Exit status 0 is the verdict; every `FAIL:` line on the way there is fatal (the
+script runs under `set -euo pipefail` and checks each expectation explicitly).
 
 The script builds the server and demo client into a `mktemp` dir (never the
 repo), then runs **10 steps**: build → start relay → HTTP-register both peers →
@@ -50,7 +85,14 @@ loudly unless **all** of these hold:
 - `POST /agents` returns `201` for `demo-agent-a` and `demo-agent-b`, and both
   ids are listed by `GET /agents`;
 - `GET /mesh/peers` returns `count:2` with `demo-agent-a` + `demo-agent-b`;
-- the subscriber receives `hello from run-demo` over WS;
+- the subscriber receives `hello from run-demo` over WS **on the exact topic it
+  subscribed to** — exactly one `EVENT` frame, naming `"topic":"demo"` — after a
+  publish to a *different* topic (`demo-other`) was accepted (`202`) and reached
+  no subscriber (the subscriber runs with `-once`, so a fan-out to every
+  subscriber would hand it that event first and this assertion would fail);
+- a publish **without** `X-Agent-ID` is rejected with **401** (the per-agent rate
+  limiter keys on that header, and the script forces
+  `CR_RATE_LIMIT_PER_MINUTE=100` so the requirement cannot be inherited away);
 - the RESPONSE's `request_id` **equals** the REQUEST's `message_id` (and is
   distinct from the RESPONSE's own `message_id`, so the run can tell the two
   fields apart), with `status_code` 200 and the responder's body object relayed
@@ -192,22 +234,40 @@ pending, with `-require-keepalive-before-reply`), and prints
 `ROUNDTRIP OK request_id=… status_code=… response_message_id=… keepalives_ignored=…`
 so a shell driver can assert the whole contract from one line.
 
-## Two guards that keep a run honest
+## Three guards that keep a run honest
 
-The demo never measures a server it did not start:
+The demo never measures a server it did not start. The three guards are the
+shared library [`scripts/lib/port-guard.sh`](../../scripts/lib/port-guard.sh)
+(`make port-guard-selftest` exercises them on a port it picks as free itself) —
+the same one `examples/federation-demo` and `examples/hermes-gateway-demo` source:
 
-1. **Port pre-check** — if anything already listens on `$DEMO_PORT` the script
-   aborts with `FAIL: something is already listening on :<port>`. (Before this
-   guard, a `DEMO_PORT` run whose clients fell back to the compiled-in default
-   port measured a *docker-published* crier that happened to own that port, and
-   failed as `FAIL: /mesh/peers count != 2` with a foreign peer list.)
-2. **Empty-peer assertion** — right after startup the script requires
+1. **`require_free_port` — nothing may already hold `$DEMO_PORT`.** If something
+   does, the script aborts before building anything, naming the holder's pid, its
+   command line and the `ss -tlnp | grep :<port>` audit command:
+
+   ```text
+   ERROR: refusing to start the ws-mesh-demo relay — TCP port :50322 is already in use.
+   ERROR:   holder pid : 2347071
+   ERROR:   holder cmd : python3 -m http.server 50322 --bind 127.0.0.1
+   ERROR:   audit with : ss -tlnp | grep :50322
+   ```
+
+2. **`assert_port_owned` — the process answering `/health` must be the pid this
+   script started.** After the readiness poll the script asks `ss` who *holds*
+   `$DEMO_PORT` and aborts unless that pid is `$SERVER_PID` — presence is not
+   ownership, and a squatter that took the port in the window between the probe
+   and the bind would otherwise be measured in the demo's place.
+
+3. **Empty-peer assertion** — right after startup the script requires
    `GET /mesh/peers` to report `count:0`, and fails if its own relay process
    exits during the readiness loop. A foreign server answering on the same port
    would already list peers and is caught here instead of being measured.
 
 Every demo client is spawned with `-url "$BASE"`, so `DEMO_PORT` moves the
-server **and** the clients together.
+server **and** the clients together. (Regression DF-CRIER-152: the clients used to
+be spawned without `-url` and fell back to the compiled-in default, so a
+`DEMO_PORT` run measured a *docker-published* crier that happened to own that
+port, and failed as `FAIL: /mesh/peers count != 2` with a foreign peer list.)
 
 ## Transcript
 
@@ -274,7 +334,36 @@ registration precondition) and the DF-CRIER-3 exchange:
   900ms responder delay, so KEEPALIVE frames arrive while the RESPONSE is
   pending; the requester's exit status is the assertion.
 
+`run_demo_e2e_test.go` RUNS the command (the source invariants above pin its
+shape; these pin its behaviour). None of them is a fixed wall-clock pass
+condition — every assertion reads a transcript line the script writes only after
+the host really did the step, and the only clocks are hang guards:
+
+- `TestRunDemoEndToEndOnAScratchPort` — `bash run-demo.sh` on a port the test
+  itself bound and released, with the transcript assertions for the two
+  CR-GAP-050 criteria (the connected agent in `/mesh/peers`, the event received
+  on the exact topic, the single-EVENT requirement, the `401` without
+  `X-Agent-ID`). While the run is live it independently asks `ss` who holds the
+  port and requires that pid to be the one the script reported starting, with
+  `/proc/<pid>/cmdline` naming this repo's relay binary — ownership, not mere
+  presence.
+- `TestRunDemoRefusesAForeignServerOnItsPort` — the negative control: a squatter
+  that answers `/health` with 200 **and** `/mesh/peers` with an empty list (a
+  server that would otherwise yield a full green) must make the run abort
+  loudly, naming the port and the holder's pid, with no `DEMO PASS` and no
+  transcript at all — the run must die before it builds or starts anything.
+- `TestRunDemoUsesTheSharedGuardsAndProvesOwnership` /
+  `TestRunDemoProvesThePublishHeaderAndExactTopic` — the ordering invariants
+  (refuse before build/start; assert ownership after `/health`; the cross-topic
+  publish before the event under test).
+- `TestDocsPointAtTheShippedNoInstallCommand` — the top-level README and the
+  integration guide both name this command, and the guide says no external
+  WebSocket client is required.
+- `TestEveryExampleHarnessSourcesThePortGuardLib` — all three example harnesses
+  source `scripts/lib/port-guard.sh` instead of keeping a private copy.
+
 ```bash
-go test ./examples/ws-mesh-demo/ -count=1
+go test ./examples/ws-mesh-demo/ -count=1          # ~12s (2 real runs of the script)
+go test ./examples/ws-mesh-demo/ -count=1 -short   # skips the runs, keeps the invariants
 ```
 

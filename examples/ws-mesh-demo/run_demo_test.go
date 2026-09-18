@@ -135,25 +135,23 @@ func TestPeersAreHTTPRegisteredBeforeMeshConnect(t *testing.T) {
 	}
 }
 
-// TestPortIsPreCheckedAndMeasuredServerIsOurs covers the second failure mode seen
-// live: the port was owned by a foreign crier, the script measured that server,
-// and the failure surfaced as a bogus "/mesh/peers count != 2".
+// TestPortIsPreCheckedAndMeasuredServerIsOurs covers the failure mode seen live:
+// the port was owned by a foreign crier, the script measured that server, and the
+// failure surfaced as a bogus "/mesh/peers count != 2". The mechanism is now the
+// shared guard library (the detailed ordering invariants live in
+// TestRunDemoUsesTheSharedGuardsAndProvesOwnership); what this test keeps honest
+// is that the guards are still wired to THIS script's port and pid.
 func TestPortIsPreCheckedAndMeasuredServerIsOurs(t *testing.T) {
 	src := runDemoScript(t)
 
-	if !strings.Contains(src, "port_in_use() {") {
-		t.Error("run-demo.sh must define a port_in_use probe")
+	if !strings.Contains(src, `. "$REPO_ROOT/scripts/lib/port-guard.sh"`) {
+		t.Error("run-demo.sh must source scripts/lib/port-guard.sh (the shared guards)")
 	}
-	portCheckIdx := strings.Index(src, `if port_in_use "$DEMO_PORT"; then`)
-	if portCheckIdx < 0 {
-		t.Fatal("run-demo.sh must abort when $DEMO_PORT is already in use")
+	if !strings.Contains(src, `require_free_port "$DEMO_PORT"`) {
+		t.Error("run-demo.sh must refuse to start on an occupied $DEMO_PORT")
 	}
-	serverStartIdx := strings.Index(src, `CRIER_PORT="$DEMO_PORT" CR_LOG_LEVEL=warn "$WORKDIR/crier"`)
-	if serverStartIdx < 0 {
-		t.Fatal("run-demo.sh must start its own relay with CRIER_PORT=$DEMO_PORT")
-	}
-	if portCheckIdx > serverStartIdx {
-		t.Error("the port pre-check must run BEFORE the relay is started")
+	if !strings.Contains(src, `assert_port_owned "$DEMO_PORT" "$SERVER_PID"`) {
+		t.Error("run-demo.sh must assert the pid holding $DEMO_PORT is the relay it started")
 	}
 	if !strings.Contains(src, `kill -0 "$SERVER_PID" 2>/dev/null`) {
 		t.Error("run-demo.sh must fail fast when its own relay process exits during startup")

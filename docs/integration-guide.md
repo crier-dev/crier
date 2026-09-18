@@ -10,10 +10,18 @@ This is the maintained, user-facing companion to:
 - `docs/mesh-protocol.md` — the authoritative mesh wire format
 - `docs/architecture.md` / `docs/specs.md` — design and behavior specs
 - `examples/demo.sh` — the runnable register → deliver → retrieve → ack round-trip
+- `examples/ws-mesh-demo/` — the runnable **zero-install** relay pub/sub + mesh
+  demo: `run-demo.sh` plus a Go WebSocket client, nothing to install
 
-Everything below was live-verified against a running server. All examples use
-`curl` + `openssl` + `websocat` (or Python `websockets`); no client SDK is
-required. The signed-config snippets require **OpenSSL >= 3**: the signing
+Everything below was live-verified against a running server. Every leg in this
+guide has a repo-shipped, runnable path — `examples/demo.sh`
+for register/deliver/retrieve/ack and `examples/ws-mesh-demo/run-demo.sh` for
+relay subscribe/publish and the mesh (§4, §5) — and those need only the Go
+toolchain, `curl` and `coreutils`: **no external WebSocket client is required for
+any part of this guide.** The `curl` + `openssl` + `websocat` transcript below is
+the *manual* alternative for reading a single step or pasting one frame by hand
+(`websocat`, or Python `websockets`, must then be installed yourself; no client SDK is
+required). The signed-config snippets require **OpenSSL >= 3**: the signing
 helper uses `openssl pkeyutl -sign -rawin` (an OpenSSL 3+ flag) and fails
 loudly on older versions instead of producing an empty signature that the
 server silently rejects with 401.
@@ -317,6 +325,43 @@ curl -s localhost:8767/agents/agent-1/inbox/stats "${AUTH[@]}" \
 
 ## 4. Relay: publish/subscribe
 
+**Zero-install path — run the shipped driver.** No WebSocket client to install:
+`examples/ws-mesh-demo` builds this server and its own Go WebSocket client
+(gorilla/websocket, from `go.mod`), starts a relay on a scratch port it proves is
+free, subscribes on an exact topic and asserts the fan-out:
+
+```bash
+DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # scratch port 18961
+DEMO_PORT=18977 DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh
+```
+
+Its relay steps prove, live, against one server it started itself:
+
+- `POST /relay/publish` **without** `X-Agent-ID` → **401** `{"error":"X-Agent-ID
+  header required for rate-limited publish"}` (the per-agent limiter keys on the
+  header; `CR_RATE_LIMIT_PER_MINUTE=0` is the only way to drop the requirement),
+- the same publish **with** `X-Agent-ID` → **202**,
+- a publish to a *different* topic (`demo-other`) reaches no subscriber — the
+  subscriber runs with `-once`, so a fan-out to every subscriber would hand it
+  that event first and the run's payload assertion would fail,
+- the subscriber receives exactly **one** frame,
+  `{"topic":"demo","event":{...}}`, carrying the literal published topic.
+
+The client is also usable against a server you already have running:
+
+```bash
+go run ./examples/ws-mesh-demo subscribe -topic my-topic -url http://localhost:8767
+go run ./examples/ws-mesh-demo subscribe -topic my-topic -url http://localhost:8767 -once
+```
+
+(`subscribe` prints `SUBSCRIBED <topic>` after the upgrade, then one `EVENT
+<payload>` line per received frame; `-once` exits 0 after the first one. Full
+flag list: `examples/ws-mesh-demo/README.md`.)
+
+**Manual alternative — an external WebSocket client.** Everything below can also
+be done by hand with `websocat` (or Python `websockets`), which you install
+yourself:
+
 ```bash
 # subscribe (WebSocket) — one terminal
 websocat "ws://localhost:8767/relay/subscribe/my-topic" "${AUTH[@]}"
@@ -375,6 +420,29 @@ then exchange `REQUEST`/`RESPONSE` frames that the server relays between
 peers. Unlike the registry/inbox API, mesh frames carry **no bearer or
 signature auth** — do not use the mesh for privileged operations without an
 application-level auth layer.
+
+**Zero-install path — run the shipped driver.** `examples/ws-mesh-demo/run-demo.sh`
+needs no WebSocket client: it starts its own relay on a scratch port it proves is
+free (and proves the listening pid is its own before measuring it), connects two
+peers over `ws://…/mesh/connect/<agentID>`, shows both in `GET /mesh/peers` while
+their sockets are open, and runs the exchange below with the correlation and
+KEEPALIVE rules asserted:
+
+```bash
+DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # scratch port 18961
+```
+
+The client also works against a server you already have running — the peer is
+visible in `/mesh/peers` for as long as its socket is open:
+
+```bash
+go run ./examples/ws-mesh-demo peer -agent alpha -url http://localhost:8767
+curl -s localhost:8767/mesh/peers     # {"peers":[{"agent_id":"alpha"}],"count":1}
+```
+
+**Manual alternative — an external WebSocket client.** The transcript below is a
+`websocat` session you drive by hand (install `websocat` or Python `websockets`
+first):
 
 ```bash
 # terminal 1 — agent alpha

@@ -378,6 +378,13 @@ curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
 > Prefer the runnable script: [`examples/demo.sh`](examples/demo.sh) performs the
 > full register → deliver → signed retrieve → ack round-trip with an ephemeral
 > ed25519 keypair (openssl 3.x). Start the server, then run `./examples/demo.sh`.
+>
+> The **relay subscribe leg** — which needs a WebSocket client and cannot be done
+> with `curl` alone — has its own zero-install driver:
+> `bash examples/ws-mesh-demo/run-demo.sh`. It starts a relay on a scratch port,
+> subscribes on an exact topic, and asserts the fan-out (including that a publish
+> without `X-Agent-ID` is 401). Nothing to install; see [Try the Mesh](#try-the-mesh)
+> below for the mesh half of the same script.
 
 ### Remote MCP mode (crier-mcp)
 
@@ -522,7 +529,12 @@ DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh    # skip the ~30s 
 
 It exits 0 only when the RESPONSE's `request_id` equals the REQUEST's
 `message_id`, its `status_code` is what the responder sent, and a KEEPALIVE frame
-that arrived on the same socket was ignored instead of being taken for the reply.
+that arrived on the same socket was ignored instead of being taken for the reply
+— and, on the relay side of the same run, that a publish *without* `X-Agent-ID`
+is `401`, that a publish to another topic reaches no subscriber, and that the
+subscriber received exactly one frame naming the exact topic it subscribed to.
+No external WebSocket client is needed for any of it: the peers and the
+subscriber are this repo's own Go client.
 Flags and the step-by-step transcript: `examples/ws-mesh-demo/README.md`.
 
 **Manual alternative — any WebSocket client works.** Neither `websocat` nor

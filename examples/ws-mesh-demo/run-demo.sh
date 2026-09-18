@@ -11,7 +11,13 @@
 #   [4/10] subscriber   ws://127.0.0.1:<port>/relay/subscribe/demo   (-once)
 #            ^
 #            |  POST /relay/publish  {"topic":"demo","event":{"msg":"hello from run-demo",...}}
-#            |  (X-Agent-ID: demo-publisher — required when rate limiting is on)
+#            |  (X-Agent-ID: demo-publisher — required when rate limiting is on:
+#            |   [7/10] also proves the requirement NEGATIVELY, a publish without
+#            |   that header must answer 401)
+#            |  POST /relay/publish  {"topic":"demo-other",...}  — 202, and it must
+#            |   NOT reach this subscriber: the exact topic is the only one the
+#            |   subscription matches, and the subscriber (-once) would take a
+#            |   fan-out to every subscriber as its first event
 #   [5/10] peer A       ws://127.0.0.1:<port>/mesh/connect/demo-agent-a
 #          peer B       ws://127.0.0.1:<port>/mesh/connect/demo-agent-b
 #            -> GET /mesh/peers returns count 2 with both agent IDs
@@ -29,14 +35,22 @@
 # be spawned without -url and silently fell back to the compiled-in default, so
 # a DEMO_PORT run measured whatever else owned that default port.)
 #
-# Two guards keep the run honest:
-#   * the script ABORTS if anything already listens on $DEMO_PORT, and
+# Three guards keep the run honest, and they come from the shared library
+# scripts/lib/port-guard.sh (the same one federation-demo and
+# hermes-gateway-demo source):
+#   * require_free_port ABORTS before anything is built or started when something
+#     already listens on $DEMO_PORT, naming the holder's pid, its command line
+#     and the `ss -tlnp | grep :<port>` audit command,
+#   * assert_port_owned then proves, after the relay answered /health, that the
+#     process HOLDING $DEMO_PORT is the pid this script started — presence is not
+#     ownership, and
 #   * the relay's peer list must be EMPTY right after startup — a foreign server
 #     answering on the same port (docker-published crier, stale demo run, …)
 #     would already list peers, and would otherwise be measured by mistake.
 #
 # Requirements: go (toolchain only) + curl + sha256sum (coreutils, used to derive
-# the registry public_key). gorilla/websocket v1.5.3 comes from go.mod — zero
+# the registry public_key) + ss (iproute2 — how the port guards find the holder).
+# gorilla/websocket v1.5.3 comes from go.mod — zero
 # external installs, zero new dependencies.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG forced false (no per-agent signing in the demo)
@@ -56,6 +70,12 @@ set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
+
+# The shared "the server we measure is the server we started" guards (QA-CRIER-9),
+# the same library federation-demo and hermes-gateway-demo source. Sourced, not
+# re-implemented: a local copy of a guard is a guard that drifts.
+. "$REPO_ROOT/scripts/lib/port-guard.sh"
+
 DEMO_PORT="${DEMO_PORT:-18961}"
 BASE="http://127.0.0.1:${DEMO_PORT}"
 WORKDIR="$(mktemp -d)"
@@ -94,16 +114,24 @@ Usage:
 What it does — one crier relay started by this script on 127.0.0.1:${DEMO_PORT}
 (override the port: DEMO_PORT=<free port> bash run-demo.sh):
   [1/10] build ./cmd/server and ./examples/ws-mesh-demo into a mktemp dir
-  [2/10] abort if anything already listens on :${DEMO_PORT}, then start the relay
-         auth-disabled and verify it answers /health with an EMPTY peer list
+  [2/10] require_free_port refuses to start while anything listens on
+         :${DEMO_PORT}; the relay then starts auth-disabled with rate limiting
+         on (100/min), and once it answers /health the script asserts with
+         assert_port_owned that the pid HOLDING :${DEMO_PORT} is the pid it
+         started, together with an EMPTY peer list — a foreign server on that
+         port would already list peers (presence is not ownership)
   [3/10] HTTP-register demo-agent-a and demo-agent-b: POST /agents -> 201, so
          both peers exist in the agent registry BEFORE they join the mesh
   [4/10] spawn the subscriber on /relay/subscribe/demo
   [5/10] spawn peer B with -respond (it answers inbound REQUESTs) and peer A on
          /mesh/connect/<agent>   (each with -url \$BASE)
   [6/10] assert GET /mesh/peers reports count 2 listing both agent ids
-  [7/10] publish one event to topic demo (POST /relay/publish)
-  [8/10] assert the subscriber received that event over WebSocket
+  [7/10] publish: a publish WITHOUT X-Agent-ID must be 401 (the per-agent rate
+         limiter keys on that header), a publish to topic demo-other must be
+         202, then the event under test goes to topic demo
+  [8/10] assert the subscriber received EXACTLY ONE event naming the exact
+         topic demo (it runs with -once, so a relay that fanned out to every
+         subscriber would hand it the demo-other event first)
   [9/10] run the mesh exchange: REQUEST demo-agent-a -> demo-agent-b, then assert
          the RESPONSE's request_id is the REQUEST's message_id, its status_code
          is 200, and that a KEEPALIVE frame arriving on the same socket was
@@ -112,6 +140,15 @@ What it does — one crier relay started by this script on 127.0.0.1:${DEMO_PORT
          echoed it as request_id
 
 Notes:
+  * no external websocket client is needed: every leg is driven by this repo's
+    own Go client (gorilla/websocket, from go.mod). The only tools required on
+    PATH are go, curl, sha256sum and ss.
+  * the three port guards are the shared library scripts/lib/port-guard.sh (the
+    same one federation-demo and hermes-gateway-demo source): require_free_port
+    names the holder's pid, command line and the "ss -tlnp | grep :<port>" audit
+    command and exits 1; assert_port_owned exits 1 when the holder is not the pid
+    this script started; a relay that dies before answering /health aborts the
+    run instead of being papered over.
   * registration in [3/10] is done by this demo so each peer is a known agent as
     well as a mesh connection; /mesh/peers itself reports live WebSocket
     connections (a peer that never registered still shows up there).
@@ -143,7 +180,7 @@ case "${1:-}" in
 esac
 
 # ── Pre-flight (before the transcript redirect, so aborts are plainly visible) ──
-for tool in go curl sha256sum; do
+for tool in go curl sha256sum ss; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "FAIL: '$tool' is required on PATH" >&2; exit 1; }
 done
@@ -157,23 +194,16 @@ esac
 [ "$DEMO_PORT" -ge 1 ] && [ "$DEMO_PORT" -le 65535 ] \
   || { echo "FAIL: DEMO_PORT out of range: $DEMO_PORT" >&2; exit 2; }
 
-port_in_use() {
-  local port="$1"
-  if command -v ss >/dev/null 2>&1; then
-    ss -tln 2>/dev/null | awk -v suffix=":$port" '$4 ~ suffix "$" { found = 1 } END { exit !found }'
-    return $?
-  fi
-  (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && return 0
-  return 1
-}
-
-if port_in_use "$DEMO_PORT"; then
-  cat >&2 <<EOF
-FAIL: something is already listening on :${DEMO_PORT} — refusing to run.
-      The demo would silently measure that server instead of its own.
-      Pick a free port:  DEMO_PORT=<free port> bash $0
-EOF
-  exit 1
+# ── Guard 1/3: refuse to start while anything listens on $DEMO_PORT ──────────
+# require_free_port (scripts/lib/port-guard.sh) names the holder's pid, its
+# command line and the `ss -tlnp | grep :<port>` audit command, then exits 1 —
+# the port probe is never followed by a start that would die on EADDRINUSE and
+# leave the health poll to be answered by the squatter.
+PG_RC=0
+( require_free_port "$DEMO_PORT" "the ws-mesh-demo relay" ) || PG_RC=$?
+if [ "$PG_RC" -ne 0 ]; then
+  [ "$PG_RC" -eq 1 ] && echo "      Pick a free port:  DEMO_PORT=<free port> bash $0" >&2
+  exit "$PG_RC"
 fi
 
 # ── Transcript: outside the repo, mktemp-derived, never overwrites a previous run ──
@@ -205,8 +235,13 @@ echo "    built $WORKDIR/crier and $WORKDIR/ws-mesh-demo"
 echo
 
 echo "==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)"
-echo "    port :${DEMO_PORT} was free before startup (checked with port_in_use)"
+echo "    port :${DEMO_PORT} passed require_free_port (nothing was listening)"
+# CR_RATE_LIMIT_PER_MINUTE is stated explicitly: [7/10] asserts the 401 its
+# header requirement produces, so the demo must not inherit a softened setting
+# from the ambient environment (0 there would turn the limiter — and the
+# requirement — off).
 env -u CR_AUTH_TOKEN CR_AUTH_TOKEN= CR_REQUIRE_AGENT_SIG=false \
+  CR_RATE_LIMIT_PER_MINUTE=100 \
   CRIER_PORT="$DEMO_PORT" CR_LOG_LEVEL=warn "$WORKDIR/crier" &
 SERVER_PID=$!
 for _ in $(seq 1 50); do
@@ -218,6 +253,17 @@ done
 curl -sfS "$BASE/health" >/dev/null 2>&1 \
   || { echo "FAIL: relay never became healthy at $BASE" >&2; exit 1; }
 echo "    $(curl -sS "$BASE/health") <- relay healthy (our pid $SERVER_PID)"
+
+# ── Guard 2/3: the listener we just polled must be OUR process ───────────────
+# assert_port_owned asks ss who HOLDS :$DEMO_PORT and exits 1 unless that pid is
+# $SERVER_PID. "Something answered /health" is not "the process we started
+# answered /health"; without this check a squatter that took the port in the
+# window between the probe and the bind would be measured in our place.
+PORT_OWNER="$(port_holder_pid "$DEMO_PORT")"
+assert_port_owned "$DEMO_PORT" "$SERVER_PID" "the ws-mesh-demo relay"
+echo "    :${DEMO_PORT} is held by pid $PORT_OWNER == our relay pid $SERVER_PID (ss -tlnp)"
+
+# ── Guard 3/3: the server we are about to measure reports an EMPTY mesh ──────
 PEERS0=$(curl -sS "$BASE/mesh/peers")
 echo "$PEERS0" | grep -q '"count":0' \
   || { echo "FAIL: $BASE/mesh/peers is not empty at startup (got: $PEERS0) — this is not our relay" >&2; exit 1; }
@@ -297,22 +343,52 @@ echo "    $PEERS"
 echo "    PASS: both mesh peers connected, count 2"
 echo
 
-echo "==> [7/10] publish an event (X-Agent-ID: demo-publisher)"
+echo "==> [7/10] publish: X-Agent-ID requirement + exact-topic fan-out"
+# (a) NEGATIVE: the per-agent rate limiter keys on X-Agent-ID and is on by
+#     default (100/min), so a publish without the header must be refused with
+#     401 BEFORE the body is read. Asserted, not assumed: this is the half of
+#     the requirement a run can silently lose by inheriting
+#     CR_RATE_LIMIT_PER_MINUTE=0 from its environment.
+PUB_NO_HEADER=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
+  -H 'Content-Type: application/json' \
+  -d '{"topic":"demo","event":{"msg":"never delivered: no X-Agent-ID"}}')
+echo "    POST /relay/publish without X-Agent-ID -> HTTP $PUB_NO_HEADER (expected 401)"
+[ "$PUB_NO_HEADER" = "401" ] \
+  || { echo "FAIL: a publish without X-Agent-ID answered $PUB_NO_HEADER, expected 401 — the header is required only while rate limiting is on (CR_RATE_LIMIT_PER_MINUTE is forced to 100 above)" >&2; exit 1; }
+
+# (b) A publish to a DIFFERENT topic must not reach this subscriber, and the
+#     subscriber is the assertion: it runs with -once, so it exits on the FIRST
+#     event it receives. A relay that fanned every event out to every subscriber
+#     would hand it this one first and [8/10] would fail on the payload — which
+#     makes "the subscription matched exactly topic demo" a provable claim
+#     instead of an assumption.
+PUB_OTHER=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
+  -H 'Content-Type: application/json' -H 'X-Agent-ID: demo-publisher' \
+  -d '{"topic":"demo-other","event":{"msg":"must not reach the demo subscriber"}}')
+echo "    POST /relay/publish topic=demo-other -> HTTP $PUB_OTHER (202: accepted, no subscriber for it)"
+[ "$PUB_OTHER" = "202" ] \
+  || { echo "FAIL: publishing to demo-other answered $PUB_OTHER, expected 202" >&2; exit 1; }
+
+# (c) The event under test, on the exact topic the subscriber listens on.
 PUB=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: demo-publisher' \
   -d '{"topic":"demo","event":{"msg":"hello from run-demo","ts":"crier-demo"}}')
-echo "    POST /relay/publish -> HTTP $PUB"
+echo "    POST /relay/publish topic=demo with X-Agent-ID: demo-publisher -> HTTP $PUB"
 [ "$PUB" = "202" ] || { echo "FAIL: expected 202 from publish, got $PUB" >&2; exit 1; }
 echo
 
-echo "==> [8/10] subscriber must receive the event over WS /relay/subscribe"
+echo "==> [8/10] subscriber must receive that one event over WS /relay/subscribe"
 wait "$SUB_PID" || { echo "FAIL: subscriber exited non-zero" >&2; exit 1; }
+EVENT_LINES=$(grep -c '^EVENT ' "$WORKDIR/sub.out" || true)
+[ "$EVENT_LINES" = "1" ] \
+  || { echo "FAIL: the subscriber received $EVENT_LINES events; exactly one publish went to its topic (the demo-other publish above must not reach it)" >&2; exit 1; }
 grep -q '"topic":"demo"' "$WORKDIR/sub.out" \
   || { echo "FAIL: subscriber frame did not name the literal topic (got: $(grep '^EVENT ' "$WORKDIR/sub.out"))" >&2; exit 1; }
 grep -q 'hello from run-demo' "$WORKDIR/sub.out" \
   || { echo "FAIL: subscriber did not receive the published event" >&2; exit 1; }
 echo "    subscriber received: $(grep '^EVENT ' "$WORKDIR/sub.out")"
-echo "    PASS: event fanned out to subscriber over WebSocket"
+echo "    PASS: exactly one event, on the exact subscribed topic demo, fanned out over WebSocket"
+echo "          (a publish without X-Agent-ID was 401, and topic demo-other reached no subscriber here)"
 echo
 
 echo "==> [9/10] mesh REQUEST/RESPONSE round-trip, demo-agent-a -> demo-agent-b"
@@ -421,5 +497,5 @@ B_KEEPALIVES=$(grep -c '^PEER KEEPALIVE IGNORED ' "$WORKDIR/peer-b.out" || true)
 echo "    responder also ignored $B_KEEPALIVES server KEEPALIVE frame(s) (same rule, other socket)"
 echo
 
-echo "==> DEMO PASS: WS subscribe fan-out + mesh peer registration + REQUEST/RESPONSE"
+echo "==> DEMO PASS: relay WS subscribe/publish (exact topic + X-Agent-ID 401) + mesh peers + REQUEST/RESPONSE"
 echo "    transcript: ${TRANSCRIPT}"
