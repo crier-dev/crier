@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -43,6 +43,7 @@ help:
 	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  load-repro-selftest  Prove the bounded load harness (caps, load gate, PDEATHSIG teardown, no survivors) — DF-CRIER-254"
+	@echo "  bunker-matrix-selftest  Prove the bunker-matrix argument surface, its --local safety and its remote refusal — no docker, no bunker, no network (DF-CRIER-81)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
 	@echo "  make-docker-check  Check every tracked Makefile (make -n dry-parse) and Dockerfile (hadolint, or the built-in python3 parse) — DF-CRIER-209"
@@ -167,6 +168,16 @@ transport-retry-selftest:
 # <= 2 workers / <= 2 s and never leaves a burner behind.
 load-repro-selftest:
 	bash scripts/load-repro-selftest.sh
+
+# DF-CRIER-81: scripts/bunker-matrix.sh gained --help/--local and a remote
+# preflight, but its argument surface and the local mode's safety claims (never
+# deploys, never calls the bunker CLI, probes the supplied host/port) are only
+# real if they are measured. This selftest drives a SANDBOX copy of the matrix
+# with a poisoned bunker-deploy.sh (canary + exit 42), a poisoned bunker CLI and
+# a local fake crier (python3 stdlib http.server) — no docker, no bunker host,
+# no network, fully deterministic.
+bunker-matrix-selftest:
+	bash scripts/bunker-matrix-selftest.sh
 
 # DF-CRIER-206: the Tier-1 guard battery (secrets/go_build/go_lint/go_tests) never
 # reads a shell script or a workflow YAML, so a .sh/.yml-only diff used to get a
