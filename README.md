@@ -84,6 +84,14 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 An agent that registers a `webhook` config (`PATCH /agents/{id}` with
 `{"webhook":{"url":…}}`) receives its messages at that endpoint instead of its
 durable inbox (CR-FEAT-001, [`specs/WEBHOOK-DELIVERY.md`](specs/WEBHOOK-DELIVERY.md) §4).
+
+That PATCH is an agent-scoped endpoint: with signature enforcement on (the
+default, `CR_REQUIRE_AGENT_SIG=true`) it requires the same
+`X-Agent-ID`/`X-Agent-Ts`/`X-Agent-Sig` trio as inbox retrieve/ack — sign
+`PATCH\n/agents/{id}\n<unix-seconds>` with the agent's ed25519 key, exactly as
+in the [Quick Start](#quick-start) signing helper. Sent unsigned it answers
+`401 {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}`.
+
 The inbox is **not** written: `GET /agents/{id}/inbox` for a webhook-configured
 agent is empty by design, so an empty retrieve is not evidence that a message
 was never sent — the message may have gone to the endpoint (or failed there).
