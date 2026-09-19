@@ -1790,3 +1790,13 @@ tasks:
   status: complete
   created_at: '2026-09-19T12:23:03.922725+00:00'
   completed_at: '2026-09-19T12:38:14.725566+00:00'
+- id: DF-CRIER-88
+  title: Compose quickstart reruns battery and resets stack state
+  criteria:
+  - docker compose up -d --build in examples/agent-ecosystem must NOT auto-run the
+    battery; the documented battery command runs it exactly once without recreating
+    the crier container or erasing in-memory state; README + docs/AGENT-ECOSYSTEM.md
+    match the verified flow; make docs-check + shell-yaml gates green
+  status: complete
+  created_at: '2026-09-19T14:19:47.408850+00:00'
+  completed_at: '2026-09-19T14:36:21.416546+00:00'
