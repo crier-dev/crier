@@ -1613,3 +1613,44 @@ tasks:
   status: complete
   created_at: '2026-09-18T21:56:36.658133+00:00'
   completed_at: '2026-09-18T22:11:41.429273+00:00'
+- id: DF-CRIER-254
+  title: Bound the load-reproduction harness
+  criteria:
+  - 'scripts/loadgen.py and scripts/load-repro.sh exist in THIS repo: the generator
+    refuses a worker count above its cap (default 4, hard max 8) and a lifetime above
+    its cap (default 30s, hard max 300s) with an error naming the cap, and the wrapper
+    runs its target command under that bounded load, serialized by a lock so one load
+    run happens at a time per host.'
+  - 'The harness refuses to start above a DOCUMENTED load threshold: the 1-minute
+    loadavg is read from a documented source (default /proc/loadavg, overridable so
+    tests can pin a synthetic value), a run above the threshold exits with a recorded
+    SKIPPED reason naming the measured loadavg and the threshold, and the threshold
+    is documented in the repo.'
+  - 'Every child and its process group is torn down on success AND on interruption
+    (SIGINT/SIGTERM/SIGHUP/SIGKILL of the runner): no busy-wait process outlives its
+    run, the runner verifies each started pid is gone, and it exits nonzero naming
+    the survivors if one remains.'
+  - 'make load-repro-selftest proves it non-vacuously in CI: worker-cap and lifetime-cap
+    refusals, the loadavg-threshold skip driven by a synthetic loadavg file, zero
+    survivors after a normal exit, zero survivors after SIGKILL of the runner, the
+    wrapper''s signal teardown, and a NEUTER proof that the survivor check can fail.'
+  - 'The load-safety rule is documented at HEAD (docs/load-reproduction.md: never
+    hand-roll a busy-wait burn loop, never setsid a burner, never pkill -f a pattern
+    also present in your own argv, one load run at a time per host) and no hand-rolled
+    burner idiom remains in the repo; make test, go vet, make gofmt-check and gitreins
+    guard pass at HEAD.'
+  status: complete
+  created_at: '2026-09-18T23:18:09.413079+00:00'
+  completed_at: '2026-09-18T23:18:14.568686+00:00'
+- id: DF-CRIER-256
+  title: One snapshot pass per poll in the load-repro selftest process-tree scan
+  criteria:
+  - 'scripts/load-repro-selftest.sh performs at most ONE /proc snapshot pass per poll
+    iteration (no per-pid fork in any loop): ppid_of/children_of read a cached snapshot
+    produced by a single interpreter call; the fixture window for assertion 11 is
+    widened and documented so the mid-flight premise cannot be missed; the whole selftest
+    completes in under 60 seconds on a host with >1500 processes with all 14 assertions
+    PASS and the measured wall time recorded in the commit body and the board row.'
+  status: complete
+  created_at: '2026-09-18T23:42:48.980981+00:00'
+  completed_at: '2026-09-18T23:57:07.121904+00:00'
