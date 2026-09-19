@@ -65,14 +65,15 @@ PASS  round-trip codex via crier
 PASS  round-trip aider via crier
 PASS  round-trip goose via crier
 PASS  round-trip sink echo via crier
+PASS  wrong-shape payload yields 200 ECHO: no text (documented trap)
 PASS  async deliver (202)
 PASS  async delivered
 PASS  guard clean payload allowed
 PASS  guard injection blocked
-battery done: 12 pass / 0 fail
+battery done: 13 pass / 0 fail
 ```
 
-(no key → the guard matrix is skipped: `battery done: 10 pass / 0 fail / 1 skip`)
+(no key → the guard matrix is skipped: `battery done: 11 pass / 0 fail / 1 skip`)
 
 ## Services
 
@@ -101,7 +102,25 @@ battery stays deterministic on any host.
    webhook (its own `/hook`, `delivery_mode: blocking`, generic schema) and a
    guard policy.
 2. **Sending**: anyone POSTs to `crier/agents/<id>/inbox` — blocking returns
-   the agent's reply (`200 {reply}`), async returns `202`, batch buffers.
+   the agent's reply (`200 {reply}`), async returns `202`, batch buffers. The
+   minimal blocking request against the published port:
+
+   ```bash
+   curl -s -X POST http://localhost:18767/agents/sink/inbox \
+     -H 'Content-Type: application/json' \
+     -d '{"payload":{"text":"What vegetable is in plot B?"},"sender":"you","session_id":"my-session","delivery_mode":"blocking","timeout_ms":15000}'
+   # → 200 {"reply":"ECHO: What vegetable is in plot B?"}
+   ```
+
+   All five fields are required: `payload.text`, `sender`, `session_id`,
+   `delivery_mode` (`blocking` | `async` | `batch`) and `timeout_ms` (0–120000).
+   The echo agent reads the text out of `payload.text` (or a bare-string
+   payload) — any other payload shape still answers `200`, but the reply text
+   falls back to the sink's default `ECHO: no text` (crier wraps the sink's own
+   body, so the raw response reads `"reply":{"reply":"ECHO: ECHO: no text"}`).
+   There is no schema validation on the message payload, so the wrong-shape
+   request is a silent trap rather than a 4xx — it is pinned by a battery
+   negative-control probe.
 3. **Guarding**: every inbound message passes the LLM guard first (DeepSeek
    when a key is present; fail-open otherwise). Injection attempts get a
    structured `403 GUARD_BLOCKED` verdict; salvageable messages get rewritten

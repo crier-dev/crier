@@ -97,6 +97,13 @@ probe "round-trip goose via crier" 200 '"reply":"' POST "/agents/goose/inbox" \
 probe "round-trip sink echo via crier" 200 "ECHO" POST "/agents/sink/inbox" \
   '{"payload":{"text":"What vegetable is in plot B?"},"sender":"battery","session_id":"eco-sink","delivery_mode":"blocking","timeout_ms":15000}'
 
+# 2b. NEGATIVE CONTROL — the wrong-shape trap (DF-CRIER-92). A payload that is not
+# `payload.text` (nor a bare string) is NOT a 4xx: there is no schema validation on
+# the message payload, so the request succeeds 200 and the sink answers
+# "ECHO: no text". Pin that surface so a future change cannot silently move it.
+probe "wrong-shape payload yields 200 ECHO: no text (documented trap)" 200 "no text" POST "/agents/sink/inbox" \
+  '{"payload":{"task":"wrong shape"},"sender":"battery","session_id":"eco-sink-bad","delivery_mode":"blocking","timeout_ms":15000}'
+
 # 3. async + batch delivery (sink counts deliveries)
 S0=$(curl -s "$SINK/stats" | python3 -c 'import json,sys; print(json.load(sys.stdin)["deliveries"])')
 probe "async deliver (202)" 202 "" POST "/agents/sink/inbox" \
