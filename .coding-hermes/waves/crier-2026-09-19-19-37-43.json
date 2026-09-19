@@ -1,0 +1,15 @@
+{
+  "tick_id": "crier-2026-09-19-19-37-43",
+  "project": "crier",
+  "base_sha": "d25fdf9",
+  "created_at": "2026-09-19 19:37:43",
+  "workers": [
+    {"task_id": "DF-CRIER-274", "worktree": "/home/kara/worktrees/crier-DF-CRIER-274", "branch": "wt/DF-CRIER-274", "files": ["examples/agent-ecosystem/sink/echo_sink.py"]},
+    {"task_id": "DF-CRIER-275", "worktree": "/home/kara/worktrees/crier-DF-CRIER-275", "branch": "wt/DF-CRIER-275", "files": ["docs/AGENT-ECOSYSTEM.md"]},
+    {"task_id": "DF-CRIER-264", "worktree": "/home/kara/worktrees/crier-DF-CRIER-264", "branch": "wt/DF-CRIER-264", "files": ["specs/AGENT-ECOSYSTEM.md"]},
+    {"task_id": "DF-CRIER-227", "worktree": "/home/kara/worktrees/crier-DF-CRIER-227", "branch": "wt/DF-CRIER-227", "files": ["README.md"]},
+    {"task_id": "DF-CRIER-109", "worktree": "/home/kara/worktrees/crier-DF-CRIER-109", "branch": "wt/DF-CRIER-109", "files": ["specs/_index.md", "specs/AGENTS.md"]},
+    {"task_id": "DF-CRIER-207", "worktree": "/home/kara/worktrees/crier-DF-CRIER-207", "branch": "wt/DF-CRIER-207", "files": ["examples/hermes-gateway-demo/run-demo.sh", "examples/federation-demo/run-demo.sh"]},
+    {"task_id": "DF-CRIER-40", "worktree": "/home/kara/worktrees/crier-DF-CRIER-40", "branch": "wt/DF-CRIER-40", "files": ["internal/mesh/", "internal/relay/", "docs/mesh-protocol.md"]}
+  ]
+}

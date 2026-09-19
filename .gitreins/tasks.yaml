@@ -1818,3 +1818,57 @@ tasks:
   status: complete
   created_at: '2026-09-19T18:35:28.324981+00:00'
   completed_at: '2026-09-19T18:59:48.291794+00:00'
+- id: DF-CRIER-274
+  title: '[dogfood:P3] echo_sink.py double-prefixes the no-text fallback: raw reply
+    reads '
+  criteria:
+  - acceptance criteria from board row DF-CRIER-274 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:22.794818+00:00'
+  completed_at: '2026-09-19T20:02:54.427797+00:00'
+- id: DF-CRIER-275
+  title: '[docs:P3] AGENT-ECOSYSTEM.md 5.3 evidence recipe re-runs the battery instead
+    of '
+  criteria:
+  - acceptance criteria from board row DF-CRIER-275 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:23.494316+00:00'
+  completed_at: '2026-09-19T20:04:10.476425+00:00'
+- id: DF-CRIER-264
+  title: '[docs:P3] specs/AGENT-ECOSYSTEM.md section 4 still describes the 3-round-trip
+    ba'
+  criteria:
+  - acceptance criteria from board row DF-CRIER-264 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:24.222755+00:00'
+  completed_at: '2026-09-19T20:04:44.308552+00:00'
+- id: DF-CRIER-227
+  title: '[dogfood:P2] No MCP tools/call JSON-RPC example in README'
+  criteria:
+  - acceptance criteria from board row DF-CRIER-227 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:24.976145+00:00'
+  completed_at: '2026-09-19T20:05:53.589065+00:00'
+- id: DF-CRIER-109
+  title: '[dogfood:P2] specs/_index.md absent and specs/AGENTS.md is unrelated DexDat
+    boil'
+  criteria:
+  - acceptance criteria from board row DF-CRIER-109 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:25.748338+00:00'
+  completed_at: '2026-09-19T20:07:08.412267+00:00'
+- id: DF-CRIER-207
+  title: "[hygiene:P3] Two example harnesses write their run transcript inside the\
+    \ repo \u2014 "
+  criteria:
+  - acceptance criteria from board row DF-CRIER-207 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:26.412007+00:00'
+  completed_at: '2026-09-19T20:08:37.544599+00:00'
+- id: DF-CRIER-40
+  title: '[dogfood:P2] Silent failure modes read as broken: no WS welcome frame, malformed'
+  criteria:
+  - acceptance criteria from board row DF-CRIER-40 verified in worktree
+  status: complete
+  created_at: '2026-09-19T19:42:26.999823+00:00'
+  completed_at: '2026-09-19T20:24:45.367555+00:00'
