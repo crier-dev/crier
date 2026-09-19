@@ -1707,3 +1707,17 @@ tasks:
   status: complete
   created_at: '2026-09-19T03:31:28.660021+00:00'
   completed_at: '2026-09-19T04:04:34.219869+00:00'
+- id: DF-CRIER-253
+  title: Isolate the CLI version tests from live-tree writes
+  criteria:
+  - 'RED-then-GREEN: with a deliberately broken sibling edit present in cmd/server
+    (or cmd/crier-mcp), ''go test ./cmd/server -run TestServerVersionCLIFlags -count=1''
+    and ''go test ./cmd/crier-mcp -run TestMCPServerCLIFlags -count=1'' must PASS
+    (no build failure, no package red) because the Go build runs against an isolated
+    snapshot of HEAD rather than the live workdir; the tests still assert the same
+    binary identity (commit segment ties to HEAD, unprefixed dev-<commit> form, Makefile
+    -X wiring via ''make -n build''); ''go test ./... -count=1'' green; no stray snapshot
+    dirs or git admin entries remain after a run.'
+  status: complete
+  created_at: '2026-09-19T04:38:13.595529+00:00'
+  completed_at: '2026-09-19T04:56:45.151158+00:00'
