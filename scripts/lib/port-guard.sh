@@ -56,6 +56,19 @@
 #       Also sets PORT_GUARD_ATTEMPTED (" :p1 :p2 …"), PORT_GUARD_SKIPPED and
 #       PORT_GUARD_SKIP_DETAIL for the caller's own report.
 #
+#   guard_loopback_off_proxy [extra-hosts]
+#       Merge 127.0.0.1, localhost and ::1 into no_proxy/NO_PROXY (both spellings)
+#       so that every curl in this shell — the harnesses' own probes AND every
+#       helper they call — reaches loopback directly. curl has NO built-in
+#       loopback exemption: with an ambient HTTP_PROXY even a 127.0.0.1 request is
+#       sent to the proxy, so a harness polling /health on 127.0.0.1 reads the
+#       proxy's failure as "my server never came up" (QA-CRIER-21: that is how
+#       examples/ws-mesh-demo/run-demo.sh hung a whole QA cell on a host whose
+#       environment pointed HTTP_PROXY at a dead port). It is deliberately NOT
+#       `unset HTTP_PROXY`: a genuinely EXTERNAL host still honours the proxy, and
+#       the environment's existing no_proxy entries are preserved, never
+#       clobbered. Idempotent.
+#
 # DEPENDENCIES: bash 4+, coreutils, ss (iproute2), curl. No lsof/pgrep/fuser.
 # EXIT CODES:   1 = the situation the guard exists for (abort the run),
 #               2 = misuse (bad argument) or a missing dependency.
@@ -99,6 +112,13 @@
 #           port fails closed naming that port only (no rotation to a free
 #           candidate), and a free explicit port is used verbatim even while
 #           every default candidate is occupied.
+#   ARM G — loopback is off the ambient proxy (QA-CRIER-21): with
+#           HTTP_PROXY/HTTPS_PROXY/ALL_PROXY pointed at a dead loopback port, a
+#           bare curl cannot reach the decoy on 127.0.0.1 (the fixture is
+#           asserted to be hostile, so the arm cannot pass vacuously) while
+#           wait_http_or_die — and therefore every harness that polls /health —
+#           still polls it green, with the operator's own no_proxy entries
+#           preserved in both spellings.
 #
 # The arms re-run this script as a CHILD process with the arms disabled
 # (`PG_SELFTEST_SKIP_ARMS=1`), so the recursion is bounded at one level and the
@@ -367,6 +387,47 @@ assert_port_owned() { # <port> <pid> <label>
   exit 1
 }
 
+# ── public: loopback traffic never rides an ambient proxy ─────────────────────
+
+# _pg_merge_no_proxy <required-csv> <existing-list> — print the merged list.
+# Both separator conventions are in the wild (curl's NO_PROXY accepts commas and
+# spaces), and `*` is a legitimate entry that must stay literal, so the split
+# happens with pathname expansion off.
+_pg_merge_no_proxy() {
+  local merged=",$1," item
+  set -f
+  for item in ${2//,/ }; do
+    [ -n "$item" ] || continue
+    case ",$merged," in
+      *",$item,"*) continue ;;
+    esac
+    merged="${merged}${item},"
+  done
+  merged="${merged#,}"
+  printf '%s' "${merged%,}"
+}
+
+# guard_loopback_off_proxy [extra-hosts]
+#
+# QA-CRIER-21. curl does NOT exempt loopback from the proxy environment: with
+# HTTP_PROXY exported (a corporate default, a sandbox egress proxy, a CI image),
+# `curl http://127.0.0.1:<port>/health` is sent to the PROXY, and when that proxy
+# is gone the request fails without ever touching the loopback server. A harness
+# polling its own scratch service then reports "never became healthy" — or, when
+# its caller only waits for a readiness line, hangs.
+#
+# This merges the loopback names into no_proxy AND NO_PROXY (curl, Go and python
+# all read both spellings) so every later curl in this shell goes direct. An
+# ambient proxy is still honoured for genuinely external hosts, and whatever
+# no_proxy the operator already had is preserved — this is not `unset HTTP_PROXY`.
+# Idempotent: call it as often as you like, from a harness or from a helper.
+guard_loopback_off_proxy() { # [extra-loopback-hosts]
+  local want="${1:-127.0.0.1,localhost,::1}"
+  no_proxy="$(_pg_merge_no_proxy "$want" "${no_proxy:-}${NO_PROXY:+,${NO_PROXY}}")"
+  NO_PROXY="$no_proxy"
+  export no_proxy NO_PROXY
+}
+
 # ── public: wait for /health, but not through a dead process ──────────────────
 
 wait_http_or_die() { # <url> <pid> <logfile> <label>
@@ -377,6 +438,9 @@ wait_http_or_die() { # <url> <pid> <logfile> <label>
     echo "ERROR: wait_http_or_die: <url> required" >&2
     exit 2
   }
+  # Every caller polls /health on LOOPBACK, and this shell may carry an ambient
+  # proxy that would swallow exactly that request (QA-CRIER-21).
+  guard_loopback_off_proxy
   _pg_require_tool curl "it is how the guard polls /health"
 
   while [ "$i" -lt "$tries" ]; do
@@ -817,6 +881,51 @@ _pg_selftest() {
     echo "PASS: wait_http_or_die returns on a live 2xx and aborts when the started pid exits first (pid + log tail named)"
   fi
 
+  # ── ARM G: a loopback poll never rides an ambient proxy (QA-CRIER-21) ────────
+  # curl has no built-in loopback exemption: on a host whose environment exports
+  # HTTP_PROXY (a corporate default, a sandbox egress proxy, a CI image),
+  # `curl http://127.0.0.1:<port>/health` is sent to the PROXY, so the decoy
+  # answers 200 and the harness still never sees it — that is the ws-mesh-demo
+  # hang this arm exists for. Three directions, because any one alone proves
+  # nothing:
+  #  (a) the fixture is HOSTILE — a bare curl on the same url with the same env
+  #      cannot reach a decoy that provably serves 200 without a proxy set
+  #      (otherwise this arm would pass vacuously on a curl that ignores proxies),
+  #  (b) the guard still returns 0 on that url with that env, and
+  #  (c) the merged list keeps the operator's OWN no_proxy entries, adds all three
+  #      loopback names to BOTH spellings, and does not duplicate an entry that
+  #      was already there.
+  checks=$((checks + 1))
+  local dead_proxy_port="" dead_proxy="" rc_bare=0 rc_guarded=0 out_guarded="" merged=""
+  dead_proxy_port="$(_pg_selftest_free_port)" || dead_proxy_port=""
+  if [ -z "$dead_proxy_port" ]; then
+    echo "port-guard selftest: FAIL: ARM G could not find a free port for the dead-proxy fixture" >&2
+    fails=$((fails + 1))
+  else
+    dead_proxy="http://127.0.0.1:$dead_proxy_port"
+    env -u no_proxy -u NO_PROXY "HTTP_PROXY=$dead_proxy" "HTTPS_PROXY=$dead_proxy" \
+      "ALL_PROXY=$dead_proxy" curl -sfS -m 5 -o /dev/null "http://127.0.0.1:$port/" >/dev/null 2>&1 || rc_bare=$?
+    out_guarded="$( env -u no_proxy -u NO_PROXY "HTTP_PROXY=$dead_proxy" "HTTPS_PROXY=$dead_proxy" \
+      "ALL_PROXY=$dead_proxy" bash -c '. "$1"; wait_http_or_die "$2" "" "" "selftest-decoy"' \
+      _ "$self" "http://127.0.0.1:$port/" 2>&1 )" || rc_guarded=$?
+    merged="$( env -u NO_PROXY "no_proxy=127.0.0.1,corp.example.com,*.internal" \
+      bash -c '. "$1"; guard_loopback_off_proxy; printf "%s|%s" "$no_proxy" "$NO_PROXY"' _ "$self" 2>&1 )"
+    local merged_want="127.0.0.1,localhost,::1,corp.example.com,*.internal"
+    if [ "$rc_bare" -eq 0 ]; then
+      echo "port-guard selftest: FAIL: ARM G fixture is not hostile — a bare curl reached the decoy on 127.0.0.1 through a dead proxy, so this arm would prove nothing (does the curl here ignore HTTP_PROXY?)" >&2
+      fails=$((fails + 1))
+    elif [ "$rc_guarded" -ne 0 ]; then
+      echo "port-guard selftest: FAIL: ARM G: wait_http_or_die could not reach the decoy (pid $decoy_pid) on http://127.0.0.1:$port/ under HTTP_PROXY=$dead_proxy (rc=$rc_guarded) — loopback traffic is riding the ambient proxy" >&2
+      echo "  output: $out_guarded" >&2
+      fails=$((fails + 1))
+    elif [ "$merged" != "${merged_want}|${merged_want}" ]; then
+      echo "port-guard selftest: FAIL: ARM G: guard_loopback_off_proxy produced '$merged', want '${merged_want}|${merged_want}' — the loopback names must land in BOTH spellings and the operator's existing entries must survive (no duplicate 127.0.0.1)" >&2
+      fails=$((fails + 1))
+    else
+      echo "PASS: ARM G: loopback is off the ambient proxy — a bare curl under HTTP_PROXY=$dead_proxy cannot reach the decoy (rc=$rc_bare) while wait_http_or_die polls the same url green, and no_proxy/NO_PROXY = $merged_want with the operator's entries preserved"
+    fi
+  fi
+
   # ── ARM A/B/C: the decoy BIND itself ─────────────────────────────────────────
   # The pick->bind race cannot be scheduled from inside this process, so it is
   # REPLAYED deterministically through a PATH shim for python3 — the technique
@@ -883,7 +992,9 @@ SHIM
       local a_abandoned="" a_rotated=""
       a_out="$(_pg_selftest_child "$self" "$shim" "$a_count" 1)" || a_rc=$?
       a_binds="$(cat "$a_count" 2>/dev/null || printf '0')"
-      a_guards="$(printf '%s\n' "$a_out" | grep -c '^PASS: ')"
+      # Count the THREE GUARD lines only: the child selftest also prints its own
+      # arm PASS lines (ARM G among them), which are not "guards behaved".
+      a_guards="$(printf '%s\n' "$a_out" | grep -cE '^PASS: (require_free_port|assert_port_owned|wait_http_or_die) ')"
       a_abandoned="$(printf '%s\n' "$a_out" | sed -n 's/^port-guard selftest: abandoned candidate :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       a_rotated="$(printf '%s\n' "$a_out" | sed -n 's/^port-guard selftest: decoy port :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       if [ "$a_rc" -ne 0 ]; then
@@ -962,7 +1073,7 @@ SHIM
       : >"$c_flog"
       c_out="$(_pg_selftest_child "$self" "$shim" "$c_count" 1 "$c_pids" "$c_flog" 1)" || c_rc=$?
       c_foreign="$(head -n 1 "$c_pids" 2>/dev/null)"
-      c_guards="$(printf '%s\n' "$c_out" | grep -c '^PASS: ')"
+      c_guards="$(printf '%s\n' "$c_out" | grep -cE '^PASS: (require_free_port|assert_port_owned|wait_http_or_die) ')"
       c_abandoned="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: abandoned candidate :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       c_rotated="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: decoy port :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       c_child_pid="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: decoy listener pid \([0-9][0-9]*\) .*/\1/p' | head -n 1)"
@@ -1179,9 +1290,9 @@ SHIM
     return 1
   fi
   if [ "$arms_skipped" -eq 0 ]; then
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + 3 decoy-bind arms + 3 candidate-rotation arms)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm + 3 decoy-bind arms + 3 candidate-rotation arms)"
   else
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards; the decoy-bind and candidate-rotation arms were skipped by PG_SELFTEST_SKIP_ARMS)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm; the decoy-bind and candidate-rotation arms were skipped by PG_SELFTEST_SKIP_ARMS)"
   fi
   return 0
 }
@@ -1203,7 +1314,7 @@ Usage:
 
 It is a library, not a tool: the example harnesses source it for
   port_holder_pid / require_free_port / assert_port_owned / wait_http_or_die /
-  select_scratch_port
+  select_scratch_port / guard_loopback_off_proxy
 The selftest exercises the three guards on a decoy listener whose port it picks
 as free itself (rotation budget PG_SELFTEST_DECOY_TRIES, bind wait
 PG_SELFTEST_BIND_TRIES), and proves the decoy BIND itself with three arms driven
@@ -1224,6 +1335,10 @@ consecutive ports it picks as free and squatters it starts and owns:
   ARM F — an explicit port is authoritative: occupied fails closed naming that
           port alone (never rotated), free is used verbatim even while every
           default candidate is occupied.
+  ARM G — loopback is off the ambient proxy: under a dead HTTP_PROXY, a bare curl
+          cannot reach the decoy on 127.0.0.1 while wait_http_or_die still polls
+          it green, and the merged no_proxy/NO_PROXY keeps the operator's own
+          entries (QA-CRIER-21).
 PG_SELFTEST_SKIP_ARMS=1 runs the guards only (that is how the arms re-run this
 selftest as a child, bounding the recursion).
 EOF

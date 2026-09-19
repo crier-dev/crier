@@ -282,6 +282,42 @@ be spawned without `-url` and fell back to the compiled-in default, so a
 `DEMO_PORT` run measured a *docker-published* crier that happened to own that
 port, and failed as `FAIL: /mesh/peers count != 2` with a foreign peer list.)
 
+## Ambient proxies: loopback never rides one (QA-CRIER-21)
+
+`curl` has **no** built-in loopback exemption. On a host that exports
+`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` (a corporate default, a sandbox egress
+proxy, a CI image) a `curl http://127.0.0.1:<port>/health` is sent to the
+**proxy**, so the demo never sees the relay it just started: `[2/10]` aborts with
+`FAIL: relay never became healthy at http://127.0.0.1:<port>`, and a caller that
+waits for the readiness line (the Go E2E arm) used to spin until its own bound —
+a hang with no cause in it (measured: the whole `go test ./...` run died on a
+120s cap, `rc=124`).
+
+The fix has three parts:
+
+- the script calls the shared `guard_loopback_off_proxy` (from
+  [`scripts/lib/port-guard.sh`](../../scripts/lib/port-guard.sh)) **before its
+  first curl**, which merges `127.0.0.1,localhost,::1` into `no_proxy` **and**
+  `NO_PROXY` and preserves whatever entries you already had. It is not
+  `unset HTTP_PROXY`: a genuinely external host still honours the proxy;
+- every `curl` in this script targets `$BASE`, which is loopback by
+  construction, and is additionally pinned per call with `--noproxy '*'`;
+- the demo client itself dials through a dialer whose proxy lookup exempts
+  loopback (`examples/ws-mesh-demo/main.go`, `demoDialer`/`proxyForDemo`), so a
+  `peer`/`subscribe`/`roundtrip` connection to `127.0.0.1` cannot be routed
+  through a proxy either. Note that gorilla rewrites `ws://`→`http://` before it
+  consults that lookup, which is why the rule lives on the dialer.
+
+The transcript records the exemption it used, e.g.
+`- loopback proxy bypass: no_proxy=127.0.0.1,localhost,::1 (every curl below
+targets $BASE and is pinned with --noproxy '*')`.
+
+A demo that still cannot start now **fails fast**: the readiness wait watches the
+child process as well as the transcript, so a script that has already exited is
+reported immediately with a named verdict (`the demo script exited before it
+reported its relay as healthy`), its exit status and the tail of its own output —
+never as a silent spin that only ends in the `go test -timeout` alarm.
+
 ## Transcript
 
 Live output is teed into a transcript **outside the repo**:
@@ -376,9 +412,25 @@ the host really did the step, and the only clocks are hang guards:
   WebSocket client is required.
 - `TestEveryExampleHarnessSourcesThePortGuardLib` — all three example harnesses
   source `scripts/lib/port-guard.sh` instead of keeping a private copy.
+- `TestDemoIsReachableUnderADeadAmbientProxy` (QA-CRIER-21) — the shipped script,
+  run with `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` pointing at a **dead** loopback
+  port, still reaches `DEMO PASS`; the arm first proves the fixture is hostile (a
+  bare `curl` under that same environment cannot reach a loopback listener the
+  test owns) so the green cannot be vacuous.
+- `TestDemoBoundedWaitFailsFast` (QA-CRIER-21) — the bounded readiness wait
+  reports a NAMED verdict, with the child's own output tail, within seconds, on
+  two sandboxed stubs (one that exits immediately, one that stalls forever),
+  driven through the real harness in a child test binary. Neither arm may end in
+  the `go test -timeout` alarm, which is what the bug produced.
+- `TestEveryExampleHarnessKeepsLoopbackOffTheProxy` (QA-CRIER-21) — every runner
+  that talks to loopback calls the shared guard **before its first curl**, and
+  every loopback `curl` in this runner carries `--noproxy '*'`.
+- `TestProxyForDemoExemptsLoopbackOnly` (QA-CRIER-21) — the demo client's dialer
+  carries the loopback exemption, and genuinely external hosts keep the standard
+  proxy lookup.
 
 ```bash
-go test ./examples/ws-mesh-demo/ -count=1          # ~12s (2 real runs of the script)
+go test ./examples/ws-mesh-demo/ -count=1          # ~17s (3 real runs of the script)
 go test ./examples/ws-mesh-demo/ -count=1 -short   # skips the runs, keeps the invariants
 ```
 

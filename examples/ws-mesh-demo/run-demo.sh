@@ -86,6 +86,17 @@ REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
 # re-implemented: a local copy of a guard is a guard that drifts.
 . "$REPO_ROOT/scripts/lib/port-guard.sh"
 
+# Loopback never rides an ambient proxy (QA-CRIER-21). curl has NO built-in
+# loopback exemption: on a host that exports HTTP_PROXY (a corporate default, a
+# sandbox egress proxy, a CI image), `curl -sfS "$BASE/health"` below is sent to
+# the PROXY, so it never reaches the relay this script just started — [2/10]
+# aborts with "relay never became healthy", and a caller that waits for the
+# readiness line (the Go E2E arm) hangs until its own bound instead of failing.
+# The shared guard merges 127.0.0.1/localhost/::1 into no_proxy AND NO_PROXY; it
+# does NOT unset HTTP_PROXY, so a genuinely external host still honours the
+# proxy. Called here, before ANY curl (including the port selector's preflight).
+guard_loopback_off_proxy
+
 DEMO_PORT_BASE="${DEMO_PORT_BASE:-18961}"   # first candidate of the default rotation
 DEMO_PORT_CANDIDATES="${DEMO_PORT_CANDIDATES:-5}"
 # DEMO_PORT is mirrored, not defaulted: empty means "walk the candidates", and a
@@ -259,6 +270,7 @@ echo
 echo "- date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "- repo: $(cd "$REPO_ROOT" && git rev-parse --short HEAD) ($(cd "$REPO_ROOT" && git log -1 --format=%s))"
 echo "- relay: ${BASE} (auth-disabled)"
+echo "- loopback proxy bypass: no_proxy=${no_proxy:-<unset>} (every curl below targets \$BASE and is pinned with --noproxy '*')"
 echo "- keepalive wait bound: ${DEMO_KEEPALIVE_WAIT}"
 echo "- transcript: ${TRANSCRIPT}"
 echo
@@ -280,14 +292,14 @@ env -u CR_AUTH_TOKEN CR_AUTH_TOKEN= CR_REQUIRE_AGENT_SIG=false \
   CRIER_PORT="$DEMO_PORT" CR_LOG_LEVEL=warn "$WORKDIR/crier" &
 SERVER_PID=$!
 for _ in $(seq 1 50); do
-  curl -sfS "$BASE/health" >/dev/null 2>&1 && break
+  curl --noproxy '*' -sfS "$BASE/health" >/dev/null 2>&1 && break
   kill -0 "$SERVER_PID" 2>/dev/null \
     || { echo "FAIL: relay exited during startup (pid $SERVER_PID)" >&2; exit 1; }
   sleep 0.2
 done
-curl -sfS "$BASE/health" >/dev/null 2>&1 \
+curl --noproxy '*' -sfS "$BASE/health" >/dev/null 2>&1 \
   || { echo "FAIL: relay never became healthy at $BASE" >&2; exit 1; }
-echo "    $(curl -sS "$BASE/health") <- relay healthy (our pid $SERVER_PID)"
+echo "    $(curl --noproxy '*' -sS "$BASE/health") <- relay healthy (our pid $SERVER_PID)"
 
 # ── Guard 2/3: the listener we just polled must be OUR process ───────────────
 # assert_port_owned asks ss who HOLDS :$DEMO_PORT and exits 1 unless that pid is
@@ -299,7 +311,7 @@ assert_port_owned "$DEMO_PORT" "$SERVER_PID" "the ws-mesh-demo relay"
 echo "    :${DEMO_PORT} is held by pid $PORT_OWNER == our relay pid $SERVER_PID (ss -tlnp)"
 
 # ── Guard 3/3: the server we are about to measure reports an EMPTY mesh ──────
-PEERS0=$(curl -sS "$BASE/mesh/peers")
+PEERS0=$(curl --noproxy '*' -sS "$BASE/mesh/peers")
 echo "$PEERS0" | grep -q '"count":0' \
   || { echo "FAIL: $BASE/mesh/peers is not empty at startup (got: $PEERS0) — this is not our relay" >&2; exit 1; }
 echo "    GET /mesh/peers -> $PEERS0 (empty: measured server is the one we started)"
@@ -310,14 +322,14 @@ for AGENT in demo-agent-a demo-agent-b; do
   # 64-hex ed25519-style public key derived from the id — deterministic, no keys
   # to manage, and it satisfies the registry's 64-hex validation.
   PUBKEY=$(printf '%s' "$AGENT" | sha256sum | cut -c1-64)
-  REG_CODE=$(curl -sS -o "$WORKDIR/register-${AGENT}.json" -w '%{http_code}' \
+  REG_CODE=$(curl --noproxy '*' -sS -o "$WORKDIR/register-${AGENT}.json" -w '%{http_code}' \
     -X POST "$BASE/agents" -H 'Content-Type: application/json' \
     -d "{\"id\":\"${AGENT}\",\"capabilities\":[\"demo\",\"mesh\"],\"public_key\":\"${PUBKEY}\"}")
   echo "    POST /agents ${AGENT} -> HTTP ${REG_CODE} $(cat "$WORKDIR/register-${AGENT}.json")"
   [ "$REG_CODE" = "201" ] \
     || { echo "FAIL: registering ${AGENT} returned HTTP ${REG_CODE} (expected 201)" >&2; exit 1; }
 done
-REGISTERED=$(curl -sS "$BASE/agents")
+REGISTERED=$(curl --noproxy '*' -sS "$BASE/agents")
 for AGENT in demo-agent-a demo-agent-b; do
   echo "$REGISTERED" | grep -q "\"id\":\"${AGENT}\"" \
     || { echo "FAIL: ${AGENT} missing from GET /agents (got: $REGISTERED)" >&2; exit 1; }
@@ -362,7 +374,7 @@ echo
 echo "==> [6/10] GET /mesh/peers (must show count 2 with both agent IDs)"
 PEERS=""
 for _ in $(seq 1 50); do
-  PEERS=$(curl -sS "$BASE/mesh/peers")
+  PEERS=$(curl --noproxy '*' -sS "$BASE/mesh/peers")
   echo "$PEERS" | grep -q '"agent_id":"demo-agent-a"' \
     && echo "$PEERS" | grep -q '"agent_id":"demo-agent-b"' \
     && echo "$PEERS" | grep -q '"count":2' && break
@@ -384,7 +396,7 @@ echo "==> [7/10] publish: X-Agent-ID requirement + exact-topic fan-out"
 #     401 BEFORE the body is read. Asserted, not assumed: this is the half of
 #     the requirement a run can silently lose by inheriting
 #     CR_RATE_LIMIT_PER_MINUTE=0 from its environment.
-PUB_NO_HEADER=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
+PUB_NO_HEADER=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
   -H 'Content-Type: application/json' \
   -d '{"topic":"demo","event":{"msg":"never delivered: no X-Agent-ID"}}')
 echo "    POST /relay/publish without X-Agent-ID -> HTTP $PUB_NO_HEADER (expected 401)"
@@ -397,7 +409,7 @@ echo "    POST /relay/publish without X-Agent-ID -> HTTP $PUB_NO_HEADER (expecte
 #     would hand it this one first and [8/10] would fail on the payload — which
 #     makes "the subscription matched exactly topic demo" a provable claim
 #     instead of an assumption.
-PUB_OTHER=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
+PUB_OTHER=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: demo-publisher' \
   -d '{"topic":"demo-other","event":{"msg":"must not reach the demo subscriber"}}')
 echo "    POST /relay/publish topic=demo-other -> HTTP $PUB_OTHER (202: accepted, no subscriber for it)"
@@ -405,7 +417,7 @@ echo "    POST /relay/publish topic=demo-other -> HTTP $PUB_OTHER (202: accepted
   || { echo "FAIL: publishing to demo-other answered $PUB_OTHER, expected 202" >&2; exit 1; }
 
 # (c) The event under test, on the exact topic the subscriber listens on.
-PUB=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
+PUB=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/relay/publish" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: demo-publisher' \
   -d '{"topic":"demo","event":{"msg":"hello from run-demo","ts":"crier-demo"}}')
 echo "    POST /relay/publish topic=demo with X-Agent-ID: demo-publisher -> HTTP $PUB"
@@ -437,7 +449,7 @@ wait "$PEER_A_PID" 2>/dev/null || true
 PEER_A_PID=""
 PEERS_AFTER=""
 for _ in $(seq 1 50); do
-  PEERS_AFTER=$(curl -sS "$BASE/mesh/peers")
+  PEERS_AFTER=$(curl --noproxy '*' -sS "$BASE/mesh/peers")
   echo "$PEERS_AFTER" | grep -q '"agent_id":"demo-agent-a"' || break
   sleep 0.2
 done

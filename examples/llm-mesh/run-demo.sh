@@ -93,6 +93,15 @@ done
 # a run on a port the operator did not name would misreport what was measured).
 # Nothing is started before the port is settled.
 . "$REPO/scripts/lib/port-guard.sh"
+
+# The crier server this lane starts is polled on 127.0.0.1, and curl has no
+# built-in loopback exemption: with an ambient HTTP_PROXY (a corporate default,
+# a sandbox egress proxy, a CI image) that /health poll would be sent to the
+# proxy and never reach the server started here (QA-CRIER-21). Merge the
+# loopback names into no_proxy/NO_PROXY before the first curl; a genuinely
+# external host (and the model provider this lane may call) still honours the
+# proxy.
+guard_loopback_off_proxy
 select_scratch_port "${CRIER_PORT:-}" "$PORT_BASE" "the llm-mesh bridge-lane crier server" \
   "$PORT_CANDIDATES" "CRIER_PORT"
 PORT="$PORT_GUARD_SELECTED"

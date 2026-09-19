@@ -26,6 +26,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -41,6 +42,46 @@ import (
 // :18767 docker-published crier) so a bare `peer -agent X` cannot connect to
 // some other server by accident. run-demo.sh always passes -url explicitly.
 const defaultBaseURL = "http://127.0.0.1:18961"
+
+// isLoopbackHost reports whether host (the host part of a URL, no port) names the
+// loopback interface: "localhost", or any literal loopback IP including ::1.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// proxyForDemo is the proxy decision for every connection this demo client
+// opens (QA-CRIER-21). Loopback is NEVER proxied: the demo's whole traffic is
+// the relay run-demo.sh started on 127.0.0.1, and a host that exports HTTP_PROXY
+// (a corporate default, a sandbox egress proxy, a CI image) must not be able to
+// route a 127.0.0.1 dial through it — a dead proxy then fails the demo with a
+// connection error that names the proxy instead of the demo. Every other host
+// keeps the standard environment lookup, so a genuinely external target can
+// still be reached through a proxy.
+func proxyForDemo(req *http.Request) (*url.URL, error) {
+	if isLoopbackHost(req.URL.Hostname()) {
+		return nil, nil
+	}
+	return http.ProxyFromEnvironment(req)
+}
+
+// demoDialer is websocket.DefaultDialer with the loopback-safe proxy decision
+// above — same handshake timeout, buffers and everything else, so every demo
+// subcommand dials exactly as before except that a loopback dial cannot be sent
+// to a proxy.
+var demoDialer = func() *websocket.Dialer {
+	d := *websocket.DefaultDialer
+	d.Proxy = proxyForDemo
+	return &d
+}()
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `ws-mesh-demo — crier relay + mesh demo client (CR-GAP-050, DF-CRIER-3)
@@ -125,7 +166,7 @@ func newMessageID() string {
 // client's identity — the mesh has no other authentication.
 func dialMesh(wsBase, agentID string) (*websocket.Conn, error) {
 	u := fmt.Sprintf("%s/mesh/connect/%s", wsBase, url.PathEscape(agentID))
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	conn, _, err := demoDialer.Dial(u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", u, err)
 	}
@@ -223,7 +264,7 @@ func cmdSubscribe(wsBase string, args []string) int {
 	}
 
 	u := fmt.Sprintf("%s/relay/subscribe/%s", wsBase, url.PathEscape(*topic))
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	conn, _, err := demoDialer.Dial(u, nil)
 	if err != nil {
 		log.Printf("subscribe: dial %s: %v", u, err)
 		return 1

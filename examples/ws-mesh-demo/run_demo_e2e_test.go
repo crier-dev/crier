@@ -45,9 +45,19 @@ const (
 	// build cache plus a loaded box is the slow case), and it is killed with
 	// its process group if this expires.
 	demoRunBudget = 150 * time.Second
-	// demoReadyBudget bounds the wait for the script's "relay is up" line so the
-	// ownership assertion happens while the server is still running.
-	demoReadyBudget = 120 * time.Second
+	// demoPollInterval is how often the readiness wait re-reads the transcript
+	// and re-checks the child. It is a polling interval, not a bound: the bounds
+	// are demoReadyBudget and, better, the child's own exit.
+	demoPollInterval = 50 * time.Millisecond
+	// demoLogTailBytes caps how much of the child's captured stdout/stderr a
+	// failure message carries, so one verbose run cannot bury the verdict.
+	demoLogTailBytes = 4000
+	// The two NAMED failures the bounded readiness wait reports. They are named
+	// because they answer different questions — "the script already died" versus
+	// "the script is still running and still has not said it is up" — and a
+	// caller must never have to guess which one it is looking at.
+	demoChildExitedBeforeReady  = "the demo script exited before it reported its relay as healthy"
+	demoReadinessDeadlineMissed = "the demo script did not report its relay as healthy within its readiness budget"
 )
 
 var (
@@ -55,6 +65,12 @@ var (
 	ssPortPID = regexp.MustCompile(`pid=([0-9]+)`)
 	// demoServerPID is the script's own readiness line naming the relay pid.
 	demoServerPID = regexp.MustCompile(`relay healthy \(our pid ([0-9]+)\)`)
+	// demoReadyBudget bounds the wait for that line so the ownership assertion
+	// happens while the server is still running. It is a hang guard, NOT a pass
+	// condition, and it is a VAR so an arm can drive the deadline branch against
+	// a sandboxed fixture (a stub that never reports readiness) without waiting
+	// two real minutes for it.
+	demoReadyBudget = 120 * time.Second
 )
 
 // requireDemoTools skips (with a reason) when the demo's prerequisites are not
@@ -171,6 +187,16 @@ func runShippedDemo(t *testing.T, port int, transcript string, onRunning func(pi
 // port itself.
 func runShippedDemoEnv(t *testing.T, env []string, transcript string, onRunning func(pid string)) demoResult {
 	t.Helper()
+	return runDemoCommand(t, demoScript, env, transcript, onRunning)
+}
+
+// runDemoCommand runs `bash <script>` under env and reports what it left behind.
+// script is a parameter — not the demoScript constant — so the bounded-wait arms
+// can drive a SANDBOXED FIXTURE (a stub that never writes a readiness line)
+// through the same harness the shipped demo uses, which is what makes their
+// "the wait fails fast" claim a claim about this code and not about a mock.
+func runDemoCommand(t *testing.T, script string, env []string, transcript string, onRunning func(pid string)) demoResult {
+	t.Helper()
 
 	outPath := filepath.Join(t.TempDir(), "run-demo.out")
 	out, err := os.Create(outPath)
@@ -182,7 +208,7 @@ func runShippedDemoEnv(t *testing.T, env []string, transcript string, onRunning 
 	ctx, cancel := context.WithTimeout(context.Background(), demoRunBudget)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", demoScript)
+	cmd := exec.CommandContext(ctx, "bash", script)
 	cmd.Dir = "."
 	cmd.Env = env
 	cmd.Stdout = out
@@ -196,24 +222,30 @@ func runShippedDemoEnv(t *testing.T, env []string, transcript string, onRunning 
 	}
 
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start `bash %s`: %v", demoScript, err)
+		t.Fatalf("start `bash %s`: %v", script, err)
 	}
 
+	child := &demoChild{done: make(chan struct{}), outPath: outPath}
+	go func() {
+		child.waitErr = cmd.Wait()
+		close(child.done)
+	}()
+
 	if onRunning != nil {
-		pid := waitForDemoRelayPID(t, transcript)
+		pid := waitForDemoRelayPID(t, transcript, child)
 		onRunning(pid)
 	}
 
-	waitErr := cmd.Wait()
+	<-child.done
 	if ctx.Err() != nil {
-		t.Fatalf("`bash %s` did not finish within %s (hang guard) — see %s", demoScript, demoRunBudget, outPath)
+		t.Fatalf("`bash %s` did not finish within %s (hang guard) — see %s", script, demoRunBudget, outPath)
 	}
 
 	code := 0
-	if waitErr != nil {
+	if child.waitErr != nil {
 		var exitErr *exec.ExitError
-		if !errors.As(waitErr, &exitErr) {
-			t.Fatalf("`bash %s`: %v", demoScript, waitErr)
+		if !errors.As(child.waitErr, &exitErr) {
+			t.Fatalf("`bash %s`: %v", script, child.waitErr)
 		}
 		code = exitErr.ExitCode()
 	}
@@ -229,24 +261,113 @@ func runShippedDemoEnv(t *testing.T, env []string, transcript string, onRunning 
 	return demoResult{code: code, output: string(body), transcript: tsp}
 }
 
+// demoChild is a running `bash <script>`, made observable to the readiness wait
+// WITHOUT the wait blocking on it: the point of the fix it exists for is that a
+// script which has ALREADY failed must be reported as such, not polled for
+// another two minutes. waitErr is written once, before done is closed, and read
+// only after done is closed — that close is the happens-before edge.
+type demoChild struct {
+	done    chan struct{}
+	waitErr error
+	outPath string // the child's captured stdout+stderr, for failure context
+}
+
+// exited reports whether the child has already finished.
+func (c *demoChild) exited() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// exitState names the child's state for a failure message: a stall must never be
+// reported as if the script were still working on it.
+func (c *demoChild) exitState() string {
+	if !c.exited() {
+		return "the demo script was still running"
+	}
+	if c.waitErr == nil {
+		return "the demo script exited 0"
+	}
+	var exitErr *exec.ExitError
+	if errors.As(c.waitErr, &exitErr) {
+		return fmt.Sprintf("the demo script exited %d", exitErr.ExitCode())
+	}
+	return fmt.Sprintf("the demo script could not be run: %v", c.waitErr)
+}
+
+// failureContext is what a bounded wait hands its caller: the child's exit
+// state, the TAIL of its own captured stdout+stderr (the script's last words —
+// the FAIL: line, or the panic), and the transcript so far. Without it a
+// readiness timeout is an unattributable silence.
+func (c *demoChild) failureContext(transcript string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", c.exitState())
+	if out, err := os.ReadFile(c.outPath); err != nil {
+		fmt.Fprintf(&b, "--- %s: unreadable: %v\n", c.outPath, err)
+	} else {
+		tail := tailBytes(out, demoLogTailBytes)
+		fmt.Fprintf(&b, "--- tail of %s (%d of %d bytes) ---\n%s\n", c.outPath, len(tail), len(out), tail)
+	}
+	if body, err := os.ReadFile(transcript); err == nil {
+		tail := tailBytes(body, demoLogTailBytes)
+		fmt.Fprintf(&b, "--- tail of %s (%d of %d bytes) ---\n%s\n", transcript, len(tail), len(body), tail)
+	} else {
+		fmt.Fprintf(&b, "--- %s was never written (%v)\n", transcript, err)
+	}
+	return b.String()
+}
+
+// tailBytes returns the last n bytes of b, starting at a line boundary where one
+// exists, so an attribution never begins mid-word.
+func tailBytes(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	cut := string(b[len(b)-n:])
+	if i := strings.IndexByte(cut, '\n'); i >= 0 && i+1 < len(cut) {
+		cut = cut[i+1:]
+	}
+	return "…\n" + cut
+}
+
 // waitForDemoRelayPID blocks until the transcript carries the readiness line the
-// script writes only after its relay answered /health — the moment the
-// ownership question ("who holds the port?") is answerable. The bound is a hang
-// guard; the signal is the script's real progress.
-func waitForDemoRelayPID(t *testing.T, transcript string) string {
+// script writes only after its relay answered /health — the moment the ownership
+// question ("who holds the port?") is answerable. The bound is a hang guard; the
+// signal is the script's real progress.
+//
+// It has TWO verdicts, both named and both carrying the child's own output, and
+// neither of them is the go-test alarm:
+//
+//   - the child EXITED before writing readiness: it cannot ever write it, so the
+//     wait fails immediately, naming the child's exit status and its output tail
+//     (a dead-proxy run used to spin here until the -timeout alarm fired, which
+//     reported a hang with no cause in it);
+//   - demoReadyBudget expired with the child still running: the hang guard's own
+//     verdict, reported with the same evidence and with the child's state.
+func waitForDemoRelayPID(t *testing.T, transcript string, child *demoChild) string {
 	t.Helper()
-	deadline := time.Now().Add(demoReadyBudget)
+	started := time.Now()
+	deadline := started.Add(demoReadyBudget)
 	for {
 		if body, err := os.ReadFile(transcript); err == nil {
 			if m := demoServerPID.FindSubmatch(body); m != nil {
 				return string(m[1])
 			}
 		}
-		if time.Now().After(deadline) {
-			body, _ := os.ReadFile(transcript)
-			t.Fatalf("the demo never reported its relay as healthy within %s — transcript so far:\n%s", demoReadyBudget, body)
+		if child.exited() {
+			t.Fatalf("%s (%s after the wait began): the readiness line matching %s never appeared in %s.\n%s",
+				demoChildExitedBeforeReady, time.Since(started).Round(time.Millisecond), demoServerPID, transcript,
+				child.failureContext(transcript))
 		}
-		time.Sleep(50 * time.Millisecond)
+		if time.Now().After(deadline) {
+			t.Fatalf("%s (%s elapsed, budget %s): the readiness line matching %s never appeared in %s.\n%s",
+				demoReadinessDeadlineMissed, time.Since(started).Round(time.Millisecond), demoReadyBudget,
+				demoServerPID, transcript, child.failureContext(transcript))
+		}
+		time.Sleep(demoPollInterval)
 	}
 }
 

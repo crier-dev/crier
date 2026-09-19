@@ -90,6 +90,14 @@ TRANSCRIPT="${DEMO_TRANSCRIPT:-$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md}"
 # instead of letting the poll be answered by a stale or foreign server.
 . "$REPO_ROOT/scripts/lib/port-guard.sh"
 
+# This harness polls its own scratch services on 127.0.0.1, and curl has no
+# built-in loopback exemption: with an ambient HTTP_PROXY (a corporate default,
+# a sandbox egress proxy, a CI image) those probes would be sent to the proxy
+# and never reach the server started here (QA-CRIER-21). Merge the loopback
+# names into no_proxy/NO_PROXY before the first curl — the proxy is still used
+# for genuinely external hosts.
+guard_loopback_off_proxy
+
 RELAY1_PID=""
 RELAY2_PID=""
 WEBHOOK_PID=""

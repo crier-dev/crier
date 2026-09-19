@@ -88,6 +88,14 @@ CRIER_BASE=""
 # letting the poll be answered by a stale or foreign server.
 . "$REPO_ROOT/scripts/lib/port-guard.sh"
 
+# Every probe below is a LOOPBACK probe on a port this script chose, and curl
+# has no built-in loopback exemption: with an ambient HTTP_PROXY (a corporate
+# default, a sandbox egress proxy, a CI image) curl would send them to the proxy
+# and never reach the services started here (QA-CRIER-21). Merge the loopback
+# names into no_proxy/NO_PROXY before the first curl; a genuinely external host
+# still honours the proxy.
+guard_loopback_off_proxy
+
 TS="$(date +%Y%m%d-%H%M%S)"
 SESSION_ID="sess-demo-${TS}"
 THREAD_ID="thr-demo-${TS}"
