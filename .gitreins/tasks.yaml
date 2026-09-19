@@ -1641,7 +1641,7 @@ tasks:
     guard pass at HEAD.'
   status: complete
   created_at: '2026-09-18T23:18:09.413079+00:00'
-  completed_at: '2026-09-18T23:18:14.568686+00:00'
+  completed_at: '2026-09-19T07:44:09.227110+00:00'
 - id: DF-CRIER-256
   title: One snapshot pass per poll in the load-repro selftest process-tree scan
   criteria:
@@ -1721,3 +1721,26 @@ tasks:
   status: complete
   created_at: '2026-09-19T04:38:13.595529+00:00'
   completed_at: '2026-09-19T04:56:45.151158+00:00'
+- id: DF-CRIER-259
+  title: Fix CLI version tests outside git worktrees
+  criteria:
+  - Version identity tests pass from the repository and from a git-less copy of the
+    tree; go test ./cmd/server -run TestServerVersionCLIFlags and go test ./cmd/crier-mcp
+    -run TestMCPServerCLIFlags pass in both contexts, without relying on ambient git
+    metadata.
+  status: complete
+  created_at: '2026-09-19T06:01:53.247467+00:00'
+  completed_at: '2026-09-19T06:48:25.202589+00:00'
+- id: DF-CRIER-260
+  title: Close the remaining live-directory go-build race sites
+  criteria:
+  - All five remaining live-directory go build sites (cmd/server/main_test.go TestStopRunningServer,
+    cmd/crier-mcp/main_test.go TestMCPServerInitialize, cmd/crier-mcp/registration_test.go
+    TestRunSelfRegistersBridgeIdentity / TestRunRegistersWithSuppliedKeyFile / TestRunSurvivesRegistrationFailure)
+    build from internal/testsupport.SnapshotBuildDir(t, ".") with the command's Dir
+    set, so no test builds from the live package directory; focused tests for both
+    packages pass in the repository AND in a copy of the tree without .git; go build
+    ./... , go vet ./... , make gofmt-check and the test suite pass.
+  status: complete
+  created_at: '2026-09-19T07:31:43.001870+00:00'
+  completed_at: '2026-09-19T07:42:20.618222+00:00'
