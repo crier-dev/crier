@@ -1809,3 +1809,12 @@ tasks:
   status: complete
   created_at: '2026-09-19T16:38:17.148568+00:00'
   completed_at: '2026-09-19T16:46:05.430610+00:00'
+- id: INT-CI-008
+  title: Protect scheduled ecosystem battery and add push contract coverage
+  criteria:
+  - A push-time contract check must fail when an example registration payload violates
+    the strict webhook decoder, and a scheduled ecosystem battery must not be cancelled
+    by a concurrent push; relevant workflow and test gates pass.
+  status: complete
+  created_at: '2026-09-19T18:35:28.324981+00:00'
+  completed_at: '2026-09-19T18:59:48.291794+00:00'
