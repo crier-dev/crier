@@ -55,3 +55,4 @@
 2026-09-16 | PROMISING-BUT-ROUGH | 12s t2fs | friction 10 | 5 findings
 
 2026-09-18 | PROMISING-BUT-ROUGH | ~90s t2fs (build 1.3s + health + register) | friction 5 | 4 findings (DOGFOOD-RELAY-1/4, DOGFOOD-MESH-2/3) — real-use relay+mesh+MCP run; bunker install 66s, smoke ok, agent destroyed
+2026-09-19 | PROMISING-BUT-ROUGH (trending SHIPPABLE) | ~90s t2fs | friction 2 | 2 findings (DF-CRIER-262 signed-PATCH README gap, DF-CRIER-263 SKIPPED-install-bunker: bunkerd kills rootless-docker installer at ~30s spawn deadline, docker.service already active — infra defect, not crier) — full real-use run: signed inbox+lease+ack, relay WS pub/sub, blocking webhook w/ reply, postgres restart durability (14 agents survived), MCP remote store E2E; rows verified on board tail
