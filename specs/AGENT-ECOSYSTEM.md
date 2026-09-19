@@ -373,9 +373,11 @@ requires `--sink`. Every local cell prints the server configuration it expects b
 - **Artifacts** (`actions/upload-artifact@v4`, `if: always()`):
   - `bunker-matrix-evidence` ← `/tmp/bunker-matrix-ci.jsonl`
   - `ecosystem-evidence` ← `/tmp/ecosystem-evidence.jsonl` (captured via
-    `docker compose -f examples/agent-ecosystem/docker-compose.yml run --rm --no-deps battery
-    sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl || true` after the
-    battery job — `|| true` so evidence capture never fails the job).
+    `docker compose -f examples/agent-ecosystem/docker-compose.yml run --rm --no-deps
+    --entrypoint cat battery /evidence/ecosystem.jsonl > /tmp/ecosystem-evidence.jsonl || true`
+    after the battery job — `--entrypoint cat` because the battery image's ENTRYPOINT is
+    `["bash", "battery.sh"]` and would otherwise swallow that command and re-run the whole
+    battery; `|| true` so evidence capture never fails the job).
 
 ## 6. Bunker deploy contract
 
