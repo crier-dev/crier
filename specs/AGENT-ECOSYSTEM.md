@@ -324,7 +324,7 @@ bunker runner** (`runs-on: [self-hosted, bunker]`) for the deploy/battery jobs a
 | Job | Runner | Needs | Triggers | What it does |
 |---|---|---|---|---|
 | `docker-image` | ubuntu-latest | — | **push only** (`if: github.event_name == 'push'`) | `docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ...:latest .`; login GHCR with `secrets.GITHUB_TOKEN`; push both tags (`permissions: packages: write`) |
-| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host localhost --port 30011 --agent crier-lab --sink http://localhost:19012`; env `DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}`, `EVIDENCE: /tmp/bunker-matrix-ci.jsonl` |
+| `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host "$BUNKER_HOST" --port 30011 --agent "$BUNKER_AGENT" --server "$BUNKER_SERVER" --sink "$SINK_URL"`; env `DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}`, `EVIDENCE: /tmp/bunker-matrix-ci.jsonl` |
 | `ecosystem-battery` | [self-hosted, bunker] | — | **dispatch \| schedule only — never push** | `cd examples/agent-ecosystem && docker compose up -d --build && docker compose run --rm battery` with ports 28767/29002/29101/29102; captures evidence (below) |
 
 Both deploy jobs are gated by `if: always() && (...)` so a failed image build does not leave
@@ -333,8 +333,11 @@ intermediate commit is waste; the nightly + manual triggers cover it — see CR-
 
 ### 5.2 Config-matrix cells (bunker-matrix job)
 
-`scripts/bunker-matrix.sh` deploys the containerized crier to the bunker agent per cell and
-probes it. Four cells, each redeploying the relay with a different env file:
+Remote mode is the default and is the CI contract: `scripts/bunker-matrix.sh` requires both
+`--agent` and `--server`, deploys the containerized crier to that operator-supplied bunker
+agent per cell, and probes it. It fails before any deployment if either identity is missing;
+`--local` is the only non-deploy path. Four cells are retained, each remote cell redeploying
+the relay with a different env file:
 
 | Cell | Config | Probes (evidence `cell` names) |
 |---|---|---|
@@ -348,6 +351,15 @@ random 64-hex key via the matrix's `register()` helper. Matrix evidence uses
 `{"ts","cell","http","want","body"}` (field `cell`, not `test` — §4.2). Matrix exit code:
 0 iff zero failures. The key is read from `$DEEPSEEK_API_KEY` or falls back to
 `grep '^DEEPSEEK_API_KEY=' ~/.hermes/.env`.
+
+Local mode is deliberately one cell at a time because one already-running process cannot be
+both `CR_GUARD_ENABLED=false` (`guard-off`) and guard-enabled (`guard-on`/`fail-closed`). The
+harness does **not** launch, restart, reconfigure, deploy, or invoke bunker in this mode; it
+health-checks the supplied base URL, then runs the selected cell's same registration and live
+HTTP probes. Those probes do create/update the named matrix agents and inbox messages, so the
+server should be disposable. A local guard-on run without `DEEPSEEK_API_KEY` is reported as a
+skip rather than pretending the advertised verdicts were exercised. The blocking local cell
+requires `--sink`. Every local cell prints the server configuration it expects before probing.
 
 ### 5.3 Concurrency, schedules, artifacts
 
@@ -394,13 +406,24 @@ pi-agent) registered and answered online, full battery passed remotely with the 
 enabled (real DeepSeek verdicts), evidence committed at
 `examples/agent-ecosystem/battery/evidence/remote-bunker-server-2026-08-24.jsonl`.
 
-### 6.2 Single-relay path (bunker-deploy.sh)
+### 6.2 Single-relay path (bunker-deploy.sh and bunker-matrix.sh)
 
-For a single crier relay (the bunker-matrix cells):
+For the remote single-relay matrix (the default mode), all infrastructure is operator-supplied:
+a reachable bunker agent/server, `~/.bunker/keys/<agent>`, the bunker CLI (or `BUNKER_BIN`),
+local Docker build/save support, rootless Docker on the agent, SSH/SCP image transfer, image
+load, and a reachable host port. The harness does not provision any of these. Copy-paste shape:
 
+```bash
+bash scripts/bunker-matrix.sh \
+  --agent "$BUNKER_AGENT" --server "$BUNKER_SERVER" \
+  --host "$BUNKER_HOST" --port 30011 --sink "$SINK_URL"
 ```
+
+The underlying deploy helper remains directly usable:
+
+```text
 bunker-deploy.sh [--skip-build] [--agent crier-lab] [--host localhost]
-                 [--port 30001] [--image crier:test]
+                 [--server bunker-server] [--port 30001] [--image crier:test]
 ```
 
 Flow: `docker build -q -t $IMAGE .` → `docker save $IMAGE | gzip > /tmp/crier-image.tar.gz` →
@@ -411,6 +434,22 @@ Flow: `docker build -q -t $IMAGE .` → `docker save $IMAGE | gzip > /tmp/crier-
 `--skip-build` reuses the last tarball (matrix cells redeploy configs, not images).
 `CR_ENV_FILE` (one `KEY=VALUE` per line, `#` comments allowed) becomes `-e` flags — the
 matrix writes per-cell env files (`/tmp/mx-<cell>.env`) and passes them through.
+
+For a local, non-deploy guard-off probe, first start the server yourself with the matching
+configuration, then run the harness against that already-running base URL:
+
+```bash
+make build
+CR_REQUIRE_AGENT_SIG=false CR_GUARD_ENABLED=false ./bin/crier -port 8767
+# In another shell:
+bash scripts/bunker-matrix.sh --local --cell guard-off --host 127.0.0.1 --port 8767
+```
+
+That example proves only the guard-off cell. It does not claim guard-on or fail-closed passed.
+For another cell, restart/configure the disposable server yourself as described by
+`bash scripts/bunker-matrix.sh --help`, then select that cell; guard-on needs its provider key
+in the running server, and blocking needs a running `--sink`. Local mode never calls
+`bunker-deploy.sh`, bunker, or Docker, and never starts/reconfigures the server process.
 
 ### 6.3 Port mapping
 
