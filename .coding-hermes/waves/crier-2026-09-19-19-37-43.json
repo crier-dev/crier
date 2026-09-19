@@ -3,13 +3,15 @@
   "project": "crier",
   "base_sha": "d25fdf9",
   "created_at": "2026-09-19 19:37:43",
+  "finished_at": "2026-09-19T23:54:13Z",
+  "recovery": "complete",
   "workers": [
-    {"task_id": "DF-CRIER-274", "worktree": "/home/kara/worktrees/crier-DF-CRIER-274", "branch": "wt/DF-CRIER-274", "files": ["examples/agent-ecosystem/sink/echo_sink.py"]},
-    {"task_id": "DF-CRIER-275", "worktree": "/home/kara/worktrees/crier-DF-CRIER-275", "branch": "wt/DF-CRIER-275", "files": ["docs/AGENT-ECOSYSTEM.md"]},
-    {"task_id": "DF-CRIER-264", "worktree": "/home/kara/worktrees/crier-DF-CRIER-264", "branch": "wt/DF-CRIER-264", "files": ["specs/AGENT-ECOSYSTEM.md"]},
-    {"task_id": "DF-CRIER-227", "worktree": "/home/kara/worktrees/crier-DF-CRIER-227", "branch": "wt/DF-CRIER-227", "files": ["README.md"]},
-    {"task_id": "DF-CRIER-109", "worktree": "/home/kara/worktrees/crier-DF-CRIER-109", "branch": "wt/DF-CRIER-109", "files": ["specs/_index.md", "specs/AGENTS.md"]},
-    {"task_id": "DF-CRIER-207", "worktree": "/home/kara/worktrees/crier-DF-CRIER-207", "branch": "wt/DF-CRIER-207", "files": ["examples/hermes-gateway-demo/run-demo.sh", "examples/federation-demo/run-demo.sh"]},
-    {"task_id": "DF-CRIER-40", "worktree": "/home/kara/worktrees/crier-DF-CRIER-40", "branch": "wt/DF-CRIER-40", "files": ["internal/mesh/", "internal/relay/", "docs/mesh-protocol.md"]}
+    {"task_id": "DF-CRIER-274", "worktree": "/home/kara/worktrees/crier-DF-CRIER-274", "branch": "wt/DF-CRIER-274", "sha": "16a92d8fb5cc74a9981787ecc4a375b28f40edfb", "judge": "PASS 94b82015", "guard": "PASS", "merge": "already merged as 4ceb0c5"},
+    {"task_id": "DF-CRIER-275", "worktree": "/home/kara/worktrees/crier-DF-CRIER-275", "branch": "wt/DF-CRIER-275", "sha": "05676ce0c12b0322aa106fbb84fdfa915bece5d7", "judge": "PASS 505246b2", "guard": "PASS", "merge": "already merged as 40fdaca"},
+    {"task_id": "DF-CRIER-264", "worktree": "/home/kara/worktrees/crier-DF-CRIER-264", "branch": "wt/DF-CRIER-264", "sha": "7e86c1facfbb031e1d27bd96f804ce245e883271", "judge": "PASS ec2ca948", "guard": "PASS", "merge": "already merged as d64fe81"},
+    {"task_id": "DF-CRIER-227", "worktree": "/home/kara/worktrees/crier-DF-CRIER-227", "branch": "wt/DF-CRIER-227", "sha": "337d4b57ccf7ee21c875400adfeb1a12b1401433", "judge": "PASS 32efb0d5", "guard": "PASS", "merge": "already merged as 2d78926"},
+    {"task_id": "DF-CRIER-109", "worktree": "/home/kara/worktrees/crier-DF-CRIER-109", "branch": "wt/DF-CRIER-109", "sha": "1e8de7bcc2b35a29c101bf2599bb809d9ffbd142", "judge": "PASS fcc06876", "guard": "PASS", "merge": "already merged as 31b240a"},
+    {"task_id": "DF-CRIER-207", "worktree": "/home/kara/worktrees/crier-DF-CRIER-207", "branch": "wt/DF-CRIER-207", "sha": "379bbbca0c8c63c70e0559c48ef41284c66e113c", "judge": "PASS 1bc3ec45", "guard": "PASS", "merge": "already merged as d005d26"},
+    {"task_id": "DF-CRIER-40", "worktree": "/home/kara/worktrees/crier-DF-CRIER-40", "sha": "e5973c06a77c658ebd279f33c0cf6e0a9b393676", "judge": "PASS 3bd6a682", "guard": "PASS", "merge": "already merged as 1c91e41"}
   ]
 }
