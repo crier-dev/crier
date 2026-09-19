@@ -1654,3 +1654,47 @@ tasks:
   status: complete
   created_at: '2026-09-18T23:42:48.980981+00:00'
   completed_at: '2026-09-19T00:02:17.110153+00:00'
+- id: int-ci-006-transport-classifier-stream-deadline
+  title: 'INT-CI-006: the deploy transport classifier must read the WHOLE attempt
+    output and treat a stream deadline as transient'
+  criteria:
+  - A cell-deploy failure whose attempt output carries a transport signature (stream
+    error, deadline_exceeded, context deadline exceeded, Unavailable, i/o timeout)
+    is classified TRANSPORT_RESET and retried within the budget, proven by feeding
+    the classifier the verbatim two-line attempt text from CI run 35408229089 and
+    observing a retry; a genuinely non-transport failure (bad image ref) stays NON_TRANSPORT
+    with exactly one attempt and the budget unspent; the NON_TRANSPORT evidence names
+    the FAILURE line (last output line, or a signature match), never an earlier unrelated
+    success line (the sha256 digest from the preceding docker load); scripts/lib/transport-retry.sh
+    --selftest pins all of it with new deterministic arms plus the intact ARM A/B/C
+    and the NEUTER proof; bash -n, make transport-retry-selftest, make shell-yaml-check,
+    make gofmt-check, make test (16/16 packages) and gitreins guard stay green.
+  status: complete
+  created_at: '2026-09-19T00:21:19.720101+00:00'
+  completed_at: '2026-09-19T00:30:56.313239+00:00'
+- id: QA-CRIER-10
+  title: Rotate scratch ports in every crier battery and probe runner
+  criteria:
+  - Every repo-shipped script that starts a scratch service (llm-mesh bridge/raw,
+    federation, hermes-gateway, ws-mesh) must use bounded default candidate rotation
+    with per-candidate preflight and holder evidence, preserve explicit port overrides
+    as fail-closed, thread selected ports through every client, and have deterministic
+    tests proving first-candidate rotation and all-candidates exhaustion. Existing
+    tests and full gates remain green.
+  status: complete
+  created_at: '2026-09-19T01:46:41.920310+00:00'
+  completed_at: '2026-09-19T02:06:22.859354+00:00'
+- id: QA-CRIER-21
+  title: ws-mesh-demo must not hang when ambient proxy env points at a dead proxy
+  criteria:
+  - 'The shipped examples/ws-mesh-demo must survive an ambient dead HTTP proxy: with
+    HTTP_PROXY/HTTPS_PROXY/ALL_PROXY=http://127.0.0.1:9 the full suite (go test ./...
+    -count=1 under timeout 120) exits 0, was rc=124/hang; the loopback demo bypasses
+    the proxy (no_proxy/--noproxy + loopback dialers) and the test''s wait for the
+    demo is bounded with a named, log-bearing failure instead of relying on the go-test
+    alarm; a deterministic test proves the dead-proxy path passes AND that a genuinely
+    dead demo fails fast with the child log surfaced; pre-fix RED proof captured;
+    make test 16/16, gofmt-check, shell-yaml-check, lint, bash -n green.'
+  status: complete
+  created_at: '2026-09-19T02:26:47.158942+00:00'
+  completed_at: '2026-09-19T02:51:31.825950+00:00'
