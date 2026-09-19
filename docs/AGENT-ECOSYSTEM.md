@@ -484,8 +484,10 @@ intermediate commit is waste, the nightly + manual triggers cover it.
   200 `ECHO`).
 - `ecosystem-evidence` ← `/tmp/ecosystem-evidence.jsonl` (captured via
   `docker compose -f examples/agent-ecosystem/docker-compose.yml --profile battery run --rm
-  --no-deps battery sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl ||
-  true` after the battery job — `|| true` so evidence capture never fails the job).
+  --no-deps --entrypoint cat battery /evidence/ecosystem.jsonl > /tmp/ecosystem-evidence.jsonl
+  || true` after the battery job — `--entrypoint cat` because the battery image's ENTRYPOINT is
+  `["bash", "battery.sh"]` and would otherwise swallow that command and re-run the whole
+  battery; `|| true` so evidence capture never fails the job).
 
 ### 5.4 How to read results
 
