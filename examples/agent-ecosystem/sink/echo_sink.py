@@ -82,8 +82,11 @@ class H(BaseHTTPRequestHandler):
             if self.headers.get("X-Crier-Event") == "batch":
                 COUNT["batches"] += 1
                 COUNT["deliveries"] += len(data.get("messages", [])) - 1
-        # blocking reply: the message payload text, echoed
-        text = "ECHO: no text"
+        # blocking reply: the message payload text, echoed. The fallback carries
+        # NO prefix of its own — the single "ECHO: " is added by the reply
+        # builder below, so a wrong-shape payload answers "ECHO: no text"
+        # (DF-CRIER-274; it used to read "ECHO: ECHO: no text").
+        text = "no text"
         if isinstance(data, dict):
             payload = data.get("payload")
             if isinstance(payload, dict) and isinstance(payload.get("text"), str):
