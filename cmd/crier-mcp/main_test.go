@@ -24,6 +24,7 @@ import (
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/testsupport"
 	"github.com/gorilla/mux"
 )
 
@@ -219,9 +220,15 @@ func TestMCPServerCLIFlags(t *testing.T) {
 	// Read HEAD before building and again after: a sibling worker may commit
 	// while the build runs, and either revision is a legitimate stamp.
 	headBefore := gitShortHead(t)
+	// DF-CRIER-253: build from an isolated HEAD snapshot, never the live
+	// package directory — a sibling worker mid-edit in cmd/crier-mcp must not
+	// be able to red this package. The snapshot keeps its git metadata, so
+	// the toolchain still stamps vcs.revision for internal/buildinfo.
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
 	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = buildDir
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp: %v\n%s", err, out)
+		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
 	}
 
 	t.Run("--help exits 0 within 1s with usage", func(t *testing.T) {

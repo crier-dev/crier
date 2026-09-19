@@ -20,6 +20,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/pidfile"
+	"github.com/crier-dev/crier/internal/testsupport"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1263,16 +1264,28 @@ func TestServerVersionCLIFlags(t *testing.T) {
 	plainBin := filepath.Join(dir, "crier-plain")
 	injectedBin := filepath.Join(dir, "crier-injected")
 
+	// DF-CRIER-253: build from an isolated HEAD snapshot, never the live
+	// package directory. A sibling worker mid-edit in cmd/server makes the
+	// live directory a syntax error away from reding this package for a
+	// reason that has nothing to do with the code under test. The snapshot
+	// keeps its git metadata, so the toolchain still stamps vcs.revision and
+	// internal/buildinfo still resolves a real commit.
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
+
 	// A sibling worker may commit while this test builds; accept either HEAD
 	// observed around the build.
 	headBefore := gitHead(t, ".")
 
-	if out, err := exec.Command("go", "build", "-o", plainBin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build unstamped crier: %v\n%s", err, out)
+	buildUnstamped := exec.Command("go", "build", "-o", plainBin, ".")
+	buildUnstamped.Dir = buildDir
+	if out, err := buildUnstamped.CombinedOutput(); err != nil {
+		t.Fatalf("build unstamped crier from %s: %v\n%s", buildDir, err, out)
 	}
 	injectedLDFlags := "-X github.com/crier-dev/crier/internal/buildinfo.Version=9.9.9"
-	if out, err := exec.Command("go", "build", "-ldflags", injectedLDFlags, "-o", injectedBin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build stamped crier: %v\n%s", err, out)
+	buildInjected := exec.Command("go", "build", "-ldflags", injectedLDFlags, "-o", injectedBin, ".")
+	buildInjected.Dir = buildDir
+	if out, err := buildInjected.CombinedOutput(); err != nil {
+		t.Fatalf("build stamped crier from %s: %v\n%s", buildDir, err, out)
 	}
 
 	headAfter := gitHead(t, ".")
@@ -1333,9 +1346,16 @@ func TestServerVersionCLIFlags(t *testing.T) {
 		// the fully expanded command without running it — that text is the
 		// only proof the release wiring points at the symbols
 		// internal/buildinfo actually reads.
-		out, err := exec.Command("make", "-C", "../..", "-n", "build").CombinedOutput()
+		// DF-CRIER-253: expand the recipe from the isolated snapshot, not the
+		// live working tree — the Makefile and its git-describe/rev-parse
+		// shell calls must run against the same revision the binary was
+		// built from, and a partial sibling edit must not be able to break
+		// this subtest either.
+		makeRecipe := exec.Command("make", "-n", "build")
+		makeRecipe.Dir = filepath.Join(buildDir, "..", "..")
+		out, err := makeRecipe.CombinedOutput()
 		if err != nil {
-			t.Fatalf("make -C ../.. -n build: %v\n%s", err, out)
+			t.Fatalf("make -n build (in %s): %v\n%s", makeRecipe.Dir, err, out)
 		}
 		expanded := string(out)
 		const pkg = "github.com/crier-dev/crier/internal/buildinfo"
