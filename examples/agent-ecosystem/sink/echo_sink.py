@@ -1,6 +1,8 @@
 # echo sink — the simplest agent in the mesh: receives webhook deliveries,
 # replies ECHO:<text> (blocking), counts deliveries for the battery.
 import json, os, threading, time
+from pathlib import Path
+
 import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -8,6 +10,9 @@ PORT = int(os.environ.get("PORT", "9002"))
 CRIER = os.environ.get("CRIER_URL", "http://crier:8767")
 LOCK = threading.Lock()
 COUNT = {"deliveries": 0, "batches": 0}
+REGISTRATION_TEMPLATE = json.loads(
+    Path(__file__).with_name("registration-payloads.json").read_text()
+)["sink"]
 # Registration state, served on /ready: an unregistered sink must never look
 # ready (INT-CI-007 — the battery used to see "ready" and then eat 404s).
 REG = {"registered": False, "last_status": None, "last_body": ""}
@@ -26,16 +31,11 @@ def register():
     """
     import secrets
     pub = secrets.token_hex(32)
-    body = {
-        "id": "sink",
-        "public_key": pub,
-        "webhook": {
-            "url": f"http://sink:{PORT}/hook",
-            "delivery_mode": "blocking",
-            "schema_template": "generic",
-        },
-        "guard": {"policies": [{"id": "default"}]},
-    }
+    # The checked-in payload is the contract source shared with the push-time
+    # Go gate. Copy it before filling runtime-only values so retries stay clean.
+    body = json.loads(json.dumps(REGISTRATION_TEMPLATE))
+    body["public_key"] = pub
+    body["webhook"]["url"] = f"http://sink:{PORT}/hook"
     for _ in range(30):
         try:
             r = requests.post(f"{CRIER}/agents", json=body, timeout=3)

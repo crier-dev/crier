@@ -23,6 +23,12 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
+      # INT-CI-008: validate the checked-in payloads used by every ecosystem
+      # registration entrypoint against the production strict webhook decoder.
+      # This is intentionally first and needs no Docker, network, runner, or key.
+      - name: Agent-ecosystem registration contract
+        run: go test -count=1 ./internal/ci
+
       - name: Build
         run: go build ./...
 

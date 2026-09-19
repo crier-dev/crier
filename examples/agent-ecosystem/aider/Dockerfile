@@ -6,7 +6,7 @@ RUN apk add --no-cache nodejs git
 RUN pip install --no-cache-dir aider-chat 2>/dev/null || echo 'aider install failed — canned only'
 # aider needs a git repo for the live path (--no-auto-commits keeps it read-only)
 RUN git init -q .
-COPY consumer/consumer.mjs .
+COPY consumer/consumer.mjs registration-payloads.json ./
 EXPOSE 9105
 ENV AGENT_ID=aider HARNESS=aider AIDER_LIVE=0
 CMD ["node", "consumer.mjs"]

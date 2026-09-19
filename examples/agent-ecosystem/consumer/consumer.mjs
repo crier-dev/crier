@@ -15,8 +15,13 @@
 // <HARNESS>_LIVE=1 AND a key; the CLIs' model bootstrap is heavy and can
 // exceed the blocking-delivery budget, so canned keeps the battery
 // deterministic on any host).
-import { createServer } from "node:http";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+
+const REGISTRATION_TEMPLATE = JSON.parse(
+  readFileSync(new URL("./registration-payloads.json", import.meta.url), "utf8")
+).consumer;
 
 const AGENT_ID = process.env.AGENT_ID || "agent";
 const HARNESS = process.env.HARNESS || AGENT_ID;
@@ -48,16 +53,12 @@ async function register() {
   // webhook-level `response_map` is refused. Reply extraction lives on
   // `custom_schema.response_map`; `schema_template: "generic"` needs none (the
   // template's own default, `raw`, returns the response body).
-  const body = {
-    id: AGENT_ID,
-    public_key: pub,
-    webhook: {
-      url: `http://${AGENT_ID}:${PORT}/hook`,
-      delivery_mode: "blocking",
-      schema_template: "generic",
-    },
-    guard: { policies: [{ id: "default" }] },
-  };
+  // The checked-in payload is the contract source shared with the push-time Go
+  // gate. Clone it before filling per-container runtime values.
+  const body = structuredClone(REGISTRATION_TEMPLATE);
+  body.id = AGENT_ID;
+  body.public_key = pub;
+  body.webhook.url = `http://${AGENT_ID}:${PORT}/hook`;
   const r = await fetch(`${CRIER}/agents`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

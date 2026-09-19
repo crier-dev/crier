@@ -44,7 +44,9 @@ services:
 
   sink:
     # Webhook receiver / echo agent — the simplest "agent" in the mesh.
-    build: ./sink
+    build:
+      context: .
+      dockerfile: sink/Dockerfile
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9002
@@ -154,6 +156,7 @@ services:
       CRIER_URL: http://crier:8767
     volumes:
       - ./hermes/cont-init.d:/etc/cont-init.d:ro
+      - ./registration-payloads.json:/etc/crier/registration-payloads.json:ro
     depends_on:
       crier: { condition: service_healthy }
     networks: [crier-net]

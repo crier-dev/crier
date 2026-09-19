@@ -9,6 +9,20 @@
 # (reply extraction lives on custom_schema.response_map).
 CRIER="${CRIER_URL:-http://crier:8767}"
 PUB="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+PAYLOAD_FILE="${CRIER_REGISTRATION_PAYLOADS:-/etc/crier/registration-payloads.json}"
+PAYLOAD="$(python3 - "$PAYLOAD_FILE" "$PUB" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    body = json.load(stream)["hermes"]
+body["public_key"] = sys.argv[2]
+print(json.dumps(body, separators=(",", ":")))
+PY
+)" || {
+  echo "hermes registration payload could not be rendered from $PAYLOAD_FILE" >&2
+  exit 1
+}
 curl -s -o /dev/null -X POST "$CRIER/agents" -H 'Content-Type: application/json' \
-  -d "{\"id\":\"hermes\",\"public_key\":\"$PUB\",\"webhook\":{\"url\":\"http://hermes:9000/hook\",\"delivery_mode\":\"async\",\"schema_template\":\"generic\"},\"guard\":{\"policies\":[{\"id\":\"default\"}]}}"
+  --data-binary "$PAYLOAD"
 echo "hermes registered with crier (exit $?)"

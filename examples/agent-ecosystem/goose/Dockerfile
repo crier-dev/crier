@@ -10,7 +10,7 @@ RUN curl -fsSL https://github.com/block/goose/releases/latest/download/goose-x86
     && chmod +x /usr/local/bin/goose \
     && rm /tmp/goose.tgz \
     || echo 'goose download failed — canned mode only'
-COPY consumer/consumer.mjs .
+COPY consumer/consumer.mjs registration-payloads.json ./
 EXPOSE 9106
 ENV AGENT_ID=goose HARNESS=goose GOOSE_LIVE=0
 CMD ["node", "consumer.mjs"]

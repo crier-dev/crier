@@ -1,0 +1,50 @@
+{
+  "sink": {
+    "id": "sink",
+    "public_key": "0000000000000000000000000000000000000000000000000000000000000000",
+    "webhook": {
+      "url": "http://sink:9002/hook",
+      "delivery_mode": "blocking",
+      "schema_template": "generic"
+    },
+    "guard": {
+      "policies": [
+        {
+          "id": "default"
+        }
+      ]
+    }
+  },
+  "consumer": {
+    "id": "agent",
+    "public_key": "0000000000000000000000000000000000000000000000000000000000000000",
+    "webhook": {
+      "url": "http://agent:9100/hook",
+      "delivery_mode": "blocking",
+      "schema_template": "generic"
+    },
+    "guard": {
+      "policies": [
+        {
+          "id": "default"
+        }
+      ]
+    }
+  },
+  "hermes": {
+    "id": "hermes",
+    "public_key": "0000000000000000000000000000000000000000000000000000000000000000",
+    "webhook": {
+      "url": "http://hermes:9000/hook",
+      "delivery_mode": "async",
+      "schema_template": "generic"
+    },
+    "guard": {
+      "policies": [
+        {
+          "id": "default"
+        }
+      ]
+    }
+  }
+}

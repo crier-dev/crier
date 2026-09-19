@@ -6,14 +6,12 @@ on:
   schedule:
     - cron: "30 6 * * *" # nightly 06:30 UTC
 
-# Only one bunker-e2e run at a time: the matrix deploys to the SAME bunker
-# agent/port (crier-lab:30011) and shares /tmp state on the self-hosted
-# runner — parallel runs clobber each other's deployments (observed 2026-08-24:
-# concurrent runs raced on tick-250/251 pushes). Newer runs cancel older ones
-# (intermediate commits don't need battery evidence; the head commit does).
+# Push runs still supersede stale push work, but event-scoped groups prevent a
+# push from cancelling a scheduled/manual run. Job-level groups below serialize
+# the bunker target and compose stack across those workflow groups.
 concurrency:
-  group: bunker-e2e
-  cancel-in-progress: true
+  group: bunker-e2e-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -38,6 +36,11 @@ jobs:
     runs-on: [self-hosted, bunker]
     needs: docker-image
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && needs.docker-image.result == 'success'))
+    # Every event deploys to crier-lab:30011. New pushes still supersede stale
+    # matrix work; schedule/dispatch runs queue rather than cancelling a peer.
+    concurrency:
+      group: bunker-e2e-target
+      cancel-in-progress: ${{ github.event_name == 'push' }}
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       EVIDENCE: /tmp/bunker-matrix-ci.jsonl
@@ -67,6 +70,11 @@ jobs:
     name: Agent-ecosystem battery (compose stack)
     runs-on: [self-hosted, bunker]
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # One compose project owns these ports and /tmp evidence at a time. Queue
+    # every battery to completion; push jobs use a different concurrency group.
+    concurrency:
+      group: bunker-e2e-ecosystem
+      cancel-in-progress: false
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       CRIER_HOST_PORT: "28767"
