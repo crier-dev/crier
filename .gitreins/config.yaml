@@ -43,7 +43,12 @@ pipeline:
     # budget below moved to 24M in the SAME change instead of burning a second
     # 6-minute judge on the token cap (fleet doctrine: raise the starved rung
     # and size the neighbouring knob from measured burn, never from a guess).
-    max_iterations: 400
+    # max_iterations 400 -> 600 (tick 353, DF-CRIER-40): the 400 rung starved on
+    # a 4-file mesh+docs row — "Cap exceeded: Iteration cap (400) reached
+    # (400.6 used)" with tier1 PASS (verdict 788c0b69). Burn basis unchanged
+    # (~53.7K tokens_in/iter, tick 301 measurement): 600 iterations projects
+    # ~32M tokens_in, under the 48M input budget, so only this knob moves.
+    max_iterations: 600
     tools:
     - read_file
     - run_command
@@ -68,7 +73,10 @@ evaluator:
   # to (warpfs lesson), so every iteration knob moves together — one place
   # stating 400 and another still stating 120 is exactly the shape that makes a
   # raise invisible.
-  max_iterations: 400
+  # max_iterations 400 -> 600 (tick 353, DF-CRIER-40): aligned with the tier2
+  # stage block in the same change — the MIN(stage, evaluator) gate means both
+  # knobs move together (warpfs lesson, tick 301).
+  max_iterations: 600
   # max_time 20m -> 30m (tick 280, CR-GAP-060): measured burn rate ~1M input
   # tokens per minute (the 9.0M starved run below ran ~9 min), so a 12M budget
   # needs headroom past the old 20m wall instead of starving on a third knob.
