@@ -1744,3 +1744,49 @@ tasks:
   status: complete
   created_at: '2026-09-19T07:31:43.001870+00:00'
   completed_at: '2026-09-19T07:42:20.618222+00:00'
+- id: DF-CRIER-261
+  title: Narrow the SnapshotBuildDir isolation claim to what is measured and pin it
+    with a test
+  criteria:
+  - 'internal/testsupport/snapshot.go''s doc comment claims a sibling mid-edit ''cannot
+    red the package''. Measured: the helper isolates the INNER go build only; the
+    OUTER go test compile still reads the live package directory, so a file that breaks
+    compilation of the package still reds the run. Acceptance: (A) every remaining
+    ''red''/''isolated'' claim in snapshot.go states which layer it covers and a ''What
+    this does NOT cover'' section names the outer-compile boundary with the measured
+    evidence; (B) a new test in internal/testsupport/snapshot_test.go proves the git-work-tree
+    branch excludes an uncommitted sibling edit from the snapshot build (fixture repo:
+    commit a valid package, then write a broken sibling file, then SnapshotBuildDir
+    + go build must SUCCEED and the broken file must be absent from the snapshot);
+    (C) no production behaviour change - go build ./... , go vet ./... , make gofmt-check
+    and go test ./internal/testsupport ./cmd/server ./cmd/crier-mcp -count=1 all PASS;
+    (D) only internal/testsupport/snapshot.go and internal/testsupport/snapshot_test.go
+    are modified.'
+  status: complete
+  created_at: '2026-09-19T08:26:11.352758+00:00'
+  completed_at: '2026-09-19T08:35:45.722478+00:00'
+- id: DF-CRIER-262
+  title: README webhook PATCH example omits ed25519 sig requirement
+  criteria:
+  - 'README Webhook delivery section documents the X-Agent-ID/X-Agent-Ts/X-Agent-Sig
+    requirement on PATCH /agents/{id} (or shows a signed example); live probe: unsigned
+    PATCH 401 matches docs, signed PATCH 2xx'
+  status: complete
+  created_at: '2026-09-19T12:11:11.745717+00:00'
+  completed_at: '2026-09-19T12:13:39.140132+00:00'
+- id: INT-CI-007
+  title: 'Fix the agent-ecosystem example stack: registration 400s on a webhook field
+    the strict decoder rejects, so all 7 agents are unregistered and 9/12 battery
+    probes fail'
+  criteria:
+  - 'Root cause corrected from the row''s flake premise: crier returns 400 webhook:
+    unknown field \"response_map\" for the example''s registration body, so no agent
+    ever registers; examples/agent-ecosystem (sink + shared consumer) must send a
+    contract-valid webhook object, registration failure must be visible (not a /ready
+    green), battery.sh must gate on GET /agents/<id> registration visibility, and
+    specs/AGENT-ECOSYSTEM.md + docs/AGENT-ECOSYSTEM.md must document the real field
+    list. Acceptance: the live compose battery run on the fixed tree reports 0 FAIL,
+    and the docs no longer claim a webhook-level response_map.'
+  status: complete
+  created_at: '2026-09-19T12:23:03.922725+00:00'
+  completed_at: '2026-09-19T12:38:14.725566+00:00'
