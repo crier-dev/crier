@@ -44,13 +44,16 @@
 #   RELAY1_PORT_BASE / RELAY2_PORT_BASE / WEBHOOK_PORT_BASE
 #                        first candidate of that service's rotation
 #                        (default 18771 / 18776 / 18781)
-#   DEMO_TRANSCRIPT      write the capture here instead of
-#                        TRANSCRIPT-<date>.md next to this script
+#   DEMO_TRANSCRIPT      override transcript path (default below)
 #   An EXPLICIT port is checked and never rotated away from: an occupied one
 #   aborts the run naming its holder, because a run on a port the operator did
 #   not name would misreport what was measured.
 #
-# Output: TRANSCRIPT-<date>.md in this directory (real output, teed live).
+# Output: the transcript is teed OUTSIDE the repo, to
+#   ${TMPDIR:-/tmp}/federation-demo-TRANSCRIPT-<date>.XXXXXX.md
+# and its path is printed at the end of the run. New runs never write into the
+# repo: the committed TRANSCRIPT-<date>.md here is a historical record and stays
+# untouched (DF-CRIER-207).
 #
 set -euo pipefail
 
@@ -78,10 +81,14 @@ RELAY1=""
 RELAY2=""
 WEBHOOK_URL=""
 WORKDIR="$(mktemp -d)"
-# DEMO_TRANSCRIPT (as in the ws-mesh demo) points the capture outside the repo —
-# the selftest uses it so a test run cannot dirty git status; the default keeps
-# writing the historical TRANSCRIPT-<date>.md next to this script.
-TRANSCRIPT="${DEMO_TRANSCRIPT:-$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md}"
+# DEMO_TRANSCRIPT (as in the ws-mesh demo) overrides the capture path — the
+# selftest uses it so a test run cannot dirty git status. The default is
+# mktemp-derived under ${TMPDIR:-/tmp}, and it is CREATED only after all three
+# ports are settled (just below, before the tee), so a port-guard refusal still
+# starts nothing and opens nothing. The committed TRANSCRIPT-<date>.md here is a
+# historical record and stays untouched (DF-CRIER-207).
+TRANSCRIPT="${DEMO_TRANSCRIPT:-}"
+TRANSCRIPT_DIR="${TMPDIR:-/tmp}"
 
 # Port guards (QA-CRIER-9): this harness starts all three servers it measures.
 # The guards come from the shared library — require_free_port refuses to start on
@@ -147,6 +154,15 @@ RELAY1="http://127.0.0.1:${RELAY1_PORT}"
 RELAY2="http://127.0.0.1:${RELAY2_PORT}"
 WEBHOOK_URL="http://127.0.0.1:${WEBHOOK_PORT}/webhook"
 
+# ── Transcript: outside the repo, mktemp-derived, never overwrites a previous run ──
+# Settled only now (after the three ports), so a refusal above created no capture.
+if [ -n "$TRANSCRIPT" ]; then
+  mkdir -p "$(dirname "$TRANSCRIPT")"
+  : > "$TRANSCRIPT"
+else
+  TRANSCRIPT="$(mktemp "$TRANSCRIPT_DIR/federation-demo-TRANSCRIPT-$(date +%Y-%m-%d).XXXXXX.md")"
+fi
+
 # Everything below is teed into the transcript (real output, not simulated).
 exec > >(tee "$TRANSCRIPT") 2>&1
 
@@ -157,6 +173,7 @@ echo "- repo: $(cd "$REPO_ROOT" && git rev-parse --short HEAD) ($(cd "$REPO_ROOT
 echo "- relay-1: ${RELAY1} (CR_FED_LINKS=http://127.0.0.1:${RELAY2_PORT}, CR_FED_NAME=relay-1)"
 echo "- relay-2: ${RELAY2} (no links)"
 echo "- webhook: ${WEBHOOK_URL}"
+echo "- transcript: ${TRANSCRIPT}"
 echo
 
 echo "==> [1/8] build crier"
@@ -261,3 +278,4 @@ echo "    relay-1 /agents: $(curl -sS "$RELAY1/agents")"
 echo "    relay-2 /agents: $(curl -sS "$RELAY2/agents")"
 echo
 echo "==> DEMO PASS: relay-1 -> relay-2 delivery via webhook, reply to sender, peers listing shows both"
+echo "    transcript: ${TRANSCRIPT}"
