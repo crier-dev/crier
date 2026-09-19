@@ -259,30 +259,47 @@ func (m *Mesh) keepaliveLoop(peerID string, conn *PeerConnection) {
 func (m *Mesh) handleMessage(peerID string, data []byte) {
 	var env Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
-		// A frame that is not even an envelope is dropped silently today;
-		// log it so a malformed peer is visible (DF-CRIER-141).
-		slog.Debug("mesh: message dropped (unmarshal)", "peer", peerID, "bytes", len(data))
+		// A frame that is not even an envelope used to be dropped with a
+		// debug log (DF-CRIER-141), which made a wrong-shaped client
+		// indistinguishable from a server that simply never answered. It is
+		// refused on the wire instead (DF-CRIER-40). Nothing could be read
+		// from it, so the refusal carries no message_id (see
+		// reportInvalidMessage).
+		m.reportInvalidMessage(peerID, "",
+			fmt.Sprintf("malformed frame: not a JSON envelope (%v)", err))
 		return
 	}
 	switch env.Type {
 	case TypeRequest:
-		m.handleAgentRequest(peerID, data)
+		m.handleAgentRequest(peerID, env, data)
 	case TypeRegister, TypeRegisterAck:
 		// The handshake payload is logged at info (agent id + peer) so the
 		// REGISTER lifecycle is traceable. Inbound REGISTER/REGISTER_ACK
 		// still have no state handler in the mesh router — the handshake is
 		// owned by the connecting side (Mesh.register) — so this logs what
-		// arrived rather than claiming it was processed.
+		// arrived rather than claiming it was processed. A payload that does
+		// not match the REGISTER shape is malformed, and malformed frames are
+		// refused rather than dropped (DF-CRIER-40).
 		var reg Register
 		if err := json.Unmarshal(data, &reg); err != nil {
-			slog.Info("mesh: REGISTER received (unparseable payload)", "peer", peerID)
+			m.reportInvalidMessage(peerID, env.MessageID,
+				fmt.Sprintf("malformed %s frame: %v", env.Type, err))
 			return
 		}
 		slog.Info("mesh: REGISTER received", "type", env.Type, "agent_id", reg.AgentID,
 			"peer", peerID, "message_id", reg.MessageID)
+	case TypeKeepalive:
+		// Recognized and deliberately ignored: there is no liveness
+		// bookkeeping and no reply of any kind — not even the
+		// INVALID_MESSAGE a malformed frame now draws, because a KEEPALIVE is
+		// perfectly well-formed. The loop keeps the socket warm and detects
+		// dead connections via read errors; it has no other effect.
+		slog.Debug("mesh: KEEPALIVE ignored", "peer", peerID, "message_id", env.MessageID)
 	case TypeResponse:
 		var resp Response
 		if err := json.Unmarshal(data, &resp); err != nil {
+			m.reportInvalidMessage(peerID, env.MessageID,
+				fmt.Sprintf("malformed RESPONSE frame: %v", err))
 			return
 		}
 		// Server-initiated request? Deliver to the waiting caller.
@@ -301,6 +318,8 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 	case TypeError:
 		var errMsg ErrorMessage
 		if err := json.Unmarshal(data, &errMsg); err != nil {
+			m.reportInvalidMessage(peerID, env.MessageID,
+				fmt.Sprintf("malformed ERROR frame: %v", err))
 			return
 		}
 		m.pendingMu.RLock()
@@ -323,17 +342,33 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		// Agent-initiated request that failed at the target side.
 		m.forwardResponse(errMsg.RequestID, data)
 	default:
-		slog.Debug("mesh: message dropped (unhandled type)", "peer", peerID, "type", env.Type)
+		// An envelope naming a type the protocol does not define (the six in
+		// the envelope table of docs/mesh-protocol.md) is malformed, not
+		// merely unhandled. It used to be dropped with a debug log, so a
+		// client that misspelled a type saw nothing but silence (DF-CRIER-40).
+		m.reportInvalidMessage(peerID, env.MessageID,
+			fmt.Sprintf("malformed frame: unknown message type %q", env.Type))
 	}
 }
 
 // handleAgentRequest forwards an agent-to-agent REQUEST to its target peer.
 // A route is recorded so the eventual RESPONSE can be returned to the
 // requester. If the target is not connected, an ERROR is sent back; a REQUEST
-// that carries no resolvable target at all is rejected as malformed.
-func (m *Mesh) handleAgentRequest(requesterID string, data []byte) {
+// that carries no resolvable target at all is rejected as malformed, and so is
+// one whose payload does not match the REQUEST shape (DF-CRIER-40).
+//
+// env is the envelope already decoded from the same bytes by handleMessage: a
+// payload that fails to decode into Request still has a readable message_id
+// there, which is what lets the refusal carry the id the requester sent.
+func (m *Mesh) handleAgentRequest(requesterID string, env Envelope, data []byte) {
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
+		// The envelope named REQUEST but the body does not match that shape
+		// (a non-object source/target, a string timeout_ms, …). Dropping it
+		// left the requester waiting out its own timeout with no evidence of
+		// why; it is refused instead.
+		m.reportInvalidMessage(requesterID, env.MessageID,
+			fmt.Sprintf("malformed REQUEST frame: %v", err))
 		return
 	}
 	targetID := req.Target.AgentID
@@ -417,6 +452,27 @@ func (m *Mesh) forwardResponse(requestID string, data []byte) {
 	if ok {
 		_ = conn.Send(data)
 	}
+}
+
+// reportInvalidMessage answers a malformed inbound frame with the protocol's
+// INVALID_MESSAGE error frame ("Malformed frame", docs/mesh-protocol.md §ERROR).
+//
+// It exists because the alternative — what the mesh did before DF-CRIER-40 —
+// was to drop such a frame with at most a debug log, leaving a wrong-shaped
+// client indistinguishable from a server that simply never answers.
+//
+// requestID is the malformed frame's own message_id, or "" when the frame was
+// too broken to have one (it did not decode as an envelope at all). It becomes
+// the refusal's request_id, which is `omitempty`: the field is ABSENT on the
+// wire for an unreadable frame, never blank, so a client can tell "I sent
+// something unparseable" from "the reply correlates to a request of mine".
+//
+// Best effort, like every other mesh ERROR: a peer that has already
+// disconnected is skipped (sendErrorTo finds no connection).
+func (m *Mesh) reportInvalidMessage(peerID, requestID, reason string) {
+	slog.Warn("mesh: malformed frame refused",
+		"peer", peerID, "message_id", requestID, "reason", reason)
+	m.sendErrorTo(peerID, requestID, "", ErrCodeInvalidMessage, reason)
 }
 
 // sendErrorTo sends an ERROR message to a peer (best effort).
