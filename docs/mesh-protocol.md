@@ -67,10 +67,12 @@ the contract.
 
 Sent by each connected client every 30 seconds (`KeepaliveInterval`,
 `internal/mesh/peer.go:keepaliveLoop`). The server **does not process it** — there is
-no liveness bookkeeping and no reply: an inbound KEEPALIVE reaches the `default`
-branch of the message switch (`internal/mesh/handleMessage`,
-`internal/mesh/peer.go:267`). The loop keeps the socket warm and detects dead
-connections via read errors; it has no other effect.
+no liveness bookkeeping and no reply: `handleMessage` recognizes `KEEPALIVE` and
+ignores it, deliberately with no frame back of any kind — not even the
+`INVALID_MESSAGE` an actual malformed frame now draws (see §Error handling and
+silent drops), because the frame is well-formed and simply has no server-side
+effect. The loop keeps the socket warm and detects dead connections via read
+errors; it has no other effect.
 
 The server sends a KEEPALIVE to every accepted peer every 30 seconds: the accept
 path starts the same loop (`internal/mesh/handler.go:46` →
@@ -157,7 +159,8 @@ as a string.
 ### ERROR (server → agent, or agent → agent)
 
 Sent by the server when a REQUEST cannot be delivered (target offline, route table
-full). Also used by agents to fail a request.
+full) or when an inbound frame is malformed (`INVALID_MESSAGE`). Also used by agents
+to fail a request.
 
 ```json
 {"type":"ERROR","version":1,"message_id":"e57206b16d39e6e28a01e286",
@@ -174,6 +177,28 @@ frames are therefore correlated exactly like RESPONSE frames: match on `request_
 (the reply's correlation field), never on `message_id` (the frame's own id). A client
 that correlates on `message_id` alone never matches a server-sent ERROR and hangs
 until its own timeout.
+
+A **malformed** inbound frame is refused with that same shape, code `INVALID_MESSAGE`
+(`internal/mesh/peer.go`: one helper, `reportInvalidMessage`, feeds the same `sendErrorTo`
+that emits `CONTROLLER_OFFLINE` and `INTERNAL`). A frame that does not decode as an
+envelope carries no id to echo, so `request_id` is **absent** — the field is
+`omitempty` and is never written blank. Captured from the live path:
+
+```json
+{"type":"ERROR","version":1,"message_id":"a2b8e3095b0eab8d1017dad2","timestamp":"2026-09-19T14:52:12.540838707-05:00","error":{"code":"INVALID_MESSAGE","message":"malformed frame: not a JSON envelope (invalid character 'o' in literal null (expecting 'u'))"}}
+```
+
+A frame that *does* decode as an envelope but does not match the shape its `type`
+declares — or whose `type` the protocol does not define — is refused with `request_id`
+set to that envelope's `message_id`, so the refusal correlates with what you sent:
+
+```json
+{"type":"ERROR","version":1,"message_id":"0f1c8c782783ce351e27b5fc","timestamp":"2026-09-19T14:52:19.129445128-05:00","request_id":"reg-bad-1","error":{"code":"INVALID_MESSAGE","message":"malformed REGISTER frame: json: cannot unmarshal string into Go struct field Register.lease_ttl_ms of type int"}}
+```
+
+Read that second example as the contract for the field: a client that correlates on
+`request_id` must treat an `ERROR` **without** one as "what I sent could not be
+parsed" (there is nothing to correlate to), not as a missing reply.
 
 `error` is an `ErrorDetail`: `{code, message, retry_after_ms?}`. Defined codes:
 
@@ -211,10 +236,29 @@ with an unknown `request_id` is dropped with no error and no log.
   requester's pending channel treats ERROR as a synthetic RESPONSE with
   `status_code: 500` and the `ErrorDetail` JSON as the body.
 - Route table full (`MaxPendingRequests` entries, default 50, flushed wholesale) → `ERROR` `INTERNAL`.
-- **Malformed frames (unparseable JSON, wrong field shapes) are silently dropped** —
-  no `ERROR` frame, no log line. This is a known limitation, not a feature: build
-  validation into your client, or run a proxy that adds it.
-- `INVALID_MESSAGE` is defined as a code but no current code path emits it.
+- **A malformed frame is answered with `ERROR` `INVALID_MESSAGE`, not swallowed.**
+  Malformed means the frame does not decode as an envelope (unparseable JSON, or
+  JSON that is not an object), the envelope names a `type` this protocol does not
+  define, or the payload does not match the shape its `type` declares — a
+  `REGISTER` whose `lease_ttl_ms` is a string, a `REQUEST` whose `source` is not a
+  `PeerRef` object, a `RESPONSE` whose `request_id` is a number. One code path
+  emits it (`handleMessage` and its `handleAgentRequest` callee,
+  `internal/mesh/peer.go`), and `error.message` names the failure. The connection
+  stays usable: a client that sent one bad frame can send a well-formed REQUEST on
+  the same socket afterwards. Pinned by `TestMeshMalformedFramesGetInvalidMessage`
+  and `TestMeshWellFormedFramesGetNoError` (`internal/mesh`).
+- **Well-formed frames are untouched.** In particular an inbound `KEEPALIVE` is
+  still recognized and ignored with no reply at all (§KEEPALIVE), and a REQUEST
+  that carries no `target.agent_id` is still refused `INVALID_MESSAGE` with a
+  message naming the missing field.
+- `INVALID_MESSAGE`'s `request_id` is the malformed frame's own `message_id` when
+  the envelope was readable; a frame that did not decode as an envelope carries
+  none, so the field is **absent** rather than blank (§ERROR, with both captured
+  frames).
+- Still silent, by design: a RESPONSE or ERROR whose `request_id` matches no
+  recorded route is dropped with a debug log (§Correlation contract — there is
+  nothing left to correlate it to), and every mesh `ERROR` is best effort, so a
+  peer that has already disconnected receives nothing.
 
 ## Not implemented (do not rely on it)
 

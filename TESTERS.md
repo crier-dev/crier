@@ -202,6 +202,14 @@ without it is `401`). Terminal A prints the frame. Subscribe to `alerts.*`
 instead and publish to `alerts.fire` and it still arrives; `alerts.fire.deep`
 only matches `alerts.>`.
 
+**A successful subscribe sends no frames until the first published event.** The
+upgrade answers `101` and that is the whole handshake: the server sends no
+welcome/hello frame, no subscription acknowledgement and no keepalive on the relay
+socket, so terminal A's `recv` after the `101` blocks exactly until a publish fans
+out — that silence is the designed state, not a broken subscription. To confirm a
+subscription is live, check `GET /relay/topics` (a topic appears there while at
+least one subscriber is connected) or publish to it and read the event back.
+
 **3. Webhook delivery (blocking + async)** — crier calls YOUR http server:
 
 ```bash
@@ -312,9 +320,15 @@ Verified good since the last revision of this file (do not report as broken):
   purge tick (measured: a message retrieved at T is retrievable again at T+30s).
 - **Two retrievers do not both get everything.** A retrieve leases its batch: an
   immediate second retrieve of the same inbox returns `{"messages":[],"lease_id":""}`.
-- **Malformed mesh frames are silently dropped** — that is what
-  `docs/mesh-protocol.md` documents (`INVALID_MESSAGE` is defined but no code path
-  emits it), so it is not an undocumented defect.
+- **A malformed mesh frame is answered, not swallowed.** A frame the server cannot
+  parse — unparseable JSON, a `type` the protocol does not define, a payload that
+  does not match its `type` — comes back as an `ERROR` frame with
+  `code: INVALID_MESSAGE` naming the failure in `error.message`; `request_id` is
+  present only when the frame was readable enough to carry a `message_id`, and the
+  socket stays usable for the next REQUEST. Well-formed frames are unaffected (a
+  `KEEPALIVE` still draws no reply at all). Proven by
+  `TestMeshMalformedFramesGetInvalidMessage` and `TestMeshWellFormedFramesGetNoError`
+  in `internal/mesh`; the shapes are documented in `docs/mesh-protocol.md` §ERROR.
 
 Known-good as of this writing: register/deliver/signed retrieve/ack, blocking +
 async webhook, relay publish→subscribe fan-out, bus-to-bus forwarding,
