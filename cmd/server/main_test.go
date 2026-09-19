@@ -1264,17 +1264,26 @@ func TestServerVersionCLIFlags(t *testing.T) {
 	plainBin := filepath.Join(dir, "crier-plain")
 	injectedBin := filepath.Join(dir, "crier-injected")
 
-	// DF-CRIER-253: build from an isolated HEAD snapshot, never the live
+	// DF-CRIER-253/259: build from an isolated snapshot, never the live
 	// package directory. A sibling worker mid-edit in cmd/server makes the
 	// live directory a syntax error away from reding this package for a
-	// reason that has nothing to do with the code under test. The snapshot
-	// keeps its git metadata, so the toolchain still stamps vcs.revision and
-	// internal/buildinfo still resolves a real commit.
+	// reason that has nothing to do with the code under test, and a tree with
+	// no git metadata (a copy of the tree, a tarball) carries no commit for
+	// the toolchain to stamp, which reded the identity assertions from every
+	// judge or eval that ran the suite outside a checkout. The snapshot is a
+	// clone of HEAD when the tree is a work tree and a deterministic
+	// one-commit repository over a copy of it otherwise, so it always has git
+	// metadata for internal/buildinfo to resolve.
 	buildDir := testsupport.SnapshotBuildDir(t, ".")
 
-	// A sibling worker may commit while this test builds; accept either HEAD
-	// observed around the build.
-	headBefore := gitHead(t, ".")
+	// The expected commit is the SNAPSHOT's own revision — the revision the
+	// binary was actually built from — not the caller's checkout, which the
+	// snapshot is deliberately isolated from (and which does not exist when
+	// the suite runs from a copy of the tree). The snapshot is frozen: a
+	// detached clone of HEAD, or a copy with a fixed commit, so there is
+	// exactly one legitimate value and no window for a sibling's commit to
+	// land inside.
+	snapshotHead := gitHead(t, buildDir)
 
 	buildUnstamped := exec.Command("go", "build", "-o", plainBin, ".")
 	buildUnstamped.Dir = buildDir
@@ -1287,8 +1296,6 @@ func TestServerVersionCLIFlags(t *testing.T) {
 	if out, err := buildInjected.CombinedOutput(); err != nil {
 		t.Fatalf("build stamped crier from %s: %v\n%s", buildDir, err, out)
 	}
-
-	headAfter := gitHead(t, ".")
 
 	t.Run("unstamped build reports the commit it was built from", func(t *testing.T) {
 		out, err := exec.Command(plainBin, "-version").CombinedOutput()
@@ -1318,11 +1325,10 @@ func TestServerVersionCLIFlags(t *testing.T) {
 		}
 
 		switch {
-		case headBefore == "" && headAfter == "":
-			t.Logf("git unavailable: cannot tie commit %q to a repo revision", commit)
-		case commit != shortSha(headBefore) && commit != shortSha(headAfter):
-			t.Errorf("-version reports commit %q, which is neither HEAD (%s) nor the revision HEAD moved to (%s)",
-				commit, shortSha(headBefore), shortSha(headAfter))
+		case snapshotHead == "":
+			t.Fatalf("the build snapshot %s has no resolvable HEAD, so the binary's commit cannot be tied to the revision it was built from", buildDir)
+		case commit != shortSha(snapshotHead):
+			t.Errorf("-version reports commit %q, but it was built from %s (snapshot HEAD)", commit, shortSha(snapshotHead))
 		}
 	})
 
@@ -1346,11 +1352,13 @@ func TestServerVersionCLIFlags(t *testing.T) {
 		// the fully expanded command without running it — that text is the
 		// only proof the release wiring points at the symbols
 		// internal/buildinfo actually reads.
-		// DF-CRIER-253: expand the recipe from the isolated snapshot, not the
-		// live working tree — the Makefile and its git-describe/rev-parse
-		// shell calls must run against the same revision the binary was
-		// built from, and a partial sibling edit must not be able to break
-		// this subtest either.
+		// DF-CRIER-253/259: expand the recipe from the isolated snapshot, not
+		// the live working tree — the Makefile and its git-describe/rev-parse
+		// shell calls must run against the same revision the binary was built
+		// from, and a partial sibling edit must not be able to break this
+		// subtest either. In a tree with no git metadata the snapshot still
+		// carries a repository, so the recipe below stamps a revision rather
+		// than an empty string.
 		makeRecipe := exec.Command("make", "-n", "build")
 		makeRecipe.Dir = filepath.Join(buildDir, "..", "..")
 		out, err := makeRecipe.CombinedOutput()
@@ -1364,15 +1372,23 @@ func TestServerVersionCLIFlags(t *testing.T) {
 				t.Errorf("`make -n build` does not stamp %s%s:\n%s", pkg, symbol, expanded)
 			}
 		}
-		if head := gitHead(t, "."); head != "" && !strings.Contains(expanded, "-X "+pkg+".Commit="+head) {
-			t.Errorf("`make -n build` does not stamp HEAD (%s) as the commit:\n%s", head, expanded)
+		// The Makefile resolves COMMIT with `git rev-parse HEAD` in the
+		// directory the recipe runs in — the snapshot — so that is the
+		// revision the expansion must carry, in a checkout and in a copy of
+		// the tree alike.
+		head := gitHead(t, makeRecipe.Dir)
+		if head == "" {
+			t.Fatalf("the build snapshot %s has no resolvable HEAD, so `make -n build` cannot be checked against a revision", makeRecipe.Dir)
+		}
+		if !strings.Contains(expanded, "-X "+pkg+".Commit="+head) {
+			t.Errorf("`make -n build` does not stamp the snapshot HEAD (%s) as the commit:\n%s", head, expanded)
 		}
 	})
 }
 
 // gitHead returns the current HEAD sha of the repository containing dir, or ""
-// when git is unavailable (the caller then cannot tie a reported commit to a
-// revision and says so instead of failing).
+// when no revision can be resolved — the caller then reports that the snapshot
+// carries no revision instead of asserting against an identity it cannot check.
 func gitHead(t *testing.T, dir string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()

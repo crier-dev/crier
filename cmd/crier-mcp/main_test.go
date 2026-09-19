@@ -217,14 +217,20 @@ func TestParseArgs(t *testing.T) {
 // and --version prints a version string and exits 0.
 func TestMCPServerCLIFlags(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "crier-mcp")
-	// Read HEAD before building and again after: a sibling worker may commit
-	// while the build runs, and either revision is a legitimate stamp.
-	headBefore := gitShortHead(t)
-	// DF-CRIER-253: build from an isolated HEAD snapshot, never the live
+	// DF-CRIER-253/259: build from an isolated snapshot, never the live
 	// package directory — a sibling worker mid-edit in cmd/crier-mcp must not
-	// be able to red this package. The snapshot keeps its git metadata, so
-	// the toolchain still stamps vcs.revision for internal/buildinfo.
+	// be able to red this package, and the snapshot must carry git metadata
+	// even when the tree the suite runs in does not: with no commit to stamp,
+	// the binary prints the bare "dev" sentinel and every identity assertion
+	// below fails, which is exactly what a judge or eval running from a copy
+	// of the tree hits.
 	buildDir := testsupport.SnapshotBuildDir(t, ".")
+	// The expected commit is the SNAPSHOT's own revision — the revision the
+	// binary was actually built from — not the caller's checkout, which the
+	// snapshot is deliberately isolated from. The snapshot is frozen (a
+	// detached clone of HEAD, or a copy with a fixed commit), so there is one
+	// legitimate value and no window for a sibling's commit to land inside.
+	head := gitShortHead(t, buildDir)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Dir = buildDir
 	if out, err := build.CombinedOutput(); err != nil {
@@ -274,13 +280,10 @@ func TestMCPServerCLIFlags(t *testing.T) {
 		}
 		commit := match[1]
 		switch {
-		case headBefore == "":
-			t.Logf("git unavailable: cannot tie commit %q to a repo revision", commit)
-		case commit != headBefore:
-			if headAfter := gitShortHead(t); commit != headAfter {
-				t.Errorf("--version reports commit %q, which is neither HEAD (%s) nor the revision HEAD moved to (%s)",
-					commit, headBefore, headAfter)
-			}
+		case head == "":
+			t.Fatalf("the build snapshot %s has no resolvable HEAD, so the binary's commit cannot be tied to the revision it was built from", buildDir)
+		case commit != head:
+			t.Errorf("--version reports commit %q, but it was built from %s (snapshot HEAD)", commit, head)
 		}
 	})
 }
@@ -407,11 +410,13 @@ func TestResolveBridgeTokenNeitherSetNotRemote(t *testing.T) {
 	}
 }
 
-// gitShortHead returns the first 8 characters of the repository HEAD, or ""
-// when git is unavailable (the caller then says so instead of failing).
-func gitShortHead(t *testing.T) string {
+// gitShortHead returns the first 8 characters of the HEAD of the repository
+// containing dir — the shape a build identity carries — or "" when no revision
+// can be resolved (the caller then reports that the snapshot carries no
+// revision instead of asserting against an identity it cannot check).
+func gitShortHead(t *testing.T, dir string) string {
 	t.Helper()
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
 	}
