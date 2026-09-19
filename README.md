@@ -518,6 +518,53 @@ cannot work, and startup says exactly which:
 INFO MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them mode=in-process tools=13 available_tools=9 unavailable_tools="[get_messages ask_agent mesh_peers mesh_request]" missing_env="[CRIER_AGENT_ID CRIER_HTTP_URL CRIER_MESH_URL]"
 ```
 
+##### A worked stdio session
+
+Every tool is a JSON-RPC frame on stdin and one response line on stdout — no MCP
+client, no server, no environment variables, because an unconfigured `crier-mcp`
+serves the same 13 tools from an in-process store. The two tools below are from
+the _nothing_ row above (`register_agent`, `list_agents`), so this whole session
+is copy-pasteable as-is; a tool whose row names environment needs it first.
+
+```bash
+make build-mcp && ./bin/crier-mcp <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hand-rolled","version":"0.1.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"register_agent","arguments":{"id":"demo-agent","public_key":"db4b1d3b0e4a7f9c2d5e8a1b4c7f0e3d6a9b2c5e8f1a4b7c0d3e6f9a2b5c8e1f","capabilities":["demo"]}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_agents","arguments":{}}}
+EOF
+```
+
+Observed stdout — one line per request, each carrying the `id` it answers
+(`notifications/initialized` is a notification with no `id`, so five frames
+produce four lines):
+
+```text
+{"jsonrpc":"2.0","result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"crier-mcp","version":"d25fdf9"},"capabilities":{"tools":{}}},"id":1}
+{"jsonrpc":"2.0","result":{"tools":[{"name":"register_agent","description":"Register a new agent with an ed25519 public key and optional capabilities. …","inputSchema":{"type":"object","properties":{"id":{…},"public_key":{…},"capabilities":{…}},"required":["id"]}}, … 12 more …]},"id":2}
+{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"id\":\"demo-agent\",\"public_key\":\"db4b1d3b0e4a7f9c2d5e8a1b4c7f0e3d6a9b2c5e8f1a4b7c0d3e6f9a2b5c8e1f\",\"capabilities\":[\"demo\"],\"status\":\"online\",\"registered_at\":\"2026-09-19T14:48:01.146463081-05:00\",\"last_seen\":\"2026-09-19T14:48:01.146463081-05:00\"}"}]},"id":3}
+{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"agents\":[{\"id\":\"demo-agent\",\"public_key\":\"db4b1d3b0e4a7f9c2d5e8a1b4c7f0e3d6a9b2c5e8f1a4b7c0d3e6f9a2b5c8e1f\",\"capabilities\":[\"demo\"],\"status\":\"online\",\"registered_at\":\"2026-09-19T14:48:01.146463081-05:00\",\"last_seen\":\"2026-09-19T14:48:01.146463081-05:00\"}]}"}]},"id":4}
+```
+
+The `tools/list` line is elided — the real frame is ~6 KB, every one of the 13
+entries carrying its full `description` and `inputSchema` — but the tool names
+and their order are verbatim. Two sample values are per-run: the `public_key`
+above is demo data (substitute your own when this bridge talks to a signed
+server), and `serverInfo.version` is the version half of the build identity of
+the tree that built the binary — `./bin/crier-mcp --version` prints `v` + that
+same version, followed by the commit it was built from
+(`vd25fdf9-<commit>`, and `-dirty` while the tree has uncommitted changes).
+Two shapes are worth noting before writing a client against this wire:
+
+- a tool result is `result.content[0].text`, and that text is **a JSON string**,
+  not a nested object — a client that reads `result.agents` finds nothing and
+  has to parse the string a second time;
+- a rejected call is still a `result`, flagged rather than raised: e.g.
+  `register_agent` without `public_key`, on a server with signature enforcement
+  on, answers `{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"public_key is required"}],"isError":true},"id":3}`
+  instead of a JSON-RPC `error` object.
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections
