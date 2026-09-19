@@ -10,7 +10,7 @@ Every piece of the project's design is demonstrated here:
 | Piece | Where |
 |---|---|
 | Agent registry + webhook delivery (blocking / async / batch) | every service self-registers; `battery` exercises all lanes |
-| Schema templates (openai-compatible / generic / custom) | agents use `schema_template: generic` + `response_map` |
+| Schema templates (openai-compatible / generic / custom) | agents use `schema_template: generic` (the template's own `raw` extraction — a webhook-level `response_map` is refused with 400) |
 | LLM message guard (allow / block / **sanitize-rewrite**) | `guard.policies` on each agent; real DeepSeek verdicts with `DEEPSEEK_API_KEY` |
 | Per-channel policies, provider presets | policy `id: default` → deepseek preset; override in compose env |
 | Kanban output lane | guard → `hermes kanban` / HTTP writer (see CR-FEAT-014) |

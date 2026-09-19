@@ -8,10 +8,22 @@ PORT = int(os.environ.get("PORT", "9002"))
 CRIER = os.environ.get("CRIER_URL", "http://crier:8767")
 LOCK = threading.Lock()
 COUNT = {"deliveries": 0, "batches": 0}
+# Registration state, served on /ready: an unregistered sink must never look
+# ready (INT-CI-007 — the battery used to see "ready" and then eat 404s).
+REG = {"registered": False, "last_status": None, "last_body": ""}
 
 
 def register():
-    """Self-register with crier as the 'sink' agent (blocking webhook)."""
+    """Self-register with crier as the 'sink' agent (blocking webhook).
+
+    `POST /agents` decodes the `webhook` object STRICTLY — an unknown key is a
+    400 at registration, not a silent drop (d97b777, DF-CRIER-150). The accepted
+    keys are exactly `url, auth_type, auth_value_ref, schema_template,
+    custom_schema, delivery_mode, batch, retries, timeout_ms`, so a webhook-level
+    `response_map` is refused. Reply extraction lives on
+    `custom_schema.response_map`; `schema_template: "generic"` needs none (the
+    template's own default, `raw`, returns the response body).
+    """
     import secrets
     pub = secrets.token_hex(32)
     body = {
@@ -21,22 +33,32 @@ def register():
             "url": f"http://sink:{PORT}/hook",
             "delivery_mode": "blocking",
             "schema_template": "generic",
-            "response_map": {"reply": "reply"},
         },
         "guard": {"policies": [{"id": "default"}]},
     }
     for _ in range(30):
         try:
             r = requests.post(f"{CRIER}/agents", json=body, timeout=3)
+            with LOCK:
+                REG["last_status"] = r.status_code
+                REG["last_body"] = r.text[:300]
             if r.status_code in (200, 201, 409):
                 with LOCK:
-                    COUNT["registered"] = True
-                print(f"sink registered with crier: {r.status_code}")
+                    REG["registered"] = True
+                print(f"sink registered with crier: {r.status_code}", flush=True)
                 return
+            # A rejected registration must be impossible to miss: the server's
+            # response body names the exact field it refused. flush=True — the
+            # container's stdout is block-buffered, so an unflushed line here
+            # would never reach `docker compose logs sink`.
+            print(f"sink registration REJECTED: HTTP {r.status_code} — {r.text[:300]}", flush=True)
         except Exception as e:
-            pass
+            with LOCK:
+                REG["last_body"] = f"{type(e).__name__}: {e}"[:300]
+            print(f"sink registration error: {type(e).__name__}: {e}", flush=True)
         time.sleep(1)
-    print("sink: could not register with crier")
+    print("sink: could not register with crier — "
+          f"last HTTP {REG['last_status']} body {REG['last_body']}", flush=True)
 
 
 class H(BaseHTTPRequestHandler):
@@ -77,17 +99,32 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/health":
             self._send(200, {"status": "ok"})
         elif self.path == "/ready":
-            # live check: re-register if crier lost us (restart/recreate)
+            # Live check: re-register if crier lost us (restart/recreate).
+            # 200 ONLY once registered; until then 503 carrying the last
+            # registration status + body, so a failed registration cannot
+            # masquerade as readiness (INT-CI-007). The process stays alive.
             ok = False
             try:
-                r = requests.get(f"{CRIER}/agents/sink", timeout=3)
-                ok = r.ok
+                ok = requests.get(f"{CRIER}/agents/sink", timeout=3).ok
             except Exception:
                 pass
             if not ok:
                 register()
+                try:
+                    ok = requests.get(f"{CRIER}/agents/sink", timeout=3).ok
+                except Exception:
+                    ok = False
             with LOCK:
-                self._send(200, {"registered": ok})
+                if ok:
+                    REG["registered"] = True
+                    self._send(200, {"ready": True, "registered": True})
+                else:
+                    self._send(503, {
+                        "ready": False,
+                        "registered": False,
+                        "last_status": REG["last_status"],
+                        "last_body": REG["last_body"],
+                    })
         else:
             self._send(404, {"error": "not found"})
 
@@ -96,6 +133,6 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"sink listening :{PORT}")
+    print(f"sink listening :{PORT}", flush=True)
     register()
     HTTPServer(("0.0.0.0", PORT), H).serve_forever()

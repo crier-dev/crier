@@ -25,7 +25,7 @@ dockerd).
 | Piece | Where in the stack |
 |---|---|
 | Agent registry + webhook delivery (blocking / async / batch) | every service self-registers; `battery` exercises blocking round-trips + the async lane; the sink counts batch POSTs |
-| Schema templates (generic / openai-compatible / hermes-http-gateway) | agents use `schema_template: generic` + `response_map`; the bunker-matrix blocking cell uses `openai-compatible` |
+| Schema templates (generic / openai-compatible / hermes-http-gateway) | agents use `schema_template: generic` (no `response_map` — the template's own `raw` extraction applies, §3.2); the bunker-matrix blocking cell uses `openai-compatible` |
 | LLM message guard (allow / block / sanitize-rewrite) | `guard.policies` on each agent; real DeepSeek verdicts when `DEEPSEEK_API_KEY` is set, fail-open otherwise (CR-SPEC-002) |
 | Per-channel policies, provider presets | policy `id: default` → deepseek preset; overridable via `CR_GUARD_DEFAULT_POLICY` / per-agent policy JSON |
 | Kanban output lane | guard → `hermes kanban` / HTTP writer (CR-FEAT-014; opt-in per policy — not exercised by the battery) |
@@ -117,9 +117,10 @@ authority for that ticket; the following contracts are normative once the ticket
 - **Shared consumer**: one `consumer.mjs` parameterized by environment —
   `AGENT_ID`, `HARNESS`, `PORT`, `CRIER_URL`, and the per-harness live-mode env — replacing the
   per-harness consumer duplication. The shared consumer keeps the shipped contract: register at
-  boot (blocking webhook, `schema_template: generic`, `response_map {"reply": "reply"}`, guard
-  default policy), `/health`, `/ready` with live re-register, `/hook` with canned reply unless
-  the harness's live env is set (pattern: `OPENCODE_LIVE=1`).
+  boot (blocking webhook, `schema_template: generic` — reply extraction is the template's own
+  default, so no `response_map` is sent, §3.1/§3.2 — guard default policy), `/health`, `/ready`
+  with live re-register, `/hook` with canned reply unless the harness's live env is set
+  (pattern: `OPENCODE_LIVE=1`).
 - **Per-harness real runtime** stays in each Dockerfile: claude-code via
   `npm install -g @anthropic-ai/claude-code` (node:22-alpine), codex via
   `npm install -g @openai/codex` (node:22-alpine), aider via `pip install aider-chat`
@@ -139,7 +140,7 @@ authority for that ticket; the following contracts are normative once the ticket
 ### 3.1 Self-registration payload
 
 Every harness registers itself with crier at boot via `POST /agents`. The shipped payload
-(sink/echo_sink.py and both consumer.mjs files are byte-identical in shape):
+(sink/echo_sink.py and consumer/consumer.mjs are identical in shape):
 
 ```json
 {
@@ -148,12 +149,19 @@ Every harness registers itself with crier at boot via `POST /agents`. The shippe
   "webhook": {
     "url": "http://sink:9002/hook",
     "delivery_mode": "blocking",
-    "schema_template": "generic",
-    "response_map": {"reply": "reply"}
+    "schema_template": "generic"
   },
   "guard": {"policies": [{"id": "default"}]}
 }
 ```
+
+The `webhook` object is decoded **strictly** (d97b777, DF-CRIER-150): an unknown key is a
+**400 at registration** — the response names the refused key — not a silently dropped field.
+The accepted keys are exactly `url, auth_type, auth_value_ref, schema_template, custom_schema,
+delivery_mode, batch, retries, timeout_ms`. In particular there is **no webhook-level
+`response_map`**: reply extraction belongs to `custom_schema.response_map` (§3.2), and with
+`schema_template: "generic"` the template's own default extraction applies, so no `response_map`
+is sent at all.
 
 - `public_key` — generated at boot (`secrets.token_hex(32)` in python, 32 random bytes hex in
   node). The registry stores it; the demo wiring does **not** sign messages (§8).
@@ -162,8 +170,11 @@ Every harness registers itself with crier at boot via `POST /agents`. The shippe
 - `webhook.delivery_mode` — `blocking` for sink/pi-agent/opencode; `async` for hermes.
 - Registration response: 200/201 accepted; **409 = already registered, treated as success**
   (idempotent — harnesses may restart against a warm registry).
-- Registration is retried in a loop at boot (sink: 30×1s; consumer.mjs: single attempt on
-  listen, re-attempted via `/ready`).
+- A registration whose status is **none of 200/201/409** is logged with the status **and the
+  response body** (bounded to 300 chars — the server names the refused field), then re-attempted
+  (sink: 30×1s at boot; consumer.mjs: re-attempted on every `/ready`). Until `GET /agents/<id>`
+  succeeds, `/ready` answers **503** `{"ready": false, "registered": false, "last_status": N,
+  "last_body": "…"}` — an unregistered harness can never look ready (INT-CI-007).
 
 ### 3.2 schema_template + response_map
 
@@ -172,11 +183,11 @@ reply from its response (CR-FEAT-003, specs/WEBHOOK-DELIVERY.md §6). The ecosys
 two named templates:
 
 - **`generic`** (alias of `generic-custom`, the default) — **passthrough**: the full Crier
-  envelope is POSTed unchanged. `response_map` selects the reply from the response body:
-  `"raw"` (default; whole JSON body, plain text wrapped in a JSON string) or a **dot path**
-  (arrays by index — e.g. `choices.0.message.content`). The ecosystem agents set
-  `response_map: {"reply": "reply"}` — i.e. the string `"reply"`, extracting the sink's
-  `{"reply": "ECHO: ..."}` field.
+  envelope is POSTed unchanged, and the reply comes from the template's own default extraction
+  `response_map: "raw"` — the whole response body (plain text wrapped in a JSON string, a JSON
+  body returned as that JSON value). The ecosystem agents therefore send **no `response_map`**:
+  the sink's `{"reply": "ECHO: ..."}` body is handed back to the sender as that object, which is
+  what the battery asserts (`ECHO` / `"reply":"`).
 - **`openai-compatible`** — the outbound body is **shaped** as a chat-completions request
   (`{"model": "{{agent.model|default:deepseek-v4-flash}}", "messages": [{"role": "user",
   "content": "{{payload.text}}"}], "stream": false}`) and the reply is extracted from
@@ -188,9 +199,14 @@ two named templates:
   openai-compatible) but is **not** used by the ecosystem stack; `custom_schema` (request
   shape + response map) wins over any named template when present.
 
-A custom `response_map` **always** wins over the named template's default. Reply extraction
-errors (missing key, bad index) fail the blocking delivery — the sender gets an error, never a
-silently empty reply (driver.go:240).
+A `response_map` is a field of **`custom_schema`** — `webhook.custom_schema.response_map`
+(`internal/webhook/webhook.go:70-77`), *not* a webhook-level field. It takes `"raw"` (whole
+body) or a **dot path** with arrays by index (e.g. `choices.0.message.content`), and is only
+sent when the harness brings its own schema; a custom `response_map` **always** wins over the
+named template's default. A webhook-level `response_map` is an unknown key and the strict
+decoder refuses the registration with **400** (DF-CRIER-150) — that is the shape the examples
+shipped until INT-CI-007. Reply extraction errors (missing key, bad index) fail the blocking
+delivery — the sender gets an error, never a silently empty reply (driver.go:240).
 
 ### 3.3 Guard default policy
 
@@ -214,8 +230,10 @@ Every harness registers `guard: {"policies": [{"id": "default"}]}`. Resolution i
 
 A crier restart wipes the memory registry. Every thin consumer implements a **live check on
 `/ready`**: `GET /agents/<id>`; on non-200 the harness re-runs `register()` before answering.
-The battery's `wait_ready` calls `/ready` for sink/pi-agent/opencode before any probe
-(battery.sh:41-43), so a restarted crier mid-battery self-heals. Hermes has no `/ready` —
+`/ready` is **200 only once registered** and **503** with `{"ready": false, "registered": false,
+"last_status": N, "last_body": "…"}` until then, so a harness whose registration was refused can
+never be mistaken for a ready agent. The battery's `wait_ready` calls `/ready` for all seven thin
+consumers before any probe, so a restarted crier mid-battery self-heals. Hermes has no `/ready` —
 re-registration is manual (`docker compose exec hermes bash /etc/cont-init.d/10-register-crier.sh`,
 documented in hermes/README.md).
 
@@ -243,7 +261,7 @@ probes never serialize against each other.
 | # | Probe | Method/path | Payload | Expect |
 |---|---|---|---|---|
 | 0 | `crier health` | `GET /health` | — | 200, body contains `ok` |
-| — | readiness `wait_ready` ×3 | `GET /ready` on sink / pi-agent / opencode | — | 200 within 60s each; **exits 1** on timeout (not counted in PASS/FAIL) |
+| — | readiness `wait_ready` ×7 + registration `wait_registered` ×7 (INT-CI-007) | `GET /ready` on sink / pi-agent / opencode / claude-code / codex / aider / goose, then `GET /agents/<id>` on the same seven ids | — | `/ready` 200 within 60s each (**exits 1** on timeout, not counted in PASS/FAIL; `/ready` is 200 only once registered, so this also surfaces a refused registration); `GET /agents/<id>` 200 within 60s each — on timeout it prints the id, the last HTTP status and the last body, counts one **FAIL** and returns non-zero, and the run continues so the tally still prints. One evidence line per registration wait: `{"ts","event":"registered","agent":<id>,"http":<status>,"seconds":<n>}` (`"timeout":true` on failure) |
 | 1 | `round-trip pi-agent via crier` | `POST /agents/pi-agent/inbox` | `{"payload":{"text":"What is the capital of France?"},"sender":"battery","session_id":"eco-pi","delivery_mode":"blocking","timeout_ms":30000}` | 200, body contains `"reply":"` |
 | 2 | `round-trip opencode via crier` | `POST /agents/opencode/inbox` | same, `"session_id":"eco-oc"`, text "Explain what a message bus is.", 30000 | 200, body contains `"reply":"` |
 | 3 | `round-trip sink echo via crier` | `POST /agents/sink/inbox` | same, `"session_id":"eco-sink"`, text "What vegetable is in plot B?", 15000 | 200, body contains `ECHO` |

@@ -31,6 +31,29 @@ wait_ready() { # name url
   for i in $(seq 1 60); do curl -sf "$u/ready" >/dev/null 2>&1 && { echo "ready: $n"; return 0; }; sleep 1; done
   echo "TIMEOUT waiting for $n"; return 1
 }
+wait_registered() { # agent-id — gate the round-trips on REGISTRATION, not on a
+  # process that merely answers /ready: a round-trip against an id crier does
+  # not know is a 404, not a bus failure (INT-CI-007).
+  local id="$1" i status body t0 t1
+  t0=$(date +%s)
+  for i in $(seq 1 60); do
+    status="$(curl -s -o "/tmp/wait_registered.$id" -w '%{http_code}' "$CRIER/agents/$id")"
+    if [[ "$status" == "200" ]]; then
+      t1=$(date +%s)
+      echo "registered: $id (HTTP $status, $((t1-t0))s)"
+      echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"registered\",\"agent\":\"$id\",\"http\":$status,\"seconds\":$((t1-t0))}" >> "$EVIDENCE"
+      return 0
+    fi
+    sleep 1
+  done
+  t1=$(date +%s)
+  body="$(head -c 300 "/tmp/wait_registered.$id" 2>/dev/null)"
+  echo "REGISTRATION TIMEOUT: $id (last HTTP $status, $((t1-t0))s)"
+  echo "      body: $body"
+  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"registered\",\"agent\":\"$id\",\"http\":$status,\"seconds\":$((t1-t0)),\"timeout\":true}" >> "$EVIDENCE"
+  FAIL=$((FAIL+1))
+  return 1
+}
 
 say "battery start — crier=$CRIER key=$([ -n "$KEY" ] && echo yes || echo no)"
 echo "[\"battery\",\"start\",\"$(date -u +%FT%TZ)\"]" >> "$EVIDENCE"
@@ -46,6 +69,17 @@ wait_ready "claude-code" "http://claude-code:9103" || exit 1
 wait_ready "codex" "http://codex:9104" || exit 1
 wait_ready "aider" "http://aider:9105" || exit 1
 wait_ready "goose" "http://goose:9106" || exit 1
+
+# 1b. registration gate: crier must actually KNOW each agent before any
+# round-trip — an unregistered id 404s, which is not a bus failure
+# (INT-CI-007). Each wait writes one evidence line (agent, status, seconds).
+wait_registered "sink"
+wait_registered "pi-agent"
+wait_registered "opencode"
+wait_registered "claude-code"
+wait_registered "codex"
+wait_registered "aider"
+wait_registered "goose"
 
 # 2. round-trips through the bus (blocking delivery, schema template)
 probe "round-trip pi-agent via crier" 200 '"reply":"' POST "/agents/pi-agent/inbox" \

@@ -64,8 +64,10 @@ All eight harnesses in the stack — seven are thin consumers running the **shar
 (`consumer/consumer.mjs`, parameterized by `AGENT_ID` / `HARNESS` / `PORT` / `CRIER_URL` /
 `DEEPSEEK_API_KEY` + the per-harness live-mode env), the eighth (hermes) is a full agent
 runtime. Every consumer self-registers with crier at boot (`POST /agents`, blocking webhook,
-`schema_template: generic`, `response_map {"reply": "reply"}`, guard policy `default`),
-answers `/health` and `/ready`, and receives webhook POSTs on `/hook`.
+`schema_template: generic` — reply extraction is the template's own default, so **no
+`response_map` is sent**: a webhook-level `response_map` is an unknown key and the strict
+decoder refuses the registration with **400** (§6.7) — guard policy `default`),
+answers `/health` and `/ready` (200 only once registered), and receives webhook POSTs on `/hook`.
 
 Master table (agent id · container port · host port default · live-mode env):
 
@@ -299,7 +301,11 @@ makes the battery CI-friendly: `docker compose run --rm battery` fails the job o
    PASS iff the HTTP code equals `want` AND (contains is empty OR the body contains it). On
    FAIL it prints the truncated body (300 chars) for the run log.
 2. For a readiness gate use `wait_ready <name> <url>` (polls `/ready` 60×1s; **exits 1** on
-   timeout, not counted in PASS/FAIL).
+   timeout, not counted in PASS/FAIL). For a registration gate use
+   `wait_registered <agent-id>` (polls `GET /agents/<id>` 60×1s; on timeout it prints the id, the
+   last HTTP status and body, counts one **FAIL** and returns non-zero). Register gates run
+   before any round-trip: a round-trip against an id crier does not know is a 404, not a bus
+   failure (INT-CI-007).
 3. Use a **distinct `session_id`** (`eco-<name>`): blocking delivery is serialized per
    session, so probes with unique sessions never serialize against each other.
 4. Rebuild the battery image with `--build` and re-run; commit the probe with the battery.sh
@@ -495,8 +501,11 @@ compose up -d --build` rebuilds the harness images.
 A crier restart wipes the in-memory registry; agents that registered at boot are "gone" from
 crier's point of view even though their containers are still up. Every thin consumer
 implements a live check on `/ready`: `GET /agents/<id>`, and on non-200 it re-runs
-`register()` before answering. The battery's `wait_ready` calls `/ready` for all seven
-consumers before any probe, so a restarted crier mid-battery self-heals. The sink re-registers
+`register()` before answering; `/ready` is **200 only once registered**, and **503**
+(`{"ready":false,"registered":false,"last_status":…,"last_body":"…"}`) while it is not — so a
+harness whose registration was refused never looks ready. The battery's `wait_ready` calls
+`/ready` for all seven consumers before any probe — and `wait_registered` then waits for
+`GET /agents/<id>` — so a restarted crier mid-battery self-heals. The sink re-registers
 up to 30×1s at boot; the node consumers register once on listen and rely on `/ready` for
 recovery. **Hermes has no `/ready`** — re-register manually:
 `docker compose exec hermes bash /etc/cont-init.d/10-register-crier.sh`.
@@ -533,6 +542,31 @@ would fail open and the injection probe would 201). To exercise the guard matrix
 `12 pass / 0 fail / 0 skip`. If the matrix SKIPs WITH a key set, the key did not reach the
 battery container (compose interpolates `${DEEPSEEK_API_KEY:-}` at `up` time — recreate the
 containers, don't just export the var).
+
+### 6.7 A refused registration is a 400, not a silent drop (the webhook object is strict)
+
+`POST /agents` decodes the **`webhook` object strictly** (d97b777, DF-CRIER-150): an unknown key
+is a **400 naming the refused field**, and the agent is never registered — so every later
+round-trip answers `404 {"error":"agent not found: \"<id>\""}` and the battery reads like a
+transient bus flake. The accepted keys are exactly `url, auth_type, auth_value_ref,
+schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms`; there is **no
+webhook-level `response_map`** (reply extraction lives on `custom_schema.response_map` — §2).
+Reproduce the refusal from outside the stack:
+
+```bash
+PUB=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+curl -s -w '\n%{http_code}\n' -X POST http://localhost:28767/agents \
+  -H 'Content-Type: application/json' \
+  -d "{\"id\":\"probe\",\"public_key\":\"$PUB\",\"webhook\":{\"url\":\"http://sink:9002/hook\",\"delivery_mode\":\"blocking\",\"schema_template\":\"generic\",\"response_map\":{\"reply\":\"reply\"}}}"
+# HTTP 400 — webhook: unknown field "response_map" (accepted: url, auth_type, auth_value_ref,
+#            schema_template, custom_schema, delivery_mode, batch, retries, timeout_ms)
+```
+
+The failure is loud at three layers (INT-CI-007): the agent prints
+`registration REJECTED: HTTP 400 — <server body>`, `/ready` answers **503**
+`{"ready":false,"registered":false,"last_status":400,"last_body":"…"}` instead of claiming
+readiness, and the battery's `wait_registered` times out on `GET /agents/<id>` and counts a FAIL
+before any round-trip runs.
 
 ---
 

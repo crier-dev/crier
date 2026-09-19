@@ -36,9 +36,18 @@ const LIVE_ENV = {
 const LIVE = HARNESS === "pi-agent" ? !!KEY : process.env[LIVE_ENV] === "1" && !!KEY;
 
 let registered = false;
+let lastStatus = null;
+let lastBody = "";
 
 async function register() {
   const pub = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  // `POST /agents` decodes the `webhook` object STRICTLY — an unknown key is a
+  // 400 at registration, not a silent drop (d97b777, DF-CRIER-150). Accepted
+  // keys are exactly url, auth_type, auth_value_ref, schema_template,
+  // custom_schema, delivery_mode, batch, retries, timeout_ms — so a
+  // webhook-level `response_map` is refused. Reply extraction lives on
+  // `custom_schema.response_map`; `schema_template: "generic"` needs none (the
+  // template's own default, `raw`, returns the response body).
   const body = {
     id: AGENT_ID,
     public_key: pub,
@@ -46,7 +55,6 @@ async function register() {
       url: `http://${AGENT_ID}:${PORT}/hook`,
       delivery_mode: "blocking",
       schema_template: "generic",
-      response_map: { reply: "reply" },
     },
     guard: { policies: [{ id: "default" }] },
   };
@@ -55,8 +63,16 @@ async function register() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  lastStatus = r.status;
+  lastBody = (await r.text()).slice(0, 300);
   registered = r.ok || r.status === 409;
-  console.log(`${AGENT_ID} registered: ${r.status}`);
+  if (registered) {
+    console.log(`${AGENT_ID} registered: ${r.status}`);
+  } else {
+    // A rejected registration must be impossible to miss: the response body
+    // names the exact field the server refused.
+    console.log(`${AGENT_ID} registration REJECTED: HTTP ${r.status} — ${lastBody}`);
+  }
 }
 
 // Run a CLI harness binary; 60s cap so a slow model bootstrap never exceeds
@@ -132,8 +148,13 @@ createServer(async (req, res) => {
     res.end(b);
   };
   if (req.method === "GET" && req.url === "/ready") {
+    // 200 ONLY once registered; until then 503 naming the last registration
+    // attempt, so an unregistered agent cannot masquerade as ready
+    // (INT-CI-007). The process keeps serving either way — never exit 0
+    // pretending to be ready.
     const ok = await ensureRegistered();
-    return send(200, { registered: ok });
+    if (ok) return send(200, { ready: true, registered: true });
+    return send(503, { ready: false, registered: false, last_status: lastStatus, last_body: lastBody });
   }
   if (req.method === "GET" && req.url === "/health") return send(200, { status: "ok" });
   if (req.method === "POST" && req.url === "/hook") {
