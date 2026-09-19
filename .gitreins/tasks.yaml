@@ -1698,3 +1698,12 @@ tasks:
   status: complete
   created_at: '2026-09-19T02:26:47.158942+00:00'
   completed_at: '2026-09-19T02:51:31.825950+00:00'
+- id: DF-CRIER-113
+  title: Expose effective runtime configuration status
+  criteria:
+  - Add a documented, authenticated runtime status endpoint that reports effective
+    auth, guard, backend, and build identity without secrets; include tests and docs/openapi
+    parity.
+  status: complete
+  created_at: '2026-09-19T03:31:28.660021+00:00'
+  completed_at: '2026-09-19T04:04:34.219869+00:00'
