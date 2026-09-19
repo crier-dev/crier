@@ -1800,3 +1800,12 @@ tasks:
   status: complete
   created_at: '2026-09-19T14:19:47.408850+00:00'
   completed_at: '2026-09-19T14:36:21.416546+00:00'
+- id: DF-CRIER-92
+  title: Ecosystem request contract not usable from the guide alone
+  criteria:
+  - 'README Sending section shows a complete correct blocking request body and documents
+    the wrong-shape trap (200 ECHO: no text); battery carries a wrong-shape negative-control
+    probe; live round-trip + battery run pass with 0 FAIL'
+  status: complete
+  created_at: '2026-09-19T16:38:17.148568+00:00'
+  completed_at: '2026-09-19T16:46:05.430610+00:00'
