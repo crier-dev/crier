@@ -45,8 +45,7 @@
 #   CRIER_PORT_BASE / ADAPTER_PORT_BASE
 #                        first candidate of that service's rotation
 #                        (default 18788 / 18793)
-#   DEMO_TRANSCRIPT      write the capture here instead of
-#                        TRANSCRIPT-<date>.md next to this script
+#   DEMO_TRANSCRIPT      override transcript path (default below)
 #   An EXPLICIT port is checked and never rotated away from: an occupied one
 #   aborts the run naming its holder, because a run on a port the operator did
 #   not name would misreport what was measured.
@@ -57,7 +56,11 @@
 #                        otherwise the adapter answers canned but
 #                        session-aware, so the demo runs offline.
 #
-# Output: TRANSCRIPT-<date>.md in this directory (real output, teed live).
+# Output: the transcript is teed OUTSIDE the repo, to
+#   ${TMPDIR:-/tmp}/hermes-gateway-demo-TRANSCRIPT-<date>.XXXXXX.md
+# and its path is printed at the end of the run. New runs never write into the
+# repo: the committed TRANSCRIPT-<date>.md files here are historical records and
+# stay untouched (DF-CRIER-207).
 #
 set -euo pipefail
 
@@ -106,10 +109,20 @@ WORKDIR="$(mktemp -d /tmp/crier-demo.XXXXXX)"
 CRIER_BIN="$WORKDIR/crier"
 CRIER_LOG="$WORKDIR/crier.log"
 ADAPTER_LOG="$WORKDIR/adapter.log"
-# DEMO_TRANSCRIPT (as in the ws-mesh demo) points the capture outside the repo —
-# the selftest uses it so a test run cannot dirty git status; the default keeps
-# writing the historical TRANSCRIPT-<date>.md next to this script.
-TRANSCRIPT="${DEMO_TRANSCRIPT:-$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md}"
+# ── Transcript: outside the repo, mktemp-derived, never overwrites a previous run ──
+# DEMO_TRANSCRIPT (as in the ws-mesh demo) overrides the path — the selftest uses
+# it so a test run cannot dirty git status. The DEFAULT is mktemp-derived under
+# ${TMPDIR:-/tmp}: a re-run can no longer rewrite a tracked TRANSCRIPT-<date>.md on
+# a committed date (the files in this directory are historical records and stay
+# untouched — DF-CRIER-207). Concurrent runs get separate files.
+TRANSCRIPT_DIR="${TMPDIR:-/tmp}"
+if [ -n "${DEMO_TRANSCRIPT:-}" ]; then
+  TRANSCRIPT="$DEMO_TRANSCRIPT"
+  mkdir -p "$(dirname "$TRANSCRIPT")"
+  : > "$TRANSCRIPT"
+else
+  TRANSCRIPT="$(mktemp "$TRANSCRIPT_DIR/hermes-gateway-demo-TRANSCRIPT-$(date +%Y-%m-%d).XXXXXX.md")"
+fi
 
 CRIER_PID=""
 ADAPTER_PID=""
