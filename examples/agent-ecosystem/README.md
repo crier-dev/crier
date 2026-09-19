@@ -24,17 +24,24 @@ compose up -d`, done (compose plugin v2.39+ installed on the agent).
 
 ```bash
 # 1. bring up the stack (crier + sink + pi-agent + opencode + claude-code + codex + aider + goose)
+#    The battery is profile-gated: `up` never runs it (DF-CRIER-88/90).
 docker compose up -d --build
 
-# 2. run the full battery of tests (--build so a patched battery.sh is picked up)
-docker compose run --rm --build battery
+# 2. run the full battery of tests — ONE-SHOT and explicit (compose profile `battery`).
+#    It builds its own image if missing and never rebuilds/recreates the stack, so it can
+#    be re-run without resetting crier's in-memory registry.
+docker compose --profile battery run --rm battery
 #    → 10+ probes: health, round-trips through the bus, async delivery,
 #      LLM guard matrix (with DEEPSEEK_API_KEY set)
 
 # 3. with the guard live (real verdicts):
 DEEPSEEK_API_KEY=sk-... docker compose up -d
-docker compose run --rm --build battery
+docker compose --profile battery run --rm battery
 ```
+
+To rebuild only the battery image after editing `battery.sh` (never add `--build` to the
+`run` command — it rebuilds the whole dependency graph and recreates the crier container):
+`docker compose --profile battery build battery`.
 
 The stack publishes eight host ports — crier `18767`, sink `19002`,
 pi-agent/opencode/claude-code/codex/aider/goose `19101`–`19106` — and each one is an
@@ -80,7 +87,7 @@ battery done: 12 pass / 0 fail
 | `aider` | Aider (python) consumer (`aider --message`); live with `AIDER_LIVE=1` + key | 19105 |
 | `goose` | Goose (block/goose, rust binary) consumer (`goose run`); live with `GOOSE_LIVE=1` + key | 19106 |
 | `hermes` | Hermes agent (profile-gated; image `hermes-agent:latest`) | — |
-| `battery` | the full battery of tests (run with `docker compose run`) | — |
+| `battery` | the full battery of tests (profile-gated one-shot: `docker compose --profile battery run --rm battery`) | — |
 
 All consumers (pi-agent through goose) run the **same shared consumer**
 (`consumer/consumer.mjs`) — parameterized by `AGENT_ID` / `HARNESS` / `PORT` /
@@ -109,7 +116,7 @@ only ship this directory, so pre-build the images and load them:
 
 ```bash
 bunker spawn my-lab --server <bunker> --cpu 2.0 --ttl 168h
-docker compose build                                   # local build (all images)
+docker compose --profile battery build              # local build (all images, battery included)
 docker save crier-agent-ecosystem-crier:latest crier-agent-ecosystem-sink:latest \
   crier-agent-ecosystem-pi-agent:latest crier-agent-ecosystem-opencode:latest \
   crier-agent-ecosystem-claude-code:latest crier-agent-ecosystem-codex:latest \
@@ -119,7 +126,7 @@ scp -r -i ~/.bunker/keys/my-lab examples/agent-ecosystem bunker-my-lab@<host>:~/
 scp -i ~/.bunker/keys/my-lab /tmp/ecosystem-images.tar.gz bunker-my-lab@<host>:~/
 bunker exec my-lab -- docker load -i ~/ecosystem-images.tar.gz
 bunker exec my-lab -- bash -c 'cd ~/agent-ecosystem && CRIER_HOST_PORT=30001 SINK_HOST_PORT=30002 PI_HOST_PORT=30003 OPENCODE_HOST_PORT=30004 CLAUDE_CODE_HOST_PORT=30005 CODEX_HOST_PORT=30006 AIDER_HOST_PORT=30007 GOOSE_HOST_PORT=30008 docker compose up -d'
-bunker exec my-lab -- bash -c 'cd ~/agent-ecosystem && docker compose run --rm battery'
+bunker exec my-lab -- bash -c 'cd ~/agent-ecosystem && docker compose --profile battery run --rm battery'
 # poke the stack from outside: http://<bunker-ip>:30001/health etc.
 ```
 

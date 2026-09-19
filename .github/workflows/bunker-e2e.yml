@@ -79,11 +79,11 @@ jobs:
         run: |
           cd examples/agent-ecosystem
           docker compose up -d --build
-          docker compose run --rm battery
+          docker compose --profile battery run --rm battery
       - name: Capture battery evidence
         if: always()
         run: |
-          docker compose -f examples/agent-ecosystem/docker-compose.yml run --rm --no-deps battery \
+          docker compose -f examples/agent-ecosystem/docker-compose.yml --profile battery run --rm --no-deps battery \
             sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl || true
       - name: Attach evidence
         if: always()

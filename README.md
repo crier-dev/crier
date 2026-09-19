@@ -726,9 +726,22 @@ with real DeepSeek verdicts when `DEEPSEEK_API_KEY` is set).
 
 ```bash
 cd examples/agent-ecosystem
+
+# 1. the long-lived stack only — crier + the agent consumers. The battery is
+#    profile-gated, so `up` never runs it (DF-CRIER-88/90).
 docker compose up -d --build
-docker compose run --rm --build battery
+
+# 2. the battery is a ONE-SHOT, explicit command: it runs exactly once, builds its
+#    own image if it is missing, and never rebuilds or recreates the stack — so
+#    re-running it leaves crier's container (and every agent registration) intact.
+docker compose --profile battery run --rm battery
 ```
+
+The two steps are independent: step 1 starts the stack and never runs the battery,
+step 2 is the only thing that runs it. After editing `battery/battery.sh`, rebuild
+just that image with `docker compose --profile battery build battery` — never add
+`--build` to the `run` command, which rebuilds the whole dependency graph and
+recreates the crier container (`docs/AGENT-ECOSYSTEM.md` §3, §6.2).
 
 Setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops and
 troubleshooting: [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) (CR-FEAT-022). The

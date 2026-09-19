@@ -15,18 +15,28 @@ wins**.
 
 ## 1. Quickstart
 
-Three commands get the whole mesh running on any Docker host (laptop, CI runner, bunker agent
+Two commands get the whole mesh running on any Docker host (laptop, CI runner, bunker agent
 with rootless dockerd):
 
 ```bash
 cd examples/agent-ecosystem
 
 # 1. bring up the stack: crier + sink + pi-agent + opencode + claude-code + codex + aider + goose
+#    The battery is profile-gated: `up` starts the long-lived stack ONLY and never
+#    runs the battery (DF-CRIER-88/90).
 docker compose up -d --build
 
-# 2. run the full battery of tests (--build so a patched battery.sh is picked up)
-docker compose run --rm --build battery
+# 2. run the full battery of tests — a ONE-SHOT, explicit command (compose profile `battery`).
+#    It builds its own image if it is missing and never rebuilds or recreates the stack,
+#    so re-running it runs the battery again against the SAME stack.
+docker compose --profile battery run --rm battery
 ```
+
+The battery is a separate one-shot service, never part of `up`: step 2 runs it exactly once
+against the stack step 1 started, and re-running step 2 leaves crier's container, its in-memory
+registry and every harness registration exactly as they were. Rebuilding the battery image
+after editing `battery.sh` is its own stack-safe command —
+`docker compose --profile battery build battery` (§6.2).
 
 No API key needed: without `DEEPSEEK_API_KEY` every harness answers with a deterministic canned
 reply, the guard fails open, and the battery skips its guard matrix. Expect:
@@ -43,7 +53,7 @@ recreated to pick it up:
 ```bash
 # 3. key mode: real guard verdicts + real harness runs
 DEEPSEEK_API_KEY=sk-... docker compose up -d
-docker compose run --rm --build battery
+docker compose --profile battery run --rm battery
 ```
 
 Expect `battery done: 12 pass / 0 fail / 0 skip` (the two guard probes join the run).
@@ -234,13 +244,19 @@ battery deterministic on any host.
 ## 3. Battery user guide
 
 `battery/battery.sh` (image `python:3.12-alpine` + `apk add curl bash`, entrypoint
-`bash battery.sh`) is the stack's test suite. Run it with:
+`bash battery.sh`) is the stack's test suite. It is a **one-shot, profile-gated** service
+(DF-CRIER-88/90) — `docker compose up -d --build` never runs it, and it is run explicitly:
 
 ```bash
-docker compose run --rm --build battery
+docker compose --profile battery run --rm battery
 ```
 
-(`--build` rebuilds the battery image — see §6.2 for why that matters.)
+Running it a second time runs the battery a second time against the **same** stack: crier is
+not rebuilt or recreated, so its in-memory registry and every harness registration survive.
+The image is built on demand by that command if it does not exist yet; after editing
+`battery.sh`, rebuild only the battery image with
+`docker compose --profile battery build battery` (§6.2) — never add `--build` to the `run`
+command, which rebuilds the whole dependency graph and recreates the stack.
 
 ### 3.1 Run modes
 
@@ -283,12 +299,19 @@ Note: `scripts/bunker-matrix.sh` writes the same shape with the field named **`c
 instead of `test` — consumers must not assume `test` in matrix evidence. Evidence never
 contains keys or tokens (bodies are truncated and JSON-encoded).
 
+The evidence file lives on the `battery-evidence` volume, so it is **appended to** by every
+battery run and survives `run --rm`: N runs leave N header + probe blocks, and an old run's
+FAIL line stays in the file. Judge a single run by slicing to the lines **after the last
+`["battery","start",…]` marker** (or start from a clean slate —
+`docker compose --profile battery down -v`, §6.2).
+
 ### 3.3 Exit code semantics
 
 `set -uo pipefail`; the final line is
 `battery done: N pass / M fail / K skip (evidence $EVIDENCE)` and the script exits with
 `[[ $FAIL -eq 0 ]]` — **exit 0 iff zero failures**, SKIPs don't fail the run. That is what
-makes the battery CI-friendly: `docker compose run --rm battery` fails the job on any FAIL.
+makes the battery CI-friendly: `docker compose --profile battery run --rm battery` fails the
+job on any FAIL.
 
 ### 3.4 How to add a probe
 
@@ -308,7 +331,8 @@ makes the battery CI-friendly: `docker compose run --rm battery` fails the job o
    failure (INT-CI-007).
 3. Use a **distinct `session_id`** (`eco-<name>`): blocking delivery is serialized per
    session, so probes with unique sessions never serialize against each other.
-4. Rebuild the battery image with `--build` and re-run; commit the probe with the battery.sh
+4. Rebuild the battery image with `docker compose --profile battery build battery` and re-run
+   (`docker compose --profile battery run --rm battery`); commit the probe with the battery.sh
    change (the evidence file lives on a volume — never commit your local run's evidence
    unless it is a deliberate live-verification record like
    `battery/evidence/remote-bunker-server-2026-08-24.jsonl`).
@@ -326,9 +350,11 @@ agent's key (`~/.bunker/keys/my-lab`).
 # 0. (new agent only) the agent needs the docker compose plugin — see §4.4
 bunker spawn my-lab --server <bunker> --cpu 2.0 --ttl 168h
 
-# 1. prebuild ALL images locally (crier builds from the repo root — see §4.3)
+# 1. prebuild ALL images locally, battery included (crier builds from the repo root — see §4.3).
+#    `--profile battery` is required here: the battery is a profiled service, so a plain
+#    `docker compose build` skips it and step 2 below ships the battery image.
 cd examples/agent-ecosystem
-docker compose build
+docker compose --profile battery build
 
 # 2. save + compress the 9 images (compose project prefix = crier-agent-ecosystem)
 docker save crier-agent-ecosystem-crier:latest crier-agent-ecosystem-sink:latest \
@@ -348,7 +374,7 @@ bunker exec my-lab -- docker load -i /home/bunker-my-lab/ecosystem-images.tar.gz
 bunker exec my-lab -- bash -c 'cd /home/bunker-my-lab/agent-ecosystem && CRIER_HOST_PORT=30001 SINK_HOST_PORT=30002 PI_HOST_PORT=30003 OPENCODE_HOST_PORT=30004 CLAUDE_CODE_HOST_PORT=30005 CODEX_HOST_PORT=30006 AIDER_HOST_PORT=30007 GOOSE_HOST_PORT=30008 docker compose up -d'
 
 # 6. run the battery against the remote stack
-bunker exec my-lab -- bash -c 'cd /home/bunker-my-lab/agent-ecosystem && docker compose run --rm battery'
+bunker exec my-lab -- bash -c 'cd /home/bunker-my-lab/agent-ecosystem && docker compose --profile battery run --rm battery'
 
 # 7. poke the stack from outside (tailnet)
 curl -s http://<bunker-ip>:30001/health
@@ -427,7 +453,7 @@ self-hosted bunker runner for deploy/battery jobs and `ubuntu-latest` for the im
 |---|---|---|---|---|
 | `docker-image` | ubuntu-latest | — | **push only** | `docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ...:latest .`; login GHCR with `secrets.GITHUB_TOKEN`; push both tags |
 | `bunker-matrix` | [self-hosted, bunker] | `docker-image` | dispatch \| schedule \| push **and** docker-image success | `bash scripts/bunker-matrix.sh --host localhost --port 30011 --agent crier-lab --sink http://localhost:19012`; env `DEEPSEEK_API_KEY` + `EVIDENCE=/tmp/bunker-matrix-ci.jsonl` |
-| `ecosystem-battery` | [self-hosted, bunker] | — | **dispatch \| schedule only — never push** | `cd examples/agent-ecosystem && docker compose up -d --build && docker compose run --rm battery` with ports `28767/29002/29101/29102`; evidence captured after (below) |
+| `ecosystem-battery` | [self-hosted, bunker] | — | **dispatch \| schedule only — never push** | `cd examples/agent-ecosystem && docker compose up -d --build && docker compose --profile battery run --rm battery` with ports `28767/29002/29101/29102`; the profiled `run` builds the battery image on demand (the profiled service is deliberately not built by `up`) and runs it once without recreating crier; evidence captured after (below) |
 
 Both deploy jobs are gated (`if: always() && ...`) so a failed image build does not leave
 stale relays running; the battery job intentionally skips push events — a battery on every
@@ -456,9 +482,9 @@ intermediate commit is waste, the nightly + manual triggers cover it.
   injection 403, `guard-off` everything 201, `fail-closed` both 403, `blocking` round-trip
   200 `ECHO`).
 - `ecosystem-evidence` ← `/tmp/ecosystem-evidence.jsonl` (captured via
-  `docker compose -f examples/agent-ecosystem/docker-compose.yml run --rm --no-deps battery
-  sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl || true` after the
-  battery job — `|| true` so evidence capture never fails the job).
+  `docker compose -f examples/agent-ecosystem/docker-compose.yml --profile battery run --rm
+  --no-deps battery sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl ||
+  true` after the battery job — `|| true` so evidence capture never fails the job).
 
 ### 5.4 How to read results
 
@@ -488,13 +514,25 @@ allowed range (`crier-lab`: 30000–30099 → 30001–30008); on the CI runner t
 ... docker compose up -d`. In-container ports are fixed — only the host side moves. Check
 what is actually listening before assuming: `ss -tlnp | grep -E '18767|19002|1910'`.
 
-### 6.2 Stale battery image (missing `--build`)
+### 6.2 Stale battery image (rebuild it — but never with `run --build`)
 
-`battery.sh` is baked into the battery image at build time. If you edit the script and run
-plain `docker compose run --rm battery`, you execute the OLD script — edits appear to do
-nothing. Always `docker compose run --rm --build battery` (the `--build` rebuilds the image
-and picks up the patched script). The same goes for consumer.mjs / Dockerfile edits: `docker
-compose up -d --build` rebuilds the harness images.
+`battery.sh` is baked into the battery image at build time, so the run command executes the
+image as it is. After editing the script, rebuild **just the battery image**:
+
+```bash
+docker compose --profile battery build battery   # rebuilds ONLY the battery image
+docker compose --profile battery run --rm battery
+```
+
+Do **not** reach for `docker compose run --rm --build battery`. `--build` on a `run` rebuilds
+every service in that command's dependency graph — the crier image included — and Compose then
+recreates the stack: the crier container gets a new ID and its in-memory registry (every agent
+registration) is wiped (DF-CRIER-88/90). A profiled `run` builds the battery image on demand
+when it is missing, so a first run needs no extra step and no `--build`.
+
+The same goes for consumer.mjs / Dockerfile edits: `docker compose up -d --build` rebuilds the
+harness images (and, being an `up`, recreates any service whose config changed — including
+crier, which resets the registry; the consumers self-heal via `/ready`, §6.3).
 
 ### 6.3 Crier restart → agents re-register on /ready
 
@@ -567,6 +605,21 @@ The failure is loud at three layers (INT-CI-007): the agent prints
 `{"ready":false,"registered":false,"last_status":400,"last_body":"…"}` instead of claiming
 readiness, and the battery's `wait_registered` times out on `GET /agents/<id>` and counts a FAIL
 before any round-trip runs.
+
+### 6.8 Full reset (a plain `down -v` leaves the battery container and its volume behind)
+
+Because the battery is profile-gated it is also outside a profile-less `down`: `docker compose
+down -v` removes the stack containers and the network, but the (exited) battery container and
+the `battery-evidence` volume are not in the active profile set and stay behind — so a "clean
+slate" that still holds an old run's evidence (and an old container) is easy to mistake for a
+fresh one. Reset everything by enabling the profile on the `down` too:
+
+```bash
+docker compose --profile battery down -v
+```
+
+That removes the stack, the battery container **and** the evidence volume (verified live on
+Compose v2.40.3; the same profile-less `down -v` immediately before it removed neither).
 
 ---
 

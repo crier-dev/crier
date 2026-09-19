@@ -2,7 +2,14 @@
 #
 #   docker compose up -d          # crier + sink + pi-agent + opencode + claude-code + codex + aider + goose
 #   docker compose --profile hermes up -d   # + hermes (requires hermes-agent:latest image)
-#   docker compose run battery     # run the full battery of tests
+#
+# The battery is ONE-SHOT and profile-gated (DF-CRIER-88/90): a plain `up` starts the
+# long-lived stack only and never runs the battery. Run it explicitly with:
+#   docker compose --profile battery run --rm battery
+# (`up` / `build` / `down` skip a profiled service, so name the profile. The `run` above
+# builds the battery image on demand if it is missing and never rebuilds or recreates the
+# rest of the stack. After editing battery.sh, rebuild just that image:
+#   docker compose --profile battery build battery.)
 #
 # Config knobs:
 #   DEEPSEEK_API_KEY=sk-...        # enable the LLM guard with the deepseek preset (real verdicts)
@@ -152,7 +159,15 @@ services:
     networks: [crier-net]
 
   battery:
-    # The full battery of tests against the stack.
+    # The full battery of tests against the stack. ONE-SHOT, profile-gated
+    # (DF-CRIER-88/90): `docker compose up -d --build` starts the long-lived stack ONLY
+    # — the battery is never auto-run. Run it explicitly, exactly once:
+    #   docker compose --profile battery run --rm battery
+    # That command builds this image on demand when it is missing, and never rebuilds or
+    # recreates the rest of the stack, so re-running it is safe. After editing
+    # battery.sh, rebuild only this image:
+    #   docker compose --profile battery build battery
+    profiles: ["battery"]
     build: ./battery
     environment:
       CRIER_URL: http://crier:8767
