@@ -919,8 +919,18 @@ func TestStopRunningServer(t *testing.T) {
 
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "crier-server")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build server: %v\n%s", err, out)
+
+	// DF-CRIER-260: build from an isolated snapshot, never the live package
+	// directory. A sibling worker mid-edit in cmd/server is one syntax error
+	// away from making this package fail to compile, and the test would
+	// report that as its own failure for a reason that has nothing to do
+	// with the code under test (the same race DF-CRIER-253/259 closed for
+	// the version tests).
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = buildDir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build server from %s: %v\n%s", buildDir, err, out)
 	}
 
 	port := freePort(t)

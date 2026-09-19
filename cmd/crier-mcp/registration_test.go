@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/testsupport"
 	"github.com/gorilla/mux"
 )
 
@@ -271,8 +272,17 @@ func TestRunSelfRegistersBridgeIdentity(t *testing.T) {
 	srv, store := newBridgeTestServer(t)
 
 	bin := filepath.Join(t.TempDir(), "crier-mcp")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp: %v\n%s", err, out)
+
+	// DF-CRIER-260: build from an isolated snapshot, never the live package
+	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
+	// error away from reding this package for a reason that has nothing to
+	// do with the code under test (the same race DF-CRIER-253/259 closed for
+	// the version tests).
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = buildDir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
 	}
 
 	cmd := exec.Command(bin)
@@ -352,8 +362,17 @@ func TestRunRegistersWithSuppliedKeyFile(t *testing.T) {
 	wantHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
 
 	bin := filepath.Join(t.TempDir(), "crier-mcp")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp: %v\n%s", err, out)
+
+	// DF-CRIER-260: build from an isolated snapshot, never the live package
+	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
+	// error away from reding this package for a reason that has nothing to
+	// do with the code under test (the same race DF-CRIER-253/259 closed for
+	// the version tests).
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = buildDir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
 	}
 
 	cmd := exec.Command(bin)
@@ -432,8 +451,17 @@ func TestRunSurvivesRegistrationFailure(t *testing.T) {
 	dead.Close()
 
 	bin := filepath.Join(t.TempDir(), "crier-mcp")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp: %v\n%s", err, out)
+
+	// DF-CRIER-260: build from an isolated snapshot, never the live package
+	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
+	// error away from reding this package for a reason that has nothing to
+	// do with the code under test (the same race DF-CRIER-253/259 closed for
+	// the version tests).
+	buildDir := testsupport.SnapshotBuildDir(t, ".")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = buildDir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
 	}
 
 	cmd := exec.Command(bin)
