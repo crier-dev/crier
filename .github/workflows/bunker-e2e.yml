@@ -91,8 +91,8 @@ jobs:
       - name: Capture battery evidence
         if: always()
         run: |
-          docker compose -f examples/agent-ecosystem/docker-compose.yml --profile battery run --rm --no-deps battery \
-            sh -c 'cat /evidence/ecosystem.jsonl' > /tmp/ecosystem-evidence.jsonl || true
+          docker compose -f examples/agent-ecosystem/docker-compose.yml --profile battery run --rm --no-deps \
+            --entrypoint cat battery /evidence/ecosystem.jsonl > /tmp/ecosystem-evidence.jsonl || true
       - name: Attach evidence
         if: always()
         uses: actions/upload-artifact@v4
