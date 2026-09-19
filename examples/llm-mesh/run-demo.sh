@@ -24,6 +24,16 @@
 #   exit 124         the wall-clock budget (DOGFOOD_TIMEOUT_S) fired before a
 #                    verdict — a wedged process, not a slow model
 #
+# SCRATCH PORT (QA-CRIER-10). The server runs on a scratch port that is CHOSEN,
+# not hard-coded: with CRIER_PORT unset the runner walks 18777..18781
+# (CRIER_PORT_CANDIDATES candidates, default 5), reports every candidate it
+# skips together with that candidate's holder pid/command/audit line, and uses
+# the first free one. An EXPLICIT CRIER_PORT is honored literally — it is
+# checked, never rotated: an occupied one aborts the run naming its holder.
+# Every candidate occupied is a named failure, never a silent skip. After
+# /health the sharing guard asserts the process holding the port is the pid
+# started here (scripts/lib/port-guard.sh).
+#
 # Requires: DEEPSEEK_API_KEY in the environment (a stub base URL may override
 # the live model; see README "Deterministic self-test").
 #
@@ -31,7 +41,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 HERE="$(pwd)"
 
-PORT="${CRIER_PORT:-18777}"
+PORT_BASE=18777                       # first candidate of the default rotation
+PORT_CANDIDATES="${CRIER_PORT_CANDIDATES:-5}"
+PORT=""                               # selected below, never hard-coded
 REPO="$(cd ../.. && pwd)"
 OUT="${DOGFOOD_OUT:-out}"
 BRIDGE="$REPO/bin/crier-mcp"
@@ -64,20 +76,29 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
   echo "ERROR: DEEPSEEK_API_KEY not set" >&2
   exit 1
 fi
-for tool in python3 curl make timeout; do
+for tool in python3 curl make timeout ss; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "ERROR: '$tool' is required for a bounded run (install it and retry)" >&2
     exit 3
   }
 done
 
+# --- scratch port: rotate candidates instead of hard-coding one --------------
+# A fixed scratch port made this demo skip or abort whenever anything already
+# listened there: a long-lived unrelated listener that predates the run, or a
+# squatter that took the port between two runs of this same script (QA-CRIER-10).
+# select_scratch_port walks $PORT_BASE..+$PORT_CANDIDATES-1, prints the holder of
+# every candidate it skips, and selects the first free one; an EXPLICIT
+# CRIER_PORT is checked and fails closed (it is never silently rotated, because
+# a run on a port the operator did not name would misreport what was measured).
+# Nothing is started before the port is settled.
+. "$REPO/scripts/lib/port-guard.sh"
+select_scratch_port "${CRIER_PORT:-}" "$PORT_BASE" "the llm-mesh bridge-lane crier server" \
+  "$PORT_CANDIDATES" "CRIER_PORT"
+PORT="$PORT_GUARD_SELECTED"
+
 echo "==> building crier + crier-mcp"
 make -C "$REPO" build build-mcp >/dev/null
-
-if ss -tln 2>/dev/null | grep -q ":$PORT "; then
-  echo "ERROR: port $PORT is busy (set CRIER_PORT to another port)" >&2
-  exit 1
-fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -102,16 +123,15 @@ env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   "$REPO/bin/crier" >"$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 
-HEALTHY=0
-for _ in $(seq 1 50); do
-  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then HEALTHY=1; break; fi
-  kill -0 "$SERVER_PID" 2>/dev/null || break
-  sleep 0.2
-done
-if [ "$HEALTHY" != 1 ]; then
-  echo "ERROR: crier server never became healthy on :$PORT (see $OUT/server.log)" >&2
-  exit 1
-fi
+# The server that ANSWERS must be the server we started: wait_http_or_die aborts
+# (with the log tail) if this pid dies first, and assert_port_owned asks ss who
+# holds :$PORT and refuses to continue when it is not $SERVER_PID — a squatter
+# that took the port in the window between the probe and the bind would
+# otherwise be measured in our place (QA-CRIER-9).
+wait_http_or_die "http://127.0.0.1:$PORT/health" "$SERVER_PID" "$OUT/server.log" "the crier server"
+SERVER_OWNER="$(port_holder_pid "$PORT")"
+assert_port_owned "$PORT" "$SERVER_PID" "the crier server"
+echo "    :$PORT is held by pid $SERVER_OWNER == the server pid $SERVER_PID (ss -tlnp)"
 
 # --- children ---------------------------------------------------------------
 

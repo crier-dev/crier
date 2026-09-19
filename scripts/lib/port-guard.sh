@@ -43,6 +43,19 @@
 #       died on the port we just checked — print the tail of <logfile> and exit 1
 #       instead of papering the death over with a later connection error.
 #
+#   select_scratch_port <explicit-port|""> <base-port> <label> [budget] [override-var]
+#       CHOOSE a scratch port instead of hard-coding one (QA-CRIER-10). With an
+#       empty <explicit-port> it walks <base>..<base>+<budget>-1 in order,
+#       preflights each candidate, prints the port, holder pid, holder command
+#       line and audit command of every candidate it SKIPS, and selects the first
+#       free one into PORT_GUARD_SELECTED (rotation is never silent). With a port
+#       named it checks THAT port and exits 1 when it is occupied — an explicit
+#       request is never silently rotated, because a run on a port the operator
+#       did not name misreports what was measured. Exits 1 when every candidate
+#       is occupied, naming each attempted port and its holder; 2 on misuse.
+#       Also sets PORT_GUARD_ATTEMPTED (" :p1 :p2 …"), PORT_GUARD_SKIPPED and
+#       PORT_GUARD_SKIP_DETAIL for the caller's own report.
+#
 # DEPENDENCIES: bash 4+, coreutils, ss (iproute2), curl. No lsof/pgrep/fuser.
 # EXIT CODES:   1 = the situation the guard exists for (abort the run),
 #               2 = misuse (bad argument) or a missing dependency.
@@ -71,6 +84,21 @@
 #   ARM C — a FOREIGN listener on the candidate port is never adopted as the
 #           decoy: the port must be held by the pid this selftest started, not
 #           merely by SOMETHING — the phantom-green QA-CRIER-9 exists for.
+#
+# It also proves the candidate ROTATION itself (QA-CRIER-10), on a run of
+# consecutive ports it picks as free itself, with squatter listeners it starts
+# and owns — no provider, no network, no fixed port:
+#
+#   ARM D — a FIRST-candidate collision is rotated past: the selection walks on
+#           to the next candidate, names the squatted port AND its holder pid,
+#           and reports how many candidates it skipped.
+#   ARM E — every candidate occupied fails closed (exit 1): the budget is named,
+#           and every attempted port is listed with the holder that took it —
+#           never a silent pick of a port somebody else owns.
+#   ARM F — the EXPLICIT port argument is authoritative: an occupied explicit
+#           port fails closed naming that port only (no rotation to a free
+#           candidate), and a free explicit port is used verbatim even while
+#           every default candidate is occupied.
 #
 # The arms re-run this script as a CHILD process with the arms disabled
 # (`PG_SELFTEST_SKIP_ARMS=1`), so the recursion is bounded at one level and the
@@ -192,6 +220,118 @@ require_free_port() { # <port> <label>
   exit 1
 }
 
+# ── public: choose a scratch port, rotating past occupied candidates ──────────
+
+select_scratch_port() { # <explicit-port|""> <base-port> <label> [budget] [override-var]
+  local explicit="${1-}" base="${2-}" label="${3:-server}" override_var="${5:-}"
+  local budget="${4:-${PORT_GUARD_CANDIDATES:-5}}"
+
+  PORT_GUARD_SELECTED=""
+  PORT_GUARD_ATTEMPTED=""
+  PORT_GUARD_SKIPPED=0
+  PORT_GUARD_SKIPPED_PORTS=""
+  PORT_GUARD_SKIP_DETAIL=""
+
+  case "$budget" in
+    '' | *[!0-9]*)
+      echo "ERROR: select_scratch_port: budget must be a positive integer (got '$budget')" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$budget" -lt 1 ]; then
+    echo "ERROR: select_scratch_port: budget must be at least 1 (got '$budget')" >&2
+    exit 2
+  fi
+
+  if [ -n "$explicit" ]; then
+    _pg_check_port_arg "$explicit" select_scratch_port
+  else
+    _pg_check_port_arg "$base" select_scratch_port
+    if [ "$((base + budget - 1))" -gt 65535 ]; then
+      echo "ERROR: select_scratch_port: candidate range :$base..+$((budget - 1)) runs past port 65535" >&2
+      exit 2
+    fi
+  fi
+
+  _pg_require_ss
+
+  local line pid cmd port
+
+  # ── explicit port: checked, never rotated ──────────────────────────────────
+  if [ -n "$explicit" ]; then
+    PORT_GUARD_ATTEMPTED=" :$explicit"
+    line="$(_pg_listen_line "$explicit")"
+    if [ -n "$line" ]; then
+      pid="$(_pg_pid_from_line "$line")"
+      cmd="$(_pg_cmdline "$pid")"
+      {
+        echo "ERROR: refusing to start $label — the explicit port :$explicit is already in use."
+        echo "ERROR:   holder pid : ${pid:-unknown (not visible to uid $(id -u))}"
+        echo "ERROR:   holder cmd : $cmd"
+        echo "ERROR:   audit with : ss -tlnp | grep :$explicit"
+        echo "ERROR: an explicitly named port is never rotated: a run on a port the operator"
+        echo "ERROR: did not name would misreport what was measured. Free :$explicit, or unset"
+        echo "ERROR: ${override_var:-the port override} to let the candidate list rotate."
+      } >&2
+      exit 1
+    fi
+    PORT_GUARD_SELECTED="$explicit"
+    echo "port-guard: selected :$explicit for $label — explicit (the port the caller named; no candidate was consulted)" >&2
+    return 0
+  fi
+
+  # ── default: bounded candidate rotation ────────────────────────────────────
+  local i=0
+  while [ "$i" -lt "$budget" ]; do
+    port=$((base + i))
+    PORT_GUARD_ATTEMPTED="${PORT_GUARD_ATTEMPTED} :$port"
+    line="$(_pg_listen_line "$port")"
+    if [ -z "$line" ]; then
+      PORT_GUARD_SELECTED="$port"
+      if [ "$PORT_GUARD_SKIPPED" -gt 0 ]; then
+        echo "port-guard: selected :$port for $label — skipped $PORT_GUARD_SKIPPED occupied candidate(s)$PORT_GUARD_SKIPPED_PORTS, candidate $((i + 1))/$budget" >&2
+      else
+        echo "port-guard: selected :$port for $label — first candidate, nothing was listening (budget $budget)" >&2
+      fi
+      return 0
+    fi
+    pid="$(_pg_pid_from_line "$line")"
+    cmd="$(_pg_cmdline "$pid")"
+    PORT_GUARD_SKIPPED=$((PORT_GUARD_SKIPPED + 1))
+    PORT_GUARD_SKIPPED_PORTS="${PORT_GUARD_SKIPPED_PORTS} :$port"
+    PORT_GUARD_SKIP_DETAIL="${PORT_GUARD_SKIP_DETAIL}:$port — holder pid ${pid:-unknown (not visible to uid $(id -u))}, cmd: $cmd
+"
+    # A rotation is never silent: name the candidate, its holder and the audit
+    # command, so the skip is attributable in the run's own log.
+    echo "port-guard: candidate :$port is in use — rotating past it for $label" >&2
+    echo "port-guard:   holder pid : ${pid:-unknown (not visible to uid $(id -u))}" >&2
+    echo "port-guard:   holder cmd : $cmd" >&2
+    echo "port-guard:   audit with : ss -tlnp | grep :$port" >&2
+    i=$((i + 1))
+  done
+
+  # ── exhausted: fail closed, naming EVERY attempted port and its holder ─────
+  {
+    echo "ERROR: refusing to start $label — all $budget scratch-port candidate(s) from :$base are in use."
+    echo "ERROR:   candidates tried:$PORT_GUARD_ATTEMPTED"
+    for port in $PORT_GUARD_ATTEMPTED; do
+      port="${port#:}"
+      line="$(_pg_listen_line "$port")"
+      if [ -n "$line" ]; then
+        pid="$(_pg_pid_from_line "$line")"
+        cmd="$(_pg_cmdline "$pid")"
+        echo "ERROR:   :$port — holder pid ${pid:-unknown (not visible to uid $(id -u))}, cmd: $cmd"
+        echo "ERROR:   :$port — audit with: ss -tlnp | grep :$port"
+      else
+        echo "ERROR:   :$port — free now (it was occupied when this candidate was preflighted)"
+      fi
+    done
+    echo "ERROR: free one of those ports, or set ${override_var:-the port override} to a free port explicitly."
+    echo "ERROR: a hard-coded scratch port would have gone on to a false skip here (QA-CRIER-10)."
+  } >&2
+  exit 1
+}
+
 # ── public: the listener we just polled must be OUR process ───────────────────
 
 assert_port_owned() { # <port> <pid> <label>
@@ -279,6 +419,14 @@ _pg_selftest_cleanup() {
   if [ -n "${_pg_SELFTEST_FOREIGN_PID:-}" ]; then
     kill "$_pg_SELFTEST_FOREIGN_PID" 2>/dev/null || true
   fi
+  # The ARM D/E/F squatters are this selftest's own fixtures too: they must not
+  # outlive the run (the rotation under test never kills a holder — that is its
+  # whole point — so the cleanup is the only thing that can end them).
+  if [ -n "${_pg_SELFTEST_SQUAT_PIDS:-}" ]; then
+    for _pg_p in $_pg_SELFTEST_SQUAT_PIDS; do
+      kill "$_pg_p" 2>/dev/null || true
+    done
+  fi
   if [ -n "${_pg_SELFTEST_TMP:-}" ]; then
     rm -rf "$_pg_SELFTEST_TMP"
   fi
@@ -295,6 +443,55 @@ _pg_selftest_free_port() { # prints a port nothing is listening on
     fi
     tries=$((tries + 1))
   done
+  return 1
+}
+
+# _pg_selftest_free_run <count> — prints the first port of <count> CONSECUTIVE
+# free ports. The rotation arms need neighbours they can squat and rotate
+# through, so a single free port is not enough; the candidate bases stay
+# randomly picked (never fixed), so a busy runner cannot make the arms flake.
+_pg_selftest_free_run() {
+  local count="${1:-4}" tries=0 base=0 i=0 ok=1
+  while [ "$tries" -lt 60 ]; do
+    base=$((20000 + RANDOM % 40000))
+    i=0
+    ok=1
+    while [ "$i" -lt "$count" ]; do
+      if [ -n "$(_pg_listen_line "$((base + i))")" ]; then
+        ok=0
+        break
+      fi
+      i=$((i + 1))
+    done
+    if [ "$ok" = "1" ]; then
+      printf '%s' "$base"
+      return 0
+    fi
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
+# _pg_selftest_squat <port> <log> — start a throwaway listener on <port> in the
+# CURRENT shell, require the port to be held by the pid just started (presence
+# is not ownership) and record that pid in _pg_SELFTEST_SQUAT_PIDS. Sets
+# _pg_SELFTEST_SQUAT_PID to it. Returns 0 on success, 1 when the port could not
+# be taken by our own listener, 2 when no listener can be created (a missing
+# dependency). Call it DIRECTLY — through a command substitution the listener it
+# starts would outlive the bookkeeping that is supposed to kill it.
+_pg_selftest_squat() {
+  local port="$1" log="$2" pid="" saved="${_pg_SELFTEST_LISTENER_PID:-}"
+  _pg_SELFTEST_SQUAT_PID=""
+  [ -n "$port" ] || return 1
+  _pg_selftest_listener_start "$port" "$log" || return 2
+  pid="$_pg_SELFTEST_LISTENER_PID"
+  _pg_SELFTEST_LISTENER_PID="$saved" # the squat set owns this one, not the decoy path
+  if _pg_selftest_decoy_ready "$port" "$pid" "$log"; then
+    _pg_SELFTEST_SQUAT_PID="$pid"
+    _pg_SELFTEST_SQUAT_PIDS="${_pg_SELFTEST_SQUAT_PIDS} $pid"
+    return 0
+  fi
+  kill "$pid" 2>/dev/null || true
   return 1
 }
 
@@ -330,9 +527,18 @@ _pg_selftest_listener_start() {
 # adopted — adopting it would make the guards measure a process this selftest did
 # not start, which is the phantom-green class QA-CRIER-9 recorded. On failure sets
 # _pg_SELFTEST_TRY_REASON to the attributable reason and returns 1.
+#
+# ATTRIBUTION WINDOW (measured on a fleet host, 2026-09-18): for a listener that
+# was JUST bound, the first `ss -tlnp` can print its LISTEN line with an EMPTY
+# users: field — the socket is already in /proc/net/tcp while ss cannot yet tie
+# it to the owning process. Reading that as "held by somebody else" aborted the
+# whole selftest on 12/12 attempts there (the line is attributable one poll
+# later). An unattributed line is therefore NOT a verdict: this keeps polling the
+# full budget (a foreign holder whose pid IS visible still fails on the first
+# poll, and one that stays invisible is named by the timeout branch).
 _pg_selftest_decoy_ready() {
   local port="$1" pid="$2" log="$3" i=0 tries="${PG_SELFTEST_BIND_TRIES:-50}"
-  local line="" holder=""
+  local line="" holder="" unattributed=""
   _pg_SELFTEST_TRY_REASON=""
   while [ "$i" -lt "$tries" ]; do
     line="$(_pg_listen_line "$port")"
@@ -341,17 +547,36 @@ _pg_selftest_decoy_ready() {
       if [ "$holder" = "$pid" ]; then
         return 0
       fi
-      _pg_SELFTEST_TRY_REASON="port :$port is held by pid ${holder:-unknown (not visible to uid $(id -u))}, not the decoy pid $pid this selftest started"
-      return 1
+      if [ -n "$holder" ]; then
+        # A VISIBLE pid that is not ours is definitive: somebody else owns the
+        # port, however long we wait.
+        _pg_SELFTEST_TRY_REASON="port :$port is held by pid $holder, not the decoy pid $pid this selftest started"
+        return 1
+      fi
+      unattributed="$line"
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
-      _pg_SELFTEST_TRY_REASON="pid $pid exited before it bound :$port ($(tail -n 1 "$log" 2>/dev/null))"
+      # The pid we started is gone. If a VISIBLE foreign pid took the port, say
+      # so (that is the ARM C fixture: the shim spawns the foreign listener and
+      # exits); otherwise report the death with the log tail.
+      sleep 0.2
+      line="$(_pg_listen_line "$port")"
+      holder="$(_pg_pid_from_line "$line")"
+      if [ -n "$holder" ] && [ "$holder" != "$pid" ]; then
+        _pg_SELFTEST_TRY_REASON="port :$port is held by pid $holder, not the decoy pid $pid this selftest started"
+      else
+        _pg_SELFTEST_TRY_REASON="pid $pid exited before it bound :$port ($(tail -n 1 "$log" 2>/dev/null))"
+      fi
       return 1
     fi
     sleep 0.1
     i=$((i + 1))
   done
-  _pg_SELFTEST_TRY_REASON="pid $pid never bound :$port within $((tries / 10))s"
+  if [ -n "$unattributed" ]; then
+    _pg_SELFTEST_TRY_REASON="port :$port is held by a process whose pid is not visible to uid $(id -u), and it never became the decoy pid $pid within $((tries / 10))s"
+  else
+    _pg_SELFTEST_TRY_REASON="pid $pid never bound :$port within $((tries / 10))s"
+  fi
   return 1
 }
 
@@ -474,6 +699,7 @@ _pg_selftest() {
   }
   _pg_SELFTEST_LISTENER_PID=""
   _pg_SELFTEST_FOREIGN_PID=""
+  _pg_SELFTEST_SQUAT_PIDS=""
   trap '_pg_selftest_cleanup' EXIT
 
   local tmp="$_pg_SELFTEST_TMP"
@@ -790,14 +1016,172 @@ SHIM
     fi
   fi
 
+  # ── ARM D/E/F: the candidate ROTATION itself (QA-CRIER-10) ───────────────────
+  # The arms above prove the decoy BIND; none of them can see the defect this row
+  # is about — a harness that hard-codes ONE scratch port and then skips or aborts
+  # when something else already holds it. The fixture is a run of consecutive
+  # ports this selftest picks as free plus squatter listeners it starts and OWNS
+  # (holder pid asserted), so the rotation is driven deterministically with no
+  # provider call, no network and no fixed port. select_scratch_port EXITS on
+  # failure by contract, so every call runs in a subshell whose status — plus the
+  # SELECTED=/SKIPPED= lines that subshell prints — is the assertion.
+  if [ "$arms_skipped" -eq 0 ]; then
+    local rot_base="" rot_log="" squat_rc=0 squat_pid="" rot_ready=1
+    checks=$((checks + 3)) # ARM D, ARM E, ARM F — counted even when the fixture cannot be built
+    _pg_SELFTEST_SQUAT_PIDS=""
+    rot_log="$tmp/rotation-squat.log"
+    rot_base="$(_pg_selftest_free_run 4)" || rot_base=""
+    if [ -z "$rot_base" ]; then
+      echo "port-guard selftest: FAIL: ARM D/E/F: no run of 4 consecutive free ports is available for the rotation fixture" >&2
+      fails=$((fails + 3))
+      rot_ready=0
+    fi
+    if [ "$rot_ready" -eq 1 ]; then
+      # Called DIRECTLY, not through a command substitution: the squatter must
+      # outlive the call so the rotation can be shown to leave it alone.
+      _pg_selftest_squat "$rot_base" "$rot_log"
+      squat_rc=$?
+      squat_pid="$_pg_SELFTEST_SQUAT_PID"
+      if [ "$squat_rc" -ne 0 ]; then
+        echo "port-guard selftest: FAIL: ARM D/E/F: could not squat :$rot_base with a listener this selftest owns (rc=$squat_rc — 2 means no python3/nc is available)" >&2
+        fails=$((fails + 3))
+        rot_ready=0
+      fi
+    fi
+
+    if [ "$rot_ready" -eq 1 ]; then
+      # ── ARM D: a FIRST-candidate collision is rotated past ──────────────────
+      local d_out="" d_rc=0 d_sel="" d_skip="" d_want=$((rot_base + 1))
+      d_out="$( ( select_scratch_port "" "$rot_base" "selftest-rotate" 3 "SELFTEST_PORT"
+                  printf 'SELECTED=%s\n' "$PORT_GUARD_SELECTED"
+                  printf 'SKIPPED=%s\n' "$PORT_GUARD_SKIPPED" ) 2>&1 )" || d_rc=$?
+      d_sel="$(printf '%s\n' "$d_out" | sed -n 's/^SELECTED=//p' | head -n 1)"
+      d_skip="$(printf '%s\n' "$d_out" | sed -n 's/^SKIPPED=//p' | head -n 1)"
+      if [ "$d_rc" -ne 0 ]; then
+        echo "port-guard selftest: FAIL: ARM D: a first-candidate collision exited $d_rc instead of rotating on to the next candidate" >&2
+        echo "  output: $d_out" >&2
+        fails=$((fails + 1))
+      elif [ "$d_sel" != "$d_want" ]; then
+        echo "port-guard selftest: FAIL: ARM D: occupied :$rot_base did not degrade to :$d_want (selected '${d_sel:-nothing}')" >&2
+        echo "  output: $d_out" >&2
+        fails=$((fails + 1))
+      elif [ "$d_skip" != "1" ]; then
+        echo "port-guard selftest: FAIL: ARM D: the rotation reported skipping '$d_skip' candidate(s), want exactly 1" >&2
+        echo "  output: $d_out" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$d_out" | grep -q "candidate :$rot_base is in use"; then
+        echo "port-guard selftest: FAIL: ARM D: the skipped candidate :$rot_base was not named — the rotation was silent" >&2
+        echo "  output: $d_out" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$d_out" | grep -q "holder pid : $squat_pid"; then
+        echo "port-guard selftest: FAIL: ARM D: the skip did not name the holder pid $squat_pid of :$rot_base" >&2
+        echo "  output: $d_out" >&2
+        fails=$((fails + 1))
+      elif [ "$(port_holder_pid "$rot_base")" != "$squat_pid" ]; then
+        echo "port-guard selftest: FAIL: ARM D: :$rot_base is no longer held by pid $squat_pid — the rotation killed a holder, which is not ours to kill" >&2
+        fails=$((fails + 1))
+      else
+        echo "PASS: ARM D: a first-candidate collision is rotated past (:$rot_base held by pid $squat_pid was named and skipped, :$d_sel selected, 1 of 3 candidates skipped, the holder left running)"
+      fi
+
+      # ── ARM E: every candidate occupied fails closed, each one named ────────
+      local s_rc2=0 s_rc3=0 e_pids="" e_out="" e_rc=0 e_miss="" e_pmiss="" e_port="" e_p=""
+      _pg_selftest_squat "$((rot_base + 1))" "$rot_log"
+      s_rc2=$?
+      e_pids="$_pg_SELFTEST_SQUAT_PID"
+      _pg_selftest_squat "$((rot_base + 2))" "$rot_log"
+      s_rc3=$?
+      e_pids="$e_pids $_pg_SELFTEST_SQUAT_PID"
+      if [ "$s_rc2" -ne 0 ] || [ "$s_rc3" -ne 0 ]; then
+        echo "port-guard selftest: FAIL: ARM E PREMISE BROKEN — could not squat :$((rot_base + 1))/:$((rot_base + 2)) with listeners this selftest owns (rc=$s_rc2/$s_rc3)" >&2
+        fails=$((fails + 1))
+      else
+        e_out="$( ( select_scratch_port "" "$rot_base" "selftest-exhaust" 3 "SELFTEST_PORT"
+                    printf 'SELECTED=%s\n' "$PORT_GUARD_SELECTED" ) 2>&1 )" || e_rc=$?
+        for e_port in "$rot_base" "$((rot_base + 1))" "$((rot_base + 2))"; do
+          printf '%s\n' "$e_out" | grep -q ":$e_port — holder pid" || e_miss="$e_miss :$e_port"
+        done
+        for e_p in $squat_pid $e_pids; do
+          printf '%s\n' "$e_out" | grep -q "holder pid $e_p," || e_pmiss="$e_pmiss $e_p"
+        done
+        if [ "$e_rc" -ne 1 ]; then
+          echo "port-guard selftest: FAIL: ARM E: an exhausted candidate budget exited $e_rc, not 1 — it must fail closed with the guard's own exit code" >&2
+          echo "  output: $e_out" >&2
+          fails=$((fails + 1))
+        elif ! printf '%s\n' "$e_out" | grep -q "all 3 scratch-port candidate(s) from :$rot_base are in use"; then
+          echo "port-guard selftest: FAIL: ARM E: the refusal did not name the 3-candidate budget and its base :$rot_base" >&2
+          echo "  output: $e_out" >&2
+          fails=$((fails + 1))
+        elif [ -n "$e_miss" ]; then
+          echo "port-guard selftest: FAIL: ARM E: the refusal did not list every attempted port with its holder (missing:$e_miss)" >&2
+          echo "  output: $e_out" >&2
+          fails=$((fails + 1))
+        elif [ -n "$e_pmiss" ]; then
+          echo "port-guard selftest: FAIL: ARM E: the refusal did not name the holder pid(s):$e_pmiss" >&2
+          echo "  output: $e_out" >&2
+          fails=$((fails + 1))
+        elif printf '%s\n' "$e_out" | grep -q '^SELECTED='; then
+          echo "port-guard selftest: FAIL: ARM E: a port was SELECTED although every candidate was occupied" >&2
+          echo "  output: $e_out" >&2
+          fails=$((fails + 1))
+        else
+          echo "PASS: ARM E: an exhausted candidate budget fails closed (exit 1, all 3 candidates and their holder pids named, nothing selected)"
+        fi
+      fi
+
+      # ── ARM F: an explicit port is authoritative, never rotated ─────────────
+      local f1_out="" f1_rc=0 f2_out="" f2_rc=0 f2_sel="" f_free=$((rot_base + 3))
+      f1_out="$( ( select_scratch_port "$rot_base" "$rot_base" "selftest-explicit" 3 "SELFTEST_PORT"
+                   printf 'SELECTED=%s\n' "$PORT_GUARD_SELECTED" ) 2>&1 )" || f1_rc=$?
+      f2_out="$( ( select_scratch_port "$f_free" "$rot_base" "selftest-explicit" 3 "SELFTEST_PORT"
+                   printf 'SELECTED=%s\n' "$PORT_GUARD_SELECTED" ) 2>&1 )" || f2_rc=$?
+      f2_sel="$(printf '%s\n' "$f2_out" | sed -n 's/^SELECTED=//p' | head -n 1)"
+      if [ "$f1_rc" -ne 1 ]; then
+        echo "port-guard selftest: FAIL: ARM F: an OCCUPIED explicit port exited $f1_rc, not 1 — an explicit request must fail closed" >&2
+        echo "  output: $f1_out" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$f1_out" | grep -q "the explicit port :$rot_base is already in use"; then
+        echo "port-guard selftest: FAIL: ARM F: the refusal did not name the explicit port :$rot_base" >&2
+        echo "  output: $f1_out" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$f1_out" | grep -q "holder pid : $squat_pid"; then
+        echo "port-guard selftest: FAIL: ARM F: the refusal did not name the holder pid $squat_pid" >&2
+        echo "  output: $f1_out" >&2
+        fails=$((fails + 1))
+      elif printf '%s\n' "$f1_out" | grep -q "candidate :"; then
+        echo "port-guard selftest: FAIL: ARM F: an occupied explicit port was ROTATED to another candidate" >&2
+        echo "  output: $f1_out" >&2
+        fails=$((fails + 1))
+      elif printf '%s\n' "$f1_out" | grep -q '^SELECTED='; then
+        echo "port-guard selftest: FAIL: ARM F: a port was selected although the explicit request was occupied" >&2
+        echo "  output: $f1_out" >&2
+        fails=$((fails + 1))
+      elif [ "$f2_rc" -ne 0 ]; then
+        echo "port-guard selftest: FAIL: ARM F: a FREE explicit port exited $f2_rc although every default candidate was occupied" >&2
+        echo "  output: $f2_out" >&2
+        fails=$((fails + 1))
+      elif [ "$f2_sel" != "$f_free" ]; then
+        echo "port-guard selftest: FAIL: ARM F: the explicit free port :$f_free was not used verbatim (selected '${f2_sel:-nothing}')" >&2
+        echo "  output: $f2_out" >&2
+        fails=$((fails + 1))
+      elif printf '%s\n' "$f2_out" | grep -q "candidate :"; then
+        echo "port-guard selftest: FAIL: ARM F: the candidate list was consulted although an explicit port was named" >&2
+        echo "  output: $f2_out" >&2
+        fails=$((fails + 1))
+      else
+        echo "PASS: ARM F: an explicit port is authoritative — occupied :$rot_base fails closed naming it and its holder (no rotation despite 3 occupied candidates), free :$f_free is used verbatim"
+      fi
+    fi
+  fi
+
   if [ "$fails" -ne 0 ]; then
     echo "port-guard selftest: $((checks - fails))/$checks checks behaved — FAIL" >&2
     return 1
   fi
   if [ "$arms_skipped" -eq 0 ]; then
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + 3 decoy-bind arms)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + 3 decoy-bind arms + 3 candidate-rotation arms)"
   else
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards; the decoy-bind arms were skipped by PG_SELFTEST_SKIP_ARMS)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards; the decoy-bind and candidate-rotation arms were skipped by PG_SELFTEST_SKIP_ARMS)"
   fi
   return 0
 }
@@ -818,7 +1202,8 @@ Usage:
   bash scripts/lib/port-guard.sh --selftest
 
 It is a library, not a tool: the example harnesses source it for
-  port_holder_pid / require_free_port / assert_port_owned / wait_http_or_die
+  port_holder_pid / require_free_port / assert_port_owned / wait_http_or_die /
+  select_scratch_port
 The selftest exercises the three guards on a decoy listener whose port it picks
 as free itself (rotation budget PG_SELFTEST_DECOY_TRIES, bind wait
 PG_SELFTEST_BIND_TRIES), and proves the decoy BIND itself with three arms driven
@@ -830,6 +1215,15 @@ by a PATH shim for python3:
           and every attempted port, with no PASS for a decoy that never bound;
   ARM C — a foreign listener on the candidate port is never adopted as the decoy:
           the port must be held by the pid the selftest started.
+It then proves select_scratch_port's own contract (QA-CRIER-10) on a run of
+consecutive ports it picks as free and squatters it starts and owns:
+  ARM D — a FIRST-candidate collision is rotated past, naming the occupied
+          candidate, its holder pid, and the port it selected instead;
+  ARM E — every candidate occupied fails closed (exit 1), listing each attempted
+          port with the holder that took it and selecting nothing;
+  ARM F — an explicit port is authoritative: occupied fails closed naming that
+          port alone (never rotated), free is used verbatim even while every
+          default candidate is occupied.
 PG_SELFTEST_SKIP_ARMS=1 runs the guards only (that is how the arms re-run this
 selftest as a child, bounding the recursion).
 EOF

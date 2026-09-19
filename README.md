@@ -680,6 +680,15 @@ three guards live in `scripts/lib/port-guard.sh`; `make port-guard-selftest`
 exercises all of them on a port the selftest picks as free itself, and CI runs
 that selftest on every push.
 
+The two llm-mesh lanes (`examples/llm-mesh/run-demo.sh` and its `mesh/` sibling)
+add the second remedy for that class: their scratch port is CHOSEN from a
+bounded candidate list instead of being hard-coded, so an unrelated listener
+already holding the first candidate makes the run rotate on to the next one
+instead of skipping it — every skipped candidate is reported with its holder's
+pid, its command line and the audit command. An explicit `CRIER_PORT` is still
+honored literally and fails closed when that port is occupied, and an exhausted
+candidate list is a named failure that starts nothing (QA-CRIER-10).
+
 ## Message guard (LLM)
 
 Every inbound delivery is classified by an LLM message guard before it reaches the receiver (CR-FEAT-010..014). The guard sits at ONE choke point in `POST /agents/{id}/inbox` — after the deliver request is decoded, before BOTH downstream branches (webhook POST and inbox store) — so webhook (blocking/async/batch) and inbox deliveries get identical treatment. The verdict is computed exactly once per message; redelivery and batch flush never re-run the guard.

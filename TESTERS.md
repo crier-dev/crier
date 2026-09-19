@@ -70,6 +70,15 @@ demo pass can never have been measured against someone else's server.
 `make port-guard-selftest` exercises all three guards on a free port it picks
 itself.
 
+The two llm-mesh lanes do not merely refuse: their scratch port is chosen from a
+bounded candidate list, and a candidate something else already holds is SKIPPED
+with its holder named (pid, command line, audit command) instead of making the
+probe skip — a long-lived unrelated listener on the first candidate, or a
+squatter that took it between two runs, just moves the run along. An explicit
+`CRIER_PORT` is the exception: it is checked and fails closed, never rotated,
+and an exhausted candidate list fails with every attempted port and its holder
+listed. `make port-guard-selftest` covers that rotation too (arms D–F).
+
 **0. Register two agents** (every exercise needs them). Signatures are ON by
 default, so an agent is only reachable with the private key whose public half it
 was registered with — **keep the private key**, a public key on its own cannot

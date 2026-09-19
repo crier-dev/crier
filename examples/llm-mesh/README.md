@@ -31,9 +31,27 @@ codebase and linked against the same registry package.
 ```
 
 Both need `DEEPSEEK_API_KEY` in the environment (model: `deepseek-v4-flash`,
-override with `--model`). Each run starts its own Crier server on an
-ephemeral port, launches the processes, prints the full conversation, and
-exits 0 only if both agents solved the puzzle.
+override with `--model`). Each run starts its OWN Crier server on a scratch
+port that it CHOOSES: it walks a bounded candidate list (18777..18781 on the
+bridge lane, 18778..18782 on the raw lane), names the holder of every candidate
+it skips, and uses the first free one — so a long-lived unrelated listener on
+the first candidate, or a squatter that took it between two runs of the same
+script, rotates the run on to the next candidate instead of making it skip
+(QA-CRIER-10). The selected port is then passed to the server, the controller,
+the harnesses and the raw mesh clients alike, and once the server answers
+`/health` the run asserts that the process holding the port is the one it
+started (QA-CRIER-9).
+
+- `CRIER_PORT` — use THIS port. It is checked, and the run aborts naming the
+  holder when it is occupied; an explicitly requested port is never silently
+  rotated, because a run on a port you did not name would misreport what was
+  measured.
+- `CRIER_PORT_CANDIDATES` — how many candidates the default rotation may try
+  (default 5). When they are all occupied the run fails, listing every
+  attempted port and its holder, instead of skipping.
+
+Each run then prints the full conversation and exits 0 only if both agents
+solved the puzzle.
 
 ## The puzzle
 

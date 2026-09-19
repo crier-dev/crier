@@ -26,12 +26,26 @@ Cases:
   wall-clock    a wedged run is killed by the wall-clock budget and the run
                 reports NO_VERDICT with the cause (exit 124)
   mesh-solved   raw protocol lane end-to-end over the real mesh wire
+  port-rotate   a scratch-port collision on a runner's FIRST default candidate
+                is rotated past (the colliding port and its holder are named)
+                and the whole run still succeeds on the port it selected; the
+                holder is left running — QA-CRIER-10
+  port-refuse   the fail-closed half: every default candidate occupied is a
+                named non-zero failure that starts nothing, an OCCUPIED explicit
+                CRIER_PORT is refused instead of rotated, and a FREE explicit
+                CRIER_PORT is used verbatim while every candidate is occupied
+  port-wiring   source invariants over BOTH runners: the shared selector is
+                used (no hard-coded default port, no ad-hoc `ss -tln` probe) and
+                every component invocation is pinned to the selected port
 
 Usage:
     python3 selftest.py                 # all cases
     python3 selftest.py --case solved   # one case
     python3 selftest.py --list          # case names
     python3 selftest.py --keep          # keep the per-case temp dirs
+
+No paid API key and no network in any case — the port cases add no provider
+call either: the collision is a squatter socket this selftest owns.
 
 Exit status: 0 if every case passed, 1 otherwise.
 """
@@ -41,6 +55,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
+import re
 import shutil
 import socket
 import subprocess
@@ -60,7 +76,8 @@ import stub_llm  # noqa: E402  (local test double)
 # A placeholder credential for a stub endpoint — never a real key, never a secret.
 STUB_KEY = "llm-mesh-selftest-stub"
 
-CASES = ["mcp-timeout", "solved", "wrong-answer", "stalled", "wall-clock", "mesh-solved"]
+CASES = ["mcp-timeout", "solved", "wrong-answer", "stalled", "wall-clock", "mesh-solved",
+         "port-rotate", "port-refuse", "port-wiring"]
 
 
 def free_port() -> int:
@@ -96,16 +113,19 @@ class CaseResult:
 # ------------------------------------------------------------------ helpers
 
 
-def scenario_env(out_dir: Path, port: int, stub_url: str, **overrides) -> dict:
+def scenario_env(out_dir: Path, port: int | None, stub_url: str, **overrides) -> dict:
     env = dict(os.environ)
     env.pop("CRIER_MCP_TIMEOUT_S", None)
+    env.pop("CRIER_PORT", None)
+    env.pop("CRIER_PORT_CANDIDATES", None)
     env.update({
         "DEEPSEEK_API_KEY": STUB_KEY,
         "DOGFOOD_OUT": str(out_dir),
         "DOGFOOD_BASE_URL": stub_url,
         "DOGFOOD_MODEL": "stub-model",
-        "CRIER_PORT": str(port),
     })
+    if port is not None:
+        env["CRIER_PORT"] = str(port)
     env.update(overrides)
     return env
 
@@ -138,6 +158,107 @@ def read_product(out_dir: Path) -> dict:
 def read_log(out_dir: Path, name: str) -> str:
     path = out_dir / name
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
+# --------------------------------------------------- scratch-port fixtures
+#
+# The port-rotation cases need ports that are occupied DETERMINISTICALLY, by a
+# listener this selftest owns, with no provider, no network and no external
+# process — so the squatter is an in-process socket: bind+listen is synchronous,
+# which removes the pick->bind race a spawned listener would introduce.
+
+PORT_BASE_RE = re.compile(r"(?m)^PORT_BASE=(\d+)")
+SELECTED_RE = re.compile(r"port-guard: selected :(\d+) for")
+
+
+def runner_base_port(script: Path) -> int:
+    """The first candidate of a runner's scratch-port rotation."""
+    m = PORT_BASE_RE.search(script.read_text(encoding="utf-8"))
+    if m is None:
+        raise AssertionError(f"{script} has no `PORT_BASE=<port>` line")
+    return int(m.group(1))
+
+
+class Squatter:
+    """A listener this selftest owns and keeps for the duration of a case."""
+
+    def __init__(self, port: int):
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.sock.bind(("127.0.0.1", port))
+        except OSError as exc:
+            self.sock.close()
+            raise AssertionError(f"could not squat :{port} — something already holds it ({exc})") from exc
+        self.sock.listen(16)
+
+    def __enter__(self) -> "Squatter":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.sock.close()
+
+    def still_listening(self) -> bool:
+        """True when the port still accepts a connection: proof the runner
+        rotated PAST this holder instead of killing it."""
+        try:
+            with socket.create_connection(("127.0.0.1", self.port), timeout=1):
+                return True
+        except OSError:
+            return False
+
+
+def squat_all(ports: list[int]) -> list[Squatter]:
+    return [Squatter(p) for p in ports]
+
+
+def selected_port(output: str) -> int | None:
+    m = SELECTED_RE.search(output)
+    return int(m.group(1)) if m else None
+
+
+def free_run(count: int, low: int = 24000, high: int = 42000, tries: int = 60) -> list[int]:
+    """`count` CONSECUTIVE free ports — a rotation fixture needs neighbours."""
+    for _ in range(tries):
+        base = random.randrange(low, high)
+        if all(port_is_free(base + i) for i in range(count)):
+            return [base + i for i in range(count)]
+    return []
+
+
+def port_is_free(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def ss_shows(port: int) -> bool:
+    """Whether `ss` (what the guards use) agrees the port is occupied."""
+    try:
+        out = subprocess.run(["ss", "-tln"], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    return any(re.search(rf":{port}\s", line) for line in out.splitlines()[1:])
+
+
+def invocation_blocks(src: str, needle: str) -> list[str]:
+    """Every shell invocation that mentions `needle`, including its
+    backslash-continued continuation lines."""
+    lines = src.splitlines()
+    blocks = []
+    for i, line in enumerate(lines):
+        if needle not in line:
+            continue
+        block = [line]
+        j = i
+        while lines[j].rstrip().endswith("\\") and j + 1 < len(lines):
+            j += 1
+            block.append(lines[j])
+        blocks.append("\n".join(block))
+    return blocks
 
 
 # ------------------------------------------------------------------ cases
@@ -194,9 +315,10 @@ def case_mcp_timeout(work: Path) -> CaseResult:
 def case_solved(work: Path) -> CaseResult:
     res = CaseResult("solved")
     out_dir = work / "out"
+    port = free_port()
     server, state, stub_url = stub_llm.start_server("solved")
     try:
-        env = scenario_env(out_dir, free_port(), stub_url,
+        env = scenario_env(out_dir, port, stub_url,
                            DOGFOOD_CONTROLLER_DEADLINE_S="60",
                            DOGFOOD_TIMEOUT_S="120",
                            DOGFOOD_MESH_WAIT_S="20",
@@ -207,6 +329,15 @@ def case_solved(work: Path) -> CaseResult:
         controller_log = read_log(out_dir, "controller.log")
         agent_a = read_log(out_dir, "agent-a.log")
         agent_b = read_log(out_dir, "agent-b.log")
+
+        # 0. an EXPLICIT CRIER_PORT is honored verbatim — never rotated away from
+        #    (the runner is asked for a free port here, so the only correct
+        #    behaviour is to use exactly that one; the rotation cases below cover
+        #    the default path and the occupied-explicit path).
+        res.check(f"port-guard: selected :{port} for" in output,
+                  "the explicitly requested port was the one selected", f":{port}")
+        res.check(f"starting crier server on :{port}" in output,
+                  "the server was started on the requested port", f":{port}")
 
         # 1. bounded, and it ends with the controller's verdict
         res.check(rc == 0, "exit 0", f"got {rc}")
@@ -398,9 +529,10 @@ def case_wall_clock(work: Path) -> CaseResult:
 def case_mesh_solved(work: Path) -> CaseResult:
     res = CaseResult("mesh-solved")
     out_dir = work / "out"
+    port = free_port()
     server, state, stub_url = stub_llm.start_server("solved")
     try:
-        env = scenario_env(out_dir, free_port(), stub_url,
+        env = scenario_env(out_dir, port, stub_url,
                            DOGFOOD_CONTROLLER_DEADLINE_S="60",
                            DOGFOOD_TIMEOUT_S="120",
                            DOGFOOD_AGENT_WAIT_S="30",
@@ -410,6 +542,13 @@ def case_mesh_solved(work: Path) -> CaseResult:
         product = read_product(out_dir)
         controller_log = read_log(out_dir, "controller.log")
         agent_a = read_log(out_dir, "agent-a.log")
+
+        # An explicit CRIER_PORT is honored verbatim on this lane too, and the
+        # raw mesh clients are pinned to it (the agents' only wire address).
+        res.check(f"port-guard: selected :{port} for" in output,
+                  "the explicitly requested port was the one selected", f":{port}")
+        res.check(f":{port} is held by pid" in output,
+                  "the relay on the requested port is the pid this run started", f":{port}")
 
         res.check(rc == 0, "exit 0", f"got {rc}")
         res.check(product.get("result") == "SOLVED", "PRODUCT result SOLVED",
@@ -429,6 +568,195 @@ def case_mesh_solved(work: Path) -> CaseResult:
         server.server_close()
 
 
+# ------------------------------------------------- scratch-port rotation
+# (QA-CRIER-10 — a fixed scratch port makes a probe skip or abort when anything
+# already listens there: a long-lived unrelated listener, or a squatter that took
+# the port between two runs of the same script. No provider call is made in any
+# of these three cases.)
+
+
+def case_port_rotate(work: Path) -> CaseResult:
+    """A collision on the FIRST default candidate is rotated past, and the run
+    still succeeds on the port it selected.
+
+    The collision is deterministic: the squatter is a socket this selftest owns
+    (bind+listen is synchronous, so there is no pick->bind race), and the
+    rotated run is the real bridge-lane demo against the local stub — so a port
+    that reached the server but not the bridges/harnesses/controller could not
+    reach SOLVED here.
+    """
+    res = CaseResult("port-rotate")
+    out_dir = work / "out"
+    base = runner_base_port(BRIDGE_RUNNER)
+    server, _state, stub_url = stub_llm.start_server("solved")
+    squatter = None
+    try:
+        squatter = Squatter(base)
+        res.check(ss_shows(base), "the first default candidate is occupied by a listener this case owns",
+                  f":{base} · ss agrees: {ss_shows(base)}")
+        env = scenario_env(out_dir, None, stub_url,
+                           DOGFOOD_CONTROLLER_DEADLINE_S="60",
+                           DOGFOOD_TIMEOUT_S="120",
+                           DOGFOOD_MESH_WAIT_S="20",
+                           DOGFOOD_ASK_TIMEOUT_S="20")
+        rc, output, secs = run_runner(BRIDGE_RUNNER, env, 180)
+        res.detail = output
+        chosen = selected_port(output)
+        product = read_product(out_dir)
+
+        res.check(f"port-guard: candidate :{base} is in use" in output,
+                  "the occupied candidate was named, with its holder, as the reason to rotate")
+        res.check(chosen is not None, "a port was selected", f"selected {chosen}")
+        res.check(chosen != base, "the selected port is NOT the occupied candidate",
+                  f"squatted :{base}, selected {chosen}")
+        res.check(chosen is not None and f"starting crier server on :{chosen}" in output,
+                  "the server was started on the SELECTED port", f":{chosen}")
+        res.check(rc == 0, "the rotated run still succeeds (no false skip)", f"exit {rc} after {secs:.1f}s")
+        res.check(product.get("result") == "SOLVED", "PRODUCT result SOLVED",
+                  f"got {product.get('result')!r}")
+        res.check(product.get("finals_received") == 2,
+                  "both finals crossed crier on the rotated port (no component kept the default)",
+                  f"finals={product.get('finals_received')}")
+        res.check(squatter.still_listening(),
+                  f"the holder of :{base} was left running — a foreign listener is not ours to kill")
+        return res
+    finally:
+        if squatter is not None:
+            squatter.sock.close()
+        server.shutdown()
+        server.server_close()
+
+
+def case_port_refuse(work: Path) -> CaseResult:
+    """The fail-closed half of the rotation contract, on both lanes.
+
+    Every default candidate occupied must be a NAMED non-zero failure that
+    starts nothing; an OCCUPIED explicit CRIER_PORT must be refused rather than
+    rotated; a FREE explicit CRIER_PORT must be used verbatim even while every
+    default candidate is occupied.
+    """
+    res = CaseResult("port-refuse")
+    budget = 3
+    bridge_candidates = [runner_base_port(BRIDGE_RUNNER) + i for i in range(budget)]
+    mesh_candidates = [runner_base_port(MESH_RUNNER) + i for i in range(budget)]
+    ports = sorted(set(bridge_candidates) | set(mesh_candidates))
+    squatters: list[Squatter] = []
+    try:
+        squatters = squat_all(ports)
+        res.check(all(s.still_listening() for s in squatters),
+                  "every candidate port is occupied by a listener this selftest owns",
+                  f":{ports}")
+        res.check(all(ss_shows(p) for p in ports), "ss agrees the candidates are occupied", f":{ports}")
+
+        # (a) the default path, every candidate occupied -> named failure
+        out_a = work / "out-exhausted"
+        env = scenario_env(out_a, None, "http://127.0.0.1:1", CRIER_PORT_CANDIDATES=str(budget))
+        rc, output, secs = run_runner(MESH_RUNNER, env, 60)
+        res.detail = output
+        missing = [p for p in mesh_candidates if f":{p} — holder pid" not in output]
+        res.check(rc != 0, "an exhausted candidate budget is a non-zero failure", f"exit {rc}")
+        res.check(f"all {budget} scratch-port candidate(s) from :{mesh_candidates[0]} are in use" in output,
+                  "the failure names the budget and its base", f":{mesh_candidates[0]} x{budget}")
+        res.check(not missing, "every attempted candidate is listed with its holder", f"missing={missing}")
+        res.check("port-guard: selected" not in output, "no port was selected")
+        res.check(not out_a.exists(), "nothing was started (the run failed before its out dir existed)")
+
+        # (b) an OCCUPIED explicit port -> refused, never rotated
+        out_b = work / "out-explicit-busy"
+        env = scenario_env(out_b, bridge_candidates[0], "http://127.0.0.1:1",
+                           CRIER_PORT_CANDIDATES=str(budget))
+        rc, output, secs = run_runner(BRIDGE_RUNNER, env, 60)
+        res.detail = output
+        res.check(rc != 0, "an occupied explicit CRIER_PORT is a non-zero failure", f"exit {rc}")
+        res.check(f"the explicit port :{bridge_candidates[0]} is already in use" in output,
+                  "the refusal names the explicitly requested port")
+        res.check("holder pid :" in output, "the refusal names the holder of that port")
+        res.check("port-guard: candidate :" not in output,
+                  "the candidate list was NOT consulted (an explicit port is never rotated)")
+        res.check("port-guard: selected" not in output, "no port was selected")
+        res.check(not out_b.exists(), "nothing was started")
+
+        # (c) a FREE explicit port wins even while every candidate is occupied
+        out_c = work / "out-explicit-free"
+        wanted = free_port()
+        res.check(port_is_free(wanted), "premise: the requested port is free to bind", f":{wanted}")
+        res.check(not ss_shows(wanted), "premise: ss agrees the requested port is free", f":{wanted}")
+        env = scenario_env(out_c, wanted, "http://127.0.0.1:1",
+                           CRIER_PORT_CANDIDATES=str(budget),
+                           DOGFOOD_TIMEOUT_S="1",
+                           DOGFOOD_CONTROLLER_DEADLINE_S="1",
+                           DOGFOOD_MAX_TURNS="1",
+                           DOGFOOD_ASK_TIMEOUT_S="1")
+        rc, output, secs = run_runner(BRIDGE_RUNNER, env, 60)
+        res.detail = output
+        res.check(f"port-guard: selected :{wanted} for" in output,
+                  "the explicit free port was selected verbatim", f":{wanted}")
+        res.check("port-guard: candidate :" not in output,
+                  "the occupied candidates were not consulted")
+        res.check(f":{wanted} is held by pid" in output and "== the server pid" in output,
+                  "the server that answered /health on the explicit port is the pid this run started",
+                  f":{wanted}")
+        res.check("==> launching controller" in output,
+                  "the run proceeded past server startup", f"exit {rc} after {secs:.1f}s")
+        res.check(rc in (0, 124), "the probe run is bounded (its own wall clock ends it)", f"exit {rc}")
+        res.check(all(s.still_listening() for s in squatters),
+                  "no squatter was disturbed by any of the three runs", f":{ports}")
+        return res
+    finally:
+        for s in squatters:
+            s.sock.close()
+
+
+def case_port_wiring(work: Path) -> CaseResult:
+    """Source invariants over BOTH runners — the half a live run cannot show: the
+    port is CHOSEN by the shared helper and threaded to every component."""
+    res = CaseResult("port-wiring")
+    del work
+    bases = {}
+    for label, script in (("bridge", BRIDGE_RUNNER), ("mesh", MESH_RUNNER)):
+        src = script.read_text(encoding="utf-8")
+        bases[label] = runner_base_port(script)
+
+        res.check('. "$REPO/scripts/lib/port-guard.sh"' in src,
+                  f"{label}: sources the shared port-guard library")
+        res.check('select_scratch_port "${CRIER_PORT:-}" "$PORT_BASE"' in src,
+                  f"{label}: chooses its port with the shared selector (explicit override passed through)")
+        res.check('"$PORT_CANDIDATES"' in src, f"{label}: threads the candidate budget to the selector")
+        res.check('PORT="$PORT_GUARD_SELECTED"' in src,
+                  f"{label}: uses the SELECTED port (PORT is not assigned anywhere else)")
+        res.check(re.search(r'PORT="\$\{CRIER_PORT:-[0-9]', src) is None,
+                  f"{label}: no hard-coded default port is left in the runner")
+        res.check('ss -tln 2>/dev/null | grep -q ":$PORT "' not in src,
+                  f"{label}: the ad-hoc `ss -tln | grep` busy probe is gone")
+        res.check(re.search(r"ss -tln\w*\s*\|", src) is None,
+                  f"{label}: the runner pipes no ss output itself (the shared helper owns the probe)")
+        res.check(f'PORT_BASE={bases[label]}' in src, f"{label}: names its first candidate")
+        res.check(f'wait_http_or_die "http://127.0.0.1:$PORT/health" "$SERVER_PID"' in src,
+                  f"{label}: waits for /health through the shared guard")
+        res.check(f'assert_port_owned "$PORT" "$SERVER_PID"' in src,
+                  f"{label}: asserts the holder of the selected port is the process it started")
+        res.check('CRIER_PORT="$PORT"' in src, f"{label}: starts the server on the selected port")
+
+        blocks = invocation_blocks(src, "python3 -u ")
+        unpinned = [b for b in blocks if "$PORT" not in b]
+        res.check(len(blocks) >= 3, f"{label}: expects the component invocations to be present",
+                  f"found {len(blocks)}")
+        res.check(not unpinned,
+                  f"{label}: every component invocation ({len(blocks)}) is pinned to the selected port",
+                  f"unpinned={len(unpinned)}")
+
+    res.check(bases["bridge"] != bases["mesh"],
+              "the two lanes keep distinct candidate bases", str(bases))
+    res.check(all(1024 <= p <= 65000 for p in bases.values()),
+              "both candidate bases are in the usable port range", str(bases))
+
+    mesh_src = MESH_RUNNER.read_text(encoding="utf-8")
+    res.check(mesh_src.count('ws://127.0.0.1:$PORT/mesh/connect/') >= 2,
+              "raw mesh clients are addressed on the selected port",
+              str(mesh_src.count('ws://127.0.0.1:$PORT/mesh/connect/')))
+    return res
+
+
 CASE_FUNCS = {
     "mcp-timeout": case_mcp_timeout,
     "solved": case_solved,
@@ -436,6 +764,9 @@ CASE_FUNCS = {
     "stalled": case_stalled,
     "wall-clock": case_wall_clock,
     "mesh-solved": case_mesh_solved,
+    "port-rotate": case_port_rotate,
+    "port-refuse": case_port_refuse,
+    "port-wiring": case_port_wiring,
 }
 
 
