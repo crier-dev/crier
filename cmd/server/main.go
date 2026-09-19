@@ -111,6 +111,12 @@ func run(args []string) int {
 	// Re-install the logger now that we know the user's level/format.
 	initLogger(cfg)
 
+	// Which registry backend serves is decided ONCE, from the configuration,
+	// by registryBackendForURL: the store selection below and the GET /status
+	// body (DF-CRIER-113) both key off this value, so the backend it advertises
+	// cannot drift from the store that actually answers.
+	regBackend := registryBackendForURL(cfg.Database.URL)
+
 	// Configure WebSocket origin check for relay and mesh.
 	wsCheck := config.BuildCheckOrigin(cfg.WSAllowedOrigins)
 	relay.SetWSCheckOrigin(wsCheck)
@@ -153,6 +159,17 @@ func run(args []string) int {
 	// without holding a token.
 	r.HandleFunc("/version", handleVersion).Methods("GET")
 
+	// Effective runtime posture (DF-CRIER-113): auth, per-agent signing
+	// requirement, guard switch, registry backend, federation/webhook modes
+	// and the build identity as JSON — the operator's answer to "what is
+	// actually in force on this live server?", with no secret value in it.
+	// Deliberately NOT auth-exempt: unlike /health and /version (which stay
+	// public so a token-less operator can ask what a server is) this one
+	// reports whether auth is ENFORCED, so an unauthenticated caller must not
+	// be able to read the posture of a server that has auth on. The exempt
+	// list in internal/middleware/auth.go is unchanged.
+	r.HandleFunc("/status", newStatusHandler(cfg, regBackend)).Methods("GET")
+
 	// OpenAPI spec (CR-GAP-049) — the spec is served live so spec-vs-code
 	// drift is visible on the running server. These three paths plus
 	// /health and /version are the five auth-exempt paths (the switch in
@@ -176,7 +193,7 @@ func run(args []string) int {
 	// Agent registry + inboxes
 	var regStore registry.Store
 
-	if cfg.Database.URL != "" {
+	if regBackend == registryBackendPostgres {
 		startupCtx, cancelStartup := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
 		defer cancelStartup()
 

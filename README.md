@@ -806,25 +806,66 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **13 paths** and **17 operations** (a path carries one entry per HTTP method, so the two counts differ) across 7 operation groups. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **14 paths** and **18 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 13 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 17 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 16 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 14 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 18 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 17 router paths
 ```
 
-The router registers **16 paths**: those 13 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
+The router registers **17 paths**: those 14 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Health** | `GET /health` | Service health check |
 | **Version** | `GET /version` | Build identity of the running server (version, commit, build time, dirty) — public like `/health` |
+| **Status** | `GET /status` | Effective runtime posture (auth, signature requirement, guard switch, registry backend, build identity) — authenticated, not auth-exempt |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
 | **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
+
+### Runtime posture — `GET /status`
+
+`GET /status` answers the question `/health` ("is it up?") and `/version` ("which build?") leave open: **what is actually in force on this server?** A process that answers `/health` `ok` while running with auth disabled, per-agent signatures optional and the message guard off is indistinguishable from a locked-down one until a request is rejected — this endpoint makes that posture readable:
+
+```bash
+curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python3 -m json.tool
+```
+
+```json
+{
+  "auth_enabled": true,
+  "require_agent_signature": true,
+  "guard_enabled": true,
+  "registry_backend": "memory",
+  "rate_limit_per_minute": 100,
+  "log_level": "info",
+  "log_format": "text",
+  "webhook_signing": false,
+  "federation_enabled": false,
+  "federation_hold_queue": "none",
+  "metrics_enabled": false,
+  "pprof_enabled": false,
+  "build": {
+    "version": "1.2.3",
+    "commit": "1a2b3c4d",
+    "build_time": "2026-09-14T06:05:59Z",
+    "modified": false
+  }
+}
+```
+
+- `auth_enabled`, `require_agent_signature` and `guard_enabled` are the effective switches at the delivery choke point — the same values the startup log lines report, readable at any time instead of only at boot.
+- `registry_backend` is the backend **actually serving**: `postgres` when `CR_DATABASE_URL` (or its fallbacks) is set, `memory` otherwise. `run()` selects the store and derives this field from the same value, so it cannot advertise a backend other than the one answering.
+- `webhook_signing` and `federation_enabled` report whether the corresponding secret/link configuration is in effect — as booleans, never as values.
+- `federation_hold_queue` is the **durability mode** of the federation hold path: `none` (no `CR_FED_LINKS`, so no hold path exists), `memory` (held deliveries are process-lifetime and lost on restart) or `file` (`CR_FED_QUEUE_FILE` is set, so they survive a restart). The path itself is config, not posture, and is never in the body.
+- `metrics_enabled` / `pprof_enabled` say whether the opt-in inspection surfaces are registered at all (`false` = those paths answer `404`).
+- `build` is byte-for-byte the object `GET /version` serves — the same `internal/buildinfo` source, nested rather than flattened.
+- **No secret or connection value is ever serialized**: not `CR_AUTH_TOKEN`, not `CR_DATABASE_URL` (only the backend name), not `CR_WEBHOOK_SECRET`, not `CR_FED_TOKEN`, and no guard provider credential or base URL.
+- `GET /status` is **not** auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header and answers `401` without it. The exempt-path list in `internal/middleware/auth.go` is unchanged at five paths — `/health` and `/version` stay public because "up?" and "which build?" must be answerable without a token; the enforced-posture answer is not.
 
 ## Observability (metrics & profiling)
 
@@ -857,7 +898,7 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 16 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 13 paths / 17 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
+- **API** — 17 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 14 paths / 18 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

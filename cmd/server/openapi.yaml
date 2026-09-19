@@ -73,6 +73,127 @@ paths:
                     description: True when the working tree had uncommitted changes at build time
                     example: false
 
+  # ── Runtime posture ──
+  # /status is NOT exempt — unlike /health and /version it reports whether auth
+  # is ENFORCED, so it requires the bearer token when CR_AUTH_TOKEN is set (the
+  # exempt-path switch in internal/middleware/auth.go is unchanged).
+  /status:
+    get:
+      operationId: runtimeStatus
+      summary: Effective runtime posture (auth, guard, registry backend, build identity)
+      description: >-
+        What is actually in force on this live server, as booleans and modes:
+        whether a Bearer token is enforced, whether per-agent ed25519 signing is
+        required, whether the LLM message guard is on, which registry backend is
+        serving (memory or postgres), the federation/webhook/inspection modes,
+        and the build identity — the same object GET /version serves, nested
+        under `build`. Operators read this to distinguish a locked server from
+        one running wider open; a server that answers /health "ok" cannot be
+        told apart from one with auth disabled any other way.
+
+        Secret values are deliberately absent, not redacted: no CR_AUTH_TOKEN,
+        no CR_DATABASE_URL (only the backend NAME), no CR_WEBHOOK_SECRET, no
+        CR_FED_TOKEN, no guard provider credential and no guard base URL. The
+        federation hold queue reports its durability MODE rather than the
+        CR_FED_QUEUE_FILE path, so no filesystem or host detail is exposed.
+
+        Not auth-exempt: requires `Authorization: Bearer <CR_AUTH_TOKEN>` when
+        CR_AUTH_TOKEN is set, and answers 401 without it.
+      responses:
+        "200":
+          description: Effective runtime posture
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [auth_enabled, require_agent_signature, guard_enabled, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                properties:
+                  auth_enabled:
+                    type: boolean
+                    description: True when a Bearer token is enforced (CR_AUTH_TOKEN set); false is the documented development posture
+                    example: true
+                  require_agent_signature:
+                    type: boolean
+                    description: True when per-agent ed25519 signing is enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true)
+                    example: true
+                  guard_enabled:
+                    type: boolean
+                    description: LLM message guard master switch (CR_GUARD_ENABLED, default true). False means the delivery path skips the guard entirely
+                    example: true
+                  registry_backend:
+                    type: string
+                    enum: [memory, postgres]
+                    description: >-
+                      The backend actually serving this process: "postgres" when
+                      CR_DATABASE_URL is set, "memory" otherwise. Derived from
+                      the same value that selected the store, so it cannot
+                      advertise a backend other than the one answering.
+                    example: memory
+                  rate_limit_per_minute:
+                    type: integer
+                    description: Effective relay publish budget (CR_RATE_LIMIT_PER_MINUTE); 0 means unlimited
+                    example: 100
+                  log_level:
+                    type: string
+                    enum: [debug, info, warn, error]
+                    description: Effective logger level (CR_LOG_LEVEL, default info)
+                    example: info
+                  log_format:
+                    type: string
+                    enum: [text, json]
+                    description: Effective logger format (CR_LOG_FORMAT, default text)
+                    example: text
+                  webhook_signing:
+                    type: boolean
+                    description: True when outbound webhook POSTs are HMAC-signed (CR_WEBHOOK_SECRET set). The secret itself is never serialized
+                    example: false
+                  federation_enabled:
+                    type: boolean
+                    description: True when relay-to-relay links are configured (CR_FED_LINKS non-empty)
+                    example: false
+                  federation_hold_queue:
+                    type: string
+                    enum: [none, memory, file]
+                    description: >-
+                      Durability mode of the federation hold path: "none" (no
+                      links configured, so no hold path exists), "memory" (held
+                      deliveries are process-lifetime and lost on restart) or
+                      "file" (CR_FED_QUEUE_FILE is set, so they survive a
+                      restart). The path itself is config, not posture, and is
+                      never reported.
+                    example: memory
+                  metrics_enabled:
+                    type: boolean
+                    description: True when GET /metrics is registered (CR_ENABLE_METRICS); false means the path answers 404
+                    example: false
+                  pprof_enabled:
+                    type: boolean
+                    description: True when GET /debug/pprof/* is registered (CR_ENABLE_PPROF); false means the paths answer 404
+                    example: false
+                  build:
+                    type: object
+                    description: Build identity of the binary serving this request — byte-for-byte the object GET /version serves
+                    required: [version, commit, build_time, modified]
+                    properties:
+                      version:
+                        type: string
+                        description: Stamped version (no leading "v"), or "dev" when none was stamped
+                        example: "1.2.3"
+                      commit:
+                        type: string
+                        description: Short (8-char) git revision the binary was built from, or "unknown" when unavailable
+                        example: "1a2b3c4d"
+                      build_time:
+                        type: string
+                        description: RFC 3339 timestamp — the stamped build time, else the commit time, else "unknown"
+                        example: "2026-09-14T06:05:59Z"
+                      modified:
+                        type: boolean
+                        description: True when the working tree had uncommitted changes at build time
+                        example: false
+        "401":
+          description: Missing or invalid bearer token — /status is not auth-exempt (CR_AUTH_TOKEN is set and no valid Authorization Bearer header was sent)
+
   # ── Relay: Pub/Sub ──
   /relay/publish:
     post:
