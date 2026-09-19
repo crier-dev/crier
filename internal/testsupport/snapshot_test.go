@@ -112,6 +112,83 @@ func TestSnapshotBuildDirWithoutGitMetadata(t *testing.T) {
 	}
 }
 
+// TestSnapshotBuildDirExcludesUncommittedSiblingEdit pins the DF-CRIER-261
+// claim at the layer the helper actually covers: on the git-work-tree branch
+// the snapshot is a clone of HEAD, so an UNCOMMITTED sibling file that is
+// sitting in the live package directory does not reach the build the test
+// spawns.
+//
+// This is deliberately narrower than "the package cannot be red": the same
+// broken file DOES fail the outer compile `go test` performs on the live
+// package directory before any test runs (measured failure line and probe
+// recipe in the package doc). What is pinned here is only that the snapshot's
+// own build is not poisoned by it — i.e. that the helper returned committed
+// content and not the live directory.
+func TestSnapshotBuildDirExcludesUncommittedSiblingEdit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatalf("git is required for the build snapshot to carry a commit: %v", err)
+	}
+
+	// The fixture carries its own .git, so the helper takes the clone-of-HEAD
+	// branch no matter where TMPDIR points: unlike the git-less test this one
+	// does not depend on the temp dir being outside a repository.
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write("go.mod", "module example.test/siblingprobe\n\ngo 1.26.6\n")
+	write(filepath.Join("cmd", "hello", "main.go"), "package main\n\nfunc main() { println(\"hello\") }\n")
+
+	mustGit(t, root, "init", "-q")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "-c", "user.email=worker@example.test", "-c", "user.name=worker", "commit", "-q", "-m", "fixture")
+	committedHead := mustGit(t, root, "rev-parse", "HEAD")
+	if !isHexRevision(committedHead) {
+		t.Fatalf("the fixture reports HEAD %q, want a git revision", committedHead)
+	}
+
+	pkgDir := filepath.Join(root, "cmd", "hello")
+
+	// Uncommitted sibling edit: a file that cannot compile, in the LIVE package
+	// directory the test is about to snapshot.
+	broken := "package main\n\nfunc zzBroken( {\n"
+	write(filepath.Join("cmd", "hello", "zz_broken_sibling.go"), broken)
+	if _, err := os.Stat(filepath.Join(pkgDir, "zz_broken_sibling.go")); err != nil {
+		t.Fatalf("the broken sibling file is not in the live package dir %s, so this probe would prove nothing: %v", pkgDir, err)
+	}
+
+	snapshot := SnapshotBuildDir(t, pkgDir)
+	if snapshot == pkgDir {
+		t.Fatalf("SnapshotBuildDir returned the live package directory %s — the snapshot must be a clone of HEAD, not the working tree", snapshot)
+	}
+	if _, err := os.Stat(filepath.Join(snapshot, "zz_broken_sibling.go")); !os.IsNotExist(err) {
+		t.Errorf("the snapshot %s contains the uncommitted sibling file zz_broken_sibling.go (stat err = %v) — the snapshot must be HEAD, where that file was never committed", snapshot, err)
+	}
+	if _, err := os.Stat(filepath.Join(snapshot, "main.go")); err != nil {
+		t.Errorf("the snapshot %s does not carry the committed package source: %v", snapshot, err)
+	}
+
+	// The surviving claim, end to end: the fixture's own HEAD, and a build in
+	// the snapshot that compiles despite the broken file in the live tree.
+	if snapshotHead := mustGit(t, snapshot, "rev-parse", "HEAD"); snapshotHead != committedHead {
+		t.Errorf("the snapshot HEAD = %s but the fixture's committed HEAD = %s — on a git work tree the snapshot must be the clone-of-HEAD branch", snapshotHead, committedHead)
+	}
+
+	bin := filepath.Join(t.TempDir(), "hello")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = snapshot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build in the snapshot %s failed: %v — an uncommitted sibling edit reached the build, which is exactly what the snapshot must prevent:\n%s", snapshot, err, out)
+	}
+}
+
 // writeFixtureModule writes a minimal single-package Go module at root.
 func writeFixtureModule(t *testing.T, root string) {
 	t.Helper()

@@ -7,16 +7,21 @@
 // used to turn those builds red for reasons that have nothing to do with the
 // code under test — each of them cost a real verdict:
 //
-//  1. DF-CRIER-253 — the sibling mid-edit. While the build ran with the live
-//     working directory as its Cmd.Dir, ANY concurrent writer in the package
-//     directory (a sibling worker mid-edit, a half-applied patch, an editor
-//     buffer saved mid-keystroke) made the package fail to COMPILE, and the
-//     test reported that as its own failure:
+//  1. DF-CRIER-253 — the sibling mid-edit. While the test-spawned build ran
+//     with the live working directory as its Cmd.Dir, ANY concurrent writer in
+//     the package directory (a sibling worker mid-edit, a half-applied patch,
+//     an editor buffer saved mid-keystroke) made that BUILD fail to compile,
+//     and the test reported the build's own output as its failure:
 //
 //     cmd/server/zz_sibling_probe.go:3:22: syntax error: unexpected {, expected )
 //     FAIL github.com/crier-dev/crier/cmd/server [build failed]
 //
 //     A tier-2 judge run on an unrelated task recorded exactly that FAIL.
+//
+//     That FAIL text has more than one source: the same wording is printed by
+//     the OUTER compile `go test` performs on the package before any test runs,
+//     which no test-level helper can isolate. This package closes the
+//     test-spawned build only — see "What this does NOT cover" below.
 //
 //  2. DF-CRIER-259 — the git-less copy. The identity assertions need the built
 //     binary to carry a COMMIT, and a bare `go build` only gets one from the
@@ -30,15 +35,52 @@
 //     the repository at the same HEAD. Measured tick 345: the QA-CRIER-21
 //     tier-2 judge hit exactly this FAIL inside its own /tmp evidence run.
 //
-// SnapshotBuildDir closes both halves: the build runs against an isolated
-// snapshot of the tree that ALWAYS carries git metadata for the toolchain to
-// stamp — a clone of HEAD when the tree is a git work tree (condition 1), and,
-// when it is not (condition 2), a copy of the tree with its own deterministic
-// one-commit repository. Either way a sibling's in-flight edit cannot red the
-// package and the identity assertions hold identically inside a checkout and
-// from a copy with no .git at all, so the tests never read the CALLER's git
-// state to decide what identity to expect: they read the snapshot's own HEAD,
-// which is the revision the binary was actually built from.
+// SnapshotBuildDir closes both halves at the layer it owns — the test-spawned
+// build: the build runs against an isolated snapshot of the tree that ALWAYS
+// carries git metadata for the toolchain to stamp — a clone of HEAD when the
+// tree is a git work tree (condition 1), and, when it is not (condition 2), a
+// copy of the tree with its own deterministic one-commit repository. On the
+// clone-of-HEAD branch an uncommitted sibling edit cannot reach the binary under
+// test — what that build compiles is committed content only. On the copy branch
+// nothing writes to the copy once it has been taken, but a file already on disk
+// when the copy is taken is copied and committed with the rest, so that branch
+// cannot exclude it (both branches are spelled out below). Either way the
+// identity assertions hold identically inside a checkout and from a copy with no
+// .git at all, so the tests never read the CALLER's git state to decide what
+// identity to expect: they read the snapshot's own HEAD, which is the revision
+// the binary was actually built from.
+//
+// # What this does NOT cover (DF-CRIER-261)
+//
+// The snapshot isolates the BUILD, not the PACKAGE: the outer compile `go test`
+// performs on the package before any test in it runs still reads the LIVE
+// package directory, and no helper called from a test can change that.
+//
+// Measured at HEAD efadaf6 while closing DF-CRIER-260 — a sibling file
+// cmd/server/zz_probe_261.go holding `package main` and then `func zzProbe261( {`
+// left in the live package directory makes
+//
+//	go test ./cmd/server -run TestStopRunningServer -count=1
+//
+// print
+//
+//	# github.com/crier-dev/crier/cmd/server [github.com/crier-dev/crier/cmd/server.test]
+//	cmd/server/zz_probe_261.go:3:18: syntax error: unexpected {, expected )
+//	FAIL	github.com/crier-dev/crier/cmd/server [build failed]
+//
+// — the outer compile, before SnapshotBuildDir is ever called, so the isolation
+// this package provides never gets a chance to apply. The probe recipe is
+// exactly that: write the file above into the package directory, run the command
+// above, expect the FAIL ... [build failed] shown, then remove the probe.
+//
+// This cannot be fixed at the test level, which is why the CLAIM was narrowed
+// instead of the compile being made immune to it: the file breaks compilation of
+// a `main` package, and a package that does not compile reds EVERY `go test` of
+// that package — the test binary that would call SnapshotBuildDir cannot be
+// built at all. A snapshot can only decide what the test builds afterwards; it
+// can never pre-empt the toolchain's own compile of the package under test.
+//
+// Attribution: measured while closing DF-CRIER-260, tracked as DF-CRIER-261.
 //
 // This package imports "testing" and is therefore TEST-ONLY. It is never
 // imported by production code or by a main package; it exists as its own
@@ -67,7 +109,7 @@ import (
 // version rendering broken — without editing the live repository.
 //
 // Set-but-empty is treated as unset, so a stray `CRIER_TEST_SNAPSHOT_DIR=` in
-// an environment cannot silently turn the isolation off.
+// an environment cannot silently turn the build isolation off.
 const SnapshotDirEnv = "CRIER_TEST_SNAPSHOT_DIR"
 
 // Commit metadata for a snapshot of a tree that has no git metadata of its
@@ -85,9 +127,13 @@ const (
 )
 
 // SnapshotBuildDir returns the directory a test must run its package build
-// from: a snapshot of the source tree that is isolated from the live working
-// tree, carries git metadata the Go toolchain can stamp into the binary, and
-// has pkgDir's package at the same tree-relative path.
+// from: a snapshot of the source tree that keeps the BUILD out of the live
+// working tree, carries git metadata the Go toolchain can stamp into the binary,
+// and has pkgDir's package at the same tree-relative path.
+//
+// What it isolates is the build the caller spawns, not the package: the
+// toolchain's own compile of pkgDir still reads the live package directory.
+// See "What this does NOT cover" in the package doc.
 //
 // The snapshot is created one of two ways, and which one applies is decided by
 // the tree the suite is running in — never by the assertions, which read the
@@ -95,9 +141,12 @@ const (
 //
 //	git work tree → git clone --shared --no-checkout <repo> <tmp> followed by
 //	  git -C <tmp> checkout --detach <HEAD>. The snapshot is HEAD, NOT the
-//	  working tree, so a sibling's in-flight edit cannot reach the build, and
-//	  the live .git is left untouched (no `git worktree` admin entries to leak
-//	  or prune).
+//	  working tree, so a sibling's uncommitted in-flight edit cannot reach the
+//	  BUILD the caller spawns: HEAD is fixed before the clone, so only committed
+//	  content is compiled there. (An edit that breaks the compile of the package
+//	  itself still reds the outer `go test`, which reads the live package
+//	  directory — see the package doc.) The live .git is left untouched (no
+//	  `git worktree` admin entries to leak or prune).
 //
 //	no git metadata (a copy of the tree with no .git, a tarball, an artifact
 //	  mount) → the tree is copied into a temp dir and turned into its own
@@ -105,8 +154,12 @@ const (
 //	  There is no HEAD to clone, and without git metadata a bare `go build`
 //	  stamps nothing at all — the binary reports the bare "dev" sentinel and
 //	  every identity assertion that requires a commit fails while the same
-//	  commands pass in a checkout. A copy also has no concurrent writers, so
-//	  materializing the working tree is exactly as isolated as cloning HEAD.
+//	  commands pass in a checkout. A copy is materialized from whatever is on
+//	  disk at that moment and nothing writes to it afterwards, so the build in
+//	  it is as isolated as a clone-of-HEAD build against LATER writes — but a
+//	  file already written into the source tree when the copy is taken (an
+//	  uncommitted sibling edit) is copied and committed with everything else,
+//	  so unlike the clone path this branch cannot exclude it.
 //
 // The snapshot is removed by a t.Cleanup hook, so it leaves no residue in the
 // temp dir and no git admin entry behind.
@@ -143,7 +196,7 @@ func SnapshotBuildDir(t *testing.T, pkgDir string) string {
 	if info, statErr := os.Stat(buildDir); statErr != nil || !info.IsDir() {
 		return fallback(t, pkgDir, "snapshot %s has no package directory %s", root, buildDir)
 	}
-	t.Logf("DF-CRIER-253/259: building %s from the isolated snapshot %s", rel, root)
+	t.Logf("DF-CRIER-253/259: building %s from the isolated snapshot %s (committed content only — the snapshot isolates this build, not the package's outer compile)", rel, root)
 	return buildDir
 }
 
@@ -195,7 +248,7 @@ func moduleRoot(dir string) (string, bool) {
 // hard-failing on the environment.
 func fallback(t *testing.T, pkgDir, format string, args ...any) string {
 	t.Helper()
-	t.Logf("DF-CRIER-253/259: no isolated build snapshot (%s) — building in the live directory %s; a concurrent sibling edit can still red this package and a tree with no git metadata cannot satisfy the identity assertions", fmt.Sprintf(format, args...), pkgDir)
+	t.Logf("DF-CRIER-253/259: no isolated build snapshot (%s) — building in the live directory %s; a concurrent sibling edit is not kept out of this build, so an uncommitted edit can red it (and it can red the package's outer `go test` compile either way — the snapshot never covers that layer), and a tree with no git metadata cannot satisfy the identity assertions", fmt.Sprintf(format, args...), pkgDir)
 	return pkgDir
 }
 
