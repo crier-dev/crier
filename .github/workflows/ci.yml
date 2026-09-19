@@ -38,6 +38,17 @@ jobs:
       - name: Demo-harness port-guard selftest
         run: make port-guard-selftest
 
+      # QA-CRIER-10: every example runner that starts a scratch service must
+      # CHOOSE its port (bounded candidate rotation with holder evidence, a named
+      # failure when they are all occupied, a caller-named port checked and never
+      # rotated) instead of binding one fixed default. This proves the RUNNERS are
+      # wired to the selector: source invariants for all five, plus live
+      # rotate / exhaust / explicit arms for federation-demo, hermes-gateway-demo
+      # and ws-mesh-demo. No provider, no key, no network; every fixture port is
+      # picked free by the selftest itself, so a busy runner cannot make it flake.
+      - name: Scratch-port rotation selftest
+        run: make scratch-port-rotation-selftest
+
       # INT-CI-001: ONE transient ssh/scp reset on the deploy leg used to kill the
       # whole bunker-e2e battery with no retry and no attribution — run 35302932314
       # lost the `blocking` cell, and every probe in it, before a single request was

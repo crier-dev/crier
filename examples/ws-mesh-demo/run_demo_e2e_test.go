@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -115,6 +116,30 @@ func parsePortHolder(ssOut string, port int) string {
 // CR_*/CRIER_*/DEMO_* setting (so an inherited CR_RATE_LIMIT_PER_MINUTE=0 or
 // CRIER_PORT cannot silently change what the run proves) plus the test's own.
 func demoEnv(port int, transcript string) []string {
+	return append(demoEnvStripped(),
+		"DEMO_PORT="+strconv.Itoa(port),
+		// The live KEEPALIVE wait costs ~30s (the server's own interval); the
+		// frame-classification rule is proven by the in-process tests instead.
+		"DEMO_KEEPALIVE_WAIT=0",
+		"DEMO_TRANSCRIPT="+transcript,
+	)
+}
+
+// demoEnvRotation is demoEnv WITHOUT DEMO_PORT: the script must CHOOSE its port
+// (QA-CRIER-10) from a candidate block the test proved free, so the run exercises
+// the default rotation path instead of a caller-named port.
+func demoEnvRotation(base, candidates int, transcript string) []string {
+	return append(demoEnvStripped(),
+		"DEMO_PORT_BASE="+strconv.Itoa(base),
+		"DEMO_PORT_CANDIDATES="+strconv.Itoa(candidates),
+		"DEMO_KEEPALIVE_WAIT=0",
+		"DEMO_TRANSCRIPT="+transcript,
+	)
+}
+
+// demoEnvStripped is the ambient environment minus the CR_*/CRIER_*/DEMO_*
+// settings the script reads: an inherited one would decide the arm by accident.
+func demoEnvStripped() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
@@ -123,13 +148,7 @@ func demoEnv(port int, transcript string) []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env,
-		"DEMO_PORT="+strconv.Itoa(port),
-		// The live KEEPALIVE wait costs ~30s (the server's own interval); the
-		// frame-classification rule is proven by the in-process tests instead.
-		"DEMO_KEEPALIVE_WAIT=0",
-		"DEMO_TRANSCRIPT="+transcript,
-	)
+	return env
 }
 
 // demoResult is what a run of the script left behind.
@@ -144,6 +163,14 @@ type demoResult struct {
 // caller can prove ownership of the port at that moment.
 func runShippedDemo(t *testing.T, port int, transcript string, onRunning func(pid string)) demoResult {
 	t.Helper()
+	return runShippedDemoEnv(t, demoEnv(port, transcript), transcript, onRunning)
+}
+
+// runShippedDemoEnv is runShippedDemo with a caller-built environment, so an arm
+// can drive the script's own port ROTATION (no DEMO_PORT) instead of naming a
+// port itself.
+func runShippedDemoEnv(t *testing.T, env []string, transcript string, onRunning func(pid string)) demoResult {
+	t.Helper()
 
 	outPath := filepath.Join(t.TempDir(), "run-demo.out")
 	out, err := os.Create(outPath)
@@ -157,7 +184,7 @@ func runShippedDemo(t *testing.T, port int, transcript string, onRunning func(pi
 
 	cmd := exec.CommandContext(ctx, "bash", demoScript)
 	cmd.Dir = "."
-	cmd.Env = demoEnv(port, transcript)
+	cmd.Env = env
 	cmd.Stdout = out
 	cmd.Stderr = out
 	// The script starts a relay, two mesh peers and a subscriber; killing only
@@ -372,9 +399,10 @@ func TestEveryExampleHarnessSourcesThePortGuardLib(t *testing.T) {
 }
 
 // TestRunDemoUsesTheSharedGuardsAndProvesOwnership pins the three guards as
-// source invariants, in the order they must run: refuse on an occupied port
-// BEFORE building or starting anything, prove the holder of the port is our own
-// relay pid AFTER it answered /health, and require an empty peer list.
+// source invariants, in the order they must run: CHOOSE the port with
+// select_scratch_port BEFORE building or starting anything (QA-CRIER-10), prove
+// the holder of the port is our own relay pid AFTER it answered /health, and
+// require an empty peer list.
 func TestRunDemoUsesTheSharedGuardsAndProvesOwnership(t *testing.T) {
 	src := runDemoScript(t)
 
@@ -382,9 +410,9 @@ func TestRunDemoUsesTheSharedGuardsAndProvesOwnership(t *testing.T) {
 		t.Error("run-demo.sh must source the shared port-guard library")
 	}
 
-	refuseIdx := strings.Index(src, `require_free_port "$DEMO_PORT"`)
+	refuseIdx := strings.Index(src, `select_scratch_port "${DEMO_PORT:-}" "$DEMO_PORT_BASE"`)
 	if refuseIdx < 0 {
-		t.Fatal("run-demo.sh must call require_free_port on $DEMO_PORT")
+		t.Fatal("run-demo.sh must settle its port with select_scratch_port")
 	}
 	buildIdx := strings.Index(src, `go build -o "$WORKDIR/crier" ./cmd/server`)
 	if buildIdx < 0 {
@@ -399,7 +427,7 @@ func TestRunDemoUsesTheSharedGuardsAndProvesOwnership(t *testing.T) {
 		t.Fatal("run-demo.sh must assert that the pid holding $DEMO_PORT is the relay it started")
 	}
 	if refuseIdx > buildIdx || refuseIdx > startIdx {
-		t.Error("the port refusal must run BEFORE the server is built and started")
+		t.Error("the port must be SELECTED before the server is built and started")
 	}
 	if ownIdx < startIdx {
 		t.Error("assert_port_owned must run after the relay was started (it proves the port's holder is that pid)")
@@ -494,7 +522,11 @@ func TestDocsPointAtTheShippedNoInstallCommand(t *testing.T) {
 		command, // run from the repo root
 		"no `websocat`, no `wscat`",
 		"X-Agent-ID",
-		"require_free_port",
+		// QA-CRIER-10: the README documents the port SELECTION (and the candidate
+		// block that can be moved), not a fixed scratch port.
+		"select_scratch_port",
+		"DEMO_PORT_BASE",
+		"DEMO_PORT_CANDIDATES",
 		"assert_port_owned",
 		"DEMO_PORT",
 		"DEMO PASS",
@@ -502,6 +534,184 @@ func TestDocsPointAtTheShippedNoInstallCommand(t *testing.T) {
 		if !strings.Contains(demoReadme, want) {
 			t.Errorf("examples/ws-mesh-demo/README.md must document %q", want)
 		}
+	}
+}
+
+// ------------------------------------------------- QA-CRIER-10 live rotation arms
+
+// pickFreePortRun returns the first of `count` CONSECUTIVE ports this test proved
+// free by binding and releasing each one — a rotation fixture needs neighbours,
+// and a FIXED block would make the arm flake on a busy box.
+func pickFreePortRun(t *testing.T, count int) []int {
+	t.Helper()
+	for attempt := 0; attempt < 80; attempt++ {
+		base := 24000 + rand.Intn(40000-24000-count)
+		ports := make([]int, 0, count)
+		ok := true
+		for i := 0; i < count; i++ {
+			ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(base+i))
+			if err != nil {
+				ok = false
+				break
+			}
+			_ = ln.Close()
+			ports = append(ports, base+i)
+		}
+		if ok {
+			return ports
+		}
+	}
+	t.Fatalf("no run of %d consecutive free ports found", count)
+	return nil
+}
+
+// squatPorts holds the given ports with listeners this test owns, so a collision
+// is deterministic (no pick->bind race, as a spawned listener would introduce).
+func squatPorts(t *testing.T, ports []int) []net.Listener {
+	t.Helper()
+	lns := make([]net.Listener, 0, len(ports))
+	for _, p := range ports {
+		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
+		if err != nil {
+			for _, open := range lns {
+				_ = open.Close()
+			}
+			t.Fatalf("squat :%d: %v", p, err)
+		}
+		lns = append(lns, ln)
+	}
+	return lns
+}
+
+func closeListeners(lns []net.Listener) {
+	for _, ln := range lns {
+		_ = ln.Close()
+	}
+}
+
+// stillAccepting is the "the rotation did not kill the holder" probe: a listener
+// this test owns must still accept a connection after a run rotated past it.
+func stillAccepting(t *testing.T, port int) bool {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// guardSelectedPort reads the port the script's selector chose out of its output.
+func guardSelectedPort(t *testing.T, output string) int {
+	t.Helper()
+	m := guardSelection.FindStringSubmatch(output)
+	if m == nil {
+		t.Fatalf("run-demo.sh never reported a `port-guard: selected :<port> for the ws-mesh-demo relay` line:\n%s", output)
+	}
+	port, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatalf("parse selected port %q: %v", m[1], err)
+	}
+	return port
+}
+
+// TestRunDemoRotatesPastAnOccupiedFirstCandidate is the live half of QA-CRIER-10
+// for this runner: with DEMO_PORT unset and the FIRST candidate of the block
+// already held by a listener this test owns, the script must name that candidate
+// and its holder, rotate to the NEXT candidate, and still run the whole demo to
+// DEMO PASS on the port it selected — with the relay's ownership asserted there,
+// and the squatter left running (a foreign listener is not ours to kill).
+func TestRunDemoRotatesPastAnOccupiedFirstCandidate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("this arm runs the shipped script")
+	}
+	requireDemoTools(t)
+
+	block := pickFreePortRun(t, 3)
+	squatted := block[0]
+	squatters := squatPorts(t, block[:1])
+	defer closeListeners(squatters)
+
+	if holder := portHolderPID(t, squatted); holder != strconv.Itoa(os.Getpid()) {
+		t.Fatalf("premise broken: :%d is held by pid %q, want this test process %d", squatted, holder, os.Getpid())
+	}
+
+	transcript := filepath.Join(t.TempDir(), "transcript.md")
+	res := runShippedDemoEnv(t, demoEnvRotation(squatted, len(block), transcript), transcript, nil)
+
+	if res.code != 0 {
+		t.Fatalf("run-demo.sh exited %d although only the FIRST candidate was occupied — it must rotate, not skip.\n--- output ---\n%s\n--- transcript ---\n%s",
+			res.code, res.output, res.transcript)
+	}
+	if !strings.Contains(res.output, "candidate :"+strconv.Itoa(squatted)+" is in use") {
+		t.Errorf("the occupied candidate :%d was never named as the reason to rotate:\n%s", squatted, res.output)
+	}
+	if !strings.Contains(res.output, "holder pid : "+strconv.Itoa(os.Getpid())) {
+		t.Errorf("the skip did not name the holder pid %d of :%d:\n%s", os.Getpid(), squatted, res.output)
+	}
+	if !strings.Contains(res.output, "ss -tlnp | grep :"+strconv.Itoa(squatted)) {
+		t.Errorf("the skip did not print the audit command for :%d:\n%s", squatted, res.output)
+	}
+
+	chosen := guardSelectedPort(t, res.output)
+	if chosen != squatted+1 {
+		t.Errorf("the occupied candidate :%d did not degrade to :%d (selected :%d)", squatted, squatted+1, chosen)
+	}
+	// The transcript is the run's own evidence that the SELECTED port reached the
+	// relay and its clients: ownership was asserted there, and the demo passes.
+	if !strings.Contains(res.transcript, fmt.Sprintf("- relay: http://127.0.0.1:%d (auth-disabled)", chosen)) {
+		t.Errorf("the transcript does not address the relay on the SELECTED port :%d:\n%s", chosen, res.transcript)
+	}
+	if !strings.Contains(res.transcript, fmt.Sprintf(":%d is held by pid", chosen)) {
+		t.Errorf("the transcript does not show the ownership guard passing on :%d:\n%s", chosen, res.transcript)
+	}
+	if !strings.Contains(res.transcript, "DEMO PASS") {
+		t.Errorf("the rotated run did not reach DEMO PASS:\n%s", res.transcript)
+	}
+	if !stillAccepting(t, squatted) {
+		t.Errorf("the holder of :%d stopped accepting after the run — the rotation must leave a foreign listener alone", squatted)
+	}
+}
+
+// TestRunDemoFailsClosedWhenEveryCandidateIsOccupied is the other half: when the
+// whole candidate block is occupied the run must fail non-zero, name the budget,
+// every attempted port and its holder — and start NOTHING (no transcript, no
+// build), never silently pick a port somebody else owns.
+func TestRunDemoFailsClosedWhenEveryCandidateIsOccupied(t *testing.T) {
+	if testing.Short() {
+		t.Skip("this arm runs the shipped script")
+	}
+	requireDemoTools(t)
+
+	block := pickFreePortRun(t, 3)
+	squatters := squatPorts(t, block)
+	defer closeListeners(squatters)
+
+	transcript := filepath.Join(t.TempDir(), "transcript.md")
+	res := runShippedDemoEnv(t, demoEnvRotation(block[0], len(block), transcript), transcript, nil)
+
+	if res.code == 0 {
+		t.Fatalf("run-demo.sh exited 0 although every candidate was occupied — a port somebody else owns was measured.\n--- output ---\n%s", res.output)
+	}
+	if !strings.Contains(res.output, fmt.Sprintf("all %d scratch-port candidate(s) from :%d are in use", len(block), block[0])) {
+		t.Errorf("the refusal does not name the %d-candidate budget and its base :%d:\n%s", len(block), block[0], res.output)
+	}
+	for _, p := range block {
+		if !strings.Contains(res.output, fmt.Sprintf(":%d — holder pid", p)) {
+			t.Errorf("the refusal does not list :%d with its holder:\n%s", p, res.output)
+		}
+	}
+	if !strings.Contains(res.output, "holder pid "+strconv.Itoa(os.Getpid())+",") {
+		t.Errorf("the refusal does not name the holder pid %d:\n%s", os.Getpid(), res.output)
+	}
+	if strings.Contains(res.output, "port-guard: selected") {
+		t.Errorf("a port was SELECTED although every candidate was occupied:\n%s", res.output)
+	}
+	if _, err := os.Stat(transcript); err == nil {
+		t.Errorf("a transcript was written although the run refused before starting anything: %s", transcript)
+	}
+	if strings.Contains(res.output, "DEMO PASS") {
+		t.Errorf("the refused run still printed DEMO PASS:\n%s", res.output)
 	}
 }
 

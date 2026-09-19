@@ -43,22 +43,40 @@ func runDemoScript(t *testing.T) string {
 }
 
 var (
+	// The first candidate of the script's default rotation, and the fixed default
+	// port the script must no longer carry (QA-CRIER-10).
+	demoPortBase    = regexp.MustCompile(`(?m)^DEMO_PORT_BASE="\$\{DEMO_PORT_BASE:-([0-9]+)\}"`)
 	demoPortDefault = regexp.MustCompile(`(?m)^DEMO_PORT="\$\{DEMO_PORT:-([0-9]+)\}"`)
-	clientCall      = regexp.MustCompile(`(?m)^[ \t]*"\$WORKDIR/ws-mesh-demo"[ \t]+(.*)$`)
+	clientCall      = regexp.MustCompile(`(?m)^[ 	]*"\$WORKDIR/ws-mesh-demo"[ 	]+(.*)$`)
+	// `port-guard: selected :<port> for the ws-mesh-demo relay — …`
+	guardSelection = regexp.MustCompile(`(?m)^port-guard: selected :([0-9]+) for the ws-mesh-demo relay`)
+	// A port literal in the script body outside the candidate-base definition: a
+	// component that would be measured on a port nothing selected. (RE2 has no
+	// lookahead, so the comment/base-definition lines are filtered in Go.)
+	portLiteral = regexp.MustCompile(`(?m)^.*(1[89][0-9]{3}).*$`)
+	baseLine    = regexp.MustCompile(`^\s*DEMO_PORT_BASE=`)
 )
 
 // TestDefaultBaseURLUsesRunDemoScratchPort keeps the client's compiled-in
-// default and the script's default in lockstep, on a scratch port that does not
-// collide with the fleet's long-lived listeners.
+// default and the FIRST candidate of the script's rotation in lockstep, on a
+// scratch port that does not collide with the fleet's long-lived listeners — and
+// pins the QA-CRIER-10 change: the runner no longer hard-codes a single port
+// (`DEMO_PORT="${DEMO_PORT:-18961}"`), it SELECTS one with the shared guard.
 func TestDefaultBaseURLUsesRunDemoScratchPort(t *testing.T) {
 	src := runDemoScript(t)
-	m := demoPortDefault.FindStringSubmatch(src)
+	m := demoPortBase.FindStringSubmatch(src)
 	if m == nil {
-		t.Fatalf("run-demo.sh: `DEMO_PORT=\"${DEMO_PORT:-<port>}\"` default not found")
+		t.Fatal(`run-demo.sh: DEMO_PORT_BASE="${DEMO_PORT_BASE:-<port>}" (the first rotation candidate) not found`)
 	}
 	want := "http://127.0.0.1:" + m[1]
 	if defaultBaseURL != want {
-		t.Errorf("defaultBaseURL = %q, run-demo.sh default port implies %q", defaultBaseURL, want)
+		t.Errorf("defaultBaseURL = %q, run-demo.sh first rotation candidate implies %q", defaultBaseURL, want)
+	}
+	if demoPortDefault.MatchString(src) {
+		t.Error("run-demo.sh still defaults DEMO_PORT to ONE fixed port — the port must be selected, not hard-coded (QA-CRIER-10)")
+	}
+	if !strings.Contains(src, `select_scratch_port "${DEMO_PORT:-}" "$DEMO_PORT_BASE"`) {
+		t.Error("run-demo.sh must choose its port with the shared select_scratch_port")
 	}
 	for _, colliding := range []string{":8767", ":18767"} {
 		if strings.HasSuffix(defaultBaseURL, colliding) {
@@ -147,8 +165,8 @@ func TestPortIsPreCheckedAndMeasuredServerIsOurs(t *testing.T) {
 	if !strings.Contains(src, `. "$REPO_ROOT/scripts/lib/port-guard.sh"`) {
 		t.Error("run-demo.sh must source scripts/lib/port-guard.sh (the shared guards)")
 	}
-	if !strings.Contains(src, `require_free_port "$DEMO_PORT"`) {
-		t.Error("run-demo.sh must refuse to start on an occupied $DEMO_PORT")
+	if !strings.Contains(src, `select_scratch_port "${DEMO_PORT:-}" "$DEMO_PORT_BASE"`) {
+		t.Error("run-demo.sh must CHOOSE its port with the shared select_scratch_port (QA-CRIER-10)")
 	}
 	if !strings.Contains(src, `assert_port_owned "$DEMO_PORT" "$SERVER_PID"`) {
 		t.Error("run-demo.sh must assert the pid holding $DEMO_PORT is the relay it started")
@@ -158,6 +176,50 @@ func TestPortIsPreCheckedAndMeasuredServerIsOurs(t *testing.T) {
 	}
 	if !strings.Contains(src, `'"count":0'`) {
 		t.Error("run-demo.sh must assert the relay it talks to starts with an EMPTY peer list")
+	}
+}
+
+// TestRunDemoSelectsItsPortInsteadOfHardCodingOne pins the QA-CRIER-10 wiring as
+// source invariants: the port is chosen before anything is built, the caller
+// override is passed through (checked, never rotated), the candidate budget is
+// threaded, and no port literal survives anywhere else in the body — a component
+// left on a literal would be measured on a port nothing selected.
+func TestRunDemoSelectsItsPortInsteadOfHardCodingOne(t *testing.T) {
+	src := runDemoScript(t)
+
+	selectIdx := strings.Index(src, `select_scratch_port "${DEMO_PORT:-}" "$DEMO_PORT_BASE"`)
+	if selectIdx < 0 {
+		t.Fatal("run-demo.sh must call select_scratch_port with its override and candidate base")
+	}
+	buildIdx := strings.Index(src, `go build -o "$WORKDIR/crier" ./cmd/server`)
+	transcriptIdx := strings.Index(src, `mktemp "$TRANSCRIPT_DIR/ws-mesh-demo-TRANSCRIPT-`)
+	if buildIdx < 0 || transcriptIdx < 0 {
+		t.Fatalf("run-demo.sh must have a build step and a transcript step (build=%d transcript=%d)", buildIdx, transcriptIdx)
+	}
+	if selectIdx > buildIdx {
+		t.Error("the port must be settled BEFORE anything is built")
+	}
+	if selectIdx > transcriptIdx {
+		t.Error("the port must be settled BEFORE a refusal can look like a started run (transcript opened first)")
+	}
+	for _, want := range []string{
+		`"$DEMO_PORT_CANDIDATES"`,
+		`DEMO_PORT="$PORT_GUARD_SELECTED"`,
+		`BASE="http://127.0.0.1:${DEMO_PORT}"`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("run-demo.sh is missing the rotation wiring %q", want)
+		}
+	}
+
+	for i, line := range strings.Split(src, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") || baseLine.MatchString(line) {
+			continue
+		}
+		if m := portLiteral.FindStringSubmatch(line); m != nil {
+			t.Errorf("run-demo.sh line %d carries the port literal %s outside the candidate-base definition: %s",
+				i+1, m[1], strings.TrimSpace(line))
+		}
 	}
 }
 

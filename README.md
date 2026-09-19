@@ -523,7 +523,7 @@ a scratch port and runs the whole exchange below live — REGISTER, REQUEST,
 RESPONSE, and the KEEPALIVE frames a client must ignore — asserting the result:
 
 ```bash
-bash examples/ws-mesh-demo/run-demo.sh                          # scratch port 18961
+bash examples/ws-mesh-demo/run-demo.sh                          # port chosen by the guard (first candidate 18961)
 DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh    # skip the ~30s keepalive wait
 ```
 

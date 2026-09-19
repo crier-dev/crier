@@ -331,8 +331,8 @@ curl -s localhost:8767/agents/agent-1/inbox/stats "${AUTH[@]}" \
 free, subscribes on an exact topic and asserts the fan-out:
 
 ```bash
-DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # scratch port 18961
-DEMO_PORT=18977 DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh
+DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # port chosen by the guard (first candidate 18961)
+DEMO_PORT=18977 DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # or a port YOU name (checked, never rotated)
 ```
 
 Its relay steps prove, live, against one server it started itself:
@@ -429,7 +429,7 @@ their sockets are open, and runs the exchange below with the correlation and
 KEEPALIVE rules asserted:
 
 ```bash
-DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # scratch port 18961
+DEMO_KEEPALIVE_WAIT=0 bash examples/ws-mesh-demo/run-demo.sh   # port chosen by the guard (first candidate 18961)
 ```
 
 The client also works against a server you already have running — the peer is

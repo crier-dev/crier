@@ -38,9 +38,14 @@
 # Three guards keep the run honest, and they come from the shared library
 # scripts/lib/port-guard.sh (the same one federation-demo and
 # hermes-gateway-demo source):
-#   * require_free_port ABORTS before anything is built or started when something
-#     already listens on $DEMO_PORT, naming the holder's pid, its command line
-#     and the `ss -tlnp | grep :<port>` audit command,
+#   * select_scratch_port CHOOSES the relay port before anything is built or
+#     started (QA-CRIER-10): with DEMO_PORT unset it walks
+#     $DEMO_PORT_BASE..+$DEMO_PORT_CANDIDATES-1, names the holder pid, command
+#     line and `ss -tlnp | grep :<port>` audit command of every candidate it
+#     skips, and uses the first free one; an EXPLICIT DEMO_PORT is checked and
+#     NEVER rotated (an occupied one aborts naming its holder), because a run on
+#     a port the operator did not name would misreport what was measured; every
+#     candidate occupied is a named failure, never a silent skip.
 #   * assert_port_owned then proves, after the relay answered /health, that the
 #     process HOLDING $DEMO_PORT is the pid this script started — presence is not
 #     ownership, and
@@ -54,7 +59,12 @@
 # external installs, zero new dependencies.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG forced false (no per-agent signing in the demo)
-#   DEMO_PORT            override relay port (default 18961 — a scratch port)
+#   DEMO_PORT            use THIS relay port. Checked, never rotated: an occupied
+#                        one aborts naming its holder.
+#   DEMO_PORT_CANDIDATES how many candidates the default rotation may try
+#                        (default 5); all occupied = a named failure
+#   DEMO_PORT_BASE       first candidate of the default rotation (default 18961 —
+#                        a scratch port, overridable so a test can move the block)
 #   DEMO_KEEPALIVE_WAIT  bound for the live KEEPALIVE observation in [9/10]
 #                        (default 35s — the server's keepalive interval is 30s,
 #                        internal/mesh/peer.go; set 0 to skip that ~30s wait)
@@ -76,8 +86,13 @@ REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
 # re-implemented: a local copy of a guard is a guard that drifts.
 . "$REPO_ROOT/scripts/lib/port-guard.sh"
 
-DEMO_PORT="${DEMO_PORT:-18961}"
-BASE="http://127.0.0.1:${DEMO_PORT}"
+DEMO_PORT_BASE="${DEMO_PORT_BASE:-18961}"   # first candidate of the default rotation
+DEMO_PORT_CANDIDATES="${DEMO_PORT_CANDIDATES:-5}"
+# DEMO_PORT is mirrored, not defaulted: empty means "walk the candidates", and a
+# caller-named port is carried through untouched (checked, never rotated). It is
+# settled below, before the transcript is opened and before anything is built.
+DEMO_PORT="${DEMO_PORT:-}"
+BASE=""
 WORKDIR="$(mktemp -d)"
 
 # The server's mesh keepalive interval is mesh.DefaultMeshConfig().KeepaliveInterval
@@ -111,13 +126,17 @@ ws-mesh-demo run-demo.sh — crier relay pub/sub + mesh REQUEST/RESPONSE demo
 Usage:
   bash run-demo.sh [-h|--help]
 
-What it does — one crier relay started by this script on 127.0.0.1:${DEMO_PORT}
+What it does — one crier relay started by this script on 127.0.0.1:<selected port>
 (override the port: DEMO_PORT=<free port> bash run-demo.sh):
   [1/10] build ./cmd/server and ./examples/ws-mesh-demo into a mktemp dir
-  [2/10] require_free_port refuses to start while anything listens on
-         :${DEMO_PORT}; the relay then starts auth-disabled with rate limiting
+  [2/10] select_scratch_port CHOOSES the relay port before anything is built:
+         it walks DEMO_PORT_BASE(=${DEMO_PORT_BASE})..+${DEMO_PORT_CANDIDATES}-1,
+         names the holder of every candidate it skips, and uses the first free
+         one; an explicitly named DEMO_PORT is checked and never rotated (an
+         occupied one aborts naming its holder); every candidate occupied is a
+         named failure. The relay then starts auth-disabled with rate limiting
          on (100/min), and once it answers /health the script asserts with
-         assert_port_owned that the pid HOLDING :${DEMO_PORT} is the pid it
+         assert_port_owned that the pid HOLDING that port is the pid it
          started, together with an EMPTY peer list — a foreign server on that
          port would already list peers (presence is not ownership)
   [3/10] HTTP-register demo-agent-a and demo-agent-b: POST /agents -> 201, so
@@ -144,11 +163,13 @@ Notes:
     own Go client (gorilla/websocket, from go.mod). The only tools required on
     PATH are go, curl, sha256sum and ss.
   * the three port guards are the shared library scripts/lib/port-guard.sh (the
-    same one federation-demo and hermes-gateway-demo source): require_free_port
-    names the holder's pid, command line and the "ss -tlnp | grep :<port>" audit
-    command and exits 1; assert_port_owned exits 1 when the holder is not the pid
-    this script started; a relay that dies before answering /health aborts the
-    run instead of being papered over.
+    same one federation-demo and hermes-gateway-demo source): select_scratch_port
+    chooses the port and names every candidate it skips with that candidate's
+    holder pid, command line and the "ss -tlnp | grep :<port>" audit command, and
+    exits 1 when every candidate is occupied (an explicitly named DEMO_PORT is
+    checked and never rotated); assert_port_owned exits 1 when the holder is not
+    the pid this script started; a relay that dies before answering /health
+    aborts the run instead of being papered over.
   * registration in [3/10] is done by this demo so each peer is a known agent as
     well as a mesh connection; /mesh/peers itself reports live WebSocket
     connections (a peer that never registered still shows up there).
@@ -185,26 +206,40 @@ for tool in go curl sha256sum ss; do
     || { echo "FAIL: '$tool' is required on PATH" >&2; exit 1; }
 done
 
-case "$DEMO_PORT" in
-  ''|*[!0-9]*)
+case "${DEMO_PORT:-}" in
+  '') ;; # empty: rotate the default candidates below
+  *[!0-9]*)
     echo "FAIL: DEMO_PORT must be a TCP port number (got '$DEMO_PORT')" >&2
     exit 2
     ;;
 esac
-[ "$DEMO_PORT" -ge 1 ] && [ "$DEMO_PORT" -le 65535 ] \
-  || { echo "FAIL: DEMO_PORT out of range: $DEMO_PORT" >&2; exit 2; }
-
-# ── Guard 1/3: refuse to start while anything listens on $DEMO_PORT ──────────
-# require_free_port (scripts/lib/port-guard.sh) names the holder's pid, its
-# command line and the `ss -tlnp | grep :<port>` audit command, then exits 1 —
-# the port probe is never followed by a start that would die on EADDRINUSE and
-# leave the health poll to be answered by the squatter.
-PG_RC=0
-( require_free_port "$DEMO_PORT" "the ws-mesh-demo relay" ) || PG_RC=$?
-if [ "$PG_RC" -ne 0 ]; then
-  [ "$PG_RC" -eq 1 ] && echo "      Pick a free port:  DEMO_PORT=<free port> bash $0" >&2
-  exit "$PG_RC"
+if [ -n "$DEMO_PORT" ]; then
+  [ "$DEMO_PORT" -ge 1 ] && [ "$DEMO_PORT" -le 65535 ] \
+    || { echo "FAIL: DEMO_PORT out of range: $DEMO_PORT" >&2; exit 2; }
 fi
+
+# ── Settle the scratch port BEFORE anything is built or started ──────────────
+# select_scratch_port (scripts/lib/port-guard.sh) is the shared selector the
+# llm-mesh, federation and hermes-gateway runners use: it walks
+# $DEMO_PORT_BASE..+$DEMO_PORT_CANDIDATES-1 in order, prints the holder
+# pid/command/audit line of every candidate it skips, and selects the first free
+# one. The port used to be one fixed default (18961), so a long-lived unrelated
+# listener on it — or a squatter that took it between two runs of this same
+# script — made the whole demo abort even though every other port was free
+# (QA-CRIER-10). An EXPLICIT DEMO_PORT is honored literally and never rotated: an
+# occupied one aborts the run naming its holder, because a run on a port the
+# operator did not name would misreport what was measured. Every candidate
+# occupied is a named failure, not a silent skip.
+#
+# It is called DIRECTLY (not in a subshell): the selected port comes back in
+# PORT_GUARD_SELECTED, and the guard's own report is the operator's evidence.
+select_scratch_port "${DEMO_PORT:-}" "$DEMO_PORT_BASE" "the ws-mesh-demo relay" \
+  "$DEMO_PORT_CANDIDATES" "DEMO_PORT"
+DEMO_PORT="$PORT_GUARD_SELECTED"
+# Every server probe and every demo client below is addressed through $BASE —
+# there is no other place a port is spelled out (a client left on its compiled-in
+# default would be measured on a port nothing selected).
+BASE="http://127.0.0.1:${DEMO_PORT}"
 
 # ── Transcript: outside the repo, mktemp-derived, never overwrites a previous run ──
 TRANSCRIPT_DIR="${TMPDIR:-/tmp}"
@@ -235,7 +270,7 @@ echo "    built $WORKDIR/crier and $WORKDIR/ws-mesh-demo"
 echo
 
 echo "==> [2/10] start relay on :${DEMO_PORT} (auth-disabled)"
-echo "    port :${DEMO_PORT} passed require_free_port (nothing was listening)"
+echo "    port :${DEMO_PORT} was selected by port-guard (nothing was listening on it)"
 # CR_RATE_LIMIT_PER_MINUTE is stated explicitly: [7/10] asserts the 401 its
 # header requirement produces, so the demo must not inherit a softened setting
 # from the ambient environment (0 there would turn the limiter — and the
@@ -258,7 +293,7 @@ echo "    $(curl -sS "$BASE/health") <- relay healthy (our pid $SERVER_PID)"
 # assert_port_owned asks ss who HOLDS :$DEMO_PORT and exits 1 unless that pid is
 # $SERVER_PID. "Something answered /health" is not "the process we started
 # answered /health"; without this check a squatter that took the port in the
-# window between the probe and the bind would be measured in our place.
+# window between the selection and the bind would be measured in our place.
 PORT_OWNER="$(port_holder_pid "$DEMO_PORT")"
 assert_port_owned "$DEMO_PORT" "$SERVER_PID" "the ws-mesh-demo relay"
 echo "    :${DEMO_PORT} is held by pid $PORT_OWNER == our relay pid $SERVER_PID (ss -tlnp)"

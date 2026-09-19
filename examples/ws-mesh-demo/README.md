@@ -39,23 +39,32 @@ From the repo root — the script builds the server and this client itself, so
 there is nothing to install first:
 
 ```bash
-bash examples/ws-mesh-demo/run-demo.sh  # scratch port 18961
+bash examples/ws-mesh-demo/run-demo.sh  # port chosen by the guard (first candidate 18961)
 ```
 
 From this directory (equivalent, with the port/keepalive overrides):
 
 ```bash
 cd examples/ws-mesh-demo
-bash run-demo.sh                        # scratch port 18961
-DEMO_PORT=19999 bash run-demo.sh        # or any free port
+bash run-demo.sh                        # port chosen by the guard (first candidate 18961)
+DEMO_PORT=19999 bash run-demo.sh        # or a port YOU name (checked, never rotated)
 DEMO_KEEPALIVE_WAIT=0 bash run-demo.sh  # skip the ~30s live KEEPALIVE wait
 bash run-demo.sh -h                     # usage + the registration precondition
 ```
 
-If the scratch port is already taken the run refuses (exit 1) and names the
-holder's pid, its command line and the `ss -tlnp | grep :<port>` audit command —
-pick another port with `DEMO_PORT=<free port>`. Expected success output (the
-step headers and the lines each step asserts on):
+The relay port is **chosen, not hard-coded**: the script walks a bounded
+candidate block — `DEMO_PORT_BASE` (default `18961`) through
+`DEMO_PORT_BASE + DEMO_PORT_CANDIDATES - 1` (default 5 candidates) — names the
+holder of every candidate it skips (pid, command line,
+`ss -tlnp | grep :<port>` audit line) and uses the first free one, so a
+long-lived unrelated listener on the first candidate, or a squatter that took it
+between two runs, rotates the demo on to the next candidate instead of aborting
+it (QA-CRIER-10). A port you name with `DEMO_PORT` is authoritative: it is
+checked and **never** rotated, and an occupied one aborts the run naming its
+holder. If every candidate is occupied the run fails (exit 1) listing the budget,
+every attempted port and each one's holder; move the block with
+`DEMO_PORT_BASE=<first candidate>` / `DEMO_PORT_CANDIDATES=<n>`. Expected success
+output (the step headers and the lines each step asserts on):
 
 ```text
 ==> [6/10] GET /mesh/peers (must show count 2 with both agent IDs)
@@ -220,7 +229,7 @@ ws-mesh-demo [-url BASE] roundtrip -agent AGENT -target AGENT
 | roundtrip  | `-max-keepalives` | Give up after this many ignored KEEPALIVE frames (0 = no progress bound). |
 | roundtrip  | `-require-keepalive-before-reply` | Exit 0 only if a KEEPALIVE was ignored while the RESPONSE was pending. |
 | roundtrip  | `-keepalive-wait` | After the RESPONSE, hold the socket up to this long for at least one live KEEPALIVE frame (0 = no wait). |
-| (all)      | `-url`  | Server base URL, default `http://127.0.0.1:18961`.              |
+| (all)      | `-url`  | Server base URL, default `http://127.0.0.1:18961` (the runner's first rotation candidate). |
 
 `subscribe` prints `SUBSCRIBED <topic>` after the WS upgrade and one
 `EVENT <payload>` line per received event (payload is the raw event JSON the
@@ -241,29 +250,33 @@ shared library [`scripts/lib/port-guard.sh`](../../scripts/lib/port-guard.sh)
 (`make port-guard-selftest` exercises them on a port it picks as free itself) —
 the same one `examples/federation-demo` and `examples/hermes-gateway-demo` source:
 
-1. **`require_free_port` — nothing may already hold `$DEMO_PORT`.** If something
-   does, the script aborts before building anything, naming the holder's pid, its
-   command line and the `ss -tlnp | grep :<port>` audit command:
+1. **`select_scratch_port` — the port is CHOSEN before anything is built, and a
+   candidate somebody else holds is rotated past (QA-CRIER-10).** With `DEMO_PORT`
+   unset the script walks its bounded candidate block, names the holder of every
+   candidate it skips, and uses the first free one; a port you name with
+   `DEMO_PORT` is checked instead (never rotated), and an occupied one aborts —
+   naming the port, the holder's pid, its command line and the
+   `ss -tlnp | grep :<port>` audit command. When every candidate is occupied the
+   run fails closed, listing the budget and every attempted port with its holder:
 
    ```text
-   ERROR: refusing to start the ws-mesh-demo relay — TCP port :50322 is already in use.
-   ERROR:   holder pid : 2347071
-   ERROR:   holder cmd : python3 -m http.server 50322 --bind 127.0.0.1
-   ERROR:   audit with : ss -tlnp | grep :50322
+   ERROR: refusing to start the ws-mesh-demo relay — all 5 scratch-port candidate(s) from :18961 are in use.
+   ERROR:   candidates tried: :18961 :18962 :18963 :18964 :18965
+   ERROR:   :18961 — holder pid 2347071, cmd: python3 -m http.server 18961 --bind 127.0.0.1
    ```
 
 2. **`assert_port_owned` — the process answering `/health` must be the pid this
    script started.** After the readiness poll the script asks `ss` who *holds*
    `$DEMO_PORT` and aborts unless that pid is `$SERVER_PID` — presence is not
-   ownership, and a squatter that took the port in the window between the probe
-   and the bind would otherwise be measured in the demo's place.
+   ownership, and a squatter that took the port in the window between the
+   selection and the bind would otherwise be measured in the demo's place.
 
 3. **Empty-peer assertion** — right after startup the script requires
    `GET /mesh/peers` to report `count:0`, and fails if its own relay process
    exits during the readiness loop. A foreign server answering on the same port
    would already list peers and is caught here instead of being measured.
 
-Every demo client is spawned with `-url "$BASE"`, so `DEMO_PORT` moves the
+Every demo client is spawned with `-url "$BASE"`, so the selected port moves the
 server **and** the clients together. (Regression DF-CRIER-152: the clients used to
 be spawned without `-url` and fell back to the compiled-in default, so a
 `DEMO_PORT` run measured a *docker-published* crier that happened to own that
@@ -303,9 +316,11 @@ Wire details: `docs/mesh-protocol.md`, OpenAPI: `cmd/server/openapi.yaml`.
   `CR_AUTH_TOKEN` first.
 - Publishing requires `X-Agent-ID` when rate limiting is on (default 100/min)
   — the demo sends `X-Agent-ID: demo-publisher`.
-- The default port is the scratch `18961`, deliberately clear of the fleet's
-  long-lived listeners (`:8767`, `:18767`); `run-demo.sh` pre-checks and the
-  client default matches the script's default.
+- The first candidate of the scratch rotation is `18961`, deliberately clear of
+  the fleet's long-lived listeners (`:8767`, `:18767`); `run-demo.sh` proves that
+  candidate free (or rotates past up to 4 others) and the client's compiled-in
+  default matches that first candidate. The runner passes `-url "$BASE"` to every
+  client, so the SELECTED port is what the clients use.
 - The request leg reconnects as `demo-agent-a` after closing that peer's holding
   socket: the server keys connections by agent ID (`Mesh.AcceptPeer`), so a
   second socket under one id replaces the first — and a late `OnClose` from the

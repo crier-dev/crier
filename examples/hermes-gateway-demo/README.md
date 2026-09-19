@@ -10,9 +10,9 @@ correlated, in the same session context.
       |
       |  POST /agents/gateway-agent/inbox   (blocking, session_id, request_id)
       v
- crier server (memory backend · CRIER_PORT=18788 · webhook driver enabled)
+ crier server (memory backend · port chosen by the guard, first candidate 18788 · webhook driver enabled)
       |
-      |  POST http://127.0.0.1:18789/webhook   (hermes-http-gateway schema)
+      |  POST http://127.0.0.1:<adapter-port>/webhook   (hermes-http-gateway schema)
       |  X-Crier-Event: message · X-Crier-Agent: harness-agent (the SENDER)
       |  X-Crier-Target: gateway-agent (the agent this delivery is FOR)
       |  X-Crier-Session: sess-… · X-Crier-Signature: hmac-sha256
@@ -138,11 +138,18 @@ cd examples/hermes-gateway-demo
 ```
 
 Prerequisites: `go`, `python3` (stdlib only), `curl`. The script builds the
-crier binary itself (into a temp dir) and needs ports 18788 + 18789 free
-(override with `CRIER_PORT` / `ADAPTER_PORT`). `CR_AUTH_TOKEN` must be unset;
-the demo starts crier with `CR_REQUIRE_AGENT_SIG=false` and the memory backend
+crier binary itself (into a temp dir) and **chooses** both ports before building
+anything: it walks a bounded candidate block — `CRIER_PORT_BASE` (default 18788)
+and `ADAPTER_PORT_BASE` (default 18793), 5 candidates each (`CRIER_PORT_CANDIDATES`
+/ `ADAPTER_PORT_CANDIDATES`) — names the holder of every candidate it skips, and
+uses the first free one (QA-CRIER-10). A port you name with `CRIER_PORT` /
+`ADAPTER_PORT` is checked and never rotated: an occupied one aborts the run
+naming its holder. Every candidate occupied is a named failure listing each
+attempted port and its holder. `CR_AUTH_TOKEN` must be unset; the demo starts
+crier with `CR_REQUIRE_AGENT_SIG=false` and the memory backend
 (`CR_DATABASE_URL` unset), per the demo's simplification — no per-agent
-signatures, no auth token.
+signatures, no auth token. `DEMO_TRANSCRIPT=<path>` moves the capture out of the
+repo (the selftest uses it so a test run cannot dirty `git status`).
 
 ### Live LLM or canned?
 

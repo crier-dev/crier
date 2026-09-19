@@ -4,13 +4,16 @@
 #
 # Proves the board PASS line end-to-end with two real crier relays:
 #
-#   relay-1 (port 18771, CR_FED_LINKS=http://127.0.0.1:18772, CR_FED_NAME=relay-1)
+#   relay-1 (<relay1-port>, CR_FED_LINKS=http://127.0.0.1:<relay2-port>, CR_FED_NAME=relay-1)
 #     |  POST /agents/relay-2-agent/inbox   (blocking, sender=relay-1-agent)
 #     v  [agent not found locally -> federation fallback]
-#   relay-2 (port 18772, no links)
+#   relay-2 (<relay2-port>, no links)
 #     |  webhook delivery (blocking, openai-compatible schema template)
 #     v
-#   echo_webhook.py (port 18773)  ->  {"choices":[{"message":{"content":"echo: ..."}}]}
+#   echo_webhook.py (<webhook-port>) ->  {"choices":[{"message":{"content":"echo: ..."}}]}
+#
+# The three ports are CHOSEN by the shared selector, never hard-coded — see
+# "SCRATCH PORTS" below.
 #
 # The blocking reply rides inside relay-2's HTTP response, which relay-1
 # relays back verbatim to the original sender (curl on relay-1). Then
@@ -20,14 +23,32 @@
 # mesh required).
 #
 # Requirements: go, python3 (stdlib only), openssl, curl, ss (iproute2).
-#   Port guards (QA-CRIER-9): refuses to start while anything listens on one of
-#   the three scratch ports, and asserts after /health that each listener is the
-#   pid this script started.
+#   Port guards (QA-CRIER-9): never measures a server it did not start — after
+#   /health the run asserts each listener is the pid it started.
+#   SCRATCH PORTS (QA-CRIER-10): the three ports are CHOSEN, not hard-coded. With
+#   RELAY1_PORT / RELAY2_PORT / WEBHOOK_PORT unset the run walks three bounded
+#   candidate blocks — 18771..18775 (relay-1), 18776..18780 (relay-2),
+#   18781..18785 (the echo webhook), <N>_PORT_CANDIDATES candidates each — and
+#   uses the first free one, naming the holder pid, command line and audit
+#   command of every candidate it skips (scripts/lib/port-guard.sh). A run whose
+#   candidates are ALL occupied fails naming every attempted port and its holder
+#   instead of skipping. Nothing is built or started until all three are settled.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG is forced false (no per-agent signing in the demo)
-#   RELAY1_PORT          override relay-1 port (default 18771)
-#   RELAY2_PORT          override relay-2 port (default 18772)
-#   WEBHOOK_PORT         override echo webhook port (default 18773)
+#   RELAY1_PORT          override relay-1 port (default: first free of 18771+)
+#   RELAY2_PORT          override relay-2 port (default: first free of 18776+)
+#   WEBHOOK_PORT         override echo webhook port (default: first free of 18781+)
+#   RELAY1_PORT_CANDIDATES / RELAY2_PORT_CANDIDATES / WEBHOOK_PORT_CANDIDATES
+#                        how many candidates that service's default rotation may
+#                        try (default 5 each)
+#   RELAY1_PORT_BASE / RELAY2_PORT_BASE / WEBHOOK_PORT_BASE
+#                        first candidate of that service's rotation
+#                        (default 18771 / 18776 / 18781)
+#   DEMO_TRANSCRIPT      write the capture here instead of
+#                        TRANSCRIPT-<date>.md next to this script
+#   An EXPLICIT port is checked and never rotated away from: an occupied one
+#   aborts the run naming its holder, because a run on a port the operator did
+#   not name would misreport what was measured.
 #
 # Output: TRANSCRIPT-<date>.md in this directory (real output, teed live).
 #
@@ -35,14 +56,32 @@ set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
-RELAY1_PORT="${RELAY1_PORT:-18771}"
-RELAY2_PORT="${RELAY2_PORT:-18772}"
-WEBHOOK_PORT="${WEBHOOK_PORT:-18773}"
-RELAY1="http://127.0.0.1:${RELAY1_PORT}"
-RELAY2="http://127.0.0.1:${RELAY2_PORT}"
-WEBHOOK_URL="http://127.0.0.1:${WEBHOOK_PORT}/webhook"
+
+# ── Scratch-port rotation (QA-CRIER-10) ───────────────────────────────────────
+# Three services, three INDEPENDENT candidate blocks so the blocks can never
+# collide with each other. <SVC>_PORT_BASE names the first candidate of that
+# service's rotation (overridable so a test can move the block onto ports it has
+# proved free); the port itself is settled below, before the transcript is opened
+# and before anything is built.
+RELAY1_PORT_BASE="${RELAY1_PORT_BASE:-18771}"
+RELAY1_PORT_CANDIDATES="${RELAY1_PORT_CANDIDATES:-5}"
+RELAY2_PORT_BASE="${RELAY2_PORT_BASE:-18776}"
+RELAY2_PORT_CANDIDATES="${RELAY2_PORT_CANDIDATES:-5}"
+WEBHOOK_PORT_BASE="${WEBHOOK_PORT_BASE:-18781}"
+WEBHOOK_PORT_CANDIDATES="${WEBHOOK_PORT_CANDIDATES:-5}"
+# Mirrored, not defaulted: an empty value means "walk the candidates", and a
+# caller-named port is carried through untouched (it is checked, never rotated).
+RELAY1_PORT="${RELAY1_PORT:-}"
+RELAY2_PORT="${RELAY2_PORT:-}"
+WEBHOOK_PORT="${WEBHOOK_PORT:-}"
+RELAY1=""
+RELAY2=""
+WEBHOOK_URL=""
 WORKDIR="$(mktemp -d)"
-TRANSCRIPT="$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md"
+# DEMO_TRANSCRIPT (as in the ws-mesh demo) points the capture outside the repo —
+# the selftest uses it so a test run cannot dirty git status; the default keeps
+# writing the historical TRANSCRIPT-<date>.md next to this script.
+TRANSCRIPT="${DEMO_TRANSCRIPT:-$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md}"
 
 # Port guards (QA-CRIER-9): this harness starts all three servers it measures.
 # The guards come from the shared library — require_free_port refuses to start on
@@ -69,13 +108,36 @@ for tool in go python3 openssl curl ss; do
     || { echo "FAIL: '$tool' is required on PATH" >&2; exit 1; }
 done
 
-# Refuse to start while anything already listens on one of our three scratch
-# ports: the freshly built relay would die on "bind: address already in use" and
-# the /health poll below would be answered by the squatter, so the run would
-# report success for a server it never started (QA-CRIER-9).
-require_free_port "$RELAY1_PORT" "relay-1"
-require_free_port "$RELAY2_PORT" "relay-2"
-require_free_port "$WEBHOOK_PORT" "echo webhook"
+# ── Settle all three scratch ports BEFORE anything is built or started ────────
+# select_scratch_port (scripts/lib/port-guard.sh) is the shared selector the
+# llm-mesh runners use: it walks <base>..<base>+<budget>-1 in order, prints the
+# holder pid/command/audit line of every candidate it skips, and selects the
+# first free one. A hard-coded scratch port made this demo abort (or measure a
+# squatter) whenever anything already listened there — a long-lived unrelated
+# listener, or a squatter that took the port between two runs of this same script
+# (QA-CRIER-10). An EXPLICIT RELAY1_PORT / RELAY2_PORT / WEBHOOK_PORT is honored
+# literally and never rotated: an occupied one aborts the run naming its holder,
+# because a run on a port the operator did not name would misreport what was
+# measured. Every candidate occupied is a named failure, not a silent skip.
+#
+# The three services get independent, non-overlapping candidate blocks, so a
+# rotation on one can never land on a port another service owns.
+select_scratch_port "${RELAY1_PORT:-}" "$RELAY1_PORT_BASE" "relay-1 (federation-demo)" \
+  "$RELAY1_PORT_CANDIDATES" "RELAY1_PORT"
+RELAY1_PORT="$PORT_GUARD_SELECTED"
+select_scratch_port "${RELAY2_PORT:-}" "$RELAY2_PORT_BASE" "relay-2 (federation-demo)" \
+  "$RELAY2_PORT_CANDIDATES" "RELAY2_PORT"
+RELAY2_PORT="$PORT_GUARD_SELECTED"
+select_scratch_port "${WEBHOOK_PORT:-}" "$WEBHOOK_PORT_BASE" "the echo webhook (federation-demo)" \
+  "$WEBHOOK_PORT_CANDIDATES" "WEBHOOK_PORT"
+WEBHOOK_PORT="$PORT_GUARD_SELECTED"
+
+# Every client, relay and webhook below is addressed through these three values —
+# there is no other place a port is spelled out (a component left on its own
+# default would be measured on a port nothing selected).
+RELAY1="http://127.0.0.1:${RELAY1_PORT}"
+RELAY2="http://127.0.0.1:${RELAY2_PORT}"
+WEBHOOK_URL="http://127.0.0.1:${WEBHOOK_PORT}/webhook"
 
 # Everything below is teed into the transcript (real output, not simulated).
 exec > >(tee "$TRANSCRIPT") 2>&1
@@ -176,9 +238,11 @@ echo "$PEERS1" | grep -q '"relay-1-agent"' \
   || { echo "FAIL: relay-1's local agent missing from its own /fed/peers" >&2; exit 1; }
 echo "$PEERS1" | grep -q '"relay-2-agent"' \
   || { echo "FAIL: relay-2's agent missing from relay-1's /fed/peers (cross-relay discovery broken)" >&2; exit 1; }
-echo "$PEERS1" | grep -q '127.0.0.1:18772\|127.0.0.1:'"$RELAY2_PORT" \
-  || { echo "FAIL: linked relay-2 missing from relay-1's /fed/peers" >&2; exit 1; }
-echo "    PASS: peers listing shows both relays with their agents"
+# The listing must name the relay-2 port THIS run selected — not a hard-coded
+# scratch literal, which would keep passing after a rotation moved relay-2.
+echo "$PEERS1" | grep -Eq "127\.0\.0\.1:$RELAY2_PORT([^0-9]|$)" \
+  || { echo "FAIL: linked relay-2 (:$RELAY2_PORT) missing from relay-1's /fed/peers" >&2; exit 1; }
+echo "    PASS: peers listing shows both relays with their agents (relay-2 on the selected :$RELAY2_PORT)"
 echo
 echo "    relay-2 /fed/peers (no links -> just itself):"
 curl -sS "$RELAY2/fed/peers" | python3 -m json.tool

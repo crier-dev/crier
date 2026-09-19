@@ -9,9 +9,9 @@
 #        |
 #        |  POST /agents/gateway-agent/inbox  (blocking, session_id + request_id)
 #        v
-#   crier server (memory backend, port 18788, webhook driver enabled)
+#   crier server (memory backend, port <crier-port>, webhook driver enabled)
 #        |
-#        |  POST http://127.0.0.1:18789/webhook  (hermes-http-gateway template)
+#        |  POST http://127.0.0.1:<adapter-port>/webhook  (hermes-http-gateway template)
 #        v
 #   adapter.py (fake Hermes gateway — verifies X-Crier-Signature, keeps the
 #        |       per-session context window, replies in OpenAI shape)
@@ -26,12 +26,30 @@
 # turn-1 context in the window).
 #
 # Requirements: go, python3 (stdlib only), curl, ss (iproute2).
-#   Port guards (QA-CRIER-9): refuses to start while anything listens on either
-#   port, and asserts after /health that the listener is the pid it started.
+#   Port guards (QA-CRIER-9): never measures a server it did not start — after
+#   /health the run asserts each listener is the pid it started.
+#   SCRATCH PORTS (QA-CRIER-10): both ports are CHOSEN, not hard-coded. With
+#   CRIER_PORT / ADAPTER_PORT unset the run walks two bounded candidate blocks —
+#   18788..18792 (the crier server) and 18793..18797 (the adapter), 5 candidates
+#   each — and uses the first free one, naming the holder pid, command line and
+#   audit command of every candidate it skips (scripts/lib/port-guard.sh). A run
+#   whose candidates are ALL occupied fails naming every attempted port and its
+#   holder instead of skipping. Nothing is built or started until both are settled.
 #   CR_AUTH_TOKEN        must NOT be set (demo runs auth-disabled)
 #   CR_REQUIRE_AGENT_SIG is forced false (no per-agent signing in the demo)
-#   CRIER_PORT           override crier port (default 18788)
-#   ADAPTER_PORT         override adapter port (default 18789)
+#   CRIER_PORT           override crier port (default: first free of 18788+)
+#   ADAPTER_PORT         override adapter port (default: first free of 18793+)
+#   CRIER_PORT_CANDIDATES / ADAPTER_PORT_CANDIDATES
+#                        how many candidates that service's default rotation may
+#                        try (default 5 each)
+#   CRIER_PORT_BASE / ADAPTER_PORT_BASE
+#                        first candidate of that service's rotation
+#                        (default 18788 / 18793)
+#   DEMO_TRANSCRIPT      write the capture here instead of
+#                        TRANSCRIPT-<date>.md next to this script
+#   An EXPLICIT port is checked and never rotated away from: an occupied one
+#   aborts the run naming its holder, because a run on a port the operator did
+#   not name would misreport what was measured.
 #   DEMO_HERMES_GATEWAY_URL  if set, the adapter forwards to this live Hermes
 #                           gateway (OpenAI-compatible /chat/completions)
 #   DEEPSEEK_API_KEY     picked up from ~/.hermes/.env automatically when
@@ -45,10 +63,23 @@ set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
-CRIER_PORT="${CRIER_PORT:-18788}"
-ADAPTER_PORT="${ADAPTER_PORT:-18789}"
-WEBHOOK_URL="http://127.0.0.1:${ADAPTER_PORT}/webhook"
-CRIER_BASE="http://127.0.0.1:${CRIER_PORT}"
+
+# ── Scratch-port rotation (QA-CRIER-10) ───────────────────────────────────────
+# Two services, two INDEPENDENT candidate blocks so a rotation on one can never
+# land on a port the other owns. <SVC>_PORT_BASE names the first candidate of that
+# service's rotation (overridable so a test can move the block onto ports it has
+# proved free); the port itself is settled at the top of main(), before anything
+# is built, started or announced.
+CRIER_PORT_BASE="${CRIER_PORT_BASE:-18788}"
+CRIER_PORT_CANDIDATES="${CRIER_PORT_CANDIDATES:-5}"
+ADAPTER_PORT_BASE="${ADAPTER_PORT_BASE:-18793}"
+ADAPTER_PORT_CANDIDATES="${ADAPTER_PORT_CANDIDATES:-5}"
+# Mirrored, not defaulted: an empty value means "walk the candidates", and a
+# caller-named port is carried through untouched (checked, never rotated).
+CRIER_PORT="${CRIER_PORT:-}"
+ADAPTER_PORT="${ADAPTER_PORT:-}"
+WEBHOOK_URL=""
+CRIER_BASE=""
 
 # Port guards (QA-CRIER-9): this harness starts BOTH servers it measures.
 # require_free_port refuses to start on a taken port; assert_port_owned proves,
@@ -67,7 +98,10 @@ WORKDIR="$(mktemp -d /tmp/crier-demo.XXXXXX)"
 CRIER_BIN="$WORKDIR/crier"
 CRIER_LOG="$WORKDIR/crier.log"
 ADAPTER_LOG="$WORKDIR/adapter.log"
-TRANSCRIPT="$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md"
+# DEMO_TRANSCRIPT (as in the ws-mesh demo) points the capture outside the repo —
+# the selftest uses it so a test run cannot dirty git status; the default keeps
+# writing the historical TRANSCRIPT-<date>.md next to this script.
+TRANSCRIPT="${DEMO_TRANSCRIPT:-$DEMO_DIR/TRANSCRIPT-$(date +%Y-%m-%d).md}"
 
 CRIER_PID=""
 ADAPTER_PID=""
@@ -90,6 +124,32 @@ pyget() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d$2
 main() {
   trap cleanup EXIT
 
+  # ── Settle both scratch ports BEFORE anything is built, started or announced ─
+  # select_scratch_port (scripts/lib/port-guard.sh) is the shared selector the
+  # other example runners use: it walks <base>..<base>+<budget>-1 in order, prints
+  # the holder pid/command/audit line of every candidate it skips, and selects the
+  # first free one. A hard-coded scratch port made this demo abort whenever
+  # anything already listened there — a long-lived unrelated listener, or a
+  # squatter that took the port between two runs of this same script
+  # (QA-CRIER-10). An EXPLICIT CRIER_PORT / ADAPTER_PORT is honored literally and
+  # never rotated: an occupied one aborts the run naming its holder, because a run
+  # on a port the operator did not name would misreport what was measured. Every
+  # candidate occupied is a named failure, never a silent skip.
+  #
+  # Nothing has been built or started at this point, so a refusal here costs
+  # nothing and measures nothing.
+  select_scratch_port "${CRIER_PORT:-}" "$CRIER_PORT_BASE" \
+    "the crier server (hermes-gateway-demo)" "$CRIER_PORT_CANDIDATES" "CRIER_PORT"
+  CRIER_PORT="$PORT_GUARD_SELECTED"
+  select_scratch_port "${ADAPTER_PORT:-}" "$ADAPTER_PORT_BASE" \
+    "the gateway adapter (hermes-gateway-demo)" "$ADAPTER_PORT_CANDIDATES" "ADAPTER_PORT"
+  ADAPTER_PORT="$PORT_GUARD_SELECTED"
+  # Every client, server and webhook below is addressed through these two values —
+  # there is no other place a port is spelled out (a component left on its own
+  # default would be measured on a port nothing selected).
+  WEBHOOK_URL="http://127.0.0.1:${ADAPTER_PORT}/webhook"
+  CRIER_BASE="http://127.0.0.1:${CRIER_PORT}"
+
   step "CR-FEAT-008 demo — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
   echo "  crier port   : $CRIER_PORT (memory backend, CR_AUTH_TOKEN unset, CR_REQUIRE_AGENT_SIG=false)"
   echo "  adapter port : $ADAPTER_PORT"
@@ -106,11 +166,11 @@ main() {
   if [ -n "${CR_AUTH_TOKEN:-}" ]; then
     fail "CR_AUTH_TOKEN is set in the environment — the demo runs auth-disabled (unset it)"
   fi
-  # Refuse to start while anything already listens on our two ports: a stale or
-  # foreign server would answer the /health polls below and this run would then
-  # measure a binary it never started (QA-CRIER-9).
-  require_free_port "$CRIER_PORT" "the crier server"
-  require_free_port "$ADAPTER_PORT" "the gateway adapter"
+  # The two ports were settled above, before anything was built or started: the
+  # crier server can no longer die on "address already in use" while the /health
+  # poll below is answered by the squatter that held the port (QA-CRIER-9/10).
+  echo "  crier server   : :$CRIER_PORT (selected by port-guard)"
+  echo "  gateway adapter: :$ADAPTER_PORT (selected by port-guard)"
 
   # 1. Build the crier server binary
   step "[1/7] build crier server"

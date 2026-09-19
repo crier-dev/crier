@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest transport-retry-selftest load-repro-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -40,6 +40,7 @@ help:
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
+	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  load-repro-selftest  Prove the bounded load harness (caps, load gate, PDEATHSIG teardown, no survivors) — DF-CRIER-254"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
@@ -130,6 +131,19 @@ docs-check:
 # The selftest picks its own free port, so a busy runner cannot make it flake.
 port-guard-selftest:
 	bash scripts/lib/port-guard.sh --selftest
+
+# QA-CRIER-10: every example runner that starts a scratch service must CHOOSE its
+# port (bounded candidate rotation, holder evidence for every candidate skipped, a
+# named failure when they are all occupied, a caller-named port checked and never
+# rotated) instead of binding one fixed default. `make port-guard-selftest` proves
+# the selector's own contract; this target proves the RUNNERS are wired to it:
+# source invariants for all five (llm-mesh bridge + raw, federation-demo,
+# hermes-gateway-demo, ws-mesh-demo) plus live rotate / exhaust / explicit arms for
+# the three runners that had no such test — no provider, no key, no network. The
+# ws-mesh runner's live arms also run in its Go suite (`go test ./examples/ws-mesh-demo/`),
+# which `make test` executes.
+scratch-port-rotation-selftest:
+	python3 examples/scratch-port-rotation-selftest.py
 
 # INT-CI-001: one transient ssh/scp reset on the deploy leg used to kill the whole
 # bunker-e2e battery with no retry and no attribution (CI run 35302932314). This
