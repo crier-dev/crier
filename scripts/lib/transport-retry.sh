@@ -61,9 +61,41 @@
 #         - output matching TRANSPORT_TRANSIENT_PATTERN, i.e. one of
 #           Connection reset by peer | Connection closed | Broken pipe |
 #           kex_exchange_identification | Operation timed out |
-#           Connection timed out | No route to host | client_loop: send disconnect
+#           Connection timed out | No route to host | client_loop: send disconnect |
+#           stream error | deadline_exceeded | context deadline exceeded |
+#           DeadlineExceeded | Unavailable | i/o timeout
+#       The signatures are matched case-SENSITIVELY, exactly as they always have
+#       been: the pattern carries the lowercase wire spellings AND the capitalized
+#       gRPC status names, so both spellings are covered without a `grep -i` that
+#       would silently widen every pre-existing alternative.
 #       Everything else is NON_TRANSPORT: retrying a real deploy error only hides
 #       it, so it is attempted exactly once and the verdict says so.
+#
+# THE EVIDENCE RULE (why a NON_TRANSPORT reason is never the first output line)
+# ----------------------------------------------------------------------------
+# A NON_TRANSPORT reason quotes the line it judged, and that line must be RELATED
+# TO THE FAILURE: prefer the last output line matching a transport signature,
+# else the LAST non-blank output line (the freshest thing the command said before
+# it died), truncated to 200 chars. It used to be the FIRST non-blank line of the
+# whole attempt output, which is only correct when the wrapped command is a leaf.
+# The cell-deploy leg is a RELAY (bunker-matrix.sh -> bunker-deploy.sh -> docker
+# load), and CI run 35408229089 measured the consequence: the wrapper reported a
+# sha256 digest from an earlier SUCCESSFUL `docker load` as the evidence for a
+# stream-deadline failure (`bunker: stream error: deadline_exceeded: context
+# deadline exceeded`, rc 1), with the retry budget left unspent. Harmless THAT
+# time only because a digest matches no signature — a different interleaving could
+# classify a real error as transient. The reason therefore names which rule
+# picked the line it quotes, so a reader can tell the two apart.
+#
+# ONE LINE, ALWAYS
+# ----------------
+# TRANSPORT_CLASS_REASON is ONE line whatever it names: the transient branches
+# quote the FIRST signature match — a single output line can carry several (the
+# deadline line above carries three) and `grep -oE` prints one match per line, so
+# an un-headed capture would leak newlines the moment two signatures land on one
+# line — and the NON_TRANSPORT branch quotes one output line, cut to 200 chars.
+# Callers embed the reason in a `FATAL: …` line, so a newline in it would split
+# the single line an operator reads.
 #
 #   transport_backoff_for <retry-index> [base]
 #       The delay before retry #<retry-index> (1-based): `base` doubled
@@ -89,9 +121,9 @@
 # MISUSE AND DEPENDENCIES
 # -----------------------
 # A bad argument, a non-numeric TRANSPORT_RETRIES / backoff, or a missing
-# mktemp/awk/grep/sleep exits 2 (or returns 2), naming what is wrong — never a
-# silent default. awk is what computes the schedule; coreutils mktemp writes the
-# scratch log under ${TMPDIR:-/tmp}.
+# mktemp/awk/grep/head/sleep exits 2 (or returns 2), naming what is wrong — never
+# a silent default. awk is what computes the schedule; coreutils mktemp writes the
+# scratch log under ${TMPDIR:-/tmp}; head is what keeps the reason one line.
 #
 # SELFTEST (used by `make transport-retry-selftest` and CI):
 #
@@ -101,7 +133,14 @@
 # host, no network), plus a pure backoff-schedule check, a misuse check, and a
 # NEUTER proof — a copy of this file with the transient predicate forced false
 # must make ARM A FAIL, and restoring it must make ARM A pass again. A selftest
-# that cannot fail is not evidence.
+# that cannot fail is not evidence. The arms:
+#   ARM A — one transient reset, then success: exactly one retry;
+#   ARM B — every attempt transient: fails closed after the budget;
+#   ARM C — a real deploy error: one attempt, NON_TRANSPORT named;
+#   ARM D — the run-35408229089 stream deadline, at rc 1 with the earlier success
+#           digest as its first line: TRANSPORT_RESET and retried;
+#   ARM E — the nested-relay shape: the evidence must be the failure (the LAST
+#           line), never an earlier hop's success line.
 #
 # shellcheck shell=bash disable=SC2155,SC2317
 
@@ -116,8 +155,17 @@ fi
 # a reset, a half-open connection or an unreachable host say on the wire. A
 # failure matching NEITHER is a real error (a bad path, a full disk, a rejected
 # command) and retrying it only hides it behind a delay.
+#
+# The stream/transport DEADLINE family is here because of CI run 35408229089: the
+# cell-deploy leg died on `bunker: stream error: deadline_exceeded: context
+# deadline exceeded` with rc 1 — NOT 255, so only the SIGNATURE can classify it,
+# and with no matching alternative it was called NON_TRANSPORT and the retry
+# budget went unspent. A stream that times out mid-transfer is exactly the
+# transient class retrying exists for, so the wire spellings (`stream error`,
+# `deadline_exceeded`, `context deadline exceeded`, `i/o timeout`) and the
+# capitalized gRPC status names (`DeadlineExceeded`, `Unavailable`) are all in.
 TRANSPORT_SSH_RC=255
-TRANSPORT_TRANSIENT_PATTERN='Connection reset by peer|Connection closed|Broken pipe|kex_exchange_identification|Operation timed out|Connection timed out|No route to host|client_loop: send disconnect'
+TRANSPORT_TRANSIENT_PATTERN='Connection reset by peer|Connection closed|Broken pipe|kex_exchange_identification|Operation timed out|Connection timed out|No route to host|client_loop: send disconnect|stream error|deadline_exceeded|context deadline exceeded|DeadlineExceeded|Unavailable|i/o timeout'
 
 # THE VERDICT LINE — the neuter lever. Every transient branch of
 # transport_classify() below returns THIS value instead of a literal `return 0`,
@@ -187,7 +235,7 @@ _tr_relay() { # <captured output> — the wrapped command's own lines, right whe
 # ── public: the classifier (no retry policy in here at all) ───────────────────
 
 transport_classify() { # <rc> <text> — prints the class; returns 0 only for TRANSPORT_RESET
-  local rc="${1:-}" text="${2:-}" hit="" line=""
+  local rc="${1:-}" text="${2:-}" hit="" line="" ev_shape=""
   case "$rc" in
     '' | *[!0-9]*) rc=1 ;;
   esac
@@ -195,7 +243,12 @@ transport_classify() { # <rc> <text> — prints the class; returns 0 only for TR
   TRANSPORT_CLASS_REASON=""
 
   if [ "$rc" -eq "$TRANSPORT_SSH_RC" ]; then
-    hit="$(printf '%s\n' "$text" | grep -m 1 -oE "$TRANSPORT_TRANSIENT_PATTERN" 2>/dev/null || true)"
+    # `<the first match>` and nothing else: `grep -m 1` bounds matching LINES, not
+    # matches, so one output line carrying several signatures prints several
+    # lines. Every reason here must stay ONE line (callers embed it in `FATAL: …`
+    # — see the SINGLE-LINE REASON note in the header) — and run 35408229089's
+    # stream-error line carries three of the signatures at once.
+    hit="$(printf '%s\n' "$text" | grep -m 1 -oE "$TRANSPORT_TRANSIENT_PATTERN" 2>/dev/null | head -n 1 || true)"
     TRANSPORT_CLASS="TRANSPORT_RESET"
     TRANSPORT_CLASS_REASON="exit $rc (ssh/scp transport failure)"
     [ -n "$hit" ] && TRANSPORT_CLASS_REASON="$TRANSPORT_CLASS_REASON; output matched '$hit'"
@@ -203,7 +256,7 @@ transport_classify() { # <rc> <text> — prints the class; returns 0 only for TR
     return "$TRANSPORT_TRANSIENT_VERDICT"
   fi
 
-  hit="$(printf '%s\n' "$text" | grep -m 1 -oE "$TRANSPORT_TRANSIENT_PATTERN" 2>/dev/null || true)"
+  hit="$(printf '%s\n' "$text" | grep -m 1 -oE "$TRANSPORT_TRANSIENT_PATTERN" 2>/dev/null | head -n 1 || true)"
   if [ -n "$hit" ]; then
     TRANSPORT_CLASS="TRANSPORT_RESET"
     TRANSPORT_CLASS_REASON="exit $rc; output matched '$hit'"
@@ -211,10 +264,27 @@ transport_classify() { # <rc> <text> — prints the class; returns 0 only for TR
     return "$TRANSPORT_TRANSIENT_VERDICT"
   fi
 
+  # ── NON_TRANSPORT: the evidence must be RELATED to the failure ─────────────
+  # NOT the first non-blank line of the whole attempt output: the wrapped command
+  # is often a RELAY, so its first line can be an earlier hop's already-relayed
+  # SUCCESS line. CI run 35408229089 measured that — the reason quoted a sha256
+  # digest from a successful `docker load` for a stream-deadline failure. So:
+  # prefer the last line matching a transport signature, else the LAST non-blank
+  # line (the freshest thing the command said before it died), cut to 200 chars.
+  # The signature preference is defensive — the whole-output scan above already
+  # decides TRANSPORT_RESET — but the evidence rule must not silently depend on
+  # that scan staying whole-output.
   TRANSPORT_CLASS="NON_TRANSPORT"
-  line="$(printf '%s\n' "$text" | grep -m 1 -v '^[[:space:]]*$' 2>/dev/null | cut -c1-200 || true)"
+  ev_shape="the last non-blank output line"
+  line="$(printf '%s\n' "$text" | grep -E "$TRANSPORT_TRANSIENT_PATTERN" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
+  if [ -n "$line" ]; then
+    ev_shape="the last output line matching a transport signature"
+  else
+    line="$(printf '%s\n' "$text" | grep -v '^[[:space:]]*$' 2>/dev/null | tail -n 1 || true)"
+  fi
+  line="$(printf '%s' "$line" | cut -c1-200)"
   TRANSPORT_CLASS_REASON="exit $rc"
-  [ -n "$line" ] && TRANSPORT_CLASS_REASON="$TRANSPORT_CLASS_REASON; not a transport signature, output: $line"
+  [ -n "$line" ] && TRANSPORT_CLASS_REASON="$TRANSPORT_CLASS_REASON; not a transport signature, output: $line [$ev_shape]"
   printf '%s' "$TRANSPORT_CLASS"
   return 1
 }
@@ -257,6 +327,7 @@ retry_transport() { # <label> -- <cmd...>
   _tr_require_tool mktemp "it creates the per-run scratch log"
   _tr_require_tool awk "it computes the backoff schedule"
   _tr_require_tool grep "it reads the transient signatures out of the failed command's output"
+  _tr_require_tool head "it keeps the classifier's reason to a single line"
   _tr_require_tool sleep "it backs off between attempts"
 
   local budget base cap attempt total rc out cls reason delay transient log start
@@ -533,6 +604,212 @@ _tr_arm_c() {
   return 0
 }
 
+# ── the two arms that pin CI run 35408229089 ──────────────────────────────────
+# The verbatim text harvested from that run's first cell (`bunker-e2e`, job
+# "Bunker config-matrix E2E", first cell `guard-on`, 2026-09-19T00:08:56Z): one
+# leftover SUCCESS line from the inner `docker load` hop, then the stream
+# deadline. Both arms feed the SAME digest line so the two questions the incident
+# raised stay separable — ARM D asks whether a deadline failure is RETRIED, ARM E
+# asks what evidence an honest non-transport failure quotes.
+_tr_INCIDENT_DIGEST='sha256:74a271eae952015703d5a08ed369d74d501e977fe38a4a2d70682e78278fcfc4'
+_tr_INCIDENT_DEADLINE='bunker: stream error: deadline_exceeded: context deadline exceeded'
+# The real, non-transport error ARM E's relayed output ends with.
+_tr_INCIDENT_ERROR='docker: invalid reference format'
+
+# _tr_arm_d <lib> <driver> <shim> <count-file>
+# ARM D: the stream deadline. The shim's first call emits those two lines and
+# exits 1 — NOT 255, so classifying it transient can only come from a SIGNATURE,
+# which is exactly the defect the row was filed for; the next call succeeds. That
+# must cost exactly one retry, and the failure's own reason must name the
+# stream-error line rather than the digest that precedes it in the same text.
+_tr_arm_d() {
+  local lib="$1" driver="$2" shim="$3" count="$4"
+  local out="" rc=0 calls=0 lines=0 result="" reset_line="" incident=""
+  local cls="" reason="" first_line="" retry_line=""
+  out="$(_tr_arm_run "$lib" "$driver" "$shim" "$count" stream-deadline-first 1 0 "arm-d")" || rc=$?
+  calls="$(cat "$count" 2>/dev/null || printf '0')"
+  lines="$(printf '%s\n' "$out" | grep -c '^transport-retry\[.*\]: attempt ' || true)"
+  result="$(printf '%s\n' "$out" | grep '^ARM_RESULT ' | tail -n 1 || true)"
+  reset_line="$(printf '%s\n' "$out" | grep -m 1 'TRANSPORT_RESET' || true)"
+  retry_line="$(printf '%s\n' "$out" | grep -m 1 'retrying in 0s' || true)"
+
+  # The same two lines, handed to the predicate DIRECTLY as well as through the
+  # shim: the shim proves the RETRY, this proves the CLASSIFICATION of the exact
+  # text the CI log carried — including the digest line, so a classifier that
+  # quoted the first line instead of the failure cannot pass this arm.
+  incident="$(printf '%s\n%s' "$_tr_INCIDENT_DIGEST" "$_tr_INCIDENT_DEADLINE")"
+  first_line="$(printf '%s\n' "$incident" | grep -m 1 -v '^[[:space:]]*$' || true)"
+  cls=""
+  reason=""
+  if transport_classify 1 "$incident" >/dev/null; then :; fi
+  cls="$TRANSPORT_CLASS"
+  reason="$TRANSPORT_CLASS_REASON"
+
+  if [ "$rc" -ne 0 ]; then
+    _tr_selftest_fail "ARM D" "a stream deadline still killed the hop (rc=$rc) — that is the CI red class (run 35408229089, 'bunker: stream error: deadline_exceeded')" "$out"
+    return 1
+  fi
+  if [ "$calls" -ne 2 ]; then
+    _tr_selftest_fail "ARM D" "the stream deadline was attempted $calls time(s), not exactly twice (1 initial + 1 retry expected for a 1-retry budget)" "$out"
+    return 1
+  fi
+  if [ "$lines" -ne 2 ]; then
+    _tr_selftest_fail "ARM D" "$lines attempt line(s) for 2 attempts — the wrapper must print exactly one line per attempt" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$out" | grep -q 'attempt 1/2 (retry budget 1)'; then
+    _tr_selftest_fail "ARM D" "the retry line did not name the attempt number and the budget 'attempt 1/2 (retry budget 1)'" "$out"
+    return 1
+  fi
+  if [ -z "$reset_line" ]; then
+    _tr_selftest_fail "ARM D" "the run never named the class TRANSPORT_RESET" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reset_line" | grep -Eq 'stream error|deadline_exceeded|context deadline exceeded'; then
+    _tr_selftest_fail "ARM D" "the TRANSPORT_RESET line did not name the stream-deadline EVIDENCE (no 'stream error' / 'deadline_exceeded' in: $reset_line)" "$out"
+    return 1
+  fi
+  if printf '%s\n' "$reset_line" | grep -q 'sha256:'; then
+    _tr_selftest_fail "ARM D" "the TRANSPORT_RESET line carried the sha256 digest as its evidence: $reset_line" "$out"
+    return 1
+  fi
+  # The reason must be ONE line: the incident text carries THREE signatures on one
+  # output line, and `grep -oE` prints one match per line, so an un-headed capture
+  # turns the wrapper's one diagnostic line into three (callers embed the reason in
+  # a `FATAL: …` line). The whole diagnostic — label, budget, class, reason and
+  # backoff — must therefore land on a single physical line.
+  case "$retry_line" in
+    'transport-retry[arm-d]: attempt 1/2 (retry budget 1) — TRANSPORT_RESET ('*') — retrying in 0s') ;;
+    *)
+      _tr_selftest_fail "ARM D" "the attempt line is not ONE line from the label to the backoff — the reason leaked a newline: '${retry_line:-none}'" "$out"
+      return 1
+      ;;
+  esac
+  case "$reason" in
+    *$'\n'*)
+      _tr_selftest_fail "ARM D" "the reason for the incident text embedded a newline (callers put it in a FATAL line): '$reason'" "$out"
+      return 1
+      ;;
+  esac
+  if [ "$first_line" != "$_tr_INCIDENT_DIGEST" ]; then
+    _tr_selftest_fail "ARM D" "the incident arm is not testing the reported shape — its first line is '${first_line:-none}', not the earlier success digest" "$out"
+    return 1
+  fi
+  if [ "$cls" != "TRANSPORT_RESET" ]; then
+    _tr_selftest_fail "ARM D" "the verbatim incident text (digest line + '$(_tr_INCIDENT_DEADLINE)') classified as '$cls', not TRANSPORT_RESET" "$out"
+    return 1
+  fi
+  if printf '%s\n' "$reason" | grep -q 'sha256:'; then
+    _tr_selftest_fail "ARM D" "the incident text's reason quoted the sha256 digest, not the failure: $reason" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reason" | grep -Eq 'stream error|deadline_exceeded|context deadline exceeded'; then
+    _tr_selftest_fail "ARM D" "the incident text's reason did not name the stream-deadline line: ${reason:-none}" "$out"
+    return 1
+  fi
+  case "$result" in
+    *'rc=0 class=OK attempts=2 retries=1 budget=1'*) ;;
+    *)
+      _tr_selftest_fail "ARM D" "the result globals do not describe one retry of the deadline (got '${result:-none}', want rc=0 class=OK attempts=2 retries=1 budget=1)" "$out"
+      return 1
+      ;;
+  esac
+  echo "PASS: ARM D: the run-35408229089 stream deadline (rc=1, digest line first) is TRANSPORT_RESET and RETRIED (2 shim calls = 1 initial + 1 retry, budget 1, $lines attempt lines, evidence names the stream error — not the digest — and the whole diagnostic stays ONE line)"
+  return 0
+}
+
+# _tr_arm_e <lib> <driver> <shim> <count-file>
+# ARM E: the nested-relay shape — the NON_TRANSPORT control. The hop's output
+# starts with the leftover SUCCESS digest (an inner hop's own line, relayed) and
+# ENDS with a real deploy error; no line carries a transport signature. A real
+# error must still be attempted exactly ONCE, with the budget unspent and no
+# retry announced, and the reason must quote the LAST line — never the digest,
+# which is precisely what the pre-fix first-line rule reported in run 35408229089.
+_tr_arm_e() {
+  local lib="$1" driver="$2" shim="$3" count="$4"
+  local out="" rc=0 calls=0 lines=0 result="" reason_line="" block=""
+  local blk_first="" blk_last=""
+  out="$(_tr_arm_run "$lib" "$driver" "$shim" "$count" relay-then-error 3 0 "arm-e")" || rc=$?
+  calls="$(cat "$count" 2>/dev/null || printf '0')"
+  lines="$(printf '%s\n' "$out" | grep -c '^transport-retry\[.*\]: attempt ' || true)"
+  result="$(printf '%s\n' "$out" | grep '^ARM_RESULT ' | tail -n 1 || true)"
+  reason_line="$(printf '%s\n' "$out" | grep -m 1 '^transport-retry\[.*\]: attempt ' || true)"
+  # The wrapped command's own lines, as the wrapper relayed them: everything
+  # between this attempt's single diagnostic line and the VERDICT that follows.
+  block="$(printf '%s\n' "$out" | awk '/^transport-retry\[/ { if (started) exit; started = 1; next } started { print }')"
+  blk_first="$(printf '%s\n' "$block" | grep -m 1 -v '^[[:space:]]*$' || true)"
+  blk_last="$(printf '%s\n' "$block" | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
+
+  if [ "$rc" -ne 1 ]; then
+    _tr_selftest_fail "ARM E" "the caller's own exit code was lost (got $rc, want 1) — a real deploy error must not be reported as success" "$out"
+    return 1
+  fi
+  if [ "$calls" -ne 1 ]; then
+    _tr_selftest_fail "ARM E" "a NON-transport failure was attempted $calls time(s) — it must be attempted exactly once (retrying a real error only hides it)" "$out"
+    return 1
+  fi
+  if [ "$lines" -ne 1 ]; then
+    _tr_selftest_fail "ARM E" "$lines attempt line(s) for 1 attempt" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reason_line" | grep -q 'NON_TRANSPORT'; then
+    _tr_selftest_fail "ARM E" "the verdict did not say NON_TRANSPORT" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reason_line" | grep -q 'retry budget 3 not spent'; then
+    _tr_selftest_fail "ARM E" "the verdict did not say the retry budget was left unspent" "$out"
+    return 1
+  fi
+  if printf '%s\n' "$out" | grep -q 'retrying in'; then
+    _tr_selftest_fail "ARM E" "the run announced a retry for a failure it must not retry" "$out"
+    return 1
+  fi
+  # ONE line, like every other reason: label, budget, class, reason, decision.
+  case "$reason_line" in
+    'transport-retry[arm-e]: attempt 1/4 (retry budget 3 not spent — not retryable) — NON_TRANSPORT ('*') — not retried') ;;
+    *)
+      _tr_selftest_fail "ARM E" "the attempt line is not ONE line from the label to the decision — the reason leaked a newline: '${reason_line:-none}'" "$out"
+      return 1
+      ;;
+  esac
+  # Premises: the shape under test really is the nested relay (an earlier success
+  # line FIRST, the real error LAST). Without these two the evidence assertions
+  # below could pass over an output that never had a first-line decoy at all.
+  if [ "$blk_first" != "$_tr_INCIDENT_DIGEST" ]; then
+    _tr_selftest_fail "ARM E" "the arm is not testing the reported shape — the hop's first line is '${blk_first:-none}', not the earlier success digest" "$out"
+    return 1
+  fi
+  if [ "$blk_last" != "$_tr_INCIDENT_ERROR" ]; then
+    _tr_selftest_fail "ARM E" "the arm is not testing the reported shape — the hop's last line is '${blk_last:-none}', not '$_tr_INCIDENT_ERROR'" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reason_line" | grep -qF "$blk_last"; then
+    _tr_selftest_fail "ARM E" "the NON_TRANSPORT reason did not quote the real error line '$blk_last': $reason_line" "$out"
+    return 1
+  fi
+  if printf '%s\n' "$reason_line" | grep -q 'sha256:'; then
+    _tr_selftest_fail "ARM E" "the NON_TRANSPORT reason quoted the earlier success digest instead of the failure: $reason_line" "$out"
+    return 1
+  fi
+  if printf '%s\n' "$reason_line" | grep -qF 'Unable to find image'; then
+    _tr_selftest_fail "ARM E" "the NON_TRANSPORT reason quoted a line that is not the failure: $reason_line" "$out"
+    return 1
+  fi
+  if ! printf '%s\n' "$reason_line" | grep -q 'last non-blank output line'; then
+    _tr_selftest_fail "ARM E" "the NON_TRANSPORT reason did not name which rule picked its evidence: $reason_line" "$out"
+    return 1
+  fi
+  case "$result" in
+    *'rc=1 class=NON_TRANSPORT attempts=1 retries=0 budget=3'*) ;;
+    *)
+      _tr_selftest_fail "ARM E" "the result globals do not describe one unretried attempt (got '${result:-none}')" "$out"
+      return 1
+      ;;
+  esac
+  echo "PASS: ARM E: the nested-relay shape stays NON_TRANSPORT on ONE attempt (1 shim call, rc=1, budget 3 unspent, no retry announced) and its reason quotes the LAST line '$blk_last' — not the earlier success digest that opens the output — all on one line"
+  return 0
+}
+
 _transport_selftest() {
   local fails=0 checks=0
   local self="${1:-${BASH_SOURCE[0]}}"
@@ -541,7 +818,7 @@ _transport_selftest() {
     echo "transport-retry selftest: FAIL: cannot locate this script (${self:-unknown}) — the arms source it" >&2
     return 2
   fi
-  for tool in mktemp awk grep sed tr sleep cat cut; do
+  for tool in mktemp awk grep sed tr sleep cat cut head tail; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "transport-retry selftest: FAIL: '$tool' is not on PATH — the arms and the scratch logs need it" >&2
       return 2
@@ -570,6 +847,16 @@ _transport_selftest() {
 #   reset-first   the first call resets (255 + the real scp messages), then OK
 #   reset-always  every call resets
 #   deploy-error  a real deploy failure (exit 1, no transport signature)
+#   stream-deadline-first
+#                 the first call dies the way CI run 35408229089 died: a digest
+#                 line from an earlier SUCCESSFUL `docker load`, then the real
+#                 `bunker: stream error: deadline_exceeded: context deadline
+#                 exceeded` — with rc 1, NOT 255, so only a SIGNATURE can classify
+#                 it — then OK
+#   relay-then-error
+#                 the nested-relay shape: the first line is that same leftover
+#                 success digest and the LAST line is a real, non-transport deploy
+#                 error (rc 1)
 n=0
 if [ -n "${TR_SHIM_COUNT:-}" ] && [ -f "$TR_SHIM_COUNT" ]; then
   n="$(cat "$TR_SHIM_COUNT" 2>/dev/null)"
@@ -592,6 +879,19 @@ case "${TR_SHIM_MODE:-reset-first}" in
     ;;
   deploy-error)
     echo "docker: Error response from daemon: no space left on device" >&2
+    exit 1
+    ;;
+  stream-deadline-first)
+    if [ "$n" -le 1 ]; then
+      echo "sha256:74a271eae952015703d5a08ed369d74d501e977fe38a4a2d70682e78278fcfc4" >&2
+      echo "bunker: stream error: deadline_exceeded: context deadline exceeded" >&2
+      exit 1
+    fi
+    ;;
+  relay-then-error)
+    echo "sha256:74a271eae952015703d5a08ed369d74d501e977fe38a4a2d70682e78278fcfc4" >&2
+    echo "Unable to find image 'crier:test' locally" >&2
+    echo "docker: invalid reference format" >&2
     exit 1
     ;;
   *)
@@ -645,6 +945,14 @@ DRIVER
   # ── ARM C: a non-transient failure is not retried ───────────────────────────
   checks=$((checks + 1))
   if _tr_arm_c "$self" "$driver" "$shim" "$tmp/arm-c.calls"; then :; else fails=$((fails + 1)); fi
+
+  # ── ARM D: the run-35408229089 stream deadline (rc=1, digest line first) ────
+  checks=$((checks + 1))
+  if _tr_arm_d "$self" "$driver" "$shim" "$tmp/arm-d.calls"; then :; else fails=$((fails + 1)); fi
+
+  # ── ARM E: the nested-relay shape — evidence is the failure, not a digest ───
+  checks=$((checks + 1))
+  if _tr_arm_e "$self" "$driver" "$shim" "$tmp/arm-e.calls"; then :; else fails=$((fails + 1)); fi
 
   # ── the backoff schedule, pinned without spending the wall clock ────────────
   checks=$((checks + 1))
@@ -723,7 +1031,7 @@ DRIVER
     echo "transport-retry selftest: $((checks - fails))/$checks checks behaved — FAIL" >&2
     return 1
   fi
-  echo "transport-retry selftest: $checks/$checks checks behaved (3 arms + the backoff schedule + the misuse refusal + the neuter proof)"
+  echo "transport-retry selftest: $checks/$checks checks behaved (5 arms + the backoff schedule + the misuse refusal + the neuter proof)"
   return 0
 }
 
@@ -751,12 +1059,17 @@ TRANSPORT_RETRIES (default 3) is the RETRY budget: the initial attempt is not
 counted against it, so 3 means at most 4 attempts. TRANSPORT_RETRY_BACKOFF_S
 (default 2, doubled per retry, capped at TRANSPORT_RETRY_BACKOFF_MAX_S = 8).
 
-The selftest drives three arms through a PATH shim — no ssh, no scp, no docker,
+The selftest drives five arms through a PATH shim — no ssh, no scp, no docker,
 no bunker host — and proves each one by COUNTING the shim's calls:
   ARM A — one transient reset, then success: exactly one retry, rc=0;
   ARM B — every attempt transient: fails closed after the budget, naming the
           class and the budget, and returns the LAST error code;
-  ARM C — a real deploy error: exactly one attempt, NON_TRANSPORT named.
+  ARM C — a real deploy error: exactly one attempt, NON_TRANSPORT named;
+  ARM D — the run-35408229089 stream deadline (rc 1, an earlier success digest as
+          the first output line): TRANSPORT_RESET, exactly one retry;
+  ARM E — the nested-relay shape: a real error after a relayed success line is
+          NON_TRANSPORT in exactly one attempt, and the reason quotes the FAILURE
+          (the last output line), never the earlier digest.
 Plus the backoff schedule, the misuse refusals, and a NEUTER proof (forced
 false, the transient predicate must make ARM A fail; restored, it passes).
 EOF
