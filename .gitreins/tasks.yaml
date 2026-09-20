@@ -1903,3 +1903,12 @@ tasks:
   status: complete
   created_at: '2026-09-20T02:00:15.281142+00:00'
   completed_at: '2026-09-20T02:13:58.053272+00:00'
+- id: qa-crier-12
+  title: Deploy fixed bunkerd to bunker-las-01 (QA-CRIER-12)
+  criteria:
+  - bunker-las-01 runs a bunkerd built at or above b4c3c48 (bunkerd --version prints
+    the deployed commit); live spawn-destroy-respawn battery on las-01 proves the
+    port range is freed on destroy and recycled on the next spawn
+  status: complete
+  created_at: '2026-09-20T03:01:31.032980+00:00'
+  completed_at: '2026-09-20T03:08:18.924161+00:00'
