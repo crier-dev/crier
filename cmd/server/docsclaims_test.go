@@ -46,6 +46,8 @@ import (
 	"github.com/crier-dev/crier/internal/mcp"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/registry"
+
+	"github.com/gorilla/websocket"
 )
 
 // docsClaimsProbeAgent is the identity the gate registers on the booted server and
@@ -676,10 +678,130 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// drift this claim exists for and is reported as an error naming
 			// the observed shape, so the claim cannot pass on a doc edit alone.
 			return liveWebhookSenderToken(client, baseURL)
+		case "STATUS-MESH-MALFORMED-FRAME-INVALID-MESSAGE":
+			// DF-CRIER-191: docs/mesh-protocol.md §"Error handling and
+			// silent drops" states a malformed frame is ANSWERED with ERROR
+			// INVALID_MESSAGE, never silently dropped. This probe measures it
+			// on the real WebSocket surface the doc describes (the gate's
+			// HTTP client cannot), reusing the exact frames of
+			// internal/mesh/malformed_frame_test.go. Outcome mapping (also
+			// documented on the claim in docs/claims.yaml):
+			//   400 = refusal observed: raw ERROR frame, error.code
+			//         INVALID_MESSAGE, non-empty error.message
+			//   200 = silent drop: no frame before the deadline
+			//         (the pre-DF-CRIER-40 behaviour the claim bars)
+			//   500 = a reply arrived that is not the refusal
+			//   502 = probe failure (dial/handshake/IO) — never a pass
+			return liveMeshMalformedFrameStatus(baseURL)
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
 	}
+}
+
+// liveMeshMalformedFrameStatus proves DF-CRIER-191's claim the way the doc
+// states it: over the real wire, not by reading code. It dials the booted
+// server's /mesh/connect/<id> WebSocket, sends the unparseable frame
+// `this is not a frame` (malformed_frame_test.go's first case), and inspects
+// the FIRST frame back — reading exactly one frame fails both on silence (the
+// silent drop the sentence bars) and on a non-ERROR reply. A second, readable
+// but wrong-shaped frame (REGISTER with a string lease_ttl_ms, the doc's own
+// example) must draw a refusal whose request_id equals that frame's own
+// message_id — the correlation half of the contract.
+func liveMeshMalformedFrameStatus(baseURL string) (int, error) {
+	// http://127.0.0.1:PORT → ws://127.0.0.1:PORT. The booted server has
+	// CR_AUTH_TOKEN set and /mesh/connect is NOT auth-exempt, so the upgrade
+	// request carries the same token the gate's HTTP probes send (a token-less
+	// upgrade is answered 401 before the handshake).
+	wsURL := "ws" + strings.TrimPrefix(baseURL, "http")
+	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	conn, _, err := dialer.Dial(wsURL+"/mesh/connect/docsclaims-malformed-probe", http.Header{"Authorization": []string{"Bearer test-token"}})
+	if err != nil {
+		return 502, fmt.Errorf("dial mesh connect: %w", err)
+	}
+	defer conn.Close()
+
+	// --- arm 1: unparseable frame → ERROR INVALID_MESSAGE, request_id ABSENT ---
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`this is not a frame`)); err != nil {
+		return 502, fmt.Errorf("write unparseable frame: %w", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return 502, fmt.Errorf("set read deadline: %w", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		// Silence on the wire IS the drift this claim exists to catch, so it
+		// is mapped (200), not reported as a probe error.
+		return 200, fmt.Errorf("no reply to the unparseable frame (read: %v)", err)
+	}
+	var env struct {
+		Type      string `json:"type"`
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return 500, fmt.Errorf("reply to unparseable frame is not an envelope: %v (raw: %s)", err, raw)
+	}
+	if env.Type != "ERROR" {
+		return 500, fmt.Errorf("reply type = %q, want ERROR (raw: %s)", env.Type, raw)
+	}
+	if env.MessageID == "" {
+		return 500, fmt.Errorf("ERROR frame carries no message_id of its own (raw: %s)", raw)
+	}
+	var errMsg struct {
+		RequestID string `json:"request_id"`
+		Error     struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &errMsg); err != nil {
+		return 502, fmt.Errorf("unmarshal ERROR reply: %w", err)
+	}
+	if errMsg.Error.Code != "INVALID_MESSAGE" {
+		return 500, fmt.Errorf("ERROR code = %q, want INVALID_MESSAGE (raw: %s)", errMsg.Error.Code, raw)
+	}
+	if strings.TrimSpace(errMsg.Error.Message) == "" {
+		return 500, fmt.Errorf("ERROR message is empty (raw: %s)", raw)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return 502, fmt.Errorf("re-decode ERROR reply: %w", err)
+	}
+	if id, present := decoded["request_id"]; present {
+		return 500, fmt.Errorf("request_id = %s on the reply to an UNREADABLE frame, want the field ABSENT", id)
+	}
+
+	// --- arm 2: readable but wrong-shaped frame → refusal correlates ---
+	const arm2ID = "docsclaims-reg-bad-191"
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(
+		`{"type":"REGISTER","version":1,"message_id":"`+arm2ID+`","agent_id":"docsclaims-malformed-probe","lease_ttl_ms":"thirty"}`)); err != nil {
+		return 502, fmt.Errorf("write wrong-shaped REGISTER: %w", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return 502, fmt.Errorf("set read deadline (arm 2): %w", err)
+	}
+	_, raw2, err := conn.ReadMessage()
+	if err != nil {
+		return 200, fmt.Errorf("no reply to the wrong-shaped REGISTER (read: %v)", err)
+	}
+	var errMsg2 struct {
+		RequestID string `json:"request_id"`
+		Error     struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw2, &errMsg2); err != nil {
+		return 500, fmt.Errorf("reply to wrong-shaped REGISTER is not an ERROR envelope: %v (raw: %s)", err, raw2)
+	}
+	if errMsg2.Error.Code != "INVALID_MESSAGE" {
+		return 500, fmt.Errorf("arm-2 ERROR code = %q, want INVALID_MESSAGE (raw: %s)", errMsg2.Error.Code, raw2)
+	}
+	if errMsg2.RequestID != arm2ID {
+		return 500, fmt.Errorf("arm-2 request_id = %q, want %q (the malformed frame's own message_id; raw: %s)",
+			errMsg2.RequestID, arm2ID, raw2)
+	}
+	return 400, nil
 }
 
 // liveAgentScopeSigStatus measures the DF-CRIER-16 precedence claim on the booted

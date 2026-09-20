@@ -241,9 +241,12 @@ with an unknown `request_id` is dropped with no error and no log.
   JSON that is not an object), the envelope names a `type` this protocol does not
   define, or the payload does not match the shape its `type` declares — a
   `REGISTER` whose `lease_ttl_ms` is a string, a `REQUEST` whose `source` is not a
-  `PeerRef` object, a `RESPONSE` whose `request_id` is a number. One code path
-  emits it (`handleMessage` and its `handleAgentRequest` callee,
-  `internal/mesh/peer.go`), and `error.message` names the failure. The connection
+  `PeerRef` object, a `RESPONSE` whose `request_id` is a number. One helper
+  emits those refusals — `reportInvalidMessage`, called from `handleMessage`
+  and its `handleAgentRequest` callee (`internal/mesh/peer.go`) — and one
+  further branch emits the code directly: `handleAgentRequest`'s blank-target
+  case (a REQUEST that decodes cleanly but names no `target.agent_id`; see the
+  next bullet) calls `sendErrorTo` itself. `error.message` names the failure. The connection
   stays usable: a client that sent one bad frame can send a well-formed REQUEST on
   the same socket afterwards. Pinned by `TestMeshMalformedFramesGetInvalidMessage`
   and `TestMeshWellFormedFramesGetNoError` (`internal/mesh`).

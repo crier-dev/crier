@@ -338,6 +338,30 @@ claims:
     # constant (mesh.DefaultMeshConfig("").MaxPendingRequests).
     expect: 50
     xfail: null
+  # DF-CRIER-191: the §"Error handling and silent drops" claim that
+  # DF-CRIER-40 landed and e5973c0 re-stated — a malformed frame is REFUSED
+  # on the wire (ERROR INVALID_MESSAGE), not silently dropped — had no claim
+  # pinning it, so it could drift back exactly the way DF-CRIER-141's silent
+  # drop did. This is a NEW measurement: no existing id drives a raw
+  # WebSocket client against the booted server, so a new id-keyed probe in
+  # makeLiveStatusProbes is minted for it (the /mesh/connect WS surface is
+  # unreachable from the gate's HTTP-only client).
+  #
+  # Status mapping, identical in claim and probe:
+  #   400 = the refusal contract holds: the raw ERROR frame came back with
+  #         error.code=INVALID_MESSAGE and a non-empty error.message
+  #   200 = the frame was silently dropped (no reply before the deadline) —
+  #         the pre-DF-CRIER-40 behaviour this claim exists to bar
+  #   500 = a reply arrived that is not the refusal (wrong type or wrong code)
+  #   502 = the probe itself failed (dial, handshake, IO) — never a pass
+  - id: STATUS-MESH-MALFORMED-FRAME-INVALID-MESSAGE
+    kind: status
+    doc: docs/mesh-protocol.md
+    quote: "A malformed frame is answered with `ERROR` `INVALID_MESSAGE`, not swallowed."
+    # `expect` is the mapped probe outcome (400 — see the mapping above), the
+    # only reading that means "the live engine refuses malformed frames".
+    expect: "400"
+    xfail: null
   - id: WEBHOOK-DEFAULT-BLOCKING
     kind: status
     doc: specs/WEBHOOK-DELIVERY.md
