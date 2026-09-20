@@ -2082,3 +2082,13 @@ tasks:
   status: complete
   created_at: '2026-09-20T21:11:32.791843+00:00'
   completed_at: '2026-09-20T21:47:26.293714+00:00'
+- id: qa-crier-20-act-workflow-filter
+  title: Filter bunker-qa.sh act leg to the repo ci.yml workflow (QA-CRIER-20)
+  criteria:
+  - bunker-qa.sh detect_cmds emits an act command filtered with -W <repo>/.github/workflows/ci.yml
+    when ci.yml exists, unfiltered otherwise and native fallback with no workflows;
+    bash -n clean; __detect-cmds probe proves all three shapes against crier and fixtures;
+    no other file in ~/.hermes touched
+  status: complete
+  created_at: '2026-09-20T22:45:00.644039+00:00'
+  completed_at: '2026-09-20T22:57:49.156940+00:00'
