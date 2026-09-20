@@ -12,14 +12,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
-	"github.com/crier-dev/crier/internal/testsupport"
 	"github.com/gorilla/mux"
 )
 
@@ -271,19 +269,10 @@ func TestRunSelfRegistersBridgeIdentity(t *testing.T) {
 	}
 	srv, store := newBridgeTestServer(t)
 
-	bin := filepath.Join(t.TempDir(), "crier-mcp")
-
-	// DF-CRIER-260: build from an isolated snapshot, never the live package
-	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
-	// error away from reding this package for a reason that has nothing to
-	// do with the code under test (the same race DF-CRIER-253/259 closed for
-	// the version tests).
-	buildDir := testsupport.SnapshotBuildDir(t, ".")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = buildDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
-	}
+	// CI-016: one session-shared build (see sharedbuild_test.go) instead of
+	// a per-test snapshot + `go build`; the DF-CRIER-260 isolation now lives
+	// in the shared build itself.
+	bin, _ := mcpSharedTarget(t)
 
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
@@ -361,19 +350,10 @@ func TestRunRegistersWithSuppliedKeyFile(t *testing.T) {
 	keyPath, priv := writeAgentKeyPEM(t, dir)
 	wantHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
 
-	bin := filepath.Join(t.TempDir(), "crier-mcp")
-
-	// DF-CRIER-260: build from an isolated snapshot, never the live package
-	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
-	// error away from reding this package for a reason that has nothing to
-	// do with the code under test (the same race DF-CRIER-253/259 closed for
-	// the version tests).
-	buildDir := testsupport.SnapshotBuildDir(t, ".")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = buildDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
-	}
+	// CI-016: one session-shared build (see sharedbuild_test.go) instead of
+	// a per-test snapshot + `go build`; the DF-CRIER-260 isolation now lives
+	// in the shared build itself.
+	bin, _ := mcpSharedTarget(t)
 
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
@@ -450,19 +430,10 @@ func TestRunSurvivesRegistrationFailure(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close()
 
-	bin := filepath.Join(t.TempDir(), "crier-mcp")
-
-	// DF-CRIER-260: build from an isolated snapshot, never the live package
-	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
-	// error away from reding this package for a reason that has nothing to
-	// do with the code under test (the same race DF-CRIER-253/259 closed for
-	// the version tests).
-	buildDir := testsupport.SnapshotBuildDir(t, ".")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = buildDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
-	}
+	// CI-016: one session-shared build (see sharedbuild_test.go) instead of
+	// a per-test snapshot + `go build`; the DF-CRIER-260 isolation now lives
+	// in the shared build itself.
+	bin, _ := mcpSharedTarget(t)
 
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),

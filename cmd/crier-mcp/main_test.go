@@ -24,7 +24,6 @@ import (
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/registry"
-	"github.com/crier-dev/crier/internal/testsupport"
 	"github.com/gorilla/mux"
 )
 
@@ -34,19 +33,10 @@ import (
 // breaks the wiring in main.go (config load, store init, mcp.New, Serve),
 // this test fails immediately.
 func TestMCPServerInitialize(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "crier-mcp")
-
-	// DF-CRIER-260: build from an isolated snapshot, never the live package
-	// directory — a sibling worker mid-edit in cmd/crier-mcp is one syntax
-	// error away from reding this package for a reason that has nothing to
-	// do with the code under test (the same race DF-CRIER-253/259 closed for
-	// the version tests).
-	buildDir := testsupport.SnapshotBuildDir(t, ".")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = buildDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
-	}
+	// CI-016: one session-shared build (see sharedbuild_test.go) instead of a
+	// per-test snapshot + `go build`; the DF-CRIER-260 isolation now lives in
+	// the shared build itself.
+	bin, _ := mcpSharedTarget(t)
 
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
@@ -224,26 +214,16 @@ func TestParseArgs(t *testing.T) {
 // --help prints usage and exits 0 within 1s without starting the MCP server,
 // and --version prints a version string and exits 0.
 func TestMCPServerCLIFlags(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "crier-mcp")
-	// DF-CRIER-253/259: build from an isolated snapshot, never the live
-	// package directory — a sibling worker mid-edit in cmd/crier-mcp must not
-	// be able to red this package, and the snapshot must carry git metadata
-	// even when the tree the suite runs in does not: with no commit to stamp,
-	// the binary prints the bare "dev" sentinel and every identity assertion
-	// below fails, which is exactly what a judge or eval running from a copy
-	// of the tree hits.
-	buildDir := testsupport.SnapshotBuildDir(t, ".")
-	// The expected commit is the SNAPSHOT's own revision — the revision the
-	// binary was actually built from — not the caller's checkout, which the
+	// CI-016: one session-shared build (see sharedbuild_test.go). The
+	// DF-CRIER-253/259 guarantees are unchanged: the binary was built from
+	// the isolated snapshot (committed content only, git metadata always
+	// present), and the expected commit below is still the SNAPSHOT's own
+	// revision — the revision the binary was actually built from — captured
+	// while the snapshot was alive, not the caller's checkout, which the
 	// snapshot is deliberately isolated from. The snapshot is frozen (a
 	// detached clone of HEAD, or a copy with a fixed commit), so there is one
 	// legitimate value and no window for a sibling's commit to land inside.
-	head := gitShortHead(t, buildDir)
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = buildDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crier-mcp from %s: %v\n%s", buildDir, err, out)
-	}
+	bin, head := mcpSharedTarget(t)
 
 	t.Run("--help exits 0 within 1s with usage", func(t *testing.T) {
 		start := time.Now()
@@ -289,9 +269,9 @@ func TestMCPServerCLIFlags(t *testing.T) {
 		commit := match[1]
 		switch {
 		case head == "":
-			t.Fatalf("the build snapshot %s has no resolvable HEAD, so the binary's commit cannot be tied to the revision it was built from", buildDir)
+			t.Fatalf("the build snapshot behind the shared session binary has no resolvable HEAD, so the binary's commit cannot be tied to the revision it was built from")
 		case commit != head:
-			t.Errorf("--version reports commit %q, but it was built from %s (snapshot HEAD)", commit, head)
+			t.Errorf("--version reports commit %q, but it was built from the session snapshot (HEAD %q)", commit, head)
 		}
 	})
 }
