@@ -64,6 +64,14 @@ const (
 	// docsClaimsTargetProbeAgent is the identity the DF-CRIER-175 claim drives:
 	// a webhook-configured agent whose outbound POST must name it as the target.
 	docsClaimsTargetProbeAgent = "docsclaims-target-probe"
+	// docsClaimsGhostProbeAgent is the identity the DF-CRIER-16 precedence claim
+	// drives, and it is NEVER registered on the booted server: the agent-scoped
+	// signing gate checks the signature trio's PRESENCE first, then whether the
+	// agent EXISTS, then the timestamp window, then the signature — so this id
+	// must reach the existence check and answer 404 "agent not found". Pointed
+	// at a registered id (docsClaimsProbeAgent) the identical probe measures the
+	// 401 arm instead.
+	docsClaimsGhostProbeAgent = "docsclaims-ghost-probe"
 )
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
@@ -603,6 +611,19 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			defer resp.Body.Close()
 			io.Copy(io.Discard, resp.Body)
 			return resp.StatusCode, nil
+		case "STATUS-AGENT-SCOPED-UNREGISTERED-404":
+			// DF-CRIER-16: README states the agent-scoped check ORDER
+			// (trio -> existence -> timestamp -> signature). The existence
+			// check runs once the trio is present and before the timestamp/
+			// signature checks, so an id that was never registered answers
+			// 404 "agent not found" — not 401. The probe sends a fresh
+			// timestamp and a well-formed 128-hex signature that cannot
+			// verify, so presence passes and existence is what answers; the
+			// status returned is the server's (resp.StatusCode), never a
+			// literal. The same probe pointed at docsClaimsProbeAgent (a
+			// REGISTERED id) measures the other arm: 401 "signature
+			// verification failed".
+			return liveAgentScopeSigStatus(client, baseURL, docsClaimsGhostProbeAgent)
 		case "STATUS-GUARD-BLOCK":
 			// README: "block — uniform 403 GUARD_BLOCKED". Deterministic without an
 			// LLM: a payload over CR_GUARD_MAX_PAYLOAD_BYTES (default 65536) carrying
@@ -638,6 +659,39 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
 	}
+}
+
+// liveAgentScopeSigStatus measures the DF-CRIER-16 precedence claim on the booted
+// server and returns the status the server ANSWERED (resp.StatusCode) — never a
+// literal. It issues GET /agents/<agentID>/inbox carrying a signature trio that is
+// syntactically complete but cannot verify: X-Agent-ID names the same id as the
+// path (so the caller==target check cannot answer first), X-Agent-Ts is fresh (so
+// the ±30s window check passes) and X-Agent-Sig is 64 bytes of hex (so the
+// presence/shape checks pass). What is left to answer is the existence check:
+//
+//	agentID = docsClaimsGhostProbeAgent (never registered) -> 404 "agent not found"
+//	agentID = docsClaimsProbeAgent     (registered)        -> 401 "signature verification failed"
+//
+// That pair is the whole point of the claim — the docs used to name only the 401.
+func liveAgentScopeSigStatus(client *http.Client, baseURL, agentID string) (int, error) {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/agents/"+agentID+"/inbox", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Agent-Ts", strconv.FormatInt(time.Now().Unix(), 10))
+	// 64 bytes of hex — a well-formed ed25519 signature THAT CANNOT VERIFY, so no
+	// registered key has to be usable for this probe (the same shape the gate's
+	// own registerAgent seeds a public key with).
+	req.Header.Set("X-Agent-Sig", strings.Repeat("ab", 64))
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
 }
 
 // liveDefault returns the production default for an id-keyed kind=default claim,

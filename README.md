@@ -92,6 +92,17 @@ default, `CR_REQUIRE_AGENT_SIG=true`) it requires the same
 in the [Quick Start](#quick-start) signing helper. Sent unsigned it answers
 `401 {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}`.
 
+That `401` is only the first of the checks a signed request passes through, and
+the ORDER is part of the contract (measured at HEAD on a registered agent and on
+an unregistered id): a missing trio is the `401` quoted above; an **unregistered**
+agent id is `404 {"error":"agent not found"}` — the existence check runs once the
+trio is present and BEFORE the timestamp and signature checks, so a negative-path
+test against an unknown id must expect `404`, not `401`; a timestamp outside the
+±30s window is `401 {"error":"request timestamp outside allowed window (±30s)"}`;
+a signature that does not verify is `401 {"error":"signature verification failed"}`.
+Step 4 of the [Quick Start](#quick-start) carries the reproducible pair
+(`GET /agents/ghost-agent-xyz/inbox` → `404`, the same call on a registered id → `401`).
+
 The inbox is **not** written: `GET /agents/{id}/inbox` for a webhook-configured
 agent is empty by design, so an empty retrieve is not evidence that a message
 was never sent — the message may have gone to the endpoint (or failed there).
@@ -347,6 +358,20 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "$
 #      X-Agent-Sig hex ed25519 signature over "METHOD\nPATH\nTS"
 #    Timestamps are generated fresh below — never hardcode them (stale timestamps
 #    are rejected with 401).
+#    Those four checks run in this order, so the FIRST one to fail names the status:
+#      1. signature trio present?  no -> 401 "missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"
+#      2. agent exists?            no -> 404 "agent not found"
+#      3. timestamp within ±30s?   no -> 401 "request timestamp outside allowed window (±30s)"
+#      4. signature valid?         no -> 401 "signature verification failed"
+#    The agent EXISTENCE check (2) sits between the trio check and the timestamp /
+#    signature checks, so an UNREGISTERED agent id answers 404 "agent not found"
+#    — never 401 — as soon as a signature trio is present. The stale-timestamp 401
+#    in (3) is measured on a REGISTERED agent (agent-1): an unknown id never gets
+#    that far.
+#    Reproduce both sides — same call, same id in X-Agent-ID and in the path, a
+#    fresh X-Agent-Ts and a well-formed 128-hex X-Agent-Sig that cannot verify:
+#      GET /agents/agent-1/inbox         -> 401 "signature verification failed"
+#      GET /agents/ghost-agent-xyz/inbox -> 404 "agent not found"
 TS=$(date +%s)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
   -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig GET /agents/agent-1/inbox "$TS")"

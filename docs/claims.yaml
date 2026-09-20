@@ -176,6 +176,22 @@ claims:
     quote: "403 GUARD_BLOCKED"
     expect: "403"
     xfail: null
+  # DF-CRIER-16: the README's agent-scoped signing contract used to state only the
+  # missing-trio 401, so a negative-path tester who hit the agent EXISTENCE check
+  # read the 404 as a contract mismatch. The corrected prose states the check order
+  # (trio -> existence -> timestamp -> signature) and the README sentence anchored
+  # below names the unregistered-agent case; the live probe in
+  # cmd/server/docsclaims_test.go sends a well-formed-but-bogus trio to an id that
+  # is NEVER registered, so the presence check passes and the existence check is
+  # what answers — real IDs are registered by the harness, this one deliberately is
+  # not (a registered id measures the 401 arm instead: "signature verification
+  # failed"). The status measured is the server's resp.StatusCode.
+  - id: STATUS-AGENT-SCOPED-UNREGISTERED-404
+    kind: status
+    doc: README.md
+    quote: 'an UNREGISTERED agent id answers 404 "agent not found"'
+    expect: "404"
+    xfail: null
 
   # --- defaults (kind: default) — compared against the imported production constant,
   # never against a duplicated literal. ---
