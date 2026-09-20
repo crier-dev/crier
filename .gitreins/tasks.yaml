@@ -1992,3 +1992,24 @@ tasks:
   status: complete
   created_at: '2026-09-20T10:13:08.575199+00:00'
   completed_at: '2026-09-20T10:13:14.078374+00:00'
+- id: qa-crier-23-make-skip
+  title: Skip Makefile-stamping subtest on make-less hosts; harness ci-pass detail
+    names failing packages
+  criteria:
+  - cmd/server TestServerVersionCLIFlags 'Makefile stamps the symbols the binary reads'
+    subtest SKIPs with a clear environment reason when make is absent from PATH; suite
+    green with make stripped from PATH (probe) and unchanged with make present; bunker-qa.sh
+    ci-pass FAIL detail greps FAIL/--- FAIL lines instead of tail -4; build_incomplete_cause
+    matches 'executable file not found'; bash -n clean; repo build/vet/test green;
+    guard PASS
+  status: complete
+  created_at: '2026-09-20T12:06:59.346806+00:00'
+  completed_at: '2026-09-20T12:28:56.660512+00:00'
+- id: deps-004-pgx-bump
+  title: pgx v5.11.0 + pgxmock v5.2.0 with errRows TypeMap test double
+  criteria:
+  - go.mod has pgx/v5 v5.11.0 + pgxmock/v5 v5.2.0; errRows implements Rows.TypeMap();
+    go build/vet/test ./... green in the worktree; guard PASS on the commit
+  status: complete
+  created_at: '2026-09-20T12:06:59.566880+00:00'
+  completed_at: '2026-09-20T12:27:55.786208+00:00'
