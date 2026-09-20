@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -146,11 +147,31 @@ type Client struct {
 	links []Link
 	token string
 	http  *http.Client
+	// selfPort is the TCP port this relay itself listens on (0 = identity
+	// unknown). It is the discriminator used by IsSelfLink to recognise a
+	// CR_FED_LINKS entry that addresses this relay instead of a remote one
+	// (DF-CRIER-12). Set via SetSelf.
+	selfPort int
 	// hold queues deliveries whose links are all transiently down for
 	// bounded retry (DF-CRIER-7, spec §8). Nil means a transient failure is
 	// reported to the caller synchronously (HTTP 502 FEDERATION_FAILED)
 	// instead of being held.
 	hold *HoldManager
+}
+
+// SetSelf declares this relay's own TCP port so the client can recognise a
+// configured link that addresses the relay itself (DF-CRIER-12). The wire
+// shape of GET /fed/peers is unchanged; the identity is used only to drop a
+// self-referencing link from the listing (see isSelfLink). A port <= 0
+// leaves the identity unknown, and no link is then classified as self —
+// the pre-DF-CRIER-12 behaviour, which NewClient alone preserves.
+func (c *Client) SetSelf(port int) {
+	if c == nil {
+		return
+	}
+	if port > 0 {
+		c.selfPort = port
+	}
 }
 
 // SetHoldManager attaches the hold/retry queue (DF-CRIER-7). With no hold
@@ -223,6 +244,96 @@ func parseLink(raw string) (Link, bool) {
 		return Link{}, false
 	}
 	return Link{URL: strings.TrimSuffix(raw, "/"), Name: u.Host}, true
+}
+
+// loopbackHost reports whether a URL host (a hostname or IP literal, no
+// port) names the local machine's loopback interface: "localhost" and
+// anything in 127.0.0.0/8 or ::1.
+//
+// "localhost:8899" and "127.0.0.1:8899" reach the SAME listener — the relay
+// binds :<port> on every interface — but they are different strings, so a
+// whole-URL or host:port string comparison cannot recognise a self-link.
+// This is the normalisation that makes the comparison meaningful: the
+// defect surfaced precisely because the operator configured 127.0.0.1 while
+// the local entry is rendered as localhost (DF-CRIER-12).
+func loopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	if h == "" {
+		return false
+	}
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// effectivelyLoopback reports whether a link URL addresses a local-spelling
+// host: loopbackHost is true OR the host is otherwise routed to this machine
+// by the Go HTTP client (an unspecified literal such as 0.0.0.0). Anything
+// else — a LAN name, a public hostname, another host's IP — is a genuine
+// remote link.
+func effectivelyLoopback(u *url.URL) bool {
+	return loopbackHost(u.Hostname()) || u.Hostname() == "0.0.0.0"
+}
+
+// linkPort resolves the port a link URL addresses: the explicit port when
+// written, otherwise the scheme default. A link with no resolvable port
+// (unknown scheme) cannot address a known listener, so it is not self.
+func linkPort(u *url.URL) (int, bool) {
+	if p := u.Port(); p != "" {
+		n, err := net.LookupPort("tcp", p)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return 80, true
+	case "https":
+		return 443, true
+	}
+	return 0, false
+}
+
+// isSelfLink reports whether link addresses THIS relay. The relay serves
+// every interface on one port (cmd/server binds :<port>), so the port is
+// the discriminator; the host only has to be a local spelling. A remote
+// link (any non-loopback host) is never self, and an unknown local identity
+// (selfPort == 0) classifies nothing, preserving the previous behaviour.
+func (c *Client) isSelfLink(link Link) bool {
+	if c == nil || c.selfPort <= 0 {
+		return false
+	}
+	u, err := url.Parse(link.URL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	port, ok := linkPort(u)
+	if !ok || port != c.selfPort {
+		return false
+	}
+	return effectivelyLoopback(u)
+}
+
+// SelfLinks returns the configured links that address this relay itself
+// (DF-CRIER-12). GET /fed/peers omits them; the startup log reports them
+// once so an operator can see why a configured link is absent from the
+// listing. Empty when the identity is unknown (SetSelf not called).
+func (c *Client) SelfLinks() []Link {
+	if c == nil {
+		return nil
+	}
+	var out []Link
+	for _, link := range c.links {
+		if c.isSelfLink(link) {
+			out = append(out, link)
+		}
+	}
+	return out
 }
 
 // ForwardDeliver POSTs a deliver request body to the linked relay's inbox
@@ -391,9 +502,27 @@ func (c *Client) FetchRemoteAgents(ctx context.Context, link Link) ([]RemoteAgen
 // linked relay, agents fetched live. A link that fails to answer still
 // appears in the listing (with empty agents) so operators can see the link
 // exists but is down.
+//
+// A link that addresses THIS relay is omitted rather than listed (DF-CRIER-12):
+// GET /fed/peers already carries the local relay as its first entry, so
+// emitting such a link would list the relay twice — once under its display
+// name and once under the address the operator typed. Nothing is fetched for
+// it either, so a self-link costs no loopback round-trip per request.
+//
+// The local relay's own display name/URL rule is unchanged and lives in
+// cmd/server (federationName: CR_FED_NAME, else localhost:<port>; URL
+// http://localhost:<port>). That rule is why the hosts cannot be compared as
+// strings: the local entry says localhost while the operator's link may say
+// 127.0.0.1 — both reach the same listener. See isSelfLink for the
+// comparison that is used instead.
 func (c *Client) Peers(ctx context.Context) []Peer {
 	peers := make([]Peer, 0, len(c.links))
 	for _, link := range c.links {
+		if c.isSelfLink(link) {
+			slog.Debug("federation: skipping link that addresses this relay",
+				"link", link.URL, "self_port", c.selfPort)
+			continue
+		}
 		p := Peer{Name: link.Name, URL: link.URL, Agents: []RemoteAgent{}}
 		agents, err := c.FetchRemoteAgents(ctx, link)
 		if err != nil {

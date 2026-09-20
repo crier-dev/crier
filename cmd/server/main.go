@@ -314,6 +314,17 @@ func run(args []string) int {
 		defer fedHold.Stop()
 
 		registryHandler.SetFederationClient(fedClient)
+		// The relay's own identity for /fed/peers (DF-CRIER-12): a
+		// CR_FED_LINKS entry that addresses this relay (its own port on a
+		// local-spelling host) is not a remote peer, so it must not be
+		// listed a second time. Report it once here, at startup, so an
+		// operator can see why a configured link is absent from the
+		// listing — the per-request skip is a Debug line.
+		fedClient.SetSelf(cfg.Port)
+		for _, self := range fedClient.SelfLinks() {
+			slog.Warn("federation: configured link addresses this relay — omitted from /fed/peers (it is already the first entry)",
+				"link", self.URL, "self_port", cfg.Port)
+		}
 		slog.Info("federation", "links", cfg.Federation.Links, "name", federationName(cfg),
 			"auth", cfg.Federation.Token != "", "max_hold_s", int(cfg.Federation.MaxHold.Seconds()),
 			"hold_queue", queueMode, "pending", fedHold.Pending())
