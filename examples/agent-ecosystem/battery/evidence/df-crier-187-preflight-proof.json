@@ -1,0 +1,23 @@
+{
+  "task_id": "DF-CRIER-187",
+  "selftest_present_path": "PASS",
+  "selftest_reject_path": "PASS",
+  "fingerprint": "6945d082a10185c7534c4d28100da7a4b52c0448",
+  "evidence": {
+    "present_path": {
+      "command": "bash /tmp/selftest-compose.sh (subshell a)",
+      "require_docker_compose_rc": 0,
+      "output": "Docker Compose version 2.40.3+ds1-0ubuntu1",
+      "download_branch_ran": 0,
+      "verdict": "REAL_PATH_OK"
+    },
+    "reject_path": {
+      "command": "bash /tmp/selftest-compose.sh (subshell b, docker shim in /tmp/selftest-compose-shim answering --version only, failing `docker compose version` with 125)",
+      "require_docker_compose_rc": 3,
+      "output": "bunker battery: FATAL: docker compose plugin missing — install via \"mkdir -p ~/.docker/cli-plugins && curl -fsSL https://github.com/docker/compose/releases/download/v2.32.1/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose && chmod +x ~/.docker/cli-plugins/docker-compose\" or file as QA environmental gap",
+      "verdict": "REJECT_PATH_OK"
+    }
+  },
+  "generated": "2026-09-20",
+  "notes": "Selftest script /tmp/selftest-compose.sh is tick-scoped and intentionally NOT committed. Fingerprint is git rev-parse HEAD of worktree crier-DF-CRIER-187 before commit."
+}

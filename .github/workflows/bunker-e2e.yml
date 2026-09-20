@@ -83,6 +83,9 @@ jobs:
       OPENCODE_HOST_PORT: "29102"
     steps:
       - uses: actions/checkout@v4
+      - name: Sanity — docker compose plugin present (DF-CRIER-187)
+        run: |
+          . scripts/lib/require-docker-compose.sh && require_docker_compose
       - name: Bring up the ecosystem stack + run the full battery
         run: |
           cd examples/agent-ecosystem
