@@ -1,0 +1,27 @@
+{
+  "tick": "crier-2026-09-20-05-15-37",
+  "tick_n": 360,
+  "project": "crier",
+  "dispatched_at": "2026-09-20T05:20:00-05:00",
+  "base_sha": "ae7150e",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-131",
+      "branch": "wt/DF-CRIER-131",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-131",
+      "brief": "/tmp/crier-t360-df-crier-131-brief.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["README.md"]
+    },
+    {
+      "task_id": "DF-CRIER-276",
+      "branch": "wt/DF-CRIER-276",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-276",
+      "brief": "/tmp/crier-t360-df-crier-276-brief.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["docs/ops-evidence.md", ".coding-hermes/evidence/"]
+    }
+  ]
+}
