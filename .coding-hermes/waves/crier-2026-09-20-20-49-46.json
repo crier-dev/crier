@@ -1,0 +1,31 @@
+{
+  "scheduler_tick_id": "crier-2026-09-20-20-49-46",
+  "mode": "wave",
+  "wave_budget": 12,
+  "lanes": [
+    {
+      "task_id": "INT-SKILL-001",
+      "edit_root": "/home/kara/.hermes/skills/coding-hermes/crier-foreman-ops",
+      "worktree": null,
+      "branch": null,
+      "worktree_note": "out-of-repo Hermes skill-tree edits; the skills tree is not a git worktree, so worktree/branch do not apply; rollback snapshot /tmp/crier-foreman-ops-pre-split-t372",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "zai-glm",
+      "brief": "/tmp/brief-intskill001.md",
+      "gitreins_task": "int-skill-001-skill-split"
+    },
+    {
+      "task_id": "INT-SKILL-002",
+      "edit_root": "/home/kara/.hermes/skills/coding-hermes-worker",
+      "worktree": null,
+      "branch": null,
+      "worktree_note": "same class, disjoint directory; SKILL.md is tracked in the no-remote home repo /home/kara — no push target exists; rollback snapshot /tmp/coding-hermes-worker-pre-split-t372",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "zai-glm",
+      "brief": "/tmp/brief-intskill002.md",
+      "gitreins_task": "int-skill-002-skill-split"
+    }
+  ],
+  "independence_note": "two mutually independent rows: disjoint skill directories, no shared file, no depends_on edges between them (verified from board rows); repo code untouched, so in-repo worktrees are inapplicable and the deliverable surface is the skill tree + board/evidence records",
+  "lane_verification": "zai-glm/glm-5.3-flash probe session 20260920_155939_165d29 answered with NO fallback line (genuine); opencode-go probe 20260920_155954_91d021 fell back xkiro->9router ocg (dead lane, rejected)"
+}
