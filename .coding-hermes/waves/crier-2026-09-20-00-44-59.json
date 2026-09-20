@@ -3,23 +3,29 @@
   "project": "crier",
   "base_sha": "fc8a595",
   "created_at": "2026-09-20 00:50:00",
-  "recovery": "pending",
+  "finished_at": "2026-09-20T01:45:00Z",
+  "recovery": "complete",
   "workers": [
     {
       "task_id": "CI-016",
       "worktree": "/home/kara/worktrees/crier-CI-016",
       "branch": "wt/CI-016",
-      "sha": null,
-      "judge": null,
-      "guard": null,
-      "merge": null
+      "sha": "c4ac818",
+      "judge": "PASS tier2 COMPLETE 6f4e823a",
+      "guard": "PASS (branch tip + merged tree)",
+      "merge": "merged as 6f4e823"
     }
   ],
   "foreman_direct": [
     {
       "task_id": "DF-CRIER-257",
-      "action": "re-judge DF-CRIER-254 via gitreins judge --async job-c2af9fffff2a4b65ac2a341e97e5d70d (iteration cap 600 live since 059845e)",
+      "action": "re-judged DF-CRIER-254 via gitreins judge --async job-c2af9fffff2a4b65ac2a341e97e5d70d -> PASS, tier2 COMPLETE, verdict 42d8b819, no cap exceeded",
       "runs_in": "main tree /home/kara/crier"
     }
-  ]
+  ],
+  "closeout": {
+    "commits": ["6f4e823 merge wt/CI-016", "45b01d8 gitreins record CI-016", "b489430 board tick 357"],
+    "pushed": "origin/main + gitlab/main at b489430 (parity verified)",
+    "worktrees": "1 open -> 0 closed, wt/CI-016 branch deleted"
+  }
 }
