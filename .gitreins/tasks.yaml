@@ -1975,3 +1975,20 @@ tasks:
   status: complete
   created_at: '2026-09-20T09:10:18.211405+00:00'
   completed_at: '2026-09-20T09:36:07.548335+00:00'
+- id: DEPS-003
+  title: 'Dependency refresh: triaged safe patch/minor bumps'
+  criteria:
+  - go.mod/go.sum carry only safe triaged bumps; go build, go vet, and go test ./...
+    -count=1 all green at wt/DEPS-003 HEAD; skip list with reasons recorded; no file
+    outside go.mod/go.sum changed
+  status: complete
+  created_at: '2026-09-20T09:56:15.787151+00:00'
+  completed_at: '2026-09-20T10:27:17.631267+00:00'
+- id: E2E-001
+  title: "Committed E2E battery \u2014 self-verifying live probe script"
+  criteria:
+  - scripts/e2e-battery.sh exists at HEAD, builds the current tree, and two consecutive
+    runs each report 24 pass / 0 fail with the server killed and port freed
+  status: complete
+  created_at: '2026-09-20T10:13:08.575199+00:00'
+  completed_at: '2026-09-20T10:13:14.078374+00:00'
