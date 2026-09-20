@@ -1,0 +1,57 @@
+{
+  "tick": "crier-2026-09-20-09-42-21",
+  "tick_n": 363,
+  "project": "crier",
+  "dispatched_at": "2026-09-20T09:55:00-05:00",
+  "base_sha": "89732c6",
+  "wave_budget": 12,
+  "workers": [
+    {
+      "task_id": "DEPS-003",
+      "branch": "wt/DEPS-003",
+      "worktree": "/home/kara/worktrees/crier-DEPS-003",
+      "brief": "/tmp/crier-t363-deps-003-brief.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": [
+        "go.mod",
+        "go.sum"
+      ]
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_id": "E2E-001",
+      "lane": "foreman-direct (battery script + live run on scratch port; foreman-owned, no worker)",
+      "scope": [
+        "scripts/e2e-battery.sh",
+        ".coding-hermes/evidence/E2E-001.md"
+      ]
+    },
+    {
+      "task_id": "CR-GAP-054",
+      "lane": "foreman-direct (tag-only residual: v0.1.0-rc1 after gates+push; kit itself already shipped by ticks 265/356)",
+      "scope": [
+        "git tag v0.1.0-rc1"
+      ]
+    }
+  ],
+  "independence_check": "DEPS-003 (worker, go.mod/go.sum only) vs E2E-001 (scripts/ + evidence doc, binary behavior) vs CR-GAP-054 (tag, no tree change) \u2014 disjoint file sets, no depends_on edges among the three (verified from rows); E2E battery runs against a HEAD build from main, not the worker's worktree",
+  "merge_order": [
+    "wt/DEPS-003"
+  ],
+  "notes": "E2E-001 battery due this window (last full run tick 356 at +12 from 344; window ~361-366; this is 363). QA-CRIER-7/13/14/16/19/20 are harness-side (paused bunker lane), not composed. DF-CRIER-134 blocked on Bane (ollama.com payment). DF-CRIER-255 blocked on interactive approval.",
+  "result": {
+    "merged": [
+      "wt/DEPS-003 6c26dc8 -> merge aa96076 (no conflicts; per-merge gates build/vet 0, 18/18 packages ok)"
+    ],
+    "judges": {
+      "DEPS-003": "24dbacb7 PASS",
+      "E2E-001 (foreman-direct)": "ca8417e5 PASS"
+    },
+    "cr_gap_054": "tag v0.1.0-rc1 cut at aa96076, pushed origin+gitlab (tag-only residual; kit shipped ticks 265/356)",
+    "e2e_001": "scripts/e2e-battery.sh committed 3494752, 2 consecutive runs 24/24 green",
+    "incident": "fresh worktree deleted by mid-tick reap --all (self-inflicted); recovered via re-dispatch",
+    "pushed": "origin/main gitlab/main at 5c2366b, parity 0/0; tag on both remotes"
+  }
+}
