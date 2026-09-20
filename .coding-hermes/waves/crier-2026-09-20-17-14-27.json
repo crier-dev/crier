@@ -1,0 +1,18 @@
+{
+  "scheduler_tick_id": "crier-2026-09-20-17-14-27",
+  "mode": "serial-fallback",
+  "wave_budget": 12,
+  "lanes": [
+    {
+      "task_id": "DF-CRIER-278",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-278",
+      "branch": "wt/DF-CRIER-278",
+      "base": "f5e8fe0",
+      "worker_model": "glm-5.3",
+      "worker_provider": "opencode-go",
+      "brief": "/tmp/brief-df278.md",
+      "gitreins_task": "df-crier-278-judge-bounds"
+    }
+  ],
+  "independence_note": "serial fallback: only one repo-local actionable row (DF-CRIER-258 shares the gitreins-complete command path; QA battery P3s grade out-of-repo cells; DF-CRIER-134/255/263 externally blocked)"
+}
