@@ -2024,3 +2024,17 @@ tasks:
   status: complete
   created_at: '2026-09-20T13:24:22.986757+00:00'
   completed_at: '2026-09-20T14:00:13.713261+00:00'
+- id: df-crier-191-mesh-error-section-pin
+  title: 'DF-CRIER-191: pin the mesh-protocol.md error-handling section to the shipped
+    engine with docs-gate claims'
+  criteria:
+  - docs/claims.yaml carries at least one claim whose doc is docs/mesh-protocol.md
+    and whose quote anchors a sentence in the Error handling and silent drops section,
+    and the pin is falsified in BOTH directions (wrong expect fails with claimed-vs-observed;
+    reverting the anchored sentence fails with anchor missing); make docs-check, go
+    vet ./..., go test ./... -count=1 and gitreins guard are green; the doc's statements
+    about INVALID_MESSAGE emission are verified against internal/mesh/peer.go with
+    file:line and against a live WS probe; correct sentences are left byte-identical
+  status: complete
+  created_at: '2026-09-20T14:46:18.532347+00:00'
+  completed_at: '2026-09-20T15:34:02.026027+00:00'
