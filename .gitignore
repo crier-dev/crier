@@ -52,6 +52,10 @@ dist/
 
 # Stale build artifacts (from go build without -o)
 /server
+# The ws-mesh-demo example builds to this path at the repo root; the tracked
+# source lives in examples/ws-mesh-demo/ and docs invoke its run-demo.sh, never
+# this binary (committed by accident in 310f8df, 8MB).
+/ws-mesh-demo
 
 # Server pidfile (make run / make stop, DF-CRIER-194)
 .crier.pid
