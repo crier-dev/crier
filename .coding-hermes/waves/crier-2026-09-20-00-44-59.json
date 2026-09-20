@@ -1,0 +1,25 @@
+{
+  "tick_id": "crier-2026-09-20-00-44-59",
+  "project": "crier",
+  "base_sha": "fc8a595",
+  "created_at": "2026-09-20 00:50:00",
+  "recovery": "pending",
+  "workers": [
+    {
+      "task_id": "CI-016",
+      "worktree": "/home/kara/worktrees/crier-CI-016",
+      "branch": "wt/CI-016",
+      "sha": null,
+      "judge": null,
+      "guard": null,
+      "merge": null
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_id": "DF-CRIER-257",
+      "action": "re-judge DF-CRIER-254 via gitreins judge --async job-c2af9fffff2a4b65ac2a341e97e5d70d (iteration cap 600 live since 059845e)",
+      "runs_in": "main tree /home/kara/crier"
+    }
+  ]
+}
