@@ -1,0 +1,20 @@
+{
+  "tick": "crier-2026-09-20-16-09-46",
+  "tick_n": 368,
+  "budget": 12,
+  "lanes": [
+    {
+      "task_id": "CLN-1",
+      "mode": "foreman-direct",
+      "model": null,
+      "provider": null,
+      "worktree": "/home/kara/crier (main tree — single lane, no worktree split needed)",
+      "branch": "main",
+      "scope": ".gitignore, .tmp-tick361-readboard.py (rm), examples/llm-mesh/__pycache__ (rm), examples/federation-demo/TRANSCRIPT-2026-09-18.md (add), .coding-hermes/waves/*.json (add)",
+      "class": "repo hygiene (Bane directive 2026-09-06): ignore-rules gaps, stale scratch artifact, untracked convention files",
+      "brief": "foreman-direct (trivial hygiene: rm + 3 gitignore lines + add existing files; no code changes)"
+    }
+  ],
+  "independence": "single lane: of 19 pending rows, 16 are fixtures (E2E-001/NEVER-DONE), owner/decision-blocked (DF-CRIER-134 ollama-billing, DF-CRIER-255 protected AGENTS.md, DF-CRIER-278 judge-cap owner decision, QA-CRIER-19/20 blocked on untracked shared harness), infra/not-a-crier-defect (DF-CRIER-263, QA-CRIER-13/14/16/5/8), or skill-file splits outside this repo (INT-SKILL-001/002) — exactly ONE executable in-repo row (CLN-1); serial path is the honest fallback",
+  "merge_order": "single lane: gate (gitreins tier-1: secrets/build/vet/tests + repo arms) then commit on main; push origin + gitlab"
+}

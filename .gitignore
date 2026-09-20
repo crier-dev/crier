@@ -47,6 +47,9 @@ dist/
 .gitreins/history/
 .gitreins/usage.jsonl
 
+# GitReins runtime logs
+.gitreins/logs/
+
 # Stale build artifacts (from go build without -o)
 /server
 
@@ -66,3 +69,7 @@ dist/
 
 # Dagger cache (gitreins guard)
 dagger.db*
+
+# Python bytecode caches (examples)
+__pycache__/
+*.pyc

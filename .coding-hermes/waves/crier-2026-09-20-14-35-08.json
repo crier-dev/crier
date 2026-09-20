@@ -1,0 +1,20 @@
+{
+  "tick": "crier-2026-09-20-14-35-08",
+  "tick_n": 366,
+  "budget": 12,
+  "lanes": [
+    {
+      "task_id": "DF-CRIER-191",
+      "mode": "worker",
+      "model": "glm-5.3",
+      "provider": "zai-glm",
+      "worktree": "/home/kara/crier (main tree — single lane, no worktree split needed)",
+      "branch": "main",
+      "scope": "docs/claims.yaml, docs/mesh-protocol.md, cmd/server/docsclaims_test.go",
+      "class": "docs-frozen with lifted freeze (blocking rows 29/40/177 complete) + claims-gate pin",
+      "brief": "/tmp/crier-t366-DF-CRIER-191-brief.md"
+    }
+  ],
+  "independence": "single lane: of 19 pending rows, 16 are fixtures (E2E-001/NEVER-DONE), owner/decision-blocked (DF-CRIER-134 ollama-billing, DF-CRIER-255 protected AGENTS.md, DF-CRIER-278 judge-cap owner decision, QA-CRIER-19/20 blocked on untracked shared harness), infra/not-a-crier-defect (DF-CRIER-263, QA-CRIER-13/14/16/5/8), or skill-file splits outside this repo (INT-SKILL-001 refuses autonomous patches by ownership, INT-SKILL-002 separate surface) — so exactly ONE executable in-repo row exists and the serial path is the honest fallback",
+  "merge_order": "single lane: gate (docs-check + vet + suite + gofmt + guard) then commit on main"
+}
