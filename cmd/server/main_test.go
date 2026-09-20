@@ -1356,6 +1356,16 @@ func TestServerVersionCLIFlags(t *testing.T) {
 	})
 
 	t.Run("Makefile stamps the symbols the binary reads", func(t *testing.T) {
+		// QA-CRIER-23 (2026-09-20): this subtest expands the Makefile recipe
+		// with `make -n`, so it cannot run where make is not installed —
+		// measured on a JIT QA agent (no make in PATH): the whole suite went
+		// red with exec: "make": executable file not found, an environment
+		// gap graded as a code failure. The stamping proof needs make; on
+		// hosts without it there is nothing to verify, so skip with the
+		// reason on record.
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skipf("make not found in PATH: the Makefile-stamping proof cannot run on this host (%v)", err)
+		}
 		// The linker SILENTLY ignores an -X flag naming a symbol it cannot
 		// find, so a typo'd package path in the Makefile would keep every
 		// build green while the identity stayed unstamped. `make -n` prints
