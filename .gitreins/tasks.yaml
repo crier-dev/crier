@@ -2061,3 +2061,24 @@ tasks:
   status: complete
   created_at: '2026-09-20T19:48:55.851870+00:00'
   completed_at: '2026-09-20T20:22:03.499177+00:00'
+- id: int-skill-001-skill-split
+  title: 'INT-SKILL-001: split crier-foreman-ops SKILL.md (100887c) under the 100K
+    skill_manage limit with zero content loss and the false mesh RESPONSE-body claim
+    corrected'
+  criteria:
+  - new SKILL.md <=45000 chars with a references index; every original paragraph preserved
+    in SKILL.md or new references/split-*.md files (12-string spot proof); the JSON-encoded-string
+    body claim corrected to the tick-332 measured truth; no existing reference file
+    deleted or modified
+  status: complete
+  created_at: '2026-09-20T21:11:31.923248+00:00'
+  completed_at: '2026-09-20T21:47:20.020115+00:00'
+- id: int-skill-002-skill-split
+  title: 'INT-SKILL-002: split coding-hermes-worker SKILL.md (104848c) under the 100K
+    skill_manage limit with zero content loss'
+  criteria:
+  - references/ dir created; new SKILL.md <=45000 chars with a references index; every
+    original paragraph preserved (12-string spot proof); no content deleted
+  status: complete
+  created_at: '2026-09-20T21:11:32.791843+00:00'
+  completed_at: '2026-09-20T21:47:26.293714+00:00'
