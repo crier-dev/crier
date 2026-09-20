@@ -95,6 +95,19 @@ jobs:
           make shell-yaml-check
           make shell-yaml-selftest
 
+      # DF-CRIER-278: the tier-2 judge's input budget is the most expensive knob in
+      # the repo, and a board-only diff has nothing in it a larger budget would
+      # resolve (measured tick 365: two tier-2 runs on three .coding-hermes JSONL
+      # files and zero source files used 33.8M and 48.1M tokens_in against a normal
+      # source-diff judge's 188K-706K; the second run died INCOMPLETE at the 48.0M
+      # cap). This step proves the fail-closed classifier that authorizes
+      # `gitreins task complete --skip-tier2` for such a diff — and the neuter proof
+      # that a verdict-forced copy of it cannot pass the selftest. Synthetic path
+      # lists only: no git, no network, no fixtures beyond a scratch dir, so it
+      # cannot flake on a busy runner.
+      - name: Judge diff classifier selftest
+        run: make judge-diff-class-selftest
+
       # DF-CRIER-209: Tier 1 never reads a Makefile recipe or a Dockerfile, and
       # the shell/YAML step above reads only shell scripts and workflow YAML — so
       # a Makefile-only or Dockerfile-only push used to get a green that verified

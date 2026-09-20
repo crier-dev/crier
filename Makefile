@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -52,6 +52,7 @@ help:
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
+	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -266,6 +267,38 @@ mcp-stdout-check:
 
 mcp-stdout-selftest:
 	bash scripts/check-mcp-stdout-selftest.sh
+
+# DF-CRIER-278: the tier-2 judge's INPUT budget is the most expensive knob in the
+# repo, and a board-only diff has nothing in it a larger budget would resolve.
+# Measured on tick 365: `gitreins task complete df-crier-203-expires-null-panel`
+# ran twice on three .coding-hermes JSONL files and zero source files — 33,824,117
+# and 48,064,774 tokens_in (INCOMPLETE, "Cap exceeded: Input token budget (48.0M)
+# exceeded (48.1M used)") against 188K-706K for a normal source-diff judge, because
+# the evaluator's own repo exploration (file_scope: full) IS the cost. Raising the
+# cap is rejected (a bigger cap buys a longer exploration, and the next run starves
+# at a higher number), so the fix is fail-closed and crier-side: a classifier that
+# authorizes `gitreins task complete --skip-tier2` ONLY for a diff with zero source
+# files, plus the committed evidence artifact that keeps the authorization
+# auditable (docs/ops-evidence.md). scripts/lib/judge-diff-class.sh decides it on
+# the path list alone — non-source iff docs/**, *.md (any depth), .coding-hermes/**,
+# .gitreins/**, LICENSE, NOTICE, .gitignore, .gitattributes, .github/**, the ROOT
+# Makefile/Dockerfile*, or yaml under .github//docs/; everything else is source,
+# including examples/**, scripts/**, specs/** and openapi yaml (those source trees
+# win over the *.md rule, because spec/openapi files drive generated code and gates)
+# and any unrecognized path — the conservative direction, since a wrong board-only
+# verdict silently drops the judge on a diff the rule meant to protect. An empty
+# diff is refused in EVERY flag combination (exit 3, "no diff = no authorization").
+# This selftest proves the contract on synthetic path lists only (no git, no
+# network): both verdicts, the --strict-verify gate, the --allow-source opt-in, the
+# empty-diff refusal in all four flag combinations, unknown-flag misuse (exit 2),
+# the mixed list, the duplicate-folded and CRLF counts, and every boundary row the
+# header documents — plus a NEUTER proof that seds the classifier's verdict call
+# site to a forced board-only and requires (a) the copy to differ, (b) the copy to
+# FAIL the selftest's own source-bearing assertion, and (c) a full selftest run
+# against the neutered pair to FAIL, so a verdict-forced-success classifier cannot
+# pass it.
+judge-diff-class-selftest:
+	bash scripts/lib/judge-diff-class-selftest.sh
 
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target
