@@ -198,6 +198,10 @@ gofmt's own rules (the gofmt arm is not a linter and does not replace `go vet`, 
 it reads only and exactly the TRACKED `.go` files — a generated or untracked `.go`
 file is outside it); and anything outside the tracked file set.
 
+## Load safety
+
+Ticks on this repo share the host with the rest of the fleet. Never hand-roll a busy-wait / burn loop in a command line, and never `setsid` one into the background — orphaned burners outlive their caller and peg every core. Use the bounded harness instead: `scripts/load-repro.sh` or `scripts/loadgen.py`. The caps are hard limits, refused — not clamped — when exceeded: workers default 4, hard max 8; seconds default 30, hard max 300. The load gate reads `/proc/loadavg` before dispatch and SKIPS with a recorded reason (exit 3) when the 1-minute loadavg is at or above the threshold (default 8.0). Never kill by `pkill -f` / `pgrep -f` with a pattern that also appears in your own argv — you will match and kill yourself. `make load-repro-selftest` proves all of the above and runs in CI (see docs/load-reproduction.md for the full contract).
+
 ## Board
 
 Foreman board (JSONL-canonical, git-tracked): `.coding-hermes/board/tasks.jsonl` + `events.jsonl`. Recurring fixtures: E2E-001 (live battery), NEVER-DONE (audit sweep).
