@@ -155,6 +155,60 @@ than the default cadence to reach exhaustion.
 - Go 1.26.6 or later
 - OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below). That flag is also a ONE-SHOT operation: the payload must be a seekable file (the helper writes it and signs it with `-in`), because a piped or redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper refuses that too, instead of sending it
 
+#### Installing Go without root
+
+A bare machine with no root has no Go at all, and the distro package may be older
+than this repo requires — install the official tarball into your home directory.
+Unpack it somewhere other than `$HOME/go`: the archive unpacks a single `go/`
+directory, and `$HOME/go` is the default `GOPATH` (see the warning below).
+
+```bash
+mkdir -p "$HOME/sdk" && cd "$HOME/sdk"
+curl -LO https://go.dev/dl/go1.26.6.linux-amd64.tar.gz   # linux-arm64 on an ARM machine
+tar -C "$HOME/sdk" -xzf go1.26.6.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
+export PATH="$HOME/sdk/go/bin:$PATH"
+go version                                               # go version go1.26.6 linux/amd64
+```
+
+The archive is named `go<version>.linux-<arch>.tar.gz` and always unpacks one
+`go/` directory. `go1.26.6` is this repo's minimum; the current stable release is
+`go1.27.1`, and any later version works the same way — download the one you want
+and pass that same file name to `tar`. `export PATH` lasts for one shell, so make
+it permanent in your shell rc (`$HOME/.bashrc` for bash, `$HOME/.profile`, or
+`$HOME/.zshrc` for zsh):
+
+```bash
+echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
+```
+
+> **Do not set `GOPATH` to the Go installation directory.** `GOROOT` is the
+> toolchain (`$HOME/sdk/go` above) and `GOPATH` is your workspace; pointing one at
+> the other is the classic fresh-install mistake, and the toolchain flags it on
+> every command. Captured verbatim on go1.26.6 — it prints your own absolute path
+> in place of `$HOME`:
+>
+> ```
+> $ export GOPATH="$HOME/sdk/go"
+> $ go env GOROOT GOPATH
+> warning: both GOPATH and GOROOT are the same directory ($HOME/sdk/go); see https://go.dev/wiki/InstallTroubleshooting
+> ```
+>
+> **The fix: do not set `GOPATH` at all.** With the toolchain under `$HOME/sdk/go`
+> the default `GOPATH` is `$HOME/go` — a workspace, distinct from the toolchain —
+> and the warning is gone. The collision needs no env var either: untar the
+> archive into `$HOME` and it unpacks to `$HOME/go`, which IS the default `GOPATH`,
+> so `GOROOT` and `GOPATH` are the same directory from the very first command. On
+> go1.26.6 this is a warning rather than a fatal error (run the two commands above
+> to see your own toolchain's wording), but it is not cosmetic: with `GOBIN` unset
+> the toolchain then installs into itself — `go install` writes the binary into the
+> toolchain's own `bin` beside `go` and `gofmt`, and the module cache lands under
+> `GOROOT`. The Go wiki page the warning links to states the rule directly: the
+> `GOPATH` directory should not be set to, or contain, the `GOROOT` directory.
+> Measured clean: toolchain at `$HOME/sdk/go` with `GOPATH` unset (recommended,
+> as above), or the toolchain under `$HOME` with `export GOPATH="$HOME/gopath"`.
+
+A distro package — `sudo apt install golang-go` on Debian/Ubuntu, `sudo dnf install golang` on Fedora — is a one-line alternative, but the packaged Go can be older than the 1.26.6 this repo requires: check `go version` afterwards.
+
 ### Build
 
 ```bash
