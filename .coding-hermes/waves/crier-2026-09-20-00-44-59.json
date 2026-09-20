@@ -13,7 +13,7 @@
       "sha": "c4ac818",
       "judge": "PASS tier2 COMPLETE 6f4e823a",
       "guard": "PASS (branch tip + merged tree)",
-      "merge": "merged as 6f4e823"
+      "merge": "merged as 97bad12"
     }
   ],
   "foreman_direct": [
@@ -24,7 +24,7 @@
     }
   ],
   "closeout": {
-    "commits": ["6f4e823 merge wt/CI-016", "45b01d8 gitreins record CI-016", "b489430 board tick 357"],
+    "commits": ["97bad12 merge wt/CI-016", "45b01d8 gitreins record CI-016", "b489430 board tick 357"],
     "pushed": "origin/main + gitlab/main at b489430 (parity verified)",
     "worktrees": "1 open -> 0 closed, wt/CI-016 branch deleted"
   }
