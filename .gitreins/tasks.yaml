@@ -1928,3 +1928,47 @@ tasks:
   status: complete
   created_at: '2026-09-20T05:25:08.471238+00:00'
   completed_at: '2026-09-20T05:40:43.233386+00:00'
+- id: DF-CRIER-277
+  title: docker compose preflight + self-heal rail for bunker battery entries
+  criteria:
+  - scripts/lib/require-docker-compose.sh exists and is sourced by every tracked docker
+    compose entrypoint; require_docker_compose exits 0 with the compose version when
+    the plugin is present, and exits 3 with one actionable FATAL line naming the missing
+    plugin after one best-effort self-heal attempt when it is absent; make shell-yaml-check
+    passes; go build/vet/test pass; evidence JSON committed.
+  status: complete
+  created_at: '2026-09-20T07:24:16.891192+00:00'
+  completed_at: '2026-09-20T07:39:26.332696+00:00'
+- id: qa-crier-3-actions-node24
+  title: "CI actions still declare node20 \u2014 bump to node24 majors"
+  criteria:
+  - Every action referenced by .github/workflows/*.yml declares runs.using node24
+    (verified against the action.yml at each pinned ref); .github/actionlint.yaml
+    still declares the bunker label; the workflow guardrail (make shell-yaml-check
+    / actionlint) passes on the staged files; no action is left on a node16/node20
+    runtime except composite actions that run no JS.
+  status: in_progress
+  created_at: '2026-09-20T09:10:16.917030+00:00'
+- id: df-crier-12-fed-peers-self
+  title: GET /fed/peers must not list this relay twice when CR_FED_LINKS names its
+    own address
+  criteria:
+  - 'internal/federation/client Peers()/HandlePeers never emits the local relay as
+    a linked peer: a link whose URL addresses this relay itself is skipped (and logged),
+    while the local entry stays first and every genuine remote link is still listed
+    with its live agents; covered by a new unit test in internal/federation plus the
+    existing local-first test still green; go build/vet/test + the claims/docs gate
+    pass.'
+  status: in_progress
+  created_at: '2026-09-20T09:10:17.565870+00:00'
+- id: df-crier-11-sender-shape
+  title: 'Webhook envelope sender shape: spec and wire must agree'
+  criteria:
+  - 'docs/specs WEBHOOK-DELIVERY.md sample envelope and docs/claims.yaml describe
+    the same sender shape the shipped webhook body carries (verified live: the emitted
+    crier.sender value type equals the documented one); make docs-check passes with
+    a claim pinning the shape; no behavioural change to the wire unless the doc is
+    the wrong side, in which case the change is stated in the row with the live probe
+    that proves it.'
+  status: in_progress
+  created_at: '2026-09-20T09:10:18.211405+00:00'

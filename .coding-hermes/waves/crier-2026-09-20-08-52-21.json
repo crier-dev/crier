@@ -1,0 +1,44 @@
+{
+  "scheduler_tick_id": "crier-2026-09-20-08-52-21",
+  "tick": 362,
+  "created_at": "2026-09-20",
+  "base_sha": "1b15914",
+  "max_concurrent": 12,
+  "wave": [
+    {
+      "task_id": "QA-CRIER-3",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-3",
+      "branch": "wt/QA-CRIER-3",
+      "brief": "/tmp/crier-t362-brief-QA-CRIER-3.txt",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "opencode-go",
+      "gitreins_task": "qa-crier-3-actions-node24",
+      "files_scope": ".github/workflows/*.yml, .github/actionlint.yaml",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-CRIER-12",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-12",
+      "branch": "wt/DF-CRIER-12",
+      "brief": "/tmp/crier-t362-brief-DF-CRIER-12.txt",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "opencode-go",
+      "gitreins_task": "df-crier-12-fed-peers-self",
+      "files_scope": "internal/federation/*.go, cmd/server/main.go",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-CRIER-11",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-11",
+      "branch": "wt/DF-CRIER-11",
+      "brief": "/tmp/crier-t362-brief-DF-CRIER-11.txt",
+      "worker_model": "glm-5.3",
+      "worker_provider": "opencode-go",
+      "gitreins_task": "df-crier-11-sender-shape",
+      "files_scope": "specs/WEBHOOK-DELIVERY.md, internal/webhook/*_test.go",
+      "status": "dispatched"
+    }
+  ],
+  "serial_fallback": false,
+  "notes": "Wave of 3 mutually independent rows (no depends_on edges; disjoint file scopes: .github/ vs internal/federation/ vs specs/+internal/webhook tests). DF-CRIER-277 already merged (1b15914) and judged tier2 PASS 32fa898d before this tick; its board row close + push is this tick's first act. Rejected from the wave: DF-CRIER-134 (Bane-actionable, out of repo), QA-CRIER-5/6/7/8/13/14/16/19/20/23 + DF-CRIER-263 (bunker fabric / QA harness, not this repo), DF-CRIER-191 (frozen mesh docs zone), DF-CRIER-203 (needs a panel), DF-CRIER-255 (needs an interactive approval), CR-GAP-054/DEPS-003/CLN-1/INT-SKILL-001/002 (multi-part or out-of-lane), DF-CRIER-258 (fleet judge-reaper class, filed on the wrong project), DF-CRIER-12+DF-CRIER-11 = the two real dogfood defects."
+}
