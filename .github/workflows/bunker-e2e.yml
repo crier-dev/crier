@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ghcr.io/crier-dev/crier:latest .
       - name: Login to GHCR
@@ -49,7 +49,7 @@ jobs:
       BUNKER_HOST: ${{ secrets.BUNKER_HOST }}
       SINK_URL: ${{ secrets.SINK_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Ensure bunker agent exists + heartbeat
         run: |
           "$HOME/go/bin/bunker" info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
@@ -61,7 +61,7 @@ jobs:
             --agent "$BUNKER_AGENT" --server "$BUNKER_SERVER" --sink "$SINK_URL"
       - name: Attach evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bunker-matrix-evidence
           path: /tmp/bunker-matrix-ci.jsonl
@@ -82,7 +82,7 @@ jobs:
       PI_HOST_PORT: "29101"
       OPENCODE_HOST_PORT: "29102"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Sanity — docker compose plugin present (DF-CRIER-187)
         run: |
           . scripts/lib/require-docker-compose.sh && require_docker_compose
@@ -98,7 +98,7 @@ jobs:
             --entrypoint cat battery /evidence/ecosystem.jsonl > /tmp/ecosystem-evidence.jsonl || true
       - name: Attach evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ecosystem-evidence
           path: /tmp/ecosystem-evidence.jsonl

@@ -20,7 +20,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Assemble site
         run: |
           mkdir -p site/docs site/examples
@@ -31,11 +31,11 @@ jobs:
           cp docs/openapi.yaml site/docs/openapi.yaml 2>/dev/null || true
           for ex in demo.sh; do cp examples/$ex site/examples/ 2>/dev/null || true; done
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
