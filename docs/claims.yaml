@@ -368,6 +368,26 @@ claims:
     quote: "X-Crier-Target: {target_agent_id}"
     expect: "202"
     xfail: null
+  # DF-CRIER-11: §3's sample drew the envelope sender as an OBJECT
+  # ("sender": {"agent_id": "agent-a"}) on the SAME screen as a scalar target,
+  # so the example contradicted itself and described nothing the server emits.
+  # The fix is on the DOC side — the wire has always carried the scalar
+  # (internal/webhook/webhook.go: Sender string `json:"sender,omitempty"`), the
+  # deliver request body types `sender` as a string, and X-Crier-Agent, the
+  # header carrying the identical identity, is a scalar. Changing the wire to
+  # an object would break every existing sink for a cosmetic symmetry win; the
+  # only argument for the object shape (mesh PeerRef) is a different protocol
+  # (docs/mesh-protocol.md source/target). This claim is therefore TWO things:
+  # the anchor below (the corrected sample line) and a live probe that
+  # re-measures the token type end-to-end — the probe's own sink captures the
+  # POST the booted server makes, and reports an OBJECT token as an error
+  # naming the shape it observed.
+  - id: WEBHOOK-OUTBOUND-SENDER-SCALAR
+    kind: status
+    doc: specs/WEBHOOK-DELIVERY.md
+    quote: "\"sender\": \"agent-a\","
+    expect: "202"
+    xfail: null
   # CR-GAP-056 removed TTL-SECONDS-CLAIM-IGNORED with the doc line it anchored:
   # DF-CRIER-174 rebuilt the TESTERS.md rough-edges table from live evidence and
   # the row claiming ttl_seconds is ignored is FALSE at HEAD (a deliver with
