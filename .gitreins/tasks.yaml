@@ -2092,3 +2092,17 @@ tasks:
   status: complete
   created_at: '2026-09-20T22:45:00.644039+00:00'
   completed_at: '2026-09-20T22:57:49.156940+00:00'
+- id: df-crier-255-agents-md-load-safety
+  title: AGENTS.md Load safety section (DF-CRIER-255)
+  criteria:
+  - 'AGENTS.md at HEAD carries a ''Load safety'' section stating: (a) never hand-roll
+    a busy-wait/burn loop in a command line nor setsid one; (b) use scripts/load-repro.sh
+    / scripts/loadgen.py; (c) caps workers default 4 / hard max 8, seconds default
+    30 / hard max 300, refused not clamped; (d) load gate reads /proc/loadavg, default
+    threshold 8.0, SKIPS with recorded reason and exit 3; (e) never pkill -f / pgrep
+    -f with a pattern that appears in your own argv; (f) make load-repro-selftest
+    proves it and runs in CI. Single-file commit (AGENTS.md only), guard green, toggle
+    re-armed true with read-back.'
+  status: complete
+  created_at: '2026-09-20T23:33:30.234114+00:00'
+  completed_at: '2026-09-20T23:40:38.277484+00:00'
