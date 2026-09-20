@@ -40,5 +40,18 @@
     }
   ],
   "serial_fallback": false,
+  "result": {
+    "merged_serially": [
+      {"task_id": "QA-CRIER-3", "branch": "wt/QA-CRIER-3", "worker_commit": "40432bb", "merge": "9d119fb", "guard": "shell-yaml-check PASS 26 files; selftest 8/8; go build/vet OK; docs-check PASS; gofmt 166/0", "judge": "tier1 PASS + tier2 PASS, verdict 7df5a4e8"},
+      {"task_id": "DF-CRIER-12", "branch": "wt/DF-CRIER-12", "worker_commit": "69cdd2f", "merge": "de6854a", "guard": "go build/vet OK; 18/18 packages -count=1; gofmt 166/0", "judge": "tier1 PASS + tier2 PASS, verdict a55e9f98 (async relaunch)"},
+      {"task_id": "DF-CRIER-11", "branch": "wt/DF-CRIER-11", "worker_commit": "eefb56d", "merge": "c88f6e8", "guard": "docs-check PASS; go build/vet OK; 18/18 packages; gofmt 167/0", "judge": "tier1 PASS + tier2 PASS, verdict 8a01f40f (async relaunch)"}
+    ],
+    "merge_conflicts": "none — disjoint file sets as composed (.github/workflows vs internal/federation+cmd/server vs specs/docs/internal/webhook tests)",
+    "foreman_direct_verification": "each worker PASS re-proven independently: DF-CRIER-12 by a fresh-build two-process /fed/peers probe (self-link 1 peer vs 2 before; ordinary link 2 peers with the remote) plus a NEUTER proof that deleting only the Peers() skip turns 3 self-link tests RED; DF-CRIER-11 by reverting only the claims anchor and showing make docs-check exits 1; QA-CRIER-3 by re-reading each new ref's runs.using from its action.yml through the GitHub API",
+    "pre_merged_closures": "DF-CRIER-277 + QA-CRIER-6 closed on merge 1b15914 (tier2 PASS 32fa898d, judged before this tick)",
+    "final_head": "b901e65",
+    "pushed": "origin/main and gitlab/main both at 0 behind b901e65",
+    "ci_at_close": "runs on de6854a and c88f6e8 completed success; runs on b901e65 in progress (per-commit duplication, no red)"
+  },
   "notes": "Wave of 3 mutually independent rows (no depends_on edges; disjoint file scopes: .github/ vs internal/federation/ vs specs/+internal/webhook tests). DF-CRIER-277 already merged (1b15914) and judged tier2 PASS 32fa898d before this tick; its board row close + push is this tick's first act. Rejected from the wave: DF-CRIER-134 (Bane-actionable, out of repo), QA-CRIER-5/6/7/8/13/14/16/19/20/23 + DF-CRIER-263 (bunker fabric / QA harness, not this repo), DF-CRIER-191 (frozen mesh docs zone), DF-CRIER-203 (needs a panel), DF-CRIER-255 (needs an interactive approval), CR-GAP-054/DEPS-003/CLN-1/INT-SKILL-001/002 (multi-part or out-of-lane), DF-CRIER-258 (fleet judge-reaper class, filed on the wrong project), DF-CRIER-12+DF-CRIER-11 = the two real dogfood defects."
 }
