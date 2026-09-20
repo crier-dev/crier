@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pashagolub/pgxmock/v5"
 )
 
@@ -187,6 +188,13 @@ func (r *errRows) Values() ([]any, error) { return nil, errors.New("unreachable:
 func (r *errRows) RawValues() [][]byte    { return nil }
 func (r *errRows) Raw() []byte            { return nil }
 func (r *errRows) Conn() *pgx.Conn        { return nil }
+
+// TypeMap is part of pgx.Rows as of pgx v5.11.0 (DEPS-004). It is never
+// reached on the paths this stub drives — Next is false, so List decodes
+// nothing — and nil is also the documented answer for a Rows that carries no
+// values, "such as one representing only an error" (pgx Rows.TypeMap). No
+// decoding behavior is claimed or changed for this error-path double.
+func (r *errRows) TypeMap() *pgtype.Map { return nil }
 
 // errRowsPool is a connPool whose every Query returns stubbed rows that fail
 // on iteration — List's query succeeds, iteration yields nothing, and
