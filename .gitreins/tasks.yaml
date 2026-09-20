@@ -2013,3 +2013,14 @@ tasks:
   status: complete
   created_at: '2026-09-20T12:06:59.566880+00:00'
   completed_at: '2026-09-20T12:27:55.786208+00:00'
+- id: df-crier-203-expires-null-panel
+  title: 'DF-CRIER-203: panel verdict on the never-expires expires_at=null wire change'
+  criteria:
+  - The board row DF-CRIER-203 carries a recorded panel decision (CONFIRM or REVERT)
+    with model identities and verbatim reasons in the closure evidence; on CONFIRM
+    the tri-state contract stays as shipped at 73a69f0 with no wire change; on REVERT
+    a commit restores the zero-time wire shape and regenerates the embedded openapi
+    copy.
+  status: complete
+  created_at: '2026-09-20T13:24:22.986757+00:00'
+  completed_at: '2026-09-20T14:00:13.713261+00:00'
