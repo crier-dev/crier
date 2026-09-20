@@ -1884,3 +1884,22 @@ tasks:
   status: complete
   created_at: '2026-09-20T00:51:55.249401+00:00'
   completed_at: '2026-09-20T01:22:39.585000+00:00'
+- id: DF-CRIER-16
+  title: 'docs(auth): pin the agent-scoped 401/404 precedence the README''s negative
+    path omits'
+  criteria:
+  - 'At HEAD: README.md states the agent-scoped negative path as 401 (missing signature
+    headers) and the stale-timestamp rejection as 401, but never states that the existence
+    check runs between them, so an UNREGISTERED agent id gets 404 agent not found
+    once a signature trio is present. Live-proven order at HEAD: (1) missing trio
+    -> 401 for any id, (2) agent existence -> 404 for unregistered ids, (3) timestamp
+    window -> 401, (4) signature verify -> 401. PASS requires: README.md documents
+    that precedence as a reader-executable claim (with the unregistered-agent 404
+    case named), docs/claims.yaml carries a claim anchoring the new README sentence,
+    cmd/server/docsclaims_test.go carries a deterministic live probe for it that observes
+    the real 404, make docs-check exits 0 while executing the new block, make test
+    is green, and the runtime behavior of the endpoints is UNCHANGED (no file under
+    internal/ or cmd/server/*.go other than docsclaims_test.go may be touched).'
+  status: complete
+  created_at: '2026-09-20T02:00:15.281142+00:00'
+  completed_at: '2026-09-20T02:13:58.053272+00:00'
