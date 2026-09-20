@@ -2038,3 +2038,15 @@ tasks:
   status: complete
   created_at: '2026-09-20T14:46:18.532347+00:00'
   completed_at: '2026-09-20T15:34:02.026027+00:00'
+- id: cln-1-repo-hygiene
+  title: "CLN-1: repo hygiene \u2014 ignore-rule gaps, stale tick-361 scratch file,\
+    \ untracked convention files"
+  criteria:
+  - 'Working tree reads clean after the tick: examples/**/__pycache__/ and .gitreins/logs/
+    are gitignored, .tmp-tick361-readboard.py is removed, the 2026-09-18 federation
+    demo transcript (real run capture, DEMO PASS, secret-scanned) and the 2026-09-20
+    waves manifests are tracked; go build + go vet + full test suite green on the
+    merged tree.'
+  status: complete
+  created_at: '2026-09-20T16:22:49.030833+00:00'
+  completed_at: '2026-09-20T16:35:43.743911+00:00'
