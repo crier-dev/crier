@@ -93,3 +93,100 @@ artifact is there to make that output legible and to place it in time.
 - An artifact never substitutes for a local test that could exist, and nothing in
   `.coding-hermes/evidence/` is a grading input for the local suite. If a criterion
   can be checked in the repo, check it in the repo.
+
+## Board-only closes and the tier-2 skip (DF-CRIER-278)
+
+The other end of the same problem. A diff whose changed path set holds **zero
+source files** — a board JSONL flip, a status file, a prose note — has nothing in
+it for the Tier-2 judge to grade, and the judge's own repo exploration
+(`file_scope: full`) is what it costs to discover that.
+
+Measured on tick 365. `gitreins task complete df-crier-203-expires-null-panel` was
+run twice against a diff of three `.coding-hermes/` JSONL files and no source
+files at all. Run 1 returned a merit FAIL, because the judge read the pre-land
+tree. Run 2 died INCOMPLETE:
+
+```text
+Cap exceeded: Input token budget (48.0M) exceeded (48.1M used)
+```
+
+`.gitreins/history/` usage for those two tier-2 runs recorded `33,824,117` and
+`48,064,774` `tokens_in`, against **188K-706K for a normal source-diff judge** — a
+60-250x overspend to evaluate a diff with no code in it.
+
+Raising the cap is **not** the fix and is explicitly rejected: it is the most
+expensive knob in the repository, and a larger budget buys a longer exploration,
+so the next run starves at a higher number. The fix is fail-closed and
+crier-side — a classifier that authorizes the skip, plus the evidence that keeps
+the authorization auditable. (`gitreins` itself is a pipx-installed fleet tool and
+is out of scope for this repository.)
+
+### The rule
+
+For a task whose working-tree diff contains **zero source files**, the foreman MAY
+run
+
+```bash
+gitreins task complete <id> --skip-tier2
+```
+
+**ONLY** after this verification has passed in the worktree being closed:
+
+```bash
+git diff --name-only <merge-base>...HEAD | bash scripts/lib/judge-diff-class.sh
+```
+
+which prints exactly one line — `verdict=board-only` or `verdict=source-bearing` —
+and **the close commit MUST include `.coding-hermes/evidence/<TASK-ID>.md`** citing
+all four of:
+
+1. the task id;
+2. the diff file list (the exact `git diff --name-only <merge-base>...HEAD` output);
+3. the classifier verdict line (`verdict=board-only`);
+4. the tier-1-only verdict path under `.gitreins/history/` — the tier-1 PASS the
+   close actually earned, since no tier-2 verdict will exist to cite.
+
+Start from `.coding-hermes/evidence/SKIP-TEMPLATE.md`.
+
+### What is NOT covered
+
+**A source-bearing diff never qualifies.** Not "small", not "only a README edit
+next to one Go file" — one source-bearing path is source-bearing, and the
+classifier says so. A close that needs more judge headroom for a real code change
+raises the relevant cap rung through the normal measured process; it does not skip
+the judge.
+
+### The classifier
+
+`scripts/lib/judge-diff-class.sh` reads the path list on stdin (one path per line,
+as produced by `git diff --name-only <base>...HEAD` or `git diff --name-only
+--cached`).
+
+A path is **non-source iff it matches ONLY**:
+
+```text
+docs/**            *.md (any depth)   .coding-hermes/**     .gitreins/**
+LICENSE            NOTICE              .gitignore            .gitattributes
+.github/**         Makefile            Dockerfile*
+*.yml / *.yaml under .github/ or docs/
+```
+
+**Anything else is SOURCE.** In particular `examples/**`, `scripts/**`, `specs/**`
+and OpenAPI yaml are source for this purpose, because spec/openapi files drive
+generated code and gates — so those source *trees* win over the `*.md` rule (a
+`specs/*.md` is source), `openapi.yaml`/`openapi.yml` is source wherever it lives,
+and only the **root** `Makefile`/`Dockerfile*` is non-source (a nested one sits
+inside a source tree). An unrecognized path is source: it is never silently
+board-only. The conservative direction is deliberate — a wrong
+`source-bearing` verdict costs an ordinary judge run, while a wrong `board-only`
+verdict silently drops the judge on a diff the rule meant to protect.
+
+Flags: `--strict-verify` gates (exit 1 on source-bearing), `--allow-source` is the
+explicit opt-in that keeps a source-bearing verdict at exit 0, and an **empty diff
+is refused in every flag combination** (exit 3, `error: empty diff — refusing to
+classify`): no diff = no authorization. `make judge-diff-class-selftest` proves the
+contract, including a neuter proof that a verdict-forced classifier cannot pass it.
+
+The skip is an authorization, not an exemption: the evidence artifact is what makes
+it auditable after the fact, and it rides the same commit as the close.
+
