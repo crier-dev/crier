@@ -70,7 +70,7 @@ X-Crier-Retry: {n}                       # 0 on first attempt
     "request_id": "…24hex…",             # set when this is a reply to a REQUEST
     "session_id": "…", "thread_id": "…",
     "delivery_mode": "blocking|async|batch",
-    "sender": {"agent_id": "agent-a"},
+    "sender": "agent-a",
     "target": "agent-b",
     "kind": "message|reply|configure"
   },
@@ -80,6 +80,15 @@ X-Crier-Retry: {n}                       # 0 on first attempt
 
 `X-Crier-Signature` = `hex(hmac_sha256(secret, canonical_body))` where `canonical_body` is the raw POST body.
 Endpoints may verify; server always sends when `CR_WEBHOOK_SECRET` is set (env, server-wide v1).
+
+**`sender` is a scalar, not an object (DF-CRIER-11).** `crier.sender` is a single JSON STRING — the agent
+id, the same value `X-Crier-Agent` carries — and `crier.target` beside it is a string for the same reason.
+An earlier revision of this sample drew `"sender": {"agent_id": "agent-a"}`, which contradicted the
+`"target": "agent-b"` printed on the next line and described nothing the server emits: the envelope field is
+`Sender string \`json:"sender,omitempty"\`` (`internal/webhook/webhook.go`), the deliver request body types
+`sender` as a string, and `X-Crier-Agent` — the header carrying the identical identity — is a scalar. A sink
+must therefore read `crier.sender` as a string, never as a `PeerRef`-shaped object: the `{"agent_id": …}`
+form belongs to the MESH frames (`source`/`target` in `docs/mesh-protocol.md`), not to this envelope.
 
 ### Which agent a delivery is for (DF-CRIER-175)
 
@@ -200,7 +209,7 @@ Template = JSON object with three sections; stored under `templates/` and refere
   "action_variants": {
     "message": {"path": "/v1/chat/completions", "body": "{{request_shape.body}}"},
     "reply":   {"path": "/v1/chat/completions", "body": "{{request_shape.body}}"},
-    "configure": {"path": "/v1/configure", "body": {"directive": "{{payload}}", "agent": "{{crier.sender.agent_id}}"}}
+    "configure": {"path": "/v1/configure", "body": {"directive": "{{payload}}", "agent": "{{crier.sender}}"}}
   },
   "response_map": {"type": "jsonpath", "path": "$.choices[0].message.content"}
 }

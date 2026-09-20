@@ -64,6 +64,11 @@ const (
 	// docsClaimsTargetProbeAgent is the identity the DF-CRIER-175 claim drives:
 	// a webhook-configured agent whose outbound POST must name it as the target.
 	docsClaimsTargetProbeAgent = "docsclaims-target-probe"
+	// docsClaimsSenderProbeAgent is the identity the DF-CRIER-11 claim drives:
+	// a webhook-configured agent that receives a delivery naming an explicit
+	// sender, so the probe can inspect the `crier.sender` JSON TOKEN TYPE of the
+	// POST the booted server made.
+	docsClaimsSenderProbeAgent = "docsclaims-sender-probe"
 	// docsClaimsGhostProbeAgent is the identity the DF-CRIER-16 precedence claim
 	// drives, and it is NEVER registered on the booted server: the agent-scoped
 	// signing gate checks the signature trio's PRESENCE first, then whether the
@@ -517,6 +522,13 @@ func TestDocsClaims(t *testing.T) {
 	// DF-CRIER-182: the identity whose never-expiring delivery reports the
 	// raw wire value of expires_at.
 	registerAgent(t, client, baseURL, docsClaimsNeverExpiresProbeAgent)
+	// DF-CRIER-11: docsClaimsSenderProbeAgent is deliberately NOT registered
+	// here. The claim's probe attaches its webhook at register time (a webhook
+	// cannot be added by an update without a signed request), and a pre-existing
+	// registration would make that register answer 409 — leaving the identity
+	// with NO webhook, so the delivery would land in the inbox (201,
+	// transport=inbox) and the probe would see no POST at all. It mirrors the
+	// DF-CRIER-175 target probe, which has the same reason for being absent.
 
 	probes := probeSet{
 		readDoc: func(doc string) (string, error) {
@@ -655,6 +667,15 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// agent the delivery is FOR); this probe measures the target half
 			// on a live delivery to a webhook-configured agent.
 			return liveWebhookTargetIdentity(client, baseURL)
+		case "WEBHOOK-OUTBOUND-SENDER-SCALAR":
+			// specs/WEBHOOK-DELIVERY.md §3 draws `"sender": "agent-a"` — a
+			// scalar — because the server emits one (DF-CRIER-11). This probe
+			// re-measures the TOKEN TYPE end-to-end: it delivers with a sender
+			// to a webhook-configured agent and inspects the raw `crier.sender`
+			// token of the POST the booted server made. An object token is the
+			// drift this claim exists for and is reported as an error naming
+			// the observed shape, so the claim cannot pass on a doc edit alone.
+			return liveWebhookSenderToken(client, baseURL)
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
@@ -1606,6 +1627,92 @@ func liveWebhookTargetIdentity(client *http.Client, baseURL string) (int, error)
 		}
 		if time.Now().After(deadline) {
 			return 0, fmt.Errorf("no POST reached the sink for %s within 5s (status %d)", docsClaimsTargetProbeAgent, status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// liveWebhookSenderToken measures the DF-CRIER-11 claim: the envelope's
+// `crier.sender` is a SCALAR on the wire. It delivers with an explicit sender
+// to a webhook-configured probe agent, captures the raw POST the booted server
+// made, and inspects the JSON TOKEN TYPE of `crier.sender`.
+//
+// Only the token type is load-bearing (the value's row is
+// liveWebhookTargetIdentity's): an OBJECT token is exactly the shape
+// specs/WEBHOOK-DELIVERY.md §3 used to draw and the defect this claim pins, so
+// it is reported as an error naming the observed shape — no `*string` unmarshal
+// that would coerce the shape away, and no reliance on the template-expansion
+// path (`{{crier.sender.agent_id}}` is a path that resolves to NOTHING against a
+// scalar, so a template probe would silently render `""` and pass vacuously).
+func liveWebhookSenderToken(client *http.Client, baseURL string) (int, error) {
+	const sender = "agent-scalar-probe"
+
+	var mu sync.Mutex
+	var gotBody []byte
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		if len(gotBody) == 0 { // first POST wins: the probe agent may also be health-probed
+			gotBody = b
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"echo":true}`)
+	}))
+	defer sink.Close()
+
+	if err := registerAgentWithWebhook(client, baseURL, docsClaimsSenderProbeAgent, sink.URL+"/hook"); err != nil {
+		return 0, err
+	}
+	body := fmt.Sprintf(`{"payload":{"sender_shape_probe":true},"sender":%q}`, sender)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents/"+docsClaimsSenderProbeAgent+"/inbox",
+		strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	status := resp.StatusCode
+
+	// The probe agent's delivery mode is the server default (async), so the POST
+	// arrives in the background — wait for the sink before judging the token.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		raw := gotBody
+		mu.Unlock()
+		if len(raw) > 0 {
+			var wire struct {
+				Crier map[string]json.RawMessage `json:"crier"`
+			}
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				return 0, fmt.Errorf("decode outbound envelope %q: %w", raw, err)
+			}
+			tok, present := wire.Crier["sender"]
+			if !present {
+				return 0, fmt.Errorf("outbound body carries no crier.sender key (delivered with sender %q): %s", sender, raw)
+			}
+			if got := strings.TrimSpace(string(tok)); len(got) == 0 || got[0] != '"' {
+				return 0, fmt.Errorf("outbound crier.sender token = %s, want a JSON STRING like %q (spec §3: the sender is a scalar, not a PeerRef object): %s",
+					got, sender, raw)
+			}
+			var v string
+			if err := json.Unmarshal(tok, &v); err != nil {
+				return 0, fmt.Errorf("outbound crier.sender token %s is not a JSON string: %w", tok, err)
+			}
+			if v != sender {
+				return 0, fmt.Errorf("outbound crier.sender = %q, want the sender the deliver named (%q)", v, sender)
+			}
+			return status, nil
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("no POST reached the sink for %s within 5s (deliver status %d)", docsClaimsSenderProbeAgent, status)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

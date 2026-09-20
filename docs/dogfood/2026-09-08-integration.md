@@ -65,7 +65,16 @@ round-trip (register → deliver → reply), following README + openapi.yaml.
    `retries:3`; server did 6 attempts (default 5 → ×2 initial+retries?).
    `CR_WEBHOOK_REDELIVER_S=5` was also ignored (cadence stayed 30s).
 5. **Envelope sender shape drift (DF-CRIER-11).** Wire sends
-   `"sender":"agent-x"`; spec §3 draws `{"sender":{"agent_id":...}}`.
+   `"sender":"agent-x"`; spec §3 drew `{"sender":{"agent_id":...}}`.
+   **RESOLVED — the DOC was the wrong side.** A captured outbound body shows
+   `"sender":"agent-x"` (JSON string) and a deliver naming no sender omits the
+   key entirely; spec §3, `{{crier.sender}}` in its §6 schema sample, and
+   docs/PRD-2026-08-19.html §6 now all print the scalar, pinned by the
+   docs/claims.yaml claim `WEBHOOK-OUTBOUND-SENDER-SCALAR` (make docs-check,
+   which re-measures the live POST) plus
+   internal/webhook/sender_shape_test.go. No wire change: an object `sender`
+   would break every existing sink, and `X-Crier-Agent` — the header carrying
+   the identical identity — is a scalar.
 6. **`GET /fed/peers` lists self (DF-CRIER-12)** — and shows the local relay
    under a `localhost:8899` name it never configured.
 

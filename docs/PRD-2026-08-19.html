@@ -199,7 +199,7 @@ X-Crier-Signature: {hmac/ed25519}      # optional, CR_WEBHOOK_SECRET
 
 {
   "crier": {"version": 1, "message_id": "...", "request_id": "...", "session_id": "...",
-            "delivery_mode": "blocking|async|batch", "sender": {"agent_id": "..."}},
+            "delivery_mode": "blocking|async|batch", "sender": "agent-a"},
   "payload": { ... }                    # sender-supplied body
 }</pre>
 <h3>Response contract</h3>
