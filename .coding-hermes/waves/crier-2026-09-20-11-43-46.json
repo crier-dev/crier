@@ -1,0 +1,26 @@
+{
+  "tick": "crier-2026-09-20-11-43-46",
+  "budget": 12,
+  "lanes": [
+    {
+      "task_id": "QA-CRIER-23",
+      "folded": ["QA-CRIER-7"],
+      "mode": "foreman-direct",
+      "worktree": "/home/kara/crier (main tree)",
+      "branch": "main",
+      "scope": "cmd/server/main_test.go (repo) + ~/.hermes/scripts/bunker-qa.sh (harness, outside repo)",
+      "class": "trivial test-infra / harness detail fix (docs+test-infra foreman-direct precedent: ticks 205/209/214/228)"
+    },
+    {
+      "task_id": "DEPS-004",
+      "mode": "worker",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "worktree": "wt/DEPS-004 (via worktree.sh)",
+      "branch": "wt/DEPS-004",
+      "scope": "go.mod, go.sum, internal/registry/postgres_list_error_test.go"
+    }
+  ],
+  "independence": "file sets are disjoint (main_test.go+harness vs go.mod/go.sum/registry test double); no depends_on edges between rows",
+  "merge_order": "worker branch merges first after gate, then foreman-direct commit; each merge gated"
+}
