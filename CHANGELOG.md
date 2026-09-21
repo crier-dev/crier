@@ -13,6 +13,8 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+## [0.1.0-rc2] - 2026-09-21
+
 ### Added
 
 - Release tooling (`RELEASE-001`): a `make release VERSION=vX.Y.Z` target that
@@ -86,5 +88,6 @@ First release candidate — the feature-complete core carried by tag
 - v0.1.0-rc1 was cut by hand; `make release` (see [Unreleased](#unreleased))
   encodes that sequence as of the next cut.
 
-[Unreleased]: https://github.com/crier-dev/crier/compare/v0.1.0-rc1...HEAD
+[Unreleased]: https://github.com/crier-dev/crier/compare/v0.1.0-rc2...HEAD
+[0.1.0-rc2]: https://github.com/crier-dev/crier/compare/v0.1.0-rc1...v0.1.0-rc2
 [0.1.0-rc1]: https://github.com/crier-dev/crier/releases/tag/v0.1.0-rc1
