@@ -2182,3 +2182,12 @@ tasks:
   status: complete
   created_at: '2026-09-21T13:52:27.085618+00:00'
   completed_at: '2026-09-21T13:56:34.399407+00:00'
+- id: RELEASE-003
+  title: "v0.1.0-rc2 GitHub Release object missing \u2014 tag exists, no Release"
+  criteria:
+  - gh release view v0.1.0-rc2 on crier-dev/crier returns a Release pointing at tag
+    v0.1.0-rc2 (commit c34a6c2) whose notes carry the rc2 CHANGELOG section; docs/releases.md
+    documents the GitHub Release publish step so future cuts do not half-land
+  status: complete
+  created_at: '2026-09-21T22:14:53.238272+00:00'
+  completed_at: '2026-09-21T22:17:03.918399+00:00'
