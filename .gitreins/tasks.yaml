@@ -2179,5 +2179,6 @@ tasks:
     main; make release VERSION=v0.1.0-rc2 gates (build/lint/test-short) pass and create
     the annotated tag naming the prep commit; CI green on the prep commit sha; tag
     pushed to origin AND gitlab
-  status: in_progress
+  status: complete
   created_at: '2026-09-21T13:52:27.085618+00:00'
+  completed_at: '2026-09-21T13:56:34.399407+00:00'
