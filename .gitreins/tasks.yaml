@@ -2106,3 +2106,17 @@ tasks:
   status: complete
   created_at: '2026-09-20T23:33:30.234114+00:00'
   completed_at: '2026-09-20T23:40:38.277484+00:00'
+- id: qa-crier-22-canonical-narration-merge
+  title: 'QA-CRIER-22: canonical narration merge + narration path hardening'
+  criteria:
+  - Both stray 2026-09-18 keys are represented in the canonical coding-hermes namespace
+    on disk (merged /qa/2026-09-18/crier rewrite incl the 967-char run-2 findings
+    + /qa/observations/2026-09-18 copy of ee37d1c1 body), UUIDs verified in ~/duckbrain/namespaces/coding-hermes/event/2026-09/current.jsonl;
+    scripts/narrate-duckbrain.sh added, bash -n + make shell-yaml-check green, and
+    a live wrapper write executed with cwd=/home/kara/crier lands in ~/duckbrain with
+    NO namespaces/ dir created in the workdir; full go suite + guard PASS; board row
+    closed naming the implemented hardening option (remember runs from the DuckBrain
+    root)
+  status: complete
+  created_at: '2026-09-21T02:25:59.649783+00:00'
+  completed_at: '2026-09-21T02:44:08.743355+00:00'
