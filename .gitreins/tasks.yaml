@@ -2153,3 +2153,12 @@ tasks:
   status: complete
   created_at: '2026-09-21T06:33:38.827495+00:00'
   completed_at: '2026-09-21T07:40:10.240137+00:00'
+- id: never-done-t382
+  title: 11-point audit sweep tick 382
+  criteria:
+  - 'Sweep completes: TODO/FIXME scan, gofmt, presence checks, build+vet+full tests,
+    govulncheck, docs/shell-yaml/make-docker checks, hilo re-measure; findings filed
+    as board rows, clean result recorded as audit event'
+  status: complete
+  created_at: '2026-09-21T12:40:14.559302+00:00'
+  completed_at: '2026-09-21T12:46:40.288523+00:00'
