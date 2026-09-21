@@ -2142,3 +2142,14 @@ tasks:
   status: complete
   created_at: '2026-09-21T05:00:21.431559+00:00'
   completed_at: '2026-09-21T06:13:55.724762+00:00'
+- id: QA-CRIER-32
+  title: Heredoc-escaping lint for the bunker-qa.sh generator
+  criteria:
+  - A lint exists that fails when the generated heredoc body of ~/.hermes/scripts/bunker-qa.sh
+    (build_remote_script) contains bare $(), ${ or backticks outside intentional host-side
+    expansions; it is wired into the repo's check entry point or a dedicated selftest,
+    and the selftest proves it rejects a seeded bad block and accepts the clean current
+    generator. Evidence artifact committed at .coding-hermes/evidence/QA-CRIER-32.md.
+  status: complete
+  created_at: '2026-09-21T06:33:38.827495+00:00'
+  completed_at: '2026-09-21T07:40:10.240137+00:00'
