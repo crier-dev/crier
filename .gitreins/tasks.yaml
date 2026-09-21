@@ -2120,3 +2120,15 @@ tasks:
   status: complete
   created_at: '2026-09-21T02:25:59.649783+00:00'
   completed_at: '2026-09-21T02:44:08.743355+00:00'
+- id: release-001-release-tooling
+  title: 'Release tooling leg: Makefile release target + CHANGELOG.md + docs/releases.md'
+  criteria:
+  - 'On HEAD: 1) Makefile has a release target that dry-parses clean with make -n
+    release VERSION=v0.1.0-test and verifies clean tree + gates + creates an annotated
+    tag without pushing; 2) CHANGELOG.md exists at repo root with a v0.1.0-rc1 entry
+    and an Unreleased section; 3) docs/releases.md documents the release-cut procedure;
+    4) make build, make lint, make test-short all green; 5) no other files touched,
+    no tag actually created'
+  status: complete
+  created_at: '2026-09-21T03:50:55.454100+00:00'
+  completed_at: '2026-09-21T04:01:01.366878+00:00'
