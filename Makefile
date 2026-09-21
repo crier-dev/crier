@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -54,6 +54,7 @@ help:
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
+	@echo "  release           Cut a release: check clean tree + main, run the gates, create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
@@ -344,6 +345,106 @@ install-hooks:
 	chmod +x "$$dst" || exit 1; \
 	cmp -s "$$src" "$$dst" || { echo "install-hooks: ERROR: installed hook is not byte-identical to $$src"; exit 1; }; \
 	echo "install-hooks: installed $$dst (byte-identical copy of scripts/hooks/pre-commit)"
+
+# RELEASE-001: v0.1.0-rc1 was cut by hand — `git tag -a` typed directly on main,
+# the gates run ad hoc, and neither a changelog nor the procedure written down
+# anywhere in the repo, so the next cut had to re-derive all of it. This target
+# encodes the sequence, and each step is a REFUSAL rather than a warning:
+#
+#   VERSION must be passed explicitly   `origin VERSION` must be the command
+#                                       line (or the environment) — the file's
+#                                       own default is `git describe --dirty`,
+#                                       which would silently tag the build
+#                                       identity string instead of a release;
+#                                       a git-describe-shaped value is refused
+#                                       too, as a second line of defence.
+#   the tag must look like a version    vX.Y.Z, optionally with a pre-release
+#                                       suffix (v0.1.0-rc2, v0.2.0).
+#   the working tree must be clean      `git status --porcelain` empty. The tag
+#                                       is cut from a COMMITTED tree — cut the
+#                                       tag first and the changelog entry for it
+#                                       can never be in the commit it names.
+#   the branch must be main             releases are cut from main, never from a
+#                                       worktree branch or a detached HEAD.
+#   the tag must not exist yet          re-tagging a published version is how
+#                                       two different commits end up under one
+#                                       number; cut a new rc instead.
+#   the gates must be green             make build && make lint && make
+#                                       test-short, each echoed before it runs.
+#
+# Then it creates the annotated tag `VERSION` with the message `crier VERSION`
+# and STOPS: it prints the exact push command for every configured remote and
+# pushes nothing, because the tag must only be published after CI is green on
+# main. The changelog lives in CHANGELOG.md and the full procedure, the gate
+# contract and the post-tag steps are in docs/releases.md.
+#
+# NOTE on how the gates are invoked: as a literal `make`, never the `$(MAKE)`
+# recursive marker. GNU make treats a recipe line mentioning `$(MAKE)` as
+# special and RUNS it even under `-n`, so `make -n release` — and the dry-parse
+# this repo's own make-docker-check (DF-CRIER-209) runs over every .PHONY target
+# — would have executed the whole build/lint/test battery instead of printing
+# it. A literal `make` is not special-cased, so `-n` stays a dry run; the
+# sub-make still inherits MAKEFLAGS and MAKELEVEL through the environment.
+release:
+	@set -e; \
+	v='$(VERSION)'; \
+	case "$(origin VERSION)" in \
+	  'command line'|'environment'|'override') ;; \
+	  *) echo "release: ERROR: refusing the default VERSION '$$v' (that is git describe output, not a release)"; \
+	     echo "release: ERROR: pass the tag explicitly: make release VERSION=v0.1.0-rc2"; \
+	     exit 1 ;; \
+	esac; \
+	case "$$v" in \
+	  v[0-9]*.[0-9]*.[0-9]*) ;; \
+	  *) echo "release: ERROR: VERSION '$$v' is not a vX.Y.Z tag (example: v0.1.0-rc2)"; exit 1 ;; \
+	esac; \
+	case "$$v" in \
+	  *-[0-9]*-g[0-9a-f][0-9a-f]*) echo "release: ERROR: VERSION '$$v' looks like git describe output, not a tag"; exit 1 ;; \
+	esac; \
+	echo "release: version ......... $$v"; \
+	echo "release: repository ...... $$(git rev-parse --show-toplevel)"; \
+	echo "release: ensuring the working tree is clean"; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+	  echo "release: ERROR: the working tree is dirty — commit or stash first:"; \
+	  git status --short; \
+	  exit 1; \
+	fi; \
+	echo "release: OK — working tree clean"; \
+	branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	echo "release: ensuring the branch is main (on '$$branch')"; \
+	if [ "$$branch" != main ]; then \
+	  echo "release: ERROR: releases are cut from main, not '$$branch'"; \
+	  exit 1; \
+	fi; \
+	echo "release: OK — on main ($$(git rev-parse --short HEAD) $$(git log -1 --format=%s | cut -c1-60))"; \
+	echo "release: ensuring the tag $$v does not exist yet"; \
+	if git rev-parse -q --verify "refs/tags/$$v" >/dev/null 2>&1; then \
+	  echo "release: ERROR: tag $$v already exists — pick a new version (do not re-tag a published one)"; \
+	  exit 1; \
+	fi; \
+	echo "release: OK — tag $$v is free"; \
+	echo "release: running the gates (a failure stops here, before any tag)"; \
+	echo "release: + make build";        make build; \
+	echo "release: + make lint";         make lint; \
+	echo "release: + make test-short";   make test-short; \
+	echo "release: OK — gates green (make build && make lint && make test-short)"; \
+	echo "release: creating annotated tag $$v (message: crier $$v)"; \
+	git tag -a "$$v" -m "crier $$v"; \
+	echo "release: created — $$v -> $$(git rev-parse --short HEAD)"; \
+	if git merge-base --is-ancestor HEAD origin/main >/dev/null 2>&1; then \
+	  echo "release: HEAD is an ancestor of origin/main (as of the last fetch)"; \
+	else \
+	  echo "release: WARNING: HEAD is not on origin/main (as of the local ref) — push main and let CI go green before pushing this tag, and run 'git fetch origin' first if that ref is stale"; \
+	fi; \
+	echo "release: NOT pushed (this target never pushes — publish after CI is green on main)"; \
+	echo "release: push it by hand:"; \
+	echo "release:     git push origin $$v"; \
+	if git remote | grep -qx gitlab; then \
+	  echo "release:     git push gitlab $$v"; \
+	else \
+	  echo "release:     (no gitlab remote configured — origin only)"; \
+	fi; \
+	echo "release: changelog: CHANGELOG.md (Keep a Changelog); procedure: docs/releases.md"
 
 generate:
 	go generate ./...
