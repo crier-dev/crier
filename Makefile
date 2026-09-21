@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -251,6 +251,31 @@ gofmt-check:
 
 gofmt-selftest:
 	bash scripts/check-gofmt.sh --selftest
+
+# QA-CRIER-32: the fleet-shared QA generator ~/.hermes/scripts/bunker-qa.sh
+# builds the per-agent remote script inside ONE UNQUOTED heredoc
+# (build_remote_script's `cat <<EOF`), so every unescaped `$` and backtick in
+# that body is expanded ON THE GENERATION HOST — three workers hit the class on
+# 2026-09-21 (double-escaped `\$\(curl\)` + bare `$BX_TAG` shipping as exit 1; a
+# backticked curl in a COMMENT executing at generation time with `curl: (2) no
+# URL specified` on every run; two more backticks pulled from comments). No repo
+# gate reads the generator (Tier 1 reads Go source; the file is fleet-shared and
+# untracked), so heredoc-escape-lint.sh is the guard: it isolates the heredoc
+# region and rejects unescaped/double-escaped backticks, double-escaped dollars,
+# and bare expansions outside the documented generation-time bake allowlist.
+# The default target is the LIVE generator; a missing file is exit 2 naming the
+# path (fail closed, never a silent skip). heredoc-lint-selftest proves the lint
+# accepts the current generator, rejects seeded bad fixtures (backtick,
+# double-escape, bare unbound var, bare specials) with line numbers, and —
+# NEUTER proof — a copy with its reject choke-point neutered accepts what the
+# real lint rejects. Deliberately NOT wired into shell-yaml-check: the shell
+# arm reads TRACKED repo scripts, this lints an UNTRACKED fleet-shared file —
+# different scope, run it explicitly or from the QA tick.
+heredoc-lint:
+	bash scripts/lib/heredoc-escape-lint.sh
+
+heredoc-lint-selftest:
+	bash scripts/lib/heredoc-escape-lint-selftest.sh
 
 # DF-CRIER-137: the documented MCP launcher's stdout contract. `make build-mcp && ./bin/crier-mcp`
 # is what README.md and docs/integration-guide.md tell a client to run, and a strict
