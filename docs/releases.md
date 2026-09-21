@@ -1,6 +1,7 @@
 # Cutting a crier release
 
-A crier release is one annotated tag on a commit of `main`. The tag is created
+A crier release is one annotated tag on a commit of `main` plus its GitHub
+Release object. The tag is created
 LOCALLY by `make release`, and published by hand once CI is green on the commit
 it names. Nothing in this repo pushes a tag for you.
 
@@ -59,6 +60,30 @@ version before publishing. If the commit is not on `origin/main` yet, push
 `main` and let CI go green on it first — `make release` prints a warning when
 the commit it tagged is not an ancestor of `origin/main` (as of the last
 `git fetch`).
+
+## 4. Create the GitHub Release object
+
+The pushed tag is not the whole release surface: GitHub renders the Releases
+page from Release objects, not tags. A tag with no Release object is invisible
+on the Releases page, has no release notes, and does not appear in
+`gh release list`. `make release` creates only the tag, so this half of the
+publish step is also done by hand, right after the tag push (v0.1.0-rc2 shipped
+tag-only until this step was noticed missing):
+
+```bash
+gh release create v0.1.0-rc2 --repo crier-dev/crier \
+  --title "v0.1.0-rc2" \
+  --notes-file /tmp/release-notes-v0.1.0-rc2.md
+```
+
+The notes file is the version's own CHANGELOG section, plus a compare link —
+rc2's is
+`https://github.com/crier-dev/crier/compare/v0.1.0-rc1...v0.1.0-rc2`.
+Verify the Release exists and names the tag:
+
+```bash
+gh release view v0.1.0-rc2 --repo crier-dev/crier
+```
 
 ## Gate requirements
 
