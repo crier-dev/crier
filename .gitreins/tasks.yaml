@@ -2162,3 +2162,22 @@ tasks:
   status: complete
   created_at: '2026-09-21T12:40:14.559302+00:00'
   completed_at: '2026-09-21T12:46:40.288523+00:00'
+- id: board-repair-release-002-t382
+  title: 'Repair torn RELEASE-002 row: tasks.jsonl line 430 missing a closing brace'
+  criteria:
+  - 'tasks.jsonl parses 429/429 lines with 0 bad; boardctl show RELEASE-002 returns
+    the full row; boardctl validate RESULT: OK; diff is exactly 1 byte on line 430
+    and no other line changes'
+  status: complete
+  created_at: '2026-09-21T13:06:43.682146+00:00'
+  completed_at: '2026-09-21T13:07:48.046516+00:00'
+- id: RELEASE-002
+  title: 'v0.1.0-rc2 release prep: changelog promotion + annotated tag'
+  criteria:
+  - CHANGELOG.md promotes Unreleased to '## [0.1.0-rc2] - 2026-09-21' with a fresh
+    empty '## [Unreleased]' above it and updated compare link refs; prep commit on
+    main; make release VERSION=v0.1.0-rc2 gates (build/lint/test-short) pass and create
+    the annotated tag naming the prep commit; CI green on the prep commit sha; tag
+    pushed to origin AND gitlab
+  status: in_progress
+  created_at: '2026-09-21T13:52:27.085618+00:00'
