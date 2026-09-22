@@ -2204,3 +2204,10 @@ tasks:
   status: complete
   created_at: '2026-09-21T22:37:36.954507+00:00'
   completed_at: '2026-09-22T00:46:29.374676+00:00'
+- id: QA-CRIER-8-31-16
+  title: Post-harness-update battery re-run + stale-premise QA row closures
+  criteria:
+  - Fresh bunker-qa evidence at HEAD proves or disproves QA-CRIER-8/31/16 premises;
+    rows closed only on live evidence, board-only close chain
+  status: in_progress
+  created_at: '2026-09-22T11:38:03.865797+00:00'
