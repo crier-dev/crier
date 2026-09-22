@@ -2191,3 +2191,16 @@ tasks:
   status: complete
   created_at: '2026-09-21T22:14:53.238272+00:00'
   completed_at: '2026-09-21T22:17:03.918399+00:00'
+- id: CR-GAP-063-065
+  title: 'Docs truth: integration-guide auth/sig corrections + claims-gate anchoring
+    of integration-guide and AGENT-ECOSYSTEM'
+  criteria:
+  - integration-guide.md env rows state the five-path auth-exempt list (health/version/openapi.json/openapi.yaml/docs)
+    and the PATCH+DELETE signed surface matching middleware and README; docs/claims.yaml
+    carries anchored live-probed claims on integration-guide.md and AGENT-ECOSYSTEM.md
+    including a relay-publish bogus-signature-202 status probe; make docs-check fails
+    on edited guarded sentences and flipped statuses (mutation-proven both directions);
+    make docs-check + go vet + go test green at HEAD
+  status: complete
+  created_at: '2026-09-21T22:37:36.954507+00:00'
+  completed_at: '2026-09-22T00:46:29.374676+00:00'
