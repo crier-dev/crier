@@ -52,8 +52,8 @@ Configuration is otherwise env-driven (full table in README):
 |---------|---------|---------|
 | `CRIER_PORT` | listen port | `8767` |
 | `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) | unset |
-| `CR_AUTH_TOKEN` | bearer token required on all requests except `/health` and `/version` | empty = auth disabled |
-| `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on inbox + agent-delete endpoints | `true` |
+| `CR_AUTH_TOKEN` | bearer token required on all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) | empty = auth disabled |
+| `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}` | `true` |
 | `CR_LOG_LEVEL` / `CR_LOG_FORMAT` | logging (`debug\|info\|warn\|error`, `text\|json`) | `info` / `text` |
 | `CR_RATE_LIMIT_PER_MINUTE` | relay publish rate limit | `100` |
 | `CR_WS_ALLOWED_ORIGINS` | comma-separated WebSocket origins, `*` = allow all | allow all |

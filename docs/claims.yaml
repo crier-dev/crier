@@ -52,6 +52,34 @@ ignore_paths:
   # filesystem paths the scanner splits at the placeholder, not API routes.
   - /proc/
   - /exe
+  # CR-GAP-065: docs/integration-guide.md and docs/AGENT-ECOSYSTEM.md are now
+  # scanned (they gained claims below). Every token here is NOT a crier API
+  # route — each is deliberate.
+  # integration-guide.md:
+  - /intel                 # illustrative mesh REQUEST path (the target agent's own path — same class as /ping above)
+  - /mesh/connect/         # prose URL form `ws://…/mesh/connect/<agentID>`; the scanner probes the literal with an EMPTY id (a real connect with an id IS a live route)
+  # AGENT-ECOSYSTEM.md — the harness consumers' OWN HTTP endpoints (ports
+  # 9002/910x), not the crier API the gate boots:
+  - /hook                  # the consumers' webhook endpoint (where crier POSTs deliveries)
+  - /ready                 # consumer readiness endpoint (200 only once registered with crier)
+  - /stats                 # the sink's delivery/batch counter endpoint
+  # AGENT-ECOSYSTEM.md — scratch files and container/agent filesystem paths:
+  - /tmp                   # scratch dir shared by matrix cells on the runner
+  - /tmp/ecosystem.jsonl   # battery evidence default path
+  - /tmp/ecosystem-images.tar.gz  # prebuilt image tarball (ship step)
+  - /tmp/ecosystem-evidence.jsonl # CI artifact capture path
+  - /tmp/bunker-matrix-ci.jsonl   # CI matrix evidence path
+  - /tmp/crier-image.tar.gz       # single-relay deploy tarball
+  - /tmp/goose.tgz                # goose release download scratch
+  - /ecosystem-images.tar.gz      # `~/ecosystem-images.tar.gz` in §6.5 (the ~ is not wordish, so the token starts at /)
+  - /evidence/ecosystem.jsonl     # path INSIDE the battery container (battery-evidence volume mount)
+  - /etc/cont-init.d/             # s6-overlay config mount (`./hermes/cont-init.d:/etc/cont-init.d:ro`)
+  - /etc/cont-init.d/10-register-crier.sh  # the Hermes boot registration script
+  - /home/bunker-                 # prose placeholder `/home/bunker-<agent>` (token ends at the <)
+  - /home/bunker-my-lab/agent-ecosystem     # agent-home compose dir (§4 walkthrough)
+  - /home/bunker-my-lab/ecosystem-images.tar.gz
+  - /usr/local/bin          # goose install target (container FS)
+  - /usr/local/bin/goose
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
@@ -411,6 +439,104 @@ claims:
     doc: specs/WEBHOOK-DELIVERY.md
     quote: "\"sender\": \"agent-a\","
     expect: "202"
+    xfail: null
+  # CR-GAP-065: docs/integration-guide.md and docs/AGENT-ECOSYSTEM.md join the
+  # claim set. The two env-table rows fixed by CR-GAP-063/064 are anchored to
+  # their corrected sentences, so reverting either fix fails the gate with
+  # "anchor missing"; the webhook 400 examples and the relay-publish
+  # no-signature-verify behavior are pinned as live status claims.
+  #
+  # Status mapping for the five STATUS-GUIDE-* claims below, identical in
+  # claim and probe:
+  #   AUTH-EXEMPT:      200 = the exemption holds (token-less GET /openapi.json
+  #                       answered 200 on the booted CR_AUTH_TOKEN server);
+  #                     401 = the exemption is gone / auth covers the spec paths
+  #   AUTH-ENFORCED:    401 = auth is enforced outside the exempt list
+  #                       (token-less GET /agents answered 401);
+  #                     200 = auth stopped being enforced — the row's premise died
+  #   PATCH-SIG:        401 = PATCH /agents/{id} answers the signature gate
+  #                       (a complete-but-bogus trio gets "signature
+  #                       verification failed"); 200 = PATCH stopped being
+  #                       agent-scoped — the CR_GAP-064 fix regressed
+  #   WEBHOOK-*-400:    400 = the strict webhook decoder refuses the unknown
+  #                       key exactly as documented; 201 = the malformed
+  #                       registration was ACCEPTED (decoder drift)
+  - id: STATUS-GUIDE-AUTH-EXEMPT-OPENAPI-200
+    kind: status
+    doc: docs/integration-guide.md
+    # CR-GAP-063: the row used to say "except /health and /version",
+    # understating the exempt surface (internal/middleware/auth.go exempts
+    # FIVE paths). The anchor is the corrected sentence.
+    quote: "bearer token required on all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`)"
+    expect: "200"
+    xfail: null
+  - id: STATUS-GUIDE-AUTH-ENFORCED-AGENTS-401
+    kind: status
+    doc: docs/integration-guide.md
+    # The mirror of the claim above, pinning the OTHER half of the same row:
+    # a token-less request to a NON-exempt path must be refused.
+    quote: "bearer token required on all requests **except the five exempt paths**"
+    expect: "401"
+    xfail: null
+  - id: STATUS-GUIDE-PATCH-REQUIRES-AGENT-SIG-401
+    kind: status
+    doc: docs/integration-guide.md
+    # CR-GAP-064: the row used to say "inbox + agent-delete endpoints",
+    # omitting PATCH /agents/{id} (cmd/server/main.go routes PATCH to
+    # HandleUpdateAgent, which calls the same requireAgent gate as DELETE).
+    # The anchor is the corrected sentence; the probe drives the newly
+    # documented surface itself.
+    quote: "require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}`"
+    expect: "401"
+    xfail: null
+  - id: STATUS-GUIDE-WEBHOOK-UNKNOWN-FIELD-400
+    kind: status
+    doc: docs/integration-guide.md
+    # §8.1: the strict webhook decoder refuses an unknown key inside the
+    # webhook object with a 400 naming it. Anchor = the documented 400 body.
+    quote: '400 {"error":"webhook: unknown field \"mode\" (accepted: url, auth_type, auth_value_ref,'
+    expect: "400"
+    xfail: null
+  - id: STATUS-GUIDE-WEBHOOK-BATCH-UNKNOWN-FIELD-400
+    kind: status
+    doc: docs/integration-guide.md
+    # §8.1: the same strictness reaches INTO nested objects (batch).
+    quote: '400 {"error":"webhook.batch: unknown field \"max_msgs\" (accepted: max_messages, flush_interval_s)"}'
+    expect: "400"
+    xfail: null
+  # README relay quickstart (CR-GAP-065c): the quickstart states the
+  # signature trio is NOT verified on POST /relay/publish. Mapping:
+  #   202 = the publish with a stale X-Agent-Ts and a bogus X-Agent-Sig was
+  #         still accepted (the trio is presence-only there);
+  #   401 = relay publish started verifying signatures (or the X-Agent-ID
+  #         requirement changed) — the quickstart sentence drifted.
+  - id: STATUS-README-RELAY-PUBLISH-BOGUS-SIG-202
+    kind: status
+    doc: README.md
+    quote: "a stale `X-Agent-Ts` and a bogus `X-Agent-Sig` both still answer"
+    expect: "202"
+    xfail: null
+  # --- AGENT-ECOSYSTEM.md (CR-GAP-065): the crier endpoints the stack
+  # drives, claimed live from the doc's own prose. kind: route — only a 404
+  # fails (agent-scoped paths answer 401 without signatures, which is the
+  # route existing, exactly like ROUTE-README-STATUS). ---
+  - id: ROUTE-ECO-REGISTER
+    kind: route
+    doc: docs/AGENT-ECOSYSTEM.md
+    quote: "(`POST /agents`, blocking webhook,"
+    expect: "/agents"
+    xfail: null
+  - id: ROUTE-ECO-HERMES-INBOX-DELIVER
+    kind: route
+    doc: docs/AGENT-ECOSYSTEM.md
+    quote: "posts message events to `http://crier:8767/agents/hermes/inbox`"
+    expect: "/agents/hermes/inbox"
+    xfail: null
+  - id: ROUTE-ECO-AGENT-GET
+    kind: route
+    doc: docs/AGENT-ECOSYSTEM.md
+    quote: "its `/ready` re-registers if `GET /agents/sink` fails"
+    expect: "/agents/sink"
     xfail: null
   # CR-GAP-056 removed TTL-SECONDS-CLAIM-IGNORED with the doc line it anchored:
   # DF-CRIER-174 rebuilt the TESTERS.md rough-edges table from live evidence and

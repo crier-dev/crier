@@ -79,6 +79,11 @@ const (
 	// at a registered id (docsClaimsProbeAgent) the identical probe measures the
 	// 401 arm instead.
 	docsClaimsGhostProbeAgent = "docsclaims-ghost-probe"
+	// docsClaimsWebhookStrictProbe is the identity the CR-GAP-065 webhook
+	// strictness probes try to register with a MALFORMED webhook object.
+	// Every attempt is refused with 400 and registers nothing, so the id
+	// never exists and the probe is repeatable run after run.
+	docsClaimsWebhookStrictProbe = "docsclaims-webhook-strict-probe"
 )
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
@@ -637,7 +642,8 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// literal. The same probe pointed at docsClaimsProbeAgent (a
 			// REGISTERED id) measures the other arm: 401 "signature
 			// verification failed".
-			return liveAgentScopeSigStatus(client, baseURL, docsClaimsGhostProbeAgent)
+			return liveAgentScopeSigStatus(client, baseURL, http.MethodGet,
+				"/agents/"+docsClaimsGhostProbeAgent+"/inbox", docsClaimsGhostProbeAgent)
 		case "STATUS-GUARD-BLOCK":
 			// README: "block — uniform 403 GUARD_BLOCKED". Deterministic without an
 			// LLM: a payload over CR_GUARD_MAX_PAYLOAD_BYTES (default 65536) carrying
@@ -693,6 +699,88 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			//   500 = a reply arrived that is not the refusal
 			//   502 = probe failure (dial/handshake/IO) — never a pass
 			return liveMeshMalformedFrameStatus(baseURL)
+		case "STATUS-GUIDE-AUTH-EXEMPT-OPENAPI-200":
+			// CR-GAP-063/065: the corrected CR_AUTH_TOKEN row exempts FIVE
+			// paths. Mapping (also on the claim): 200 = the exemption holds
+			// (token-less GET /openapi.json answered 200 on this booted
+			// CR_AUTH_TOKEN server); 401 = the exemption is gone. The probe
+			// sends NO Authorization header — the boot sets CR_AUTH_TOKEN,
+			// so a covered path would 401.
+			req, err := http.NewRequest(http.MethodGet, baseURL+"/openapi.json", nil)
+			if err != nil {
+				return 0, err
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return 0, err
+			}
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+			return resp.StatusCode, nil
+		case "STATUS-GUIDE-AUTH-ENFORCED-AGENTS-401":
+			// CR-GAP-063/065: the mirror half of the same row — outside the
+			// exempt list the token is REQUIRED. Mapping: 401 = enforcement
+			// holds (token-less GET /agents answered 401); 200 = auth
+			// stopped being enforced and the row's premise died.
+			req, err := http.NewRequest(http.MethodGet, baseURL+"/agents", nil)
+			if err != nil {
+				return 0, err
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return 0, err
+			}
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+			return resp.StatusCode, nil
+		case "STATUS-GUIDE-PATCH-REQUIRES-AGENT-SIG-401":
+			// CR-GAP-064/065: the corrected CR_REQUIRE_AGENT_SIG row now
+			// documents PATCH /agents/{id} as agent-scoped (same gate as
+			// DELETE). Mapping: 401 = the signature gate answers (trio
+			// present, agent exists, fresh ts, bogus sig -> "signature
+			// verification failed"); 200 = PATCH stopped being agent-scoped.
+			return liveAgentScopeSigStatus(client, baseURL, http.MethodPatch,
+				"/agents/"+docsClaimsProbeAgent, docsClaimsProbeAgent)
+		case "STATUS-GUIDE-WEBHOOK-UNKNOWN-FIELD-400":
+			// CR-GAP-065: §8.1's first quoted 400 body — an unknown key
+			// inside the webhook object is refused. Mapping: 400 = the
+			// refusal contract holds; 201 = the malformed registration was
+			// ACCEPTED (decoder drift). The refused register creates
+			// nothing, so the probe id stays free run after run.
+			return liveRegisterStatus(client, baseURL, docsClaimsWebhookStrictProbe,
+				`{"url":"http://127.0.0.1:9000/hook","mode":"blocking"}`)
+		case "STATUS-GUIDE-WEBHOOK-BATCH-UNKNOWN-FIELD-400":
+			// CR-GAP-065: §8.1's second quoted 400 body — the strictness
+			// reaches INTO nested objects (batch.max_msgs).
+			return liveRegisterStatus(client, baseURL, docsClaimsWebhookStrictProbe,
+				`{"url":"http://127.0.0.1:9000/hook","batch":{"max_msgs":5}}`)
+		case "STATUS-README-RELAY-PUBLISH-BOGUS-SIG-202":
+			// CR-GAP-065c: the README relay quickstart states the signature
+			// trio is NOT verified on POST /relay/publish — "a stale
+			// X-Agent-Ts and a bogus X-Agent-Sig both still answer 202".
+			// This probe is that sentence, executed: X-Agent-ID names a
+			// REGISTERED agent (the rate-limiter requirement), X-Agent-Ts is
+			// an hour stale, X-Agent-Sig is 64 bytes of hex that cannot
+			// verify. Mapping: 202 = the publish was still accepted (the
+			// trio is presence-only here); 401 = publish started verifying
+			// signatures and the quickstart drifted.
+			body := `{"topic":"docsclaims-bogus-sig","event":{"x":1}}`
+			req, err := http.NewRequest(http.MethodPost, baseURL+"/relay/publish", strings.NewReader(body))
+			if err != nil {
+				return 0, err
+			}
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Agent-ID", docsClaimsProbeAgent)
+			req.Header.Set("X-Agent-Ts", strconv.FormatInt(time.Now().Add(-time.Hour).Unix(), 10))
+			req.Header.Set("X-Agent-Sig", strings.Repeat("ab", 64))
+			resp, err := client.Do(req)
+			if err != nil {
+				return 0, err
+			}
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+			return resp.StatusCode, nil
 		default:
 			return 0, fmt.Errorf("no live status probe for claim %q", claimID)
 		}
@@ -804,20 +892,24 @@ func liveMeshMalformedFrameStatus(baseURL string) (int, error) {
 	return 400, nil
 }
 
-// liveAgentScopeSigStatus measures the DF-CRIER-16 precedence claim on the booted
+// liveAgentScopeSigStatus measures the agent-scoped signature gate on the booted
 // server and returns the status the server ANSWERED (resp.StatusCode) — never a
-// literal. It issues GET /agents/<agentID>/inbox carrying a signature trio that is
+// literal. It issues one request carrying a signature trio that is
 // syntactically complete but cannot verify: X-Agent-ID names the same id as the
 // path (so the caller==target check cannot answer first), X-Agent-Ts is fresh (so
 // the ±30s window check passes) and X-Agent-Sig is 64 bytes of hex (so the
-// presence/shape checks pass). What is left to answer is the existence check:
+// presence/shape checks pass). What is left to answer is the existence check,
+// then the signature:
 //
-//	agentID = docsClaimsGhostProbeAgent (never registered) -> 404 "agent not found"
-//	agentID = docsClaimsProbeAgent     (registered)        -> 401 "signature verification failed"
+//	unregistered id + GET inbox    -> 404 "agent not found" (DF-CRIER-16)
+//	registered id + GET inbox      -> 401 "signature verification failed"
+//	registered id + PATCH /agents  -> 401 (same requireAgent gate — CR-GAP-064)
 //
-// That pair is the whole point of the claim — the docs used to name only the 401.
-func liveAgentScopeSigStatus(client *http.Client, baseURL, agentID string) (int, error) {
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/agents/"+agentID+"/inbox", nil)
+// The method/path parameters exist for the PATCH arm (CR-GAP-064/065): the
+// guide's corrected row now documents PATCH /agents/{id} as agent-scoped, and
+// this is the probe that pins it live.
+func liveAgentScopeSigStatus(client *http.Client, baseURL, method, path, agentID string) (int, error) {
+	req, err := http.NewRequest(method, baseURL+path, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -1838,6 +1930,28 @@ func liveWebhookSenderToken(client *http.Client, baseURL string) (int, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// liveRegisterStatus registers an agent whose webhook object is MALFORMED on
+// purpose and returns the status the server ANSWERED (resp.StatusCode) — the
+// status the guide's §8.1 quotes for exactly these bodies. A 400 refuses the
+// registration and creates nothing (so the probe id stays free run after run);
+// a 201 would mean the strict webhook decoder drifted.
+func liveRegisterStatus(client *http.Client, baseURL, id, webhookJSON string) (int, error) {
+	body := fmt.Sprintf(`{"id":%q,"public_key":%q,"webhook":%s}`, id, strings.Repeat("ab", 32), webhookJSON)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/agents", strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
 }
 
 // registerAgentWithWebhook registers the probe identity with a webhook attached and
