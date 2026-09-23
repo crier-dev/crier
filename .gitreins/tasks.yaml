@@ -2233,3 +2233,13 @@ tasks:
   status: complete
   created_at: '2026-09-23T04:09:07.288698+00:00'
   completed_at: '2026-09-23T04:31:22.230119+00:00'
+- id: CR-GAP-069-RESIDUAL
+  title: 'CR-GAP-069 residual: AGENTS.md gate paragraph for the demo-cleanup arm'
+  criteria:
+  - AGENTS.md 'The commit gate' section carries the demo-cleanup arm paragraph at
+    its documented anchor (after the gofmt-selftest paragraph, before make-docker-selftest),
+    stating what the arm covers and its limits; make demo-cleanup-check + make demo-cleanup-selftest
+    green; go build/vet/test-short green
+  status: complete
+  created_at: '2026-09-23T21:26:56.479076+00:00'
+  completed_at: '2026-09-23T21:27:25.806010+00:00'

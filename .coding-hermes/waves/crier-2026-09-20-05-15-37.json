@@ -23,5 +23,6 @@
       "provider": "deepseek-foreman",
       "scope": ["docs/ops-evidence.md", ".coding-hermes/evidence/"]
     }
-  ]
+  ],
+  "finished_at": "2026-09-23T21:27:32Z"
 }

@@ -27,5 +27,6 @@
     }
   ],
   "independence_note": "two mutually independent rows: disjoint skill directories, no shared file, no depends_on edges between them (verified from board rows); repo code untouched, so in-repo worktrees are inapplicable and the deliverable surface is the skill tree + board/evidence records",
-  "lane_verification": "zai-glm/glm-5.3-flash probe session 20260920_155939_165d29 answered with NO fallback line (genuine); opencode-go probe 20260920_155954_91d021 fell back xkiro->9router ocg (dead lane, rejected)"
+  "lane_verification": "zai-glm/glm-5.3-flash probe session 20260920_155939_165d29 answered with NO fallback line (genuine); opencode-go probe 20260920_155954_91d021 fell back xkiro->9router ocg (dead lane, rejected)",
+  "finished_at": "2026-09-23T21:27:32Z"
 }

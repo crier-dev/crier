@@ -12,5 +12,6 @@
     }
   ],
   "serial_fallback": false,
-  "notes": "Single-item wave: only DF-CRIER-187 survives triage (P1, code, actionable). QA-CRIER-5 needs a QA-lane harness fix (not this repo's code); QA-CRIER-6 folds into DF-CRIER-187; QA-CRIER-7 is mostly triage; DF-CRIER-134 is blocked on Bane action. No other eligible rows."
+  "notes": "Single-item wave: only DF-CRIER-187 survives triage (P1, code, actionable). QA-CRIER-5 needs a QA-lane harness fix (not this repo's code); QA-CRIER-6 folds into DF-CRIER-187; QA-CRIER-7 is mostly triage; DF-CRIER-134 is blocked on Bane action. No other eligible rows.",
+  "finished_at": "2026-09-23T21:27:32Z"
 }
