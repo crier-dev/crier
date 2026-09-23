@@ -699,13 +699,13 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			//   500 = a reply arrived that is not the refusal
 			//   502 = probe failure (dial/handshake/IO) — never a pass
 			return liveMeshMalformedFrameStatus(baseURL)
-		case "STATUS-GUIDE-AUTH-EXEMPT-OPENAPI-200":
-			// CR-GAP-063/065: the corrected CR_AUTH_TOKEN row exempts FIVE
-			// paths. Mapping (also on the claim): 200 = the exemption holds
-			// (token-less GET /openapi.json answered 200 on this booted
-			// CR_AUTH_TOKEN server); 401 = the exemption is gone. The probe
-			// sends NO Authorization header — the boot sets CR_AUTH_TOKEN,
-			// so a covered path would 401.
+		case "STATUS-GUIDE-AUTH-EXEMPT-OPENAPI-200", "STATUS-GUIDE-BEARER-ONLY-AUTH-EXEMPT-OPENAPI-200":
+			// CR-GAP-063/065: the env-table and config-B bearer-only rows
+			// independently name the five CR_AUTH_TOKEN-exempt paths. Both
+			// anchors use the same live semantics: 200 = a token-less GET
+			// /openapi.json answered 200 on this booted CR_AUTH_TOKEN server;
+			// 401 = the exemption is gone. The probe sends NO Authorization
+			// header, so a covered path would 401.
 			req, err := http.NewRequest(http.MethodGet, baseURL+"/openapi.json", nil)
 			if err != nil {
 				return 0, err

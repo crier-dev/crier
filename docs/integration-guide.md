@@ -79,7 +79,7 @@ in this guide works under all three (drop or add the headers as shown):
 | Config | `CR_AUTH_TOKEN` | `CR_REQUIRE_AGENT_SIG` | Effect |
 |--------|-----------------|------------------------|--------|
 | A. Open | unset | `false` | No auth at all. Good for local dev only. |
-| B. Bearer only | `secret` | `false` | All HTTP requests (except `/health` and `/version`) need `Authorization: Bearer secret`; inbox endpoints are open to any agent. |
+| B. Bearer only | `secret` | `false` | All HTTP requests except the five exempt paths (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) require `Authorization: Bearer ***`; inbox endpoints are open to any agent. |
 | C. Full security | `secret` | `true` (default) | Bearer token **and** per-agent ed25519 signatures on inbox/agent-delete endpoints. The production default. |
 
 Start command per config:

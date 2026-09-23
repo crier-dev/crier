@@ -446,7 +446,7 @@ claims:
   # "anchor missing"; the webhook 400 examples and the relay-publish
   # no-signature-verify behavior are pinned as live status claims.
   #
-  # Status mapping for the five STATUS-GUIDE-* claims below, identical in
+  # Status mapping for the six STATUS-GUIDE-* claims below, identical in
   # claim and probe:
   #   AUTH-EXEMPT:      200 = the exemption holds (token-less GET /openapi.json
   #                       answered 200 on the booted CR_AUTH_TOKEN server);
@@ -454,6 +454,10 @@ claims:
   #   AUTH-ENFORCED:    401 = auth is enforced outside the exempt list
   #                       (token-less GET /agents answered 401);
   #                     200 = auth stopped being enforced — the row's premise died
+  #   B-BEARER-ONLY:    200 = config B's token-less GET /openapi.json is still
+  #                       exempt; the quote uniquely anchors config B's whole
+  #                       table row, so any path-list edit makes the gate fail
+  #                       before this shared live probe can pass
   #   PATCH-SIG:        401 = PATCH /agents/{id} answers the signature gate
   #                       (a complete-but-bogus trio gets "signature
   #                       verification failed"); 200 = PATCH stopped being
@@ -477,6 +481,17 @@ claims:
     # a token-less request to a NON-exempt path must be refused.
     quote: "bearer token required on all requests **except the five exempt paths**"
     expect: "401"
+    xfail: null
+  # CR-GAP-063: config B used to understate the exemption list and leave its
+  # Authorization example's closing Markdown delimiter missing. This full-row
+  # quote is deliberately distinct from the env-table quote above: changing
+  # even one config-B path makes its anchor fail. Its status probe reuses the
+  # same booted token-enabled, token-less GET /openapi.json measurement.
+  - id: STATUS-GUIDE-BEARER-ONLY-AUTH-EXEMPT-OPENAPI-200
+    kind: status
+    doc: docs/integration-guide.md
+    quote: "All HTTP requests except the five exempt paths (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) require `Authorization: Bearer ***`; inbox endpoints are open to any agent."
+    expect: "200"
     xfail: null
   - id: STATUS-GUIDE-PATCH-REQUIRES-AGENT-SIG-401
     kind: status
