@@ -1,0 +1,20 @@
+{
+  "tick_id": "crier-2026-09-23-03-58-50",
+  "tick_number": 388,
+  "wave_budget": 7,
+  "mode": "serial-fallback",
+  "reason": "only ONE independent repo-side task on the board (CR-GAP-069); fixtures + off-repo/owner-blocked rows are not dispatchable; <2 independent tasks -> no wave, 1 worker dispatched serially",
+  "tasks": [
+    {
+      "task_id": "CR-GAP-069",
+      "title": "Demo/runner cleanup-contract gate — every tracked script that spawns a crier server carries an EXIT-trap cleanup",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman",
+      "worktree": "shared-main (serial path, no worktree needed for single task)",
+      "brief": "/tmp/crier-t388-brief.md",
+      "dispatch_session": "proc_06e8a3284879",
+      "gitreins_task": "CR-GAP-069 (created + started pre-dispatch)"
+    }
+  ],
+  "created_at": "2026-09-23T04:20:00-05:00"
+}
