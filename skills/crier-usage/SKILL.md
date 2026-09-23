@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.3.0
+version: 1.4.0
 ---
 
 # Crier Usage — field guide for agents
@@ -141,6 +141,20 @@ DELETE; a PATCH without the sig headers → 401):
 - `GET /fed/peers` requires the Bearer header on an auth-enabled relay (it is
   not exempt like `/health`) and lists YOUR OWN relay as a peer
   (DF-CRIER-12) — filter self before parsing.
+- ✅ **A RECOVERED delivery's reply has nowhere to go** (DF-CRIER-282, open):
+  when a held delivery is forwarded after the link returns, the relay logs
+  `federation: held delivery recovered — relayed to the linked relay … status=200
+  response="…"` and reloads the hold queue to `{"items":[]}` — but the original
+  caller already got its `202` and is gone, so that reply is dropped. If you need
+  the webhook's answer you cannot rely on a recovery; poll the peer's inbox, or
+  keep the link up.
+- ⚠️ **Your probe must name `sender` or you never see the hold path.** A
+  sender-less body is answered `502` synchronously and queues nothing
+  (DF-CRIER-129, correct by design) — so a test that "proves holding" without a
+  `sender` proves nothing. And the payload should carry a **`text` key** if the
+  remote agent uses the `openai-compatible` template, or every reply comes back
+  `echo: ` (empty) and you cannot tell a broken forward from an empty template
+  (DF-CRIER-279).
 - Operator recipe that worked (scratch ports):
   ```bash
   # relay B (destination)
@@ -209,6 +223,27 @@ live run proved:
     and a fresh ephemeral key gets 401 on every inbox read (the server kept the
     first run's key). Use CRIER_AGENT_PRIVATE_KEY_FILE for anything persistent
     (README documents this; it still bites — 2026-09-18 run).
+11. **Writing your own raw WebSocket client: ONE reader per connection, and
+    match on the right id.** `websockets` raises `ConcurrencyError: cannot call
+    recv while another coroutine is already running recv` if a responder task
+    and the main loop both `recv()` — that is a library rule, not a crier bug;
+    use one reader task feeding an `asyncio.Queue`. And a REQUEST carries
+    `message_id` while its reply carries `request_id`, so a matcher filtering on
+    `request_id` never sees the REQUEST it awaits and "hangs" while the frame
+    sits in the queue. Both cost real time on the 2026-09-23 run; neither is
+    crier's fault (see `docs/dogfood/diagnostics.md`).
+12. A retrieve body that *looks* truncated (`"payload":"eyJoZW...kIn0="`) is a
+    display artifact of the reading pipeline, not the wire — dump the bytes to a
+    file before filing a data-loss bug (verified 2026-09-23; crier does not elide).
+13. With the guard ON (the default) and no provider key, the deliver still
+    answers in **1.4-2.1ms** with `guard.errored:true` and
+    `reason:"guard_error: all providers failed: no provider api key"` — the
+    router skips before calling out. A missing key is fast and says why; it is
+    not a 10s stall (measured 2026-09-23).
+14. `schema_template: "openai-compatible"` hard-codes `{{payload.text}}` — a
+    payload without a `text` key is delivered with an **empty** content field and
+    reported as a successful delivery (DF-CRIER-279). Use `generic-custom` /
+    `custom_schema` when your payload shape is anything else.
 
 ## Verified-good examples (2026-08-09 live run)
 

@@ -249,3 +249,180 @@ correlation middleware now threads through the guard audit call). Sample
 block line: `guard msg=<id> target=inbox-1 ... decision=block risk=high
 request_id=<rid> provider=deepseek model=deepseek-v4-flash patterns="…"
 ms=1644 payload_bytes=156` + a WARN `event=guard_blocked` twin.
+
+
+# 2026-09-23 addendum — raw-mesh client, the federation recovery forward, and how the templates bite
+
+## How the mesh actually behaves for a raw client (read this before writing one)
+
+The mesh is the one surface where a hand-written client fails for reasons that
+have nothing to do with crier. Two of the three failures in this run were
+**mine**, and both are worth knowing because each one looks exactly like a
+server bug:
+
+1. **`websockets` allows only ONE reader per connection.** A driver that does
+   `asyncio.create_task(responder(sock))` *and* `await sock.recv()` in the main
+   loop gets
+   `ConcurrencyError: cannot call recv while another coroutine is already running recv`.
+   That is a library rule, not a crier defect. The working shape — used by
+   `examples/llm-mesh/` and reproduced here — is one reader task per socket
+   pushing into an `asyncio.Queue`, with every phase consuming from the queue.
+   **Design the queue in from the start.**
+2. **A REQUEST carries `message_id`; a RESPONSE/ERROR carries `request_id`.**
+   A matcher that filters incoming frames on `request_id` will never match the
+   REQUEST it is waiting for and will time out while the frame sits in the
+   queue — the queue's *buffer* shows the frame arrived, which makes it look
+   like a delivery problem when it is a matching-key problem. Wait on
+   `message_id` for a REQUEST, `request_id` for a reply. This is the correlation
+   contract in `docs/mesh-protocol.md`, and it applies to your test client too.
+
+With those two fixed, the whole documented surface works first try, including
+every refusal path: a non-JSON frame comes back `INVALID_MESSAGE` **with
+`request_id` absent**, an unknown `type` comes back `INVALID_MESSAGE` **with
+`request_id` echoed**, a blank `target.agent_id` is named explicitly
+(`expected target.agent_id`), a `source` that is not a `PeerRef` object is
+refused with the Go decode error, and a RESPONSE with a wrong `request_id` is
+silently dropped while **the socket stays usable for the next request**. Body
+types pass through unchanged: a string body arrives as a string, an object body
+as an object. Measured round-trip on loopback: **0.257ms mean (a→b), 0.262ms
+(b→a), 20 runs each, max 0.577ms**. The server's KEEPALIVE arrives at ~27-30s
+carrying `"agent_id":"crier"` — the server's own mesh identity, not the peer's.
+
+## How the federation recovery forward works (and the gap in the spec)
+
+Five outcomes were driven live. Four confirm 2026-09-14; the fifth is what this
+run adds.
+
+```
+deliver -> relay-1 -> link DOWN
+   body names no sender  -> 502 FEDERATION_FAILED IMMEDIATELY (0.7ms), nothing queued
+   body names a sender   -> 202 {"status":"held",...} (3.1ms), item on disk
+                             (hold queue = one atomically-rewritten JSON doc, 608 bytes)
+link COMES BACK -> the sweep re-POSTs the SAME BYTES
+   -> log: "federation: held delivery recovered — relayed to the linked relay"
+           ... status=200 response_bytes=109 response="{...\"reply\":\"echo: ...\"}"
+   -> hold queue reloaded to {"items":[]}
+   -> THE REPLY IS DROPPED: nobody is waiting on the original 202
+budget expires  -> exactly one durable notice in the SENDER's inbox:
+   {"kind":"error","code":"FEDERATION_FAILED","message_id":…,"target":…,"sender":…,
+    "request_id":…,"attempts":4,"error":"federation: no link reachable (…)"}
+```
+
+**The gap (DF-CRIER-282):** `specs/WEBHOOK-DELIVERY.md` §8.1 defines the three
+outcomes for the *first* attempt, and the terminal notice, and says nothing
+about the reply of a **recovery**. The relay does log it (`response="…"`), so
+the information is not lost — it is only invisible to the sender, which got a
+`202` and then never hears the outcome of the message it sent. A sender that
+needed the webhook's reply has no documented path to it. Read §8.1 with that in
+mind: "at-most-once delivery to the sender" is true of the *first* attempt, not
+of a recovery.
+
+Also note the practical consequence of the no-sender rule: **an ad-hoc probe
+that forgets `sender` will always see the synchronous `502` and never the hold
+path**, because the terminal report is addressed to the sender and an
+unreportable delivery is not held. That is documented (DF-CRIER-129) and it is
+the correct design — but it means a test that "proves holding works" is not
+proving anything until its body names a sender.
+
+## How `schema_template` bites (silent empty content)
+
+`schema_template: "openai-compatible"` renders its outbound body from a
+**hard-coded** template (`internal/webhook/schema.go:55-81`):
+
+```
+{"model": "{{agent.model|default:deepseek-v4-flash}}",
+ "messages": [{"role": "user", "content": "{{payload.text}}"}], "stream": false}
+```
+
+`{{payload.text}}` resolves against the payload; a payload with **no `text`
+key** renders **empty**, and `expandTemplate` substitutes the empty string
+rather than failing. Measured live, same relay, same endpoint, payload shape the
+only variable:
+
+```
+payload {"task":"held work"}                  -> reply "echo: "      (200, "delivered")
+payload {"text":"dogfood hello over federation"} -> reply "echo: dogfood hello over federation"
+```
+
+The delivery is recorded as **successful**. Nothing logs a missing field, no 4xx
+is raised, and the endpoint answers 200. `specs/AGENT-ECOSYSTEM.md:272`
+documents the trap for that spec's own echo sink; the webhook config table
+(`docs/integration-guide.md:590`) lists the template without mentioning that it
+hard-codes `payload.text`. If your payloads use any other key shape, the body is
+silently dropped. Use `generic-custom`/`custom_schema` when the payload is not
+`{"text": …}`.
+
+Corollary for dogfood runs: **when you build a federation probe, give the remote
+agent webhook a payload with a `text` key**, or every echo comes back empty and
+you cannot tell a broken forward from an empty template. This run's first
+federation pass hit exactly that ambiguity.
+
+## The payload in a retrieve response is NOT truncated — your pipeline may be
+
+A retrieve body read through a tool/pipeline can show `"payload":"eyJoZW...kIn0="`.
+That ellipsis is a **display artifact of the reading pipeline**, not the wire:
+dumping the raw bytes showed the field literally as
+`eyJoZW...kIn0=","created_at":"2026-09-` — i.e. the three dots are *in the
+captured text*, and they are not U+2026 either (the field's codepoints are all
+`[a-z0-9=]`). Base64-decoding that string still yields the true payload. Verify
+by writing the response to a file and inspecting the bytes before reporting a
+truncation bug — crier is not eliding. (It cost a detour here: it looked exactly
+like a P1 data-loss bug.)
+
+## Performance: measure the server's own handler lines, not curl's wall clock
+
+Every request logs `duration=` (20-270µs for all endpoints; `/agents/{id}/inbox`
+166µs, delete 21µs, a 404 42µs). `hyperfine` on a curl command reports ~7-8ms
+for the same call with `User: 2.5ms System: 4.3ms` — **6.8ms of that is curl's
+own process startup**. Cold server start to a healthy `/health` is 17.1ms;
+signed retrieve 8.8ms and signed ack 9.52ms wall (openssl subprocess inside
+them); `GET /agents` goes 1.54ms → 1.97ms p50 from 10 to 100 agents. Nothing a
+user would notice, in either direction: **no PERF row was filed.** With the
+guard ON and no key, the deliver stays at 1.4-2.1ms because the router skips
+before calling out (`guard router: provider skipped … reason="no api key"`) —
+the degraded path is fast and says why.
+
+## The dogfood leak class is still live, and the new gate cannot see it
+
+`CR-GAP-069` asked for two things; #1 landed (`scripts/check-demo-cleanup.sh` +
+its selftest + a CI step: a trap + port-owned assertion for tracked scripts).
+**#2 was never implemented** — the word `orphan` appears nowhere in
+`coding-hermes-dogfood/SKILL.md`, nowhere in this lane's scheduler prompt, and no
+fleet script sweeps crier's scratch ports. The new gate's scope is
+`git ls-files '*.sh'` — **tracked** scripts only — so the ad-hoc `/tmp` script
+that actually leaked the two servers is invisible to it by construction.
+
+The class is not theoretical. On this host right now: **20 `dogfood-asce*`
+containers** from two scratch compose stacks (`/tmp/dogfood-asce`,
+`/tmp/dogfood-asce-2026-09-07`, both 2 weeks old, **11 still running**) holding
+**14 host ports** — `14222, 15434, 16380, 17700, 18081, 18082, 18222, 24222,
+25434, 26380, 27700, 28081, 28082, 28222`. A tick-start sweep (orphan
+containers named `dogfood-*` whose compose file lives in `/tmp`, plus listeners
+on the 18xxx/19xxx scratch range whose holder is not the pid this tick started)
+would name every one of them without guessing. Filed as **DF-CRIER-281**.
+
+## Right-way cheat sheet (additions)
+
+```bash
+# 1. restart from zero, on scratch ports the harness CHOSE, and prove your own pids
+ss -ltnH "sport = :18771"          # empty = free; never hard-code a scratch port
+
+# 2. federation hold path — the body MUST name a sender or it is never held
+curl -sS -X POST "$R1/agents/remote/inbox" -H 'Content-Type: application/json' \
+  -d '{"payload":{"text":"hi"},"sender":"me","delivery_mode":"blocking"}'   # text key!
+
+# 3. drive the mesh from python: ONE reader per socket, a queue, message_id to wait
+#    for a REQUEST and request_id to wait for its reply (see the two traps above)
+
+# 4. read the server's own numbers, not curl's: grep 'duration=' <(the server log)
+
+# 5. before reporting a truncation/mojibake bug, dump the bytes to a file and
+#    inspect them — a pipeline ellipsis is not a wire truncation
+```
+
+## Lean on the write-gate before trusting any 'filed' claim
+
+`EXIT=$?` after a pipeline reports the **pipeline's** status. Use
+`${PIPESTATUS[0]}` or you will read a green next to a failed command. And after
+appending to the board, re-read the tail — a count printed by the writing step
+is not evidence that the row landed.
