@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -50,6 +50,8 @@ help:
 	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
 	@echo "  gofmt-check       Check every tracked .go file with gofmt (go vet does not read formatting) — a drifting file fails (DF-CRIER-189)"
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
+	@echo "  parity-check      Assert the primary remote (origin) and the content mirror (gitlab) carry the same main — exact 0/0 or a loud failure naming both counts and the fix (REV5-CRIER-001)"
+	@echo "  parity-selftest   Prove that checker still accepts parity and rejects mirror-behind, primary-behind, dual lineage, a missing remote, a branchless remote and an unreachable remote, incl. a neuter proof (REV5-CRIER-001)"
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
@@ -251,6 +253,45 @@ gofmt-check:
 
 gofmt-selftest:
 	bash scripts/check-gofmt.sh --selftest
+
+# REV5-CRIER-001: the fourth arm, and the only one whose subject is the REMOTES
+# rather than the tree. This repo pushes main to two places — origin
+# (github.com/crier-dev/crier) is the PRIMARY and the mirror is the subordinate
+# CONTENT copy — and nothing in the repo asserted they carry the same commit. The
+# tick battery compared them BY HAND, once per tick, with a `git rev-list
+# --left-right --count origin/main...gitlab/main` typed into a shell, so the result
+# lived in a chat log instead of the repo, and it was only run when someone
+# remembered. The history that hand-check was catching: two diverged lineages
+# around ticks 143-149, and a tick that never pushed the mirror at all (around
+# ticks 79 and 101). A mirror that is BEHIND is the worse failure of the two,
+# because clone/fetch are answered with a stale tree while everything looks green.
+#
+# parity-check fetches both remotes and requires `git rev-list --left-right
+# --count A/main...B/main` to be exactly `0	0`. The two counts name opposite
+# sides: left = A-only commits (so a nonzero left means B is behind), right =
+# B-only commits (a nonzero right means A is behind). One side behind exits 1 with
+# that side's push recipe; BOTH sides nonzero is dual lineage, which no push can
+# reconcile, so it exits 1 with an ESCALATION and no push advice at all — the
+# checker never force-pushes and never prints a copy-pasteable force command.
+#
+# It fails closed (exit 2, naming what was missing) on a missing remote, a failed
+# fetch, a remote that answers but has no such branch, and unusable configuration —
+# a remote this host cannot read is never reported as "no drift". The remotes it
+# compares are overridable (PARITY_REMOTE_A / PARITY_REMOTE_B / PARITY_BRANCH) so
+# parity-selftest can point it at throwaway bare repos under ${TMPDIR:-/tmp}.
+#
+# parity-selftest proves all of that on those fixtures, including a NEUTER proof
+# that the rejection comes from the checker's own verdict. It is deliberately NOT a
+# CI step (.github/workflows/ is untouched): CI runners have no gitlab credentials
+# and no route to the mirror, so a parity job there could only ever exit 2 — this
+# check belongs to the tick battery on the dev host, which is where both remotes
+# are reachable. Same reasoning (and the same precedent) as heredoc-lint: different
+# scope, run explicitly or from the tick.
+parity-check:
+	bash scripts/check-remote-parity.sh
+
+parity-selftest:
+	bash scripts/check-remote-parity-selftest.sh
 
 # QA-CRIER-32: the fleet-shared QA generator ~/.hermes/scripts/bunker-qa.sh
 # builds the per-agent remote script inside ONE UNQUOTED heredoc
