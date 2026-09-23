@@ -142,6 +142,27 @@ jobs:
           make gofmt-check
           make gofmt-selftest
 
+      # CR-GAP-069: a runnable demo (or an ad-hoc dogfood script) that backgrounds a
+      # crier server with no EXIT trap leaks the process and the port, and nothing in
+      # the repo noticed — the dogfood federation demo left two orphans on
+      # :18767/:18877 for a human to reap. This arm is the notice: it classifies a
+      # tracked shell script as server-spawning only when the text really spawns a
+      # server (a mention — a comment, a heredoc, a fatal message, a grep pattern, a
+      # `go build` — never classifies) and then requires BOTH an EXIT trap that kills
+      # the pid it started and, for a port-binding run, an ownership assertion that
+      # the port's holder IS that pid. A bounded run (timeout on the spawn, or a
+      # `timeout … bash -c` launcher) is exempt from the trap — its timeout is the
+      # reaping mechanism. The check is static text analysis: it starts no server and
+      # signals no process, so it cannot disturb the live servers a shared runner may
+      # be carrying. It fails closed (a nonexistent path, a non-shell path, a list in
+      # which nothing classifies, an empty default scope) rather than printing a green
+      # over files it never read, and the selftest proves the rejection path — on the
+      # real tree and on fixtures — including a neuter proof.
+      - name: Demo server-spawn cleanup check
+        run: |
+          make demo-cleanup-check
+          make demo-cleanup-selftest
+
       # DF-CRIER-137: the documented way to launch the MCP bridge
       # (`make build-mcp && ./bin/crier-mcp`, README + integration guide) feeds a
       # strict MCP stdio client, and the `build-mcp` recipe was not prefixed with

@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -50,6 +50,8 @@ help:
 	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
 	@echo "  gofmt-check       Check every tracked .go file with gofmt (go vet does not read formatting) — a drifting file fails (DF-CRIER-189)"
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
+	@echo "  demo-cleanup-check  Fail when a tracked shell script spawns a crier server without an EXIT-trap cleanup + port-ownership assertion (CR-GAP-069)"
+	@echo "  demo-cleanup-selftest  Prove that checker still rejects a trap-less / unowned server spawn and accepts the real tree, incl. a neuter proof (CR-GAP-069)"
 	@echo "  parity-check      Assert the primary remote (origin) and the content mirror (gitlab) carry the same main — exact 0/0 or a loud failure naming both counts and the fix (REV5-CRIER-001)"
 	@echo "  parity-selftest   Prove that checker still accepts parity and rejects mirror-behind, primary-behind, dual lineage, a missing remote, a branchless remote and an unreachable remote, incl. a neuter proof (REV5-CRIER-001)"
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
@@ -253,6 +255,48 @@ gofmt-check:
 
 gofmt-selftest:
 	bash scripts/check-gofmt.sh --selftest
+
+# CR-GAP-069: the fifth arm, and the only one whose subject is a PROCESS LIFE rather
+# than a file's syntax. The dogfood federation demo leaked two orphan crier servers
+# on :18767/:18877 (reaped by hand); the contract that prevents it lives in the demo
+# harness — a script that backs the server with `&` must (a) register an EXIT trap
+# that kills the pid it started and (b) assert after the start that the port's holder
+# is that pid (assert_port_owned / port_holder_pid from scripts/lib/port-guard.sh).
+# Every runner and scripts/e2e-battery.sh already do both; NOTHING enforced it, so an
+# ad-hoc script could re-create the leak with no signal — which is what happened.
+#
+# demo-cleanup-check classifies a TRACKED shell script as server-spawning only when
+# the text actually SPAWNS a crier server binary (./bin/crier, bin/crier,
+# $WORKDIR/crier, $CRIER_BIN, $REPO/bin/crier, `go run ./cmd/server`, a backgrounded
+# `make run`, or the MCP server bin/crier-mcp / `make mcp` / a `timeout … bash -c`
+# launcher), in a backgrounded, wrapped or timeout-bounded form. A MENTION never
+# classifies: comments, heredoc bodies (usage text, transcripts, inline python), the
+# message commands (echo/printf/fatal/… — the `fatal "… make run, or ./bin/crier …"`
+# shape in scripts/bunker-matrix.sh) and the non-executing commands (grep/awk/sed/…
+# — the `grep -q "make run"` shape in scripts/bunker-matrix-selftest.sh) are text,
+# and a `go build` that only writes the server binary is a BUILD, not a spawn. A
+# classified script must meet BOTH requirements; every rejection names the file, the
+# spawn line and each missing requirement ((a) trap, (b) ownership) by name. (b) is
+# owed only by a script that binds a relay port — the relay always listens, so every
+# relay spawner owes it; an MCP/stdio launcher binds nothing. A BOUNDED-EXECUTION
+# script (timeout on the spawn, or a `timeout … bash -c` launcher executor such as
+# scripts/check-mcp-stdout.sh) is exempt from (a) — the timeout is its reaping
+# mechanism — but still owes (b) when it binds a port.
+#
+# It is a STATIC text check: it never starts a server and never signals a process
+# (this host runs live crier servers owned by other sessions), and it fails closed —
+# an explicit list with a nonexistent path, a non-shell path, or in which NOTHING
+# classifies as server-spawning exits 1 with the paths named, and a default run whose
+# scope is empty exits 2, so a green over files it never read is impossible.
+# demo-cleanup-selftest proves all of that on fixtures it creates under
+# ${TMPDIR:-/tmp} — including a NEUTER proof that the rejection is caused by the
+# verdict and not by accident, and a regression proof that the real tree (the five
+# example runners, e2e-battery.sh, check-mcp-stdout.sh) is still accepted.
+demo-cleanup-check:
+	bash scripts/check-demo-cleanup.sh
+
+demo-cleanup-selftest:
+	bash scripts/check-demo-cleanup-selftest.sh
 
 # REV5-CRIER-001: the fourth arm, and the only one whose subject is the REMOTES
 # rather than the tree. This repo pushes main to two places — origin
