@@ -18,6 +18,7 @@ paths:
   /health:
     get:
       operationId: healthCheck
+      tags: [health]
       summary: Health check
       security: []
       responses:
@@ -39,6 +40,7 @@ paths:
   /version:
     get:
       operationId: buildVersion
+      tags: [health]
       summary: Build identity of the running server
       description: >
         Version, git commit, build time and dirty flag of the binary serving
@@ -80,6 +82,7 @@ paths:
   /status:
     get:
       operationId: runtimeStatus
+      tags: [health]
       summary: Effective runtime posture (auth, guard, registry backend, build identity)
       description: >-
         What is actually in force on this live server, as booleans and modes:
@@ -198,6 +201,7 @@ paths:
   /relay/publish:
     post:
       operationId: relayPublish
+      tags: [relay]
       summary: Publish an event to a topic
       requestBody:
         required: true
@@ -240,6 +244,7 @@ paths:
   /relay/subscribe/{topic}:
     get:
       operationId: relaySubscribe
+      tags: [relay]
       summary: Subscribe to a topic or wildcard pattern via WebSocket
       description: |
         The path accepts a literal topic name or a wildcard subscription
@@ -303,6 +308,7 @@ paths:
   /relay/topics:
     get:
       operationId: relayListTopics
+      tags: [relay]
       summary: List active topics
       responses:
         "200":
@@ -314,6 +320,7 @@ paths:
   /mesh/peers:
     get:
       operationId: meshListPeers
+      tags: [mesh]
       summary: List connected mesh peers
       responses:
         "200":
@@ -341,6 +348,7 @@ paths:
   /mesh/connect/{agentID}:
     get:
       operationId: meshConnect
+      tags: [mesh]
       summary: Open a P2P WebSocket connection to an agent
       parameters:
         - name: agentID
@@ -358,6 +366,7 @@ paths:
   /fed/peers:
     get:
       operationId: fedListPeers
+      tags: [federation]
       summary: List federation peers (local relay first, then linked relays with their agents)
       description: >
         The local relay is listed first (name from CR_FED_NAME, agents from
@@ -406,6 +415,7 @@ paths:
   /agents:
     get:
       operationId: registryListAgents
+      tags: [registry]
       summary: List registered agents
       description: |
         Capability discovery (spec §7): with ?capability=abc only agents whose
@@ -423,6 +433,7 @@ paths:
           description: Array of registered agents (status reflects registration-liveness, not live connection health)
     post:
       operationId: registryRegisterAgent
+      tags: [registry]
       summary: Register a new agent
       description: |
         The public_key PRESENCE requirement follows signature enforcement
@@ -469,6 +480,7 @@ paths:
   /agents/{id}:
     get:
       operationId: registryGetAgent
+      tags: [registry]
       summary: Get agent details
       parameters:
         - name: id
@@ -483,6 +495,7 @@ paths:
           description: Agent not found
     delete:
       operationId: registryUnregisterAgent
+      tags: [registry]
       summary: Unregister an agent
       description: |
         When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
@@ -511,6 +524,7 @@ paths:
           description: Agent not found
     patch:
       operationId: registryUpdateAgent
+      tags: [registry]
       summary: Partially update an agent's registration (self-configuration directive, spec §7)
       description: |
         Partial update of an agent's registration — the self-configuration
@@ -576,6 +590,7 @@ paths:
   /agents/{id}/inbox:
     post:
       operationId: inboxDeliver
+      tags: [inbox]
       summary: Deliver a message to an agent's inbox
       description: |
         Delivers a message to the target agent. When the agent has a webhook
@@ -870,6 +885,7 @@ paths:
                         description: "Why the delivery was NOT held, plus the last transport/status error behind it — one of: \"federation: no link reachable|no link delivered …\" (every link unreachable or answering a retryable status, and no hold queue available), \"federation: hold delivery: …\" (the hold queue refused the delivery), \"federation: no sender on the deliver request (target …): …\" (the request names no sender, so a terminal FEDERATION_FAILED could never be reported — an unreportable delivery is never held, DF-CRIER-129). Never carries the link token."
     get:
       operationId: inboxRetrieve
+      tags: [inbox]
       summary: Retrieve undelivered messages from inbox
       description: |
         When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
@@ -944,6 +960,7 @@ paths:
   /agents/{id}/inbox/stats:
     get:
       operationId: inboxStats
+      tags: [inbox]
       summary: Get inbox queue statistics
       description: |
         When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
@@ -992,6 +1009,7 @@ paths:
   /agents/{id}/inbox/ack:
     post:
       operationId: inboxAck
+      tags: [inbox]
       summary: Acknowledge message delivery (release lease)
       description: |
         When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the

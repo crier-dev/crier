@@ -26,6 +26,19 @@ helper uses `openssl pkeyutl -sign -rawin` (an OpenSSL 3+ flag) and fails
 loudly on older versions instead of producing an empty signature that the
 server silently rejects with 401.
 
+### Muster-generated clients
+
+`servers[0]` is the local-development default. When generating a Muster command
+client for a deployed relay, override it explicitly with that relay's real base
+URL:
+
+```bash
+openapi-cli generate docs/openapi.yaml --base-url https://relay.example
+```
+
+The generated commands use `https://relay.example` rather than the spec's
+`http://localhost:8767` default.
+
 ---
 
 ## 1. Running the server
