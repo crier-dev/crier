@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.4.0
+version: 1.5.0
 ---
 
 # Crier Usage — field guide for agents
@@ -244,6 +244,24 @@ live run proved:
     payload without a `text` key is delivered with an **empty** content field and
     reported as a successful delivery (DF-CRIER-279). Use `generic-custom` /
     `custom_schema` when your payload shape is anything else.
+15. **A "restart" that never took over the port answers you anyway.** A second
+    `./bin/crier -port 8767` on a held port logs `server failed: another
+    process already holds this port` to ITS OWN output and exits; the old
+    process keeps serving and the old pidfile stays on disk. After any
+    restart, prove the world you are in: `curl -s :8767/status` — check
+    `build.commit` equals your checkout (`git rev-parse --short HEAD`) and
+    `registry_backend` is the backend you configured. A memory-backend
+    message that "survived" a restart is this user-side bug, not crier's
+    (measured 2026-09-24; see `docs/dogfood/diagnostics-2026-09-24.md`).
+16. `kill $(cat .crier.pid)` feeds bash the JSON pidfile (`{`, `"pid":` …) —
+    use `make stop`, which reads the JSON, verifies `/proc/<pid>/exe`, and
+    SIGTERMs (DF-CRIER-283).
+17. Fresh non-root box: `examples/demo.sh` needs `xxd`, and on Debian 13
+    `vim-common` does NOT ship it — `apt-get download xxd && dpkg -x xxd_*.deb
+    ~/xxdroot && export PATH=~/xxdroot/usr/bin:$PATH` (DF-CRIER-280). Also set
+    `export GOPATH=~/gopath` after a tarball Go install to `~/go`, or go warns
+    `both GOPATH and GOROOT are the same directory` on every call
+    (DF-CRIER-284).
 
 ## Verified-good examples (2026-08-09 live run)
 
