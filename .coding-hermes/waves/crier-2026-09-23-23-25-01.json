@@ -1,0 +1,48 @@
+{
+  "tick_id": "crier-2026-09-23-23-25-01",
+  "tick_number": 390,
+  "wave_budget": 6,
+  "mode": "serial-fallback",
+  "reason": "the project-specific crier prompt-mode contract caps this tick at ONE worker; that stricter cap overrides the generic wave budget, so CR-GAP-063 is dispatched serially in shared main",
+  "tasks": [
+    {
+      "task_id": "CR-GAP-063",
+      "title": "Fix the bearer-only auth exemption row and pin it in docs-check",
+      "worker_model": "gpt-5.6-terra",
+      "worker_provider": "openai-codex",
+      "worktree": "shared-main (serial path, no worktree)",
+      "brief": "/tmp/crier-t390-brief.md",
+      "dispatch_process": "proc_7493f82e8265",
+      "dispatch_pid": 3458894,
+      "rework_attempts": [
+        {
+          "attempt": 2,
+          "brief": "/tmp/crier-t390-rework2-brief.md",
+          "dispatch_process": "proc_9b59d43f1fba",
+          "dispatch_pid": 3792129,
+          "reason": "attempt 1 left the Authorization inline-code delimiter unclosed despite claiming it was fixed"
+        },
+        {
+          "attempt": 3,
+          "brief": "/tmp/crier-t390-rework3-brief.md",
+          "dispatch_process": "proc_9064c4252841",
+          "dispatch_pid": 4024686,
+          "reason": "attempt 2 made zero diff after using an invalid total-backtick-count proof; byte-level evidence showed no closing delimiter after Authorization"
+        }
+      ],
+      "gitreins_task": "CR-GAP-063 (created + started pre-dispatch)",
+      "worker_commit": "568aaaf6ba23d7442e03fe7f3ff5d0d31d52e394",
+      "worker_sessions": [
+        "20260923_183115_104654",
+        "20260923_183901_dfd7b2",
+        "20260923_184423_05ac1a"
+      ],
+      "judge": {
+        "result": "PASS",
+        "verdict_id": "986be0c9"
+      }
+    }
+  ],
+  "created_at": "2026-09-23T18:31:00-05:00",
+  "finished_at": "2026-09-23T18:59:33-05:00"
+}
