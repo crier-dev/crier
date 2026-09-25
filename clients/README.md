@@ -23,7 +23,8 @@ package manager:
 ```bash
 make build                                   # or: go build -o bin/crier ./cmd/server
 ./bin/crier keygen -out alice.key -id alice  # <- no openssl, no xxd, no hex surgery
-make run                                     # in another terminal
+docker compose up -d postgres                # durable backend (README § Run)
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' make run
 
 python3 clients/python/round_trip.py --server http://localhost:8767 --id alice --key alice.key
 # or the same round-trip in TypeScript:

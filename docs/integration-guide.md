@@ -46,12 +46,31 @@ The generated commands use `https://relay.example` rather than the spec's
 
 ## 1. Running the server
 
-Build and start with the default in-memory backend:
+**The path this guide documents is the durable one.** Start PostgreSQL, then
+point the server at it:
 
 ```bash
 make build
-./bin/crier                 # listens on :8767
+docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier   # durable; listens on :8767
 ```
+
+That is the whole setup: `CR_DATABASE_URL` is what selects the PostgreSQL
+backend, migrations apply automatically on startup, and agents and undelivered
+inbox messages then survive a restart of the server. Everything else in this
+guide is unchanged by that choice — register, deliver, retrieve, ack, the relay
+and the mesh behave identically on either backend; the difference is what is
+still there after a restart. Nothing is left to decide, and no later section has
+to be reached for the durable setup to be in force.
+
+**Without `CR_DATABASE_URL` (a bare `./bin/crier`) the server is demo-only.** The
+registry and every inbox then live in process memory: restart the process and the
+agents and any undelivered messages are gone. That is fine for a throwaway demo
+or a unit test — it is NOT the configuration this guide documents, and it is not
+a backend a durable inbox can be tested against.
+
+Host port 5437 already taken? §6 carries the `CRIER_PG_HOST_PORT` /
+`COMPOSE_PROJECT_NAME` overrides and the URL that follows each one.
 
 The server binary takes no positional arguments but accepts flags that
 **override** the env-driven config (see `./bin/crier --help`):
@@ -59,7 +78,7 @@ The server binary takes no positional arguments but accepts flags that
 | Flag | Overrides | Default |
 |------|-----------|---------|
 | `-port N` | `CRIER_PORT` | `8767` |
-| `-db-url URL` | `CR_DATABASE_URL` | unset (in-memory backend) |
+| `-db-url URL` | `CR_DATABASE_URL` | unset — the demo-only in-memory backend (§1) |
 | `-version` | — | prints the build identity (version, commit, dirty marker) and exits |
 
 Configuration is otherwise env-driven (full table in README):
@@ -67,7 +86,7 @@ Configuration is otherwise env-driven (full table in README):
 | Env var | Purpose | Default |
 |---------|---------|---------|
 | `CRIER_PORT` | listen port | `8767` |
-| `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) | unset |
+| `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) — the backend §1 starts | unset: the demo-only in-memory backend |
 | `CR_AUTH_TOKEN` | bearer token required on all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) | empty = auth disabled |
 | `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}` | `true` |
 | `CR_LOG_LEVEL` / `CR_LOG_FORMAT` | logging (`debug\|info\|warn\|error`, `text\|json`) | `info` / `text` |
@@ -98,15 +117,16 @@ in this guide works under all three (drop or add the headers as shown):
 | B. Bearer only | `secret` | `false` | All HTTP requests except the five exempt paths (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) require `Authorization: Bearer ***`; inbox endpoints are open to any agent. |
 | C. Full security | `secret` | `true` (default) | Bearer token **and** per-agent ed25519 signatures on inbox/agent-delete endpoints. The production default. |
 
-Start command per config:
+Start command per config — the durable backend of §1 is in every one of them
+(`CR_DATABASE_URL`), so the auth variables are the only difference:
 
 ```bash
 # A. Open
-./bin/crier
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
 # B. Bearer only
-CR_AUTH_TOKEN=secret CR_REQUIRE_AGENT_SIG=false ./bin/crier
+CR_AUTH_TOKEN=secret CR_REQUIRE_AGENT_SIG=false CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
 # C. Full security
-CR_AUTH_TOKEN=secret ./bin/crier
+CR_AUTH_TOKEN=secret CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
 ```
 
 For the rest of this guide, define `AUTH=(-H "Authorization: Bearer $TOKEN")`
@@ -146,7 +166,10 @@ List (`GET /agents` → 200), get one (`GET /agents/{id}`), and delete
 
 The inbox is a durable per-agent FIFO with lease-based delivery: a retrieve
 leases messages for 30 seconds; acked messages are removed; unacked messages
-are redelivered after the lease expires.
+are redelivered after the lease expires. "Durable" here means the backend §1
+starts (PostgreSQL): a delivered, unacked message is still there after a server
+restart. On the demo-only in-memory backend it is not — the process exit takes
+the queue with it.
 
 ### Deliver (no signature needed in any config)
 
@@ -546,6 +569,10 @@ Full wire reference: `docs/mesh-protocol.md`.
 
 ## 6. Durable setup (PostgreSQL)
 
+§1 already starts this backend — this section is its reference. The compose
+service, the port/project overrides when 5437 or the container name is taken,
+and what the backend carries:
+
 ```bash
 docker compose up -d postgres     # project container, port 5437
 CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' ./bin/crier
@@ -555,7 +582,8 @@ Host port and compose project are env-overridable (`CRIER_PG_HOST_PORT`, `COMPOS
 
 Migrations apply automatically on startup. With the Postgres backend, agents
 and undelivered messages survive server restarts; without
-`CR_DATABASE_URL` everything is process-lifetime only. The MCP server
+`CR_DATABASE_URL` everything is process-lifetime only — the demo-only in-memory
+backend, explicitly not the configuration §1 documents. The MCP server
 (`make build-mcp && ./bin/crier-mcp`, stdio, 13 tools) shares the same
 backend, so agents registered over HTTP are visible over MCP and vice versa.
 
@@ -619,7 +647,7 @@ stay deterministic; with a key set, deliveries are LLM-classified and the
 script prints what the guard verdicts mean on the wire:
 
 ```bash
-make run
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' make run   # durable backend (§1)
 CR_AUTH_TOKEN=secret ./examples/demo.sh     # config B or C
 ./examples/demo.sh                          # config A
 ```

@@ -234,7 +234,7 @@ func run(args []string) int {
 		slog.Info("registry backend", "type", "postgres", "max_conns", cfg.Database.MaxConns)
 	} else {
 		regStore = registry.NewMemoryStore()
-		slog.Info("registry backend", "type", "memory", "hint", "set CR_DATABASE_URL for PostgreSQL")
+		logMemoryBackendWarning()
 	}
 
 	registryHandler := registry.NewHandler(regStore)
@@ -808,6 +808,26 @@ func federationName(cfg config.Config) string {
 	return fmt.Sprintf("localhost:%d", cfg.Port)
 }
 
+// logMemoryBackendWarning announces the non-durable backend at a level nobody
+// can miss (CR-FEAT-034: make the durable path the documented default; pairs
+// with CR-FEAT-031's startup warning).
+//
+// The in-memory store keeps agents and undelivered messages in process memory,
+// so a restart eats the queue — while crier's product promise is a DURABLE
+// inbox. Measured against the external review (DISPATCH · CRI-001): the
+// first-run experience demonstrated "durability" on a backend that keeps
+// nothing, and the only startup signal was an INFO line carrying a hint, read
+// like every other startup line. This is a WARN that names the consequence, the
+// fix and a machine-readable `durable=false`; it changes no behaviour, and
+// GET /status still reports registry_backend=memory for a programmatic check.
+func logMemoryBackendWarning() {
+	slog.Warn("registry backend is the in-memory store — DEMO-ONLY and non-durable: agents and undelivered inbox messages are lost when this process exits. Set CR_DATABASE_URL (docker compose up -d postgres) for the durable inbox the docs document",
+		"type", "memory",
+		"durable", false,
+		"hint", "set CR_DATABASE_URL for PostgreSQL",
+	)
+}
+
 // printUsage writes the full usage text: the flag summary plus the
 // environment variables crier reads for configuration.
 func printUsage(out io.Writer, fs *flag.FlagSet) {
@@ -824,7 +844,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "-port and -db-url flags override them when set:")
 	fmt.Fprintln(out, "  CRIER_PORT                  listen port (default 8767)")
 	fmt.Fprintln(out, "  CR_PIDFILE                  pidfile path; set to pair the server with -stop / make stop (default: none)")
-	fmt.Fprintln(out, "  CR_DATABASE_URL             PostgreSQL URL (fallbacks: DATABASE_URL, CRIER_DATABASE_URL)")
+	fmt.Fprintln(out, "  CR_DATABASE_URL             PostgreSQL URL — the durable backend the docs document; unset = demo-only in-memory store (fallbacks: DATABASE_URL, CRIER_DATABASE_URL)")
 	fmt.Fprintln(out, "  CR_AUTH_TOKEN               bearer token required on all requests (empty = auth disabled)")
 	fmt.Fprintln(out, "  CR_REQUIRE_AGENT_SIG        require per-agent ed25519 signatures (default true)")
 	fmt.Fprintln(out, "  CR_LOG_LEVEL                debug|info|warn|error (default info)")

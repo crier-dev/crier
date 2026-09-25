@@ -20,6 +20,23 @@ make build
 CR_GUARD_ENABLED=false ./bin/crier -port 8767 -pidfile .crier.pid &
 ```
 
+That start is the **demo-only in-memory backend**: the registry and every inbox
+live in the process, so nothing survives a restart. It is deliberate for this
+pass — a 30-minute scratch run on a throwaway bus needs no Docker. If you would
+rather test the **durable** configuration (the one the README documents), start
+PostgreSQL first and change nothing else:
+
+```bash
+docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' \
+  CR_GUARD_ENABLED=false ./bin/crier -port 8767 -pidfile .crier.pid &
+```
+
+Everything below behaves identically on either backend; the difference is what a
+restart keeps. Use the second block whenever what you deliver should still be in
+the inbox after you stop and start the server — the README and the integration
+guide document that (durable) configuration as their default.
+
 The `-pidfile` matters: it is what pairs this start with `make stop` below.
 Shared host? Port 8767 may already be taken by someone else's server. Check
 first (`ss -tlnp | grep :8767` — empty output means free); if it is held,

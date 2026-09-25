@@ -74,7 +74,7 @@ a naive blocking read stalls or misparses mid-exchange.
 **No Hivemind source — built from scratch**
 
 ### Design
-- Registry is backed by a pluggable Store: in-memory by default, PostgreSQL when `CR_DATABASE_URL` is set (CI-003b — implemented)
+- Registry is backed by a pluggable Store: in-memory by default in the binary (a start with no `CR_DATABASE_URL`), PostgreSQL when `CR_DATABASE_URL` is set (CI-003b — implemented). The documented configuration (README § Run, docs/integration-guide.md §1) sets `CR_DATABASE_URL`: the in-memory backend is demo-only — process-lifetime, so nothing survives a restart
 - Agent: `{ID, PublicKey, Capabilities, Status, RegisteredAt, LastSeen}`
 - Inbox is a per-agent FIFO queue with lease-based delivery
 - Messages expire after TTL (default 24h)

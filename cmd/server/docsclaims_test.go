@@ -1030,6 +1030,10 @@ func liveCount(repoRoot, claimID string) (any, error) {
 		return countStampedBuildPaths(repoRoot)
 	case "COUNT-MCP-TOOLS":
 		return countMCPTools()
+	case "COUNT-DOCS-DURABLE-START-README", "COUNT-DOCS-DURABLE-START-GUIDE",
+		"COUNT-DOCS-MEMORY-DEMO-ONLY-README", "COUNT-DOCS-MEMORY-DEMO-ONLY-GUIDE",
+		"COUNT-DOCS-MEMORY-NOT-DEFAULT-README", "COUNT-DOCS-MEMORY-NOT-DEFAULT-GUIDE":
+		return countHappyPathDurable(repoRoot, claimID)
 	default:
 		return nil, fmt.Errorf("no live count probe for claim %q", claimID)
 	}
@@ -1144,6 +1148,194 @@ func logicalShellLines(text string) []string {
 		out = append(out, cur.String())
 	}
 	return out
+}
+
+// ---------- CR-FEAT-034: the documented path must be the DURABLE one ----------
+//
+// The gap these claims close (external review DISPATCH · CRI-001, via Bane
+// 2026-09-25): crier's inbox is sold as durable, while the first-run experience
+// was a demo of non-durable durability — "the most surprising default in an
+// inbox product". The Postgres backend and the compose stack already existed;
+// what was wrong was WHICH backend the docs put in front of a reader. These
+// three measurements are read from the docs themselves, so the positioning
+// cannot drift back:
+//
+//   COUNT-DOCS-DURABLE-START     — the first fenced block of each doc's start
+//                                  section must set CR_DATABASE_URL (expect 2:
+//                                  README.md and docs/integration-guide.md).
+//   COUNT-DOCS-MEMORY-DEMO-ONLY  — every happy-path doc must label the
+//                                  in-memory backend demo-only (expect 2).
+//   COUNT-DOCS-MEMORY-NOT-DEFAULT — how many of the phrasings that USED to
+//                                  present the non-durable backend as the
+//                                  documented default are still present
+//                                  (expect 0; a revert fails the gate).
+
+// happyPathDocs are the two docs that document the first-run path top to bottom.
+// They are the surfaces a tester follows, so they are the surfaces measured —
+// each claim id carries its doc as a -README / -GUIDE suffix.
+var happyPathDocs = []string{"README.md", "docs/integration-guide.md"}
+
+// durableStartHeading maps a happy-path doc to the heading whose FIRST fenced
+// code block is that doc's documented server-start recipe. A heading that is
+// renamed fails the claim (firstFencedBlockAfterHeading errors) rather than
+// silently measuring nothing.
+var durableStartHeading = map[string]string{
+	"README.md":                 "### Run",
+	"docs/integration-guide.md": "## 1. Running the server",
+}
+
+// memoryDemoOnlyPhrases must ALL appear in a happy-path doc for it to count as
+// labelling the in-memory backend as demo-only.
+var memoryDemoOnlyPhrases = []string{"demo-only", "in-memory backend"}
+
+// memoryAsDefaultPhrases are the exact sentences that presented the non-durable
+// backend as the documented/default configuration before CR-FEAT-034 (the
+// integration guide's §1 opening, the README and guide default columns, the
+// README's old step-1 block). The measurement is ZERO occurrences.
+var memoryAsDefaultPhrases = []string{
+	"Build and start with the default in-memory backend",
+	"unset (in-memory backend)",
+	"_(unset — in-memory backend)_",
+	"# Default port :8767",
+}
+
+// headingLevel returns the ATX heading level of a trimmed line (0 when the line
+// is not a heading). "#### x" → 4; "#x" → 0 (not a heading: no space).
+func headingLevel(line string) int {
+	if !strings.HasPrefix(line, "#") {
+		return 0
+	}
+	n := 0
+	for n < len(line) && line[n] == '#' {
+		n++
+	}
+	if n < len(line) && line[n] != ' ' {
+		return 0
+	}
+	return n
+}
+
+// firstFencedBlockAfterHeading returns the first fenced code block inside the
+// section a heading opens (the section ends at the next heading of the same or
+// shallower level). A missing heading, or a section carrying no fenced block, is
+// an ERROR — the caller fails closed instead of passing over nothing.
+func firstFencedBlockAfterHeading(text, heading string) (string, error) {
+	lines := strings.Split(text, "\n")
+	level := headingLevel(heading)
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == heading {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", fmt.Errorf("heading %q not found", heading)
+	}
+	var b strings.Builder
+	inFence := false
+	for i := start + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if inFence {
+			if isFenceLine(t) {
+				return b.String(), nil
+			}
+			b.WriteString(lines[i])
+			b.WriteString("\n")
+			continue
+		}
+		if lvl := headingLevel(t); lvl > 0 && lvl <= level {
+			break
+		}
+		if isFenceLine(t) {
+			inFence = true
+		}
+	}
+	return "", fmt.Errorf("no fenced code block in the section opened by %q", heading)
+}
+
+// happyPathDocBySuffix maps a claim id suffix to the doc it measures, so a
+// failing claim names the doc that actually moved instead of a shared count.
+var happyPathDocBySuffix = map[string]string{
+	"-README": "README.md",
+	"-GUIDE":  "docs/integration-guide.md",
+}
+
+// happyPathClaimProbe resolves a CR-FEAT-034 count claim id to the doc it
+// measures and a per-doc check, so each claim's expectation is one doc's
+// property (1 = holds, 0 = does not).
+func happyPathClaimProbe(claimID string) (doc string, check func(string) (int, error), ok bool) {
+	idx := strings.LastIndex(claimID, "-")
+	if idx < 0 {
+		return "", nil, false
+	}
+	suffix, base := claimID[idx:], claimID[:idx]
+	d, found := happyPathDocBySuffix[suffix]
+	if !found {
+		return "", nil, false
+	}
+	// The suffix map is the only place a doc is named; this keeps it honest
+	// against the list of docs the row actually covers.
+	known := false
+	for _, hp := range happyPathDocs {
+		if hp == d {
+			known = true
+		}
+	}
+	if !known {
+		return "", nil, false
+	}
+	doc = d
+	switch base {
+	case "COUNT-DOCS-DURABLE-START":
+		return doc, func(text string) (int, error) {
+			blk, err := firstFencedBlockAfterHeading(text, durableStartHeading[doc])
+			if err != nil {
+				return 0, err
+			}
+			if strings.Contains(blk, "CR_DATABASE_URL") {
+				return 1, nil
+			}
+			return 0, nil
+		}, true
+	case "COUNT-DOCS-MEMORY-DEMO-ONLY":
+		return doc, func(text string) (int, error) {
+			for _, p := range memoryDemoOnlyPhrases {
+				if !strings.Contains(text, p) {
+					return 0, nil
+				}
+			}
+			return 1, nil
+		}, true
+	case "COUNT-DOCS-MEMORY-NOT-DEFAULT":
+		return doc, func(text string) (int, error) {
+			n := 0
+			for _, p := range memoryAsDefaultPhrases {
+				if strings.Contains(text, p) {
+					n++
+				}
+			}
+			return n, nil
+		}, true
+	}
+	return "", nil, false
+}
+
+// countHappyPathDurable re-measures one CR-FEAT-034 claim from its doc.
+func countHappyPathDurable(repoRoot, claimID string) (any, error) {
+	doc, check, ok := happyPathClaimProbe(claimID)
+	if !ok {
+		return nil, fmt.Errorf("no happy-path doc probe for claim %q", claimID)
+	}
+	raw, err := os.ReadFile(filepath.Join(repoRoot, doc))
+	if err != nil {
+		return nil, err
+	}
+	n, err := check(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", doc, err)
+	}
+	return n, nil
 }
 
 // countMCPTools measures the MCP tool count the way a real MCP client sees it: a
