@@ -621,14 +621,17 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	// first is the address a MESSAGE_EXPIRED receipt is sent to if this message
 	// expires unacknowledged, the second is the provenance a dead letter
 	// reports. An absent value is stored as SQL NULL — never as an empty string
-	// — so "not recorded" has exactly one representation.
+	// — so "not recorded" has exactly one representation. priority is stored
+	// for every message (CR-FEAT-035): a delivery that names none stores the
+	// documented default, which is the ordering every message had before the
+	// column existed.
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
-    id, agent_id, payload, sender, idempotency_key, created_at, expires_at,
+    id, agent_id, payload, sender, idempotency_key, priority, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, NULL, NULL, NULL, FALSE);`,
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NULL, NULL, NULL, FALSE);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
-		entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
+		entry.Priority, entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -687,19 +690,25 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 		return nil, "", fmt.Errorf("retrieve agent check: %w", err)
 	}
 
-	// 2. Claim a disjoint FIFO batch: lock the candidate rows (skipping rows
-	// a concurrent retriever already locked) and read them back. The locks
+	// 2. Claim a disjoint priority batch: lock the candidate rows (skipping
+	// rows a concurrent retriever already locked) and read them back. The locks
 	// live until commit, so nothing needs to be re-checked when the batch is
 	// stamped below.
+	//
+	// ORDER (CR-FEAT-035): highest priority first, then FIFO by delivery
+	// sequence. Before the priority column existed this was `delivery_sequence
+	// ASC` alone, which is exactly what a queue of default-priority (0)
+	// messages still gets — the second key only ever decides between rows the
+	// first one ties.
 	rows, err := tx.Query(ctx, `
-SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
+SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
        created_at, expires_at
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
   AND expires_at > $2
   AND (lease_expires_at IS NULL OR lease_expires_at <= $2)
-ORDER BY delivery_sequence ASC
+ORDER BY priority DESC, delivery_sequence ASC
 FOR UPDATE SKIP LOCKED
 LIMIT $3;`,
 		agentID, now, maxMessages,
@@ -716,7 +725,7 @@ LIMIT $3;`,
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.CreatedAt, &expiresAt); err != nil {
+			&entry.IdempotencyKey, &entry.Priority, &entry.CreatedAt, &expiresAt); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
@@ -971,6 +980,64 @@ WHERE agent_id = $1
 	}
 
 	return int(depth), int(leased), age, nil
+}
+
+// QueueDepth reports the store-wide inbox queue accounting (CR-FEAT-035,
+// registry.DepthReporter): every un-acknowledged, un-expired message in every
+// inbox, how many of those are held under a live lease, and how long the oldest
+// one has been waiting.
+//
+// It is ONE aggregate query over the whole table rather than a loop over
+// agents, so the cost of the operator's question ("how deep is the queue?") does
+// not scale with the number of registered agents. The predicates are the ones
+// Stats applies per agent — `acked = FALSE`, `expires_at > now` (a never-expires
+// message is stored as `infinity` and therefore counts, DF-CRIER-37),
+// `lease_expires_at > now` for the leased subset — so the store-wide figure is
+// the sum of the per-agent ones, not a second definition of "queued".
+//
+// It deliberately reads without a transaction: it is a measurement for
+// operators, and a single statement in PostgreSQL is already a consistent
+// snapshot of the table.
+func (s *PostgresStore) QueueDepth() (QueueDepth, error) {
+	ctx, cancel := s.operationContext()
+	defer cancel()
+
+	now := time.Now().UTC()
+
+	var (
+		pending int64
+		leased  int64
+		oldest  *time.Time
+	)
+	err := s.pool.QueryRow(ctx, `
+SELECT
+    COUNT(*)::bigint AS pending,
+    COUNT(*) FILTER (
+        WHERE lease_expires_at IS NOT NULL AND lease_expires_at > $1
+    )::bigint AS leased_count,
+    MIN(created_at) AS oldest_created_at
+FROM inbox_entries
+WHERE acked = FALSE
+  AND expires_at > $1;`, now).Scan(&pending, &leased, &oldest)
+	if err != nil {
+		return QueueDepth{}, fmt.Errorf("queue depth: %w", err)
+	}
+	if pending > math.MaxInt {
+		return QueueDepth{}, fmt.Errorf("queue depth: %d pending exceeds int range", pending)
+	}
+	if leased > math.MaxInt {
+		return QueueDepth{}, fmt.Errorf("queue depth: %d leased exceeds int range", leased)
+	}
+
+	var depth QueueDepth
+	depth.Pending = int(pending)
+	depth.Leased = int(leased)
+	if oldest != nil {
+		if age := now.Sub(*oldest); age > 0 {
+			depth.OldestAge = age
+		}
+	}
+	return depth, nil
 }
 
 // PurgeExpired has moved to postgres_ownership.go (CR-FEAT-025): the sweep is

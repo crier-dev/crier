@@ -58,7 +58,9 @@ call. A delivery record carries exactly the question an incident review asks:
 `delivered` (stored in the target's inbox), `webhook_accepted` (handed to the
 target's webhook transport), `webhook_failed`, `federation_held`,
 `federation_failed`, `guard_blocked`, `quarantined`, `agent_not_found`,
-`rejected`, `unspecified`.
+`rate_limited` (the global ingest budget shed the delivery — 429
+`RATE_LIMITED_GLOBAL`, CR-FEAT-035: the request was fine and the bus was full,
+which is not the same finding as `rejected`), `rejected`, `unspecified`.
 
 The verdict is measured from **what the caller received** — the handler wraps
 its own response and maps the status it wrote — not re-derived from which branch

@@ -96,6 +96,13 @@ type deliverRequest struct {
 	// the connection does not duplicate work. Absent (or empty) means no
 	// deduplication, exactly as before.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// Priority is the retrieval priority of this message (CR-FEAT-035,
+	// documented in docs/openapi.yaml as integer 0..9 default 0). A POINTER so
+	// absent is distinguishable from an explicit 0 even though both resolve to
+	// the same stored value: absent must stay "today's behaviour" (the store's
+	// zero value, FIFO) and an out-of-range value must be refused, which needs
+	// the field to be present.
+	Priority *int `json:"priority,omitempty"`
 }
 
 // maxTTLSeconds bounds ttl_seconds so the requested lifetime still fits a
@@ -140,6 +147,15 @@ func validateDeliverParameters(req *deliverRequest) error {
 	}
 	if req.TimeoutMs < 0 || req.TimeoutMs > maxDeliverTimeoutMs {
 		return fmt.Errorf("timeout_ms must be 0..%d", maxDeliverTimeoutMs)
+	}
+	// The documented priority range (docs/openapi.yaml: minimum 0, maximum 9).
+	// Out of range is a 400, never a clamp: the caller asked for an ordering the
+	// bus cannot honor, and silently storing a different one would make the
+	// retrieval order unexplainable from the request that asked for it
+	// (CR-FEAT-035). Absent (nil) is the documented default and is not
+	// validated — it is exactly the pre-CR-FEAT-035 delivery.
+	if req.Priority != nil && (*req.Priority < MinMessagePriority || *req.Priority > MaxMessagePriority) {
+		return fmt.Errorf("priority must be %d..%d", MinMessagePriority, MaxMessagePriority)
 	}
 	return nil
 }
@@ -904,6 +920,20 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		}
 	}
 
+	// ▼ GLOBAL INGEST BUDGET (CR-FEAT-035) — the one shed on the delivery path
+	// itself. Everything below this line is real work on behalf of this
+	// delivery (idempotency bookkeeping, a federation forward, an LLM guard
+	// call, a store write) and this is the last point at which refusing it is
+	// cheap. It sits AFTER validation and containment so a malformed request
+	// still learns it is malformed and a contained agent is still answered
+	// 403 AGENT_QUARANTINED — a 429 must never mask either. A refusal here is a
+	// 429 with a named error and a Retry-After (backpressure.go). With
+	// CR_RATE_LIMIT_GLOBAL_PER_MINUTE unset this is a single nil check.
+	if h.shedGlobal(w) {
+		verdictOverride = VerdictRateLimited
+		return
+	}
+
 	// ▼ SENDER-SUPPLIED IDEMPOTENCY (CR-FEAT-025) — before any transport or
 	// store choice, for the same reason the validations above are: a duplicate
 	// delivery must not reach a webhook endpoint or the inbox store at all.
@@ -1024,6 +1054,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		Payload:    req.Payload,
 		CreatedAt:  time.Now().UTC(),
 		TTLSeconds: req.TTLSeconds,
+		// Retrieval priority (CR-FEAT-035). Absent in the request resolves to
+		// the zero value, which is the ordering every message had before this
+		// field existed — the documented default.
+		Priority: priorityOrDefault(req.Priority),
 		// The sender is stored WITH the message (CR-FEAT-025): it is the
 		// address a terminal outcome is reported to. Without it a TTL expiry
 		// can only be counted, never reported — which is exactly how an

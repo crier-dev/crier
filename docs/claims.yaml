@@ -1300,3 +1300,25 @@ claims:
     quote: 'delivering by id is unchanged'
     expect: 2
     xfail: null
+
+  # --- CR-FEAT-035 (external review DISPATCH · CRI-001, via Bane 2026-09-25) ---
+  # Priority lanes and real backpressure. Both claims below are kind=default:
+  # the README prints the two numbers a deployment depends on, and each is
+  # compared against the production constant an UNSET environment resolves to,
+  # so a default that moves in code without moving the prose fails the gate. The
+  # live 429 + Retry-After + named error is proven end to end by
+  # TestCRFEAT035_* in cmd/server/crfeat035_test.go (this file anchors prose).
+  - id: DEFAULT-GLOBAL-RATE-LIMIT-PER-MINUTE
+    kind: default
+    doc: README.md
+    quote: "CR_RATE_LIMIT_GLOBAL_PER_MINUTE"
+    expect: 0
+    xfail: null
+  - id: DEFAULT-MESSAGE-PRIORITY-RANGE
+    kind: default
+    doc: README.md
+    # The range is printed as a pair; the probe returns the two production
+    # constants the handler validates against, formatted the same way.
+    quote: "integer **0..9**"
+    expect: "0..9"
+    xfail: null

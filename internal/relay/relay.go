@@ -61,6 +61,17 @@ func (r *Relay) CheckRateLimit(agentID string) bool {
 	return r.RateLimiter.Allow(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
 }
 
+// RateLimitRetryAfter reports how long an agent the per-agent cap just refused
+// should wait before retrying (0 when limiting is off, or when a slot is in
+// fact free). It is what the publish 429's `Retry-After` header reports, so the
+// refusal carries a backoff instruction instead of a bare "no" (CR-FEAT-035).
+func (r *Relay) RateLimitRetryAfter(agentID string) time.Duration {
+	if r.RateLimiter == nil {
+		return 0
+	}
+	return r.RateLimiter.RetryAfter(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
+}
+
 // Frame is the JSON object a relay subscription delivers: the LITERAL
 // published topic plus the published event, unchanged.
 //

@@ -184,7 +184,10 @@ func run(args []string) int {
 	// reports whether auth is ENFORCED, so an unauthenticated caller must not
 	// be able to read the posture of a server that has auth on. The exempt
 	// list in internal/middleware/auth.go is unchanged.
-	r.HandleFunc("/status", newStatusHandler(cfg, regBackend)).Methods("GET")
+	//
+	// Its registration moved down to the registry-routes block (CR-FEAT-035):
+	// the body now carries the live inbox queue depth, read from the serving
+	// store, and the store does not exist yet at this point in the wiring.
 
 	// OpenAPI spec (CR-GAP-049) — the spec is served live so spec-vs-code
 	// drift is visible on the running server. These three paths plus
@@ -241,6 +244,21 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+	// Global ingest budget (CR-FEAT-035): a shed on the delivery path itself,
+	// so a runaway producer cannot push every inbox deeper without limit.
+	// 0 (the default) installs nothing — the delivery path is then exactly what
+	// it was before this feature existed, and the per-agent publish cap stays
+	// the only backpressure. When set, an over-budget delivery is refused 429
+	// with a named error and a Retry-After before any transport, guard call or
+	// store write.
+	registryHandler.SetGlobalRateLimit(cfg.GlobalRateLimitPerMinute)
+	if cfg.GlobalRateLimitPerMinute > 0 {
+		slog.Info("inbox ingest budget", "global_per_minute", cfg.GlobalRateLimitPerMinute,
+			"shed", "429 RATE_LIMITED_GLOBAL + Retry-After, before any transport or store work")
+	} else {
+		slog.Info("inbox ingest budget", "global_per_minute", 0,
+			"detail", "no global budget: the per-agent publish cap (CR_RATE_LIMIT_PER_MINUTE) remains the only backpressure, exactly as before CR-FEAT-035")
+	}
 	// Presence (CR-FEAT-024): the status every registry read reports is DERIVED
 	// from the row's liveness evidence (`last_seen`) and this documented window,
 	// so a crashed agent goes stale instead of reporting "online" forever. The
@@ -478,6 +496,17 @@ func run(args []string) int {
 	r.HandleFunc("/agents/{id}/inbox/transfer", registryHandler.HandleTransfer).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/dead-letters", registryHandler.HandleDeadLetters).Methods("GET")
 
+	// Effective runtime posture + the LIVE queue depth (DF-CRIER-113,
+	// CR-FEAT-035). Registered here rather than with /health, /version and the
+	// spec-hosting routes above because its body now carries a measurement of
+	// the serving store — how much is queued, how much of that is leased, how
+	// old the oldest waiting message is — and this is the first point in the
+	// wiring at which that store exists. Nothing else about the endpoint
+	// changes: it is still authenticated, still not on the auth-exempt list
+	// (internal/middleware/auth.go), and still reports booleans and modes for
+	// every configuration fact.
+	r.HandleFunc("/status", newStatusHandlerWithQueue(cfg, regBackend, newQueueDepthReader(regStore))).Methods("GET")
+
 	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
 	// OPT-IN extra, and the only A2A surface any row of this series has
 	// registered so far. It exists ONLY while CR_A2A_ENABLED is true, so with
@@ -580,6 +609,9 @@ func run(args []string) int {
 		relaySvc: relaySvc,
 		meshSvc:  meshSvc,
 		fedHold:  fedHold,
+		// The inbox queue gauges read the store that actually serves
+		// (CR-FEAT-035). A store that cannot report a depth leaves them NaN.
+		queueDepth: newQueueDepthReader(regStore),
 	})
 
 	srv := &http.Server{

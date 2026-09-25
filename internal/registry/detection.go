@@ -33,6 +33,13 @@ const (
 	VerdictAgentNotFound = "agent_not_found"
 	// VerdictRejected — the request itself was refused (400).
 	VerdictRejected = "rejected"
+	// VerdictRateLimited — the request was well-formed and the target was
+	// reachable, but the bus refused to take on more work: the global ingest
+	// budget shed it (429 RATE_LIMITED_GLOBAL, CR-FEAT-035). It is its own
+	// verdict rather than "rejected" because the delivery was NOT the problem —
+	// a retry later is expected to succeed — and an operator reading the log
+	// needs to tell a client bug from a saturated bus.
+	VerdictRateLimited = "rate_limited"
 	// VerdictUnspecified — the handler reached no terminal branch the
 	// detector knows; recorded as such rather than guessed.
 	VerdictUnspecified = "unspecified"

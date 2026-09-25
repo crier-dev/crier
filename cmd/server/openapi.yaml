@@ -122,7 +122,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
@@ -181,6 +181,45 @@ paths:
                     type: integer
                     description: Effective relay publish budget (CR_RATE_LIMIT_PER_MINUTE); 0 means unlimited
                     example: 100
+                  global_rate_limit_per_minute:
+                    type: integer
+                    description: >-
+                      Effective GLOBAL inbox-ingest budget in deliveries per
+                      minute across every agent (CR_RATE_LIMIT_GLOBAL_PER_MINUTE,
+                      CR-FEAT-035); 0 — the default — means no global budget
+                      exists and the delivery path never sheds. Reported beside
+                      the per-agent publish cap because the two are different
+                      lanes: this one is what refuses POST /agents/{id}/inbox
+                      with 429 RATE_LIMITED_GLOBAL.
+                    example: 0
+                  queue_depth:
+                    type: object
+                    nullable: true
+                    description: >-
+                      LIVE store-wide inbox queue (CR-FEAT-035): how much is
+                      waiting right now. Unlike every other field here this is
+                      a measurement, not posture, so it changes between two
+                      reads of the same server. It is counts and an age only —
+                      never a payload, a message id or an agent id. Null when
+                      the serving store cannot report a depth (a remote
+                      proxy), so "empty" and "unavailable" are never the same
+                      reading; GET /metrics reports the same numbers as the
+                      inbox_queue_* gauges, and NaN there carries the same
+                      "cannot report" meaning.
+                    required: [pending, leased, oldest_age_s]
+                    properties:
+                      pending:
+                        type: integer
+                        description: Un-acknowledged, un-expired messages across all inboxes, leased ones included (a leased message is still queued)
+                        example: 41
+                      leased:
+                        type: integer
+                        description: How many of `pending` are currently held under a live lease
+                        example: 3
+                      oldest_age_s:
+                        type: integer
+                        description: How long the oldest pending message has been waiting, in seconds (0 when nothing is queued)
+                        example: 12
                   log_level:
                     type: string
                     enum: [debug, info, warn, error]
@@ -284,7 +323,21 @@ paths:
         "401":
           description: X-Agent-ID header required (rate limiting enabled)
         "429":
-          description: Rate limit exceeded
+          description: |
+            Per-agent publish rate limit exceeded (`CR_RATE_LIMIT_PER_MINUTE`,
+            default 100 events/minute, keyed on the X-Agent-ID header). The
+            refusal carries a `Retry-After` header (CR-FEAT-035) — an integer
+            number of seconds, never below 1 — so a client knows how long to
+            back off instead of guessing. The budget is PER AGENT: one noisy
+            publisher cannot spend another's. For the delivery path's separate
+            GLOBAL budget see POST /agents/{id}/inbox.
+          headers:
+            Retry-After:
+              description: Whole seconds the caller should wait before retrying; a retry at that instant is admitted if no other caller has spent the budget in the meantime.
+              schema:
+                type: integer
+                minimum: 1
+                example: 47
 
   /relay/subscribe/{topic}:
     get:
@@ -764,6 +817,31 @@ paths:
                   minimum: 0
                   maximum: 9
                   default: 0
+                  description: |
+                    Retrieval priority, 0..9 (CR-FEAT-035) — higher is handed
+                    back first by GET /agents/{id}/inbox. Ties keep arrival
+                    order, and the default (0) is plain FIFO, so a delivery
+                    that omits this field is ordered exactly as it was before
+                    the field existed. A value outside 0..9 is rejected with
+                    400 (`{"error":"priority must be 0..9"}`) and nothing is
+                    dispatched or stored — it is never clamped, because a
+                    clamped priority would read back in an order the caller
+                    could not explain from its own request.
+
+                    The queue is not a priority queue in the algorithm-textbook
+                    sense: a higher-priority message is preferred among the
+                    messages that are CLAIMABLE at that moment (unacked,
+                    unexpired, unleased), and each retrieve hands back at most
+                    `limit` of them. A priority is therefore how an urgent
+                    message gets ahead of a low-value backlog in the SAME
+                    inbox; it cannot pre-empt a lease already handed out, and
+                    it does not reorder across agents.
+
+                    Stored on THE MESSAGE, so it is the postgres column
+                    `inbox_entries.priority` (migration 007) — the ordering
+                    survives a restart on the durable backend, and an existing
+                    database reads every message it already holds as priority
+                    0, which is the order it has always had.
                 idempotency_key:
                   type: string
                   maxLength: 128
@@ -932,6 +1010,63 @@ paths:
                 $ref: "#/components/schemas/GuardBlockedResponse"
         "404":
           description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) when the request names a sender, or reported as 502 FEDERATION_FAILED (no hold queue, queue refused, or no sender on the request — DF-CRIER-129)."
+        "429":
+          description: |
+            Global ingest budget exceeded (CR-FEAT-035,
+            `CR_RATE_LIMIT_GLOBAL_PER_MINUTE`) — the bus refused to take on
+            more work. The delivery reached no transport, no guard call and no
+            inbox: a shed is cheap by construction, which is the point of
+            having one. The error is NAMED (`RATE_LIMITED_GLOBAL`) rather than
+            prose, so a client can branch on it, and the response carries a
+            `Retry-After` header plus the same figure as `retry_after_s` in the
+            body.
+
+            Scope: GLOBAL across every agent and every sender — the budget
+            exists because a per-agent cap cannot shed a flood that arrives
+            from many ids at once. It is opt-in: with
+            `CR_RATE_LIMIT_GLOBAL_PER_MINUTE` unset (the default, 0) no
+            delivery is ever refused with this status, and the only
+            backpressure on the bus is the per-agent publish cap
+            (`CR_RATE_LIMIT_PER_MINUTE`, POST /relay/publish). Per-namespace
+            budgets are part of CR-FEAT-029; today every delivery counts
+            against one global key.
+
+            Ordering: the budget is checked AFTER the request has been decoded,
+            validated and the containment (CR-FEAT-030) decision made, and
+            BEFORE idempotency bookkeeping, federation forwarding, the guard
+            call and the store write — so a malformed delivery still answers
+            400, a contained agent still answers 403 `AGENT_QUARANTINED`, and
+            neither is masked by a 429.
+          headers:
+            Retry-After:
+              description: Whole seconds to wait before retrying; a retry at that instant is admitted if no other caller has spent the budget in the meantime.
+              schema:
+                type: integer
+                minimum: 1
+                example: 60
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, scope, limit_per_minute, retry_after_s]
+                properties:
+                  error:
+                    type: string
+                    enum: [RATE_LIMITED_GLOBAL]
+                    description: The named refusal. A client that retries on any 429 without reading this cannot tell the two budgets apart.
+                  scope:
+                    type: string
+                    enum: [global]
+                    description: Which budget refused the delivery. `global` today; CR-FEAT-029 adds one value per namespace.
+                  limit_per_minute:
+                    type: integer
+                    description: The budget in force, so a client logs the number it was refused by rather than assuming a server default.
+                    example: 600
+                  retry_after_s:
+                    type: integer
+                    minimum: 1
+                    description: The same wait as the Retry-After header, for clients that log only the body.
+                    example: 60
         "502":
           description: |
             Bad gateway — the delivery was rejected upstream; a rejection is never reported as 404.

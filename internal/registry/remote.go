@@ -307,6 +307,13 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	if entry.TTLSeconds != nil {
 		body["ttl_seconds"] = *entry.TTLSeconds
 	}
+	// Forward the retrieval priority the same way (CR-FEAT-035): a proxy that
+	// dropped it would hand the downstream relay a queue that reads in a
+	// different order than the caller asked for. Absent at the default, which
+	// is what the downstream relay would store anyway.
+	if entry.Priority != MinMessagePriority {
+		body["priority"] = entry.Priority
+	}
 	if err := s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox", body, &out); err != nil {
 		return err
 	}

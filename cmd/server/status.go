@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/crier-dev/crier/config"
@@ -30,6 +31,21 @@ import (
 // guard base URL. A hostname or a filesystem path can leak topology, so the
 // federation hold queue reports its durability MODE ("none"/"memory"/"file")
 // rather than CR_FED_QUEUE_FILE's path.
+//
+// CR-FEAT-035 adds two fields that are not posture at all, and the distinction
+// is deliberate rather than a lapse:
+//
+//   - "global_rate_limit_per_minute" is posture (the effective value of the
+//     CR_RATE_LIMIT_GLOBAL_PER_MINUTE budget, 0 = none), the same class as the
+//     per-agent "rate_limit_per_minute" it sits beside;
+//   - "queue_depth" is a MEASUREMENT — how much is queued right now — which the
+//     endpoint reports because "nothing sheds load and nothing reports depth"
+//     is exactly the blind spot the review named: an operator holding /health
+//     "ok" could not tell a healthy relay from one 40 000 messages behind. It
+//     carries counts and an age, never a payload, a message id, an agent id or
+//     any configuration, and it is read per request (a snapshot, not a cache).
+//     A store that cannot report (a remote proxy) reports null rather than a
+//     fabricated zero.
 //
 // Auth: /status is NOT on the exempt list in internal/middleware/auth.go, so
 // with CR_AUTH_TOKEN set it requires the Bearer header like every other
@@ -82,6 +98,61 @@ func federationHoldQueueMode(cfg config.Config) string {
 	return federationHoldQueueMemory
 }
 
+// statusQueueDepth is the WIRE shape of the live queue measurement (CR-FEAT-035):
+// counts plus an age in whole seconds. `oldest_age_s` is 0 when nothing is
+// queued — there is no message whose age could be reported — and the object is
+// null as a whole when the serving store cannot answer, so "empty" and
+// "unavailable" are never the same reading.
+type statusQueueDepth struct {
+	// Pending is the number of un-acknowledged, un-expired messages across all
+	// inboxes (leased messages included: a leased message is still queued).
+	Pending int `json:"pending"`
+	// Leased is how many of Pending are currently held under a live lease.
+	Leased int `json:"leased"`
+	// OldestAgeS is how long the oldest pending message has been waiting.
+	OldestAgeS int `json:"oldest_age_s"`
+}
+
+// queueDepthReader reads the serving store's live queue depth. ok=false means
+// "this store cannot report" (or the read failed), which the surfaces render as
+// an absence — null in GET /status, NaN on the metric — rather than as a zero.
+type queueDepthReader func() (registry.QueueDepth, bool)
+
+// newQueueDepthReader adapts a store to the reader above. A store that does not
+// implement registry.DepthReporter (the remote proxy) yields nil: no reader at
+// all, so nothing anywhere reports a depth it cannot measure.
+func newQueueDepthReader(store registry.Store) queueDepthReader {
+	reporter, ok := store.(registry.DepthReporter)
+	if !ok {
+		return nil
+	}
+	return func() (registry.QueueDepth, bool) {
+		depth, err := reporter.QueueDepth()
+		if err != nil {
+			slog.Warn("queue depth unavailable", "error", err)
+			return registry.QueueDepth{}, false
+		}
+		return depth, true
+	}
+}
+
+// statusQueueDepthFrom renders a live measurement as the wire object, or nil
+// when the store cannot report.
+func statusQueueDepthFrom(read queueDepthReader) *statusQueueDepth {
+	if read == nil {
+		return nil
+	}
+	depth, ok := read()
+	if !ok {
+		return nil
+	}
+	return &statusQueueDepth{
+		Pending:    depth.Pending,
+		Leased:     depth.Leased,
+		OldestAgeS: int(depth.OldestAge.Seconds()),
+	}
+}
+
 // statusResponse is the wire contract of GET /status. Every field is an
 // effective boolean or mode — see the file comment for what is deliberately
 // absent. The Build object is buildinfo.Info itself, which is the same type
@@ -124,6 +195,18 @@ type statusResponse struct {
 	// RateLimitPerMinute is the effective relay publish budget; 0 means
 	// unlimited (CR_RATE_LIMIT_PER_MINUTE).
 	RateLimitPerMinute int `json:"rate_limit_per_minute"`
+	// GlobalRateLimitPerMinute is the effective global inbox-ingest budget in
+	// deliveries per minute across every agent (CR_RATE_LIMIT_GLOBAL_PER_MINUTE,
+	// CR-FEAT-035); 0 — the default — means no global budget exists and the
+	// delivery path never sheds. It is reported next to the per-agent publish
+	// cap because the two are different lanes and an operator deploying one
+	// while reading the other must be able to tell them apart.
+	GlobalRateLimitPerMinute int `json:"global_rate_limit_per_minute"`
+	// QueueDepth is the live store-wide inbox queue: how many messages are
+	// waiting, how many of those are held under a lease, and how old the oldest
+	// one is. Null when the serving store cannot report it (a remote proxy).
+	// It is a measurement, not posture — see the file comment.
+	QueueDepth *statusQueueDepth `json:"queue_depth"`
 	// LogLevel and LogFormat are the effective logger settings, so an
 	// operator can tell a debug server from an info one without the log.
 	LogLevel  string `json:"log_level"`
@@ -171,9 +254,13 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		WebhookSigning:      cfg.Webhook.Secret != "",
 		FederationEnabled:   len(cfg.Federation.Links) > 0,
 		FederationHoldQueue: federationHoldQueueMode(cfg),
-		MetricsEnabled:      cfg.Observability.EnableMetrics,
-		PProfEnabled:        cfg.Observability.EnablePProf,
-		Build:               buildinfo.Resolve(),
+		// The global ingest budget (CR-FEAT-035). Read from the same
+		// configuration the handler was installed from, so a server that had
+		// no budget installed cannot advertise one.
+		GlobalRateLimitPerMinute: cfg.GlobalRateLimitPerMinute,
+		MetricsEnabled:           cfg.Observability.EnableMetrics,
+		PProfEnabled:             cfg.Observability.EnablePProf,
+		Build:                    buildinfo.Resolve(),
 	}
 }
 
@@ -182,12 +269,27 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 // change while the process serves — so the handler reads no globals and stays
 // testable without env plumbing (the same seam registerObservability uses).
 //
-// Encoding a fixed-shape struct of booleans, small ints, short strings and a
-// nested identity cannot fail; a write error here means the client went away,
-// which the connection layer already reports (see handleVersion).
+// It is the no-store form: the live queue measurement is reported as null
+// because there is no store to read it from. run() mounts newStatusHandlerWithQueue
+// instead, so the served endpoint reports the real thing.
 func newStatusHandler(cfg config.Config, registryBackend string) http.HandlerFunc {
+	return newStatusHandlerWithQueue(cfg, registryBackend, nil)
+}
+
+// newStatusHandlerWithQueue is newStatusHandler plus the live inbox queue
+// measurement (CR-FEAT-035). read is consulted PER REQUEST — the whole point of
+// the field is that it changes while the posture does not — and a nil reader
+// (or a store that cannot report) serializes as `"queue_depth": null`.
+//
+// Encoding a fixed-shape struct of booleans, small ints, short strings, a small
+// nested measurement and a nested identity cannot fail; a write error here
+// means the client went away, which the connection layer already reports (see
+// handleVersion).
+func newStatusHandlerWithQueue(cfg config.Config, registryBackend string, read queueDepthReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
+		resp := buildStatusResponse(cfg, registryBackend)
+		resp.QueueDepth = statusQueueDepthFrom(read)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(buildStatusResponse(cfg, registryBackend))
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }

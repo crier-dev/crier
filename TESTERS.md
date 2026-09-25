@@ -391,6 +391,59 @@ is not selected — federation forwards by agent id); the round-robin cursor liv
 in the serving process; and there is no all-holders fan-out — one holder per
 delivery.
 
+**1c. Priority & backpressure (CR-FEAT-035)** — the two gaps left after the
+first pass: a low-value flood could starve an urgent message, and the per-agent
+100/min publish cap was the only thing that ever refused a request. The recipes
+below check the priority field, and name what to look for in the two backpressure
+surfaces (the global budget needs a server started with
+`CR_RATE_LIMIT_GLOBAL_PER_MINUTE` set — it is off by default, and with it off the
+delivery path is unchanged):
+
+```bash
+# A. A delivery may name a retrieval priority, 0..9 (default 0 = today's FIFO).
+#    Retrieve hands the HIGHEST priority claimable message back first, whatever
+#    its arrival position — deliver a batch of low-value messages, then one
+#    urgent one, and retrieve with max=1: the urgent one comes back.
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"batch":1}}'                                    # 201 (priority 0)
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"alert":"disk"},"priority":9}'                   # 201
+# then, signed as bob: GET /agents/bob/inbox?max=1 -> the {"alert":"disk"} message
+# with "priority":9 on it. On a priority-less message the key is absent entirely,
+# so a client written before this field existed parses the same bytes it always did.
+
+# B. Out of range is refused, never clamped, and stores nothing (a clamped
+#    priority would retrieve in an order the caller cannot explain).
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"n":1},"priority":10}'                           # 400
+
+# C. Queue depth is readable where operators look: GET /status carries
+#    "queue_depth":{"pending":N,"leased":M,"oldest_age_s":S} beside
+#    "global_rate_limit_per_minute", and GET /metrics (CR_ENABLE_METRICS=true)
+#    exposes the same numbers as inbox_queue_depth / inbox_queue_leased /
+#    inbox_queue_oldest_age_seconds plus inbox_shed_total{scope}.
+
+# D. The global budget, when set (CR_RATE_LIMIT_GLOBAL_PER_MINUTE=N): the N+1th
+#    delivery inside the minute answers 429 with a Retry-After header and a
+#    NAMED body — {"error":"RATE_LIMITED_GLOBAL","scope":"global",
+#    "limit_per_minute":N,"retry_after_s":<same as the header>} — and nothing was
+#    stored. The per-agent publish cap's 429 (POST /relay/publish) carries
+#    Retry-After too now; its body is unchanged.
+```
+
+The two verdicts below are executed by `make docs-check` against its own server:
+
+<!-- doccheck -->
+```bash
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"urgent":1},"priority":9}'   # -> 201
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' -d '{"payload":{"urgent":1},"priority":10}'  # -> 400
+```
+
+Check the refusal text too: it names the range (`{"error":"priority must be
+0..9"}`), and the inbox above is unchanged by it — `priority: 9` is the last
+value inside the documented range and is accepted, `priority: 10` is one past it
+and is refused.
+
 **2. Relay pub/sub** — fan-out to live subscribers (topic patterns support `*`
 for exactly one segment and a terminal `>` for one-or-more):
 

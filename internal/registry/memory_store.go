@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -171,6 +172,13 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 // leased and unexpired) it returns a non-nil empty slice and an EMPTY lease
 // ID — no lease is minted for a batch that does not exist (DF-CRIER-32).
 // Under write lock, so concurrent retrievers get disjoint message sets.
+//
+// ORDER (CR-FEAT-035): highest Priority first; messages of equal priority keep
+// their arrival order. Every message delivered without a `priority` carries the
+// zero value, so a queue of them comes back exactly FIFO — the ordering this
+// method had before priorities existed. The ordering is applied to the whole
+// claimable set BEFORE the batch is cut to maxMessages, which is what makes a
+// high-priority message behind a long low-priority backlog reachable at all.
 func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxMessages int) ([]*InboxEntry, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -179,28 +187,24 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		return nil, "", fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 
+	// A non-positive batch size claims nothing (the pre-CR-FEAT-035 contract)
+	// and, for the same reason as before, touches no entry's lease state.
+	if maxMessages <= 0 {
+		return []*InboxEntry{}, "", nil
+	}
+
 	now := time.Now()
 	queue := s.inboxes[agentID]
 
-	// Pass 1: pick the batch. Expired leases on the way past are released
-	// inline so the entry falls through to the claiming pass (DF-CRIER-33).
-	// Without this, a default-backend message was redelivered only after
-	// lease + a purge tick (60s for a documented 30s lease), because
+	// Pass 1: collect every claimable message. Expired leases on the way past
+	// are released inline so the entry falls through to the claiming pass
+	// (DF-CRIER-33). Without this, a default-backend message was redelivered
+	// only after lease + a purge tick (60s for a documented 30s lease), because
 	// PurgeExpired was the only release path. PurgeExpired remains the
 	// backstop for messages nobody retrieves.
-	capHint := maxMessages
-	if capHint < 0 {
-		capHint = 0
-	}
-	if capHint > len(queue) {
-		capHint = len(queue)
-	}
-	batch := make([]*InboxEntry, 0, capHint)
+	available := make([]*InboxEntry, 0, len(queue))
 
 	for _, entry := range queue {
-		if len(batch) >= maxMessages {
-			break
-		}
 		// Skip already ACKed messages.
 		if entry.ACKed {
 			continue
@@ -229,13 +233,25 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 			}
 		}
 
-		batch = append(batch, entry)
+		available = append(available, entry)
 	}
 
-	if len(batch) == 0 {
+	if len(available) == 0 {
 		// Nothing was leased: minting a lease here would hand the caller a
 		// usable-looking credential over zero messages.
 		return []*InboxEntry{}, "", nil
+	}
+
+	// Pass 2: order the claimable set (CR-FEAT-035) and cut the batch. Stable,
+	// so equal priorities keep the arrival order `available` was built in.
+	if len(available) > 1 {
+		sort.SliceStable(available, func(i, j int) bool {
+			return available[i].Priority > available[j].Priority
+		})
+	}
+	batch := available
+	if len(batch) > maxMessages {
+		batch = batch[:maxMessages]
 	}
 
 	leaseID, err := newLeaseID()
@@ -243,7 +259,7 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		return nil, "", fmt.Errorf("generate lease id: %w", err)
 	}
 
-	// Pass 2: stamp the claimed batch with the lease.
+	// Pass 3: stamp the claimed batch with the lease.
 	for _, entry := range batch {
 		leasedAt := now
 		entry.LeasedAt = &leasedAt
@@ -356,6 +372,55 @@ func (s *MemoryStore) Stats(agentID string) (queueDepth, leasedCount int, oldest
 	}
 
 	return queueDepth, leasedCount, oldestAge, nil
+}
+
+// QueueDepth reports the store-wide inbox queue accounting (CR-FEAT-035,
+// registry.DepthReporter): every un-acknowledged, un-expired message in every
+// inbox, how many of those are held under a live lease, and how long the oldest
+// one has been waiting.
+//
+// The per-message rules are the SAME predicates this store's Stats already
+// applies per agent (a zero ExpiresAt means "never expires"; a lease counts as
+// held while LeasedAt/LeaseID are set), so the store-wide number is the sum of
+// the per-agent ones rather than a second definition of "queued". The in-memory
+// store cannot fail here, but the signature returns an error because
+// DepthReporter is shared with the PostgreSQL backend, where a depth query can
+// fail.
+func (s *MemoryStore) QueueDepth() (QueueDepth, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now()
+	var (
+		depth  QueueDepth
+		oldest time.Time
+	)
+
+	for _, queue := range s.inboxes {
+		for _, entry := range queue {
+			if entry.ACKed {
+				continue
+			}
+			// A zero ExpiresAt is "never expires" (DF-CRIER-37) — counted,
+			// not silently treated as expired.
+			if !entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(now) {
+				continue
+			}
+			depth.Pending++
+			if entry.LeasedAt != nil && entry.LeaseID != "" {
+				depth.Leased++
+			}
+			if oldest.IsZero() || entry.CreatedAt.Before(oldest) {
+				oldest = entry.CreatedAt
+			}
+		}
+	}
+
+	if !oldest.IsZero() {
+		depth.OldestAge = now.Sub(oldest)
+	}
+
+	return depth, nil
 }
 
 // PurgeExpired removes all expired messages from all inboxes and returns

@@ -105,6 +105,17 @@ type InboxEntry struct {
 	// letter state which key produced the message. Deduplication itself
 	// happens at deliver time, before anything is stored.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// Priority is the sender-supplied retrieval priority (CR-FEAT-035),
+	// bounded by MinMessagePriority..MaxMessagePriority (0..9). Retrieve hands
+	// back the HIGHEST priority messages first; messages of equal priority keep
+	// their arrival order, and the zero value is that arrival order for
+	// everything — a delivery that names no priority is exactly the FIFO
+	// message it was before this field existed.
+	//
+	// It is `omitempty` on purpose: a priority-less message must serialise to
+	// byte-identical JSON (no `"priority":0` key appears on the wire), so the
+	// retrieve body of every pre-existing client is unchanged.
+	Priority int `json:"priority,omitempty"`
 	// TTLSeconds is the lifetime the delivery requested, in seconds
 	// (POST /agents/{id}/inbox `ttl_seconds`, documented in openapi.yaml but
 	// parsed nowhere until DF-CRIER-37). It is not serialized: it exists so
