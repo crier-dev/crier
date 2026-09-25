@@ -2327,3 +2327,16 @@ tasks:
   status: complete
   created_at: '2026-09-25T07:24:11.351222+00:00'
   completed_at: '2026-09-25T07:37:56.562653+00:00'
+- id: INT-MUSTER-005
+  title: Spec-generated client E2E cell
+  criteria:
+  - scripts/e2e-battery.sh gains a cell that obtains a client for crier GENERATED
+    from docs/openapi.yaml (muster openapi-cli if on PATH, else a spec-driven client
+    built from the spec at battery runtime) and drives signed register 201, deliver
+    201, signed retrieve 200 with intact payload, ack 204
+  - the cell FAILS CLOSED when the spec cannot be read (never a vacuous pass); battery
+    passes locally with the new gate (24 -> 25+); shell-yaml-check and gofmt-check
+    green
+  status: complete
+  created_at: '2026-09-25T15:35:22.489435+00:00'
+  completed_at: '2026-09-25T15:57:07.078822+00:00'
