@@ -218,12 +218,21 @@ live run proved:
    envelope — so a wildcard/multi-topic subscriber cannot route frames
    (DOGFOOD-RELAY-1, 2026-09-18).
 9. `POST /relay/publish` needs `X-Agent-ID` on default config (rate limit on);
-   the integration-guide example omits it → 401 (DOGFOOD-RELAY-4).
-10. crier-mcp ephemeral key: a SECOND bridge run with the same CRIER_AGENT_ID
+   the signature trio on publish is PRESENCE-ONLY by design — a bogus
+   signature still answers 202, so any client can claim any agent id and
+   spend its 100/min budget. Verified identity (trio checked against the
+   registered key, ±30s window) applies to inbox retrieve/ack and agent
+   PATCH only (dogfood 2026-09-25); the integration-guide example omits the
+   X-Agent-ID requirement → 401 (DOGFOOD-RELAY-4).
+10. Registry `status:"online"` is registration-liveness only: `last_seen`
+    advances ONLY on a signed `PATCH /agents/{id}`, and a never-connected
+    agent still reads online while `GET /mesh/peers` shows nothing. For
+    connection truth use the mesh peers endpoint (re-verified 2026-09-25).
+11. crier-mcp ephemeral key: a SECOND bridge run with the same CRIER_AGENT_ID
     and a fresh ephemeral key gets 401 on every inbox read (the server kept the
     first run's key). Use CRIER_AGENT_PRIVATE_KEY_FILE for anything persistent
     (README documents this; it still bites — 2026-09-18 run).
-11. **Writing your own raw WebSocket client: ONE reader per connection, and
+12. **Writing your own raw WebSocket client: ONE reader per connection, and
     match on the right id.** `websockets` raises `ConcurrencyError: cannot call
     recv while another coroutine is already running recv` if a responder task
     and the main loop both `recv()` — that is a library rule, not a crier bug;
@@ -232,19 +241,19 @@ live run proved:
     `request_id` never sees the REQUEST it awaits and "hangs" while the frame
     sits in the queue. Both cost real time on the 2026-09-23 run; neither is
     crier's fault (see `docs/dogfood/diagnostics.md`).
-12. A retrieve body that *looks* truncated (`"payload":"eyJoZW...kIn0="`) is a
+13. A retrieve body that *looks* truncated (`"payload":"eyJoZW...kIn0="`) is a
     display artifact of the reading pipeline, not the wire — dump the bytes to a
     file before filing a data-loss bug (verified 2026-09-23; crier does not elide).
-13. With the guard ON (the default) and no provider key, the deliver still
+14. With the guard ON (the default) and no provider key, the deliver still
     answers in **1.4-2.1ms** with `guard.errored:true` and
     `reason:"guard_error: all providers failed: no provider api key"` — the
     router skips before calling out. A missing key is fast and says why; it is
     not a 10s stall (measured 2026-09-23).
-14. `schema_template: "openai-compatible"` hard-codes `{{payload.text}}` — a
+15. `schema_template: "openai-compatible"` hard-codes `{{payload.text}}` — a
     payload without a `text` key is delivered with an **empty** content field and
     reported as a successful delivery (DF-CRIER-279). Use `generic-custom` /
     `custom_schema` when your payload shape is anything else.
-15. **A "restart" that never took over the port answers you anyway.** A second
+16. **A "restart" that never took over the port answers you anyway.** A second
     `./bin/crier -port 8767` on a held port logs `server failed: another
     process already holds this port` to ITS OWN output and exits; the old
     process keeps serving and the old pidfile stays on disk. After any
@@ -253,10 +262,10 @@ live run proved:
     `registry_backend` is the backend you configured. A memory-backend
     message that "survived" a restart is this user-side bug, not crier's
     (measured 2026-09-24; see `docs/dogfood/diagnostics-2026-09-24.md`).
-16. `kill $(cat .crier.pid)` feeds bash the JSON pidfile (`{`, `"pid":` …) —
+17. `kill $(cat .crier.pid)` feeds bash the JSON pidfile (`{`, `"pid":` …) —
     use `make stop`, which reads the JSON, verifies `/proc/<pid>/exe`, and
     SIGTERMs (DF-CRIER-283).
-17. Fresh non-root box: `examples/demo.sh` needs `xxd`, and on Debian 13
+18. Fresh non-root box: `examples/demo.sh` needs `xxd`, and on Debian 13
     `vim-common` does NOT ship it — `apt-get download xxd && dpkg -x xxd_*.deb
     ~/xxdroot && export PATH=~/xxdroot/usr/bin:$PATH` (DF-CRIER-280). Also set
     `export GOPATH=~/gopath` after a tarball Go install to `~/go`, or go warns
