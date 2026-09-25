@@ -526,6 +526,16 @@ WHERE id = $1;`, id, at)
 	return nil
 }
 
+// nullText maps an absent string to SQL NULL, so "not recorded" has exactly one
+// representation in the database (CR-FEAT-025): an empty sender or idempotency
+// key stores NULL, never ”, and reads back as the empty string either way.
+func nullText(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // pgTimestamptz renders a message expiry for the inbox_entries.expires_at
 // column. The zero time means "never expires" (ttl_seconds=0, DF-CRIER-37):
 // Postgres has no zero time.Time, and the column is NOT NULL with a
@@ -607,12 +617,18 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	ctx, cancel := s.operationContext()
 	defer cancel()
 
+	// sender and idempotency_key are stored WITH the message (CR-FEAT-025): the
+	// first is the address a MESSAGE_EXPIRED receipt is sent to if this message
+	// expires unacknowledged, the second is the provenance a dead letter
+	// reports. An absent value is stored as SQL NULL — never as an empty string
+	// — so "not recorded" has exactly one representation.
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
-    id, agent_id, payload, created_at, expires_at,
+    id, agent_id, payload, sender, idempotency_key, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked
-) VALUES ($1, $2, $3::jsonb, $4, $5, NULL, NULL, NULL, FALSE);`,
-		entry.ID, agentID, entry.Payload, entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, NULL, NULL, NULL, FALSE);`,
+		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
+		entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -676,7 +692,8 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// live until commit, so nothing needs to be re-checked when the batch is
 	// stamped below.
 	rows, err := tx.Query(ctx, `
-SELECT id, agent_id, payload, created_at, expires_at
+SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
+       created_at, expires_at
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -698,7 +715,8 @@ LIMIT $3;`,
 		// `infinity` (ttl_seconds=0 → never expires, DF-CRIER-37) decodes
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
-		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.CreatedAt, &expiresAt); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
+			&entry.IdempotencyKey, &entry.CreatedAt, &expiresAt); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
@@ -955,47 +973,7 @@ WHERE agent_id = $1
 	return int(depth), int(leased), age, nil
 }
 
-// PurgeExpired deletes TTL-expired messages and releases elapsed leases.
-// Returns the number of deleted TTL-expired messages.
-func (s *PostgresStore) PurgeExpired() int {
-	ctx, cancel := s.operationContext()
-	defer cancel()
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		slog.Error("postgres purge expired", "error", err)
-		return 0
-	}
-	defer tx.Rollback(ctx)
-
-	now := time.Now().UTC()
-
-	tag, err := tx.Exec(ctx, `
-DELETE FROM inbox_entries
-WHERE expires_at <= $1;`, now)
-	if err != nil {
-		slog.Error("postgres purge expired", "error", err)
-		return 0
-	}
-	removed := int(tag.RowsAffected())
-
-	_, err = tx.Exec(ctx, `
-UPDATE inbox_entries
-SET leased_at = NULL,
-    lease_id = NULL,
-    lease_expires_at = NULL
-WHERE expires_at > $1
-  AND lease_expires_at IS NOT NULL
-  AND lease_expires_at <= $1;`, now)
-	if err != nil {
-		slog.Error("postgres purge expired", "error", err)
-		return 0
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		slog.Error("postgres purge expired", "error", err)
-		return 0
-	}
-
-	return removed
-}
+// PurgeExpired has moved to postgres_ownership.go (CR-FEAT-025): the sweep is
+// the same one, but it now reports the rows it removed instead of only counting
+// them, and it also applies the dead-letter retention window. PurgeExpired
+// remains the count-only entry point.

@@ -48,6 +48,14 @@ func registerTestAgent(t *testing.T, store Store) *Agent {
 }
 
 func setupRouter(store Store) *mux.Router {
+	_, r := setupRouterWithHandler(store)
+	return r
+}
+
+// setupRouterWithHandler registers the same routes setupRouter does and ALSO
+// returns the handler, so a test that has to configure it (the idempotency
+// window, presence) can.
+func setupRouterWithHandler(store Store) (*Handler, *mux.Router) {
 	handler := NewHandler(store)
 	r := mux.NewRouter()
 	r.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
@@ -58,7 +66,9 @@ func setupRouter(store Store) *mux.Router {
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", handler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", handler.HandleStats).Methods("GET")
-	return r
+	r.HandleFunc("/agents/{id}/inbox/transfer", handler.HandleTransfer).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/dead-letters", handler.HandleDeadLetters).Methods("GET")
+	return handler, r
 }
 
 // ----- AC 1: Register agent with ed25519 public key → 201, duplicate → 409 -----

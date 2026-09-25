@@ -92,6 +92,16 @@ var excludedOperations = map[string]string{
 	"relayListTopics":     "GET /relay/topics — \"List active topics\" with subscriber counts; relay operational census, not an agent-messaging verb.",
 	"fedListPeers":        "GET /fed/peers — \"List federation peers (local relay first, then linked relays with their agents)\" (CR-FEAT-006); cross-relay topology for operators, and each link is fetched live from that relay's own GET /agents.",
 	"registryUpdateAgent": "PATCH /agents/{id} — \"Partially update an agent's registration (self-configuration directive, spec §7)\", requiring the per-agent ed25519 signature headers; the crier-mcp bridge has no tool for it yet, so it is uncovered — not an agent-messaging verb; reclassify when the bridge grows a tool for it.",
+	// CR-FEAT-025 — the ownership surfaces. Both are operator/holder verbs on a
+	// specific inbox, and neither is reachable through the bridge's store today:
+	// crier-mcp runs on a RemoteStore, which implements neither the Transferrer
+	// nor the DeadLetterStore capability (the relay's OWN handler is what answers
+	// them), so a tool would have nothing to call. That is why they are
+	// EXCLUDED rather than mapped — and why the exclusion names the missing
+	// capability instead of merely saying \"no tool yet\": reclassify these when
+	// RemoteStore grows the capability and the bridge grows the tool.
+	"inboxTransfer":    "POST /agents/{id}/inbox/transfer — \"Transfer (reassign) messages from one inbox to another\": an operator rebalance of a stuck lease, signed by the current HOLDER whose inbox is being drained; RemoteStore does not implement Transferrer, so no bridge tool could execute it.",
+	"inboxDeadLetters": "GET /agents/{id}/inbox/dead-letters — \"List messages that expired unacknowledged in this inbox\": a forensics/retrieval surface for the agent whose consumer stopped consuming (and for an operator holding the relay token); RemoteStore does not implement DeadLetterStore, so no bridge tool could execute it.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

@@ -246,6 +246,10 @@ func run(args []string) int {
 	// environment sets none.
 	presence := registry.NewPresence(cfg.PresenceStaleAfter)
 	registryHandler.SetPresence(presence)
+	// Idempotency window (CR-FEAT-025): how long a sender-supplied
+	// idempotency_key deduplicates a delivery. Resolved from the registry
+	// package's own default when the environment sets none.
+	registryHandler.SetIdempotencyWindow(cfg.IdempotencyWindow)
 	// The evidence that feeds it: mesh sockets accepted for an agent and the
 	// KEEPALIVE heartbeats on them (the sink is nil when the store cannot
 	// touch — a remote proxy — in which case the mesh records nothing and this
@@ -460,6 +464,10 @@ func run(args []string) int {
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
+	// Task ownership (CR-FEAT-025): the transfer/reassign surface for a stuck
+	// lease, and the dead-letter destination a TTL expiry feeds.
+	r.HandleFunc("/agents/{id}/inbox/transfer", registryHandler.HandleTransfer).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/dead-letters", registryHandler.HandleDeadLetters).Methods("GET")
 
 	// Opt-in live-inspection surfaces (DF-CRIER-142): GET /metrics and
 	// GET /debug/pprof/* exist ONLY when CR_ENABLE_METRICS /
@@ -484,7 +492,12 @@ func run(args []string) int {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Periodic expired message purging
+	// Periodic expired message purging. The HANDLER's sweep, not the store's
+	// bare PurgeExpired (CR-FEAT-025): it dead-letters every message it removes
+	// and writes exactly one MESSAGE_EXPIRED receipt into each one's sender
+	// inbox, so a TTL expiry is a reported outcome instead of a silent delete.
+	// The store's count-only PurgeExpired remains the whole contract for a
+	// backend that cannot report.
 	purgeCtx, purgeCancel := context.WithCancel(context.Background())
 	defer purgeCancel()
 	go func() {
@@ -495,7 +508,7 @@ func run(args []string) int {
 			case <-purgeCtx.Done():
 				return
 			case <-ticker.C:
-				regStore.PurgeExpired()
+				registryHandler.PurgeExpired()
 			}
 		}
 	}()

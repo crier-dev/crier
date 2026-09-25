@@ -18,7 +18,7 @@ tags:
   - name: registry
     description: Agent registration, lookup, update and removal.
   - name: inbox
-    description: Durable per-agent inboxes — deliver, retrieve with lease, ack, stats.
+    description: Durable per-agent inboxes — deliver (with optional sender idempotency key), retrieve with lease, ack, stats, transfer/reassign between inboxes, and the dead-letter destination for messages that expired unacknowledged.
   - name: relay
     description: Topic pub/sub — publish, WebSocket subscribe, list topics.
   - name: mesh
@@ -764,6 +764,36 @@ paths:
                   minimum: 0
                   maximum: 9
                   default: 0
+                idempotency_key:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Optional sender-supplied deduplication key (CR-FEAT-025).
+                    A second delivery carrying the SAME key for the SAME agent
+                    within the relay's deduplication window
+                    (`CR_IDEMPOTENCY_WINDOW_S`, default 24h) is answered with
+                    the ORIGINAL accept — same `id`, same status, same
+                    transport — and stores nothing: one key yields one
+                    message, so a sender that retried after losing the
+                    response does not duplicate work on the target.
+
+                    The replay is marked with `idempotent_replay: true` in the
+                    response body, so a caller can always tell a replayed
+                    accept from a fresh one while still reading the message id
+                    it needs from either. A blocking delivery replays with the
+                    reply the single endpoint call produced.
+
+                    Scope: per (agent, key) pair — the same key aimed at two
+                    different agents is two deliveries. Absent or empty means
+                    no deduplication, exactly as before. A key longer than 128
+                    characters is rejected with 400. Only an ACCEPT is
+                    replayed: a rejected delivery (400/403/404/409/502)
+                    records nothing, so a corrected retry under the same key
+                    is delivered rather than answered with a replay of the
+                    rejection. Two simultaneous duplicates are serialized, and
+                    the second answers with the first one's accept; a duplicate
+                    that arrives while the original is still in flight for
+                    longer than the server's bound is answered 409.
                 ttl_seconds:
                   type: integer
                   minimum: 0
@@ -778,7 +808,7 @@ paths:
                     delivery is not stored, so it has no expiry.
       responses:
         "201":
-          description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157)."
+          description: "Message stored in the target's durable inbox (transport \"inbox\"). Webhook-configured agents never answer 201 — their deliveries accept with 200 (blocking) or 202 (async/batch) and are NOT stored (DF-CRIER-157). A stored message that expires while it is still unacknowledged is dead-lettered (GET /agents/{id}/inbox/dead-letters) and produces exactly one MESSAGE_EXPIRED receipt in the SENDER's own inbox (CR-FEAT-025): a TTL expiry is reported, never silent."
           content:
             application/json:
               schema:
@@ -799,6 +829,9 @@ paths:
                   guard:
                     $ref: "#/components/schemas/GuardVerdictMeta"
                     description: "Guard verdict metadata whenever the verdict is not a CLEAN pass (decision allow + no error + risk low + no matched patterns) — visibility for async senders. Surfaced for sanitize, errored fail-open, and any allow carrying a risk marker (e.g. the over-cap `oversize` marker); a clean allow omits it (CR-FEAT-010, spec §9.3, DF-CRIER-158)"
+                  idempotent_replay:
+                    type: boolean
+                    description: "Present (true) when this accept was answered from the recorded accept of an EARLIER delivery under the same `idempotency_key` (CR-FEAT-025): nothing was stored or dispatched by this request, and `id` is the message the first delivery stored. Absent means this request produced the accept."
         "202":
           description: |
             Accepted, not yet delivered. Two shapes — branch on the body, not on the status code (DF-CRIER-157, DF-CRIER-7).
@@ -850,6 +883,9 @@ paths:
                   request_id:
                     type: string
                     description: Sender correlation id, echoed back
+                  idempotent_replay:
+                    type: boolean
+                    description: "Present (true) when this reply was answered from the recorded accept of an EARLIER delivery under the same `idempotency_key` (CR-FEAT-025): the endpoint was called ONCE, and `reply` is the reply that single call produced."
         "400":
           description: |
             Invalid request — nothing is dispatched to the target's webhook and
@@ -1162,6 +1198,198 @@ paths:
           description: |-
             Lease conflict — every requested message ID exists, but at least one is leased under a different (or no) lease. The body reports the current lease held on the message, so the caller can re-retrieve instead of acking with a stale lease.
 
+  /agents/{id}/inbox/transfer:
+    post:
+      operationId: inboxTransfer
+      tags: [inbox]
+      summary: Transfer (reassign) messages from one inbox to another
+      description: |
+        Moves messages out of this inbox and into another agent's — the
+        rebalance surface for a STUCK lease (CR-FEAT-025). A holder that took a
+        message and never acked it can be worked around immediately: the
+        messages land in the destination UNLEASED, so a live worker claims them
+        without waiting out the lease and racing every other consumer for them.
+
+        The lease stays a real lock by default: a message that is currently
+        leased must be moved under ITS lease (`lease_id`), exactly as an ack
+        requires, and a mismatch answers 409 with nothing moved. An UNLEASED
+        message needs no lease — nobody owns it, and it is claimable by any
+        consumer anyway — so rebalancing unfetched work needs no override.
+        `force: true` is the explicit operator override for a holder that is
+        gone: it moves the messages whatever their lease state, and it must be
+        asked for on every call.
+
+        Messages move as a UNIT: an unknown ID answers 404 and nothing moves. A
+        moved message keeps its id, payload, creation time and expiry; only its
+        agent and lease/ack state change.
+
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig
+        — the same signing contract as DELETE /agents/{id}: sign
+        "POST\n/agents/{id}/inbox/transfer\n<unix-seconds>". The holder signs its
+        own rebalance; an operator acting on a dead holder's behalf uses the
+        shared relay token (CR_AUTH_TOKEN) with signature enforcement off, the
+        same authorization the other inbox routes accept.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The CURRENT holder's agent id — the inbox the messages move out of.
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      security:
+        - bearerAuth: []
+          agentSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_agent_id, message_ids]
+              properties:
+                target_agent_id:
+                  type: string
+                  description: "The destination inbox. Must be a registered agent, and must differ from the {id} in the path (400 otherwise). An unregistered target answers 404 — a transfer to nowhere is refused, never queued."
+                lease_id:
+                  type: string
+                  description: "The lease a LEASED message is currently held under. A message held under a different (or no) lease answers 409 and nothing moves. An unleased message needs no lease — nobody owns it, and it is claimable by any consumer anyway, so moving it displaces nobody."
+                message_ids:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                  description: "The messages to move — required and non-empty. All of them move or none does: an ID the source inbox does not hold (never delivered, already acked, or expired) is answered 404 naming the offending IDs."
+                force:
+                  type: boolean
+                  description: "Operator override: move the messages whatever their lease state, clearing the lease so the destination can claim them. The escape hatch for a holder that is gone. Never implied and never defaulted — it must be set on every call that needs it, which is why this schema states no default at all (an absent field is false by the JSON contract, not by a server-side default)."
+      responses:
+        "200":
+          description: Messages moved (all of them, or the request was rejected)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, moved, message_ids]
+                properties:
+                  from:
+                    type: string
+                    description: The source inbox the messages left.
+                  to:
+                    type: string
+                    description: The destination inbox the messages joined, unleased.
+                  moved:
+                    type: integer
+                    description: How many messages moved — equal to len(message_ids) on success.
+                  message_ids:
+                    type: array
+                    items:
+                      type: string
+                    description: The moved message ids, in the order they were requested. They are unchanged, so a lease or receipt naming an id still resolves after the move.
+                  forced:
+                    type: boolean
+                    description: Present (true) when the move overrode a lease.
+        "400":
+          description: Invalid request body, a missing target_agent_id or message_ids, or a target equal to the source.
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the source agent
+        "404":
+          description: |-
+            The source agent is not registered, the target agent is not registered, or at least one message_id is not in the source inbox. The error body names the unknown ids.
+        "409":
+          description: |-
+            Lease conflict — every requested message ID exists in the source inbox, but at least one is leased under a different (or no) lease and `force` was not set. Nothing moved. The body reports the current lease held on the message.
+        "501":
+          description: The configured registry store does not implement transfers.
+
+  /agents/{id}/inbox/dead-letters:
+    get:
+      operationId: inboxDeadLetters
+      tags: [inbox]
+      summary: List messages that expired unacknowledged in this inbox
+      description: |
+        The dead-letter destination (CR-FEAT-025): the messages that expired
+        while they were still unacknowledged in this agent's inbox, newest
+        first, each with the payload that was delivered and the correlation ids
+        of the delivery. A message expires because nobody came back for it — the
+        queue this answers for is the one whose consumer stopped consuming.
+
+        Every message listed here also produced exactly ONE `MESSAGE_EXPIRED`
+        receipt in its SENDER's inbox, and its `message_id` is the primary key
+        of the destination: a message is dead-lettered once, so it is reported
+        once.
+
+        The agent ROW need not still exist: a dead letter outlives the
+        registration it was addressed to (that is precisely when it matters
+        most), so this route answers from the dead-letter destination alone
+        rather than 404-ing on a missing registry row.
+
+        Retention: the destination is bounded by TIME. A persisting backend
+        sweeps records older than its documented retention window (7 days) on
+        the same pass that produces them, and the in-memory backend keeps the
+        most recent records up to its capacity. A record that ages out is gone —
+        read it while it is there.
+
+        When CR_REQUIRE_AGENT_SIG=true (the default), this endpoint requires the
+        per-agent ed25519 signature headers X-Agent-ID, X-Agent-Ts, X-Agent-Sig
+        — the same signing contract as DELETE /agents/{id}: sign
+        "GET\n/agents/{id}/inbox/dead-letters\n<unix-seconds>".
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent id whose inbox the messages expired in.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: "Maximum records to return. Honored or rejected, never silently clamped: a value outside 1..100 (or a non-integer) answers 400."
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
+      security:
+        - bearerAuth: []
+          agentSignature: []
+      responses:
+        "200":
+          description: Dead letters for this inbox (an empty array is a normal answer — nothing has expired here)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, dead_letters, count]
+                properties:
+                  agent_id:
+                    type: string
+                    description: The inbox these records belong to.
+                  dead_letters:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeadLetter"
+                    description: Always a JSON array (never null). Newest first.
+                  count:
+                    type: integer
+                    description: "The number of records in THIS response (the page), never a total."
+        "400":
+          description: limit is not an integer, or is outside 1..100.
+        "401":
+          description: Missing or invalid agent signature (when CR_REQUIRE_AGENT_SIG=true)
+        "403":
+          description: X-Agent-ID does not match the target agent
+        "501":
+          description: The configured registry store does not keep a dead-letter destination.
+
 components:
   parameters:
     XAgentID:
@@ -1202,9 +1430,10 @@ components:
         X-Agent-ID (must match the {id} in the path, else 403) and X-Agent-Ts
         (±30 seconds of server time). Required — alongside bearerAuth — when
         CR_REQUIRE_AGENT_SIG=true (the default) on DELETE /agents/{id}, PATCH
-        /agents/{id}, GET /agents/{id}/inbox, GET /agents/{id}/inbox/stats and
-        POST /agents/{id}/inbox/ack; an unsigned or invalidly signed request is
-        rejected with 401.
+        /agents/{id}, GET /agents/{id}/inbox, GET /agents/{id}/inbox/stats,
+        POST /agents/{id}/inbox/ack, POST /agents/{id}/inbox/transfer and
+        GET /agents/{id}/inbox/dead-letters; an unsigned or invalidly signed
+        request is rejected with 401.
   schemas:
     InboxEntry:
       type: object
@@ -1241,6 +1470,47 @@ components:
         guard:
           $ref: "#/components/schemas/GuardVerdictMeta"
           description: "LLM message-guard verdict metadata (CR-FEAT-010) — present on guarded deliveries, absent when the guard is disabled; a sanitized entry's payload is the quarantine notice and the original rides here in quarantined_payload"
+        sender:
+          type: string
+          description: "The agent that delivered this message (CR-FEAT-025), or absent when the delivery named no sender. Recorded WITH the message because it is the address a terminal outcome is reported to: when the message expires unacknowledged, a MESSAGE_EXPIRED receipt is written into the SENDER's inbox, which a purge that no longer knew the sender could not do. It is metadata, not routing: the webhook envelope carries its own copy."
+        idempotency_key:
+          type: string
+          description: "The sender-supplied deduplication key this message was delivered under (CR-FEAT-025), or absent when the delivery carried none. Provenance only — the deduplication itself happens at deliver time, before the message is stored. It is what lets a dead letter state which key produced the message."
+    DeadLetter:
+      type: object
+      required: [message_id, agent_id, payload, created_at, expires_at, dead_lettered_at, reason]
+      properties:
+        message_id:
+          type: string
+          description: "The id the message was delivered under. It is the primary key of the dead-letter destination, which is what makes a dead letter exactly-once: the same message cannot be recorded twice, and therefore cannot produce a second expiry receipt."
+        agent_id:
+          type: string
+          description: "The inbox the message died in — the TARGET of the delivery, not its sender."
+        sender:
+          type: string
+          description: "The agent that delivered the message, or absent when the delivery named none. It is the address the MESSAGE_EXPIRED receipt went to."
+        payload:
+          type: string
+          format: byte
+          description: "The stored message body, base64-encoded (Go []byte JSON encoding), byte-for-byte what was delivered — after the guard's verdict was applied, exactly like the inbox copy. This is the record a sender re-delivers from."
+        created_at:
+          type: string
+          format: date-time
+          description: When the message was delivered (RFC 3339).
+        expires_at:
+          type: string
+          format: date-time
+          description: "The expiry instant that elapsed unacknowledged (RFC 3339). Always finite: a message that never expires (ttl_seconds=0) is never purged and so never dead-lettered."
+        dead_lettered_at:
+          type: string
+          format: date-time
+          description: When the expiry sweep removed the message from the inbox (RFC 3339).
+        reason:
+          type: string
+          description: "Why the message was dead-lettered. `ttl_expired_unacked` is the only reason the inbox lane produces today."
+        idempotency_key:
+          type: string
+          description: "The sender-supplied key the delivery carried, or absent when it carried none (CR-FEAT-025)."
     GuardAgentConfig:
       type: object
       required: [policies]
@@ -1452,3 +1722,6 @@ components:
         guard:
           $ref: "#/components/schemas/GuardVerdictMeta"
           description: "Guard verdict metadata whenever the verdict is not a CLEAN pass — same contract as the 201 inbox accept (CR-FEAT-010, spec §9.3)"
+        idempotent_replay:
+          type: boolean
+          description: "Present (true) when this accept was answered from the recorded accept of an EARLIER delivery under the same `idempotency_key` (CR-FEAT-025) — nothing was queued by this request, and `id` is the message the first delivery queued."

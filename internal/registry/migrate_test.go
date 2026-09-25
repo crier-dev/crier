@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 5, version, "should reflect the five embedded migration files")
+	assert.Equal(t, 6, version, "should reflect the six embedded migration files (006 = CR-FEAT-025 task ownership)")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
@@ -196,7 +196,7 @@ func openTestDB(ctx context.Context, t *testing.T) *sql.DB {
 func clearSchema(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.ExecContext(ctx, `
-		DROP TABLE IF EXISTS inbox_entries, agents, schema_migrations CASCADE;
+		DROP TABLE IF EXISTS dead_letters, inbox_entries, agents, schema_migrations CASCADE;
 	`)
 	require.NoError(t, err)
 }

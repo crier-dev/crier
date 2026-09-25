@@ -109,6 +109,12 @@ Durable per-agent FIFO queues with lease-based delivery. The documented configur
 - **Long-poll:** `GET /agents/{id}/inbox?wait_seconds=N` (0..120, default `0`) parks the read and answers the moment a message is claimable, or — when the budget expires — with the SAME empty body a poll-only read gets, so a client treats the two identically and simply re-polls. Absent or `0` is today's read, byte-for-byte: no timer, no subscription. A budget outside 0..120, or a non-integer, is a `400` naming the parameter (a documented parameter is honored or rejected, never silently ignored — DF-CRIER-180). A delivery through the relay's deliver endpoint wakes a parked read immediately; inbox writes that bypass it (the federation hold queue, webhook-failure notices, a second relay process on the same store) surface within about a second. Errors are never waited out: an unregistered agent still answers `404` at once.
 - **New-message ping:** an agent that cannot hold a request open — or would rather not — can connect to the mesh with `ws://…/mesh/connect/{agentID}?inbox_notify=1` and receive one `INBOX_NOTIFY` frame on that socket per delivery into its inbox, naming the message id and the sender and carrying no payload. It is opt-in per connection (a client that did not ask receives nothing), best effort (no queue, no retry, no ack — the durable read remains the contract), and ignored if echoed back. Wire format: [`docs/mesh-protocol.md`](docs/mesh-protocol.md) §INBOX_NOTIFY.
 
+- **Task ownership (CR-FEAT-025).** The lease answers "who owns this message *now*"; it says nothing about a sender's retry, and a TTL expiry used to be a silent delete. Four surfaces close that, all inside the lease model:
+  - **Sender idempotency keys.** `POST /agents/{id}/inbox` accepts an optional `idempotency_key`. A second delivery of the same key to the same agent within the deduplication window (`CR_IDEMPOTENCY_WINDOW_S`, default 24h) is answered with the ORIGINAL accept — same `id`, same status, `"idempotent_replay":true` — and stores nothing (a blocking webhook delivery replays the reply its single endpoint call produced), so a sender that retried after losing the response does not duplicate work. Only an accept is replayed: a rejected delivery records nothing, so a corrected retry under the same key is delivered rather than answered with a replay of the rejection. The key is also recorded on the stored message, so a dead letter can name the key that produced it.
+  - **Expiry receipts.** A message that expires unacknowledged produces exactly one `MESSAGE_EXPIRED` receipt in its SENDER's inbox — the same durable error-notification shape as `WEBHOOK_FAILED`/`FEDERATION_FAILED`: `{"kind":"error","code":"MESSAGE_EXPIRED","message_id":…,"target":…,"expires_at":…,"dead_lettered":true,"dead_letter_path":"/agents/{id}/inbox/dead-letters",…}`. It is a direct store write, never routed through webhook or federation delivery, so it cannot recurse.
+  - **A dead-letter destination.** The message itself is preserved: `GET /agents/{id}/inbox/dead-letters?limit=N` (1..100, default 20) lists the messages that expired in that inbox, newest first, with the payload that was delivered, the sender, the expiry that elapsed and the reason. The record is keyed by message id (dead-lettered once, reported once) and is NOT tied to the agent row — a dead letter outlives the registration it was addressed to, which is exactly when it matters. A persisting backend sweeps records older than 7 days on the same pass that produces them; the in-memory backend keeps the most recent 1024.
+  - **Transfer / reassign.** `POST /agents/{id}/inbox/transfer` moves messages out of a STUCK lease into another agent's inbox, where they land UNLEASED and immediately claimable — the alternative is waiting out the lease and racing every other consumer. A currently-leased message must be moved under its own `lease_id` (`409` otherwise, and nothing moves); an unleased one needs no lease; `force:true` is the explicit operator override for a holder that is gone. Messages move as a unit (an unknown id moves nothing) and keep their id, payload, creation time and expiry.
+
 ### 5. Webhook delivery (bypasses the inbox)
 
 An agent that registers a `webhook` config (`PATCH /agents/{id}` with
@@ -1273,6 +1279,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_WEBHOOK_SECRET` | _(unset)_ | HMAC outbound signing. |
 | `CR_WEBHOOK_TIMEOUT_S` | `30` | Outbound webhook timeout, seconds. |
 | `CR_WEBHOOK_MAX_RETRIES` | `5` | Outbound retry count for queued async/batch webhook deliveries. When a delivery exhausts them, the sender gets exactly one durable `WEBHOOK_FAILED` in its own inbox — see [Webhook delivery](#5-webhook-delivery-bypasses-the-inbox). |
+| `CR_IDEMPOTENCY_WINDOW_S` | `86400` | How long a sender-supplied `idempotency_key` deduplicates a delivery (CR-FEAT-025). Within the window a repeated key for the same agent is answered with the original accept (`"idempotent_replay":true`, same message id) and stores nothing, so a sender that retried after losing the response does not duplicate work on the target; past it the key delivers normally. It is a per-relay, in-memory retry window, not a durable ledger — a restart closes it early, and the message the retry would have duplicated is still in the target's inbox. A non-positive or non-integer value is a startup error: a window of `0` would mean "deduplicate nothing" while the deliver schema still documents the feature. |
 | `CR_WEBHOOK_REDELIVER_S` | `30` | Redelivery interval, seconds — one queued delivery attempt per tick. |
 | `CR_WEBHOOK_PROBE_S` | `60` | Dead-target probe interval, seconds. |
 | `CR_WEBHOOK_CIRCUIT_THRESHOLD` | `10` | Consecutive failures that open the circuit. |
@@ -1320,15 +1327,15 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **14 paths** and **18 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **16 paths** and **20 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 14 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 18 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 17 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 16 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 20 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 19 router paths
 ```
 
-The router registers **17 paths**: those 14 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
+The router registers **19 paths**: those 16 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -1340,6 +1347,7 @@ The router registers **17 paths**: those 14 plus the three spec-hosting routes (
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
 | **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
+| **Ownership** | `POST /agents/{id}/inbox/transfer`, `GET /agents/{id}/inbox/dead-letters` | Rebalance a stuck lease; read the messages that expired unacknowledged (CR-FEAT-025) |
 
 ### Runtime posture — `GET /status`
 
@@ -1385,7 +1393,7 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 
 Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default** (set the env var to enable, unset = the path answers `404`):
 
-- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), and `http_requests_total{code}`.
+- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, and `http_requests_total{code}`.
 - `GET /debug/pprof/` (`CR_ENABLE_PPROF=true`) — the standard Go profiling index plus the named profiles (`heap`, `goroutine`, `block`, `mutex`, `threadcreate`, `profile`, `symbol`, `trace`, `cmdline`).
 
 **Neither path is auth-exempt**: they are served like any other authenticated route — with `CR_AUTH_TOKEN` set they require `Authorization: Bearer <token>`; with auth disabled they are open. The exempt-path list in `internal/middleware/auth.go` is unchanged. Exposure note: the pprof surface reveals runtime internals (stacks, heap) — enable it only on trusted networks.
@@ -1413,7 +1421,7 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 17 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 14 paths / 18 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
+- **API** — 19 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 16 paths / 20 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

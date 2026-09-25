@@ -324,7 +324,7 @@ claims:
     kind: count
     doc: README.md
     quote: "docs/openapi.yaml"
-    expect: 14
+    expect: 16
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -333,8 +333,11 @@ claims:
     # instead of the old conflatable "17 endpoints"; only the anchor moved.
     # DF-CRIER-113 added GET /status to the spec, so the pair is 14 paths /
     # 18 operations and both the anchor and the expectation moved with it.
-    quote: "18 operations"
-    expect: 18
+    # CR-FEAT-025 added POST /agents/{id}/inbox/transfer and
+    # GET /agents/{id}/inbox/dead-letters, so the pair is 16 / 20 and both
+    # moved with it again.
+    quote: "20 operations"
+    expect: 20
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -357,9 +360,11 @@ claims:
     doc: README.md
     # CR-GAP-057: was "16 HTTP endpoints" — the unit is now explicit (router
     # registrations in cmd/server/main.go), so the anchor moved with it.
-    # DF-CRIER-113 registered GET /status, so the count is 17.
-    quote: "17 router paths"
-    expect: 17
+    # DF-CRIER-113 registered GET /status, so the count was 17; CR-FEAT-025
+    # registered POST /agents/{id}/inbox/transfer and
+    # GET /agents/{id}/inbox/dead-letters, so it is 19.
+    quote: "19 router paths"
+    expect: 19
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
@@ -1110,4 +1115,45 @@ claims:
     doc: docs/integration-guide.md
     quote: 'it is NOT the configuration this guide documents'
     expect: 0
+    xfail: null
+
+  # --- CR-FEAT-025 (external review DISPATCH · CRI-001, via Bane 2026-09-25) ---
+  # Task ownership: idempotency keys, expiry receipts, the dead-letter
+  # destination and transfer/reassign. The anchors below fail the gate if the
+  # prose is edited away, and the ROUTE-* claims probe the two NEW paths on a
+  # live in-process server — a route that is documented but not registered
+  # (the exact failure class DF-CRIER-113 closed for /status) is a 404 here.
+  - id: ROUTE-README-INBOX-TRANSFER
+    kind: route
+    doc: README.md
+    quote: "POST /agents/{id}/inbox/transfer"
+    expect: "/agents/{id}/inbox/transfer"
+    xfail: null
+  - id: ROUTE-README-INBOX-DEAD-LETTERS
+    kind: route
+    doc: README.md
+    quote: "GET /agents/{id}/inbox/dead-letters"
+    expect: "/agents/{id}/inbox/dead-letters"
+    xfail: null
+  - id: COUNT-OWNERSHIP-IDEMPOTENT-REPLAY-README
+    kind: count
+    doc: README.md
+    # The replay marker is the whole published contract of a deduplicated
+    # delivery: if the prose stops naming it, a client cannot code against it.
+    quote: '"idempotent_replay":true'
+    expect: 1
+    xfail: null
+  - id: COUNT-OWNERSHIP-MESSAGE-EXPIRED-README
+    kind: count
+    doc: README.md
+    # The receipt code, next to the two notifications it is modelled on.
+    quote: 'MESSAGE_EXPIRED'
+    expect: 1
+    xfail: null
+  - id: COUNT-OWNERSHIP-DEAD-LETTERS-README
+    kind: count
+    doc: README.md
+    # The retrieval path a sender is pointed at by its receipt.
+    quote: 'dead-letters?limit=N'
+    expect: 1
     xfail: null

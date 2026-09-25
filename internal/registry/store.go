@@ -63,6 +63,76 @@ type ListErrorReporter interface {
 	ListError() error
 }
 
+// PurgeReporter is an optional Store capability for a purge that reports what
+// it removed (CR-FEAT-025). PurgeExpired's `int` return is the whole contract
+// for a store that cannot report — the count is all a caller can act on — but a
+// silent count is exactly how a TTL expiry became a mystery: the message was
+// removed and nothing downstream could learn its body, its id or its sender.
+//
+// Contract for implementers:
+//
+//   - the removal is completed (durably, for a persisting backend) BEFORE
+//     report is called for it, so a caller that dead-letters on the report can
+//     never resurrect a message that is still in the inbox;
+//   - report is called EXACTLY ONCE per removed message, in any order;
+//   - the report callback must not be invoked while the store's own write lock
+//     is held — the caller's report path writes back to the store (a dead
+//     letter and a receipt to the sender), and a store that calls it under its
+//     own lock deadlocks against itself;
+//   - a nil report is legal and means "count only" (the plain PurgeExpired
+//     contract), so one implementation can serve both.
+type PurgeReporter interface {
+	PurgeExpiredReport(report func(agentID string, entry *InboxEntry)) int
+}
+
+// DeadLetterStore is an optional Store capability: the durable destination for
+// messages an expiry sweep removed unacknowledged (CR-FEAT-025). A store that
+// does not implement it answers 501 on the dead-letter read path and
+// dead-letters nothing — the receipt to the sender still goes out, because a
+// sender must not lose the notification merely because the backend keeps no
+// archive.
+type DeadLetterStore interface {
+	// AppendDeadLetter records dl, and reports whether it was ADDED. A message
+	// id already recorded is not added twice, and false is returned — that is
+	// what keeps one expiry from producing two records (and, through the
+	// caller's exactly-once rule, two receipts) if a store ever reports the
+	// same removal twice.
+	AppendDeadLetter(dl *DeadLetter) (bool, error)
+	// ListDeadLetters returns up to limit dead letters for the given agent
+	// (the inbox they expired in), newest first. limit <= 0 means the store's
+	// documented default.
+	ListDeadLetters(agentID string, limit int) ([]*DeadLetter, error)
+}
+
+// Transferrer is an optional Store capability: moving messages out of one
+// inbox and into another's (CR-FEAT-025). This is the operator's answer to a
+// STUCK lease — a holder that took a message and never acked it, where the
+// alternative is waiting out the lease and then racing every other consumer for
+// it.
+//
+// Contract:
+//
+//   - agentID is the CURRENT holder's inbox, targetAgentID the destination;
+//     both must exist (ErrAgentNotFound otherwise) and must differ;
+//   - messageIDs must be non-empty and must all exist in the source inbox
+//     (ErrMessageNotFound otherwise) — a partial move is never performed;
+//   - without force, a message is movable when it is UNLEASED or leased under
+//     leaseID; one held under a DIFFERENT lease is ErrLeaseConflict and nothing
+//     moves. An unleased message is claimable by any consumer anyway, so moving
+//     it displaces nobody; a leased message is somebody's live work, and only
+//     its own lease (or an explicit force) may move it. This keeps the lease a
+//     real lock;
+//   - with force, the lease is overridden: the messages move whatever their
+//     lease state. This is the deliberate operator escape hatch for a holder
+//     that is gone, and it is explicit in the API so it is never accidental;
+//   - moved messages keep their id, payload, creation and expiry — only their
+//     agent, lease and ack state change: they land in the destination UNLEASED
+//     and claimable, which is the point of the transfer;
+//   - the number moved is returned, and equals len(messageIDs) on success.
+type Transferrer interface {
+	Transfer(agentID, leaseID string, messageIDs []string, targetAgentID string, force bool) (int, error)
+}
+
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store
@@ -95,6 +165,11 @@ type Handler struct {
 	// documented default window, so a Handler built without SetPresence still
 	// reports a crashed agent as stale instead of online forever.
 	presence Presence
+	// idempotency is the sender-supplied-key replay window (CR-FEAT-025). It is
+	// created by NewHandler; a Handler that was never built by it (a zero-value
+	// one in a test) has no window and therefore deduplicates nothing — the
+	// pre-CR-FEAT-025 behaviour — instead of panicking on the deliver path.
+	idempotency *idempotencyRegistry
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -108,7 +183,22 @@ func NewHandler(store Store) *Handler {
 		// derives status the same way a configured one does, just with the
 		// shipped window (CR-FEAT-024).
 		presence: NewPresence(DefaultStalenessWindow),
+		// The documented deduplication window a sender's idempotency key is
+		// honored within (CR-FEAT-025).
+		idempotency: newIdempotencyRegistry(DefaultIdempotencyWindow),
 	}
+}
+
+// SetIdempotencyWindow configures the window within which a sender-supplied
+// idempotency key deduplicates a delivery (CR-FEAT-025). A non-positive window
+// restores the documented default — never "deduplicate nothing", which a window
+// of 0 would otherwise mean and which would make the feature silently absent.
+func (h *Handler) SetIdempotencyWindow(window time.Duration) {
+	if h.idempotency == nil {
+		h.idempotency = newIdempotencyRegistry(window)
+		return
+	}
+	h.idempotency.SetWindow(window)
 }
 
 // SetPresence configures the rule that derives the status a row REPORTS from
@@ -235,6 +325,9 @@ type MemoryStore struct {
 	mu      sync.RWMutex
 	agents  map[string]*Agent
 	inboxes map[string][]*InboxEntry
+	// deadLetters is the process-lifetime dead-letter destination
+	// (CR-FEAT-025), guarded by mu.
+	deadLetters *memoryDeadLetters
 }
 
 // NewMemoryStore returns an in-memory agent registry with process-lifetime
@@ -242,8 +335,9 @@ type MemoryStore struct {
 // Uses crypto/rand for lease IDs and sync.RWMutex for thread safety.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		agents:  make(map[string]*Agent),
-		inboxes: make(map[string][]*InboxEntry),
+		agents:      make(map[string]*Agent),
+		inboxes:     make(map[string][]*InboxEntry),
+		deadLetters: newMemoryDeadLetters(DefaultDeadLetterCapacity),
 	}
 }
 

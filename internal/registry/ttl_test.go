@@ -358,7 +358,8 @@ func TestPostgresStoreUnit_Deliver_NeverExpiresWritesInfinity(t *testing.T) {
 	entry := &InboxEntry{Payload: []byte(`{"n":1}`), TTLSeconds: &zero}
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, pgxmock.AnyArg(), infinityArg{}).
+		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, nil, nil,
+			pgxmock.AnyArg(), infinityArg{}).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Deliver("agent", entry))
@@ -372,7 +373,8 @@ func TestPostgresStoreUnit_Deliver_TTLSeconds_HourIsWritten(t *testing.T) {
 	entry := &InboxEntry{Payload: []byte(`{"n":1}`), TTLSeconds: &hour}
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, nil, nil,
+			pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Deliver("agent", entry))
@@ -422,8 +424,8 @@ func TestPostgresStoreUnit_Retrieve_InfinityExpiryScansAsZero(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"?2"}).AddRow(1))
 	// A never-expiring message comes back from Postgres as timestamptz
 	// `infinity`; scanning it must not error and must normalize to zero.
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "created_at", "expires_at"}).
-		AddRow("msg-never", "agent", []byte(`{}`), now, pgtype.Timestamptz{Valid: true, InfinityModifier: pgtype.Infinity})
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
+		AddRow("msg-never", "agent", []byte(`{}`), "", "", now, pgtype.Timestamptz{Valid: true, InfinityModifier: pgtype.Infinity})
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)

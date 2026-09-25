@@ -61,6 +61,15 @@ type Config struct {
 	// validated at load: a non-positive or non-integer value is a startup
 	// error, never a silently ignored setting.
 	PresenceStaleAfter time.Duration
+	// IdempotencyWindow is the window within which a sender-supplied
+	// idempotency key deduplicates a delivery (CR_IDEMPOTENCY_WINDOW_S,
+	// CR-FEAT-025). Zero means "the registry package's own default"
+	// (registry.DefaultIdempotencyWindow, 24h) — resolved once, where the
+	// handler's replay registry is built, so the constant is never duplicated
+	// here. A non-integer or non-positive value is a startup error, never a
+	// silently ignored setting: a window of 0 would mean "deduplicate nothing"
+	// while the API still promised the feature.
+	IdempotencyWindow time.Duration
 	// Webhook holds push-delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	Webhook WebhookConfig
 	// Federation holds relay-to-relay link configuration (CR-FEAT-006).
@@ -372,6 +381,21 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_PRESENCE_STALE_AFTER_S: %q (want positive seconds)", v)
 		}
 		cfg.PresenceStaleAfter = time.Duration(n) * time.Second
+	}
+
+	// CR_IDEMPOTENCY_WINDOW_S is the window within which a sender-supplied
+	// idempotency key deduplicates a delivery (CR-FEAT-025). Unset leaves the
+	// zero value, which the registry resolves to its own default
+	// (registry.DefaultIdempotencyWindow) — one constant, not a copy of it
+	// here. A non-positive value is refused rather than honored: a window of 0
+	// would silently mean "deduplicate nothing", which is the feature being
+	// absent while the deliver schema still documents it.
+	if v := os.Getenv("CR_IDEMPOTENCY_WINDOW_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_IDEMPOTENCY_WINDOW_S: %q (want positive seconds)", v)
+		}
+		cfg.IdempotencyWindow = time.Duration(n) * time.Second
 	}
 
 	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).

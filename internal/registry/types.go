@@ -92,6 +92,19 @@ type InboxEntry struct {
 	LeaseID       string        `json:"lease_id,omitempty"`
 	LeaseDuration time.Duration `json:"-"` // not serialized; used by PurgeExpired
 	ACKed         bool          `json:"acked"`
+	// Sender is the originating agent id, recorded WITH the stored message
+	// (CR-FEAT-025). It is not used for delivery routing — the webhook
+	// envelope carries its own copy — but it is the address a terminal
+	// outcome is reported to: when this message expires unacknowledged the
+	// MESSAGE_EXPIRED receipt is written into the SENDER's inbox, which is
+	// impossible to do from a purge that no longer knows who sent it. Empty
+	// when the delivery named no sender.
+	Sender string `json:"sender,omitempty"`
+	// IdempotencyKey is the sender-supplied deduplication key the delivery
+	// carried (CR-FEAT-025), recorded as provenance: it is what lets a dead
+	// letter state which key produced the message. Deduplication itself
+	// happens at deliver time, before anything is stored.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	// TTLSeconds is the lifetime the delivery requested, in seconds
 	// (POST /agents/{id}/inbox `ttl_seconds`, documented in openapi.yaml but
 	// parsed nowhere until DF-CRIER-37). It is not serialized: it exists so

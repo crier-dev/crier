@@ -15,6 +15,34 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Task ownership: idempotency keys, expiry receipts, a dead-letter
+  destination, and transfer/reassign** (CR-FEAT-025) — the four gaps the
+  external review (`DISPATCH · CRI-001`, by Carter) named under "the lease is
+  the lock", closed inside the existing lease model rather than beside it.
+  `POST /agents/{id}/inbox` now takes an optional `idempotency_key`: a repeated
+  key for the same agent inside `CR_IDEMPOTENCY_WINDOW_S` (default 24h) is
+  answered with the original accept — same id, same status,
+  `"idempotent_replay":true` — and stores nothing, so a sender that retried
+  after losing the response no longer duplicates the target's work (a blocking
+  webhook delivery replays the reply its single endpoint call produced; a
+  rejected delivery records nothing, so a corrected retry is delivered rather
+  than answered with a replay of the rejection). A message that expires
+  unacknowledged now produces exactly one `MESSAGE_EXPIRED` receipt in its
+  SENDER's inbox — the same durable error-notification shape as `WEBHOOK_FAILED`
+  and `FEDERATION_FAILED`, which is why the sender is now stored WITH the
+  message — and the message itself is preserved in a dead-letter destination,
+  `GET /agents/{id}/inbox/dead-letters` (newest first, bounded by 7-day
+  retention on a persisting backend and by capacity in memory, keyed by message
+  id so a message is dead-lettered once and reported once, and NOT tied to the
+  agent row so it survives the registration it was addressed to).
+  `POST /agents/{id}/inbox/transfer` rebalances a stuck lease: messages move to
+  another inbox UNLEASED and immediately claimable, under their own lease (409
+  and nothing moved otherwise), with `force:true` as the explicit override for a
+  holder that is gone. Migration `006_add_task_ownership` adds the two
+  provenance columns to `inbox_entries` and the `dead_letters` table; the
+  in-memory and PostgreSQL backends implement the same `PurgeReporter`,
+  `DeadLetterStore` and `Transferrer` capabilities, and `PurgeExpired` keeps
+  its count-only contract for any backend that does not.
 - **`crier keygen`** (CR-FEAT-027) — the signing ceremony, replaced. The server
   binary now generates an ed25519 keypair in-process (no openssl, no xxd),
   writes it as a PKCS#8 PEM at mode `0600` in the same shape
