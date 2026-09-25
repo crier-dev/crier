@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -52,6 +52,7 @@ help:
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
 	@echo "  demo-cleanup-check  Fail when a tracked shell script spawns a crier server without an EXIT-trap cleanup + port-ownership assertion (CR-GAP-069)"
 	@echo "  demo-cleanup-selftest  Prove that checker still rejects a trap-less / unowned server spawn and accepts the real tree, incl. a neuter proof (CR-GAP-069)"
+	@echo "  orphan-sweep-check  Prove the tick-start orphan sweep still classifies dogfood-* / /tmp-compose containers and in-range port holders, fails closed on a missing/failing tool, and never invokes a mutating verb — with stub docker/ss, so it needs neither (DF-CRIER-281)"
 	@echo "  parity-check      Assert the primary remote (origin) and the content mirror (gitlab) carry the same main — exact 0/0 or a loud failure naming both counts and the fix (REV5-CRIER-001)"
 	@echo "  parity-selftest   Prove that checker still accepts parity and rejects mirror-behind, primary-behind, dual lineage, a missing remote, a branchless remote and an unreachable remote, incl. a neuter proof (REV5-CRIER-001)"
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
@@ -297,6 +298,48 @@ demo-cleanup-check:
 
 demo-cleanup-selftest:
 	bash scripts/check-demo-cleanup-selftest.sh
+
+# DF-CRIER-281 — CR-GAP-069's ask #2: the TICK-START ORPHAN SWEEP. demo-cleanup-check
+# (the arm above) reads TRACKED shell scripts, so it cannot see the leak shape that
+# actually costs this shared host: an ad-hoc dogfood/QA run whose compose file and
+# scripts live under /tmp and which leaves containers (and a scratch-range port)
+# behind. Measured on this host when the sweep was written: 20 containers named
+# dogfood-* with compose configs under /tmp/dogfood-*, 7 more /tmp-compose stacks
+# (df9r-*, qa3probe*-scaled-*), and a leaked `./bin/crier` holding :8767 — none of
+# them visible to any gate.
+#
+# scripts/orphan-sweep.sh is REPORT-ONLY: it never stops, kills, removes or prunes
+# anything, and findings never change its exit code. A container is an ORPHAN
+# CANDIDATE when its name matches dogfood-* OR its
+# com.docker.compose.project.config_files label names a file under /tmp/ — either
+# rule, both reported, running or exited, with the container's status (incl. its
+# age), that compose path, the docker ps port column and the PortMappings from
+# `docker inspect`. Ports are every `ss -tlnp` listener in a configurable range
+# (ORPHAN_SWEEP_PORT_MIN/ORPHAN_SWEEP_PORT_MAX, default 14000-29000 inclusive) with
+# the holder's pid, process name and full command line (from /proc/<pid>/cmdline,
+# with the ss record kept alongside); a holder whose command carries the range's own
+# markers is still reported — the sweep never assumes a listener is benign — and a
+# holder ss cannot attribute is reported as unattributable rather than skipped. It
+# fails closed: a required tool (docker, ss, awk) missing from PATH or FAILING
+# (`docker ps -a` / `ss` nonzero) is exit 2, never a green over a host it could not
+# read, and an invalid port range is refused for the same reason.
+#
+# This target runs the SELFTEST only — never the live sweep. CI runners have no
+# docker daemon and no dogfood stacks, and a checker that has only ever been seen to
+# pass is decoration. The selftest drives the real script against STUB docker and ss
+# executables placed first on PATH in a temp dir, so the sweep's own logic is
+# exercised with no daemon, no socket table and no host process involved, and the
+# stub log of EVERY invocation is what makes the report-only invariant checkable
+# (no mutating verb was even invoked). It proves the classification rules
+# (dogfood+/tmp, dogfood+/home via the name rule, non-dogfood+/tmp via the tmp rule,
+# and the two negatives), the fail-closed paths (no docker, no ss, a failing docker,
+# a non-numeric and an inverted range), the range filter with its inclusive bounds
+# and its env override, the clean-host path (an explicitly empty census plus an empty
+# socket table is a legal exit 0 with zero findings), and a NEUTER proof — a copy of
+# the script whose classification is forced to always-no must FAIL the same fixture
+# assertions, so a green selftest cannot be proving nothing.
+orphan-sweep-check:
+	bash scripts/orphan-sweep.sh --selftest
 
 # REV5-CRIER-001: the fourth arm, and the only one whose subject is the REMOTES
 # rather than the tree. This repo pushes main to two places — origin

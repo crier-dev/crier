@@ -163,6 +163,24 @@ jobs:
           make demo-cleanup-check
           make demo-cleanup-selftest
 
+      # DF-CRIER-281 — CR-GAP-069's ask #2, the TICK-START ORPHAN SWEEP. The step
+      # above reads TRACKED shell scripts, so it is blind to the leak shape that
+      # actually costs the shared host: an ad-hoc dogfood/QA run whose compose file
+      # lives under /tmp and which leaves containers and a scratch-range port behind.
+      # scripts/orphan-sweep.sh reports them (dogfood-* by name, or any compose
+      # config under /tmp/; plus every ss -tlnp listener in 14000-29000 with its
+      # holder pid, process name and full command line) and NEVER fixes anything — no
+      # stop, no rm, no kill, no prune — and its findings never change its exit code.
+      # This step runs the SELFTEST only, never the live sweep: a CI runner has no
+      # docker daemon and no dogfood stacks, and the selftest drives the real script
+      # against STUB docker/ss executables on PATH, so it proves the classification
+      # rules, the fail-closed paths (missing docker, missing ss, a FAILING docker, an
+      # invalid range), the range filter and its env override, the empty-host path and
+      # a neuter proof — and, from the stubs' log of every invocation, that no
+      # mutating verb was even invoked.
+      - name: Tick-start orphan sweep selftest
+        run: make orphan-sweep-check
+
       # DF-CRIER-137: the documented way to launch the MCP bridge
       # (`make build-mcp && ./bin/crier-mcp`, README + integration guide) feeds a
       # strict MCP stdio client, and the `build-mcp` recipe was not prefixed with
