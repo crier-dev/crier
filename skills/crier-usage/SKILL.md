@@ -250,9 +250,12 @@ live run proved:
     router skips before calling out. A missing key is fast and says why; it is
     not a 10s stall (measured 2026-09-23).
 15. `schema_template: "openai-compatible"` hard-codes `{{payload.text}}` — a
-    payload without a `text` key is delivered with an **empty** content field and
-    reported as a successful delivery (DF-CRIER-279). Use `generic-custom` /
-    `custom_schema` when your payload shape is anything else.
+    payload without a `text` key now **fails the delivery loudly** (DF-CRIER-279:
+    the render error names `payload.text`, nothing is POSTed, and a blocking
+    delivery returns the error to the sender instead of a `content:""` reply).
+    Use `generic-custom` / `custom_schema` when your payload shape is anything
+    else, or give the placeholder an explicit `|default:` in a `custom_schema`
+    body.
 16. **A "restart" that never took over the port answers you anyway.** A second
     `./bin/crier -port 8767` on a held port logs `server failed: another
     process already holds this port` to ITS OWN output and exits; the old

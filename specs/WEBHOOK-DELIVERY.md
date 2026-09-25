@@ -217,6 +217,10 @@ Template = JSON object with three sections; stored under `templates/` and refere
 
 - `generic-custom`: passthrough — POSTs the full envelope JSON, reply = raw body.
 - `openai-compatible`: messages[] mapping, reply from first choice, `session_map` → `user` field.
+- `{{path}}` placeholders resolve against the template context (`crier`, `payload`, `agent`, `auth`); a path
+  the context does not carry **fails the delivery** with an error naming the placeholder, unless the
+  placeholder declares an explicit `|default:` fallback (`{{payload.text|default:}}` renders empty on
+  purpose) — a missing key is never silently substituted with `""` (DF-CRIER-279).
 - Custom schemas supplied at registration REPLACE the named template entirely (merge = shallow; unknown
   keys rejected at registration — 400).
 

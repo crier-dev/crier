@@ -324,38 +324,43 @@ unreportable delivery is not held. That is documented (DF-CRIER-129) and it is
 the correct design — but it means a test that "proves holding works" is not
 proving anything until its body names a sender.
 
-## How `schema_template` bites (silent empty content)
+## How `schema_template` bites (silent empty content — now a loud failure)
 
 `schema_template: "openai-compatible"` renders its outbound body from a
-**hard-coded** template (`internal/webhook/schema.go:55-81`):
+**hard-coded** template (`internal/webhook/schema.go`):
 
 ```
 {"model": "{{agent.model|default:deepseek-v4-flash}}",
  "messages": [{"role": "user", "content": "{{payload.text}}"}], "stream": false}
 ```
 
-`{{payload.text}}` resolves against the payload; a payload with **no `text`
-key** renders **empty**, and `expandTemplate` substitutes the empty string
-rather than failing. Measured live, same relay, same endpoint, payload shape the
-only variable:
+`{{payload.text}}` resolves against the payload. **As measured on the run this
+document was written from (pre-DF-CRIER-279)** a payload with **no `text` key**
+rendered **empty**: the endpoint answered 200, nothing logged a missing field, no
+4xx was raised, and the delivery was recorded as **successful**. Same relay, same
+endpoint, payload shape the only variable:
 
 ```
 payload {"task":"held work"}                  -> reply "echo: "      (200, "delivered")
 payload {"text":"dogfood hello over federation"} -> reply "echo: dogfood hello over federation"
 ```
 
-The delivery is recorded as **successful**. Nothing logs a missing field, no 4xx
-is raised, and the endpoint answers 200. `specs/AGENT-ECOSYSTEM.md:272`
-documents the trap for that spec's own echo sink; the webhook config table
-(`docs/integration-guide.md:590`) lists the template without mentioning that it
-hard-codes `payload.text`. If your payloads use any other key shape, the body is
-silently dropped. Use `generic-custom`/`custom_schema` when the payload is not
-`{"text": …}`.
+**DF-CRIER-279 fixed that.** `expandTemplate` no longer substitutes a path it
+cannot resolve: a placeholder the template context cannot fill fails the render
+unless it carries an explicit `|default:` fallback, and the failure reaches the
+delivery log (`webhook: delivery failed`, naming e.g. `payload.text`) instead of
+a successful POST with an empty content field; a blocking delivery returns that
+error to the sender. A template that MEANS "an absent value renders empty" says
+so — `hermes-http-gateway` does exactly that for its optional `session_id` /
+`thread_id` slots. `specs/AGENT-ECOSYSTEM.md:272` still documents the trap for
+that spec's own echo sink, and the webhook config table
+(`docs/integration-guide.md:590`) lists the template: use
+`generic-custom`/`custom_schema` when the payload is not `{"text": …}`.
 
 Corollary for dogfood runs: **when you build a federation probe, give the remote
-agent webhook a payload with a `text` key**, or every echo comes back empty and
-you cannot tell a broken forward from an empty template. This run's first
-federation pass hit exactly that ambiguity.
+agent webhook a payload with a `text` key** — since DF-CRIER-279 a template that
+cannot fill a placeholder fails the delivery, so a probe that used to come back
+as `echo: ` now reports the mismatch instead of hiding it.
 
 ## The payload in a retrieve response is NOT truncated — your pipeline may be
 

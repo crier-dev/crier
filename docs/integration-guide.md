@@ -789,10 +789,12 @@ push is what you want (a dashboard, a co-resident process, §4).
 
 One more reason not to route an external producer at the webhook path (an agent
 registered with a `webhook`, §8): the `openai-compatible` schema template reads
-only `payload.text` and silently sends an empty content body for any other
-payload shape (DF-CRIER-279), so a producer following this section's payloads
-would push empty messages. Inbox pull has no shaper between producer and
-consumer.
+only `payload.text`, so any other payload shape fails the delivery loudly
+(DF-CRIER-279: the request-body render errors, naming the missing path
+`payload.text`, and nothing is POSTed — before that fix the same shape sent an
+empty content body and was still reported as a successful delivery). A producer
+following this section's payloads would not be delivered at all. Inbox pull has
+no shaper between producer and consumer.
 
 ### 9.2 The recipe (config C — the production default)
 

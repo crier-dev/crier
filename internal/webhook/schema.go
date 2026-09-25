@@ -25,7 +25,9 @@ type RequestShape struct {
 	Method  string            `json:"method,omitempty"` // default POST
 	Headers map[string]string `json:"headers,omitempty"`
 	// Body is a JSON template with {{path}} placeholders. Paths resolve
-	// against TemplateContext. A nil Body means passthrough: the full Crier
+	// against TemplateContext; a path the context does not carry FAILS the
+	// render unless the placeholder declares a `|default:` fallback
+	// (DF-CRIER-279). A nil Body means passthrough: the full Crier
 	// envelope is POSTed unchanged (generic-custom default).
 	Body json.RawMessage `json:"body,omitempty"`
 }
@@ -65,6 +67,15 @@ var openAICompatible = Template{
 	ResponseMap: "choices.0.message.content",
 }
 
+// hermesGateway is the session-aware variant of openAICompatible.
+//
+// session_id / thread_id are OPTIONAL envelope fields (spec §3): a delivery
+// need not carry a session or a thread (the deliver API takes both per
+// request, and examples/hermes-gateway-demo carries its thread inside the
+// payload), so those two placeholders declare an explicit empty `|default:` —
+// an absent thread keeps rendering "" exactly as before. `{{payload.text}}` is
+// REQUIRED and deliberately has no default: a payload with no `text` key fails
+// the delivery loudly (DF-CRIER-279) instead of POSTing `"content": ""`.
 var hermesGateway = Template{
 	Name: "hermes-http-gateway",
 	RequestShape: RequestShape{
@@ -73,8 +84,8 @@ var hermesGateway = Template{
   "model": "{{agent.model|default:deepseek-v4-flash}}",
   "messages": [{"role": "user", "content": "{{payload.text}}"}],
   "stream": false,
-  "session_id": "{{crier.session_id}}",
-  "thread_id": "{{crier.thread_id}}"
+  "session_id": "{{crier.session_id|default:}}",
+  "thread_id": "{{crier.thread_id|default:}}"
 }`),
 	},
 	ResponseMap: "choices.0.message.content",
@@ -199,22 +210,44 @@ func buildContext(cfg *Config, env *Envelope) map[string]any {
 }
 
 // expandTemplate substitutes {{path[|default:...]}} placeholders in a JSON
-// template. Paths resolve against the context; missing values become the
-// default or empty string.
+// template. Paths resolve against the context.
+//
+// A path the context does not carry is an ERROR unless the placeholder has an
+// explicit `|default:` fallback (DF-CRIER-279). Substituting "" was silent data
+// loss: `{{payload.text}}` against a payload with no `text` key rendered
+// `"content": ""`, the shaped POST went out, the endpoint answered 200 and the
+// delivery was logged `webhook: delivery delivered` — the message body was gone
+// and nothing named the missing key. A template that MEANS "an absent value
+// renders empty" now says so, e.g. `{{crier.thread_id|default:}}`. No
+// substitution is ever delivered from a failed render: the caller gets the
+// error instead of the partially expanded body.
 func expandTemplate(raw json.RawMessage, ctx map[string]any) ([]byte, error) {
 	s := string(raw)
 	var err error
+	var missing []string
+	seen := make(map[string]bool)
 	s = placeholderRe.ReplaceAllStringFunc(s, func(ph string) string {
 		inner := strings.TrimSuffix(strings.TrimPrefix(ph, "{{"), "}}")
 		path := inner
 		def := ""
+		hasDefault := false
 		if i := strings.Index(inner, "|default:"); i >= 0 {
 			path = strings.TrimSpace(inner[:i])
 			def = inner[i+len("|default:"):]
+			hasDefault = true
 		}
 		val, ok := resolvePath(ctx, strings.TrimSpace(path))
 		if !ok {
-			return def
+			if hasDefault {
+				return def
+			}
+			// No fallback: record the placeholder (once) and fail the render
+			// below — the empty substitute returned here is never delivered.
+			if !seen[ph] {
+				seen[ph] = true
+				missing = append(missing, ph)
+			}
+			return ""
 		}
 		b, e := json.Marshal(val)
 		if e != nil {
@@ -235,7 +268,27 @@ func expandTemplate(raw json.RawMessage, ctx map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(missing) > 0 {
+		return nil, missingPlaceholderError(missing)
+	}
 	return []byte(s), nil
+}
+
+// missingPlaceholderError names every placeholder the context could not fill and
+// that carried no explicit `|default:` (DF-CRIER-279). It reaches the delivery
+// log and, in blocking mode, the sender's 5xx, so a failing delivery says WHICH
+// key the payload did not supply instead of quietly losing the body.
+func missingPlaceholderError(placeholders []string) error {
+	quoted := make([]string, 0, len(placeholders))
+	for _, ph := range placeholders {
+		quoted = append(quoted, strconv.Quote(ph))
+	}
+	noun := "placeholder"
+	if len(placeholders) > 1 {
+		noun = "placeholders"
+	}
+	return fmt.Errorf("template %s %s: path not found in the template context and no |default: fallback was given",
+		noun, strings.Join(quoted, ", "))
 }
 
 // resolvePath walks a dotted path into the context. Returns ok=false when

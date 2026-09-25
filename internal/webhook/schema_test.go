@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,24 +108,52 @@ func TestTemplate_BuildBody_CrierSessionThreadExpansion(t *testing.T) {
 	if v["agent_id"] != "agent-a" {
 		t.Fatalf("agent_id = %v (want agent-a)", v["agent_id"])
 	}
-	// Empty session/thread render as empty strings (omitempty drops the key).
+	// The half that used to live here asserted a SILENT empty-string
+	// substitution for an absent path ("Empty session/thread render as empty
+	// strings (omitempty drops the key)"). DF-CRIER-279 makes that path a hard
+	// error, so the contract asserted now is the error itself — naming every
+	// placeholder the context cannot fill — and the |default: form below is
+	// what still renders "" on purpose.
 	emptyEnv := &Envelope{
 		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-2", Sender: "agent-a"},
 		Payload: json.RawMessage(`{}`),
 	}
-	emptyBody, err := tpl.BuildBody(&Config{URL: "http://x"}, emptyEnv)
+	_, err = tpl.BuildBody(&Config{URL: "http://x"}, emptyEnv)
+	if err == nil {
+		t.Fatal("BuildBody = nil error, want a loud failure naming the absent placeholders")
+	}
+	for _, want := range []string{"crier.session_id", "crier.thread_id", "payload.text"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %v does not name %q", err, want)
+		}
+	}
+	// Explicit defaults are the escape hatch: an absent value renders the
+	// declared default (here: empty) with no error.
+	defaultedTpl := Template{
+		Name:        "test-crier-defaulted",
+		ResponseMap: "raw",
+		RequestShape: RequestShape{
+			Method: "POST",
+			Body: json.RawMessage(`{
+				"session_id": "{{crier.session_id|default:}}",
+				"thread_id": "{{crier.thread_id|default:}}",
+				"content": "{{payload.text|default:no text}}"
+			}`),
+		},
+	}
+	defaultedBody, err := defaultedTpl.BuildBody(&Config{URL: "http://x"}, emptyEnv)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("explicit defaults must render, got error: %v", err)
 	}
 	var v2 map[string]any
-	if err := json.Unmarshal(emptyBody, &v2); err != nil {
-		t.Fatalf("empty body not json: %v", err)
+	if err := json.Unmarshal(defaultedBody, &v2); err != nil {
+		t.Fatalf("defaulted body not json: %v", err)
 	}
-	if s, ok := v2["session_id"].(string); !ok || s != "" {
-		t.Fatalf("empty session_id = %v (want \"\")", v2["session_id"])
+	if v2["session_id"] != "" || v2["thread_id"] != "" {
+		t.Errorf("session_id/thread_id = %v/%v, want empty (explicit |default:)", v2["session_id"], v2["thread_id"])
 	}
-	if s, ok := v2["thread_id"].(string); !ok || s != "" {
-		t.Fatalf("empty thread_id = %v (want \"\")", v2["thread_id"])
+	if v2["content"] != "no text" {
+		t.Errorf("content = %v, want the declared default", v2["content"])
 	}
 }
 
@@ -165,6 +194,130 @@ func TestTemplate_ExtractReply(t *testing.T) {
 	// missing path errors
 	if _, err := openAICompatible.ExtractReply([]byte(`{"choices":[]}`)); err == nil {
 		t.Fatal("expected error for missing path")
+	}
+}
+
+// ---------- DF-CRIER-279: a missing template path is a LOUD failure ----------
+
+// TestTemplate_BuildBody_MissingPathFailsLoud: a payload with no `text` key
+// used to render `"content": ""` — the POST went out, the endpoint answered
+// 200, and the delivery was reported as delivered with the message body gone.
+// It is now an error naming the path that could not be filled.
+func TestTemplate_BuildBody_MissingPathFailsLoud(t *testing.T) {
+	env := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-1", Sender: "agent-a"},
+		Payload: json.RawMessage(`{"task":"wrong shape"}`),
+	}
+	body, err := openAICompatible.BuildBody(&Config{URL: "http://x", SchemaTemplate: "openai-compatible"}, env)
+	if err == nil {
+		t.Fatalf("BuildBody = %s, nil error — a payload without text must not render", body)
+	}
+	if body != nil {
+		t.Errorf("body = %s, want nil alongside the error", body)
+	}
+	if !strings.Contains(err.Error(), "payload.text") {
+		t.Errorf("error %q does not name the missing path payload.text", err)
+	}
+	// The template's shape did not change: with the text key present the SAME
+	// template expands (the failure is the payload mismatch, not the template).
+	env.Payload = json.RawMessage(`{"text":"hello"}`)
+	if _, err := openAICompatible.BuildBody(&Config{URL: "http://x"}, env); err != nil {
+		t.Errorf("same template with text present: %v", err)
+	}
+}
+
+// TestTemplate_BuildBody_HappyPathBytesUnchanged pins the EXACT bytes the
+// openai-compatible template renders for a text payload: the fail-loud change
+// must not move the happy path (DF-CRIER-279).
+func TestTemplate_BuildBody_HappyPathBytesUnchanged(t *testing.T) {
+	env := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-1", Sender: "a"},
+		Payload: json.RawMessage(`{"text":"hello"}`),
+	}
+	body, err := openAICompatible.BuildBody(&Config{URL: "http://x"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"messages":[{"content":"hello","role":"user"}],"model":"deepseek-v4-flash","stream":false}`
+	if string(body) != want {
+		t.Errorf("body = %s\nwant      %s", body, want)
+	}
+}
+
+// TestTemplate_BuildBody_ExplicitDefaultStillRenders: `|default:` is how a
+// template declares "this value may be absent" — it must keep working, including
+// an explicitly EMPTY default.
+func TestTemplate_BuildBody_ExplicitDefaultStillRenders(t *testing.T) {
+	tpl := Template{
+		Name:        "test-defaults",
+		ResponseMap: "raw",
+		RequestShape: RequestShape{
+			Method: "POST",
+			Body: json.RawMessage(`{
+				"content": "{{payload.text|default:hello}}",
+				"optional": "{{payload.nope|default:}}",
+				"session_id": "{{crier.session_id|default:}}"
+			}`),
+		},
+	}
+	env := &Envelope{Crier: EnvelopeMeta{Version: 1, MessageID: "m-1"}, Payload: json.RawMessage(`{}`)}
+	body, err := tpl.BuildBody(&Config{URL: "http://x"}, env)
+	if err != nil {
+		t.Fatalf("explicit defaults must render, got error: %v", err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("body not json: %v", err)
+	}
+	if v["content"] != "hello" {
+		t.Errorf("content = %v, want the declared default", v["content"])
+	}
+	if v["optional"] != "" {
+		t.Errorf("optional = %v, want an explicitly empty default", v["optional"])
+	}
+	if v["session_id"] != "" {
+		t.Errorf("session_id = %v, want an explicitly empty default", v["session_id"])
+	}
+}
+
+// TestTemplate_BuildBody_HermesGatewayMissingTextFailsLoud: the session-aware
+// template shares the `{{payload.text}}` shape, so a payload without text fails
+// the same way (DF-CRIER-279) — while its session/thread slots, which spec §3
+// makes OPTIONAL envelope fields, keep rendering empty through explicit
+// `|default:`s instead of failing a legitimate thread-less delivery.
+func TestTemplate_BuildBody_HermesGatewayMissingTextFailsLoud(t *testing.T) {
+	cfg := &Config{URL: "http://x", SchemaTemplate: "hermes-http-gateway"}
+	noText := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-1", Sender: "a", SessionID: "sess-x", ThreadID: "thread-y"},
+		Payload: json.RawMessage(`{"task":"wrong shape"}`),
+	}
+	if _, err := hermesGateway.BuildBody(cfg, noText); err == nil {
+		t.Fatal("BuildBody = nil error — hermes-http-gateway must fail loudly without payload.text")
+	} else if !strings.Contains(err.Error(), "payload.text") {
+		t.Errorf("error %q does not name the missing path payload.text", err)
+	}
+
+	noThread := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "m-2", Sender: "a", SessionID: "sess-x"},
+		Payload: json.RawMessage(`{"text":"17 times 23?"}`),
+	}
+	body, err := hermesGateway.BuildBody(cfg, noThread)
+	if err != nil {
+		t.Fatalf("a gateway delivery without a thread must still render: %v", err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("body not json: %v", err)
+	}
+	msgs, ok := v["messages"].([]any)
+	if !ok || len(msgs) != 1 {
+		t.Fatalf("messages = %v", v["messages"])
+	}
+	if c := msgs[0].(map[string]any)["content"]; c != "17 times 23?" {
+		t.Errorf("content = %v, want the payload text", c)
+	}
+	if v["session_id"] != "sess-x" || v["thread_id"] != "" {
+		t.Errorf("session_id/thread_id = %v/%v, want sess-x and empty", v["session_id"], v["thread_id"])
 	}
 }
 

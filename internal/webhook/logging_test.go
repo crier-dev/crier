@@ -3,10 +3,13 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -120,6 +123,59 @@ func TestDeliverBlockingLogsRetryAttempt(t *testing.T) {
 	}
 	if !strings.Contains(out, "request_id=req-fail") {
 		t.Errorf("log %q: want request_id=req-fail", out)
+	}
+}
+
+// TestDeliverMissingTemplatePathIsNotReportedDelivered pins the DF-CRIER-279
+// end-to-end contract at the driver: a delivery whose schema template cannot
+// render (openai-compatible against a payload with no `text` key) ends in the
+// FAILED path — a warn outcome line naming the missing path, no POST to the
+// endpoint, delivered=false — and never in "webhook: delivery delivered".
+func TestDeliverMissingTemplatePathIsNotReportedDelivered(t *testing.T) {
+	logs := captureLogs(t)
+
+	var hits atomic.Int32
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer sink.Close()
+
+	d := NewDriver(NewClient(2*time.Second, nil), NewMemoryQueue(), DefaultDriverConfig())
+	cfg := &Config{URL: sink.URL, SchemaTemplate: "openai-compatible", DeliveryMode: "blocking"}
+	env := &Envelope{
+		Crier:   EnvelopeMeta{Version: 1, MessageID: "msg-279", Kind: KindMessage, Sender: "agent-sender"},
+		Payload: json.RawMessage(`{"task":"wrong shape"}`),
+	}
+
+	delivered, err := d.DeliverContext(context.Background(), "agent-279", cfg, env)
+	if err != nil {
+		t.Fatalf("DeliverContext: %v", err)
+	}
+	if delivered {
+		t.Fatal("delivered = true, want false — an unrenderable body must not count as delivered")
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, "webhook: delivery failed") {
+		t.Errorf("log %q: want the failed outcome line", out)
+	}
+	if strings.Contains(out, "webhook: delivery delivered") {
+		t.Errorf("log %q: a body that was never rendered must not be reported delivered", out)
+	}
+	if !strings.Contains(out, "payload.text") {
+		t.Errorf("log %q: want the missing placeholder path named in the failure", out)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Errorf("endpoint received %d request(s), want 0 — nothing may be POSTed for an unrenderable body", got)
+	}
+
+	// Blocking mode is the loudest form: the caller gets the render failure,
+	// marked permanent (the same envelope can never render).
+	if _, err := d.DeliverBlocking(context.Background(), "agent-279", cfg, env, 500*time.Millisecond); err == nil {
+		t.Fatal("DeliverBlocking error = nil, want the template render failure")
+	} else if !errors.Is(err, ErrPermanent) || !strings.Contains(err.Error(), "payload.text") {
+		t.Errorf("DeliverBlocking error = %v, want ErrPermanent naming payload.text", err)
 	}
 }
 
