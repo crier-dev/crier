@@ -93,6 +93,13 @@ func (s *MemoryStore) Update(agent *Agent) error {
 	agent.Status = existing.Status
 	agent.RegisteredAt = existing.RegisteredAt
 	agent.LastSeen = time.Now()
+	// The realm is registration-time identity, not a PATCH field (CR-FEAT-029):
+	// it is preserved from the stored row exactly like RegisteredAt, so a
+	// caller that builds an Agent without one can never move a live agent into
+	// another realm through the update path. Moving realms is unregister +
+	// register; the HTTP handler refuses a `namespace` member on a PATCH for
+	// the same reason.
+	agent.Namespace = existing.Namespace
 	s.agents[agent.ID] = agent
 	return nil
 }

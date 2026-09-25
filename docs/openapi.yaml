@@ -248,6 +248,18 @@ paths:
       operationId: relayPublish
       tags: [relay]
       summary: Publish an event to a topic
+      description: |-
+        The realm a publish belongs to comes from the X-Crier-Namespace HEADER
+        (CR-FEAT-029, specs/NAMESPACES.md), never from the body: the per-realm
+        rate limit is evaluated before the body is read, so a `namespace`
+        MEMBER in the body is refused with 400 rather than silently ignored. A
+        publish is delivered only to subscribers of the SAME namespace, even on
+        an identical topic name — and the rate limit that applies is that
+        namespace's own (keyed by (namespace, agent)), which is what stops one
+        realm's flood from costing another realm's agents their budget.
+      parameters:
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - $ref: "#/components/parameters/XCrierNamespaceToken"
       requestBody:
         required: true
         content:
@@ -276,15 +288,18 @@ paths:
             empty topics are not queued or retained, and the topic does not
             appear in GET /relay/topics until at least one subscriber connects.
         "400":
-          description: |
-            Invalid request — malformed JSON, missing or empty topic/event, or
-            an invalid topic (empty, leading/trailing/consecutive dots,
-            whitespace or any character outside `letters digits _ - .`, over
-            256 bytes, or a wildcard token).
+          description: |-
+            Invalid request — malformed JSON, missing or empty topic/event, an
+            invalid topic (empty, leading/trailing/consecutive dots, whitespace
+            or any character outside `letters digits _ - .`, over 256 bytes, or
+            a wildcard token), a namespace the server does not declare (error
+            UNKNOWN_NAMESPACE), a `namespace` MEMBER in the body (send the
+            X-Crier-Namespace header instead), or a namespace that disagrees
+            between the header and the query parameter.
         "401":
-          description: X-Agent-ID header required (rate limiting enabled)
+          description: X-Agent-ID header required (rate limiting enabled), or the named namespace requires its own credential (X-Crier-Namespace-Token) and it is missing or wrong (error NAMESPACE_UNAUTHORIZED)
         "429":
-          description: Rate limit exceeded
+          description: Rate limit exceeded — the cap is the publishing namespace's own (CR-FEAT-029) when it declares one, else CR_RATE_LIMIT_PER_MINUTE
 
   /relay/subscribe/{topic}:
     get:
@@ -304,6 +319,12 @@ paths:
           segments: `demo.>` matches `demo.one` and `demo.one.two`, but not
           `demo` itself.
 
+        Subscription patterns are scoped to a NAMESPACE (realm, CR-FEAT-029,
+        specs/NAMESPACES.md): two subscribers of the identical topic name in
+        two different namespaces are two disjoint sets, and a publish in one
+        realm is never delivered to a subscriber of the other — including
+        through a wildcard pattern. There is no cross-realm bridging.
+
         Every other shape is invalid and is rejected with 400 BEFORE the
         WebSocket upgrade: an embedded token (`foo*bar`), a `>` that is not the
         last segment (`foo.>.bar`), empty segments, leading/trailing dots,
@@ -321,6 +342,23 @@ paths:
           required: true
           schema:
             type: string
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |-
+            The namespace (realm) to subscribe INSIDE (CR-FEAT-029,
+            specs/NAMESPACES.md) — an alias of the X-Crier-Namespace header,
+            provided separately because a browser WebSocket cannot set headers.
+            Absent = the default namespace, which is what every
+            pre-CR-FEAT-029 subscriber already gets. A name the server does not
+            declare is refused (400) BEFORE the upgrade; a namespace with
+            `auth: "token"` requires the X-Crier-Namespace-Token HEADER (401) —
+            a realm credential is never accepted in the query string, because a
+            URL is logged far more casually than a header.
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - $ref: "#/components/parameters/XCrierNamespaceToken"
       responses:
         "101":
           description: |
@@ -525,11 +563,25 @@ paths:
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
+                namespace:
+                  type: string
+                  description: |-
+                    The namespace (realm) to register INTO (CR-FEAT-029,
+                    specs/NAMESPACES.md). Absent — or `default` — is the
+                    implicit namespace every pre-CR-FEAT-029 registration got,
+                    and it never appears in a response body. A name the server
+                    does not declare is a 400 UNKNOWN_NAMESPACE and NEVER a
+                    silent fallback to the default namespace; a namespace with
+                    `auth: "token"` additionally requires the
+                    X-Crier-Namespace-Token header (401
+                    NAMESPACE_UNAUTHORIZED) before the row is created.
       responses:
         "201":
-          description: Agent registered
+          description: "Agent registered. The response is the stored row: identical to what GET /agents/{id} answers, plus a `namespace` member whenever the agent was registered into a DECLARED namespace (absent for the default namespace, so an existing client's payload is unchanged)."
         "400":
-          description: "Invalid request body, webhook config, or guard config (guard.policies required, policy id 1..64 runes, action allow|block|sanitize, block_risk low|medium|high, providers ≤ 5, custom requires base_url + api_key_ref, deepseek preset forbids thinking_enabled)"
+          description: "Invalid request body, webhook config, guard config (guard.policies required, policy id 1..64 runes, action allow|block|sanitize, block_risk low|medium|high, providers ≤ 5, custom requires base_url + api_key_ref, deepseek preset forbids thinking_enabled), or a namespace name this server does not declare (error UNKNOWN_NAMESPACE)"
+        "401":
+          description: "The named namespace requires its own credential (X-Crier-Namespace-Token) and it is missing or wrong (error NAMESPACE_UNAUTHORIZED)"
         "409":
           description: Agent ID already registered
 
@@ -700,6 +752,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/XCrierNamespaceToken"
       requestBody:
         required: true
         content:
@@ -794,6 +847,18 @@ paths:
                     the second answers with the first one's accept; a duplicate
                     that arrives while the original is still in flight for
                     longer than the server's bound is answered 409.
+                namespace:
+                  type: string
+                  description: |-
+                    The namespace (realm) this delivery believes it is
+                    addressing (CR-FEAT-029, specs/NAMESPACES.md). CHECKED
+                    against the target agent's own namespace, never believed:
+                    absent means "the target's realm" (what every
+                    pre-CR-FEAT-029 request does), and any other value is
+                    refused with 403 NAMESPACE_MISMATCH — a message cannot cross
+                    namespaces by naming one. The stored message carries the
+                    TARGET's realm whatever this member said, and the realm is
+                    recorded with the message so a retrieve reports it.
                 ttl_seconds:
                   type: integer
                   minimum: 0
@@ -925,11 +990,21 @@ paths:
                     type: string
                     description: "Human-readable rejection naming the offending field and its allowed values, e.g. 'delivery_mode must be blocking|async|batch', 'payload is required', 'payload must be a JSON object'"
         "403":
-          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict"
+          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict. Also the NAMESPACE_MISMATCH refusal (CR-FEAT-029): the request named a namespace the TARGET agent is not registered in, and the message was not stored — a delivery cannot cross namespaces by naming one (specs/NAMESPACES.md §5)."
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GuardBlockedResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/GuardBlockedResponse"
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [NAMESPACE_MISMATCH]
+                      detail:
+                        type: string
+                        description: Names the target's namespace and the one the request asked for
         "404":
           description: "Agent not found — locally and on every linked relay (a definitive all-links-404). A link outage is never reported as 404 (DF-CRIER-7): it is held (202) when the request names a sender, or reported as 502 FEDERATION_FAILED (no hold queue, queue refused, or no sender on the request — DF-CRIER-129)."
         "502":
@@ -1390,6 +1465,59 @@ paths:
         "501":
           description: The configured registry store does not keep a dead-letter destination.
 
+  /namespaces:
+    get:
+      operationId: listNamespaces
+      tags: [registry]
+      summary: List the namespace (realm) policies this server enforces
+      description: |-
+        The realm dimension (CR-FEAT-029, specs/NAMESPACES.md): every
+        namespace this server serves, with the policy it is actually
+        enforcing for it and a live per-namespace agent census.
+
+        Always answers, on every deployment: a server with no namespaces
+        declared reports exactly one entry — the implicit `default`
+        namespace, unconfigured and shared-posture — which is what makes
+        "nothing changes for an existing deployment" visible rather than
+        implied.
+
+        Secrets are never disclosed. `token_ref` is the `env:VAR`
+        REFERENCE a `token`-posture namespace resolves its credential
+        from; the value it resolves to is never serialized, logged or
+        echoed, and no response carries it. A namespace's `guard_policy`
+        is likewise not echoed (only whether one is declared) — the
+        listing states WHAT is enforced, not the policy documents.
+
+        NOT auth-exempt: like `GET /status` it reports posture, so on a
+        server with CR_AUTH_TOKEN set a token-less caller gets 401. With
+        auth unset (the development posture) it is open, like every other
+        route.
+      responses:
+        "200":
+          description: |-
+            Every namespace this server serves, the `default` one first.
+            `count` counts the entries in THIS response, so an unconfigured
+            deployment answers `count: 1` with the single implicit realm.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [default, count, namespaces]
+                properties:
+                  default:
+                    type: string
+                    description: "The name of the implicit namespace every agent belongs to when it declares none. Always `default` — served so a client never has to hard-code the spelling of the realm whose wire form is the empty string."
+                  count:
+                    type: integer
+                    description: Number of namespaces in this response (always ≥ 1).
+                  namespaces:
+                    type: array
+                    description: The namespace policies, the default namespace first.
+                    items:
+                      $ref: "#/components/schemas/NamespacePolicy"
+        "401":
+          description: Missing or invalid bearer token (when CR_AUTH_TOKEN is set — this route is NOT auth-exempt)
+
 components:
   parameters:
     XAgentID:
@@ -1411,6 +1539,44 @@ components:
       in: header
       required: true
       description: Hex-encoded ed25519 signature (128 hex chars) over the payload "<METHOD>\n<path>\n<unix-seconds>" where path is the raw URL path (query string excluded).
+      schema:
+        type: string
+    XCrierNamespace:
+      name: X-Crier-Namespace
+      in: header
+      required: false
+      description: |-
+        The NAMESPACE (realm) a relay request acts in (CR-FEAT-029,
+        specs/NAMESPACES.md). Absent = the default namespace, which is what
+        every pre-CR-FEAT-029 client already gets. A name the server does not
+        declare is refused (400 UNKNOWN_NAMESPACE) and is NEVER mapped back to
+        the default namespace, so a typo cannot join the wrong realm.
+
+        On POST /relay/publish the realm must be sent HERE, not in the body:
+        the per-realm rate limit is evaluated before the body is read, and a
+        `namespace` body member is refused with 400 rather than ignored. On GET
+        /relay/subscribe/{topic} the `namespace` query parameter is an alias of
+        this header (a browser WebSocket cannot set headers); when both are
+        present they must agree, else 400.
+
+        Publishes in one realm reach only subscribers of that same realm, even
+        on an identical topic name; there is no cross-realm bridging.
+      schema:
+        type: string
+    XCrierNamespaceToken:
+      name: X-Crier-Namespace-Token
+      in: header
+      required: false
+      description: |-
+        The namespace-scoped credential a namespace with `auth: "token"`
+        requires (CR-FEAT-029, specs/NAMESPACES.md §4.1). Resolved server-side
+        from the namespace's `token_ref` (an `env:VAR` reference — the secret is
+        never in the config file, and never echoed by any response). Required on
+        the surfaces where the namespace is known: registering an agent INTO the
+        namespace, delivering to an agent IN it, and publishing/subscribing in
+        it on the relay. A missing or wrong credential is 401
+        NAMESPACE_UNAUTHORIZED; a namespace with the default `shared` posture
+        never asks for one.
       schema:
         type: string
   securitySchemes:
@@ -1476,6 +1642,9 @@ components:
         idempotency_key:
           type: string
           description: "The sender-supplied deduplication key this message was delivered under (CR-FEAT-025), or absent when the delivery carried none. Provenance only — the deduplication itself happens at deliver time, before the message is stored. It is what lets a dead letter state which key produced the message."
+        namespace:
+          type: string
+          description: "The namespace (realm) this message was delivered INTO (CR-FEAT-029, specs/NAMESPACES.md). Derived from the TARGET agent's registered namespace, never from the sender's claim — a delivery that names a different realm is refused with 403 NAMESPACE_MISMATCH. Recorded WITH the message so a retrieved message states its realm even after the agent's row is gone; ABSENT means the default namespace, which is what every pre-CR-FEAT-029 message is."
     DeadLetter:
       type: object
       required: [message_id, agent_id, payload, created_at, expires_at, dead_lettered_at, reason]
@@ -1511,6 +1680,42 @@ components:
         idempotency_key:
           type: string
           description: "The sender-supplied key the delivery carried, or absent when it carried none (CR-FEAT-025)."
+        namespace:
+          type: string
+          description: "The namespace (realm) the message belonged to when it expired (CR-FEAT-029). Copied from the inbox entry at sweep time because a dead letter outlives its agent's row (the destination is deliberately not foreign-keyed) — without it, the realm whose retention policy expired the message would be unrecoverable. ABSENT = the default namespace."
+    NamespacePolicy:
+      type: object
+      required: [name, auth]
+      description: "One namespace (realm) and the policy this server is enforcing for it (CR-FEAT-029, specs/NAMESPACES.md). Reported by GET /namespaces: the posture and the `env:` REFERENCE, never a resolved secret. Every policy axis is INHERITED when unset, so a namespace with no declared values behaves exactly like the pre-CR-FEAT-029 deployment."
+      properties:
+        name:
+          type: string
+          description: "Operator-facing name. `default` is the implicit namespace every deployment has; a declared namespace spells its own name."
+        auth:
+          type: string
+          enum: [shared, token]
+          description: "Authentication posture. `shared` (the default): the deployment's CR_AUTH_TOKEN bearer and per-agent ed25519 signature are the whole gate. `token`: an additional namespace-scoped credential is required on the surfaces where the namespace is known — registration into it, delivery into it, and relay publish/subscribe in it — supplied in X-Crier-Namespace-Token."
+        token_ref:
+          type: string
+          description: "The `env:VAR` reference the required credential resolves from (present only for a `token` posture). A REFERENCE, so it is safe to report; the value it resolves to is never serialized, logged or echoed."
+        configured:
+          type: boolean
+          description: "True when this namespace declares at least one policy value; false means every axis inherits the deployment's setting (the default namespace of an unconfigured deployment is always false)."
+        rate_limit_per_minute:
+          type: integer
+          description: "Relay publish cap per agent WITHIN this namespace. Absent = the deployment cap (CR_RATE_LIMIT_PER_MINUTE). 0 = no per-namespace cap. The counter is keyed by (namespace, agent), so two namespaces never consume each other's budget."
+        guard_enabled:
+          type: boolean
+          description: "Whether the LLM message guard is consulted for deliveries INTO this namespace. Absent = the deployment's guard posture. false SKIPS the choke point entirely for this namespace's deliveries, which is what keeps one realm's traffic out of the process-wide guard budget and circuit breaker."
+        has_guard_policy:
+          type: boolean
+          description: "True when the namespace declares a guard_policy (the realm-level default policy for deliveries into it; an agent's own guard.policies still outrank it). The policy itself is not echoed here."
+        retention_seconds:
+          type: integer
+          description: "Default message lifetime for deliveries into this namespace, in seconds. Absent = the store's DefaultMessageTTL (24h). An explicit ttl_seconds on a delivery always wins."
+        agents:
+          type: integer
+          description: "Live census: agents registered into this namespace, derived from the same rows the delivery path routes on."
     GuardAgentConfig:
       type: object
       required: [policies]

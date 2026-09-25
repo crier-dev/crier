@@ -1045,6 +1045,14 @@ func liveCount(repoRoot, claimID string) (any, error) {
 	if strings.HasPrefix(claimID, "COUNT-OWNERSHIP-") {
 		return countOwnershipPhrase(repoRoot, claimID)
 	}
+	// CR-FEAT-029: the namespaces section's contract phrases are each pinned
+	// to BOTH sides of the contract — the sentence the README publishes and the
+	// literal the code emits/enforces — so renaming an error code, a policy key
+	// or the guard switch in the code without the prose (or the other way
+	// round) is what fails here.
+	if strings.HasPrefix(claimID, "COUNT-NAMESPACE-") {
+		return countNamespacePhrase(repoRoot, claimID)
+	}
 	switch claimID {
 	case "COUNT-OPENAPI-PATHS", "COUNT-OPENAPI-OPERATIONS":
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "openapi.yaml"))
@@ -1507,6 +1515,61 @@ var ownershipAnchorPhrases = map[string]string{
 	"COUNT-OWNERSHIP-IDEMPOTENT-REPLAY-README": `"idempotent_replay":true`,
 	"COUNT-OWNERSHIP-MESSAGE-EXPIRED-README":   "MESSAGE_EXPIRED",
 	"COUNT-OWNERSHIP-DEAD-LETTERS-README":      "dead-letters?limit=N",
+}
+
+// namespaceAnchorPhrases pins each CR-FEAT-029 count claim to the README phrase
+// that publishes the contract AND the source literal that emits or enforces it.
+// A claim is 1 only when BOTH sides are present, so the gate fails if either
+// moves: renaming the refusal code in the handler without the prose, or editing
+// the prose without the code, are both caught — and the failure message names
+// the side that is missing rather than a shared count.
+var namespaceAnchorPhrases = map[string]struct {
+	docPhrase  string
+	sourceFile string
+	sourceLit  string
+}{
+	// The second acceptance criterion's wire contract: the named refusal a
+	// client codes against when it tries to cross realms.
+	"COUNT-NAMESPACE-CROSSING-REFUSAL-README": {
+		docPhrase:  "NAMESPACE_MISMATCH",
+		sourceFile: filepath.Join("internal", "registry", "handler.go"),
+		sourceLit:  `"NAMESPACE_MISMATCH"`,
+	},
+	// The isolation valve: the realm-level switch that keeps one realm's
+	// traffic out of the process-wide guard budget and circuit breaker.
+	"COUNT-NAMESPACE-GUARD-VALVE-README": {
+		docPhrase:  "guard_enabled: false",
+		sourceFile: filepath.Join("internal", "registry", "handler.go"),
+		sourceLit:  "GuardSkipped()",
+	},
+	// The policy document's own shape: the member a client writes to declare a
+	// realm, and the JSON key the parser reads.
+	"COUNT-NAMESPACE-DEFAULT-NAME-README": {
+		docPhrase:  `"name":"acme"`,
+		sourceFile: filepath.Join("internal", "namespace", "namespace.go"),
+		sourceLit:  `json:"namespaces"`,
+	},
+}
+
+// countNamespacePhrase re-measures one CR-FEAT-029 claim against both sides of
+// its contract (README + source).
+func countNamespacePhrase(repoRoot, claimID string) (any, error) {
+	anchor, ok := namespaceAnchorPhrases[claimID]
+	if !ok {
+		return nil, fmt.Errorf("no namespace doc probe for claim %q", claimID)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		return nil, err
+	}
+	srcRaw, err := os.ReadFile(filepath.Join(repoRoot, anchor.sourceFile))
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(string(docRaw), anchor.docPhrase) && strings.Contains(string(srcRaw), anchor.sourceLit) {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 // countOwnershipPhrase re-measures one CR-FEAT-025 claim from the README.

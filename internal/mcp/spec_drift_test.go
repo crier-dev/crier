@@ -13,7 +13,7 @@ package mcp
 // the one-line justification per entry is the reason a future reader needs.
 //
 // The relationship is MANY-TO-MANY, not one tool per operation: 13 tools
-// exercise 10 covered spec operations, 8 operations are explicitly excluded, and
+// exercise 10 covered spec operations, 9 operations are explicitly excluded, and
 // several tools share an operation (deliver_message and send_message both
 // deliver to the durable inbox; retrieve_inbox and get_messages both retrieve it;
 // get_messages and ack_messages both ack it). This guard therefore checks the
@@ -102,6 +102,10 @@ var excludedOperations = map[string]string{
 	// RemoteStore grows the capability and the bridge grows the tool.
 	"inboxTransfer":    "POST /agents/{id}/inbox/transfer — \"Transfer (reassign) messages from one inbox to another\": an operator rebalance of a stuck lease, signed by the current HOLDER whose inbox is being drained; RemoteStore does not implement Transferrer, so no bridge tool could execute it.",
 	"inboxDeadLetters": "GET /agents/{id}/inbox/dead-letters — \"List messages that expired unacknowledged in this inbox\": a forensics/retrieval surface for the agent whose consumer stopped consuming (and for an operator holding the relay token); RemoteStore does not implement DeadLetterStore, so no bridge tool could execute it.",
+	// CR-FEAT-029 — the realm/posture surface. Same shape as runtimeStatus:
+	// operator-facing policy reporting, and unreachable from the bridge's
+	// transport, so a tool would have nothing to call.
+	"listNamespaces": "GET /namespaces — \"List the namespace (realm) policies this server enforces\" (CR-FEAT-029, specs/NAMESPACES.md), with a live per-realm agent census: an operator posture surface like GET /status, not an agent-messaging verb — and the bridge runs on a RemoteStore, which exposes no realm call, so a tool could not execute it. Reclassify if the bridge ever grows one.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

@@ -9,6 +9,15 @@ is the whole throughput (no sharding, no read replicas), the mesh is a full fan 
 live WebSockets per agent, there are no namespaces, and the 100/min/agent publish
 cap is the ONLY backpressure.
 
+Two of those have moved since the review, and this page states which parts of it
+are still true: **namespaces exist** — a realm dimension with per-realm policy
+landed as CR-FEAT-029 ([`specs/NAMESPACES.md`](NAMESPACES.md)), so a single
+deployment is no longer forced into one shared fate — and the backpressure half
+(priority lanes, a global/per-realm shed with `Retry-After`) is filed as
+CR-FEAT-035 and is still open. Neither changes a number on this page: the soak
+below drives ONE namespace, one relay process and the in-memory backend, which is
+what it measures.
+
 This page answers that with numbers instead of a claim. Everything below was
 produced by `scripts/load-soak.py` (the bounded, repeatable soak) driving a real
 `crier` server on a scratch port, on one host, in one run — and every figure
@@ -93,10 +102,12 @@ Not supported by this run — do **not** read these numbers as:
   demonstrates how little a sub-second measurement window overlaps a sanctioned
   burn — not because it is a contended-host ceiling.
 - **a multi-relay, sharded or replicated figure.** The soak drives ONE relay
-  process, which is what crier ships today. Sharding, read replicas and
-  namespaces do not exist here, so there is nothing to measure; the single-process
-  result is a ceiling on the whole system as shipped, not on one component of a
-  bigger one.
+  process, which is what crier ships today. Sharding and read replicas do not
+  exist here, so there is nothing to measure; the single-process result is a
+  ceiling on the whole system as shipped, not on one component of a bigger one.
+  Namespaces DO exist since CR-FEAT-029, and the soak deliberately runs inside
+  one of them (the implicit default realm): a per-realm figure would measure the
+  policy dimension, not the ceiling this page is about.
 - **a PostgreSQL figure.** Every number here is the in-memory registry backend
   (the default when no database URL is set). The durable Postgres path is not
   measured.

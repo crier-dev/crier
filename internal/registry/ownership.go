@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/crier-dev/crier/internal/metrics"
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // This file is the HTTP and sweep side of task ownership (CR-FEAT-025): the
@@ -284,6 +285,26 @@ func (h *Handler) HandleTransfer(w http.ResponseWriter, r *http.Request) {
 	case len(req.MessageIDs) == 0:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_ids is required (a transfer with no messages moves nothing)"})
 		return
+	}
+
+	// Realms (CR-FEAT-029): a transfer is a MOVE of live messages between two
+	// inboxes, and moving one into another realm's inbox would be exactly the
+	// implicit crossing this feature forbids — the message would be readable by
+	// an agent whose realm never agreed to hold it. Both rows are read first;
+	// an unknown agent is left to the store's own error reporting (the same 404
+	// every other transfer shape gets), and only a pair of KNOWN agents in
+	// DIFFERENT realms is refused here.
+	if source, srcErr := h.store.Get(id); srcErr == nil {
+		if dest, dstErr := h.store.Get(req.TargetAgentID); dstErr == nil {
+			if from, to := namespaceOfAgent(source), namespaceOfAgent(dest); from != to {
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error": "NAMESPACE_MISMATCH",
+					"detail": fmt.Sprintf("inbox transfer cannot cross namespaces: source is in %q, target is in %q",
+						namespace.Display(from), namespace.Display(to)),
+				})
+				return
+			}
+		}
 	}
 
 	store, ok := h.store.(Transferrer)

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // newRemoteTestServer spins a real registry HTTP handler (signing disabled)
@@ -582,6 +585,72 @@ func TestLoadEd25519PrivateKeyFile(t *testing.T) {
 			if _, err := LoadEd25519PrivateKeyFile(path); err != nil && strings.Contains(err.Error(), rawHex[:16]) {
 				t.Fatalf("%s: error leaked key material: %v", tc.name, err)
 			}
+		}
+	})
+}
+
+// TestRemoteStore_RegisterCarriesTheNamespace (CR-FEAT-029) — a proxied
+// registration must land the agent in the SAME realm. Without the forwarded
+// member the downstream relay would register the agent in ITS default realm,
+// which is a silent realm move: the agent would (with per-realm guard settings)
+// silently leave the guarded realm, and every later realm check would be
+// measured against the wrong row.
+func TestRemoteStore_RegisterCarriesTheNamespace(t *testing.T) {
+	t.Run("declared realm is forwarded and stored", func(t *testing.T) {
+		store := NewMemoryStore()
+		h := NewHandler(store)
+		h.SetRequireAgentSig(false)
+		reg, err := namespace.Parse(`{"namespaces":[{"name":"acme"}]}`, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.SetNamespacePolicies(reg)
+		r := mux.NewRouter()
+		r.HandleFunc("/agents", h.HandleRegister).Methods(http.MethodPost)
+		srv := httptest.NewServer(r)
+		t.Cleanup(srv.Close)
+
+		rs := NewRemoteStore(srv.URL, "remote-client", "")
+		keyBytes, err := hex.DecodeString(strings.Repeat("cd", 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := &Agent{ID: "alice", PublicKey: HexKey(keyBytes), Namespace: "acme"}
+		if err := rs.Register(agent); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		stored, err := store.Get("alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.Namespace != "acme" {
+			t.Fatalf("stored namespace = %q, want acme (the proxy dropped the realm)", stored.Namespace)
+		}
+	})
+
+	t.Run("default realm sends no namespace member", func(t *testing.T) {
+		// The downstream relay declares the realm and refuses an undeclared
+		// one, so a proxy that invented a member would be refused here — this
+		// proves the default realm's request is the body it always was.
+		var got map[string]json.RawMessage
+		recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &got)
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":"alice"}`))
+		}))
+		t.Cleanup(recorder.Close)
+
+		rs := NewRemoteStore(recorder.URL, "remote-client", "")
+		keyBytes, err := hex.DecodeString(strings.Repeat("ef", 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rs.Register(&Agent{ID: "alice", PublicKey: HexKey(keyBytes)}); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		if _, present := got["namespace"]; present {
+			t.Fatalf("the default realm must not be sent on the wire: %v", got)
 		}
 	})
 }

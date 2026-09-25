@@ -11,6 +11,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -175,6 +176,13 @@ type Handler struct {
 	// one in a test) has no window and therefore deduplicates nothing — the
 	// pre-CR-FEAT-025 behaviour — instead of panicking on the deliver path.
 	idempotency *idempotencyRegistry
+	// namespaces is the realm policy set (CR-FEAT-029, namespace.go). Nil (the
+	// default) means one implicit namespace: every target resolves to the
+	// default realm, retention and guard settings resolve exactly as they did
+	// before the feature existed, and no response body grows a namespace
+	// member. All methods on *namespace.Registry are nil-safe for exactly this
+	// reason — the zero Handler is the unconfigured deployment.
+	namespaces *namespace.Registry
 }
 
 // NewHandler creates a Handler that delegates store operations to the

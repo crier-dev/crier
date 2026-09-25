@@ -15,6 +15,51 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Namespaces (realms)** (CR-FEAT-029) — a realm dimension on agents and
+  messages, with per-realm policy. Named after the ancestor the external review
+  pointed at — WAMP's realms, *"a routing and administrative domain … messages
+  are only routed within a Realm"* — and opt-in: with `CR_NAMESPACES` unset
+  every agent is in the one implicit namespace and every wire surface (agent
+  rows, inbox entries, webhook envelopes, relay frames, `/relay/topics`) is
+  byte-identical to a build without this feature.
+  - **Per-realm policy** (`CR_NAMESPACES` inline or `CR_NAMESPACES_FILE`), each
+    axis inherited when unset: auth posture (`shared` — the deployment's gate —
+    or `token`, an additional realm credential resolved from an `env:VAR`
+    reference and required on registration into the realm, delivery into it and
+    relay publish/subscribe in it), **rate limits** (`rate_limit_per_minute`,
+    counted per `(realm, agent)`, so one realm's flood cannot spend another's
+    budget and the same agent id has one budget per realm), **guard settings**
+    (`guard_enabled: false` keeps a realm's traffic out of the process-wide
+    guard concurrency and circuit breaker — the noisy-neighbour valve — and
+    `guard_policy` is the realm-level default policy) and **retention**
+    (`retention_seconds`, the default message lifetime for the realm, which an
+    explicit `ttl_seconds` still overrides).
+  - **Realm-scoped routing with no implicit crossing**: a message's realm is the
+    TARGET agent's stored realm, never the sender's claim — a delivery naming a
+    different realm is `403 NAMESPACE_MISMATCH` and stores nothing; an inbox
+    transfer between realms is refused; relay subscribers of the same topic name
+    in two realms are two disjoint sets (wildcards included); a realm name the
+    server does not declare is refused on every lane rather than falling back to
+    the default realm; `PATCH /agents/{id}` refuses the member (moving a live
+    agent is unregister + re-register).
+  - **`GET /namespaces`** — the policies actually being enforced, with a live
+    per-realm agent census, reporting postures and `env:` references and never a
+    resolved secret. Not auth-exempt, like `/status`.
+  - **Storage**: migration `007_add_namespaces` adds a nullable `namespace`
+    column to `agents`, `inbox_entries` and `dead_letters`, where `NULL` is the
+    default realm — an existing database gains three NULL columns and changes
+    none of its answers. The webhook envelope and dead-letter records carry the
+    realm too, so a message states it even after its agent's row is gone.
+  - Spec: [`specs/NAMESPACES.md`](specs/NAMESPACES.md) (WAMP semantics read and
+    cited, the `""`-canonical mapping, the decision table per lane, the
+    non-regression table and the honest non-goals: the mesh lane is not
+    realm-scoped, there is no cross-realm bridging, and a `token`-posture realm
+    is not subscribable from a browser page without a header-capable client).
+    Acceptance is measured live by `cmd/server/crfeat029_test.go` plus the relay
+    and registry namespace suites.
+  Source: external hands-on review `DISPATCH · CRI-001` by Carter (via Bane,
+  2026-09-25).
+
 - **Detection & containment** (CR-FEAT-030) — the other half of attribution, and
   it is opt-in (`CR_DETECT_ENABLED`, default `false`; with the flag unset no
   route is registered, no file is written and the delivery path is unchanged):

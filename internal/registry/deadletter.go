@@ -78,6 +78,14 @@ type DeadLetter struct {
 	// at deliver time, and a dead letter records which key produced this
 	// message so a re-delivery under the same key can be reasoned about.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// Namespace is the realm the message belonged to when it expired
+	// (CR-FEAT-029), copied from the inbox entry at sweep time. A dead letter
+	// outlives its agent's row (the destination is deliberately not
+	// foreign-keyed), so the realm has to be recorded WITH the record or the
+	// operator loses the one fact that says whose retention policy applied.
+	// Empty = the default namespace, and `omitempty` keeps every
+	// pre-CR-FEAT-029 record byte-identical.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // expiryReceiptPayload is the durable, machine-readable inbox payload of an
@@ -149,5 +157,9 @@ func newDeadLetter(agentID string, entry *InboxEntry, now time.Time) *DeadLetter
 		DeadLetteredAt: now,
 		Reason:         DeadLetterReasonExpired,
 		IdempotencyKey: entry.IdempotencyKey,
+		// The realm travels with the record (CR-FEAT-029): the dead letter
+		// outlives the agent row, so this is the only place the realm of the
+		// retention policy that expired it can be read from afterwards.
+		Namespace: entry.Namespace,
 	}
 }
