@@ -271,6 +271,12 @@ source relay classifies a failed forward attempt into exactly three outcomes:
 - Retry runs until delivery succeeds or the hold budget (`CR_FED_MAX_HOLD_S`) expires. A retry re-POSTs the
   **same bytes** as the original attempt (same hop header, same link auth) and the delivery is removed from
   the queue the moment a 2xx is seen, so a recovery forwards it exactly once.
+- **A recovered delivery's reply is dropped, by design** (DF-CRIER-282). The successful retry has no
+  synchronous reply path: the original request completed with `202` and its caller is gone, so the source
+  relay logs the linked relay's answer (`message_id`, `target`, `sender`, `attempts`, `status`, response
+  snippet) and routes it nowhere. A sender that needs that answer polls the target peer's inbox, or supplies
+  its own correlation — a `request_id` it matches when the peer's webhook reply path echoes it back. This
+  differs from the **Relayed** row above: that verbatim reply is the first synchronous attempt only.
 - **Terminal FEDERATION_FAILED.** When the budget expires — or a retry gets a definitive answer that is not a
   delivery (all-links-404, or any non-2xx rejection) — the sender gets exactly one durable notification in its
   own inbox, written directly through the store (never through webhook/federation routing, so it cannot
