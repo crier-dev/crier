@@ -205,6 +205,31 @@ live run proved:
 - Every guard decision logs one line carrying the HTTP `request_id` —
   join it to the delivery line to trace a message end-to-end.
 
+## A2A opt-in gate (INT-A2A-001, live-verified 2026-09-25 @ 4a87ec5)
+
+A2A is an EXTRA: default-off, additive-only, two-half gate.
+
+- Server switch `CR_A2A_ENABLED` (default false) + per-agent block
+  `{"a2a":{"enabled":true}}` on `POST /agents` / `PATCH /agents/{id}`. Either
+  half alone is inert.
+- **No A2A route exists yet under either value** (INT-A2A-002..006 are future
+  rows): `/.well-known/agent-card.json` and any JSON-RPC path 404 with the
+  switch ON too. `GET /openapi.json` is md5-identical across both postures —
+  verified.
+- Strict decode: an unknown key inside the `a2a` object is
+  `400 {"error":"a2a: unknown field \"enabld\" (accepted: enabled)"}` and
+  registers NOTHING (verify with a follow-up GET → 404). A wrong-TYPED member
+  is a generic `400 invalid json` (intentional webhook parity,
+  `internal/registry/a2a_optin_test.go:125`). `"a2a":null` CLEARS the block
+  (three-state rule); `{"a2a":{}}` is a valid opt-OUT that round-trips as `{}`
+  and survives restart.
+- The block persists on Postgres (migration 005 nullable column): opt-in
+  survives restart; a no-block agent stays keyless (`omitempty`) so pre-A2A
+  consumers see no diff.
+- Opted-in agents do ordinary messaging unchanged: deliver/retrieve/ack
+  verified live on both switch postures (p50 5.6 ms server-side; client wall
+  ~60 ms is curl+openssl forks).
+
 ## Common pitfalls
 
 1. ~~Ack without `message_ids` → false success~~ **FIXED (verified 2026-09-08):** lease-only ack now → 400. Still always ack with `lease_id` + the `message_ids` from the retrieve, verify via `/inbox/stats`.
