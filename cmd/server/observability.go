@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -11,6 +12,7 @@ import (
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/metrics"
+	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
 
 	"github.com/gorilla/mux"
@@ -62,11 +64,17 @@ type observabilityFlags struct {
 }
 
 // observabilityDeps carries the live objects the gauges read. federation
-// hold may be nil (no links configured — depth is then constantly 0).
+// hold may be nil (no links configured — depth is then constantly 0), and
+// queueDepth may be nil (the serving store cannot report a queue depth — the
+// inbox-queue gauges are then NaN rather than a fabricated zero).
 type observabilityDeps struct {
 	relaySvc *relay.Relay
 	meshSvc  *mesh.Mesh
 	fedHold  *federation.HoldManager
+	// queueDepth reads the store-wide inbox queue (CR-FEAT-035). Wired from
+	// the store that actually serves, so the gauges report the queue of the
+	// backend answering — memory or postgres — and never a copied number.
+	queueDepth queueDepthReader
 }
 
 // registerObservabilityGauges registers the composition-layer gauges whose
@@ -96,6 +104,41 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(n)
 		})
+	registerQueueDepthGauges(deps.queueDepth)
+}
+
+// registerQueueDepthGauges exposes the store-wide inbox queue (CR-FEAT-035):
+// how many messages are waiting, how many of those are held under a live lease,
+// and how old the oldest one is.
+//
+// A store that cannot report (a remote proxy — no depth route) makes all three
+// gauges NaN, Prometheus's own spelling for "no value": a zero would read as an
+// empty queue, which is the one reading an operator must never be handed by
+// accident. NaN is valid in the text exposition format, so a scrape stays
+// parseable either way.
+func registerQueueDepthGauges(read queueDepthReader) {
+	sample := func(pick func(registry.QueueDepth) float64) func() float64 {
+		return func() float64 {
+			if read == nil {
+				return math.NaN()
+			}
+			depth, ok := read()
+			if !ok {
+				return math.NaN()
+			}
+			return pick(depth)
+		}
+	}
+
+	metrics.Default.RegisterGaugeFunc("inbox_queue_depth",
+		"Inbox messages queued and unacknowledged across all agents (leased messages included), read from the serving store. NaN when the store cannot report a depth.",
+		sample(func(d registry.QueueDepth) float64 { return float64(d.Pending) }))
+	metrics.Default.RegisterGaugeFunc("inbox_queue_leased",
+		"How many of inbox_queue_depth are currently held under a live lease. NaN when the store cannot report a depth.",
+		sample(func(d registry.QueueDepth) float64 { return float64(d.Leased) }))
+	metrics.Default.RegisterGaugeFunc("inbox_queue_oldest_age_seconds",
+		"Age of the oldest unacknowledged, unexpired inbox message, in seconds (0 when nothing is queued). NaN when the store cannot report a depth.",
+		sample(func(d registry.QueueDepth) float64 { return d.OldestAge.Seconds() }))
 }
 
 // registerPProf mounts the net/http/pprof surface on the gorilla mux:

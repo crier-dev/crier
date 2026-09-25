@@ -58,6 +58,10 @@ var statusScrubbedEnv = []string{
 	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE",
 	"CR_ENABLE_METRICS", "CR_ENABLE_PPROF",
 	"CR_LOG_LEVEL", "CR_LOG_FORMAT", "CR_RATE_LIMIT_PER_MINUTE",
+	// CR-FEAT-035: the global inbox-ingest budget is read from this one, for
+	// the same reason — a case must see the budget it asked for (or none), not
+	// whatever the runner's environment happened to carry.
+	"CR_RATE_LIMIT_GLOBAL_PER_MINUTE",
 }
 
 // statusTopLevelKeys is the documented wire schema of GET /status. It is
@@ -69,6 +73,11 @@ var statusTopLevelKeys = []string{
 	"build",
 	"federation_enabled",
 	"federation_hold_queue",
+	// CR-FEAT-035: the effective global inbox-ingest budget (posture) and the
+	// LIVE store-wide queue measurement. Both are documented in
+	// docs/openapi.yaml's /status schema; adding one here without adding it
+	// there (or vice versa) is what this exact comparison exists to catch.
+	"global_rate_limit_per_minute",
 	"guard_enabled",
 	"log_format",
 	"log_level",
@@ -78,6 +87,9 @@ var statusTopLevelKeys = []string{
 	"pprof_enabled",
 	// CR-FEAT-024: the staleness window a row's derived status is judged by.
 	"presence_stale_after_s",
+	// CR-FEAT-035: {pending, leased, oldest_age_s} from the serving store, or
+	// null for a store that cannot report a depth.
+	"queue_depth",
 	"rate_limit_per_minute",
 	"registry_backend",
 	"require_agent_signature",

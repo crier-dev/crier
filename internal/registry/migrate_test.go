@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 6, version, "should reflect the six embedded migration files (006 = CR-FEAT-025 task ownership)")
+	assert.Equal(t, 7, version, "should reflect the seven embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority)")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 

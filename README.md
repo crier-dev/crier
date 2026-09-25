@@ -1307,6 +1307,123 @@ That run is executed as a test against the real server —
 alert it trips, contains the agent in one call and then proves the enforcement,
 the log and the restart survival. The capture is in the test's own output.
 
+## Priority lanes & real backpressure (CR-FEAT-035)
+
+The external review (`DISPATCH · CRI-001`, Carter, via Bane, 2026-09-25) named
+three gaps in passing: **no priority lanes**, the per-agent 100/min publish cap
+as **the only backpressure**, and **no visibility into how deep a queue was** —
+so a steady stream of low-value messages could starve an urgent one, and a
+runaway producer either got 429ed per agent id or pushed every inbox deeper with
+nothing to stop it and nothing to read. All three are addressed below, and an
+existing deployment is unaffected: **a delivery that names no priority is the
+FIFO message it always was, and an unconfigured server sheds nothing at all.**
+
+### Priority — an optional `priority` on a delivery
+
+`POST /agents/{id}/inbox` accepts an optional `priority`, integer **0..9**
+(default `0`). `GET /agents/{id}/inbox` hands back the **highest** priority
+claimable messages first; messages of equal priority keep arrival order, and the
+default queue is plain FIFO — so a client that never sends the field sees exactly
+the ordering it saw before the field existed (`"priority":0` is not even on the
+wire: the key is omitted at the default).
+
+```bash
+BASE=http://127.0.0.1:8767
+# A low-value backlog, then one urgent message BEHIND it.
+curl -s -X POST $BASE/agents/agent-1/inbox -d '{"payload":{"batch":1}}'                 # 201 (priority 0)
+curl -s -X POST $BASE/agents/agent-1/inbox -d '{"payload":{"batch":2}}'                 # 201 (priority 0)
+curl -s -X POST $BASE/agents/agent-1/inbox -d '{"payload":{"alert":"disk"},"priority":9}'  # 201
+# The urgent message comes back FIRST, wherever it arrived.
+curl -s "$BASE/agents/agent-1/inbox?max=1"      # -> the {"alert":"disk"} message, "priority":9
+# Out of range is refused, never clamped, and stores nothing:
+curl -s -X POST $BASE/agents/agent-1/inbox -d '{"payload":{},"priority":10}'
+# 400 {"error":"priority must be 0..9"}
+```
+
+- **It is a preference within ONE inbox, not a priority queue across the bus.**
+  A higher-priority message is chosen among the messages *claimable at that
+  moment* (unacked, unexpired, unleased), and each retrieve returns at most
+  `limit` of them — it cannot pre-empt a lease already handed out, and it never
+  reorders across agents.
+- **The ordering survives a restart on the durable backend**: the priority is
+  stored on the message (PostgreSQL migration 007 adds
+  `inbox_entries.priority`, `NOT NULL DEFAULT 0`, range-checked), so every
+  message a pre-existing database already holds reads back at priority 0 — the
+  order it has always had.
+- **The MCP bridge does not expose it yet**: `deliver_message` sends no
+  priority, so bridge-delivered messages are the FIFO default. Named here rather
+  than left to be discovered.
+
+### Backpressure — a global ingest budget, and a `Retry-After` on every 429
+
+`CR_RATE_LIMIT_GLOBAL_PER_MINUTE` (default **0 = no budget**) is a shed on the
+delivery path itself, across every agent and every sender. Set it and a delivery
+over budget is refused before any transport, guard call or store write:
+
+```bash
+export CR_RATE_LIMIT_GLOBAL_PER_MINUTE=3
+curl -si -X POST $BASE/agents/agent-1/inbox -d '{"payload":{"n":1}}'   # 201, 201, 201 …
+# …the fourth delivery inside the minute:
+# HTTP/1.1 429 Too Many Requests
+# Retry-After: 60
+# {"error":"RATE_LIMITED_GLOBAL","scope":"global","limit_per_minute":3,"retry_after_s":60}
+```
+
+- The error is **named** (`RATE_LIMITED_GLOBAL`) so a client branches on a code,
+  not on prose; `Retry-After` (whole seconds, never below 1) and the body's
+  `retry_after_s` carry the same wait, so a client that logs only one of them
+  still learns it.
+- The wait is honest: it is the time until enough of the current window has aged
+  out that a retry is admitted, if no one else has spent the budget meanwhile.
+- **Both 429s carry `Retry-After` now** — the pre-existing per-agent publish cap
+  (`CR_RATE_LIMIT_PER_MINUTE`, `POST /relay/publish`) gained the header too,
+  with its body and its per-agent scope unchanged.
+- The budget is checked **after** the request is decoded, validated and the
+  containment decision made, and **before** idempotency bookkeeping, federation
+  forwarding, the guard call and the store write — so a malformed delivery still
+  answers 400 and a contained agent still answers 403 `AGENT_QUARANTINED`; a 429
+  never masks either.
+- **Per-namespace budgets are not here yet** — that is CR-FEAT-029's half, and
+  today every delivery counts against the one global key. The counter is already
+  labelled by scope, so that change adds series rather than renaming them.
+
+### Depth — where operators already look
+
+`GET /status` carries the live store-wide queue beside the budget that protects
+it, and `GET /metrics` exposes the same three numbers as gauges:
+
+```json
+{
+  "global_rate_limit_per_minute": 3,
+  "queue_depth": { "pending": 41, "leased": 3, "oldest_age_s": 12 }
+}
+```
+
+```
+# TYPE inbox_queue_depth gauge
+inbox_queue_depth 41
+# TYPE inbox_queue_leased gauge
+inbox_queue_leased 3
+# TYPE inbox_queue_oldest_age_seconds gauge
+inbox_queue_oldest_age_seconds 12
+# TYPE inbox_shed_total counter
+inbox_shed_total{scope="global"} 7
+```
+
+- `pending` counts un-acknowledged, un-expired messages across **all** inboxes
+  (a leased message is still queued); it is the sum of the per-agent counters
+  `GET /agents/{id}/inbox/stats` already reports.
+- A store that cannot report a depth renders `"queue_depth": null` in `/status`
+  and `NaN` on the gauges — "empty" and "unavailable" are never the same
+  reading.
+- `inbox_shed_total` counts what the budget refused, by scope.
+
+All of the above is executed as a test against the real server —
+`TestCRFEAT035_*` in `cmd/server/crfeat035_test.go` (priority beats arrival
+order, absent priority is FIFO, the budget sheds with 429 + `Retry-After` + the
+named error, the depth is readable in `/status` and `/metrics`, and an
+unconfigured server refuses nothing).
+
 ## Configuration
 
 All configuration is via environment variables (defaults shown):
@@ -1324,7 +1441,8 @@ All configuration is via environment variables (defaults shown):
 | `CR_PRESENCE_STALE_AFTER_S` | `90` | How long a registry row may go without **liveness evidence** — a mesh connect accepted for it, a `KEEPALIVE` heartbeat on that socket, or a signed `PATCH /agents/{id}` — before the `status` reported for it becomes `stale` (CR-FEAT-024; see [§3](#3-agent-registry)). The default is three missed mesh heartbeats (3 × 30s), so one dropped tick can never flip a live agent. It is a READ-TIME window: nothing is stored, no sweeper runs, and the stored `status` column keeps its `online`/`offline` values. Setting it below the 30s keepalive interval makes a healthy agent flap to `stale` between beats — the server warns at startup, and `GET /status` reports the effective window as `presence_stale_after_s`. A non-positive or non-integer value is a startup error, never a silently ignored setting. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
-| `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-agent publish rate limit (events/minute), keyed on the `X-Agent-ID` header. `0` disables rate limiting and the identity requirement. |
+| `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-agent publish rate limit (events/minute), keyed on the `X-Agent-ID` header. `0` disables rate limiting and the identity requirement. The 429 carries a `Retry-After` header in whole seconds (CR-FEAT-035) and the budget is PER AGENT — for the delivery path's global budget see `CR_RATE_LIMIT_GLOBAL_PER_MINUTE` below. |
+| `CR_RATE_LIMIT_GLOBAL_PER_MINUTE` | `0` (disabled) | Global inbox-ingest budget, in deliveries/minute across **every** agent and sender (CR-FEAT-035). `0` — the default — means no global budget exists: no delivery is ever refused by it and the delivery path is byte-identical to a build without the feature. When set, a delivery over budget is refused `429 {"error":"RATE_LIMITED_GLOBAL","scope":"global","limit_per_minute":N,"retry_after_s":N}` with a matching `Retry-After` header, before any transport, guard call or store write — so a runaway producer cannot push every inbox deeper without limit, which the per-agent publish cap alone could not do (a flood from many ids spends every agent's own budget). Checked after decode/validation/containment and before idempotency, federation, the guard and the store: a malformed delivery still answers 400 and a contained agent still answers 403 `AGENT_QUARANTINED`. Per-namespace budgets are CR-FEAT-029's half. |
 | `CR_WS_ALLOWED_ORIGINS` | _(unset — all origins allowed)_ | Comma-separated list of allowed WebSocket `Origin` headers (`scheme://host:port`). `*` allows all origins. |
 | `CR_FED_LINKS` | _(unset — federation disabled)_ | Comma-separated base URLs of linked relays (relay-to-relay federation, CR-FEAT-006). When set, deliveries to agents unknown on this relay are forwarded to each linked relay in order (first non-404, non-retryable answer wins and is relayed back verbatim — a blocking webhook reply returns to the original sender), and `GET /fed/peers` lists the linked relays with their agents. A transient link outage (unreachable link, or a retryable 5xx/408/429) is held and retried instead of answering `404` (`202 Accepted {"status":"held",…}`) — but only when the request names a `sender`; a sender-less request is never held and answers `502 {"error":"FEDERATION_FAILED",…}` immediately, because the terminal notification is addressed to the sender and could never reach an inbox (DF-CRIER-129). A definitive all-links-404 still answers `404` immediately. Example: `http://localhost:18772`. |
 | `CR_FED_NAME` | _(unset — `localhost:<port>`)_ | Optional display name for this relay in the `GET /fed/peers` listing. |
@@ -1360,7 +1478,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_WEBHOOK_BATCH_FLUSH_S` | `5` | Batch flush interval, seconds. |
 | `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
 | `CR_ENABLE_PPROF` | `false` | Opt-in: register `GET /debug/pprof/` (plus `cmdline`, `profile`, `symbol`, `trace`, `heap`, `goroutine`, `block`, `mutex`, `threadcreate`) for live Go profiling. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
-| `CR_ENABLE_METRICS` | `false` | Opt-in: register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
+| `CR_ENABLE_METRICS` | `false` | Opt-in: register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests, and the live inbox queue (`inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds`, `inbox_shed_total`; CR-FEAT-035). Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
 | `CR_A2A_ENABLED` | `false` | Opt-in: A2A (agent-to-agent protocol) interoperability — INT-A2A-001/002, [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md). **Default off, and A2A is an extra rather than first-class support**: with the flag unset nothing A2A-related is registered, and every existing route, response body, auth requirement and storage path behaves exactly as it did before the option existed. The flag is also only HALF the gate — an agent takes part in A2A only if it opted in as well, via the optional `a2a` object on `POST /agents` / `PATCH /agents/{id}` (`{"a2a":{"enabled":true}}`, strictly decoded, absent by default). With the flag set crier publishes exactly ONE A2A surface: `GET /.well-known/agent-card.json?agent_id=<id>` serves the [A2A](https://a2a-protocol.org) Agent Card projected from that agent's registry row (INT-A2A-002) — `404` for an id that is not an opted-in row, `400` when the request names no agent, `Cache-Control: private` + `ETag` for conditional GETs — and nothing else: the JSON-RPC binding, streaming and the push-notification configs land with INT-A2A-003..006. |
 | `CR_DETECT_ENABLED` | `false` | Opt-in: the detection layer (CR-FEAT-030) — signed delivery log, behaviour alerts, canary tokens and the kill-switch, plus the five detection routes. Default off: unset means no route is registered (all five answer `404`), no log file is written and the delivery path is unchanged. Not auth-exempt — the kill-switch requires the Bearer header like every other authenticated route. See [Detection & containment](#detection--containment-cr-feat-030). |
 | `CR_DETECT_LOG` | _(unset — no log written)_ | Path of the append-only signed delivery log. Every delivery outcome is appended and fsynced; alerts and containment are recorded in it too. Unset, alerts and containment still work in memory — nothing is persisted. |
@@ -1448,6 +1566,12 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
   "guard_enabled": true,
   "registry_backend": "memory",
   "rate_limit_per_minute": 100,
+  "global_rate_limit_per_minute": 0,
+  "queue_depth": {
+    "pending": 0,
+    "leased": 0,
+    "oldest_age_s": 0
+  },
   "log_level": "info",
   "log_format": "text",
   "webhook_signing": false,
@@ -1469,6 +1593,8 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 - `webhook_signing` and `federation_enabled` report whether the corresponding secret/link configuration is in effect — as booleans, never as values.
 - `federation_hold_queue` is the **durability mode** of the federation hold path: `none` (no `CR_FED_LINKS`, so no hold path exists), `memory` (held deliveries are process-lifetime and lost on restart) or `file` (`CR_FED_QUEUE_FILE` is set, so they survive a restart). The path itself is config, not posture, and is never in the body.
 - `metrics_enabled` / `pprof_enabled` say whether the opt-in inspection surfaces are registered at all (`false` = those paths answer `404`).
+- `global_rate_limit_per_minute` is the effective **global inbox-ingest budget** (CR-FEAT-035, `CR_RATE_LIMIT_GLOBAL_PER_MINUTE`); `0` — the default — means no global budget exists and no delivery is ever shed by one. It sits beside `rate_limit_per_minute` (the per-agent **publish** cap) because they are different lanes, and an operator deploying one must not read the other as it.
+- `queue_depth` is the one field here that is a **measurement rather than posture** (CR-FEAT-035): the live store-wide inbox queue — `pending` unacknowledged messages, how many of them are `leased`, and the age of the oldest. It changes between two reads of the same server, it carries counts and an age and nothing else (no payload, no message id, no agent id), and it is `null` — not `0` — when the serving store cannot report a depth, so "empty" and "unavailable" are never the same reading. `GET /metrics` reports the same three numbers as the `inbox_queue_*` gauges.
 - `build` is byte-for-byte the object `GET /version` serves — the same `internal/buildinfo` source, nested rather than flattened.
 - **No secret or connection value is ever serialized**: not `CR_AUTH_TOKEN`, not `CR_DATABASE_URL` (only the backend name), not `CR_WEBHOOK_SECRET`, not `CR_FED_TOKEN`, and no guard provider credential or base URL.
 - `GET /status` is **not** auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header and answers `401` without it. The exempt-path list in `internal/middleware/auth.go` is unchanged at five paths — `/health` and `/version` stay public because "up?" and "which build?" must be answerable without a token; the enforced-posture answer is not.
@@ -1477,7 +1603,7 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 
 Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default** (set the env var to enable, unset = the path answers `404`):
 
-- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, and `http_requests_total{code}`.
+- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, `http_requests_total{code}`, and the live inbox queue (CR-FEAT-035): `inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds` (gauges, `NaN` when the serving store cannot report a depth) and `inbox_shed_total{scope}` (what the global ingest budget refused).
 - `GET /debug/pprof/` (`CR_ENABLE_PPROF=true`) — the standard Go profiling index plus the named profiles (`heap`, `goroutine`, `block`, `mutex`, `threadcreate`, `profile`, `symbol`, `trace`, `cmdline`).
 
 **Neither path is auth-exempt**: they are served like any other authenticated route — with `CR_AUTH_TOKEN` set they require `Authorization: Bearer <token>`; with auth disabled they are open. The exempt-path list in `internal/middleware/auth.go` is unchanged. Exposure note: the pprof surface reveals runtime internals (stacks, heap) — enable it only on trusted networks.

@@ -804,12 +804,14 @@ func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	s, mock := newMockStore(t)
 	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1"}
 
-	// Seven arguments since CR-FEAT-025: sender and idempotency_key ride with
-	// the message (they are the receipt address and the dead-letter
-	// provenance), so the INSERT names them explicitly.
+	// Eight arguments since CR-FEAT-035: the INSERT names the priority column
+	// too, because a retrieval priority that only lived in memory would read
+	// back in arrival order on the durable backend. sender + idempotency_key
+	// ride with the message since CR-FEAT-025 (the receipt address and the
+	// dead-letter provenance).
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
-			pgxmock.AnyArg(), pgxmock.AnyArg()).
+			0, pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -828,7 +830,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 	// representation in the database.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
-			pgxmock.AnyArg(), pgxmock.AnyArg()).
+			0, pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -841,7 +843,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -854,7 +856,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -867,7 +869,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -930,11 +932,12 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	mock.ExpectQuery(`SELECT 1 FROM agents`).
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
-	// Claiming select — locks a disjoint FIFO batch. Since CR-FEAT-025 the row
-	// also carries the delivery's sender and idempotency key (read back through
-	// COALESCE so a NULL provenance arrives as "").
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
-		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", now, now.Add(time.Hour))
+	// Claiming select — locks a disjoint priority batch. Since CR-FEAT-025 the
+	// row also carries the delivery's sender and idempotency key (read back
+	// through COALESCE so a NULL provenance arrives as ""), and since
+	// CR-FEAT-035 its priority (the first ORDER BY key).
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "created_at", "expires_at"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, now, now.Add(time.Hour))
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)

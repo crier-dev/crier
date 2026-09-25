@@ -1025,6 +1025,22 @@ func liveDefault(claimID string) (any, error) {
 		// constant an unset environment resolves to — not to a literal here —
 		// so a window change that skips the docs fails this gate.
 		return int(registry.NewPresence(0).StaleAfter().Seconds()), nil
+	case "DEFAULT-GLOBAL-RATE-LIMIT-PER-MINUTE":
+		// CR-FEAT-035: the README prints the shipped default of the global
+		// inbox-ingest budget. An unset environment must resolve to 0 — "no
+		// budget at all", which is the behaviour the row was filed under: the
+		// delivery path is unchanged unless an operator opts in.
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, err
+		}
+		return cfg.GlobalRateLimitPerMinute, nil
+	case "DEFAULT-MESSAGE-PRIORITY-RANGE":
+		// CR-FEAT-035: the documented `priority` range, printed by the README
+		// as a pair. Compared in its wire form against the two production
+		// constants validateDeliverParameters enforces, so prose and boundary
+		// cannot drift apart.
+		return fmt.Sprintf("%d..%d", registry.MinMessagePriority, registry.MaxMessagePriority), nil
 	default:
 		return nil, fmt.Errorf("no live default probe for claim %q", claimID)
 	}

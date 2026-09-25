@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -11,6 +12,7 @@ import (
 	"github.com/crier-dev/crier/internal/httperr"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
+	"github.com/crier-dev/crier/internal/ratelimit"
 )
 
 // relayEventsTotal counts accepted relay publishes (DF-CRIER-142): one Inc
@@ -63,9 +65,16 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if !r.CheckRateLimit(agentID) {
+			// The refusal carries the backoff instruction (CR-FEAT-035): a
+			// 429 without Retry-After tells the caller nothing it did not
+			// already know, and a client that has to guess either retries
+			// immediately (wasting both sides' work) or backs off far more
+			// than it needed to. The body is unchanged.
+			retryAfterS := ratelimit.HeaderSeconds(r.RateLimitRetryAfter(agentID))
 			slog.Warn("relay: publish rejected", "reason", "rate limit exceeded",
-				"sender", agentID, "request_id", rid)
+				"sender", agentID, "retry_after_s", retryAfterS, "request_id", rid)
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfterS))
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "rate limit exceeded"})
 			return

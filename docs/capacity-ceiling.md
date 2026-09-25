@@ -186,3 +186,21 @@ recorded config block predates two later additions to the record's shape (the
 a measured path. Rules and caps quoted on this page are asserted by
 `scripts/load-soak-selftest.sh` (a CI step), not by `docs/claims.yaml` — the
 claims file anchors measurements.
+
+## Update: the cap is no longer the only backpressure (CR-FEAT-035)
+
+Every statement above is a record of what that soak **measured at commit
+`6628dec`**, and it is left as measured. One of its conclusions has since been
+superseded by a later change, and naming that here is the honest way to keep both
+readable:
+
+*"the 100/min/agent publish cap is the ONLY backpressure"* was true of the
+configuration that run drove. CR-FEAT-035 adds a second, opt-in one —
+`CR_RATE_LIMIT_GLOBAL_PER_MINUTE`, a GLOBAL shed on the delivery ingest that
+refuses with `429 RATE_LIMITED_GLOBAL` + `Retry-After` before any transport or
+store work, plus the store-wide queue depth at `GET /status` and `GET /metrics`
+— and it **does not exist unless an operator sets it** (default 0). So the soak's
+own probe (110 publishes from one agent, 100 accepted and 10 refused with 429) is
+still exactly reproducible on a default server, and the ceiling it published is
+unchanged by this row: what the numbers above measure is the default
+configuration, which is still the default configuration.

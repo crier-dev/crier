@@ -15,6 +15,44 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Priority lanes and real backpressure** (CR-FEAT-035) — the three gaps the
+  external review (`DISPATCH · CRI-001`, by Carter) named in passing, closed
+  without changing what an existing deployment does:
+  - **an optional `priority` on a delivery** (`POST /agents/{id}/inbox`,
+    integer 0..9, default 0) — `GET /agents/{id}/inbox` hands back the highest
+    priority claimable messages first, ties keep arrival order, and a delivery
+    that names no priority is exactly the FIFO message it always was (the key is
+    omitted from the wire at the default, so a pre-existing client parses
+    identical bytes). Out of range is a 400 naming the range, never a clamp. The
+    ordering is stored with the message (PostgreSQL migration 007, `priority
+    NOT NULL DEFAULT 0`, range-checked), so it survives a restart and every
+    message an existing database already holds reads back in the order it has
+    always had.
+  - **a global ingest budget** (`CR_RATE_LIMIT_GLOBAL_PER_MINUTE`, default 0 =
+    no budget) — a shed on the delivery path itself, across every agent and
+    sender, which the per-agent publish cap could never be: a flood from many
+    ids spends every agent's own budget. A delivery over budget is refused **429
+    `RATE_LIMITED_GLOBAL`** with a `Retry-After` header (whole seconds) and the
+    same wait in the body, before any transport, guard call or store write —
+    and the check sits after decode/validation/containment, so a malformed
+    delivery still answers 400 and a contained agent still answers 403
+    `AGENT_QUARANTINED`. The pre-existing **per-agent** publish 429 gained the
+    `Retry-After` header the review found missing; its body and its scope are
+    unchanged. Per-namespace budgets remain CR-FEAT-029's half (the shed counter
+    is already labelled by scope, so that change adds series rather than
+    renaming them).
+  - **queue depth where operators already look** — `GET /status` reports
+    `queue_depth` (`pending` / `leased` / `oldest_age_s`) beside
+    `global_rate_limit_per_minute`, and `GET /metrics` exposes
+    `inbox_queue_depth`, `inbox_queue_leased` and
+    `inbox_queue_oldest_age_seconds` (gauges; `NaN` when the serving store
+    cannot report a depth) plus `inbox_shed_total{scope}`. The store-wide
+    numbers use the same predicates the per-agent `.../inbox/stats` counters
+    already apply, so they are the sum of those, not a second definition of
+    "queued".
+  - Both 429 lanes now shed through one sliding-window implementation
+    (`internal/ratelimit`), so "how long do I wait" has exactly one answer in
+    the codebase.
 - **Detection & containment** (CR-FEAT-030) — the other half of attribution, and
   it is opt-in (`CR_DETECT_ENABLED`, default `false`; with the flag unset no
   route is registered, no file is written and the delivery path is unchanged):

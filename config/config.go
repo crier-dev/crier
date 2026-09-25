@@ -29,7 +29,15 @@ type Config struct {
 	LogLevel           string
 	LogFormat          string
 	RateLimitPerMinute int
-	WSAllowedOrigins   string
+	// GlobalRateLimitPerMinute is the global inbox-ingest budget
+	// (CR_RATE_LIMIT_GLOBAL_PER_MINUTE, CR-FEAT-035), in deliveries per minute
+	// across every agent. 0 — the default — disables it entirely: the
+	// per-agent publish cap (RateLimitPerMinute) stays the only backpressure
+	// and the delivery path behaves exactly as it did before the feature
+	// existed. When set, a delivery over budget is refused 429 with a named
+	// error and a Retry-After, before any transport or store work.
+	GlobalRateLimitPerMinute int
+	WSAllowedOrigins         string
 	// RequireAgentSig enforces per-agent ed25519 request signing on inbox
 	// read/ack/stats and agent deletion. Secure by default.
 	RequireAgentSig bool
@@ -349,6 +357,19 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_PER_MINUTE: %q (want non-negative integer)", v)
 		}
 		cfg.RateLimitPerMinute = n
+	}
+
+	// Global ingest budget (CR-FEAT-035). Opt-in, and 0 — the default — means
+	// the budget does not exist: no delivery is ever shed by it and the
+	// delivery path is identical to a build without the feature, which is the
+	// contract this row was filed under. A negative value is a startup error
+	// rather than a silent "disabled", because "off" already has a spelling.
+	if v := os.Getenv("CR_RATE_LIMIT_GLOBAL_PER_MINUTE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_GLOBAL_PER_MINUTE: %q (want non-negative integer)", v)
+		}
+		cfg.GlobalRateLimitPerMinute = n
 	}
 
 	// WebSocket allowed origins (comma-separated, "*" = allow all)

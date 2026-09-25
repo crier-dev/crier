@@ -11,6 +11,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/ratelimit"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -175,6 +176,13 @@ type Handler struct {
 	// one in a test) has no window and therefore deduplicates nothing — the
 	// pre-CR-FEAT-025 behaviour — instead of panicking on the deliver path.
 	idempotency *idempotencyRegistry
+	// globalRateLimit and globalLimiter are the global inbox-ingest budget
+	// (CR-FEAT-035, see backpressure.go): a shed on the delivery path itself,
+	// so a runaway producer cannot push every inbox deeper without limit. Zero
+	// / nil — the default — means the budget does not exist and nothing is ever
+	// shed.
+	globalRateLimit int
+	globalLimiter   *ratelimit.Window
 }
 
 // NewHandler creates a Handler that delegates store operations to the
