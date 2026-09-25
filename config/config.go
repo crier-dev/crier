@@ -43,6 +43,15 @@ type Config struct {
 	// server registers neither /metrics nor /debug/pprof and both answer
 	// 404 like any unregistered path.
 	Observability ObservabilityConfig
+	// A2AEnabled is the server-side half of the OPT-IN A2A interoperability
+	// gate (CR_A2A_ENABLED, INT-A2A-001, specs/A2A-OPTION.md §4.1). Default
+	// false: with the flag unset the option is OFF and NOTHING A2A-related is
+	// registered, so every existing route, body, auth requirement and
+	// storage path behaves exactly as it did before the option existed. The
+	// other half is the per-agent `a2a` block on a registry row (§4.2);
+	// either half alone is inert. Carried only in this row — no code path
+	// consumes it yet (INT-A2A-002..006 add the surfaces).
+	A2AEnabled bool
 }
 
 // ObservabilityConfig holds the opt-in live-inspection surfaces
@@ -440,13 +449,27 @@ func Load() (Config, error) {
 		cfg.Observability.EnableMetrics = parsed
 	}
 
+	// Opt-in A2A interoperability (INT-A2A-001, specs/A2A-OPTION.md §4.1).
+	// Same tolerant bool dialect as the other switches; default false, so an
+	// unset flag leaves the option OFF and nothing A2A-related registered.
+	// The value is carried here only — no surface reads it yet, and the
+	// per-agent half of the gate is the optional `a2a` block on a registry
+	// row (§4.2).
+	if v := os.Getenv("CR_A2A_ENABLED"); v != "" {
+		parsed, err := parseTolerantBool("CR_A2A_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.A2AEnabled = parsed
+	}
+
 	return cfg, nil
 }
 
 // parseTolerantBool is the single tolerant boolean dialect crier reads env
 // vars with (CR_REQUIRE_AGENT_SIG, CR_GUARD_ENABLED, CR_ENABLE_PPROF,
-// CR_ENABLE_METRICS): true/1/yes and false/0/no, case-insensitive, anything
-// else fails loudly naming the variable.
+// CR_ENABLE_METRICS, CR_A2A_ENABLED): true/1/yes and false/0/no,
+// case-insensitive, anything else fails loudly naming the variable.
 func parseTolerantBool(name, v string) (bool, error) {
 	switch strings.ToLower(v) {
 	case "true", "1", "yes":

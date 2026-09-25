@@ -29,9 +29,10 @@ func newMockStore(t *testing.T) (*PostgresStore, pgxmock.PgxPoolIface) {
 }
 
 // agentRowColumns is the column set Get/List scan, in order — it mirrors
-// agentConfigColumns (DF-CRIER-151 adds webhook + guard). Keep the two in sync.
+// agentConfigColumns (DF-CRIER-151 adds webhook + guard, INT-A2A-001 adds a2a).
+// Keep the two in sync.
 func agentRowColumns() []string {
-	return []string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen", "webhook", "guard"}
+	return []string{"id", "public_key", "capabilities", "status", "registered_at", "last_seen", "webhook", "guard", "a2a"}
 }
 
 // Exact marshalled shapes, verified by running the marshaller (struct field
@@ -133,7 +134,7 @@ func TestPostgresStoreUnit_Register_KeylessAgentAllowedAndWritesNull(t *testing.
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(ag.ID, ([]byte)(nil), []byte(`["relay"]`), string(StatusOnline),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), ([]byte)(nil), ([]byte)(nil)).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -209,7 +210,7 @@ func TestPostgresStoreUnit_Register_Success(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), pgxmock.AnyArg(), string(ag.Status), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			([]byte)(nil), ([]byte)(nil)).
+			([]byte)(nil), ([]byte)(nil), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Register(ag)
@@ -227,9 +228,9 @@ func TestPostgresStoreUnit_Register_PersistsWebhookAndGuard(t *testing.T) {
 	ag.Webhook = testWebhookConfig()
 	ag.Guard = testGuardConfig()
 
-	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard \)`).
+	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a \)`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			[]byte(wantWebhookJSON), []byte(wantGuardJSON)).
+			[]byte(wantWebhookJSON), []byte(wantGuardJSON), ([]byte)(nil)).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -246,7 +247,7 @@ func TestPostgresStoreUnit_Register_AgentExists(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg()).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23505"})
 
 	err := s.Register(ag)
@@ -260,7 +261,7 @@ func TestPostgresStoreUnit_Register_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg()).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("connection refused"))
 
 	err := s.Register(ag)
@@ -281,8 +282,8 @@ func TestPostgresStoreUnit_Get_Success(t *testing.T) {
 
 	rows := pgxmock.NewRows(agentRowColumns()).
 		AddRow(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(ag.Status), now, now,
-			[]byte(wantWebhookJSON), []byte(wantGuardJSON))
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+			[]byte(wantWebhookJSON), []byte(wantGuardJSON), nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs(ag.ID).
 		WillReturnRows(rows)
 
@@ -307,8 +308,8 @@ func TestPostgresStoreUnit_Get_NullConfigsAreNil(t *testing.T) {
 	pub := make([]byte, ed25519.PublicKeySize)
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil)
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs("a1").
 		WillReturnRows(rows)
 
@@ -327,8 +328,8 @@ func TestPostgresStoreUnit_Get_StoredJSONNullIsNil(t *testing.T) {
 	pub := make([]byte, ed25519.PublicKeySize)
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte("null"), []byte("null"))
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte("null"), []byte("null"), nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs("a1").
 		WillReturnRows(rows)
 
@@ -346,8 +347,8 @@ func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
 	t.Run("webhook", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte(`{"url":`), nil)
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, []byte(`{"url":`), nil, nil)
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -360,8 +361,8 @@ func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
 	t.Run("guard", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, []byte(`[1,2]`))
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, []byte(`[1,2]`), nil)
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -379,8 +380,8 @@ func TestPostgresStoreUnit_Get_KeylessAgentRoundTrips(t *testing.T) {
 	now := time.Now().UTC()
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil)
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs("keyless").
 		WillReturnRows(rows)
 
@@ -398,9 +399,9 @@ func TestPostgresStoreUnit_List_KeylessAgentKept(t *testing.T) {
 	pub := make([]byte, ed25519.PublicKeySize)
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil).
-		AddRow("keyed", pub, []byte(`[]`), "online", now, now, nil, nil)
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		AddRow("keyless", nil, []byte(`[]`), "online", now, now, nil, nil, nil).
+		AddRow("keyed", pub, []byte(`[]`), "online", now, now, nil, nil, nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WillReturnRows(rows)
 
 	agents := s.List()
@@ -413,7 +414,7 @@ func TestPostgresStoreUnit_List_KeylessAgentKept(t *testing.T) {
 func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs("missing").
 		WillReturnError(pgx.ErrNoRows)
 
@@ -425,7 +426,7 @@ func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
 func TestPostgresStoreUnit_Get_SQLError(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WithArgs("error-agent").
 		WillReturnError(errors.New("connection closed"))
 
@@ -443,7 +444,7 @@ func TestPostgresStoreUnit_List_Empty(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	rows := pgxmock.NewRows(agentRowColumns())
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WillReturnRows(rows)
 
 	agents := s.List()
@@ -458,9 +459,9 @@ func TestPostgresStoreUnit_List_Populated(t *testing.T) {
 	// Two agents
 	pub := make([]byte, ed25519.PublicKeySize)
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("a1", pub, []byte(`["relay"]`), "online", now, now, []byte(wantWebhookJSON), nil).
-		AddRow("a2", pub, []byte(`[]`), "offline", now, now, nil, []byte(wantGuardJSON))
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+		AddRow("a1", pub, []byte(`["relay"]`), "online", now, now, []byte(wantWebhookJSON), nil, nil).
+		AddRow("a2", pub, []byte(`[]`), "offline", now, now, nil, []byte(wantGuardJSON), nil)
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WillReturnRows(rows)
 
 	agents := s.List()
@@ -480,7 +481,7 @@ func TestPostgresStoreUnit_List_Populated(t *testing.T) {
 func TestPostgresStoreUnit_List_QueryError(t *testing.T) {
 	s, mock := newMockStore(t)
 
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard FROM agents`).
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
 		WillReturnError(errors.New("connection closed"))
 
 	agents := s.List()
@@ -515,8 +516,8 @@ func TestPostgresStoreUnit_Update_PersistsWebhookAndGuard(t *testing.T) {
 	ag.Webhook = testWebhookConfig()
 	ag.Guard = testGuardConfig()
 
-	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
-		WithArgs(ag.ID, []byte(`["relay"]`), []byte(wantWebhookJSON), []byte(wantGuardJSON), pgxmock.AnyArg()).
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb, last_seen = \$6`).
+		WithArgs(ag.ID, []byte(`["relay"]`), []byte(wantWebhookJSON), []byte(wantGuardJSON), ([]byte)(nil), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 	require.NoError(t, s.Update(ag))
@@ -532,8 +533,8 @@ func TestPostgresStoreUnit_Update_NilWebhookClearsColumn(t *testing.T) {
 	ag.Webhook = nil
 	ag.Guard = nil
 
-	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
-		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb, last_seen = \$6`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 	require.NoError(t, s.Update(ag))
@@ -545,7 +546,7 @@ func TestPostgresStoreUnit_Update_NotFound(t *testing.T) {
 	ag := testAgent(t)
 
 	mock.ExpectExec(`UPDATE agents`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 0))
 
 	err := s.Update(ag)
@@ -561,7 +562,7 @@ func TestPostgresStoreUnit_Update_NilCapabilitiesMarshalAsEmptyArray(t *testing.
 	ag.Capabilities = nil
 
 	mock.ExpectExec(`UPDATE agents`).
-		WithArgs(ag.ID, []byte(`[]`), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
+		WithArgs(ag.ID, []byte(`[]`), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 	require.NoError(t, s.Update(ag))
@@ -573,7 +574,7 @@ func TestPostgresStoreUnit_Update_SQLError(t *testing.T) {
 	ag := testAgent(t)
 
 	mock.ExpectExec(`UPDATE agents`).
-		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("connection closed"))
 
 	err := s.Update(ag)
@@ -634,8 +635,8 @@ func TestPostgresStoreUnit_Update_AdvancesCallerLastSeen(t *testing.T) {
 	preUpdate := ag.LastSeen
 	cap := &capturedTimeArg{}
 
-	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, last_seen = \$5`).
-		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), cap).
+	mock.ExpectExec(`UPDATE agents SET capabilities = \$2::jsonb, webhook = \$3::jsonb, guard = \$4::jsonb, a2a = \$5::jsonb, last_seen = \$6`).
+		WithArgs(ag.ID, []byte(`["relay"]`), ([]byte)(nil), ([]byte)(nil), ([]byte)(nil), cap).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 	require.NoError(t, s.Update(ag))

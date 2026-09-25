@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/metrics"
@@ -46,6 +47,10 @@ type registerRequest struct {
 	Capabilities []string                `json:"capabilities"`
 	Webhook      *webhook.Config         `json:"webhook,omitempty"`
 	Guard        *guard.AgentGuardConfig `json:"guard,omitempty"`
+	// A2A is the optional per-agent half of the A2A gate (INT-A2A-001).
+	// Absent is the default and keeps every existing registration byte-
+	// identical; present is strictly decoded by strictA2AMember.
+	A2A *a2a.Config `json:"a2a,omitempty"`
 }
 
 // agentsResponse is the JSON body for GET /agents.
@@ -186,6 +191,11 @@ type patchRequest struct {
 	Capabilities []string        `json:"capabilities,omitempty"`
 	Webhook      *webhook.Config `json:"webhook,omitempty"`
 	Guard        json.RawMessage `json:"guard,omitempty"`
+	// A2A mirrors the registration field (INT-A2A-001): present replaces the
+	// block, explicit null clears it, absent leaves it unchanged — the same
+	// three-state contract the webhook object uses, so an agent that opted in
+	// can opt back out without being deleted and re-registered.
+	A2A *a2a.Config `json:"a2a,omitempty"`
 }
 
 // blockingDeliverResponse is returned for delivery_mode=blocking: the
@@ -338,6 +348,35 @@ func strictWebhookMember(body []byte) (cfg *webhook.Config, present bool, err er
 // later-key-wins decode, and the name is matched case-insensitively like the
 // decoder matches the struct field.
 func agentWebhookRaw(body []byte) (json.RawMessage, bool) {
+	return topLevelMemberRaw(body, "webhook")
+}
+
+// strictA2AMember strict-decodes the top-level `a2a` member of an agent
+// registration/update body (INT-A2A-001, specs/A2A-OPTION.md §4.2), the same
+// discipline strictWebhookMember applies to `webhook`: an unknown or misnamed
+// key inside the object is an error instead of being dropped by encoding/json.
+// present=false means the body carries no a2a member at all; present=true with
+// a nil config means the member was an explicit JSON null, which the update
+// path reads as "remove the block".
+func strictA2AMember(body []byte) (cfg *a2a.Config, present bool, err error) {
+	raw, ok := topLevelMemberRaw(body, "a2a")
+	if !ok {
+		return nil, false, nil
+	}
+	cfg, err = a2a.DecodeConfig(raw)
+	if err != nil {
+		return nil, true, err
+	}
+	return cfg, true, nil
+}
+
+// topLevelMemberRaw returns the raw JSON of one top-level member of an agent
+// body, matched case-insensitively like encoding/json matches the struct field
+// it will decode into. ok=false when the body carries no such member (or is not
+// a JSON object). The LAST occurrence wins, mirroring the decoder's
+// later-key-wins rule. It is the single implementation behind agentWebhookRaw
+// and strictA2AMember, so the two strict-member scans cannot drift apart.
+func topLevelMemberRaw(body []byte, name string) (json.RawMessage, bool) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
 	if err != nil {
@@ -363,7 +402,7 @@ func agentWebhookRaw(body []byte) (json.RawMessage, bool) {
 		if err := dec.Decode(&val); err != nil {
 			return nil, false
 		}
-		if strings.EqualFold(key, "webhook") {
+		if strings.EqualFold(key, name) {
 			raw, present = val, true
 		}
 	}
@@ -383,12 +422,20 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The webhook object is held to its declared contract even though the
-	// body around it is decoded permissively (DF-CRIER-150).
+	// body around it is decoded permissively (DF-CRIER-150). The optional a2a
+	// object is held to the same discipline (INT-A2A-001): a misnamed key
+	// inside it is a 400 naming the key, never a silently dropped opt-in.
 	if cfg, present, err := strictWebhookMember(body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	} else if present {
 		req.Webhook = cfg
+	}
+	if cfg, present, err := strictA2AMember(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	} else if present {
+		req.A2A = cfg
 	}
 	if req.ID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
@@ -423,6 +470,7 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		Capabilities: req.Capabilities,
 		Webhook:      req.Webhook,
 		Guard:        req.Guard,
+		A2A:          req.A2A,
 	}
 	if agent.Capabilities == nil {
 		agent.Capabilities = []string{}
@@ -534,11 +582,22 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// Same strict webhook contract as POST /agents (DF-CRIER-150): a
 	// misnamed key inside the object is a 400, and the agent is left
 	// untouched. Absent or explicit null still means "remove the webhook".
+	// The optional a2a object follows the identical three-state rule
+	// (INT-A2A-001): present replaces, explicit null removes, absent leaves
+	// the agent's opt-in untouched.
 	if cfg, present, err := strictWebhookMember(body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	} else if present {
 		req.Webhook = cfg
+	}
+	a2aPresent := false
+	if cfg, present, err := strictA2AMember(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	} else if present {
+		req.A2A = cfg
+		a2aPresent = true
 	}
 
 	agent, err := h.store.Get(id)
@@ -563,6 +622,14 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		agent.Webhook = req.Webhook
+	}
+	if a2aPresent {
+		// INT-A2A-001: the a2a member PRESENT replaces the block, an explicit
+		// JSON null clears it (req.A2A is nil), and an ABSENT member leaves
+		// the agent's existing opt-in alone — the three-state rule, expressed
+		// through a2aPresent because the webhook-style nil check alone could
+		// not tell absent from null.
+		agent.A2A = req.A2A
 	}
 	if req.Guard != nil {
 		// Spec §9.2 (CR-FEAT-011): guard present → replaces the whole

@@ -116,6 +116,16 @@ func freePort(t *testing.T) int {
 // (middleware included) instead of a hand-built handler under test.
 func startTestServer(t *testing.T) string {
 	t.Helper()
+	return startTestServerWithEnv(t, nil)
+}
+
+// startTestServerWithEnv is startTestServer plus caller-supplied environment
+// overrides, applied AFTER the deterministic scrub below: a test can boot the
+// same server under a different CR_* posture. INT-A2A-001 uses it to boot the
+// server twice — CR_A2A_ENABLED unset and CR_A2A_ENABLED=true — and assert the
+// existing surface is byte-identical in both positions.
+func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
+	t.Helper()
 
 	// Deterministic environment: no DB, no auth token, no inherited port.
 	// The guard is off so the registry routes do not depend on an external
@@ -125,6 +135,9 @@ func startTestServer(t *testing.T) string {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CRIER_DATABASE_URL", "")
 	t.Setenv("CR_GUARD_ENABLED", "false")
+	for k, v := range extra {
+		t.Setenv(k, v)
+	}
 
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))

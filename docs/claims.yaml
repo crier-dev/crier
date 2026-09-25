@@ -223,6 +223,15 @@ claims:
 
   # --- defaults (kind: default) — compared against the imported production constant,
   # never against a duplicated literal. ---
+  # INT-A2A-001: the README's environment table prints this default, and the
+  # option being OFF unless an operator turns it on IS the feature — so the
+  # printed value is pinned to config.Config.A2AEnabled, not to a literal here.
+  - id: DEFAULT-A2A-ENABLED
+    kind: default
+    doc: README.md
+    quote: "CR_A2A_ENABLED"
+    expect: false
+    xfail: null
   - id: DEFAULT-REQUIRE-AGENT-SIG
     kind: default
     doc: README.md

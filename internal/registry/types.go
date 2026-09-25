@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/webhook"
 )
@@ -63,6 +64,13 @@ type Agent struct {
 	// Guard is the optional LLM message-guard policy config (CR-FEAT-010).
 	// API keys are never part of it — only env: refs (spec §4.1/§9.2).
 	Guard *guard.AgentGuardConfig `json:"guard,omitempty"`
+	// A2A is the optional OPT-IN A2A interoperability block (INT-A2A-001,
+	// specs/A2A-OPTION.md §4.2) — the per-agent half of the A2A gate; the
+	// server-side half is CR_A2A_ENABLED (config.Config.A2AEnabled). Absent
+	// (omitempty) means the agent takes no part in A2A, which keeps the
+	// serialized row byte-identical to a pre-A2A registration. Nothing
+	// consumes it yet: INT-A2A-002..006 add the surfaces that do.
+	A2A *a2a.Config `json:"a2a,omitempty"`
 }
 
 // InboxEntry is a message stored in an agent's persistent inbox.

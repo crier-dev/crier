@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -866,6 +867,73 @@ func TestPostgresStore_Register_NilConfigsReadBackNil(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got.Webhook, "an agent registered without a webhook must read back nil")
 	require.Nil(t, got.Guard, "an agent registered without a guard must read back nil")
+	require.Nil(t, got.A2A, "an agent registered without an a2a block must read back nil")
+}
+
+// --- A2A opt-in block (INT-A2A-001) ------------------------------------------
+//
+// The block is the per-agent half of the A2A gate and a later row reads it off
+// the row, so it must survive the durable backend the same way the webhook and
+// guard configs do: registering on one process and reading from a fresh one.
+
+func TestPostgresStore_Register_PersistsA2A(t *testing.T) {
+	store := newTestStore(t)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	agent := &Agent{
+		ID:        "a2a-agent",
+		PublicKey: HexKey(pub),
+		A2A:       &a2a.Config{Enabled: true},
+	}
+	require.NoError(t, store.Register(agent))
+
+	got, err := store.Get("a2a-agent")
+	require.NoError(t, err)
+	require.NotNil(t, got.A2A, "the a2a block must be persisted by Register")
+	require.Equal(t, *agent.A2A, *got.A2A)
+
+	// A completely fresh store (new pool, new process state) reads it back: the
+	// opt-in lives in the database, not in the registering process.
+	fresh, err := NewPostgresStore(context.Background(), testConnString)
+	require.NoError(t, err)
+	defer fresh.Close()
+	again, err := fresh.Get("a2a-agent")
+	require.NoError(t, err)
+	require.NotNil(t, again.A2A)
+	require.True(t, again.A2A.Enabled)
+
+	// And the column really is SQL NULL for an agent that did not opt in —
+	// "absent", not an empty object that would read as opted out.
+	plain := newTestAgent(t, store, "a2a-none")
+	var raw *string
+	row := store.pool.QueryRow(context.Background(), `SELECT a2a::text FROM agents WHERE id = $1`, plain.ID)
+	require.NoError(t, row.Scan(&raw))
+	require.Nil(t, raw, "an agent registered without the block must store SQL NULL in agents.a2a")
+}
+
+func TestPostgresStore_Update_ClearsA2A(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "a2a-clear")
+
+	agent.A2A = &a2a.Config{Enabled: true}
+	require.NoError(t, store.Update(agent))
+	got, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.A2A)
+
+	// Opting back out writes SQL NULL (the PATCH handler clears the field
+	// before calling Update), so the agent reads back with no block at all.
+	got.A2A = nil
+	require.NoError(t, store.Update(got))
+
+	cleared, err := store.Get(agent.ID)
+	require.NoError(t, err)
+	require.Nil(t, cleared.A2A, "an explicit nil a2a block must clear the stored opt-in")
+
+	// ...and the OTHER optional configs are untouched by that write path.
+	require.Nil(t, cleared.Webhook)
+	require.Nil(t, cleared.Guard)
 }
 
 func TestPostgresStore_Update_PersistsChangedWebhook(t *testing.T) {

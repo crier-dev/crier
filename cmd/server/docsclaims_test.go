@@ -933,6 +933,15 @@ func liveAgentScopeSigStatus(client *http.Client, baseURL, method, path, agentID
 // imported from the real packages — never a duplicated literal.
 func liveDefault(claimID string) (any, error) {
 	switch claimID {
+	case "DEFAULT-A2A-ENABLED":
+		// INT-A2A-001: the option is opt-in and default-off; the README row
+		// prints that default, so this probe pins it to the production
+		// constant an unset environment resolves to.
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, err
+		}
+		return cfg.A2AEnabled, nil
 	case "DEFAULT-REQUIRE-AGENT-SIG":
 		cfg, err := config.Load()
 		if err != nil {

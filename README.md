@@ -1030,6 +1030,7 @@ All configuration is via environment variables (defaults shown):
 | `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
 | `CR_ENABLE_PPROF` | `false` | Opt-in: register `GET /debug/pprof/` (plus `cmdline`, `profile`, `symbol`, `trace`, `heap`, `goroutine`, `block`, `mutex`, `threadcreate`) for live Go profiling. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
 | `CR_ENABLE_METRICS` | `false` | Opt-in: register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
+| `CR_A2A_ENABLED` | `false` | Opt-in: A2A (agent-to-agent protocol) interoperability — INT-A2A-001, [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md). **Default off, and A2A is an extra rather than first-class support**: with the flag unset nothing A2A-related is registered, and every existing route, response body, auth requirement and storage path behaves exactly as it did before the option existed. The flag is also only HALF the gate — an agent takes part in A2A only if it opted in as well, via the optional `a2a` object on `POST /agents` / `PATCH /agents/{id}` (`{"a2a":{"enabled":true}}`, strictly decoded, absent by default). This row ships the switch and the opt-in only: no A2A route, card or stream exists yet under either value, and none appear until the later rows of the series land. |
 
 ### Durable backend (PostgreSQL)
 
@@ -1141,6 +1142,7 @@ Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default*
 | [`docs/integration-guide.md`](docs/integration-guide.md) | End-to-end integration guide — auth modes, signing, inbox lifecycle, mesh, Postgres |
 | [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) | Agent-ecosystem reference stack — setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops, troubleshooting (CR-FEAT-022) |
 | [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) | Message guard spec (CR-SPEC-002) — verdict contract, policies, providers, kanban output |
+| [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md) | A2A interoperability as an opt-in extra (INT-A2A-001) — binding decision (JSON-RPC 2.0 + SSE), A2A ⇄ crier object mapping, the two-half gate, the route surface, the non-regression contract |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
 ## Project Status

@@ -69,14 +69,14 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 4, version, "should reflect the four embedded migration files")
+	assert.Equal(t, 5, version, "should reflect the five embedded migration files")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
-// TestRunMigrations_AgentConfigColumns verifies that 003 added the nullable
-// webhook/guard columns to agents (DF-CRIER-151). A migration applied by a
-// different name would be a no-op on an existing database, so the columns —
-// not the file — are what this asserts.
+// TestRunMigrations_AgentConfigColumns verifies the nullable optional-config
+// columns on agents: webhook + guard (003, DF-CRIER-151) and a2a (005,
+// INT-A2A-001). A migration applied by a different name would be a no-op on an
+// existing database, so the columns — not the file — are what this asserts.
 func TestRunMigrations_AgentConfigColumns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -87,7 +87,7 @@ func TestRunMigrations_AgentConfigColumns(t *testing.T) {
 
 	require.NoError(t, RunMigrations(ctx, testConnString))
 
-	for _, col := range []string{"webhook", "guard"} {
+	for _, col := range []string{"webhook", "guard", "a2a"} {
 		var exists bool
 		err := db.QueryRowContext(ctx, `
 			SELECT EXISTS (
