@@ -175,6 +175,16 @@ type Handler struct {
 	// one in a test) has no window and therefore deduplicates nothing — the
 	// pre-CR-FEAT-025 behaviour — instead of panicking on the deliver path.
 	idempotency *idempotencyRegistry
+	// capMu guards capCursors.
+	capMu sync.Mutex
+	// capCursors is the per-capability round-robin cursor of
+	// capability-routed delivery (CR-FEAT-026, capability.go): one counter per
+	// capability, advanced once per dispatched delivery to that capability and
+	// resolved modulo the pool size. It is created on first use rather than by
+	// NewHandler so a zero-value Handler still rotates instead of panicking.
+	// Per process, in memory, deliberately not persisted: this is fairness
+	// across holders, not exactly-once dispatch.
+	capCursors map[string]uint64
 }
 
 // NewHandler creates a Handler that delegates store operations to the

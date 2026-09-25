@@ -85,6 +85,11 @@ const (
 	// Every attempt is refused with 400 and registers nothing, so the id
 	// never exists and the probe is repeatable run after run.
 	docsClaimsWebhookStrictProbe = "docsclaims-webhook-strict-probe"
+	// docsClaimsUnheldCapability is the capability the CR-FEAT-026 probe dials
+	// (STATUS-CAPABILITY-UNHELD-404). No agent the gate registers advertises it,
+	// so the capability is genuinely unheld and the probe is repeatable run
+	// after run — the booted registry holds only the probe identities below.
+	docsClaimsUnheldCapability = "docsclaims-unheld-capability"
 )
 
 // ---------- claims file shape (mirrors docs/claims.yaml) ----------
@@ -675,6 +680,51 @@ func makeLiveStatusProbes(client *http.Client, baseURL string) func(string) (int
 			// verification failed".
 			return liveAgentScopeSigStatus(client, baseURL, http.MethodGet,
 				"/agents/"+docsClaimsGhostProbeAgent+"/inbox", docsClaimsGhostProbeAgent)
+		case "STATUS-CAPABILITY-UNHELD-404":
+			// CR-FEAT-026: TESTERS.md §1b states that a capability nobody holds
+			// is refused with 404 and a NAMED error, never a silent drop. The
+			// probe measures BOTH halves, because either one alone can be the
+			// failure this claim exists for: the status must be 404 (a 201 here
+			// would mean the delivery was accepted and stored with no holder)
+			// AND the body must carry `error: "NO_CAPABLE_AGENT"` naming the
+			// capability dialed (a generic 404, or the by-id `agent not found`,
+			// would leave a caller unable to tell the two apart). A mismatch is
+			// reported as a probe error rather than as a different status, so
+			// the failure message names the observed body.
+			//
+			// The capability is one no probe identity advertises, so the probe
+			// is repeatable: nothing it does registers a holder.
+			probeBody := `{"payload":{"job":"docsclaims-capability-probe"},"sender":"docsclaims-probe"}`
+			req, err := http.NewRequest(http.MethodPost,
+				baseURL+"/capabilities/"+docsClaimsUnheldCapability+"/inbox", strings.NewReader(probeBody))
+			if err != nil {
+				return 0, err
+			}
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(req)
+			if err != nil {
+				return 0, err
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusNotFound {
+				return resp.StatusCode, nil
+			}
+			var refusal struct {
+				Error      string `json:"error"`
+				Capability string `json:"capability"`
+			}
+			if err := json.Unmarshal(raw, &refusal); err != nil {
+				return 0, fmt.Errorf("zero-holder refusal body is not JSON: %v (raw: %s)", err, raw)
+			}
+			if refusal.Error != "NO_CAPABLE_AGENT" {
+				return 0, fmt.Errorf("zero-holder refusal is 404 but its error code is %q, want NO_CAPABLE_AGENT (raw: %s) — an unnamed 404 is the silent-drop-shaped failure this claim bars", refusal.Error, raw)
+			}
+			if refusal.Capability != docsClaimsUnheldCapability {
+				return 0, fmt.Errorf("zero-holder refusal names capability %q, want %q (raw: %s)", refusal.Capability, docsClaimsUnheldCapability, raw)
+			}
+			return resp.StatusCode, nil
 		case "STATUS-GUARD-BLOCK":
 			// README: "block — uniform 403 GUARD_BLOCKED". Deterministic without an
 			// LLM: a payload over CR_GUARD_MAX_PAYLOAD_BYTES (default 65536) carrying
@@ -1096,6 +1146,8 @@ func liveCount(repoRoot, claimID string) (any, error) {
 		return countStampedBuildPaths(repoRoot)
 	case "COUNT-RELEASE-ASSETS":
 		return countReleaseAssets(repoRoot)
+	case "COUNT-CAPABILITY-SHARED-DELIVER":
+		return countSharedDeliverPath(repoRoot)
 	case "COUNT-MCP-TOOLS":
 		return countMCPTools()
 	case "COUNT-DOCS-DURABLE-START-README", "COUNT-DOCS-DURABLE-START-GUIDE",
@@ -1540,6 +1592,33 @@ func countHappyPathDurable(repoRoot, claimID string) (any, error) {
 		return nil, fmt.Errorf("%s: %w", doc, err)
 	}
 	return n, nil
+}
+
+// countSharedDeliverPath re-measures the CR-FEAT-026 claim that the
+// capability-routed target and the by-id target are served by ONE deliver
+// implementation — the row's "reusing the existing deliver path".
+//
+// It reads internal/registry/handler.go and measures two things, in both
+// directions: exactly ONE `func (h *Handler) deliver(` declaration must exist
+// (two implementations would be the parallel path the row forbids, and would
+// drift on the guard/lease/ack), and the number of `h.deliver(` call sites — the
+// entry points that share it — is what the claim pins. A refactor that adds a
+// third target (or a second implementation) moves this number and fails the
+// gate until the doc and the claim are updated together.
+func countSharedDeliverPath(repoRoot string) (any, error) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "internal", "registry", "handler.go"))
+	if err != nil {
+		return nil, err
+	}
+	src := string(raw)
+	if n := strings.Count(src, "func (h *Handler) deliver("); n != 1 {
+		return nil, fmt.Errorf("internal/registry/handler.go declares %d `func (h *Handler) deliver(` — CR-FEAT-026 relies on a SINGLE shared deliver implementation", n)
+	}
+	callers := strings.Count(src, "h.deliver(w, r, ")
+	if callers == 0 {
+		return nil, fmt.Errorf("no `h.deliver(w, r, …)` call site found in internal/registry/handler.go — the shared deliver path is unreachable")
+	}
+	return callers, nil
 }
 
 // countMCPTools measures the MCP tool count the way a real MCP client sees it: a

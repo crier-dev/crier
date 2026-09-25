@@ -81,6 +81,15 @@ type idempotentReceipt struct {
 	Blocking   bool
 	Reply      json.RawMessage
 	RecordedAt time.Time
+	// Capability and Target record the routing provenance of a
+	// capability-routed delivery (CR-FEAT-026): the capability the sender
+	// dialed and the holder chosen for it. They ride on the receipt so a
+	// REPLAY names the SAME holder instead of re-resolving the pool to a
+	// different worker — which is the duplicate this key exists to prevent,
+	// and worse on a pool than on a named inbox (two workers, one job).
+	// Empty on a by-id delivery, whose replay body is unchanged.
+	Capability string
+	Target     string
 }
 
 // replayResponse renders the original accept with the replay marker set, so a
@@ -94,6 +103,8 @@ func (r idempotentReceipt) replayResponse() deliverResponse {
 		ExpiresAt:        r.ExpiresAt,
 		Guard:            r.Guard,
 		IdempotentReplay: true,
+		Capability:       r.Capability,
+		Target:           r.Target,
 	}
 }
 
@@ -167,11 +178,23 @@ func (r *idempotencyRegistry) SetWindow(window time.Duration) {
 	r.window = window
 }
 
-// idempotencyRecordKey is the registry key of one (agent, key) pair. The NUL
-// separator keeps a key from being able to impersonate another pair by
-// embedding the separator in either half.
-func idempotencyRecordKey(agentID, key string) string {
-	return agentID + "\x00" + key
+// idempotencyScopes namespace a record key. A by-id delivery deduplicates under
+// its TARGET AGENT, a capability-routed one under the CAPABILITY it dialed
+// (CR-FEAT-026) — the holder is not known when the key is resolved, and a retry
+// must be answered with the first attempt's accept (naming the worker that took
+// the work) rather than dispatched to a second worker in the pool. The scope is
+// an explicit field rather than a prefix folded into the id, so a capability
+// name can never collide with an agent id that happens to look like one.
+const (
+	idempotencyScopeAgent      = "agent"
+	idempotencyScopeCapability = "capability"
+)
+
+// idempotencyRecordKey is the registry key of one (scope, target, key) triple.
+// The NUL separator keeps a key from being able to impersonate another pair by
+// embedding the separator in any half.
+func idempotencyRecordKey(scope, target, key string) string {
+	return scope + "\x00" + target + "\x00" + key
 }
 
 // recordLocked returns the receipt recorded for k, if it is still inside the
@@ -209,8 +232,27 @@ func (r *idempotencyRegistry) pruneLocked(now time.Time) {
 // returned attempt (recording the accept it produced) — or Abandons it, which
 // releases the key without recording anything so the sender's next attempt is
 // delivered rather than replayed.
+//
+// The key is scoped to the target AGENT: same agent + same key replays, a
+// different agent + the same key is a different delivery. Use
+// AcquireForCapability for a capability-routed delivery (CR-FEAT-026).
 func (r *idempotencyRegistry) Acquire(agentID, key string, now time.Time) (idempotentReceipt, idempotencyOutcome, *idempotencyAttempt) {
-	k := idempotencyRecordKey(agentID, key)
+	return r.acquireWithScope(idempotencyScopeAgent, agentID, key, now)
+}
+
+// AcquireForCapability resolves a delivery whose target is a CAPABILITY rather
+// than an agent id (CR-FEAT-026, POST /capabilities/{capability}/inbox). Same
+// window, same claim/serialize behaviour as Acquire — only the namespace
+// differs, so a retry of the same key is answered with the accept the FIRST
+// attempt produced (naming the holder it chose) instead of being dispatched
+// again to whichever worker the rotation would pick now.
+func (r *idempotencyRegistry) AcquireForCapability(capability, key string, now time.Time) (idempotentReceipt, idempotencyOutcome, *idempotencyAttempt) {
+	return r.acquireWithScope(idempotencyScopeCapability, capability, key, now)
+}
+
+// acquireWithScope is the one implementation behind both callers above.
+func (r *idempotencyRegistry) acquireWithScope(scope, target, key string, now time.Time) (idempotentReceipt, idempotencyOutcome, *idempotencyAttempt) {
+	k := idempotencyRecordKey(scope, target, key)
 	deadline := now.Add(idempotencyClaimWait)
 	for {
 		r.mu.Lock()

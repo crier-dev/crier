@@ -115,6 +115,13 @@ Durable per-agent FIFO queues with lease-based delivery. The documented configur
   - **A dead-letter destination.** The message itself is preserved: `GET /agents/{id}/inbox/dead-letters?limit=N` (1..100, default 20) lists the messages that expired in that inbox, newest first, with the payload that was delivered, the sender, the expiry that elapsed and the reason. The record is keyed by message id (dead-lettered once, reported once) and is NOT tied to the agent row — a dead letter outlives the registration it was addressed to, which is exactly when it matters. A persisting backend sweeps records older than 7 days on the same pass that produces them; the in-memory backend keeps the most recent 1024.
   - **Transfer / reassign.** `POST /agents/{id}/inbox/transfer` moves messages out of a STUCK lease into another agent's inbox, where they land UNLEASED and immediately claimable — the alternative is waiting out the lease and racing every other consumer. A currently-leased message must be moved under its own `lease_id` (`409` otherwise, and nothing moves); an unleased one needs no lease; `force:true` is the explicit operator override for a holder that is gone. Messages move as a unit (an unknown id moves nothing) and keep their id, payload, creation time and expiry.
 
+**Addressing a POOL, not a name — capability-routed delivery (CR-FEAT-026).** `GET /agents?capability=solver` could already tell you who advertises a capability, but delivery still required naming ONE agent id: the capability index was a phone book nobody could dial, and a pool of interchangeable workers (three solvers behind one capability) could not be addressed as a pool. `POST /capabilities/{capability}/inbox` takes the same body as `POST /agents/{id}/inbox` and picks the holder:
+
+- **Selection rule, in full.** Candidates are every `online`-or-not registered agent whose `capabilities` include the name, matched EXACTLY like the discovery filter. LIVE holders rank first — liveness is the registry's own derived status (`online` inside `CR_PRESENCE_STALE_AFTER_S`, §3), and while at least one holder is live the pool is exactly the live holders, so a crashed worker absorbs no work. The choice rotates **round-robin** over that pool, one holder per delivery, agent-id ascending, with one cursor per capability advanced once per dispatched delivery. The accept names what it chose — `{"id":"…","transport":"inbox","capability":"solver","target":"worker-b"}` — because the sender has to know which worker took the work. A by-id delivery's body carries neither field: delivering by id is unchanged.
+- **Zero holders is a NAMED error, never a silent drop**: `404 {"error":"NO_CAPABLE_AGENT","capability":"solver","detail":"…"}` and nothing is dispatched or stored. It is deliberately not the plain `agent not found` a by-id delivery to an unknown id gets. A capability whose holders are registered but NOT live is not this error either: the pool falls back to all holders, because the inbox is durable and the message can wait for a worker that comes back — and a message nobody ever takes is carried by the existing ownership path (one `MESSAGE_EXPIRED` receipt in the sender's inbox, §4 above). A holder that dies **mid-lease** needs no case of its own either: the lease expires and the message returns to the queue it was delivered to.
+- **Retries do not fan out.** A capability-routed delivery that carries an `idempotency_key` is scoped to the CAPABILITY rather than to the holder (the holder is not known when the key is resolved): a repeated key is answered with the FIRST attempt's accept — same `id`, same `target` — instead of dispatching the same job to a second worker, and it is answered even if the pool has since emptied. A concurrent duplicate in flight is `409`.
+- **Stated limits.** Selection is LOCAL to this relay: a capability held only on a linked relay is not selected, because federation forwards by agent id (CR-FEAT-006) — the refusal says so rather than letting "nobody" mean "nobody anywhere". The cursor lives in the serving process and is not persisted (a restart or a second process on the same store rotates on its own): this is fairness across holders, not exactly-once dispatch. And there is no all-holders fan-out — one holder per delivery is the shipped semantic.
+
 ### 5. Webhook delivery (bypasses the inbox)
 
 An agent that registers a `webhook` config (`PATCH /agents/{id}` with
@@ -1410,15 +1417,15 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **16 paths** and **20 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **17 paths** and **21 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 16 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 20 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 24 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 17 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 21 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 25 router paths
 ```
 
-The router registers **24 paths**: those 16 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030).
+The router registers **25 paths**: those 17 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030).
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -1432,6 +1439,7 @@ The router registers **24 paths**: those 16 plus the three spec-hosting routes (
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
 | **Detection** (opt-in) | `GET /delivery-log`, `GET /delivery-log/verify`, `GET /alerts`, `GET /canaries`, `POST /agents/{id}/kill-switch` | Signed delivery log, behaviour alerts, canary tokens and the single-call kill-switch (CR-FEAT-030, `CR_DETECT_ENABLED`) |
 | **Ownership** | `POST /agents/{id}/inbox/transfer`, `GET /agents/{id}/inbox/dead-letters` | Rebalance a stuck lease; read the messages that expired unacknowledged (CR-FEAT-025) |
+| **Capability delivery** | `POST /capabilities/{capability}/inbox` | Deliver to a capability — round-robin over its live holders (CR-FEAT-026) |
 
 ### Runtime posture — `GET /status`
 
@@ -1477,7 +1485,7 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 
 Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default** (set the env var to enable, unset = the path answers `404`):
 
-- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, and `http_requests_total{code}`.
+- `GET /metrics` (`CR_ENABLE_METRICS=true`) — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `capability_routed_total` (capability-routed deliveries that resolved to a holder), `capability_unheld_total` (refused with `NO_CAPABLE_AGENT`), `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, and `http_requests_total{code}`.
 - `GET /debug/pprof/` (`CR_ENABLE_PPROF=true`) — the standard Go profiling index plus the named profiles (`heap`, `goroutine`, `block`, `mutex`, `threadcreate`, `profile`, `symbol`, `trace`, `cmdline`).
 
 **Neither path is auth-exempt**: they are served like any other authenticated route — with `CR_AUTH_TOKEN` set they require `Authorization: Bearer <token>`; with auth disabled they are open. The exempt-path list in `internal/middleware/auth.go` is unchanged. Exposure note: the pprof surface reveals runtime internals (stacks, heap) — enable it only on trusted networks.
@@ -1506,7 +1514,7 @@ All core primitives are implemented and tested:
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
-- **API** — 24 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 19 always-on plus the 5 opt-in detection routes — documented as 16 paths / 20 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
+- **API** — 25 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 20 always-on plus the 5 opt-in detection routes — documented as 17 paths / 21 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

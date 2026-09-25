@@ -221,6 +221,11 @@ type blockingDeliverResponse struct {
 	// (CR-FEAT-025): the endpoint was called ONCE, and `reply` is the reply
 	// that call produced.
 	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
+	// Capability and Target are present on a capability-ROUTED blocking
+	// delivery (CR-FEAT-026): the capability dialed and the holder that
+	// answered. Same two fields, same meaning as on deliverResponse.
+	Capability string `json:"capability,omitempty"`
+	Target     string `json:"target,omitempty"`
 }
 
 // deliverResponse is the JSON body for POST /agents/{id}/inbox.
@@ -253,6 +258,14 @@ type deliverResponse struct {
 	// sender that retried can read the id it needs from either response while
 	// still being able to tell a replay from a fresh delivery.
 	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
+	// Capability and Target are present on a CAPABILITY-ROUTED delivery
+	// (CR-FEAT-026, POST /capabilities/{capability}/inbox): the capability the
+	// sender dialed and the holder the registry chose from it. A routed sender
+	// has to know which worker took the work — that is the whole point of
+	// dialing a pool — while a by-id delivery's body is unchanged, because
+	// telling a sender the id it just wrote in the path would be noise.
+	Capability string `json:"capability,omitempty"`
+	Target     string `json:"target,omitempty"`
 }
 
 // guardBlockedResponse is the uniform 403 body for blocked deliveries
@@ -704,7 +717,60 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.presence.Derive(agent, time.Now()))
 }
 
-// HandleDeliver handles POST /agents/{id}/inbox — delivers a message.
+// HandleDeliver handles POST /agents/{id}/inbox — delivers a message to the
+// agent whose id is in the path.
+//
+// It is a thin wrapper over deliver(): the id comes from the path and no
+// capability is named, which is exactly the behaviour this endpoint has always
+// had (CR-FEAT-026 added a second TARGET, not a second deliver).
+func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
+	h.deliver(w, r, mux.Vars(r)["id"], "")
+}
+
+// HandleDeliverByCapability handles POST /capabilities/{capability}/inbox — a
+// capability-ROUTED delivery (CR-FEAT-026, capability.go): the sender names a
+// CAPABILITY instead of an agent id and the registry picks the holder.
+//
+// Selection happens here, before the deliver path proper: live holders of the
+// capability first (status derived from the row's own liveness evidence,
+// CR-FEAT-024), round-robin across them with a per-capability cursor, falling
+// back to all holders when none is live — and 404 NO_CAPABLE_AGENT, never a
+// silent drop, when nobody holds the capability at all. The chosen holder's id
+// then enters deliver() and EVERYTHING after that is the by-id path: the same
+// guard choke point, the same webhook driver, the same durable inbox write, the
+// same lease/ack/TTL semantics, the same federation fallback.
+//
+// The accept names what it chose (`"capability":"solver"`, `"target":"worker-b"`)
+// because a routed sender has to know which holder took the work; a by-id
+// delivery's body is unchanged.
+//
+// The zero-holder refusal is observed by the detection layer like any other
+// delivery outcome, with an EMPTY target — nothing was chosen, so no holder is
+// invented in the log.
+func (h *Handler) HandleDeliverByCapability(w http.ResponseWriter, r *http.Request) {
+	capability := mux.Vars(r)["capability"]
+	if capability == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "capability is required"})
+		return
+	}
+	h.deliver(w, r, "", capability)
+}
+
+// deliver is the ONE deliver implementation behind both targets above: the
+// by-id endpoint passes the path id and no capability, the capability endpoint
+// passes no id and the capability it must resolve. Sharing it is the point of
+// CR-FEAT-026 — a capability-routed delivery is not a parallel delivery path
+// that could drift from the by-id one on the guard, the lease, the ack or the
+// expiry receipt.
+//
+// When capability is non-empty, id arrives EMPTY and is filled by the
+// resolution step below, after the idempotency key has been resolved (a replay
+// must be answered from its receipt even if the pool has since emptied, and it
+// must not consume a turn in the rotation).
+//
+// ---------------------------------------------------------------------------
+// The doc below describes the shared path; `id` is the resolved recipient.
+//
 // If the target agent has a webhook endpoint configured and the webhook
 // driver is enabled, the message is pushed to the endpoint instead of the
 // inbox (CR-FEAT-001: webhook is the preferred push surface).
@@ -722,9 +788,8 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 // 201 with the verdict in the RESPONSE BODY (`"guard":{…,"errored":true}` —
 // there is no guard response header), while the X-Crier-Guard-* headers exist
 // only on the OUTBOUND webhook POST.
-func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-
+// ---------------------------------------------------------------------------
+func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
 	var req deliverRequest
 
 	// DETECTION (CR-FEAT-030): exactly one observation per delivery request,
@@ -821,7 +886,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if h.detector.Quarantined(id) {
+		// The TARGET-side check needs a target. On a capability-routed request
+		// there is none yet — the holder is chosen below, after the idempotency
+		// key has been resolved — so it runs there, on the RESOLVED holder, for
+		// the same reason: a contained agent may neither send nor receive
+		// (CR-FEAT-030), and the check must not be skipped just because the
+		// sender named a pool instead of a name.
+		if capability == "" && h.detector.Quarantined(id) {
 			verdictOverride = VerdictQuarantined
 			writeJSON(w, http.StatusForbidden, quarantinedResponse{
 				Error:  "AGENT_QUARANTINED",
@@ -839,6 +910,15 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	// A replay answers with the ORIGINAL accept (same id, same status) so a
 	// sender that retried after losing the response learns what its first
 	// attempt produced; nothing is stored and nothing is dispatched.
+	//
+	// On a capability-routed request (CR-FEAT-026) the key is scoped to the
+	// CAPABILITY, not to a holder: the holder has not been chosen yet, and a
+	// retry of the same key must be answered with the FIRST attempt's accept —
+	// naming the worker that took the work — instead of dispatching the same
+	// work to a second worker in the pool. Resolving the key before the pool is
+	// also what keeps a replay (and a 409) from consuming a turn in the
+	// rotation, and what lets a replay answer even if the capability has since
+	// emptied.
 	var attempt *idempotencyAttempt
 	if key := req.IdempotencyKey; key != "" {
 		if err := validateIdempotencyKey(key); err != nil {
@@ -846,12 +926,27 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.idempotency != nil {
-			rec, outcome, att := h.idempotency.Acquire(id, key, time.Now())
+			var rec idempotentReceipt
+			var outcome idempotencyOutcome
+			var att *idempotencyAttempt
+			if capability != "" {
+				rec, outcome, att = h.idempotency.AcquireForCapability(capability, key, time.Now())
+			} else {
+				rec, outcome, att = h.idempotency.Acquire(id, key, time.Now())
+			}
 			switch outcome {
 			case idempotencyReplay:
 				idempotentReplaysTotal.Inc()
+				// A replayed capability delivery names the holder the FIRST
+				// attempt chose: it rides on the receipt, so the observation
+				// below and the response agree with the recorded accept rather
+				// than with a fresh roll of the rotation.
+				if capability != "" && rec.Target != "" {
+					id = rec.Target
+				}
 				slog.Info("inbox deliver replayed",
 					"target", id,
+					"capability", capability,
 					"sender", req.Sender,
 					"message_id", rec.ID,
 					"transport", rec.Transport,
@@ -866,6 +961,8 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 						Reply:            rec.Reply,
 						SessionID:        req.SessionID,
 						RequestID:        req.RequestID,
+						Capability:       rec.Capability,
+						Target:           rec.Target,
 						IdempotentReplay: true,
 					})
 					return
@@ -887,6 +984,35 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			// anything, so a corrected retry under the same key is delivered
 			// rather than answered with a replay of the rejection.
 			defer attempt.Abandon()
+		}
+	}
+
+	// ▼ CAPABILITY ROUTING (CR-FEAT-026, capability.go) — the sender named a
+	// capability instead of an agent id, so the holder is chosen NOW: after
+	// every body and parameter validation (a 400 answers the REQUEST, never the
+	// target) and after the idempotency key (a replay is answered from its
+	// receipt without consulting the registry at all). From here on `id` is the
+	// resolved holder and nothing else in this function changes — the same guard
+	// choke point, webhook driver, durable inbox write, lease/ack/TTL and
+	// federation fallback carry the message whoever took it.
+	//
+	// The target-side containment check lives here for a capability-routed
+	// request because this is where a target first exists.
+	if capability != "" {
+		resolved, ok := h.routeCapability(w, r, capability)
+		if !ok {
+			return
+		}
+		id = resolved
+		if h.detector != nil && h.detector.Quarantined(id) {
+			verdictOverride = VerdictQuarantined
+			writeJSON(w, http.StatusForbidden, quarantinedResponse{
+				Error:  "AGENT_QUARANTINED",
+				Agent:  id,
+				Side:   "target",
+				Detail: "the target agent is contained; deliveries to it are refused until an operator clears the quarantine",
+			})
+			return
 		}
 	}
 
@@ -988,6 +1114,19 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadGateway, federationFailure(req, entry.ID, id, ferr))
 		}
 		return
+	}
+
+	// accept records an accept under the sender's key, stamping the routing
+	// provenance of a capability-routed delivery onto the receipt (CR-FEAT-026)
+	// so a REPLAY of it names the same capability and the same holder. nil
+	// attempt (no idempotency key) is a no-op — the same tolerance the
+	// deferred Abandon() relies on.
+	accept := func(rec idempotentReceipt) {
+		if capability != "" {
+			rec.Capability = capability
+			rec.Target = id
+		}
+		attempt.Finish(rec)
 	}
 
 	// ▼ GUARD CHOKE POINT (spec §2) — one call site covers webhook
@@ -1098,11 +1237,13 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				Reply:     reply,
 			})
 			writeJSON(w, http.StatusOK, blockingDeliverResponse{
-				ID:        entry.ID,
-				Transport: "webhook",
-				Reply:     reply,
-				SessionID: req.SessionID,
-				RequestID: req.RequestID,
+				ID:         entry.ID,
+				Transport:  "webhook",
+				Reply:      reply,
+				SessionID:  req.SessionID,
+				RequestID:  req.RequestID,
+				Capability: capability,
+				Target:     routedTarget(capability, id),
 			})
 			deliveriesTotal.Inc()
 			return
@@ -1135,7 +1276,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		)
 		// Queued for push: the accept is recorded under the sender's key
 		// (CR-FEAT-025) so a retry does not queue the same work twice.
-		attempt.Finish(idempotentReceipt{
+		accept(idempotentReceipt{
 			Status:       http.StatusAccepted,
 			ID:           entry.ID,
 			Transport:    "webhook",
@@ -1147,6 +1288,8 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			Transport:    "webhook",
 			DeliveryMode: mode,
 			Guard:        guardInDeliverResponse(guardMeta),
+			Capability:   capability,
+			Target:       routedTarget(capability, id),
 		})
 		deliveriesTotal.Inc()
 		return
@@ -1190,7 +1333,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	// The message is stored: record the accept under the sender's key
 	// (CR-FEAT-025), so a retry of the same key answers with THIS id instead
 	// of storing a second copy of the same work.
-	attempt.Finish(idempotentReceipt{
+	accept(idempotentReceipt{
 		Status:    http.StatusCreated,
 		ID:        entry.ID,
 		Transport: "inbox",
@@ -1198,10 +1341,12 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		Guard:     guardInDeliverResponse(guardMeta),
 	})
 	writeJSON(w, http.StatusCreated, deliverResponse{
-		ID:        entry.ID,
-		Transport: "inbox",
-		ExpiresAt: &expiresAt,
-		Guard:     guardInDeliverResponse(guardMeta),
+		ID:         entry.ID,
+		Transport:  "inbox",
+		ExpiresAt:  &expiresAt,
+		Guard:      guardInDeliverResponse(guardMeta),
+		Capability: capability,
+		Target:     routedTarget(capability, id),
 	})
 	deliveriesTotal.Inc()
 }

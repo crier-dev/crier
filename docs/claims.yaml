@@ -35,6 +35,12 @@ ignore_paths:
   # sign as either identity) — these are scratch key files, not API routes.
   - /tmp/crier-alice.key
   - /tmp/crier-bob.key
+  # CR-FEAT-026: TESTERS.md §1b registers two interchangeable workers for one
+  # capability, each with its own keypair, so the signed retrieve is exercised as
+  # whichever holder the relay chose. Same class as the two above: scratch key
+  # files on disk, NOT API routes.
+  - /tmp/crier-solver-a.key
+  - /tmp/crier-solver-b.key
   # CR-GAP-062: docs/mesh-protocol.md and specs/WEBHOOK-DELIVERY.md are now
   # scanned. These tokens are NOT crier API routes — each is deliberate.
   - /ping                 # illustrative mesh REQUEST path (the target agent's own path)
@@ -324,7 +330,9 @@ claims:
     kind: count
     doc: README.md
     quote: "docs/openapi.yaml"
-    expect: 16
+    # CR-FEAT-026 added POST /capabilities/{capability}/inbox, so the pair is
+    # 17 / 21 and both moved with it.
+    expect: 17
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -336,8 +344,10 @@ claims:
     # CR-FEAT-025 added POST /agents/{id}/inbox/transfer and
     # GET /agents/{id}/inbox/dead-letters, so the pair is 16 / 20 and both
     # moved with it again.
-    quote: "20 operations"
-    expect: 20
+    # CR-FEAT-026 added POST /capabilities/{capability}/inbox, so the pair is
+    # 17 / 21.
+    quote: "21 operations"
+    expect: 21
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -365,9 +375,13 @@ claims:
     # when CR_DETECT_ENABLED is on, but they are HandleFunc registrations in
     # main.go all the same) and CR-FEAT-025 registered
     # POST /agents/{id}/inbox/transfer and GET /agents/{id}/inbox/dead-letters,
-    # so the merged count is 16 API + 3 spec-hosting + 5 detection = 24.
-    quote: "24 router paths"
-    expect: 24
+    # so the merged count was 16 API + 3 spec-hosting + 5 detection = 24.
+    # CR-FEAT-026 registered POST /capabilities/{capability}/inbox, so it is
+    # 17 API + 3 + 5 = 25. Note the README's "20 always-on" line counts the
+    # 17 API + 3 spec-hosting routes; that line is prose the same number
+    # measures, and it moved with it.
+    quote: "25 router paths"
+    expect: 25
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
@@ -1247,4 +1261,42 @@ claims:
     # The retrieval path a sender is pointed at by its receipt.
     quote: 'dead-letters?limit=N'
     expect: 1
+    xfail: null
+
+  # --- CR-FEAT-026 (external review DISPATCH · CRI-001, via Bane 2026-09-25) ---
+  # Capability-routed delivery. Three claims, one per load-bearing half of the
+  # row: the route is live on the doc that documents it, a capability nobody
+  # holds is refused with the NAMED error (404 + NO_CAPABLE_AGENT — the "never a
+  # silent drop" half, measured with the body, not just the status), and BOTH
+  # targets are served by ONE deliver implementation (the "reusing the existing
+  # deliver path" half — a second implementation would fail the count probe).
+  - id: ROUTE-CAPABILITY-DELIVER
+    kind: route
+    doc: README.md
+    # The route, in the README's own §4 documentation of the selector. The
+    # probe replaces {capability} with the registered probe agent, so it
+    # exercises the route itself (405 = registered and POST-only, which the
+    # gate treats as live) rather than the resource.
+    quote: '`POST /capabilities/{capability}/inbox` takes the same body as'
+    expect: "/capabilities/{capability}/inbox"
+    xfail: null
+  - id: STATUS-CAPABILITY-UNHELD-404
+    kind: status
+    doc: TESTERS.md
+    # §1b's documented refusal, measured end to end by a live POST to a
+    # capability no probe identity holds: the status must be 404 AND the body
+    # must carry error NO_CAPABLE_AGENT naming that capability.
+    quote: '{"error":"NO_CAPABLE_AGENT","capability":"nobody-holds-this"'
+    expect: 404
+    xfail: null
+  - id: COUNT-CAPABILITY-SHARED-DELIVER
+    kind: count
+    doc: README.md
+    # "delivering by id is unchanged" is only true if there is ONE deliver path.
+    # Measured in internal/registry/handler.go: 2 call sites (the by-id wrapper
+    # and the capability wrapper) over exactly 1 implementation — so a third
+    # target, or a second implementation, fails the gate until this claim and
+    # the prose move together.
+    quote: 'delivering by id is unchanged'
+    expect: 2
     xfail: null

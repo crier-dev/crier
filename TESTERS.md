@@ -323,6 +323,74 @@ curl -s -X POST $BASE/agents/bob/inbox/transfer -H 'Content-Type: application/js
 #   * an unknown message_id is 404 and moves NOTHING (a batch goes as a unit).
 ```
 
+**1b. Deliver to a CAPABILITY, not a name (CR-FEAT-026)** — the registry's
+capability index as a worker pool. `POST /capabilities/{capability}/inbox` takes
+the same body as `POST /agents/{id}/inbox` and picks a HOLDER, so lease, ack, TTL
+and the expiry receipt you just exercised are unchanged — only the addressing
+moved from a name to a pool.
+
+```bash
+# Two interchangeable workers for one capability. Each keeps its own key: the
+# retrieve below is signed as whichever worker the relay chose.
+openssl genpkey -algorithm ED25519 -out /tmp/crier-solver-a.key >/dev/null 2>&1
+openssl genpkey -algorithm ED25519 -out /tmp/crier-solver-b.key >/dev/null 2>&1
+A_PUB=$(openssl pkey -in /tmp/crier-solver-a.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
+B_PUB=$(openssl pkey -in /tmp/crier-solver-b.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
+curl -s -X POST $BASE/agents -H 'Content-Type: application/json' \
+  -d "{\"id\":\"solver-a\",\"public_key\":\"${A_PUB}\",\"capabilities\":[\"solver\"]}"   # -> 201
+curl -s -X POST $BASE/agents -H 'Content-Type: application/json' \
+  -d "{\"id\":\"solver-b\",\"public_key\":\"${B_PUB}\",\"capabilities\":[\"solver\"]}"   # -> 201
+curl -s "$BASE/agents?capability=solver"     # -> 200, both listed (discovery, CR-FEAT-007)
+
+# Deliver to the POOL. The accept names the capability AND the holder it chose:
+curl -s -X POST $BASE/capabilities/solver/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"solve-1"},"sender":"alice"}'
+# -> 201 {"id":"...","transport":"inbox","capability":"solver","target":"solver-a",...}
+curl -s -X POST $BASE/capabilities/solver/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"solve-2"},"sender":"alice"}'
+# -> 201 with "target":"solver-b" — the rotation moved to the other worker.
+# Deliver four more and the targets alternate a,b,a,b,…; a third holder would
+# take every third delivery. A by-id deliver is untouched: its body carries
+# neither "capability" nor "target".
+
+# Retrievable and ackable is the ordinary inbox contract, signed as the CHOSEN
+# holder — use the "target" the accept named (solver-a here):
+TS=$(date +%s)
+curl -s $BASE/agents/solver-a/inbox -H "X-Agent-ID: solver-a" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-solver-a.key GET /agents/solver-a/inbox "$TS")"
+# -> 200 {"messages":[{…,"payload":"<base64>"}],"lease_id":"…","queue_depth":…}
+LEASE_ID=<lease_id from that retrieve>; MSG_ID=<id from that retrieve>
+TS=$(date +%s)
+curl -s -X POST $BASE/agents/solver-a/inbox/ack -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: solver-a" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-solver-a.key POST /agents/solver-a/inbox/ack "$TS")" \
+  -d "{\"lease_id\":\"${LEASE_ID}\",\"message_ids\":[\"${MSG_ID}\"]}"   # -> 204
+
+# Nobody holds the capability: a NAMED refusal, never a silent drop — and
+# nothing is dispatched or stored anywhere:
+curl -s -X POST $BASE/capabilities/nobody-holds-this/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"orphan"}}'
+# -> 404 {"error":"NO_CAPABLE_AGENT","capability":"nobody-holds-this","detail":"…"}
+
+# A worker that DIES loses nothing. Unregister solver-b (signed as solver-b, the
+# same gate as DELETE /agents/{id}), deliver again, and every delivery now goes
+# to the live solver-a. Kill a holder MID-LEASE instead and the message is not
+# lost either: it never acks, its 30s lease expires, and the message returns to
+# the queue it was delivered to — re-read that inbox after the lease to see it.
+# A retry cannot fan out: repeat a capability delivery with the same
+# "idempotency_key" and the second accept is the FIRST one's — same id, same
+# target, "idempotent_replay":true — so two workers do not run one job.
+```
+
+What the selector will NOT do (all of it stated in the spec operation rather
+than discovered): it prefers LIVE holders, so a crashed worker absorbs no work
+while a live one exists (`status` is derived from liveness evidence, §2); when no
+holder is live it still accepts, because the inbox is durable and the message can
+wait; selection is LOCAL to this relay (a capability held only on a linked relay
+is not selected — federation forwards by agent id); the round-robin cursor lives
+in the serving process; and there is no all-holders fan-out — one holder per
+delivery.
+
 **2. Relay pub/sub** — fan-out to live subscribers (topic patterns support `*`
 for exactly one segment and a terminal `>` for one-or-more):
 

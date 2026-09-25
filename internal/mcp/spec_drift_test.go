@@ -102,6 +102,14 @@ var excludedOperations = map[string]string{
 	// RemoteStore grows the capability and the bridge grows the tool.
 	"inboxTransfer":    "POST /agents/{id}/inbox/transfer — \"Transfer (reassign) messages from one inbox to another\": an operator rebalance of a stuck lease, signed by the current HOLDER whose inbox is being drained; RemoteStore does not implement Transferrer, so no bridge tool could execute it.",
 	"inboxDeadLetters": "GET /agents/{id}/inbox/dead-letters — \"List messages that expired unacknowledged in this inbox\": a forensics/retrieval surface for the agent whose consumer stopped consuming (and for an operator holding the relay token); RemoteStore does not implement DeadLetterStore, so no bridge tool could execute it.",
+	// CR-FEAT-026 — capability-routed delivery. Excluded because the SELECTION
+	// is the relay's, not the bridge's, and the bridge cannot reproduce it: the
+	// round-robin cursor and the derived-liveness ranking live in the relay
+	// process (registry/capability.go), so a client-side imitation (list the
+	// holders, pick one, deliver by id) would be a different, non-documented
+	// rotation rather than this operation. The bridge's deliver tools address
+	// one agent id by construction (RemoteStore.Deliver(id, entry)).
+	"capabilityDeliver": "POST /capabilities/{capability}/inbox — \"Deliver a message to a capability (round-robin over its live holders)\": the holder choice is made BY THE RELAY (per-capability cursor + derived liveness), a stateful rule the bridge cannot reproduce from list_agents without inventing a second, undocumented rotation; reclassify when the bridge grows a tool that delegates the selection to the server rather than imitating it.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

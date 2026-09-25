@@ -18,7 +18,7 @@ tags:
   - name: registry
     description: Agent registration, lookup, update and removal.
   - name: inbox
-    description: Durable per-agent inboxes — deliver (with optional sender idempotency key), retrieve with lease, ack, stats, transfer/reassign between inboxes, and the dead-letter destination for messages that expired unacknowledged.
+    description: Durable per-agent inboxes — deliver to an agent id, or to a CAPABILITY (round-robin over its live holders, CR-FEAT-026), with an optional sender idempotency key; retrieve with lease, ack, stats, transfer/reassign between inboxes, and the dead-letter destination for messages that expired unacknowledged.
   - name: relay
     description: Topic pub/sub — publish, WebSocket subscribe, list topics.
   - name: mesh
@@ -1389,6 +1389,173 @@ paths:
           description: X-Agent-ID does not match the target agent
         "501":
           description: The configured registry store does not keep a dead-letter destination.
+
+  # ── Capability-routed delivery (CR-FEAT-026) ──
+  # The registry's advertised capabilities become a dialable worker pool: the
+  # path names a CAPABILITY where /agents/{id}/inbox names an agent, and the
+  # holder is chosen from the pool. Everything after that choice is the by-id
+  # operation above — same guard, same webhook driver, same durable inbox, same
+  # lease/ack/TTL.
+  /capabilities/{capability}/inbox:
+    post:
+      operationId: capabilityDeliver
+      tags: [inbox]
+      summary: Deliver a message to a capability (round-robin over its live holders)
+      description: |
+        Deliver to a CAPABILITY instead of an agent id — the registry's
+        capability index turned into a worker pool a sender can dial. Before
+        this, GET /agents?capability=abc could tell you who advertises a
+        capability and delivery still required naming one agent id, so the index
+        was a phone book nobody could dial (the gap measured live by the
+        external review `DISPATCH · CRI-001`, CR-FEAT-026).
+
+        **Selection rule.** Candidates are every registered agent whose
+        advertised `capabilities` include the name, matched EXACTLY — the same
+        comparison `GET /agents?capability=` uses. LIVE holders rank first:
+        liveness is the registry's own derived status (`online` while the row's
+        liveness evidence is inside `CR_PRESENCE_STALE_AFTER_S`, CR-FEAT-024),
+        and while at least one holder is live the pool is exactly the live
+        holders, so a crashed worker absorbs no work. The choice rotates
+        ROUND-ROBIN over the pool, one holder per delivery, in agent-id
+        ascending order, with ONE cursor per capability advanced once per
+        dispatched delivery.
+
+        **When no holder is live** the pool falls back to ALL holders rather
+        than refusing: the inbox is durable, so the message waits for a worker
+        that comes back. A message nobody ever takes is carried by the existing
+        ownership path — the sender gets exactly one `MESSAGE_EXPIRED` receipt
+        in its own inbox (CR-FEAT-025) — and a holder that dies MID-LEASE needs
+        no case of its own: the lease expires and the message returns to the
+        queue it was delivered to (`GET /agents/{id}/inbox`, §4 lease/ack).
+
+        **Zero holders is a NAMED error, never a silent drop**: 404
+        `{"error":"NO_CAPABLE_AGENT","capability":"<name>","detail":"…"}`, which
+        also states the limit that selection is LOCAL to this relay — a
+        capability held only on a linked relay is not selected, because
+        federation forwards a delivery by AGENT ID (CR-FEAT-006).
+
+        **The accept names what it chose** (`"capability":"solver"`,
+        `"target":"worker-b"`), because a routed sender has to know which worker
+        took the work. A by-id delivery's body carries neither field.
+
+        **Retries do not fan out.** A capability-routed delivery carrying an
+        `idempotency_key` is scoped to the CAPABILITY rather than to the holder
+        (the holder is not known when the key is resolved): a repeated key is
+        answered with the FIRST attempt's accept — same id, same `target` —
+        instead of dispatching the same work to a second worker in the pool, and
+        it is answered even if the pool has since emptied. A concurrently
+        in-flight duplicate is `409`, as on the by-id path.
+
+        The request body is the one `POST /agents/{id}/inbox` accepts — the same
+        required `payload` object, the same optional correlation/session fields,
+        the same `delivery_mode` / `timeout_ms` validation and the same 400s —
+        restated here so this operation reads on its own. The response is the
+        by-id accept plus those two routing fields. Delivery by agent id is
+        unchanged in every respect.
+
+        Stated limit: the cursor lives in the serving process and is not
+        persisted, so a restart, a second process on the same store, or two
+        relays behind a load balancer each rotate on their own. This is fairness
+        across holders, not exactly-once dispatch.
+      parameters:
+        - name: capability
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "The advertised capability to deliver to, matched exactly against each agent's `capabilities` (the same comparison `GET /agents?capability=` applies)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: object
+                  description: "Message payload — the same REQUIRED JSON object `POST /agents/{id}/inbox` takes (a body that omits the key, or sends null / a non-object, is refused with 400 `payload is required` / `payload must be a JSON object` and nothing is dispatched or stored)."
+                sender:
+                  type: string
+                  description: Originating agent id — also the inbox a `MESSAGE_EXPIRED` receipt is delivered to if the message expires unacknowledged.
+                session_id:
+                  type: string
+                  description: Conversation context for session-aware delivery (CR-FEAT-004).
+                thread_id:
+                  type: string
+                  description: Thread context for session-aware delivery (CR-FEAT-004).
+                delivery_mode:
+                  type: string
+                  enum: [blocking, async, batch]
+                  description: "Overrides the resolved holder's webhook default; validation is identical to the by-id path (400 for any other value, before anything is dispatched or stored)."
+                timeout_ms:
+                  type: integer
+                  minimum: 0
+                  maximum: 120000
+                  default: 30000
+                  description: Bounds a BLOCKING delivery to the resolved holder's webhook (0..120000, same bound and same 400 as the by-id path).
+                request_id:
+                  type: string
+                  description: Sender's correlation id, echoed in the reply.
+                kind:
+                  type: string
+                  description: Message kind (defaults to `message`; `configure` carries a self-configuration directive, CR-FEAT-007).
+                ttl_seconds:
+                  type: integer
+                  minimum: 0
+                  description: "Requested lifetime of the stored message (absent = store default, 0 = never expires), resolved into the accept's `expires_at` exactly as on the by-id path."
+                idempotency_key:
+                  type: string
+                  description: "Sender-supplied deduplication key (CR-FEAT-025). On this operation the key is scoped to the CAPABILITY: a second delivery of the same key is answered with the first attempt's accept — same id, same `target` — and stores nothing."
+      responses:
+        "201":
+          description: "Stored in the resolved holder's durable inbox. The accept is the by-id accept plus `capability` and `target`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, transport]
+                properties:
+                  id:
+                    type: string
+                    description: Assigned message id.
+                  transport:
+                    type: string
+                    enum: [inbox]
+                    description: The holder has no webhook endpoint, so the message went to its durable inbox.
+                  expires_at:
+                    type: string
+                    nullable: true
+                    description: "The resolved message expiry (RFC 3339), or null when the message never expires."
+                  capability:
+                    type: string
+                    description: The capability this delivery was dialed to.
+                  target:
+                    type: string
+                    description: "The holder the registry chose — the inbox the message is retrievable from."
+                  guard:
+                    type: object
+                    description: "Present when the guard verdict was not a clean allow (spec §9.3), exactly as on the by-id path (the RESOLVED holder's guard policy applies)."
+                  idempotent_replay:
+                    type: boolean
+                    description: "Present and true when this accept was answered from the recorded accept of an earlier delivery under the same idempotency_key — the `target` then names the holder the FIRST attempt chose."
+        "200":
+          description: "Blocking webhook delivery (the resolved holder has a webhook endpoint and `delivery_mode: blocking`): the endpoint's reply, with the same `capability` / `target` fields."
+        "202":
+          description: "Accepted for webhook push to the resolved holder (`delivery_mode: async|batch`) — queued, NOT stored in the inbox (spec §4), with the same `capability` / `target` fields."
+        "400":
+          description: "Same refusals as the by-id operation: malformed JSON, a missing/invalid `payload`, an unknown `delivery_mode`, an out-of-range `timeout_ms`/`ttl_seconds`, or an over-long `idempotency_key`. Nothing is dispatched and nothing is stored. A refusal cannot depend on the target, so it is answered before the pool is consulted."
+        "403":
+          description: "`GUARD_BLOCKED` — the resolved holder's guard policy blocked the message (never queued, never stored, never POSTed); `AGENT_QUARANTINED` — the sender, or the RESOLVED holder, is contained by the detection layer's kill-switch (CR-FEAT-030)."
+        "404":
+          description: |-
+            `NO_CAPABLE_AGENT` — no agent registered ON THIS RELAY advertises the capability, so there is no holder to choose. The body is `{"error":"NO_CAPABLE_AGENT","capability":"<name>","detail":"…"}` and nothing is dispatched or stored. This is deliberately NOT the plain `agent not found` of the by-id path: the two say different things.
+
+            (A delivery to a holder that is unregistered between selection and the store write answers the by-id `agent not found` instead, the same race a by-id delivery has.)
+        "409":
+          description: "`idempotency_key` already has a delivery in flight — nothing was stored by this request, exactly as on the by-id path."
+        "502":
+          description: "Blocking webhook delivery to the resolved holder was permanently rejected (non-retryable status, or a reply the holder's schema cannot map), or a federation failure for a holder id that vanished after selection — the same `502` contract as the by-id operation."
 
 components:
   parameters:

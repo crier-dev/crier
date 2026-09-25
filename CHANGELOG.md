@@ -15,6 +15,42 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Capability-routed delivery — the registry's capability index as a dialable
+  worker pool** (CR-FEAT-026). `GET /agents?capability=solver` could already tell
+  you who advertises a capability, but delivery still required naming ONE agent
+  id, so a pool of interchangeable workers could not be addressed as a pool (the
+  gap the external review `DISPATCH · CRI-001` by Carter measured live at
+  `ca28523d`). `POST /capabilities/{capability}/inbox` takes the same body as
+  `POST /agents/{id}/inbox` and picks the holder: candidates are every agent
+  whose advertised `capabilities` include the name (matched exactly like the
+  discovery filter), **live holders rank first** (liveness is the registry's own
+  derived status, so a crashed worker absorbs no work while a live one exists),
+  and the choice **round-robins** over that pool — one holder per delivery,
+  agent-id ascending, one cursor per capability, advanced once per dispatched
+  delivery. The accept names what it chose (`"capability":"solver"`,
+  `"target":"worker-b"`) because the sender has to know which worker took the
+  work; a by-id delivery's body is unchanged. **Zero holders is a named error,
+  never a silent drop**: `404 NO_CAPABLE_AGENT` naming the capability and stating
+  that selection is local to the relay (federation forwards by agent id) — while
+  a capability whose holders are all merely stale still ACCEPTS, because the
+  inbox is durable and an untaken message is carried by the existing expiry
+  receipt. A holder that dies **mid-lease** needs no case of its own: the lease
+  expires and the message returns to the queue it was delivered to. A retry
+  carrying an `idempotency_key` is scoped to the CAPABILITY (the holder is not
+  known when the key is resolved), so a repeated key is answered with the first
+  attempt's accept — same id, same `target` — instead of dispatching the same job
+  to a second worker, and it is answered even if the pool has since emptied.
+  Everything after the choice is the existing deliver path (guard choke point,
+  webhook driver, durable inbox, lease/ack/TTL, federation fallback), and the
+  detection layer observes a routed delivery with the RESOLVED holder as its
+  target and a zero-holder refusal with an empty one. Two counters
+  (`capability_routed_total`, `capability_unheld_total`) make a pool that has
+  gone empty visible. Proved by `TestCapabilityDelivery*` in
+  `internal/registry` (landing + signed retrieve + ack, the exact rotation, a
+  stale holder skipped, the named refusal with nothing stored, capability-scoped
+  idempotency, lease requeue after a holder dies, one observation per request,
+  and a concurrent 40-delivery rotation under `-race`). Source: the external
+  review `DISPATCH · CRI-001` by Carter, delivered via Bane.
 - **Detection & containment** (CR-FEAT-030) — the other half of attribution, and
   it is opt-in (`CR_DETECT_ENABLED`, default `false`; with the flag unset no
   route is registered, no file is written and the delivery path is unchanged):

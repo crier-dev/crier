@@ -63,6 +63,9 @@ func setupRouterWithHandler(store Store) (*Handler, *mux.Router) {
 	r.HandleFunc("/agents/{id}", handler.HandleGetAgent).Methods("GET")
 	r.HandleFunc("/agents/{id}", handler.HandleUnregister).Methods("DELETE")
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleDeliver).Methods("POST")
+	// Capability-routed delivery (CR-FEAT-026) — registered here so the helper
+	// mirrors cmd/server/main.go's route table.
+	r.HandleFunc("/capabilities/{capability}/inbox", handler.HandleDeliverByCapability).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox", handler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", handler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", handler.HandleStats).Methods("GET")

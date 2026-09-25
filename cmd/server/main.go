@@ -463,6 +463,13 @@ func run(args []string) int {
 	r.HandleFunc("/agents/{id}", registryHandler.HandleUnregister).Methods("DELETE")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleUpdateAgent).Methods("PATCH")
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleDeliver).Methods("POST")
+	// Capability-routed delivery (CR-FEAT-026): the registry's advertised
+	// capabilities become a dialable worker pool. The path names the CAPABILITY
+	// where the by-id route names an agent, and the holder is chosen from the
+	// live holders by round-robin (registry/capability.go); everything after
+	// that choice is the deliver path above, unchanged. A capability nobody
+	// holds is refused with 404 NO_CAPABLE_AGENT, never dropped.
+	r.HandleFunc("/capabilities/{capability}/inbox", registryHandler.HandleDeliverByCapability).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
