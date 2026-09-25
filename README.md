@@ -727,6 +727,30 @@ Two shapes are worth noting before writing a client against this wire:
   on, answers `{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"public_key is required"}],"isError":true},"id":3}`
   instead of a JSON-RPC `error` object.
 
+#### Which MCP surface to use
+
+An MCP client can reach the server through more than one surface, and they
+answer different needs.
+
+**The curated bridge (`crier-mcp`)** exposes agent-messaging verbs — registry,
+inbox and mesh — and adds the composites a conversational agent would otherwise
+build itself: `ask_agent` delivers, polls and acks the reply in a single call,
+and `mesh_request` owns the WebSocket round trip. It also keeps the lease/ack
+bookkeeping and identity registration out of the harness. Use it for
+conversational agents and mesh interactions.
+
+**Muster's `openapi-mcp`, pointed at `docs/openapi.yaml`,** generates a generic
+client over the whole REST surface — every operation the spec defines, whether
+or not it is agent-shaped. Use it when raw coverage of every operation matters
+more than an agent-optimised surface.
+
+Both derive from `docs/openapi.yaml`, and the curated bridge's half of that
+relationship is enforced by the coverage guard in `internal/mcp`
+(`spec_drift_test.go`): every advertised tool must name the spec operations it
+exercises, and every spec operation must be either covered by a tool or recorded
+as a deliberate exclusion with its reason. Adding, renaming or removing either
+side fails the build until the table is updated.
+
 ### Try the Mesh
 
 The mesh is the second primitive: direct agent-to-agent WebSocket connections
