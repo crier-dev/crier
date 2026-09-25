@@ -79,6 +79,20 @@ type Agent struct {
 	// serialized row byte-identical to a pre-A2A registration. Nothing
 	// consumes it yet: INT-A2A-002..006 add the surfaces that do.
 	A2A *a2a.Config `json:"a2a,omitempty"`
+	// Namespace is the realm this agent belongs to (CR-FEAT-029). The DEFAULT
+	// namespace — the only one a deployment that declares no namespaces has —
+	// is spelled "" here, and omitempty then keeps the serialized row
+	// byte-identical to a pre-CR-FEAT-029 registration. That is deliberate:
+	// the acceptance criterion for this row is that single-namespace
+	// behaviour is unchanged, and a row that gained a `"namespace":"default"`
+	// member would change every existing client's payload (see
+	// namespace.Canonical, the one place the mapping lives).
+	//
+	// A non-empty value names a namespace the server was started with
+	// (CR_NAMESPACES / CR_NAMESPACES_FILE); registering into an undeclared
+	// namespace is refused rather than mapped back to the default, because a
+	// typo must never silently widen access.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // InboxEntry is a message stored in an agent's persistent inbox.
@@ -128,6 +142,13 @@ type InboxEntry struct {
 	// (CR-FEAT-010, spec §9.3). Present on guarded deliveries; absent when
 	// the guard is disabled.
 	Guard *guard.Meta `json:"guard,omitempty"`
+	// Namespace is the realm the message was delivered into (CR-FEAT-029).
+	// It is derived from the TARGET agent's row and recorded WITH the message,
+	// so a stored message states its realm even after the agent is
+	// unregistered or moved. The default namespace is "" and
+	// `omitempty` keeps the entry byte-identical to a pre-CR-FEAT-029
+	// message.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // MessageExpiry is the tri-state WIRE encoding of a message expiry

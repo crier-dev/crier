@@ -1430,6 +1430,85 @@ All of the above is executed as a test against the real server —
 order, absent priority is FIFO, the budget sheds with 429 + `Retry-After` + the
 named error, the depth is readable in `/status` and `/metrics`, and an
 unconfigured server refuses nothing).
+## Namespaces (realms) — per-realm policy (CR-FEAT-029)
+
+Before this, crier had exactly one of everything: one registry, one relay topic
+space, one inbox namespace, one rate-limit counter per agent id and one
+process-wide guard budget. The consequence was one noisy neighbour with one
+shared fate — a flood anywhere could cost another agent its publish budget, and
+could trip the shared guard circuit so that *nobody's* deliveries were checked.
+The normative design is [`specs/NAMESPACES.md`](specs/NAMESPACES.md), and it
+takes its shape from WAMP's realms (an isolated routing and administrative
+domain: *"WAMP messages are only routed within a Realm"*).
+
+A **namespace** is a realm dimension on agents and messages with per-realm
+policy. It is **opt-in and additive**: with `CR_NAMESPACES` unset nothing is
+declared, every agent is in the one implicit namespace, and every wire surface —
+agent rows, inbox entries, webhook envelopes, relay frames, `/relay/topics` — is
+byte-identical to a build without this feature.
+
+```bash
+export CR_NAMESPACES='{"namespaces":[
+  {"name":"acme","rate_limit_per_minute":240,"retention_seconds":86400,
+   "guard_policy":{"id":"acme-default","thresholds":{"block_risk":"high"}}},
+  {"name":"batch","guard_enabled":false,"rate_limit_per_minute":0}
+]}'
+# … or CR_NAMESPACES_FILE=/etc/crier/namespaces.json (set at most one of the two)
+```
+
+Per-realm policy — every axis is **inherited when unset**, so a namespace that
+declares nothing behaves exactly like a namespace that does not exist:
+
+| Axis | Field(s) | Unset means |
+|------|----------|-------------|
+| Auth posture | `auth` (`shared`\|`token`), `token_ref` (`env:VAR`) | `shared` — the deployment's bearer token + per-agent signature gate |
+| Rate limit | `rate_limit_per_minute` | `CR_RATE_LIMIT_PER_MINUTE`, counted per **(realm, agent)** |
+| Guard settings | `guard_enabled`, `guard_policy` | `CR_GUARD_ENABLED` / `CR_GUARD_DEFAULT_POLICY` |
+| Retention | `retention_seconds` | 24h (`registry.DefaultMessageTTL`) |
+
+The two isolation properties are the point, and both are measured:
+
+- **A message cannot cross namespaces implicitly.** Its realm is the TARGET
+  agent's stored realm, never the sender's claim: `POST /agents/{id}/inbox` with
+  a `namespace` that is not the target's answers `403 NAMESPACE_MISMATCH` and
+  stores nothing; an inbox transfer between two realms is refused; a relay
+  publish reaches only subscribers of its own realm, even on an identical topic
+  name and through a wildcard; and a name the server does not declare is a `400`
+  on every lane — **never** a silent fallback to the default realm.
+- **Two realms do not interfere.** The relay's rate-limit counter is keyed by
+  `(realm, agent)`, so one realm's flood cannot spend another's budget and the
+  same agent id has one budget per realm. A realm that declares
+  `guard_enabled: false` never reaches the guard choke point at all, so its
+  traffic cannot consume the process-wide guard concurrency or trip the shared
+  circuit for the realms that are guarded.
+
+```bash
+BASE=http://127.0.0.1:8767
+# register into a realm (a realm the server does not declare is refused)
+curl -s -X POST $BASE/agents -d '{"id":"alice","public_key":"<64 hex>","namespace":"acme"}'
+# deliver: the realm is implied by the target, and recorded with the message
+curl -s -X POST $BASE/agents/alice/inbox -d '{"payload":{"hello":"acme"}}'
+# a crossing attempt is refused, and nothing is stored
+curl -s -X POST $BASE/agents/alice/inbox -d '{"payload":{},"namespace":"batch"}'   # 403 NAMESPACE_MISMATCH
+# publish inside a realm (the realm is a HEADER — the per-realm limit is evaluated first)
+curl -s -X POST $BASE/relay/publish -H 'X-Crier-Namespace: acme' -H 'X-Agent-ID: alice' \
+     -d '{"topic":"orders.created","event":{"n":1}}'
+# what is actually enforced, with a live per-realm agent census (no secrets)
+curl -s $BASE/namespaces
+```
+
+A realm can also demand its own credential (`"auth":"token"`, resolved from an
+`env:VAR` reference — never an inline secret): registration into it, delivery
+into it and relay publish/subscribe in it then require
+`X-Crier-Namespace-Token`. A realm that declares that posture but resolves to an
+empty secret is refused at boot.
+
+The acceptance run is executed against the real server —
+`cmd/server/crfeat029_test.go` (`TestCRFEAT029TwoNamespacesDoNotShareFate`,
+`TestCRFEAT029MessageCannotCrossNamespaces`,
+`TestCRFEAT029SingleNamespaceIsByteIdentical`) — plus the relay and handler
+suites in `internal/relay/namespace_test.go` and
+`internal/registry/namespace_test.go`.
 
 ## Configuration
 
@@ -1497,6 +1576,8 @@ All configuration is via environment variables (defaults shown):
 | `CR_DETECT_QUIET_HOURS` | `1-5` | UTC quiet window `S-E` for the odd-hour signal — start inclusive, end exclusive, wrapping past midnight (`22-6` works). `0-0` disables that signal. |
 | `CR_DETECT_QUIET_MIN_MESSAGES` | `3` | Messages one sender may deliver inside the quiet window before `odd_hour_volume` fires. |
 | `CR_CANARY_TOKENS` | _(unset — two generated per boot, and logged)_ | Comma-separated canary tokens to plant. A delivery addressed to a canary id, or carrying a canary token in its payload, trips `canary_trip`. Pinned tokens keep stable ids across restarts; generated ones rotate per boot. |
+| `CR_NAMESPACES` | _(unset — one implicit namespace)_ | The namespace (realm) policy document, inline JSON (CR-FEAT-029): `{"namespaces":[{"name":"acme","rate_limit_per_minute":240,"retention_seconds":86400}]}`. Per-realm auth posture (`auth`/`token_ref`), rate limit, guard settings (`guard_enabled`/`guard_policy`) and retention, each **inherited when unset**. Unknown fields, duplicate names, an invalid name, a `token` posture with no resolvable `env:VAR` secret, or a `retention_seconds < 1` fail the boot. Set at most one of this and `CR_NAMESPACES_FILE`. See [Namespaces (realms)](#namespaces-realms--per-realm-policy-cr-feat-029). |
+| `CR_NAMESPACES_FILE` | _(unset)_ | Path to the same document (CR-FEAT-029). An unreadable file fails the boot rather than silently serving no namespaces. |
 
 ### Durable backend (PostgreSQL)
 
@@ -1535,15 +1616,15 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **17 paths** and **21 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **18 paths** and **22 operations** (a path carries one entry per HTTP method, so the two counts differ) across 8 operation groups. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 17 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 21 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 25 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 18 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 22 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 26 router paths
 ```
 
-The router registers **25 paths**: those 17 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030).
+The router registers **26 paths**: those 18 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030).
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -1558,6 +1639,7 @@ The router registers **25 paths**: those 17 plus the three spec-hosting routes (
 | **Detection** (opt-in) | `GET /delivery-log`, `GET /delivery-log/verify`, `GET /alerts`, `GET /canaries`, `POST /agents/{id}/kill-switch` | Signed delivery log, behaviour alerts, canary tokens and the single-call kill-switch (CR-FEAT-030, `CR_DETECT_ENABLED`) |
 | **Ownership** | `POST /agents/{id}/inbox/transfer`, `GET /agents/{id}/inbox/dead-letters` | Rebalance a stuck lease; read the messages that expired unacknowledged (CR-FEAT-025) |
 | **Capability delivery** | `POST /capabilities/{capability}/inbox` | Deliver to a capability — round-robin over its live holders (CR-FEAT-026) |
+| **Namespaces** | `GET /namespaces` | The realm policies this server enforces, with a live per-realm agent census (CR-FEAT-029) |
 
 ### Runtime posture — `GET /status`
 
@@ -1640,7 +1722,8 @@ All core primitives are implemented and tested:
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
-- **API** — 25 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 20 always-on plus the 5 opt-in detection routes — documented as 17 paths / 21 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
+- **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
+- **API** — 26 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 21 always-on plus the 5 opt-in detection routes — documented as 18 paths / 22 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.
@@ -1649,6 +1732,11 @@ Coverage numbers above are measured fresh per change (`go test -short -count=1 -
 
 - **CI-003b** ✅ — PostgreSQL persistence for registry and inboxes (implemented, `CR_DATABASE_URL`)
 - **CI-007** ✅ — MCP server exposing registry and inbox tools (implemented, `cmd/crier-mcp`)
+- **Namespaces/tenants** ✅ — per-realm policy and realm-scoped routing (CR-FEAT-029, `CR_NAMESPACES`); the
+  mesh lane is deliberately NOT realm-scoped yet, and there is no cross-realm bridging (see
+  [`specs/NAMESPACES.md`](specs/NAMESPACES.md) §11)
+- **Priority lanes & backpressure** — message priority and a global/per-realm shed with `Retry-After`
+  (CR-FEAT-035; the per-realm half waits on this row)
 - **Capability-based routing** — route messages by agent capability cards
 
 ## License

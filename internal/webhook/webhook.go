@@ -144,6 +144,11 @@ type EnvelopeMeta struct {
 	// (allow/sanitize — blocked messages never POST), absent when the
 	// guard is disabled. Emitted as X-Crier-Guard-* headers (§7.2).
 	Guard *guard.Meta `json:"guard,omitempty"`
+	// Namespace is the realm the delivery belongs to (CR-FEAT-029) — the
+	// TARGET agent's namespace, resolved from its registry row, never taken
+	// from the request body. Empty = the default namespace, and `omitempty`
+	// keeps every pre-CR-FEAT-029 envelope byte-identical.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // Client performs webhook POSTs with timeout and optional HMAC signing.

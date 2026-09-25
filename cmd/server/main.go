@@ -199,6 +199,19 @@ func run(args []string) int {
 
 	// Relay pub/sub
 	relaySvc := relay.New(cfg.RateLimitPerMinute)
+	// Realms (CR-FEAT-029): the namespace policy set built from
+	// CR_NAMESPACES / CR_NAMESPACES_FILE, resolved ONCE here and shared by both
+	// lanes that must agree about it (the relay's publish/subscribe scoping and
+	// per-realm rate limits, and the registry's registration/delivery/guard/
+	// retention rules). A broken document fails the boot — a realm that cannot
+	// be read must never be served as a half-configured one.
+	nsReg, err := buildNamespaces(cfg)
+	if err != nil {
+		slog.Error("initialize namespaces", "error", err)
+		return 1
+	}
+	nsReg.LogPolicies()
+	relaySvc.SetNamespacePolicies(nsReg)
 	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
 	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
 	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")
@@ -259,6 +272,11 @@ func run(args []string) int {
 		slog.Info("inbox ingest budget", "global_per_minute", 0,
 			"detail", "no global budget: the per-agent publish cap (CR_RATE_LIMIT_PER_MINUTE) remains the only backpressure, exactly as before CR-FEAT-035")
 	}
+	// Realms (CR-FEAT-029): the registry lane enforces the same policy set the
+	// relay was given — registration validates the realm and its auth posture,
+	// delivery pins every message to the TARGET's realm, and the realm supplies
+	// the retention default and the guard settings for deliveries into it.
+	registryHandler.SetNamespacePolicies(nsReg)
 	// Presence (CR-FEAT-024): the status every registry read reports is DERIVED
 	// from the row's liveness evidence (`last_seen`) and this documented window,
 	// so a crashed agent goes stale instead of reporting "online" forever. The
@@ -495,6 +513,12 @@ func run(args []string) int {
 	// lease, and the dead-letter destination a TTL expiry feeds.
 	r.HandleFunc("/agents/{id}/inbox/transfer", registryHandler.HandleTransfer).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/dead-letters", registryHandler.HandleDeadLetters).Methods("GET")
+	// Realms (CR-FEAT-029): the policy set this server is actually enforcing,
+	// with a live per-namespace agent census. Registered unconditionally — an
+	// unconfigured deployment answers with the one implicit namespace — and
+	// NOT auth-exempt: like /status it reports posture, so a token-less caller
+	// must not be able to read it on a server that has auth on.
+	r.HandleFunc("/namespaces", registryHandler.HandleListNamespaces).Methods("GET")
 
 	// Effective runtime posture + the LIVE queue depth (DF-CRIER-113,
 	// CR-FEAT-035). Registered here rather than with /health, /version and the

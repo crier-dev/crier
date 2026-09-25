@@ -25,7 +25,7 @@ import (
 
 // listQueryRegex is the SELECT expectation for List, mirroring the statement
 // in postgres_store.go List (agentConfigColumns + FROM agents).
-const listQueryRegex = `SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`
+const listQueryRegex = `SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`
 
 // expectListRows stubs one SUCCESSFUL empty List query.
 func expectListRows(mock pgxmock.PgxPoolIface) {
@@ -73,7 +73,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 				// AddRow), but registered_at is unscannable into a
 				// time.Time: the scan of this row must fail.
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("scan-broken", make([]byte, 32), []byte(`[]`), "online", struct{}{}, now, nil, nil, nil)
+					AddRow("scan-broken", make([]byte, 32), []byte(`[]`), "online", struct{}{}, now, nil, nil, nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "scan",
@@ -84,7 +84,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 				// A non-32-byte, non-empty key is corrupt data: the whole
 				// listing is dropped (pre-existing behavior, unchanged).
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("corrupt-key", []byte("short"), []byte(`[]`), "online", now, now, nil, nil, nil)
+					AddRow("corrupt-key", []byte("short"), []byte(`[]`), "online", now, now, nil, nil, nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "public key",
@@ -93,7 +93,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 			name: "malformed capabilities JSON",
 			drive: func(mock pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("bad-caps", pub, []byte(`{"not":"an array"}`), "online", now, now, nil, nil, nil)
+					AddRow("bad-caps", pub, []byte(`{"not":"an array"}`), "online", now, now, nil, nil, nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "capabilities",
@@ -102,7 +102,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 			name: "malformed webhook JSON",
 			drive: func(mock pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("bad-webhook", pub, []byte(`[]`), "online", now, now, []byte(`{"url":`), nil, nil)
+					AddRow("bad-webhook", pub, []byte(`[]`), "online", now, now, []byte(`{"url":`), nil, nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "webhook",
@@ -111,7 +111,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 			name: "malformed guard JSON",
 			drive: func(mock pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("bad-guard", pub, []byte(`[]`), "online", now, now, nil, []byte(`[1,2]`), nil)
+					AddRow("bad-guard", pub, []byte(`[]`), "online", now, now, nil, []byte(`[1,2]`), nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "guard",
@@ -120,7 +120,7 @@ func postgresListFailureCases(now time.Time) []listFailureCase {
 			name: "malformed a2a JSON",
 			drive: func(mock pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("bad-a2a", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`))
+					AddRow("bad-a2a", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`), "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 			},
 			wantIn: "a2a",
@@ -275,7 +275,7 @@ func TestPostgresListError_RecoveredBySuccess(t *testing.T) {
 			name: "successful populated",
 			stubSuccess: func(mock pgxmock.PgxPoolIface) int {
 				rows := pgxmock.NewRows(agentRowColumns()).
-					AddRow("a1", make([]byte, 32), []byte(`[]`), "online", now, now, nil, nil, nil)
+					AddRow("a1", make([]byte, 32), []byte(`[]`), "online", now, now, nil, nil, nil, "")
 				mock.ExpectQuery(listQueryRegex).WillReturnRows(rows)
 				return 1
 			},

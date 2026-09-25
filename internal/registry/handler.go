@@ -25,6 +25,7 @@ import (
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
+	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -52,6 +53,13 @@ type registerRequest struct {
 	// Absent is the default and keeps every existing registration byte-
 	// identical; present is strictly decoded by strictA2AMember.
 	A2A *a2a.Config `json:"a2a,omitempty"`
+	// Namespace is the realm this agent registers INTO (CR-FEAT-029). Absent
+	// (or "default") is the implicit realm every pre-CR-FEAT-029 registration
+	// got, and it never appears in a response body. A name the server does not
+	// declare is a 400 UNKNOWN_NAMESPACE, and a realm with AuthToken posture
+	// additionally requires X-Crier-Namespace-Token — a typo is never quietly
+	// mapped back to the default realm.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // agentsResponse is the JSON body for GET /agents.
@@ -103,6 +111,13 @@ type deliverRequest struct {
 	// zero value, FIFO) and an out-of-range value must be refused, which needs
 	// the field to be present.
 	Priority *int `json:"priority,omitempty"`
+	// Namespace names the realm this delivery believes it is addressing
+	// (CR-FEAT-029). It is CHECKED against the target's own namespace, never
+	// believed: it must either be absent (the target's realm is implied, which
+	// is what every pre-CR-FEAT-029 request does) or name the SAME realm the
+	// target agent is registered in. Anything else is refused with
+	// NAMESPACE_MISMATCH — a message cannot cross realms by naming one.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // maxTTLSeconds bounds ttl_seconds so the requested lifetime still fits a
@@ -489,6 +504,16 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
+	// Realms (CR-FEAT-029): the namespace is validated before anything is
+	// registered, so a request that names an undeclared realm — or fails the
+	// realm's own auth posture — never creates a row. A request that names no
+	// namespace resolves to the default one and reaches the rest of this
+	// handler exactly as it did before namespaces existed.
+	namespaceName, nsErr := h.resolveRegistrationNamespace(req.Namespace, r.Header.Get(namespace.HeaderNamespaceToken))
+	if nsErr != nil {
+		writeNamespaceError(w, nsErr)
+		return
+	}
 	// The public_key PRESENCE requirement follows signature enforcement
 	// (DF-CRIER-192): with enforcement on (the default) a keyless agent
 	// could never authenticate, so it is rejected up front with the
@@ -519,6 +544,7 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		Webhook:      req.Webhook,
 		Guard:        req.Guard,
 		A2A:          req.A2A,
+		Namespace:    namespaceName,
 	}
 	if agent.Capabilities == nil {
 		agent.Capabilities = []string{}
@@ -657,6 +683,19 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	} else if present {
 		req.A2A = cfg
 		a2aPresent = true
+	}
+	// Realms are not a PATCH field (CR-FEAT-029). A `namespace` member is
+	// REFUSED rather than ignored: moving a live agent between realms has no
+	// defined meaning for the messages already queued in its inbox (they were
+	// delivered under the old realm's retention, guard settings and auth
+	// posture), and silently accepting the member would look exactly like a
+	// successful move. The supported path is unregister + register into the
+	// target realm, which leaves nothing ambiguous behind.
+	if member, present := topLevelMemberRaw(body, "namespace"); present && string(bytes.TrimSpace(member)) != "null" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "namespace cannot be changed by PATCH; unregister the agent and register it into the target namespace",
+		})
+		return
 	}
 
 	agent, err := h.store.Get(id)
@@ -1068,19 +1107,63 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		IdempotencyKey: req.IdempotencyKey,
 	}
 	observationID = entry.ID
-	// Resolve the expiry now, from the same instant the store will use, so
-	// the response can report what the message's expiry actually became.
-	if err := resolveMessageExpiry(entry); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
 	kind := req.Kind
 	if kind == "" {
 		kind = webhook.KindMessage
 	}
 
 	target, getErr := h.store.Get(id)
+
+	// ▼ REALMS (CR-FEAT-029). The target's stored namespace is the AUTHORITY
+	// for this delivery: the request's own `namespace` is only ever checked
+	// against it, so a message cannot be routed into a realm other than the
+	// one its target actually belongs to. Three properties, in order:
+	//
+	//  1. an EXPLICIT namespace that is not the target's is refused (403
+	//     NAMESPACE_MISMATCH) — absent means "the target's realm", never a
+	//     default chosen on the caller's behalf;
+	//  2. the realm's auth posture is enforced here, which is the only point
+	//     in the delivery path where the namespace is known at all;
+	//  3. the realm supplies this delivery's retention default and its guard
+	//     settings (the guard wrap below).
+	//
+	// With no namespaces declared — and for a target in the default realm —
+	// every step below is a no-op and the request reaches the expiry
+	// resolution and the guard exactly as it did before this feature.
+	var nsPolicy namespace.Policy
+	if target != nil {
+		targetNS := namespaceOfAgent(target)
+		if req.Namespace != "" && namespace.Canonical(req.Namespace) != targetNS {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "NAMESPACE_MISMATCH",
+				"detail": fmt.Sprintf("target %q is in namespace %q; a message cannot cross namespaces (%q requested)",
+					id, namespace.Display(targetNS), namespace.Display(req.Namespace)),
+			})
+			return
+		}
+		if err := h.namespaces.CheckAuth(targetNS, r.Header.Get(namespace.HeaderNamespaceToken)); err != nil {
+			writeNamespaceError(w, err)
+			return
+		}
+		nsPolicy = h.namespaces.Resolve(targetNS)
+		entry.Namespace = targetNS
+		// The realm's retention is a DEFAULT, so an explicit ttl_seconds on the
+		// request (including an explicit 0 = never expires) always wins.
+		if req.TTLSeconds == nil && nsPolicy.RetentionSeconds != nil {
+			// Validated <= maxRetentionSeconds at load, so the int conversion
+			// is exact on every platform crier builds for.
+			ttl := int(*nsPolicy.RetentionSeconds)
+			entry.TTLSeconds = &ttl
+		}
+		logNamespaceDeliver(id, targetNS, req.Sender)
+	}
+
+	// Resolve the expiry now, from the same instant the store will use, so
+	// the response can report what the message's expiry actually became.
+	if err := resolveMessageExpiry(entry); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	// Federation fallback (CR-FEAT-006, hold/retry DF-CRIER-7): the target
 	// agent is not registered on this relay. When relay links are
@@ -1166,10 +1249,22 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	// ▼ GUARD CHOKE POINT (spec §2) — one call site covers webhook
 	// (blocking/async/batch) AND inbox store. Per-message verdicts are
 	// computed exactly once; redelivery/batch flush never re-run the guard.
+	//
+	// REALMS (CR-FEAT-029): the namespace can skip this choke point entirely
+	// (guard_enabled=false) or supply the realm-level default policy. That is
+	// what keeps one realm's traffic out of another realm's guard budget — the
+	// guard's concurrency cap and circuit breaker are process-wide, so without
+	// a per-namespace switch a flood in one realm would stop every other realm
+	// being checked. An agent's own guard.policies still outrank the realm
+	// default, per the guard spec's own specificity order (§4.2).
 	var guardMeta *guard.Meta
 	payload := req.Payload
-	if h.guard != nil && target != nil {
-		res, gerr := h.guard.Check(r.Context(), id, target.Guard, guard.Input{
+	if h.guard != nil && target != nil && !nsPolicy.GuardSkipped() {
+		guardCfg := target.Guard
+		if guardCfg == nil && nsPolicy.GuardPolicy != nil {
+			guardCfg = &guard.AgentGuardConfig{Policies: []guard.Policy{*nsPolicy.GuardPolicy}}
+		}
+		res, gerr := h.guard.Check(r.Context(), id, guardCfg, guard.Input{
 			AgentID:   id,
 			MessageID: entry.ID,
 			Sender:    req.Sender,
@@ -1237,6 +1332,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 				SessionID: req.SessionID,
 				ThreadID:  req.ThreadID,
 				Guard:     guardMeta,
+				// The realm the delivery belongs to (CR-FEAT-029) — the
+				// target's own, resolved above from its registry row. Omitted
+				// entirely for the default namespace.
+				Namespace: entry.Namespace,
 			},
 			Payload: payload,
 		}

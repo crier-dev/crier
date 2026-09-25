@@ -7,12 +7,19 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // TopicInfo describes an active topic and its subscriber count.
 type TopicInfo struct {
 	Name        string `json:"name"`
 	Subscribers int    `json:"subscribers"`
+	// Namespace is the realm this topic belongs to (CR-FEAT-029). It is
+	// empty for the default namespace, and `omitempty` keeps the /relay/topics
+	// body byte-identical to a pre-CR-FEAT-029 response — the same reason the
+	// agent and inbox rows spell the default realm as "".
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // Relay manages publish/subscribe topic routing.
@@ -22,6 +29,12 @@ type Relay struct {
 	// topic -> set of subscriber channels. Keys are literal topic names and
 	// wildcard subscription patterns alike, so Subscribe/Unsubscribe/topic
 	// inventory stay a single map.
+	//
+	// Since CR-FEAT-029 the key is NAMESPACE-SCOPED: subscriptionKey(ns, topic)
+	// prefixes the realm, so two realms using the same literal topic name are
+	// two disjoint sets of subscribers and a publish in one can never reach a
+	// subscriber in the other. For the default namespace the key's prefix is
+	// empty and the map is what it always was.
 	subs map[string]map[chan []byte]struct{}
 	// wildcards holds the parsed form of every non-literal subscription key.
 	// A pattern is parsed once at Subscribe time; publish matching only walks
@@ -33,6 +46,45 @@ type Relay struct {
 	RateLimiter        *RateLimiter
 	rateLimitPerMinute int
 	rateLimitWindow    time.Duration
+	// namespaces is the realm policy set (CR-FEAT-029). Nil — the default,
+	// and the only state a deployment that declares no namespaces is in —
+	// means one implicit realm whose publish cap is rateLimitPerMinute and
+	// whose rate-limit key is the bare agent id, exactly as before.
+	namespaces *namespace.Registry
+}
+
+// namespaceSep separates the realm from the topic in the relay's internal
+// subscription key. It cannot occur in either part: validateTopic rejects the
+// NUL byte and a namespace name is restricted to [a-z0-9_-].
+const namespaceSep = "\x00"
+
+// subscriptionKey is the relay's internal key for one (realm, topic) pair.
+func subscriptionKey(nsName, topic string) string {
+	return namespace.Canonical(nsName) + namespaceSep + topic
+}
+
+// topicOf strips the realm prefix off an internal subscription key.
+func topicOf(key string) string {
+	if i := strings.Index(key, namespaceSep); i >= 0 {
+		return key[i+len(namespaceSep):]
+	}
+	return key
+}
+
+// namespaceOfKey returns the realm part of an internal subscription key.
+func namespaceOfKey(key string) string {
+	if i := strings.Index(key, namespaceSep); i >= 0 {
+		return key[:i]
+	}
+	return ""
+}
+
+// SetNamespacePolicies wires the realm policy set onto the relay (CR-FEAT-029):
+// publish and subscribe are scoped to a realm, and each realm's own rate limit
+// (or the deployment's, when it declares none) applies to its publishers. Nil
+// restores the single implicit realm — every existing behaviour, unchanged.
+func (r *Relay) SetNamespacePolicies(reg *namespace.Registry) {
+	r.namespaces = reg
 }
 
 // New creates a new Relay ready to serve.
@@ -51,25 +103,69 @@ func New(rateLimitPerMinute int) *Relay {
 	return r
 }
 
-// CheckRateLimit checks whether the given agent ID is within the rate limit.
-// Returns true if the request is allowed, false if rate limited.
-// When rate limiting is disabled, always returns true.
+// CheckRateLimit checks whether the given agent ID is within the rate limit of
+// the DEFAULT namespace. Returns true if the request is allowed, false if rate
+// limited. When rate limiting is disabled, always returns true.
 func (r *Relay) CheckRateLimit(agentID string) bool {
+	return r.CheckRateLimitIn("", agentID)
+}
+
+// CheckRateLimitIn checks whether an agent may publish inside a namespace
+// (CR-FEAT-029). The cap comes from the namespace's own policy when it
+// declares one, else from the deployment's CR_RATE_LIMIT_PER_MINUTE; a cap of 0
+// means that namespace is not rate limited at all.
+//
+// The counter key is (namespace, agent), which is the whole isolation claim:
+// two realms' traffic cannot consume each other's budget, so one realm's flood
+// cannot rate-limit a quiet realm's agents out of publishing — the "one noisy
+// neighbour, one shared fate" failure the review measured.
+func (r *Relay) CheckRateLimitIn(nsName, agentID string) bool {
 	if r.RateLimiter == nil {
 		return true
 	}
-	return r.RateLimiter.Allow(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
+	limit := r.rateLimitPerMinute
+	if pol, ok := r.namespaces.Lookup(nsName); ok {
+		limit = pol.RateLimit(r.rateLimitPerMinute)
+	}
+	if limit <= 0 {
+		// A namespace whose effective cap is 0 has rate limiting switched off
+		// for its publishers — a deliberate policy value, and the same meaning
+		// 0 has deployment-wide.
+		return true
+	}
+	return r.RateLimiter.Allow(subscriptionKey(nsName, agentID), limit, r.rateLimitWindow)
 }
 
 // RateLimitRetryAfter reports how long an agent the per-agent cap just refused
 // should wait before retrying (0 when limiting is off, or when a slot is in
 // fact free). It is what the publish 429's `Retry-After` header reports, so the
 // refusal carries a backoff instruction instead of a bare "no" (CR-FEAT-035).
+// It answers for the DEFAULT namespace; a realm-scoped refusal asks
+// RateLimitRetryAfterIn, which reads the budget that refusal actually spent.
 func (r *Relay) RateLimitRetryAfter(agentID string) time.Duration {
+	return r.RateLimitRetryAfterIn("", agentID)
+}
+
+// RateLimitRetryAfterIn is RateLimitRetryAfter for one namespace (CR-FEAT-029):
+// the SAME effective cap and the SAME (namespace, agent) counter key
+// CheckRateLimitIn refused on, so the wait the 429 advertises is the wait for
+// the budget that said no — a realm with its own rate_limit_per_minute is told
+// when THAT limit frees, not when some other key's window slides.
+func (r *Relay) RateLimitRetryAfterIn(nsName, agentID string) time.Duration {
 	if r.RateLimiter == nil {
 		return 0
 	}
-	return r.RateLimiter.RetryAfter(agentID, r.rateLimitPerMinute, r.rateLimitWindow)
+	limit := r.rateLimitPerMinute
+	if pol, ok := r.namespaces.Lookup(nsName); ok {
+		limit = pol.RateLimit(r.rateLimitPerMinute)
+	}
+	if limit <= 0 {
+		// A namespace whose effective cap is 0 is not rate limited (the same
+		// meaning 0 has deployment-wide, see CheckRateLimitIn): there is no
+		// budget to wait for.
+		return 0
+	}
+	return r.RateLimiter.RetryAfter(subscriptionKey(nsName, agentID), limit, r.rateLimitWindow)
 }
 
 // Frame is the JSON object a relay subscription delivers: the LITERAL
@@ -110,15 +206,31 @@ func buildFrame(topic string, event json.RawMessage) []byte {
 	return append(frame, '}')
 }
 
-// Publish sends an event to a topic. Every matching subscriber receives it
-// exactly once: exact-topic subscribers via one map lookup, plus every
-// subscription pattern (literal or wildcard) that matches. Topic names are
+// Publish sends an event to a topic in the DEFAULT namespace. It is the
+// pre-CR-FEAT-029 entry point, kept as the whole contract for callers that
+// never heard of realms (and for every existing test).
+func (r *Relay) Publish(topic string, event json.RawMessage) error {
+	return r.PublishIn("", topic, event)
+}
+
+// PublishIn sends an event to a topic INSIDE one namespace (CR-FEAT-029).
+// Every matching subscriber of that same namespace receives it exactly once:
+// exact-topic subscribers via one map lookup, plus every subscription pattern
+// (literal or wildcard) of the same namespace that matches. Topic names are
 // always literal — wildcard tokens are subscriber-side only, so a publish to
 // "demo.*" or "demo.>" is rejected.
 //
-// Subscribers receive the topic-bearing frame built by buildFrame, not the bare
-// event. Returns an error if the topic is invalid.
-func (r *Relay) Publish(topic string, event json.RawMessage) error {
+// Realm isolation is a property of the LOOKUP, not a filter applied afterwards:
+// subscribers are stored under a realm-prefixed key, so a publish in realm A
+// cannot see — let alone deliver to — a subscriber in realm B even when both
+// subscribed to the identical topic name. There is no bridging, no fallback and
+// no "default realm" substitution: an unconfigured deployment uses the empty
+// prefix and behaves exactly as before.
+//
+// Subscribers receive the topic-bearing frame built by buildFrame (the topic is
+// the LITERAL published topic, without the realm). Returns an error if the
+// topic is invalid.
+func (r *Relay) PublishIn(nsName, topic string, event json.RawMessage) error {
 	if err := validateTopic(topic); err != nil {
 		return err
 	}
@@ -130,6 +242,7 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 	// envelope is identical for all of them (the topic is the published one, not
 	// the subscription pattern), so it is built and allocated exactly once.
 	frame := buildFrame(topic, event)
+	key := subscriptionKey(nsName, topic)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -138,7 +251,7 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 	// A wildcard key can never equal a valid publish topic — publish topics are
 	// literal while pattern keys always carry a wildcard token — so no topic can
 	// be delivered twice through this lookup.
-	for ch := range r.subs[topic] {
+	for ch := range r.subs[key] {
 		// Non-blocking send: drop if subscriber is slow / full.
 		select {
 		case ch <- frame:
@@ -146,16 +259,22 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 		}
 	}
 
-	// Wildcard subscriptions: one match per active pattern. The topic segments
-	// are split only when a pattern exists, so publishes on a wildcard-free
-	// relay keep their original cost.
+	// Wildcard subscriptions: one match per active pattern OF THIS REALM. The
+	// realm prefix is compared first, so a pattern in another realm is never
+	// even parsed against this topic. The topic segments are split only when a
+	// pattern exists, so publishes on a wildcard-free relay keep their original
+	// cost.
 	if len(r.wildcards) > 0 {
+		prefix := namespace.Canonical(nsName) + namespaceSep
 		segments := strings.Split(topic, ".")
-		for pattern, parsed := range r.wildcards {
+		for wkey, parsed := range r.wildcards {
+			if !strings.HasPrefix(wkey, prefix) {
+				continue
+			}
 			if !parsed.matches(segments) {
 				continue
 			}
-			for ch := range r.subs[pattern] {
+			for ch := range r.subs[wkey] {
 				select {
 				case ch <- frame:
 				default:
@@ -167,8 +286,8 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 }
 
 // Subscribe registers a channel to receive frames for a topic name or a
-// wildcard subscription pattern ("*" = exactly one segment, ">" = one or more
-// trailing segments in final position).
+// wildcard subscription pattern in the DEFAULT namespace ("*" = exactly one
+// segment, ">" = one or more trailing segments in final position).
 //
 // Each channel value is a complete wire frame (see Frame): the LITERAL
 // published topic plus the event exactly as it was published. The frame is
@@ -176,11 +295,18 @@ func (r *Relay) Publish(topic string, event json.RawMessage) error {
 // matched topic off it.
 // Call the returned function to unsubscribe.
 func (r *Relay) Subscribe(topic string) (<-chan []byte, func()) {
+	return r.SubscribeIn("", topic)
+}
+
+// SubscribeIn registers a channel for a namespace-scoped subscription
+// (CR-FEAT-029). A subscriber in one realm receives only that realm's
+// publishes, even on an identical topic name — see PublishIn.
+func (r *Relay) SubscribeIn(nsName, topic string) (<-chan []byte, func()) {
 	pattern, err := parseSubscriptionPattern(topic)
 	if err != nil {
 		return closedSubscription()
 	}
-	return r.subscribePattern(topic, pattern)
+	return r.subscribePattern(nsName, topic, pattern)
 }
 
 // closedSubscription is the inert subscription returned for an invalid topic:
@@ -193,21 +319,23 @@ func closedSubscription() (<-chan []byte, func()) {
 }
 
 // subscribePattern registers a channel for an already-validated subscription
-// pattern. The pattern is parsed once by the caller (Subscribe or
-// HandleSubscribe) and carried here, so registration never re-parses.
-func (r *Relay) subscribePattern(topic string, pattern subscriptionPattern) (<-chan []byte, func()) {
+// pattern inside a namespace. The pattern is parsed once by the caller
+// (Subscribe, SubscribeIn or HandleSubscribe) and carried here, so registration
+// never re-parses.
+func (r *Relay) subscribePattern(nsName, topic string, pattern subscriptionPattern) (<-chan []byte, func()) {
 	ch := make(chan []byte, 64)
+	key := subscriptionKey(nsName, topic)
 
 	r.mu.Lock()
-	if r.subs[topic] == nil {
-		r.subs[topic] = make(map[chan []byte]struct{})
+	if r.subs[key] == nil {
+		r.subs[key] = make(map[chan []byte]struct{})
 	}
-	r.subs[topic][ch] = struct{}{}
+	r.subs[key][ch] = struct{}{}
 	// Non-literal patterns are indexed for publish-time matching: Subscribe
 	// stores the parsed form once so Publish walks only this map (O(active
 	// patterns)) instead of re-parsing every key on every event.
 	if !pattern.literal {
-		r.wildcards[topic] = pattern
+		r.wildcards[key] = pattern
 	}
 	r.mu.Unlock()
 
@@ -216,16 +344,16 @@ func (r *Relay) subscribePattern(topic string, pattern subscriptionPattern) (<-c
 		once.Do(func() {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			if m, ok := r.subs[topic]; ok {
+			if m, ok := r.subs[key]; ok {
 				if _, exists := m[ch]; exists {
 					delete(m, ch)
 					close(ch)
 				}
 				if len(m) == 0 {
-					delete(r.subs, topic)
+					delete(r.subs, key)
 					// The pattern is gone with its last subscriber: publish
 					// must stop matching it.
-					delete(r.wildcards, topic)
+					delete(r.wildcards, key)
 				}
 			}
 		})
@@ -233,16 +361,20 @@ func (r *Relay) subscribePattern(topic string, pattern subscriptionPattern) (<-c
 	return ch, unsub
 }
 
-// Topics returns a list of active topics with subscriber counts.
+// Topics returns a list of active topics with subscriber counts, each carrying
+// the namespace it belongs to (CR-FEAT-029). The same literal topic name can
+// appear more than once — once per realm that has subscribers on it — which is
+// exactly the isolation this feature adds, made visible.
 func (r *Relay) Topics() []TopicInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	out := make([]TopicInfo, 0, len(r.subs))
-	for name, m := range r.subs {
+	for key, m := range r.subs {
 		out = append(out, TopicInfo{
-			Name:        name,
+			Name:        topicOf(key),
 			Subscribers: len(m),
+			Namespace:   namespaceOfKey(key),
 		})
 	}
 	return out

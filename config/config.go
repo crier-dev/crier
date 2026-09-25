@@ -111,6 +111,26 @@ type Config struct {
 	// delivery log and the delivery path is byte-identical to a build without
 	// this feature.
 	Detection DetectionConfig
+	// Namespaces holds the realm policy set (CR_NAMESPACES /
+	// CR_NAMESPACES_FILE, CR-FEAT-029, specs/NAMESPACES.md). Both default to
+	// empty, which is a deployment with exactly one implicit namespace —
+	// every behaviour this server had before the feature existed.
+	Namespaces NamespaceConfig
+}
+
+// NamespaceConfig carries the realm policy document as RAW input. Like
+// GuardConfig.DefaultPolicy, it is parsed and validated by the owning package
+// (internal/namespace) at startup, so a broken policy fails the boot instead of
+// silently serving a weaker realm than the operator declared — and so no
+// validation rule is duplicated here.
+type NamespaceConfig struct {
+	// Inline is CR_NAMESPACES: the namespace document itself
+	// ({"namespaces":[{...}]}).
+	Inline string
+	// File is CR_NAMESPACES_FILE: a path to the same document. Set at most
+	// ONE of the two — Load refuses both, because "which one won" is not a
+	// question an operator should have to answer from a log line.
+	File string
 }
 
 // DetectionConfig holds the detection layer's tuning (CR-FEAT-030). Every
@@ -705,6 +725,17 @@ func Load() (Config, error) {
 		for _, tok := range splitTrim(v) {
 			cfg.Detection.CanaryTokens = append(cfg.Detection.CanaryTokens, tok)
 		}
+	}
+
+	// Realms (CR-FEAT-029). The document is passed through to
+	// internal/namespace, which parses and validates it at startup; the one
+	// rule enforced HERE is that the two spellings cannot both be set, because
+	// a silent precedence rule is exactly the kind of ambiguity that makes an
+	// operator read the source to find out which realm is live.
+	cfg.Namespaces.Inline = os.Getenv("CR_NAMESPACES")
+	cfg.Namespaces.File = os.Getenv("CR_NAMESPACES_FILE")
+	if strings.TrimSpace(cfg.Namespaces.Inline) != "" && strings.TrimSpace(cfg.Namespaces.File) != "" {
+		return cfg, fmt.Errorf("CR_NAMESPACES and CR_NAMESPACES_FILE are both set — declare the namespace document in exactly one place")
 	}
 
 	return cfg, nil

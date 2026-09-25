@@ -33,9 +33,9 @@ func TestPostgresStoreUnit_Register_PersistsA2A(t *testing.T) {
 	ag := testAgent(t)
 	ag.A2A = testA2AConfig()
 
-	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a \)`).
+	mock.ExpectExec(`INSERT INTO agents \( id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace \)`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON)).
+			([]byte)(nil), ([]byte)(nil), []byte(wantA2AJSON), nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -52,7 +52,7 @@ func TestPostgresStoreUnit_Register_NilA2AWritesNull(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO agents`).
 		WithArgs(ag.ID, []byte(ag.PublicKey), []byte(`["relay"]`), string(StatusOnline), pgxmock.AnyArg(), pgxmock.AnyArg(),
-			([]byte)(nil), ([]byte)(nil), ([]byte)(nil)).
+			([]byte)(nil), ([]byte)(nil), ([]byte)(nil), nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	require.NoError(t, s.Register(ag))
@@ -90,8 +90,8 @@ func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
 	t.Run("stored block", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(wantA2AJSON))
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(wantA2AJSON), "")
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -105,8 +105,8 @@ func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
 	t.Run("null column", func(t *testing.T) {
 		s, mock := newMockStore(t)
 		rows := pgxmock.NewRows(agentRowColumns()).
-			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, nil)
-		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
+			AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, nil, "")
+		mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
 			WithArgs("a1").
 			WillReturnRows(rows)
 
@@ -125,8 +125,8 @@ func TestPostgresStoreUnit_Get_InvalidA2AJSON(t *testing.T) {
 	pub := make([]byte, 32)
 
 	rows := pgxmock.NewRows(agentRowColumns()).
-		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`))
-	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a FROM agents`).
+		AddRow("a1", pub, []byte(`[]`), "online", now, now, nil, nil, []byte(`{"enabled":`), "")
+	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
 		WithArgs("a1").
 		WillReturnRows(rows)
 

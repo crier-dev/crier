@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // PoolConfig is backend configuration after config.Load has parsed environment values.
@@ -146,8 +148,13 @@ func (s *PostgresStore) operationContext() (context.Context, context.CancelFunc)
 // agentConfigColumns is the column list shared by Get and List, in the exact
 // order both scan it: the six registration columns followed by the three
 // optional configs added by 003_add_agent_config_columns and
-// 005_add_agent_a2a_column.
-const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a`
+// 005_add_agent_a2a_column, and the realm added by 008_add_namespaces.
+//
+// `namespace` is COALESCEd to ” because NULL is the canonical storage of the
+// DEFAULT namespace (008): an existing row — and every new row in a deployment
+// that declares no namespaces — reads back as "", exactly what the in-memory
+// backend and the wire form use.
+const agentConfigColumns = `id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE(namespace, '')`
 
 // marshalOptionalConfig marshals one of an agent's optional configs (webhook,
 // guard, a2a) for its nullable JSONB column. A nil config — absent, or
@@ -247,9 +254,10 @@ func (s *PostgresStore) Register(agent *Agent) error {
 
 	_, err = s.pool.Exec(ctx, `
 INSERT INTO agents (
-    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb);`,
+    id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, namespace
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10);`,
 		agent.ID, pubKeyArg, capsJSON, string(status), now, now, webhookJSON, guardJSON, a2aJSON,
+		nullText(namespace.Canonical(agent.Namespace)),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -285,7 +293,7 @@ SELECT `+agentConfigColumns+`
 FROM agents
 WHERE id = $1;`, id).Scan(
 		&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-		&webhookJSON, &guardJSON, &a2aJSON,
+		&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -353,7 +361,7 @@ ORDER BY registered_at ASC, id ASC;`)
 			a2aJSON          []byte
 		)
 		if err := rows.Scan(&agent.ID, &publicKey, &capabilitiesJSON, &agent.Status, &agent.RegisteredAt, &agent.LastSeen,
-			&webhookJSON, &guardJSON, &a2aJSON); err != nil {
+			&webhookJSON, &guardJSON, &a2aJSON, &agent.Namespace); err != nil {
 			slog.Error("postgres list scan", "error", err)
 			s.setListError(fmt.Errorf("postgres list: scan: %w", err))
 			return []*Agent{}
@@ -628,10 +636,11 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, created_at, expires_at,
-    leased_at, lease_id, lease_expires_at, acked
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NULL, NULL, NULL, FALSE);`,
+    leased_at, lease_id, lease_expires_at, acked, namespace
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NULL, NULL, NULL, FALSE, $9);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
 		entry.Priority, entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
+		nullText(namespace.Canonical(entry.Namespace)),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -702,7 +711,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// first one ties.
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
-       created_at, expires_at
+       created_at, expires_at, COALESCE(namespace, '')
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -725,7 +734,7 @@ LIMIT $3;`,
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.Priority, &entry.CreatedAt, &expiresAt); err != nil {
+			&entry.IdempotencyKey, &entry.Priority, &entry.CreatedAt, &expiresAt, &entry.Namespace); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}

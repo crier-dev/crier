@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // This file is the PostgreSQL arm of the ownership capabilities (CR-FEAT-025):
@@ -20,7 +22,8 @@ import (
 // deadLetterColumns is the column list shared by every dead-letter read, in the
 // order the scan below expects.
 const deadLetterColumns = `message_id, agent_id, COALESCE(sender, ''), payload,
-       created_at, expires_at, dead_lettered_at, reason, COALESCE(idempotency_key, '')`
+       created_at, expires_at, dead_lettered_at, reason, COALESCE(idempotency_key, ''),
+       COALESCE(namespace, '')`
 
 // scanDeadLetter reads one dead-letter row into a record.
 func scanDeadLetter(scan func(dest ...any) error) (*DeadLetter, error) {
@@ -29,7 +32,8 @@ func scanDeadLetter(scan func(dest ...any) error) (*DeadLetter, error) {
 		expiresAt pgtype.Timestamptz
 	)
 	if err := scan(&dl.MessageID, &dl.AgentID, &dl.Sender, &dl.Payload,
-		&dl.CreatedAt, &expiresAt, &dl.DeadLetteredAt, &dl.Reason, &dl.IdempotencyKey); err != nil {
+		&dl.CreatedAt, &expiresAt, &dl.DeadLetteredAt, &dl.Reason, &dl.IdempotencyKey,
+		&dl.Namespace); err != nil {
 		return nil, err
 	}
 	dl.ExpiredAt = expiryFromTimestamptz(expiresAt)
@@ -157,13 +161,13 @@ func (s *PostgresStore) AppendDeadLetter(dl *DeadLetter) (bool, error) {
 	err := s.pool.QueryRow(ctx, `
 INSERT INTO dead_letters (
     message_id, agent_id, sender, payload, created_at, expires_at,
-    dead_lettered_at, reason, idempotency_key
-) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+    dead_lettered_at, reason, idempotency_key, namespace
+) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (message_id) DO NOTHING
 RETURNING message_id;`,
 		dl.MessageID, dl.AgentID, nullText(dl.Sender), dl.Payload,
 		dl.CreatedAt, pgTimestamptz(dl.ExpiredAt), dl.DeadLetteredAt,
-		dl.Reason, nullText(dl.IdempotencyKey),
+		dl.Reason, nullText(dl.IdempotencyKey), nullText(namespace.Canonical(dl.Namespace)),
 	).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already recorded: the original expiry owns the record and its

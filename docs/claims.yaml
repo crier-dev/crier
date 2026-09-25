@@ -61,6 +61,11 @@ ignore_paths:
   # CR-GAP-065: docs/integration-guide.md and docs/AGENT-ECOSYSTEM.md are now
   # scanned (they gained claims below). Every token here is NOT a crier API
   # route — each is deliberate.
+  # CR-FEAT-029: the README's namespace section documents the FILE form of the
+  # namespace policy (CR_NAMESPACES_FILE=/etc/crier/namespaces.json). That is a
+  # filesystem path an operator writes, not an API route — the route that
+  # reports the same policy set is GET /namespaces, claimed live below.
+  - /etc/crier/namespaces.json
   # integration-guide.md:
   - /intel                 # illustrative mesh REQUEST path (the target agent's own path — same class as /ping above)
   - /mesh/connect/         # prose URL form `ws://…/mesh/connect/<agentID>`; the scanner probes the literal with an EMPTY id (a real connect with an id IS a live route)
@@ -329,10 +334,11 @@ claims:
   - id: COUNT-OPENAPI-PATHS
     kind: count
     doc: README.md
+    # CR-FEAT-026 added POST /capabilities/{capability}/inbox and CR-FEAT-029
+    # added GET /namespaces to the spec, so the merged pair is 18 paths /
+    # 22 operations and both moved with it.
     quote: "docs/openapi.yaml"
-    # CR-FEAT-026 added POST /capabilities/{capability}/inbox, so the pair is
-    # 17 / 21 and both moved with it.
-    expect: 17
+    expect: 18
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -343,11 +349,11 @@ claims:
     # 18 operations and both the anchor and the expectation moved with it.
     # CR-FEAT-025 added POST /agents/{id}/inbox/transfer and
     # GET /agents/{id}/inbox/dead-letters, so the pair is 16 / 20 and both
-    # moved with it again.
-    # CR-FEAT-026 added POST /capabilities/{capability}/inbox, so the pair is
-    # 17 / 21.
-    quote: "21 operations"
-    expect: 21
+    # moved with it again. CR-FEAT-026 added
+    # POST /capabilities/{capability}/inbox and CR-FEAT-029 added GET
+    # /namespaces, so the merged pair is 18 / 22.
+    quote: "22 operations"
+    expect: 22
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -376,12 +382,13 @@ claims:
     # main.go all the same) and CR-FEAT-025 registered
     # POST /agents/{id}/inbox/transfer and GET /agents/{id}/inbox/dead-letters,
     # so the merged count was 16 API + 3 spec-hosting + 5 detection = 24.
-    # CR-FEAT-026 registered POST /capabilities/{capability}/inbox, so it is
-    # 17 API + 3 + 5 = 25. Note the README's "20 always-on" line counts the
-    # 17 API + 3 spec-hosting routes; that line is prose the same number
-    # measures, and it moved with it.
-    quote: "25 router paths"
-    expect: 25
+    # CR-FEAT-026 registered POST /capabilities/{capability}/inbox and
+    # CR-FEAT-029 registered GET /namespaces, so the merged count is
+    # 18 API + 3 spec-hosting + 5 detection = 26. Note the README's "21
+    # always-on" line counts the 18 API + 3 spec-hosting routes; that line is
+    # prose the same number measures, and it moved with it.
+    quote: "26 router paths"
+    expect: 26
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
@@ -1347,4 +1354,62 @@ claims:
     # The methods, as §9.4 names them: SendMessage answers a Task or a Message,
     # SendStreamingMessage answers text/event-stream.
     quote: "`SendStreamingMessage` (`text/event-stream`"
+    xfail: null
+
+  # --- CR-FEAT-029 — namespaces (realms), per-realm policy --------------------
+  # The README's namespace section claims that a realm is a routing dimension
+  # AND that the policy set is inspectable. Both halves are probed LIVE on the
+  # gate's own in-process server: the route below must be registered, and the
+  # anchors fail the gate if the prose that states the isolation contract is
+  # edited away. The two behavioural claims (a message cannot cross realms; two
+  # realms' rate limits and guard settings do not interfere) are not prose
+  # claims here — they are executed as tests, and the README names them:
+  #   cmd/server/crfeat029_test.go, internal/relay/namespace_test.go,
+  #   internal/registry/namespace_test.go.
+  - id: ROUTE-README-NAMESPACES
+    kind: route
+    doc: README.md
+    # The route that reports the policy set the server is actually enforcing.
+    # GET-probed live: a documented route that is not registered is a 404 here,
+    # which is the exact failure class this claim exists for.
+    quote: "`GET /namespaces`"
+    expect: "/namespaces"
+    xfail: null
+  - id: COUNT-NAMESPACE-CROSSING-REFUSAL-README
+    kind: count
+    doc: README.md
+    # The named refusal that carries the crossing contract: if the prose stops
+    # naming NAMESPACE_MISMATCH, a client cannot code against the property the
+    # row's second acceptance criterion is about.
+    quote: "NAMESPACE_MISMATCH"
+    expect: 1
+    xfail: null
+  - id: COUNT-NAMESPACE-GUARD-VALVE-README
+    kind: count
+    doc: README.md
+    # The per-realm guard switch — the isolation valve that keeps one realm's
+    # traffic out of the process-wide guard budget and circuit breaker. Named
+    # once, in the policy table and the bullet beneath it.
+    quote: "guard_enabled: false"
+    expect: 1
+    xfail: null
+  - id: COUNT-NAMESPACE-DEFAULT-NAME-README
+    kind: count
+    doc: README.md
+    # The operator-facing name of the implicit realm. The wire form is the
+    # empty string (specs/NAMESPACES.md §3); the prose must keep naming the
+    # spelling a client sends, so a reader never has to guess it.
+    quote: '"name":"acme"'
+    expect: 1
+    xfail: null
+  - id: ROUTE-NAMESPACES-SPEC-ANCHOR
+    kind: route
+    doc: specs/NAMESPACES.md
+    # The spec is the normative design authority for this row, and it is
+    # scanned only because a claim names it. This claim does double duty: it
+    # anchors the spec's status line (so the document cannot silently lose its
+    # ticket) and it requires the route it documents to exist on the same
+    # server — the spec and the code are checked against ONE live surface.
+    quote: "**CR-FEAT-029**"
+    expect: "/namespaces"
     xfail: null

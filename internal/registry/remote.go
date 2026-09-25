@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // RemoteStore is a Store implementation that talks to a running Crier server
@@ -234,11 +236,21 @@ func (s *RemoteStore) doAck(agentID string, body any) error {
 func (s *RemoteStore) Register(agent *Agent) error {
 	// PublicKey is a HexKey ([]byte with hex MarshalJSON); pass it as the
 	// typed value so it serializes as a hex string, not raw bytes.
-	return s.do(http.MethodPost, "/agents", map[string]any{
+	body := map[string]any{
 		"id":           agent.ID,
 		"public_key":   agent.PublicKey,
 		"capabilities": agent.Capabilities,
-	}, nil)
+	}
+	// The realm travels with the proxy call (CR-FEAT-029): registering through
+	// a remote store must land the agent in the SAME namespace, or the proxy
+	// would silently move it to the downstream relay's default realm — the
+	// exact silent widening namespaces exist to prevent. Omitted for the
+	// default realm, so a proxied registration of a namespace-less agent sends
+	// the byte-identical body it always did.
+	if ns := namespace.Canonical(agent.Namespace); ns != "" {
+		body["namespace"] = ns
+	}
+	return s.do(http.MethodPost, "/agents", body, nil)
 }
 
 func (s *RemoteStore) Get(id string) (*Agent, error) {
@@ -300,6 +312,11 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	body := map[string]any{
 		"payload": json.RawMessage(entry.Payload),
 	}
+	// The realm is deliberately NOT forwarded as a claim (CR-FEAT-029): the
+	// downstream relay resolves it from ITS OWN row for the target agent, and a
+	// claim is only ever checked against that. Forwarding the proxy's local
+	// copy would at best be a no-op and at worst manufacture the
+	// NAMESPACE_MISMATCH this path exists to avoid.
 	// Forward a requested lifetime verbatim so a proxied delivery honors
 	// ttl_seconds (including 0 = never expires) instead of silently falling
 	// back to the downstream relay's default (DF-CRIER-37). Absent when the
