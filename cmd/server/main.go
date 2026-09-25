@@ -217,6 +217,12 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+	// New-message ping (CR-FEAT-023): a delivery that lands in an agent's
+	// durable inbox taps an agent that ASKED for it on its existing mesh
+	// socket (/mesh/connect/{agentID}?inbox_notify=1). The long-poll
+	// (?wait_seconds= on GET /agents/{id}/inbox) needs nothing wired — it is
+	// internal to the handler.
+	registryHandler.SetInboxPinger(meshSvc)
 
 	// LLM message guard (CR-FEAT-010) — the inbound choke point for every
 	// delivery (webhook POST / inbox store). Constructed BEFORE the routes

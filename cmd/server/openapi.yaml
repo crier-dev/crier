@@ -936,12 +936,51 @@ paths:
             Lease duration in seconds. Alias of the historical `lease` — both
             spellings are accepted; when both appear in one request, `lease`
             wins and `lease_seconds` fills in only what it left absent.
+        - name: wait_seconds
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+            maximum: 120
+          description: |-
+            Long-poll budget in seconds, 0..120 (default 0 = absent = the
+            poll-only read, byte-identical to the response this endpoint has
+            always returned).
+
+            With `wait_seconds` > 0 the request PARKS until a message is
+            claimable and then answers immediately with that batch — the
+            long-poll every agent framework already understands. If nothing
+            arrives inside the budget it answers `200` with the same empty body
+            (`messages: []`, `lease_id: ""`, plus the live `queue_depth` /
+            `leased_count`) a poll-only read gets, so a client treats both the
+            same way and simply re-polls. A message that arrives through this
+            relay's deliver endpoint wakes a parked read at once; inbox writes
+            that bypass it (the federation hold queue, webhook-failure notices,
+            a second relay process sharing the store) surface within about a
+            second. Errors are NOT waited out: an unregistered agent still
+            answers `404` immediately.
+
+            The budget is honored or rejected, never silently ignored
+            (DF-CRIER-180): a non-integer, a negative value, or one above 120
+            answers `400`. 120 is the ceiling the request-level blocking
+            deliver budget uses (`webhook.timeout_ms`), so the two
+            request-level waits cannot disagree. Lease, ack and TTL semantics
+            are untouched — a long-poll is a sequence of ordinary retrieves.
+
+            An agent that cannot hold an HTTP request open can instead be
+            pinged on its mesh socket (`?inbox_notify=1` on `GET
+            /mesh/connect/{agentID}`, frame `INBOX_NOTIFY` — docs/mesh-protocol.md).
       security:
         - bearerAuth: []
           agentSignature: []
       responses:
         "200":
-          description: Array of leased messages
+          description: |-
+            Array of leased messages. A long-poll (`wait_seconds` > 0) that expires
+            with nothing claimable answers this exact shape with an empty `messages`
+            array and an empty `lease_id` — the same body a poll-only read gets, so
+            the two are indistinguishable by design and a client simply re-polls.
           content:
             application/json:
               schema:

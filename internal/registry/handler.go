@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -987,6 +988,16 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The message is durable from here on, so this is the one place that tells
+	// the other side of the same write about it (CR-FEAT-023), both
+	// fire-and-forget: the reads parked on this agent by a long-poll retrieve
+	// are woken so they answer immediately, and an agent that asked for a
+	// new-message ping is tapped on its own transport. Neither can fail the
+	// delivery — they run on the sender's response path only as a wake-up —
+	// and neither touches lease/ack/TTL behaviour.
+	h.wakeLongPolls(id)
+	h.pingInbox(id, entry.ID, req.Sender)
+
 	slog.Info("inbox deliver accepted",
 		"target", id,
 		"sender", req.Sender,
@@ -1028,6 +1039,28 @@ func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
 	return m
 }
 
+// parseWaitSeconds reads the optional long-poll budget `wait_seconds`
+// (CR-FEAT-023). Absent or empty is 0 — the poll-only read every existing
+// caller already gets, byte-identical to what this endpoint has always
+// answered. A present value is HONORED or REJECTED, never silently ignored
+// (DF-CRIER-180): a non-integer, a negative budget and one above
+// maxWaitSeconds are all 400s naming the bound, so a caller that mistypes the
+// parameter learns it instead of quietly polling.
+func parseWaitSeconds(r *http.Request) (time.Duration, error) {
+	raw := r.URL.Query().Get("wait_seconds")
+	if raw == "" {
+		return 0, nil
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, errors.New("wait_seconds must be an integer number of seconds")
+	}
+	if secs < 0 || secs > maxWaitSeconds {
+		return 0, fmt.Errorf("wait_seconds must be 0..%d", maxWaitSeconds)
+	}
+	return time.Duration(secs) * time.Second, nil
+}
+
 // HandleRetrieve handles GET /agents/{id}/inbox — retrieves leased messages.
 // Agent-owned: requires a valid per-agent signature when enabled.
 //
@@ -1035,9 +1068,22 @@ func guardInDeliverResponse(m *guard.Meta) *guard.Meta {
 // {"messages":[],"lease_id":""} plus queue_depth / leased_count (DF-CRIER-177)
 // and the caller must not ack. A non-empty lease_id is returned exactly when
 // messages were leased (DF-CRIER-32).
+//
+// Long-poll (CR-FEAT-023): `?wait_seconds=N` (0..maxWaitSeconds, default 0)
+// parks the read until a message is claimable and then answers with that
+// batch, or answers the SAME empty body a poll-only read gets when the budget
+// expires. Absent/0 is the unchanged poll-only read — no extra timer, no
+// notification subscription — and lease/ack/TTL semantics are identical on
+// both paths, because a long-poll is a sequence of ordinary store retrieves.
 func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if !h.requireAgent(w, r, id) {
+		return
+	}
+
+	wait, werr := parseWaitSeconds(r)
+	if werr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": werr.Error()})
 		return
 	}
 
@@ -1075,8 +1121,14 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messages, leaseID, err := h.store.Retrieve(id, leaseSecs, maxMsgs)
+	messages, leaseID, err := h.retrieveWithWait(r.Context(), id, leaseSecs, maxMsgs, wait)
 	if err != nil {
+		// A client that stopped waiting is not answered: there is nobody
+		// left to write to. Every other error keeps its existing mapping —
+		// a long-poll never turns a 404 or a 500 into a late empty 200.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
 		if errors.Is(err, ErrAgentNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		} else if errors.Is(err, ErrInvalidStoreInput) {

@@ -15,6 +15,12 @@ type Mesh struct {
 	agentID     string
 	connections map[string]*PeerConnection
 	mu          sync.RWMutex
+	// inboxNotify records, per agent id, that the agent's CURRENT connection
+	// asked to be pinged when a message lands in its inbox (CR-FEAT-023).
+	// Guarded by mu alongside connections: the opt-in is granted by
+	// /mesh/connect/{agentID}?inbox_notify=1 and released when that
+	// connection goes away, so it can never outlive the socket it applies to.
+	inboxNotify map[string]bool
 	pending     map[string]chan *Response
 	pendingMu   sync.RWMutex
 	// routes tracks in-flight agent-to-agent requests so responses can be
@@ -53,6 +59,7 @@ func NewMesh(config MeshConfig) *Mesh {
 	return &Mesh{
 		agentID:     config.AgentID,
 		connections: make(map[string]*PeerConnection),
+		inboxNotify: make(map[string]bool),
 		pending:     make(map[string]chan *Response),
 		routes:      make(map[string]string),
 		stopCh:      make(chan struct{}),
@@ -158,6 +165,7 @@ func (m *Mesh) Stop() {
 		conn.Close()
 	}
 	m.connections = make(map[string]*PeerConnection)
+	m.inboxNotify = make(map[string]bool)
 }
 
 func (m *Mesh) ActivePeers() int {
@@ -171,6 +179,11 @@ func (m *Mesh) ActivePeers() int {
 func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
 	m.mu.Lock()
 	m.connections[agentID] = conn
+	// A fresh connection starts with no inbox-ping opt-in (CR-FEAT-023): the
+	// opt-in is per connection, so an agent that reconnects without asking
+	// again cannot keep being pinged on the old grant. The caller grants it
+	// (SetInboxNotify) once it has parsed the connection's own request.
+	delete(m.inboxNotify, agentID)
 	m.mu.Unlock()
 
 	conn.OnMessage(func(data []byte) {
@@ -178,12 +191,89 @@ func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
 	})
 	conn.OnClose(func(err error) {
 		m.mu.Lock()
+		// The ping opt-in belongs to THIS connection, so it is released with
+		// it — but only while this connection is still the registered one: a
+		// socket replaced by a reconnect can close late, and that late close
+		// must not revoke the live connection's grant.
+		if m.connections[agentID] == conn {
+			delete(m.inboxNotify, agentID)
+		}
 		delete(m.connections, agentID)
 		m.mu.Unlock()
 		slog.Debug("mesh: peer disconnected", "agent_id", agentID, "error", err)
 	})
 
 	go m.keepaliveLoop(agentID, conn)
+}
+
+// SetInboxNotify records whether the agent's CURRENT connection asked to be
+// pinged when a message lands in its inbox (CR-FEAT-023). It is granted by
+// /mesh/connect/{agentID}?inbox_notify=1 and is deliberately per connection:
+// an agent that never asked can never receive an unsolicited frame.
+func (m *Mesh) SetInboxNotify(agentID string, enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if enabled {
+		m.inboxNotify[agentID] = true
+		return
+	}
+	delete(m.inboxNotify, agentID)
+}
+
+// InboxNotifyEnabled reports whether the agent's current connection asked for
+// the new-message ping (CR-FEAT-023).
+func (m *Mesh) InboxNotifyEnabled(agentID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.inboxNotify[agentID]
+}
+
+// PingInbox notifies agentID that messageID (from sender) has landed in its
+// durable inbox (CR-FEAT-023) — the mesh half of the new-message ping, and the
+// implementation of registry.InboxPinger.
+//
+// It returns true when the frame was handed to a live, opted-in connection;
+// false when the agent has no connection here, never asked for pings, or the
+// write failed. A false return is NOT a delivery failure: the message is
+// durable before this is called, so it means "the agent will learn about it on
+// its next read", never "the message is gone" — which is why the caller treats
+// this as fire-and-forget and the poll-only / long-poll lanes stay the whole
+// contract on their own.
+//
+// The mesh lock is released before the write: PeerConnection.Send holds its own
+// bounded write deadline (10s for a stalled client), and blocking AcceptPeer or
+// a handshake behind that would be worse than a dropped ping.
+func (m *Mesh) PingInbox(agentID, messageID, sender string) bool {
+	m.mu.RLock()
+	conn, connected := m.connections[agentID]
+	optedIn := m.inboxNotify[agentID]
+	m.mu.RUnlock()
+	if !connected || !optedIn || conn == nil {
+		return false
+	}
+	frame := &InboxNotify{
+		Envelope: Envelope{
+			Type:      TypeInboxNotify,
+			Version:   1,
+			MessageID: newMessageID(),
+			Timestamp: time.Now(),
+		},
+		AgentID:        agentID,
+		InboxMessageID: messageID,
+		Sender:         sender,
+	}
+	data, err := Marshal(frame)
+	if err != nil {
+		slog.Warn("mesh: marshal inbox notify", "agent_id", agentID, "error", err)
+		return false
+	}
+	if err := conn.Send(data); err != nil {
+		slog.Debug("mesh: inbox notify not delivered", "agent_id", agentID, "error", err)
+		return false
+	}
+	slog.Debug("mesh: inbox notify sent", "agent_id", agentID,
+		"message_id", frame.MessageID, "inbox_message_id", messageID)
+	return true
 }
 
 // PeerIDs returns the list of connected peer agent IDs.
@@ -295,6 +385,14 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		// perfectly well-formed. The loop keeps the socket warm and detects
 		// dead connections via read errors; it has no other effect.
 		slog.Debug("mesh: KEEPALIVE ignored", "peer", peerID, "message_id", env.MessageID)
+	case TypeInboxNotify:
+		// Server→agent frame by definition (CR-FEAT-023): the server pings an
+		// agent about its own inbox, so an INBOUND one carries no meaning and
+		// has no effect. Recognized rather than refused for the same reason
+		// KEEPALIVE is: the frame is well-formed, and a client that echoes a
+		// ping back should not draw an INVALID_MESSAGE for it.
+		slog.Debug("mesh: INBOX_NOTIFY ignored (server→agent frame)", "peer", peerID,
+			"message_id", env.MessageID)
 	case TypeResponse:
 		var resp Response
 		if err := json.Unmarshal(data, &resp); err != nil {
@@ -342,8 +440,8 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		// Agent-initiated request that failed at the target side.
 		m.forwardResponse(errMsg.RequestID, data)
 	default:
-		// An envelope naming a type the protocol does not define (the six in
-		// the envelope table of docs/mesh-protocol.md) is malformed, not
+		// An envelope naming a type the protocol does not define (the type
+		// table of docs/mesh-protocol.md) is malformed, not
 		// merely unhandled. It used to be dropped with a debug log, so a
 		// client that misspelled a type saw nothing but silence (DF-CRIER-40).
 		m.reportInvalidMessage(peerID, env.MessageID,
