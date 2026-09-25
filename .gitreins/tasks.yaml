@@ -2350,3 +2350,14 @@ tasks:
   status: complete
   created_at: '2026-09-25T17:44:53.153916+00:00'
   completed_at: '2026-09-25T18:04:49.668230+00:00'
+- id: INT-A2A-001
+  title: 'A2A option: spec of record + opt-in gate (CR_A2A_ENABLED)'
+  criteria:
+  - specs/A2A-OPTION.md committed as design authority; CR_A2A_ENABLED default false
+    parsed in config; optional per-agent a2a block on registry row mirroring webhook
+    pattern; with switch off server behavior byte-identical (test asserts pre-existing
+    surface unchanged off AND on); make test-short + make docs-check + gofmt + vet
+    green
+  status: complete
+  created_at: '2026-09-25T19:37:56.213172+00:00'
+  completed_at: '2026-09-25T19:57:17.167282+00:00'
