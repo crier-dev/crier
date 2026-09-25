@@ -122,7 +122,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, require_agent_signature, guard_enabled, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
@@ -132,6 +132,26 @@ paths:
                     type: boolean
                     description: True when per-agent ed25519 signing is enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true)
                     example: true
+                  mesh_auth_required:
+                    type: boolean
+                    description: >-
+                      True when the mesh connect handshake is enforced
+                      (CR_REQUIRE_MESH_AUTH, default false). True means a peer
+                      must answer an ed25519 challenge before its frames are
+                      admitted and before it is listed by GET /mesh/peers;
+                      false means the agent id in the connect URL is taken at
+                      face value (see docs/mesh-protocol.md §Authentication).
+                    example: true
+                  mesh_origin_policy:
+                    type: string
+                    enum: [allow-all, allowlist]
+                    description: >-
+                      The mode CR_MESH_ALLOWED_ORIGINS resolves to. "allow-all"
+                      (the default, origins unset or "*") accepts every origin;
+                      "allowlist" means an upgrade carrying an Origin header
+                      must name a listed origin. The origins themselves are
+                      config and are never reported.
+                    example: allowlist
                   guard_enabled:
                     type: boolean
                     description: LLM message guard master switch (CR_GUARD_ENABLED, default true). False means the delivery path skips the guard entirely

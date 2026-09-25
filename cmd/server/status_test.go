@@ -46,6 +46,10 @@ var statusScrubbedEnv = []string{
 	"CR_DATABASE_URL", "DATABASE_URL", "CRIER_DATABASE_URL",
 	"CR_GUARD_ENABLED", "CR_GUARD_DEEPSEEK_BASE_URL", "CR_GUARD_MODEL", "CR_GUARD_KANBAN_URL",
 	"CR_REQUIRE_AGENT_SIG",
+	// DF-CRIER-287: the mesh posture is read from these, so an ambient value
+	// (inherited from the runner or left behind by a sibling test) must not
+	// decide what /status reports.
+	"CR_REQUIRE_MESH_AUTH", "CR_MESH_AUTH_TIMEOUT_S", "CR_MESH_ALLOWED_ORIGINS",
 	"CR_WEBHOOK_SECRET",
 	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE",
 	"CR_ENABLE_METRICS", "CR_ENABLE_PPROF",
@@ -64,6 +68,8 @@ var statusTopLevelKeys = []string{
 	"guard_enabled",
 	"log_format",
 	"log_level",
+	"mesh_auth_required",
+	"mesh_origin_policy",
 	"metrics_enabled",
 	"pprof_enabled",
 	"rate_limit_per_minute",
@@ -352,6 +358,12 @@ func TestStatusDefaultsFromConfigLoad(t *testing.T) {
 	}{
 		{"auth_enabled", false},
 		{"require_agent_signature", true},
+		// DF-CRIER-287: the mesh default is the DOCUMENTED permissive one —
+		// authentication off, every origin allowed — and the endpoint has to
+		// say so, because that is the posture an operator auditing a live
+		// server must not have to guess.
+		{"mesh_auth_required", false},
+		{"mesh_origin_policy", config.MeshOriginPolicyAllowAll},
 		{"guard_enabled", true},
 		{"registry_backend", registryBackendMemory},
 		{"rate_limit_per_minute", float64(100)},
@@ -416,6 +428,8 @@ func TestStatusNeverSerializesSecrets(t *testing.T) {
 		Port:               8767,
 		AuthToken:          statusSentinelAuthToken,
 		RequireAgentSig:    true,
+		RequireMeshAuth:    true,
+		MeshAllowedOrigins: "https://status-sentinel-console.invalid",
 		RateLimitPerMinute: 100,
 		LogLevel:           "debug",
 		LogFormat:          "json",
@@ -446,6 +460,8 @@ func TestStatusNeverSerializesSecrets(t *testing.T) {
 	}{
 		{"auth_enabled", true},
 		{"require_agent_signature", true},
+		{"mesh_auth_required", true},
+		{"mesh_origin_policy", config.MeshOriginPolicyAllowlist},
 		{"guard_enabled", true},
 		{"registry_backend", registryBackendPostgres},
 		{"webhook_signing", true},

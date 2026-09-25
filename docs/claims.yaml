@@ -238,6 +238,18 @@ claims:
     quote: "CR_REQUIRE_AGENT_SIG"
     expect: true
     xfail: null
+  # DF-CRIER-287: the mesh connect handshake is OPT-IN, and that is the whole
+  # migration contract — the README's environment table prints this default, so
+  # it is pinned to the production value an unset environment resolves to
+  # (config.Config.RequireMeshAuth, probed in cmd/server/docsclaims_test.go)
+  # rather than to a literal here. Turning it on by default would refuse every
+  # existing mesh client.
+  - id: DEFAULT-REQUIRE-MESH-AUTH
+    kind: default
+    doc: README.md
+    quote: "CR_REQUIRE_MESH_AUTH"
+    expect: false
+    xfail: null
   - id: DEFAULT-GUARD-MAX-PAYLOAD-BYTES
     kind: default
     doc: README.md

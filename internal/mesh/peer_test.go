@@ -697,10 +697,10 @@ func TestMeshAgentRequestRoutePruneHonorsConfiguredCap(t *testing.T) {
 // effective guard (fail closed — a misconfigured cap must not silently disable
 // the limit).
 func TestPruneRoutesLockedConfiguredCap(t *testing.T) {
-	fill := func(ids ...string) map[string]string {
-		routes := make(map[string]string, len(ids))
+	fill := func(ids ...string) map[string]meshRoute {
+		routes := make(map[string]meshRoute, len(ids))
 		for _, id := range ids {
-			routes[id] = "requester"
+			routes[id] = meshRoute{requesterID: "requester", targetID: "target"}
 		}
 		return routes
 	}

@@ -262,6 +262,22 @@ The `REQUEST`/`RESPONSE` frames the mesh relays are specified in
 `docs/mesh-protocol.md`; this demo exercises live peer visibility and fan-out,
 not an RPC round trip.
 
+*Testing the mesh with authentication on (DF-CRIER-287).* By default the mesh
+takes the agent id in the connect URL at face value — that is documented, and it
+is what the demo above exercises. To see the other posture, restart the server
+with `CR_REQUIRE_MESH_AUTH=true` (`CR_GUARD_ENABLED=false CR_REQUIRE_MESH_AUTH=true
+./bin/crier -port 8767 -pidfile .crier.pid`): a connection to
+`ws://localhost:8767/mesh/connect/<agentID>` then receives an `AUTH_CHALLENGE`
+instead of being admitted, and a client that answers nothing — or signs with a
+key other than the one registered for that agent — gets `ERROR` `AUTH_FAILED` and
+never appears in `GET /mesh/peers`. A client that signs `mesh-auth-v1\n<agent_id>\n<nonce>`
+with the registered key gets `AUTH_OK` and is listed. The exact frames, the three
+refusal classes and the client-side migration note are in
+`docs/mesh-protocol.md` §Authentication; `GET /status` reports
+`"mesh_auth_required"` on both postures. Worth reporting: anything that
+authenticates with the wrong key, any unauthenticated connection that shows up in
+`GET /mesh/peers`, and any refusal whose message does not name the real cause.
+
 **5. Federation (two buses)** — forward across relays:
 
 ```bash
