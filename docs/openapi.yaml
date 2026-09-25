@@ -12,6 +12,19 @@ servers:
     description: Local development
 security:
   - bearerAuth: []
+tags:
+  - name: health
+    description: Server liveness, build identity and effective runtime posture.
+  - name: registry
+    description: Agent registration, lookup, update and removal.
+  - name: inbox
+    description: Durable per-agent inboxes — deliver, retrieve with lease, ack, stats.
+  - name: relay
+    description: Topic pub/sub — publish, WebSocket subscribe, list topics.
+  - name: mesh
+    description: WebSocket peer mesh — connect and list peers.
+  - name: federation
+    description: Cross-relay federation peer list.
 paths:
   # ── Health ──
   # /health exempt — middleware.Auth exempts it from the bearer check
