@@ -52,7 +52,7 @@ help:
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
 	@echo "  demo-cleanup-check  Fail when a tracked shell script spawns a crier server without an EXIT-trap cleanup + port-ownership assertion (CR-GAP-069)"
 	@echo "  demo-cleanup-selftest  Prove that checker still rejects a trap-less / unowned server spawn and accepts the real tree, incl. a neuter proof (CR-GAP-069)"
-	@echo "  orphan-sweep-check  Prove the tick-start orphan sweep still classifies dogfood-* / /tmp-compose containers and in-range port holders, fails closed on a missing/failing tool, and never invokes a mutating verb — with stub docker/ss, so it needs neither (DF-CRIER-281)"
+	@echo "  orphan-sweep-check  Prove the tick-start orphan sweep still classifies dogfood-* / /tmp-compose containers and reports the low-scratch :8767 leak class plus every in-range port holder with pid + age (default range 8000-29000), fails closed on a missing/failing tool, and never invokes a mutating verb — with stub docker/ss, so it needs neither (DF-CRIER-281)"
 	@echo "  parity-check      Assert the primary remote (origin) and the content mirror (gitlab) carry the same main — exact 0/0 or a loud failure naming both counts and the fix (REV5-CRIER-001)"
 	@echo "  parity-selftest   Prove that checker still accepts parity and rejects mirror-behind, primary-behind, dual lineage, a missing remote, a branchless remote and an unreachable remote, incl. a neuter proof (REV5-CRIER-001)"
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
@@ -315,9 +315,13 @@ demo-cleanup-selftest:
 # rule, both reported, running or exited, with the container's status (incl. its
 # age), that compose path, the docker ps port column and the PortMappings from
 # `docker inspect`. Ports are every `ss -tlnp` listener in a configurable range
-# (ORPHAN_SWEEP_PORT_MIN/ORPHAN_SWEEP_PORT_MAX, default 14000-29000 inclusive) with
-# the holder's pid, process name and full command line (from /proc/<pid>/cmdline,
-# with the ss record kept alongside); a holder whose command carries the range's own
+# (ORPHAN_SWEEP_PORT_MIN/ORPHAN_SWEEP_PORT_MAX, default 8000-29000 inclusive — the
+# lower bound is 8000, not 14000, because the measured leak was a `./bin/crier -port
+# 8767` holding the server's own default port and a 14000+ default never reported it)
+# with the holder's pid, process name, age (from /proc/<pid>/stat field 22 against
+# /proc/uptime; `unknown` when /proc has no such holder) and full command line (from
+# /proc/<pid>/cmdline, with the ss record kept alongside); a holder whose command
+# carries the range's own
 # markers is still reported — the sweep never assumes a listener is benign — and a
 # holder ss cannot attribute is reported as unattributable rather than skipped. It
 # fails closed: a required tool (docker, ss, awk) missing from PATH or FAILING
@@ -334,10 +338,15 @@ demo-cleanup-selftest:
 # (dogfood+/tmp, dogfood+/home via the name rule, non-dogfood+/tmp via the tmp rule,
 # and the two negatives), the fail-closed paths (no docker, no ss, a failing docker,
 # a non-numeric and an inverted range), the range filter with its inclusive bounds
-# and its env override, the clean-host path (an explicitly empty census plus an empty
-# socket table is a legal exit 0 with zero findings), and a NEUTER proof — a copy of
-# the script whose classification is forced to always-no must FAIL the same fixture
-# assertions, so a green selftest cannot be proving nothing.
+# and its env override, the DEFAULT range covering the low-scratch :8767 leak class
+# (and still excluding a listener just below it), a holder AGE on every port line —
+# computed for a holder that really exists, `unknown` for the ones /proc does not
+# have — the clean-host path (an explicitly empty census plus an empty
+# socket table is a legal exit 0 with zero findings), and THREE NEUTER proofs: a copy
+# of the script whose classification is forced to always-no, one whose port age is
+# forced to a constant, and one whose default range is forced back to 14000-29000 must
+# each FAIL the assertions it is the cause of, so a green selftest cannot be proving
+# nothing.
 orphan-sweep-check:
 	bash scripts/orphan-sweep.sh --selftest
 

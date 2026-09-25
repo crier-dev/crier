@@ -168,15 +168,17 @@ jobs:
       # actually costs the shared host: an ad-hoc dogfood/QA run whose compose file
       # lives under /tmp and which leaves containers and a scratch-range port behind.
       # scripts/orphan-sweep.sh reports them (dogfood-* by name, or any compose
-      # config under /tmp/; plus every ss -tlnp listener in 14000-29000 with its
-      # holder pid, process name and full command line) and NEVER fixes anything — no
+      # config under /tmp/; plus every ss -tlnp listener in 8000-29000 — the low bound
+      # covers the `crier -port 8767` leak class — with its holder pid, process name,
+      # holder age and full command line) and NEVER fixes anything — no
       # stop, no rm, no kill, no prune — and its findings never change its exit code.
       # This step runs the SELFTEST only, never the live sweep: a CI runner has no
       # docker daemon and no dogfood stacks, and the selftest drives the real script
       # against STUB docker/ss executables on PATH, so it proves the classification
       # rules, the fail-closed paths (missing docker, missing ss, a FAILING docker, an
-      # invalid range), the range filter and its env override, the empty-host path and
-      # a neuter proof — and, from the stubs' log of every invocation, that no
+      # invalid range), the range filter and its env override, the default range covering
+      # the 8767 leak class, the port-age column, the empty-host path and THREE neuter
+      # proofs — and, from the stubs' log of every invocation, that no
       # mutating verb was even invoked.
       - name: Tick-start orphan sweep selftest
         run: make orphan-sweep-check
