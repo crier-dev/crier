@@ -47,6 +47,33 @@ procedure, the gate requirements and the publish step are in
   signing backends, the two-agent exchange and a second server with
   `CR_AUTH_TOKEN` (refusing an unauthenticated round-trip and accepting an
   authenticated one), and reaps the servers on exit. It also runs in CI.
+- **The release front door: prebuilt binaries + a curl-to-install path**
+  (CR-FEAT-028) — `gh release view v0.1.0-rc2` answered `assets: []`: the
+  Release object existed and carried notes only, so the only way in was
+  `git clone` plus a Go toolchain plus `make build`. An external hands-on review
+  (`DISPATCH · CRI-001`, by Carter) filed that as a tester-funnel problem. Every
+  release now carries 8 assets — `crier` and `crier-mcp` cross-compiled for
+  linux/amd64, linux/arm64 and darwin/arm64, the installer, and a `SHA256SUMS`
+  manifest. `scripts/release-artifacts.sh` (and `make release-artifacts`) builds
+  them with `CGO_ENABLED=0 -trimpath`, stripped, stamping the same
+  `internal/buildinfo` identity the other build paths stamp; it re-verifies the
+  manifest and runs the host artifact's `-version` before returning, so a set
+  whose identity did not land is never left on disk. `scripts/install.sh` is the
+  one-line front door (`curl -fsSL …/install.sh | sh`): it detects the platform,
+  verifies both binaries against that manifest and installs them into
+  `$HOME/.local/bin`, and it REFUSES an unverified download — no checksum tool,
+  no manifest entry for the binary, or a digest that does not match installs
+  nothing, and there is deliberately no flag to skip the check. `make release`
+  builds the asset set for the tag it cuts, and `make release-upload` attaches it
+  to the Release object (creating it from the version's own changelog section and
+  the compare link when it does not exist yet) — the publish step that used to be
+  a hand-written, forgettable `gh release create`, which is how rc2 shipped
+  without binaries. `make install-path-selftest` is the acceptance drive: it
+  builds the set, serves it as a release tree, installs into a clean box whose
+  `PATH` carries a `go` shim that exits 127 (so "no toolchain" is proven
+  positively, not assumed from an absent `go`), runs the installed binary through
+  `/health`, `/version`, a registration and an inbox delivery, and proves both
+  unverified-download shapes are refused by name.
 
 ## [0.1.0-rc2] - 2026-09-21
 

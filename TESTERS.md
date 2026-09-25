@@ -14,6 +14,27 @@ you), and **§2.0b** builds the keypair by hand if you would rather see the wire
 
 ## 1. Get it running (5 minutes)
 
+**Fastest path — a prebuilt binary, no Go toolchain** (CR-FEAT-028). Every
+release carries cross-compiled `crier` and `crier-mcp` for linux/amd64,
+linux/arm64 and darwin/arm64, and the installer verifies each against the
+release's `SHA256SUMS` before anything is written:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+CR_GUARD_ENABLED=false crier -port 8767 -pidfile .crier.pid &
+```
+
+`sh -s -- --version <tag>` pins a release instead of the newest; `--dir <path>`
+installs somewhere else. An unverified download installs nothing — the installer
+fails loudly on a checksum mismatch or a manifest with no entry for the binary,
+and there is no flag to skip that. If you would rather read the source, or you
+are testing the build itself, use the clone path below: both end at the same
+server on the same port, and `crier -version` (or `curl -s localhost:8767/version`)
+says which build answered either way.
+
+**From source:**
+
 ```bash
 git clone https://github.com/crier-dev/crier.git && cd crier
 make build

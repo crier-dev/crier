@@ -39,9 +39,18 @@ The target then:
 3. verifies the tag does not exist yet,
 4. runs the gates — `make build && make lint && make test-short` — echoing each
    one before it runs, and stopping before any tag if one fails,
-5. creates the annotated tag `VERSION` with the message `crier VERSION`,
-6. prints the exact `git push` command for both remotes — `origin`, plus
-   `gitlab` when that remote is configured.
+5. builds the release asset set for this exact commit — `make release-artifacts
+   VERSION=<tag>` (CR-FEAT-028): `crier` and `crier-mcp` cross-compiled for
+   linux/amd64, linux/arm64 and darwin/arm64 into `dist/`, the installer
+   (`scripts/install.sh`) copied in, and `SHA256SUMS` written and re-verified.
+   The assets are built HERE, from the commit being tagged, so a published
+   binary can always be tied to the tag that names it — and `dist/` is
+   gitignored build output, so it never dirties the tree the next release
+   checks,
+6. creates the annotated tag `VERSION` with the message `crier VERSION`,
+7. prints the exact `git push` command for both remotes — `origin`, plus
+   `gitlab` when that remote is configured — and the `make release-upload`
+   command that attaches the assets (step 4 below).
 
 It never pushes. That is deliberate: the tag must only be published after CI is
 green on `main`.
@@ -61,29 +70,79 @@ version before publishing. If the commit is not on `origin/main` yet, push
 the commit it tagged is not an ancestor of `origin/main` (as of the last
 `git fetch`).
 
-## 4. Create the GitHub Release object
+## 4. Publish the Release object — and its assets
 
 The pushed tag is not the whole release surface: GitHub renders the Releases
 page from Release objects, not tags. A tag with no Release object is invisible
 on the Releases page, has no release notes, and does not appear in
 `gh release list`. `make release` creates only the tag, so this half of the
-publish step is also done by hand, right after the tag push (v0.1.0-rc2 shipped
-tag-only until this step was noticed missing):
+publish step is done by hand, right after the tag push.
+
+**Attach the asset set in the same command (CR-FEAT-028).** This is what puts
+the binaries on the page. v0.1.0-rc2 shipped with `assets: []` — the Release
+object existed and carried notes only, so the only way in was `git clone` plus a
+Go toolchain plus `make build`, which is the tester-funnel problem the external
+hands-on review filed (`DISPATCH · CRI-001`). `make release` built the asset set
+for the tag it cut in step 5 above; this publishes it:
 
 ```bash
-gh release create v0.1.0-rc2 --repo crier-dev/crier \
-  --title "v0.1.0-rc2" \
-  --notes-file /tmp/release-notes-v0.1.0-rc2.md
+make release-upload VERSION=v0.1.0-rc3
 ```
 
-The notes file is the version's own CHANGELOG section, plus a compare link —
-rc2's is
-`https://github.com/crier-dev/crier/compare/v0.1.0-rc1...v0.1.0-rc2`.
-Verify the Release exists and names the tag:
+`DRY_RUN=1` prints the exact `gh` commands and publishes nothing:
 
 ```bash
-gh release view v0.1.0-rc2 --repo crier-dev/crier
+make release-upload VERSION=v0.1.0-rc3 DRY_RUN=1
 ```
+
+`release-upload` (`scripts/release-upload.sh`) verifies `dist/SHA256SUMS`
+first, refuses a set that is missing any release target or the installer,
+refuses assets built from a commit other than the tag's (pin `ALLOW_TAG_DRIFT=1`
+only when you know why they differ), and then either CREATES the Release object
+— title, release notes from the version's own `CHANGELOG.md` section, compare
+link against the previous tag — or uploads onto the one that already exists. It
+never pushes or moves a git tag: §3 is still a hand command.
+
+Two things it will not decide for you:
+
+- **`--prerelease` (`PRERELEASE=1`)**: a prerelease is EXCLUDED from
+  `/releases/latest`, and that is the URL `scripts/install.sh` resolves for a
+  default (unpinned) install. Mark an rc prerelease only if you mean to close
+  that default path — a tester then has to pass `--version <tag>` — and note
+  that the rc's cut so far are published as ordinary releases.
+- **overwriting an asset**: re-running against an existing Release object
+  without `CLOBBER=1` fails on the name collision rather than silently
+  replacing a binary somebody may already have downloaded.
+
+The hand-written form below still works if the notes must be something other
+than the changelog section (pass `--notes-file <path>` to `release-upload` for
+the same effect, with the assets):
+
+```bash
+gh release create v0.1.0-rc3 --repo crier-dev/crier \
+  --title "v0.1.0-rc3" \
+  --notes-file /tmp/release-notes-v0.1.0-rc3.md
+```
+
+Verify that the Release exists, names the tag, **and carries the assets** — a
+release with the object and no assets is the defect this step closes, so the
+asset list is part of the verification, not an extra:
+
+```bash
+gh release view v0.1.0-rc3 --repo crier-dev/crier --json assets --jq '.assets[].name'
+```
+
+The acceptance drive for the whole front door — the asset set builds, installs
+from a served release tree into a clean box with a failing `go` shim on `PATH`,
+the installed binary runs, and both unverified-download shapes are refused — is:
+
+```bash
+make install-path-selftest
+```
+
+It needs no network, no docker and no keys; the publish command itself is driven
+against a `gh` PATH shim there, so the real upload is the one step this
+repo cannot test without publishing something.
 
 ## Gate requirements
 
@@ -93,6 +152,11 @@ The release target enforces the minimum battery on the commit being tagged:
   identity, so the tag and `./bin/crier -version` can never disagree.
 - `make lint` — `go vet ./...`.
 - `make test-short` — the unit suite (`go test -short ./...`, no Docker).
+- `make release-artifacts` — the release asset set, built for the tag being cut
+  from the commit being tagged (CR-FEAT-028). `make install-path-selftest` is
+  its acceptance drive: the set is built, served as a release tree, installed
+  into a clean box that has a FAILING `go` shim on `PATH`, and the installed
+  binary is run — plus the tampered-artifact and missing-manifest refusals.
 
 Before the tag is published, the full CI on the same commit should be green as
 well: `.github/workflows/ci.yml` runs the build, vet, the short suite, the
