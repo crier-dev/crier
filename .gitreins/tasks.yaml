@@ -2340,3 +2340,13 @@ tasks:
   status: complete
   created_at: '2026-09-25T15:35:22.489435+00:00'
   completed_at: '2026-09-25T15:57:07.078822+00:00'
+- id: INT-MUSTER-006
+  title: 'Reconcile two MCP surfaces: README guidance + spec/tool drift guard'
+  criteria:
+  - 'README integration section names both MCP surfaces with when-to-use guidance;
+    a drift guard test cross-checks docs/openapi.yaml operations vs the crier-mcp
+    13-tool surface and fails loudly on mismatch; non-vacuity proof: test fails on
+    a deliberate mismatch and passes when restored; go test + make test-short green'
+  status: complete
+  created_at: '2026-09-25T17:44:53.153916+00:00'
+  completed_at: '2026-09-25T18:04:49.668230+00:00'
