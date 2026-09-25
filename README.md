@@ -153,7 +153,7 @@ than the default cadence to reach exhaustion.
 ### Prerequisites
 
 - Go 1.26.6 or later
-- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below). That flag is also a ONE-SHOT operation: the payload must be a seekable file (the helper writes it and signs it with `-in`), because a piped or redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper refuses that too, instead of sending it
+- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below). That flag is also a ONE-SHOT operation: the payload must be a seekable file (the helper writes it and signs it with `-in`), because a piped or redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper refuses that too, instead of sending it. If the box has no `xxd` at all (a fresh Debian install does not), **Installing xxd without root** below is the recipe — it needs no root, exactly like the Go install that follows
 
 #### Installing Go without root
 
@@ -206,8 +206,72 @@ echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
 > `GOPATH` directory should not be set to, or contain, the `GOROOT` directory.
 > Measured clean: toolchain at `$HOME/sdk/go` with `GOPATH` unset (recommended,
 > as above), or the toolchain under `$HOME` with `export GOPATH="$HOME/gopath"`.
+>
+> **Already unpacked the archive into `$HOME` (so the toolchain IS `$HOME/go`)?**
+> Then "do not set `GOPATH` at all" does not help you — `$HOME/go` IS the default
+> `GOPATH`, so both live on the same directory from the very first command, with
+> no env var set either way. Move your workspace off the toolchain with the
+> one-liner below and the warning is gone (belt-and-braces for anyone who would
+> rather not move the toolchain):
+>
+> ```bash
+> export GOPATH="$HOME/gopath"                            # this shell
+> echo 'export GOPATH="$HOME/gopath"' >> "$HOME/.bashrc"  # every shell
+> ```
+>
+> Measured on go1.26.6: the warning above appears whenever `GOROOT` and `GOPATH`
+> resolve to the same directory (`GOPATH="$(go env GOROOT)" go env GOROOT GOPATH`
+> prints it), and the same command prints no warning at all with `GOPATH` set to
+> `$HOME/gopath`. Either fix works — a toolchain under `$HOME/sdk/go` as in the
+> recipe above, or this export; you do not need both.
 
 A distro package — `sudo apt install golang-go` on Debian/Ubuntu, `sudo dnf install golang` on Fedora — is a one-line alternative, but the packaged Go can be older than the 1.26.6 this repo requires: check `go version` afterwards.
+
+#### Installing xxd without root (Debian 13)
+
+`xxd` is the other half of the quickstart, and a fresh box usually has none: the
+signing helper hex-encodes the ed25519 public key and signature with `xxd -p`,
+and `examples/demo.sh` refuses to start without it (`ERROR: xxd required (hex
+encoding)`, exit 1) — so an xxd-less machine fails the first documented demo
+before any crier code runs. `xxd` is not in coreutils and not in a minimal Debian
+install.
+
+**The obvious guess is wrong on Debian 13 (trixie):** `vim-common`, the package
+`xxd` is usually said to come from, contains **no `xxd` binary** there. Measured
+against Debian's own trixie package file listings, `vim-common`'s payload is
+`etc/vim/vimrc`, `usr/bin/helpztags`, mime/desktop entries, icons and man pages —
+no `xxd` anywhere in it — while the `xxd` package's payload carries the binary at
+`usr/bin/xxd` (plus its man pages and copyright). It is its own package, and
+fetching plus unpacking it needs no root, exactly like the Go install above:
+
+```bash
+mkdir -p "$HOME/extract-xxd" && cd "$HOME/extract-xxd"
+apt-get download xxd                      # no root: downloads the .deb only
+dpkg -x xxd_*.deb "$HOME/extract-xxd"     # unpack in place, still no root
+export PATH="$HOME/extract-xxd/usr/bin:$PATH"
+printf 'crier' | xxd -p                   # sanity: prints 6372696572
+```
+
+`apt-get download` only writes the `.deb` into the current directory (the name it
+reports is the one to unpack, `xxd_*.deb`); it installs nothing and changes no
+system file. `dpkg -x <deb> <dir>` unpacks a package into a directory without
+touching the system package database, so the binary lands at
+`$HOME/extract-xxd/usr/bin/xxd` — no `dpkg -i`, no `sudo`, no root anywhere in
+the recipe. As with `go`, `export PATH` lasts for one shell; make it permanent in
+your shell rc:
+
+```bash
+echo 'export PATH="$HOME/extract-xxd/usr/bin:$PATH"' >> "$HOME/.bashrc"
+```
+
+Check the result rather than trusting a package name — `command -v xxd` names the
+path, and `xxd -p < /dev/null` exits 0 printing nothing on a working binary. Not
+every release ships it under this exact name: when one answers `E: Unable to
+locate package xxd` (the message apt prints for a package it cannot find), locate
+that release's own `xxd` package — its package file listing names it, as does
+`dpkg -S` on a box that already has the binary (it prints the owning package and
+its path) — instead of reaching for `vim-common`. The `dpkg -x` step is unchanged
+either way.
 
 ### Build
 

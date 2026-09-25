@@ -87,7 +87,9 @@ sign anything:
 ```bash
 BASE=${BASE:-http://localhost:8767}
 
-# One ed25519 keypair per agent (openssl 3.x + xxd).
+# One ed25519 keypair per agent (openssl 3.x + xxd). A fresh box usually has no
+# xxd, and the register call below then 400s on an empty pubkey — the README's
+# "Installing xxd without root" recipe gets it with no root at all.
 openssl genpkey -algorithm ED25519 -out /tmp/crier-alice.key >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out /tmp/crier-bob.key   >/dev/null 2>&1
 ALICE_PUB=$(openssl pkey -in /tmp/crier-alice.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
