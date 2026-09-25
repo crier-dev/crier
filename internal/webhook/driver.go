@@ -68,8 +68,9 @@ type Driver struct {
 	degraded      map[string]time.Time // agentID -> degraded-since
 	failures      map[string]int       // agentID -> consecutive failures
 	batches       map[string]*batchBuffer
-	drainWakeCh   chan struct{} // nudges redeliverLoop (async enqueues)
-	flushWakeCh   chan struct{} // nudges batchLoop (batch enqueues)
+	paused        map[string]bool // agentID -> outbound lane paused by the kill-switch (CR-FEAT-030)
+	drainWakeCh   chan struct{}   // nudges redeliverLoop (async enqueues)
+	flushWakeCh   chan struct{}   // nudges batchLoop (batch enqueues)
 	stopCh        chan struct{}
 	stopped       bool
 	wg            sync.WaitGroup
@@ -203,6 +204,10 @@ func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config
 	if cfg == nil {
 		return false, fmt.Errorf("webhook: nil config for %s", agentID)
 	}
+	// A paused agent's outbound lane accepts nothing (CR-FEAT-030).
+	if err := d.refuseIfPaused(agentID); err != nil {
+		return false, err
+	}
 	rid := middleware.RequestIDFromContext(ctx)
 
 	switch effectiveDeliveryMode(cfg, env) {
@@ -278,6 +283,10 @@ func (d *Driver) wake(ch chan struct{}) {
 func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Config, env *Envelope, budget time.Duration) ([]byte, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("webhook: nil config for %s", agentID)
+	}
+	// A paused agent's outbound lane accepts nothing (CR-FEAT-030).
+	if err := d.refuseIfPaused(agentID); err != nil {
+		return nil, err
 	}
 	if budget <= 0 {
 		budget = 30 * time.Second
@@ -426,6 +435,15 @@ func (d *Driver) redeliverLoop() {
 func (d *Driver) drainQueue() {
 	items := d.queue.PopBatch(100)
 	for _, item := range items {
+		// A paused agent's queued deliveries are dead-lettered, not sent
+		// (CR-FEAT-030): the kill-switch must not leave a lane that keeps
+		// POSTing after the agent was contained.
+		if d.Paused(item.AgentID) {
+			logf("webhook: queued delivery dropped (agent paused by kill-switch)",
+				"agent", item.AgentID, "message_id", envelopeID(item.Envelope))
+			webhookOutcomeTotal.With("dropped").Inc()
+			continue
+		}
 		cfg := d.agentConfig(item.AgentID)
 		if cfg == nil {
 			logf("webhook: queue item dropped (agent gone)", "agent", item.AgentID)
@@ -786,6 +804,13 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		return
 	}
 	agentID := buf.agentID
+	// A paused agent's buffered batch is dropped, not flushed (CR-FEAT-030).
+	if d.Paused(agentID) {
+		logf("webhook: buffered batch dropped (agent paused by kill-switch)",
+			"agent", agentID, "messages", len(items))
+		webhookOutcomeTotal.With("dropped").Add(float64(len(items)))
+		return
+	}
 	envs := make([]*Envelope, 0, len(items))
 	for _, it := range items {
 		envs = append(envs, it.Envelope)

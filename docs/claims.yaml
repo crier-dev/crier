@@ -358,8 +358,11 @@ claims:
     # CR-GAP-057: was "16 HTTP endpoints" — the unit is now explicit (router
     # registrations in cmd/server/main.go), so the anchor moved with it.
     # DF-CRIER-113 registered GET /status, so the count is 17.
-    quote: "17 router paths"
-    expect: 17
+    # CR-FEAT-030 registered the five opt-in detection routes (they exist only
+    # when CR_DETECT_ENABLED is on, but they are HandleFunc registrations in
+    # main.go all the same), so the count is 22.
+    quote: "22 router paths"
+    expect: 22
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
@@ -1110,4 +1113,76 @@ claims:
     doc: docs/integration-guide.md
     quote: 'it is NOT the configuration this guide documents'
     expect: 0
+    xfail: null
+
+  # --- CR-FEAT-030 — detection & containment (OPT-IN) -------------------------
+  # The README's detection section claims five routes, four signals and four
+  # thresholds. Each route claim is probed LIVE (the gate boots the server with
+  # CR_DETECT_ENABLED=true precisely so these paths exist); each threshold is
+  # compared against the production constant in internal/detect, never against a
+  # number copied into the docs.
+  - id: DETECT-ROUTE-DELIVERY-LOG
+    kind: route
+    doc: README.md
+    quote: "`GET /delivery-log`"
+    expect: "/delivery-log"
+    xfail: null
+  - id: DETECT-ROUTE-DELIVERY-LOG-VERIFY
+    kind: route
+    doc: README.md
+    quote: "`GET /delivery-log/verify`"
+    expect: "/delivery-log/verify"
+    xfail: null
+  - id: DETECT-ROUTE-ALERTS
+    kind: route
+    doc: README.md
+    quote: "`GET /alerts`"
+    expect: "/alerts"
+    xfail: null
+  - id: DETECT-ROUTE-CANARIES
+    kind: route
+    doc: README.md
+    quote: "`GET /canaries`"
+    expect: "/canaries"
+    xfail: null
+  - id: DETECT-ROUTE-KILL-SWITCH
+    kind: route
+    doc: README.md
+    quote: "`POST /agents/{id}/kill-switch`"
+    expect: "/agents/{id}/kill-switch"
+    xfail: null
+  - id: DETECT-DEFAULT-FANOUT-TARGETS
+    kind: default
+    doc: README.md
+    quote: "`CR_DETECT_FANOUT_MIN_TARGETS`"
+    expect: 5
+    xfail: null
+  - id: DETECT-DEFAULT-NEWPEER-TARGETS
+    kind: default
+    doc: README.md
+    quote: "`CR_DETECT_NEWPEER_MIN_TARGETS`"
+    expect: 3
+    xfail: null
+  - id: DETECT-DEFAULT-QUIET-MESSAGES
+    kind: default
+    doc: README.md
+    quote: "`CR_DETECT_QUIET_MIN_MESSAGES`"
+    expect: 3
+    xfail: null
+  - id: DETECT-DEFAULT-QUIET-WINDOW
+    kind: default
+    doc: README.md
+    quote: "01:00-05:00 UTC"
+    expect: "01:00-05:00"
+    xfail: null
+  # The spec is the design authority, so its kill-switch section is gated too:
+  # the anchor pins the ordered action set, and the probe proves the route it
+  # documents is really registered. Listing a spec doc here also makes the path
+  # scanner walk it — every path-looking token in specs/DETECTION.md must be a
+  # live route or a deliberate entry in ignore_paths.
+  - id: DETECT-SPEC-KILL-SWITCH-ORDER
+    kind: route
+    doc: specs/DETECTION.md
+    quote: "1. **`pause_webhooks`**"
+    expect: "/agents/{id}/kill-switch"
     xfail: null

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crier-dev/crier/internal/detect"
 )
 
 // DatabaseConfig holds PostgreSQL connection and pool settings.
@@ -82,6 +84,51 @@ type Config struct {
 	// either half alone is inert. Carried only in this row — no code path
 	// consumes it yet (INT-A2A-002..006 add the surfaces).
 	A2AEnabled bool
+	// Detection holds the OPT-IN detection & containment layer
+	// (CR_DETECT_ENABLED, CR-FEAT-030, specs/DETECTION.md). Default off: with
+	// the flag unset the server registers no detection route, writes no
+	// delivery log and the delivery path is byte-identical to a build without
+	// this feature.
+	Detection DetectionConfig
+}
+
+// DetectionConfig holds the detection layer's tuning (CR-FEAT-030). Every
+// zero value falls back to the documented default in internal/detect, so the
+// defaults live in ONE place and this struct never duplicates a number.
+type DetectionConfig struct {
+	// Enabled is CR_DETECT_ENABLED — the master switch.
+	Enabled bool
+	// LogPath is CR_DETECT_LOG: the append-only signed delivery log. Empty
+	// means no log is written (alerts and containment still work, in memory).
+	LogPath string
+	// KeyPath is CR_DETECT_KEY: the ed25519 signing-key file. When a log path
+	// is set and this is empty, the log is signed with "<log path>.key".
+	KeyPath string
+	// FanoutWindow / FanoutMinTargets are the fan-out signal's window and
+	// distinct-target threshold (CR_DETECT_FANOUT_WINDOW_S,
+	// CR_DETECT_FANOUT_MIN_TARGETS). Zero = internal/detect's default.
+	FanoutWindow     time.Duration
+	FanoutMinTargets int
+	// NewPeerWindow / NewPeerMinTargets are the new-peer burst signal's
+	// window and threshold (CR_DETECT_NEWPEER_WINDOW_S,
+	// CR_DETECT_NEWPEER_MIN_TARGETS).
+	NewPeerWindow     time.Duration
+	NewPeerMinTargets int
+	// QuietStartHour / QuietEndHour are the UTC hour bounds of the quiet
+	// window (CR_DETECT_QUIET_HOURS, "S-E", start inclusive, end exclusive;
+	// a start above the end wraps midnight). config.Load applies the
+	// documented 01:00–05:00 default; an EXPLICIT equal pair (0-0) disables
+	// the odd-hour signal, and a zero-value Config — built in a test, not by
+	// Load — leaves it off too rather than guessing.
+	QuietStartHour int
+	QuietEndHour   int
+	// QuietMinMessages is the odd-hour volume threshold
+	// (CR_DETECT_QUIET_MIN_MESSAGES).
+	QuietMinMessages int
+	// CanaryTokens are the operator-planted canary tokens
+	// (CR_CANARY_TOKENS, comma-separated). Empty = the server generates
+	// default canaries at boot and logs them.
+	CanaryTokens []string
 }
 
 // ObservabilityConfig holds the opt-in live-inspection surfaces
@@ -537,7 +584,101 @@ func Load() (Config, error) {
 		cfg.A2AEnabled = parsed
 	}
 
+	// Detection & containment (CR-FEAT-030, specs/DETECTION.md). OPT-IN: with
+	// CR_DETECT_ENABLED unset the server registers no detection route, writes
+	// no log and behaves exactly as before.
+	if v := os.Getenv("CR_DETECT_ENABLED"); v != "" {
+		parsed, err := parseTolerantBool("CR_DETECT_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Detection.Enabled = parsed
+	}
+	cfg.Detection.LogPath = os.Getenv("CR_DETECT_LOG")
+	cfg.Detection.KeyPath = os.Getenv("CR_DETECT_KEY")
+	// The quiet window is the one detection setting whose DEFAULT is a value
+	// rather than "whatever internal/detect resolves": the zero pair would be
+	// ambiguous between "unset" and "disabled", so the documented window is
+	// applied here (from the detect package's own constants) and an explicit
+	// CR_DETECT_QUIET_HOURS=0-0 is what turns the signal off.
+	cfg.Detection.QuietStartHour = detect.DefaultQuietStartHour
+	cfg.Detection.QuietEndHour = detect.DefaultQuietEndHour
+	// A configured log without a key path signs with <log>.key: the log is
+	// only worth keeping if it can be verified after a restart, and a missing
+	// key path must not silently mean "unsigned".
+	if cfg.Detection.LogPath != "" && cfg.Detection.KeyPath == "" {
+		cfg.Detection.KeyPath = cfg.Detection.LogPath + ".key"
+	}
+	if v := os.Getenv("CR_DETECT_FANOUT_WINDOW_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_DETECT_FANOUT_WINDOW_S: %q (want positive seconds)", v)
+		}
+		cfg.Detection.FanoutWindow = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_DETECT_FANOUT_MIN_TARGETS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_DETECT_FANOUT_MIN_TARGETS: %q (want a positive count)", v)
+		}
+		cfg.Detection.FanoutMinTargets = n
+	}
+	if v := os.Getenv("CR_DETECT_NEWPEER_WINDOW_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_DETECT_NEWPEER_WINDOW_S: %q (want positive seconds)", v)
+		}
+		cfg.Detection.NewPeerWindow = time.Duration(n) * time.Second
+	}
+	if v := os.Getenv("CR_DETECT_NEWPEER_MIN_TARGETS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_DETECT_NEWPEER_MIN_TARGETS: %q (want a positive count)", v)
+		}
+		cfg.Detection.NewPeerMinTargets = n
+	}
+	if v := os.Getenv("CR_DETECT_QUIET_HOURS"); v != "" {
+		start, end, err := parseHourRange("CR_DETECT_QUIET_HOURS", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Detection.QuietStartHour = start
+		cfg.Detection.QuietEndHour = end
+	}
+	if v := os.Getenv("CR_DETECT_QUIET_MIN_MESSAGES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_DETECT_QUIET_MIN_MESSAGES: %q (want a positive count)", v)
+		}
+		cfg.Detection.QuietMinMessages = n
+	}
+	if v := os.Getenv("CR_CANARY_TOKENS"); v != "" {
+		for _, tok := range splitTrim(v) {
+			cfg.Detection.CanaryTokens = append(cfg.Detection.CanaryTokens, tok)
+		}
+	}
+
 	return cfg, nil
+}
+
+// parseHourRange reads a "S-E" UTC hour range (0..23 each, start inclusive,
+// end exclusive). A declared range is HONORED or REFUSED, never ignored: an
+// operator who writes "22-6" gets the wrap-around window, and one who writes
+// "25-3" gets a startup error naming the bound.
+func parseHourRange(name, v string) (int, int, error) {
+	parts := strings.SplitN(v, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid %s: %q (want S-E, e.g. 1-5)", name, v)
+	}
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || start < 0 || start > 23 {
+		return 0, 0, fmt.Errorf("invalid %s: %q (start hour must be 0..23)", name, v)
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || end < 0 || end > 23 {
+		return 0, 0, fmt.Errorf("invalid %s: %q (end hour must be 0..23)", name, v)
+	}
+	return start, end, nil
 }
 
 // parseTolerantBool is the single tolerant boolean dialect crier reads env
