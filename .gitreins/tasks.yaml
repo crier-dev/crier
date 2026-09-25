@@ -2277,3 +2277,33 @@ tasks:
   status: complete
   created_at: '2026-09-25T04:03:14.427757+00:00'
   completed_at: '2026-09-25T04:18:51.175296+00:00'
+- id: INT-MUSTER-002
+  title: Muster onboarding path + auth-reality declaration (board INT-MUSTER-002 +
+    INT-MUSTER-003)
+  criteria:
+  - docs/integration-guide.md gains 'Using crier from Muster' with real commands +
+    live-verified bearer-only vs signature-required endpoint table; examples/muster-bridge/
+    runnable under the CR-GAP-069 cleanup contract; new prose anchored in docs/claims.yaml;
+    docs-check green
+  status: complete
+  created_at: '2026-09-25T05:54:36.466012+00:00'
+  completed_at: '2026-09-25T06:18:04.106380+00:00'
+- id: INT-MUSTER-004
+  title: One-command platform-connection onboarding script (board INT-MUSTER-004)
+  criteria:
+  - scripts/onboard-connection.sh with idempotent registration + printed send command
+    + per-connection config, selftest proves idempotency/delivery-201/non-clobber
+    live, cleanup contract satisfied, shell-yaml green
+  status: complete
+  created_at: '2026-09-25T05:54:37.283980+00:00'
+  completed_at: '2026-09-25T06:20:29.700139+00:00'
+- id: DF-CRIER-280
+  title: Non-root quickstart xxd recipe + GOPATH/GOROOT export (board DF-CRIER-280
+    + DF-CRIER-284)
+  criteria:
+  - README non-root block gains the measured apt-get download xxd + dpkg -x recipe
+    (vim-common does not ship xxd on Debian 13) and the GOPATH export line; docs-check
+    green; live non-root download transcript pasted
+  status: complete
+  created_at: '2026-09-25T05:54:38.102343+00:00'
+  completed_at: '2026-09-25T06:21:37.797231+00:00'

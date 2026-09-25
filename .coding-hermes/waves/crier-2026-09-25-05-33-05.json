@@ -1,0 +1,19 @@
+{
+  "tick_id": "crier-2026-09-25-05-33-05",
+  "mode": "wave",
+  "wave_budget": 7,
+  "created_at": "2026-09-25 05:50:50 UTC",
+  "base_sha": "a40e8ea",
+  "picked": ["INT-MUSTER-002", "INT-MUSTER-003", "INT-MUSTER-004", "DF-CRIER-280", "DF-CRIER-284"],
+  "partition_note": "5 rows -> 3 workers: INT-MUSTER-002+003 combined (both edit docs/integration-guide.md - one worker avoids a same-file merge conflict); DF-CRIER-280+284 combined (both edit the same README non-root install block). INT-MUSTER-004 independent (scripts/ + selftest). Cross-worker file disjointness verified: docs/claims.yaml+w1 only, README+w3 only, scripts/+w2 only.",
+  "worktrees": [
+    {"task_ids": ["INT-MUSTER-002", "INT-MUSTER-003"], "worktree": "~/worktrees/crier-INT-MUSTER-002-003", "branch": "wt/INT-MUSTER-002-003", "base": "origin/main", "base_sha": "a40e8ea"},
+    {"task_ids": ["INT-MUSTER-004"], "worktree": "~/worktrees/crier-INT-MUSTER-004", "branch": "wt/INT-MUSTER-004", "base": "origin/main", "base_sha": "a40e8ea"},
+    {"task_ids": ["DF-CRIER-280", "DF-CRIER-284"], "worktree": "~/worktrees/crier-DF-CRIER-280-284", "branch": "wt/DF-CRIER-280-284", "base": "origin/main", "base_sha": "a40e8ea"}
+  ],
+  "dispatched": [
+    {"task_ids": ["INT-MUSTER-002", "INT-MUSTER-003"], "worker": "w1", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w1.txt", "started_at": "2026-09-25 05:51:00 UTC"},
+    {"task_ids": ["INT-MUSTER-004"], "worker": "w2", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w2.txt", "started_at": "2026-09-25 05:51:00 UTC"},
+    {"task_ids": ["DF-CRIER-280", "DF-CRIER-284"], "worker": "w3", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w3.txt", "started_at": "2026-09-25 05:51:00 UTC"}
+  ]
+}
