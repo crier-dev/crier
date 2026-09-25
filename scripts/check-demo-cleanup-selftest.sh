@@ -50,9 +50,20 @@
 #                       checker never prints a PASS over a list it enforced nothing on
 #   SHAPES              one fixture carrying four executable spawn forms (a `bash -c`
 #                       command string, a `nohup` wrapper, a bare `crier` on PATH, a
-#                       backgrounded subshell) and three non-spawns (the binary's own
-#                       `-version` and `-stop` flags, a `go build -o …`): exactly the
-#                       four must classify, the three must not
+#                       backgrounded subshell) and four non-spawns (the binary's own
+#                       `-version` and `-stop` flags, the non-listening `keygen`
+#                       subcommand, a `go build -o …`): exactly the four must
+#                       classify, the four must not
+#   KEYGEN-ONLY         a fixture whose ONLY crier invocation is `crier keygen`
+#                       (CR-FEAT-027)                       -> NOT-SPAWNING, 0 spawn
+#                       sites, and an explicit list of it is still refused: the
+#                       subcommand binds no port, so it owes neither a trap nor an
+#                       ownership assertion. Before that rule it was REJECTED for
+#                       missing (b) over a port it never binds (measured)
+#   KEYGEN+NOSPAWN-CONTROL
+#                       the same keygen call PLUS a backgrounded relay -> 1 spawn
+#                       site, still REJECTED for (b): the new rule must not hide a
+#                       real server on the same file
 #   FAIL-CLOSED-MISSING a named path that does not exist            -> REJECT (1)
 #   FAIL-CLOSED-NON-SHELL
 #                       a named path that is not a shell script    -> REJECT (1)
@@ -318,6 +329,8 @@ crier --port 9003 &
 ( "$WORKDIR/crier" --port 9004 > /tmp/d.log 2>&1 ) &
 ./bin/crier -version
 ./bin/crier -stop -pidfile /tmp/x.pid
+"$BIN/crier" keygen -out /tmp/fx.key -id fx
+"$CRIER_BIN" keygen -out /tmp/fx2.key -id fx2 -json
 go build -o bin/crier ./cmd/server
 FX
   _run "$tmp/fx-shapes.sh"
@@ -326,10 +339,54 @@ FX
   _verdict "fx-shapes.sh" "$RC" 1 "$shapes_n spawn site(s) (want 4), all backgrounded"
   if [ "$RC" -eq 1 ] && [ "$shapes_n" -eq 4 ] \
     && ! printf '%s\n' "$OUT" | grep '  spawn site' | grep -q '\-version' \
+    && ! printf '%s\n' "$OUT" | grep '  spawn site' | grep -q 'keygen' \
     && ! printf '%s\n' "$OUT" | grep '  spawn site' | grep -q 'go build'; then
-    _ok "SHAPES: a shell string / wrapper / bare-PATH / subshell spawn each classify (4), while -version, -stop and go build do not"
+    _ok "SHAPES: a shell string / wrapper / bare-PATH / subshell spawn each classify (4), while -version, -stop, the non-listening keygen subcommand and go build do not"
   else
-    _bad "SHAPES: rc=$RC (want 1) with exactly 4 spawn sites and no -version/go-build site; got $shapes_n site(s)
+    _bad "SHAPES: rc=$RC (want 1) with exactly 4 spawn sites and no -version/keygen/go-build site; got $shapes_n site(s)
+  output: $OUT"
+  fi
+
+  # ── 7b. a keygen-only script is NOT a spawn at all (CR-FEAT-027) ──────────
+  # Regression: before the keygen rule, this fixture was classified as a relay
+  # spawn and REJECTED for missing the (b) ownership assertion — for a port the
+  # subcommand never binds. It must be NOT-SPAWNING, and an explicit list of it
+  # must still be refused (the vacuous-PASS rule is unchanged).
+  cat >"$tmp/fx-keygen-only.sh" <<'FX'
+#!/usr/bin/env bash
+set -euo pipefail
+"$CRIER_BIN" keygen -out /tmp/fx-keygen-only.key -id fixture
+echo done
+FX
+  _run "$tmp/fx-keygen-only.sh"
+  local keygen_n=0
+  keygen_n="$(printf '%s\n' "$OUT" | grep -c '  spawn site' || true)"
+  _verdict "fx-keygen-only.sh" "$RC" 1 "NOT-SPAWNING (no spawn site), vacuous-PASS refusal"
+  if [ "$RC" -eq 1 ] && [ "$keygen_n" -eq 0 ] && _has "NOT-SPAWNING"; then
+    _ok "KEYGEN-ONLY: the keygen subcommand is not a server spawn (0 spawn sites) and owes no trap/ownership assertion"
+  else
+    _bad "KEYGEN-ONLY: rc=$RC (want 1), want 0 spawn sites and NOT-SPAWNING; got $keygen_n site(s)
+  output: $OUT"
+  fi
+
+  # And the rule must NOT suppress a real spawn on a line that also names keygen:
+  # the same fixture plus a backgrounded relay must still classify and still owe
+  # the ownership assertion.
+  cat >"$tmp/fx-keygen-plus-spawn.sh" <<'FX'
+#!/usr/bin/env bash
+set -euo pipefail
+"$CRIER_BIN" keygen -out /tmp/fx-k.key -id fixture
+CRIER_PORT=9005 "$CRIER_BIN" > /tmp/fx-k.log 2>&1 &
+SERVER_PID=$!
+FX
+  _run "$tmp/fx-keygen-plus-spawn.sh"
+  local mixed_n=0
+  mixed_n="$(printf '%s\n' "$OUT" | grep -c '  spawn site' || true)"
+  _verdict "fx-keygen-plus-spawn.sh" "$RC" 1 "1 spawn site (the relay), REJECT for (a)+(b)"
+  if [ "$RC" -eq 1 ] && [ "$mixed_n" -eq 1 ] && _has "missing (b) ownership assertion"; then
+    _ok "KEYGEN+NOSPAWN-CONTROL: the keygen rule does not hide a backgrounded relay on the same file (1 site, still REJECTED)"
+  else
+    _bad "KEYGEN+NOSPAWN-CONTROL: rc=$RC (want 1) with 1 spawn site and a (b) rejection; got $mixed_n site(s)
   output: $OUT"
   fi
 

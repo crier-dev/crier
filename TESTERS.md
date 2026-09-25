@@ -8,8 +8,9 @@ only care about one mode.
 Everything below runs against the **default configuration**: per-agent request
 signatures are ON (`CR_REQUIRE_AGENT_SIG=true`). The LLM message guard is the
 only thing switched off in §1, so a keyless run is deterministic. If a step
-answers `401`, you are missing the three signature headers — §2.0 generates the
-keypair they need, and every gated call below carries them.
+answers `401`, you are missing the three signature headers — **§2.0a** is the
+fastest way to get them (`crier keygen` plus a client library that signs for
+you), and **§2.0b** builds the keypair by hand if you would rather see the wire.
 
 ## 1. Get it running (5 minutes)
 
@@ -82,7 +83,53 @@ listed. `make port-guard-selftest` covers that rotation too (arms D–F).
 **0. Register two agents** (every exercise needs them). Signatures are ON by
 default, so an agent is only reachable with the private key whose public half it
 was registered with — **keep the private key**, a public key on its own cannot
-sign anything:
+sign anything.
+
+**0a. The no-ceremony path — `crier keygen` plus a client library.** If you are
+here to exercise crier rather than to inspect its wire format, start here: no
+openssl, no xxd, nothing to install.
+
+```bash
+# Build once (or use the binary you already have). `crier keygen` writes an
+# ed25519 keypair as PKCS#8 PEM at mode 0600 and prints the agent config.
+go build -o bin/crier ./cmd/server
+./bin/crier keygen -out alice.key -id alice    # -> alice.key + the exact POST /agents body
+./bin/crier keygen -out bob.key   -id bob      # a second identity, when you need one
+```
+
+Then, with the server up (`make run`), the Python client completes the whole
+signed round-trip — register, deliver, signed retrieve, signed ack, signed
+stats, relay publish/subscribe — and prints what it asked for and what came
+back. The last two steps are negative controls: the same retrieve with no
+signature, and the same retrieve signed with a different key, must both be
+refused. If either one succeeds, the run says so instead of reporting a pass.
+
+```bash
+python3 clients/python/round_trip.py --server ${BASE} --id alice --key alice.key
+```
+
+The TypeScript client does the same (Node 22.6+; nothing to install):
+
+```bash
+node clients/typescript/round-trip.ts --server ${BASE} --id alice --key alice.key
+```
+
+Two identities on one bus — alice delivers to bob, bob's key reads and acks it,
+and alice's key is refused (403) when it targets bob's inbox:
+
+```bash
+python3 clients/python/two_agents.py --server ${BASE} \
+  --alice-id alice --alice-key alice.key --bob-id bob --bob-key bob.key
+```
+
+The two clients are documented in `clients/README.md` (method surface, signing
+contract, requirements). Everything from §0b on is the same round-trip by hand:
+it is the protocol reference, it is worth reading, and you do not need it to get
+a message across.
+
+**0b. The raw path — keys with openssl, signatures with your own helper.** Use
+this when you want to see exactly what goes on the wire (or to sign from a
+language that has no client yet). One ed25519 keypair per agent:
 
 ```bash
 BASE=${BASE:-http://localhost:8767}
@@ -90,6 +137,8 @@ BASE=${BASE:-http://localhost:8767}
 # One ed25519 keypair per agent (openssl 3.x + xxd). A fresh box usually has no
 # xxd, and the register call below then 400s on an empty pubkey — the README's
 # "Installing xxd without root" recipe gets it with no root at all.
+# (Or write the same PKCS#8 key with `./bin/crier keygen -out /tmp/crier-alice.key -id alice`
+# and skip openssl entirely — the helper below reads either key file.)
 openssl genpkey -algorithm ED25519 -out /tmp/crier-alice.key >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out /tmp/crier-bob.key   >/dev/null 2>&1
 ALICE_PUB=$(openssl pkey -in /tmp/crier-alice.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)

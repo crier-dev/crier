@@ -13,6 +13,41 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+### Added
+
+- **`crier keygen`** (CR-FEAT-027) — the signing ceremony, replaced. The server
+  binary now generates an ed25519 keypair in-process (no openssl, no xxd),
+  writes it as a PKCS#8 PEM at mode `0600` in the same shape
+  `openssl genpkey -algorithm ED25519` writes, and prints the agent config: the
+  agent id, the hex public key, the exact `POST /agents` body and the next
+  command. Before printing anything it re-reads the file, parses it with the
+  server's own key loader and signs+verifies a sample payload, so the printed
+  public key is provably the file's key; `-force` is required to overwrite an
+  existing private key, and `-json` prints the same facts machine-readably. The
+  external review (`DISPATCH · CRI-001`) named the openssl+xxd+sig()-helper
+  ceremony as the number-one adoption killer, and it is what the last three
+  testers each tripped over.
+- **First-party clients** (CR-FEAT-027) — `clients/python/crier_client.py`
+  (stdlib only, no packages to install) and `clients/typescript/crier.ts`
+  (Node 22.6+, no packages either) expose the bus as methods: `register`,
+  `deliver`, `retrieve`, `ack`, `stats`, `publish`, `subscribe`, plus
+  `unregister` and a `request()` escape hatch. Both build the `X-Agent-ID` /
+  `X-Agent-Ts` / `X-Agent-Sig` trio for you, decode inbox payloads, and surface
+  the server's own error text. Runnable transcripts
+  (`clients/python/round_trip.py`, `clients/typescript/round-trip.ts`,
+  `clients/python/two_agents.py`) complete the round-trip and prove the
+  signatures are enforced with negative controls — an unsigned call and a
+  wrongly-signed call must both be refused. The Python signer prefers the
+  `cryptography` package when present and otherwise uses a bundled RFC 8032
+  implementation verified against the RFC 8032 §7.1 vectors and byte-identical
+  to the library-backed path.
+- **`make client-roundtrip-check`** (CR-FEAT-027) — the acceptance drive for the
+  above: it builds the server, starts it on a port the shared port selector
+  chooses, asserts it owns that port, runs `crier keygen`, both clients, both
+  signing backends, the two-agent exchange and a second server with
+  `CR_AUTH_TOKEN` (refusing an unauthenticated round-trip and accepting an
+  authenticated one), and reaps the servers on exit. It also runs in CI.
+
 ## [0.1.0-rc2] - 2026-09-21
 
 ### Added
