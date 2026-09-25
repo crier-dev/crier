@@ -129,7 +129,9 @@ capabilities. The public key is what config C verifies signatures against.
 openssl genpkey -algorithm ED25519 -out agent.key
 PUBKEY=$(openssl pkey -in agent.key -pubout -outform DER | tail -c 32 | xxd -p -c 64)
 
-# register → 201
+# register → 201 (a duplicate id answers 409 {"error":"agent already
+# registered: \"agent-1\""} — idempotency-refused, the existing agent is
+# untouched; skip registration or delete the agent first)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY}\",\"capabilities\":[\"intel\"]}"
 ```

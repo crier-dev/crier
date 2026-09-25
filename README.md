@@ -461,7 +461,10 @@ sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR:
 #    with CR_REQUIRE_AGENT_SIG=false accepts registration without it.)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}"
-# 201
+# 201 — but a SECOND register with the same id answers 409 {"error":"agent already
+# registered: \"agent-1\""}: idempotency-refused, the existing agent and its key are
+# untouched (DF-CRIER-288). Re-running the quickstart is safe — skip the register
+# step, or DELETE /agents/agent-1 first to start over with a fresh key.
 
 # 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
 #    24h default, 0 means the message never expires and is reported as
@@ -531,6 +534,7 @@ CR_REQUIRE_AGENT_SIG=false make run
 # With signing disabled, POST /agents no longer needs a public_key either —
 # register with just an id:
 #   curl -s -X POST localhost:8767/agents -d '{"id":"agent-1"}'        # 201
+#   (a duplicate id answers 409 "agent already registered" — see step 1)
 # A keyless agent registered this way is unusable on a server that enforces
 # signing (its agent-scoped calls answer 401 "no registered public key"), so
 # re-enabling CR_REQUIRE_AGENT_SIG later means re-registering with a key.
