@@ -18,8 +18,11 @@
 # WHAT IS PROVED
 # --------------
 #   TRACKED TREE        no-argument run over the repo's own tracked scripts
-#                       (the compliant population: scripts/e2e-battery.sh, the five
-#                       examples/**/run-demo.sh runners, scripts/check-mcp-stdout.sh)
+#                       (the compliant population: scripts/e2e-battery.sh, the
+#                       examples/**/run-demo.sh runners, scripts/check-mcp-stdout.sh,
+#                       scripts/onboard-connection-selftest.sh, and any future
+#                       server-spawning script added under the contract — the
+#                       count is DERIVED at selftest time, never frozen)
 #                       must exit 0 and must name each of them COMPLIANT — the
 #                       regression guard that this gate never starts rejecting the
 #                       demos it is supposed to protect
@@ -395,11 +398,17 @@ FX
   other_out="$(cd "${TMPDIR:-/tmp}" && bash "$CHECKER" 2>&1)"
   other_rc=$?
   _verdict "default scope from ${TMPDIR:-/tmp}" "$other_rc" 0 "same verdict as the tree"
+  # the expected population is DERIVED from the tree run, never frozen — a new
+  # compliant server-spawning script (e.g. the tick-393 additions) must not
+  # break this check, and a population DROP must still fail it.
+  local expected_pop=""
+  expected_pop="$(printf '%s' "$tree_out" | grep -oE '[0-9]+ server-spawning \([0-9]+ compliant, 0 rejected\)' | head -1)"
   if [ "$other_rc" -eq 0 ] \
-    && printf '%s' "$other_out" | grep -q "7 server-spawning (7 compliant, 0 rejected)"; then
-    _ok "CWD-INDEPENDENT: the default run reaches the same scope and verdict from another directory"
+    && [ -n "$expected_pop" ] \
+    && printf '%s' "$other_out" | grep -qF "$expected_pop"; then
+    _ok "CWD-INDEPENDENT: the default run reaches the same scope and verdict from another directory ($expected_pop)"
   else
-    _bad "CWD-INDEPENDENT: rc=$other_rc (want 0 with 7 compliant) when run from ${TMPDIR:-/tmp}
+    _bad "CWD-INDEPENDENT: rc=$other_rc (want 0, same population as the tree: ${expected_pop:-unparsed}) when run from ${TMPDIR:-/tmp}
   output: $(printf '%s' "$other_out" | tail -3)"
   fi
 
