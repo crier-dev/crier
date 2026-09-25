@@ -89,6 +89,13 @@ type deliverRequest struct {
 	// distinguishable from an explicit 0: absent = the store default (24h),
 	// 0 = the message never expires, n > 0 = n seconds.
 	TTLSeconds *int `json:"ttl_seconds,omitempty"`
+	// IdempotencyKey is the sender's optional deduplication key (CR-FEAT-025):
+	// a second delivery of the same key to the same agent within the relay's
+	// deduplication window is answered with the FIRST delivery's accept — same
+	// message id — and stores nothing, so a sender that retried after losing
+	// the connection does not duplicate work. Absent (or empty) means no
+	// deduplication, exactly as before.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // maxTTLSeconds bounds ttl_seconds so the requested lifetime still fits a
@@ -209,6 +216,11 @@ type blockingDeliverResponse struct {
 	Reply     json.RawMessage `json:"reply"`
 	SessionID string          `json:"session_id,omitempty"`
 	RequestID string          `json:"request_id,omitempty"`
+	// IdempotentReplay marks a blocking accept answered from the recorded
+	// accept of an earlier delivery under the same idempotency key
+	// (CR-FEAT-025): the endpoint was called ONCE, and `reply` is the reply
+	// that call produced.
+	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
 }
 
 // deliverResponse is the JSON body for POST /agents/{id}/inbox.
@@ -235,6 +247,12 @@ type deliverResponse struct {
 	// internally, DF-CRIER-37); RFC 3339 otherwise.
 	ExpiresAt *MessageExpiry `json:"expires_at,omitempty"`
 	Guard     *guard.Meta    `json:"guard,omitempty"`
+	// IdempotentReplay marks a delivery answered from the recorded accept of
+	// an earlier delivery that carried the same idempotency_key (CR-FEAT-025).
+	// The body is otherwise the original accept — same id, same status — so a
+	// sender that retried can read the id it needs from either response while
+	// still being able to tell a replay from a fresh delivery.
+	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
 }
 
 // guardBlockedResponse is the uniform 403 body for blocked deliveries
@@ -815,6 +833,63 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ▼ SENDER-SUPPLIED IDEMPOTENCY (CR-FEAT-025) — before any transport or
+	// store choice, for the same reason the validations above are: a duplicate
+	// delivery must not reach a webhook endpoint or the inbox store at all.
+	// A replay answers with the ORIGINAL accept (same id, same status) so a
+	// sender that retried after losing the response learns what its first
+	// attempt produced; nothing is stored and nothing is dispatched.
+	var attempt *idempotencyAttempt
+	if key := req.IdempotencyKey; key != "" {
+		if err := validateIdempotencyKey(key); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if h.idempotency != nil {
+			rec, outcome, att := h.idempotency.Acquire(id, key, time.Now())
+			switch outcome {
+			case idempotencyReplay:
+				idempotentReplaysTotal.Inc()
+				slog.Info("inbox deliver replayed",
+					"target", id,
+					"sender", req.Sender,
+					"message_id", rec.ID,
+					"transport", rec.Transport,
+					"request_id", middleware.RequestIDFromContext(r.Context()),
+				)
+				if rec.Blocking {
+					// A blocking delivery is request/response: the recorded
+					// reply is the answer, and the endpoint was called once.
+					writeJSON(w, rec.Status, blockingDeliverResponse{
+						ID:               rec.ID,
+						Transport:        rec.Transport,
+						Reply:            rec.Reply,
+						SessionID:        req.SessionID,
+						RequestID:        req.RequestID,
+						IdempotentReplay: true,
+					})
+					return
+				}
+				writeJSON(w, rec.Status, rec.replayResponse())
+				return
+			case idempotencyBusy:
+				// Another delivery under this key is still in flight. Nothing
+				// was stored by THIS request, and answering with a fresh
+				// delivery would be the duplicate this key exists to prevent.
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "a delivery with this idempotency_key is already in progress",
+				})
+				return
+			}
+			attempt = att
+			// Any response that is NOT an accept (a guard block, a federation
+			// failure, a store error) releases the key without recording
+			// anything, so a corrected retry under the same key is delivered
+			// rather than answered with a replay of the rejection.
+			defer attempt.Abandon()
+		}
+	}
+
 	msgID := make([]byte, 12)
 	rand.Read(msgID)
 
@@ -823,6 +898,14 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		Payload:    req.Payload,
 		CreatedAt:  time.Now().UTC(),
 		TTLSeconds: req.TTLSeconds,
+		// The sender is stored WITH the message (CR-FEAT-025): it is the
+		// address a terminal outcome is reported to. Without it a TTL expiry
+		// can only be counted, never reported — which is exactly how an
+		// expired delivery became a mystery.
+		Sender: req.Sender,
+		// Provenance for the same reason: a dead letter states which key
+		// produced the message it holds.
+		IdempotencyKey: req.IdempotencyKey,
 	}
 	observationID = entry.ID
 	// Resolve the expiry now, from the same instant the store will use, so
@@ -1003,6 +1086,17 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error()})
 				return
 			}
+			// The endpoint answered, so this delivery produced an accept: record it
+			// under the sender's key (CR-FEAT-025) BEFORE answering, so a
+			// concurrent duplicate that is waiting on the key finds the receipt
+			// instead of racing a second call to the endpoint.
+			attempt.Finish(idempotentReceipt{
+				Status:    http.StatusOK,
+				ID:        entry.ID,
+				Transport: "webhook",
+				Blocking:  true,
+				Reply:     reply,
+			})
 			writeJSON(w, http.StatusOK, blockingDeliverResponse{
 				ID:        entry.ID,
 				Transport: "webhook",
@@ -1039,6 +1133,15 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			"transport", "webhook",
 			"request_id", middleware.RequestIDFromContext(r.Context()),
 		)
+		// Queued for push: the accept is recorded under the sender's key
+		// (CR-FEAT-025) so a retry does not queue the same work twice.
+		attempt.Finish(idempotentReceipt{
+			Status:       http.StatusAccepted,
+			ID:           entry.ID,
+			Transport:    "webhook",
+			DeliveryMode: mode,
+			Guard:        guardInDeliverResponse(guardMeta),
+		})
 		writeJSON(w, http.StatusAccepted, deliverResponse{
 			ID:           entry.ID,
 			Transport:    "webhook",
@@ -1084,6 +1187,16 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	// The expiry is resolved into the tri-state wire type (DF-CRIER-182): a
 	// never-expiring message reports null instead of the zero time.
 	expiresAt := MessageExpiry(entry.ExpiresAt)
+	// The message is stored: record the accept under the sender's key
+	// (CR-FEAT-025), so a retry of the same key answers with THIS id instead
+	// of storing a second copy of the same work.
+	attempt.Finish(idempotentReceipt{
+		Status:    http.StatusCreated,
+		ID:        entry.ID,
+		Transport: "inbox",
+		ExpiresAt: &expiresAt,
+		Guard:     guardInDeliverResponse(guardMeta),
+	})
 	writeJSON(w, http.StatusCreated, deliverResponse{
 		ID:        entry.ID,
 		Transport: "inbox",

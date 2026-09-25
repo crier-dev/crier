@@ -186,6 +186,13 @@ func TestPresenceGoesStaleWhenTheAgentDiesEndToEnd(t *testing.T) {
 	// The mesh notices the dead socket...
 	awaitPeer(t, client, base, presenceAgent, false)
 
+	// Baseline for (6), sampled AFTER the socket is gone and the peer is off the
+	// list. A heartbeat can legitimately land in the instant between the (3)
+	// snapshot and the close, so the invariant this test owns is the one that
+	// holds from here on: a DEAD agent produces no evidence, and nothing that
+	// merely READS the row manufactures any.
+	postKill := fetchAgent(t, client, base, presenceAgent)
+
 	// (5) ...and the REGISTRY row must stop claiming online, within the
 	// documented window, with the transition captured live. Every observation is
 	// recorded so the failure message can show what was actually seen rather
@@ -240,12 +247,13 @@ func TestPresenceGoesStaleWhenTheAgentDiesEndToEnd(t *testing.T) {
 		flip.at.Round(10*time.Millisecond), presenceWindowS, describe())
 
 	// (6) The staleness is DERIVED, not manufactured: the stored row still
-	// carries the evidence instant it had, so the message that arrives when the
-	// agent comes back refreshes the same row instead of a rewritten one.
+	// carries the evidence instant it had once the agent was gone, so the
+	// message that arrives when the agent comes back refreshes the same row
+	// instead of a rewritten one.
 	dead := fetchAgent(t, client, base, presenceAgent)
-	if !parseLastSeen(t, dead).Equal(parseLastSeen(t, live)) {
+	if !parseLastSeen(t, dead).Equal(parseLastSeen(t, postKill)) {
 		t.Errorf("last_seen moved while the agent was dead: %s → %s (a dead agent produces no evidence)",
-			live.LastSeen, dead.LastSeen)
+			postKill.LastSeen, dead.LastSeen)
 	}
 
 	// (7) The listing a dashboard actually reads agrees with the detail read.

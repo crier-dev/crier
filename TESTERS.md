@@ -264,6 +264,65 @@ curl -s $BASE/agents           # -> 200
 curl -s $BASE/agents/bob/inbox # -> 401
 ```
 
+**1a. Task ownership (CR-FEAT-025)** — the four surfaces the external review
+(`DISPATCH · CRI-001`) filed under "the lease is the lock". Each recipe states
+what to look at, not just what to run.
+
+```bash
+# A. A retried delivery does not duplicate work. Deliver the SAME idempotency_key
+#    twice; the second accept names the FIRST message id, carries
+#    "idempotent_replay":true, and stores nothing — bob's queue_depth stays 1.
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"build"},"sender":"alice","idempotency_key":"job-1"}'
+# -> 201 {"id":"<ID>","transport":"inbox","expires_at":"..."}
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"build"},"sender":"alice","idempotency_key":"job-1"}'
+# -> 201 {"id":"<the SAME ID>","transport":"inbox","idempotent_replay":true}
+# (a different key, or a different target agent, is a new message: the key is
+#  scoped per (agent, key) and inside CR_IDEMPOTENCY_WINDOW_S, default 24h)
+
+# B. An expired message produces exactly ONE receipt for its sender. Deliver
+#    with the smallest TTL, wait for the sweep (it runs every 30s) and read
+#    ALICE's inbox — not bob's: the receipt goes to the sender.
+curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
+  -d '{"payload":{"job":"expire-me"},"sender":"alice","ttl_seconds":1}'
+sleep 35
+TS=$(date +%s)
+curl -s "$BASE/agents/alice/inbox" -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key GET /agents/alice/inbox "$TS")"
+# -> 200 {"messages":[{"payload":"<base64>"...}]} — decode the payload:
+# -> {"kind":"error","code":"MESSAGE_EXPIRED","message_id":"<the original>",
+#     "target":"bob","dead_lettered":true,
+#     "dead_letter_path":"/agents/bob/inbox/dead-letters",...}
+# Exactly one per expired message: a second sweep adds nothing.
+
+# C. The dead-letter destination holds the body. Same signed read as any inbox
+#    route, on the TARGET's inbox, and it answers even after bob is deleted:
+curl -s "$BASE/agents/bob/inbox/dead-letters?limit=5" \
+  -H "X-Agent-ID: bob" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-bob.key GET /agents/bob/inbox/dead-letters "$TS")"
+# -> 200 {"agent_id":"bob","dead_letters":[{"message_id":"<original>",
+#     "payload":"<base64 of what was delivered>","sender":"alice",
+#     "expires_at":"...","dead_lettered_at":"...",
+#     "reason":"ttl_expired_unacked"}],"count":1}
+
+# D. Transfer / reassign a stuck lease. bob retrieves his own message and never
+#    acks it (the stuck lease); a foreman moves it to dave in one signed call,
+#    and dave can claim it immediately — no waiting out the 30s lease.
+TS=$(date +%s)
+LEASE_ID=<lease_id from bob's retrieve of the message>
+curl -s -X POST $BASE/agents/bob/inbox/transfer -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: bob" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-bob.key POST /agents/bob/inbox/transfer "$TS")" \
+  -d "{\"target_agent_id\":\"dave\",\"lease_id\":\"${LEASE_ID}\",\"message_ids\":[\"<MSG_ID>\"]}"
+# -> 200 {"from":"bob","to":"dave","moved":1,"message_ids":["<MSG_ID>"]}
+#   * the same id in dave's inbox, payload and expiry intact, UNLEASED;
+#   * bob's ack for it now answers 404 (he no longer holds it);
+#   * a WRONG lease_id is 409 and nothing moves — the lease is still the lock;
+#   * a holder that is GONE needs no lease: add "force":true to move it anyway;
+#   * an unknown message_id is 404 and moves NOTHING (a batch goes as a unit).
+```
+
 **2. Relay pub/sub** — fan-out to live subscribers (topic patterns support `*`
 for exactly one segment and a terminal `>` for one-or-more):
 

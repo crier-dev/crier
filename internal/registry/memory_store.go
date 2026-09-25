@@ -152,6 +152,13 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 		}
 		entry.ID = id
 	}
+	// A delivery never arrives pre-leased: the lease is minted by Retrieve and
+	// by nothing else (CR-FEAT-025 keeps the re-delivery below honest — an
+	// entry handed back by a dead-letter/transfer path is unleased).
+	entry.LeasedAt = nil
+	entry.LeaseID = ""
+	entry.LeaseDuration = 0
+	entry.ACKed = false
 
 	s.inboxes[agentID] = append(s.inboxes[agentID], entry)
 	return nil
@@ -354,13 +361,42 @@ func (s *MemoryStore) Stats(agentID string) (queueDepth, leasedCount int, oldest
 // PurgeExpired removes all expired messages from all inboxes and returns
 // messages whose lease has expired back to the unleased state. Returns the
 // total number of messages removed.
+//
+// It is the count-only arm of PurgeExpiredReport (CR-FEAT-025): a caller that
+// only needs the number gets it without a report callback, exactly as before.
 func (s *MemoryStore) PurgeExpired() int {
+	return s.PurgeExpiredReport(nil)
+}
+
+// PurgeExpiredReport removes every TTL-expired message and reports each one to
+// `report` AFTER it is out of the inbox, so a caller can dead-letter it and
+// notify its sender (CR-FEAT-025). Expired leases are still returned to the
+// unleased state, as PurgeExpired has always done.
+//
+// The report callback is invoked with the store's write lock RELEASED: the
+// caller's report path writes back to this store (a dead-letter record and a
+// receipt into the sender's inbox), and reporting under the lock would
+// self-deadlock on the non-reentrant mutex.
+func (s *MemoryStore) PurgeExpiredReport(report func(agentID string, entry *InboxEntry)) int {
+	expired := s.purgeExpiredLocked(time.Now())
+
+	for _, entry := range expired {
+		if report != nil {
+			report(entry.AgentID, entry)
+		}
+	}
+	return len(expired)
+}
+
+// purgeExpiredLocked performs the sweep and returns the removed entries (their
+// AgentID filled in). It takes the write lock itself and releases it before
+// returning, so no caller can accidentally invoke a report callback while
+// holding it.
+func (s *MemoryStore) purgeExpiredLocked(now time.Time) []*InboxEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
-	removed := 0
-
+	var expired []*InboxEntry
 	for agentID, queue := range s.inboxes {
 		filtered := make([]*InboxEntry, 0, len(queue))
 		for _, entry := range queue {
@@ -368,7 +404,8 @@ func (s *MemoryStore) PurgeExpired() int {
 			// never expires (ttl_seconds=0, DF-CRIER-37) and must survive
 			// every purge pass.
 			if !entry.ExpiresAt.IsZero() && entry.ExpiresAt.Before(now) {
-				removed++
+				entry.AgentID = agentID
+				expired = append(expired, entry)
 				continue
 			}
 			// Return expired leases to unleased state.
@@ -387,6 +424,5 @@ func (s *MemoryStore) PurgeExpired() int {
 		}
 		s.inboxes[agentID] = filtered
 	}
-
-	return removed
+	return expired
 }

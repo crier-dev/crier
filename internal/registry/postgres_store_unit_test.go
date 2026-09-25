@@ -802,10 +802,14 @@ func TestPostgresStoreUnit_Deliver_ExpiryBeforeCreated(t *testing.T) {
 
 func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	s, mock := newMockStore(t)
-	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`)}
+	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1"}
 
+	// Seven arguments since CR-FEAT-025: sender and idempotency_key ride with
+	// the message (they are the receipt address and the dead-letter
+	// provenance), so the INSERT names them explicitly.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
+			pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -816,11 +820,28 @@ func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
+	s, mock := newMockStore(t)
+
+	// A delivery that names no sender and carries no key stores NULL for both
+	// (CR-FEAT-025) — never an empty string, so "not recorded" has exactly one
+	// representation in the database.
+	mock.ExpectExec(`INSERT INTO inbox_entries`).
+		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
+			pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -832,7 +853,8 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -844,7 +866,8 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
-		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -907,9 +930,11 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	mock.ExpectQuery(`SELECT 1 FROM agents`).
 		WithArgs("agent").
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
-	// Claiming select — locks a disjoint FIFO batch.
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "created_at", "expires_at"}).
-		AddRow("msg-1", "agent", []byte(`{}`), now, now.Add(time.Hour))
+	// Claiming select — locks a disjoint FIFO batch. Since CR-FEAT-025 the row
+	// also carries the delivery's sender and idempotency key (read back through
+	// COALESCE so a NULL provenance arrives as "").
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", now, now.Add(time.Hour))
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)
@@ -926,6 +951,7 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	require.NotEmpty(t, leaseID)
 	require.Equal(t, leaseID, msgs[0].LeaseID, "returned entries must carry the minted lease")
 	require.Equal(t, 30*time.Second, msgs[0].LeaseDuration)
+	require.Equal(t, "foreman", msgs[0].Sender, "the stored sender travels with the retrieved message")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -1138,18 +1164,64 @@ func TestPostgresStoreUnit_Stats_AgentNotFound(t *testing.T) {
 
 func TestPostgresStoreUnit_PurgeExpired_RemovesTTLExpired(t *testing.T) {
 	s, mock := newMockStore(t)
+	now := time.Now().UTC()
 
+	// The sweep reads the removed rows back from the DELETE itself
+	// (CR-FEAT-025), so the report describes what was actually deleted.
+	expired := now.Add(-time.Hour)
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM inbox_entries`).
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{"n":1}`), "foreman", "k-1", now.Add(-2*time.Hour), expired).
+		AddRow("m2", "agent", []byte(`{"n":2}`), "", "", now.Add(-2*time.Hour), expired).
+		AddRow("m3", "other", []byte(`{"n":3}`), "", "", now.Add(-2*time.Hour), expired)
+	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
-		WillReturnResult(pgxmock.NewResult("DELETE", 3))
+		WillReturnRows(rows)
 	mock.ExpectExec(`UPDATE inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 2))
+	// Retention housekeeping runs in the same transaction.
+	mock.ExpectExec(`DELETE FROM dead_letters`).
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectCommit()
 
-	removed := s.PurgeExpired()
+	reported := make(map[string]string)
+	removed := s.PurgeExpiredReport(func(agentID string, entry *InboxEntry) {
+		reported[entry.ID] = entry.Sender
+	})
 	require.Equal(t, 3, removed)
+	require.Equal(t, map[string]string{"m1": "foreman", "m2": "", "m3": ""}, reported)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPostgresStoreUnit_PurgeExpired_ReportsAfterCommit(t *testing.T) {
+	s, mock := newMockStore(t)
+	now := time.Now().UTC()
+
+	mock.ExpectBegin()
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{}`), "foreman", "", now.Add(-time.Hour), now.Add(-time.Minute))
+	mock.ExpectQuery(`DELETE FROM inbox_entries`).
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnRows(rows)
+	mock.ExpectExec(`UPDATE inbox_entries`).
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	mock.ExpectExec(`DELETE FROM dead_letters`).
+		WithArgs(pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("DELETE", 0))
+	mock.ExpectCommit()
+
+	// The report runs after the commit: with a commit failure (the previous
+	// test class) nothing is reported, so a caller can never dead-letter a
+	// message that is still in the inbox.
+	var reported []string
+	removed := s.PurgeExpiredReport(func(agentID string, entry *InboxEntry) {
+		reported = append(reported, entry.ID)
+	})
+	require.Equal(t, 1, removed)
+	require.Equal(t, []string{"m1"}, reported)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -1167,29 +1239,36 @@ func TestPostgresStoreUnit_PurgeExpired_DeleteError(t *testing.T) {
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM inbox_entries`).
+	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnError(errors.New("deadlock detected"))
 	mock.ExpectRollback()
 
-	removed := s.PurgeExpired()
+	var reported int
+	removed := s.PurgeExpiredReport(func(agentID string, entry *InboxEntry) { reported++ })
 	require.Equal(t, 0, removed)
+	require.Zero(t, reported, "a failed delete reports nothing")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestPostgresStoreUnit_PurgeExpired_UpdateError(t *testing.T) {
 	s, mock := newMockStore(t)
+	now := time.Now().UTC()
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM inbox_entries`).
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{}`), "", "", now.Add(-time.Hour), now.Add(-time.Minute))
+	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
-		WillReturnResult(pgxmock.NewResult("DELETE", 1))
+		WillReturnRows(rows)
 	mock.ExpectExec(`UPDATE inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnError(errors.New("deadlock detected"))
 	mock.ExpectRollback()
 
-	removed := s.PurgeExpired()
+	var reported int
+	removed := s.PurgeExpiredReport(func(agentID string, entry *InboxEntry) { reported++ })
 	require.Equal(t, 0, removed)
+	require.Zero(t, reported, "a rolled-back sweep reports nothing")
 	require.NoError(t, mock.ExpectationsWereMet())
 }

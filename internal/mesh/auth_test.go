@@ -706,6 +706,14 @@ func TestMeshConnectPeerCompletesHandshake(t *testing.T) {
 	if err := client.ConnectPeer(context.Background(), "crier-under-test", wsURL); err != nil {
 		t.Fatalf("ConnectPeer: %v", err)
 	}
+	// The client's handshake completing proves the SERVER admitted the socket, but
+	// the peer-table entry can still be a scheduling instant behind under load, so
+	// this waits for it the same way the HTTP view below does rather than reading
+	// it once.
+	peersDeadline := time.Now().Add(2 * time.Second)
+	for m.ActivePeers() != 1 && time.Now().Before(peersDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if m.ActivePeers() != 1 {
 		t.Fatalf("server ActivePeers = %d, want 1", m.ActivePeers())
 	}

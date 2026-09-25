@@ -1038,6 +1038,13 @@ func liveCount(repoRoot, claimID string) (any, error) {
 	if strings.HasPrefix(claimID, "COUNT-SOAK-") {
 		return soakClaim(repoRoot, claimID)
 	}
+	// CR-FEAT-025: the published contract of the ownership surfaces (the
+	// idempotency replay marker, the expiry-receipt code, the dead-letter path
+	// a receipt points at) is pinned per phrase, so a failure names the phrase
+	// that moved instead of a shared count.
+	if strings.HasPrefix(claimID, "COUNT-OWNERSHIP-") {
+		return countOwnershipPhrase(repoRoot, claimID)
+	}
 	switch claimID {
 	case "COUNT-OPENAPI-PATHS", "COUNT-OPENAPI-OPERATIONS":
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "openapi.yaml"))
@@ -1487,6 +1494,35 @@ func happyPathClaimProbe(claimID string) (doc string, check func(string) (int, e
 		}, true
 	}
 	return "", nil, false
+}
+
+// ownershipAnchorPhrases maps each CR-FEAT-025 count claim to the phrase it
+// measures in README.md. The claim is 1 when the phrase is published and 0 when
+// it is not: the point is that the documented contract of a NEW API surface —
+// what a client codes against — cannot be edited away without the gate saying
+// so. Each phrase is one the surface actually emits or answers on (the replay
+// marker in an accept body, the receipt code in a MESSAGE_EXPIRED payload, the
+// retrieval path that receipt points at).
+var ownershipAnchorPhrases = map[string]string{
+	"COUNT-OWNERSHIP-IDEMPOTENT-REPLAY-README": `"idempotent_replay":true`,
+	"COUNT-OWNERSHIP-MESSAGE-EXPIRED-README":   "MESSAGE_EXPIRED",
+	"COUNT-OWNERSHIP-DEAD-LETTERS-README":      "dead-letters?limit=N",
+}
+
+// countOwnershipPhrase re-measures one CR-FEAT-025 claim from the README.
+func countOwnershipPhrase(repoRoot, claimID string) (any, error) {
+	phrase, ok := ownershipAnchorPhrases[claimID]
+	if !ok {
+		return nil, fmt.Errorf("no ownership doc probe for claim %q", claimID)
+	}
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(string(raw), phrase) {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 // countHappyPathDurable re-measures one CR-FEAT-034 claim from its doc.
