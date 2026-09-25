@@ -741,3 +741,181 @@ Retry/backoff, the offline queue for unreachable endpoints, the per-endpoint
 circuit breaker, and relay-to-relay (federated) delivery are specified in
 `specs/WEBHOOK-DELIVERY.md` and `docs/specs.md` — this section covers the
 registration object and the wire contracts only.
+
+---
+
+## 9. External non-Go consumers: the durable inbox pull path
+
+Everything in §2 and §3 is plain HTTP plus `openssl`: no Crier SDK, no Go
+toolchain and no WebSocket client are involved. That makes the durable inbox the
+one path an external harness — a Python, TypeScript or DB-native agent such as
+Consensus — can adopt without writing any Go, and this section is that path end
+to end. Every leg below was measured live against a scratch-port server in
+config C, and the same round-trip is re-run on every commit by
+`scripts/e2e-battery.sh` (the *foreign-agent inbox isolation* cell).
+
+### 9.1 Pull from the durable inbox — do not subscribe for delivery
+
+**An external, long-lived consumer should use the durable inbox: `POST
+/agents/{id}/inbox` in, `GET /agents/{id}/inbox` out, `POST
+/agents/{id}/inbox/ack` when it is done. It is pull-based, the server holds the
+message until the consumer acks it, and it therefore survives consumer
+downtime. The relay (`POST /relay/publish` / `GET /relay/subscribe/{topic}`,
+§4) is for live push to a consumer that is already connected — it is a fan-out,
+not a mailbox.**
+
+Two reasons, both measured live on a scratch server (transcripts in §9.3):
+
+- **The relay DROPS an event that is published while nobody is subscribed, and
+  never replays it.** A publish with zero subscribers answers `202` and the
+  event is gone: the subscriber that connected one second later waited 5s on
+  that very topic and received no frame at all. An external consumer has no way
+  to learn what it missed — a restart, a redeploy or even a reconnect window
+  between subscribe and publish is a hole in its history. The inbox has no such
+  window: a delivery is stored until it is acked, so downtime costs latency,
+  never messages.
+- **The inbox has no subscribe-before-publish race.** Relay push only reaches a
+  consumer whose subscription is already established, so the producer and the
+  consumer must be ordered correctly for every message. The inbox requires
+  nothing of the consumer at delivery time: it can start, crash and restart in
+  any order relative to the producer, and an unacked message reappears after its
+  lease expires (30s by default) — the *same* message id, not a copy.
+
+Prefer the relay when the consumer is already connected and best-effort live
+push is what you want (a dashboard, a co-resident process, §4).
+
+One more reason not to route an external producer at the webhook path (an agent
+registered with a `webhook`, §8): the `openai-compatible` schema template reads
+only `payload.text` and silently sends an empty content body for any other
+payload shape (DF-CRIER-279), so a producer following this section's payloads
+would push empty messages. Inbox pull has no shaper between producer and
+consumer.
+
+### 9.2 The recipe (config C — the production default)
+
+The three auth configurations are the ones defined in §1. Which tier each step
+needs — this is the whole authorization surface of the pull path:
+
+| Step | Endpoint | Config A (open) | Config B (bearer) | Config C (bearer + signature) |
+|------|----------|-----------------|-------------------|-------------------------------|
+| Register the consumer | `POST /agents` | open | bearer | bearer — **no signature** |
+| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer — **no signature** |
+| Retrieve (leases the batch) | `GET /agents/{id}/inbox` | open | bearer | bearer **+ signature** |
+| Ack the lease | `POST /agents/{id}/inbox/ack` | open | bearer | bearer **+ signature** |
+| Drain check (optional) | `GET /agents/{id}/inbox/stats` | open | bearer | bearer **+ signature** |
+
+Only the consumer's OWN steps are signed, and only in config C: **register and
+deliver need no signature in any configuration**, which is what makes the inbox
+a mailbox — any registered producer may deliver into it. The signed steps are
+exactly the agent-owned ones (`retrieve`, `ack`, `stats`, plus `DELETE
+/agents/{id}` and `PATCH /agents/{id}`), and the caller in `X-Agent-ID` must be
+the agent in the path: another agent's id is refused with `403`, not `401` (§9.3).
+
+```bash
+# One identity, one keypair — OpenSSL >= 3, the same key format as §2 and §3.
+PORT=8767
+AGENT=consensus
+AUTH=(-H "Authorization: Bearer $CR_AUTH_TOKEN")   # drop this in config A
+openssl genpkey -algorithm ED25519 -out agent.key
+PUBKEY=$(openssl pkey -in agent.key -pubout -outform DER | tail -c 32 | xxd -p -c 64)
+
+# 1. register the consumer with its public key                              # → 201
+curl -s -X POST localhost:$PORT/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"$AGENT\",\"public_key\":\"$PUBKEY\",\"capabilities\":[\"inbox\"]}"
+# → 201 {"id":"consensus","public_key":"33acb5…","capabilities":["inbox"],"status":"online",
+#        "registered_at":"…","last_seen":"…"}
+
+# 2. deliver a message INTO its inbox — no signature, any registered producer  # → 201
+curl -s -X POST localhost:$PORT/agents/$AGENT/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"payload":{"round_trip":"cr-consensus-1","text":"hello from an external non-Go harness"}}'
+# → 201 {"id":"b619a256231e4fa5aeb00d82","transport":"inbox",
+#        "expires_at":"2026-09-26T04:06:23.868749589Z"}
+# (the payload is stored VERBATIM, wrapped in nothing — see §9.3 for the
+#  round-trip proof: the retrieved payload base64-decodes to those exact bytes)
+
+# 3. signed retrieve — leases the batch for 30s by default                     # → 200
+TS=$(date +%s)
+printf 'GET\n/agents/consensus/inbox\n%s' "$TS" > payload.txt
+SIG=$(sig)   # helper from §3 Retrieve — fails loudly on OpenSSL < 3
+curl -s localhost:$PORT/agents/$AGENT/inbox "${AUTH[@]}" \
+  -H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG"
+# → 200 {"messages":[{"id":"b619a256231e4fa5aeb00d82","agent_id":"consensus",
+#         "payload":"eyJyb3VuZF90cmlwIjoiY3ItY29uc2Vuc3VzLTEiLCJ0ZXh0IjoiaGVsbG8g…",
+#         "created_at":"2026-09-25T04:06:23.868749589Z","leased_at":"2026-09-24T23:06:23.902707318-05:00",
+#         "lease_id":"cd981baea0533ab459186c8026e8be2e","acked":false,
+#         "expires_at":"2026-09-26T04:06:23.868749589Z"}],
+#        "lease_id":"cd981baea0533ab459186c8026e8be2e","queue_depth":1,"leased_count":1}
+
+# 4. signed ack — only ids that came back with THAT lease_id                   # → 204
+TS=$(date +%s)
+printf 'POST\n/agents/consensus/inbox/ack\n%s' "$TS" > payload.txt
+SIG=$(sig)   # helper from §3 Retrieve
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:$PORT/agents/$AGENT/inbox/ack "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \
+  -d '{"lease_id":"cd981baea0533ab459186c8026e8be2e","message_ids":["b619a256231e4fa5aeb00d82"]}'
+# → 204
+```
+
+The signing helper is §3's `sig()`, verbatim — define it once before step 3:
+
+```bash
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; _sig=$(openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
+```
+
+The payload the signature covers is `METHOD\n<path>\n<unix-seconds>` for the
+agent in the path — the same scheme as §3, and the signature is bound to both
+the method and the path, so a signature minted for the retrieve cannot be
+replayed on the ack. The ack rules (§3) apply unchanged: a lease-only ack is
+`400`, an unknown message id is `404`, and a stale lease is `409`.
+
+An external consumer's loop is therefore: `GET /agents/{id}/inbox` → process
+each message's base64-decoded `payload` → `POST /agents/{id}/inbox/ack` with
+the `lease_id` and the ids from the same response. Anything the consumer does
+not ack (a crash mid-batch, a process that dies) is redelivered when the lease
+expires — no message loss, no subscribe-before-publish ordering requirement.
+
+### 9.3 What was measured (scratch server, config C)
+
+**The relay drop.** A publish to a topic with ZERO subscribers answers `202` and
+the event is discarded — a later subscriber never sees it:
+
+```bash
+# publish with nobody subscribed → 202 (and GET /relay/topics → 200 {"topics":[]})
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:$PORT/relay/publish "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -H 'X-Agent-ID: consensus' \
+  -d '{"topic":"consensus.live.drop","event":{"n":1}}'
+# → 202
+
+# a subscriber connects LATE on that topic and waits 5 seconds:
+#   no frame within 5s -> the pre-subscription publish was DROPPED (never replayed)
+# ... and the next publish, made while it IS connected, arrives immediately:
+#   {"topic": "consensus.live.drop", "event": {"n": 2}}
+```
+
+**The inbox redelivery.** An unacked message comes back after its lease
+expires — the same message id, under a fresh lease:
+
+```bash
+# deliver, then retrieve with a 3s lease, then do NOT ack:
+#   retrieve #1 → 200  messages[0].id=9d72ab31…  lease_id=04e205c5…
+#   retrieve #2 immediately → 200 {"messages":[],"lease_id":"","queue_depth":1,"leased_count":1}
+#     (leased_count:1 is the tell documented in §3 — the message is HELD, not lost)
+#   sleep 5   # the 3s lease expires
+#   retrieve #3 → 200  messages[0].id=9d72ab31…  lease_id=f6b01976…   ← SAME id, redelivered
+
+# and the cross-agent negative, same server: B (its own keypair, registered)
+# signs a retrieve of A's inbox with its OWN headers → 403
+#   {"error":"agent \"consensus-b\" may only access its own resources (target \"consensus\")"}
+# while B's own inbox answers 200 {"messages":[],"lease_id":"","queue_depth":0,"leased_count":0}
+```
+
+**The payload round-trip.** `payload` is base64 of the delivered bytes; this
+was compared byte-for-byte against the delivered string, and it matched:
+
+```bash
+# delivered:      {"round_trip":"cr-consensus-1","text":"hello from an external non-Go harness"}
+# base64-decoded: {"round_trip":"cr-consensus-1","text":"hello from an external non-Go harness"}
+# ROUND-TRIP: INTACT
+```
+

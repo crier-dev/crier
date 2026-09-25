@@ -560,3 +560,61 @@ claims:
   # measured by liveTTLDeliverySeconds, which is simply no longer pinned to a
   # doc claim). Claiming it again would require a doc line that says the
   # opposite of what the server does.
+
+  # --- CR-CONSENSUS-1: §9 (external non-Go consumers) joins the claim set. The
+  # section documents the pull path an external harness adopts — keypair,
+  # register, deliver, signed retrieve, signed ack — so every route its curl
+  # sequence drives is claimed live here, anchored to the §9.2 table ROW the
+  # path appears in (a whole-row quote, the CR-GAP-063 shape: editing any cell of
+  # that row fails the gate before the live probe can pass). kind: route is
+  # GET-probed and ONLY a 404 fails, so an agent-scoped path that answers 401
+  # without signatures (or 405 on a POST-only path) counts as the route
+  # existing — exactly like ROUTE-README-STATUS. No probe-table entry in
+  # cmd/server/docsclaims_test.go is needed for these ids: they are pure route
+  # claims, and every path they probe (/agents, /agents/{id}/inbox,
+  # /agents/{id}/inbox/ack, /agents/{id}/inbox/stats, /relay/publish,
+  # /relay/subscribe/{topic}) already has live precedent in the README claims
+  # above. The relay pair is claimed here because §9.1 is where the guide tells
+  # an external consumer to prefer the inbox over it.
+  - id: ROUTE-GUIDE-EXTERNAL-REGISTER
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "| Register the consumer | `POST /agents` | open | bearer | bearer — **no signature** |"
+    expect: "/agents"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-INBOX-DELIVER
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "| Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer — **no signature** |"
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-INBOX-RETRIEVE
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "| Retrieve (leases the batch) | `GET /agents/{id}/inbox` | open | bearer | bearer **+ signature** |"
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-INBOX-ACK
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "| Ack the lease | `POST /agents/{id}/inbox/ack` | open | bearer | bearer **+ signature** |"
+    expect: "/agents/{id}/inbox/ack"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-INBOX-STATS
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "| Drain check (optional) | `GET /agents/{id}/inbox/stats` | open | bearer | bearer **+ signature** |"
+    expect: "/agents/{id}/inbox/stats"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-RELAY-PUBLISH
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "The relay (`POST /relay/publish` / `GET /relay/subscribe/{topic}`,"
+    expect: "/relay/publish"
+    xfail: null
+  - id: ROUTE-GUIDE-EXTERNAL-RELAY-SUBSCRIBE
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "The relay (`POST /relay/publish` / `GET /relay/subscribe/{topic}`,"
+    expect: "/relay/subscribe/{topic}"
+    xfail: null

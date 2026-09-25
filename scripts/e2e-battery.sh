@@ -12,6 +12,11 @@
 #   relay: publish 202 (X-Agent-ID) -> topics listing -> WS receive ->
 #   wildcard WS receive (bat.* matches bat.<ts>)
 #   ttl: deliver expires_at=1s -> retrieve after 2s -> zero messages
+#   foreign-agent inbox isolation: A and B register with their OWN keypairs ->
+#   deliver into A (no signature) -> A signed retrieve 200 with the payload
+#   round-trip INTACT (base64-decoded == delivered) -> B signed retrieve of A's
+#   inbox -> 403 (cross-agent, B's own valid signature) -> B's own inbox 200
+#   empty -> A signed ack 204
 #
 # Usage: scripts/e2e-battery.sh [port]     (default 18782; falls back if taken)
 set -uo pipefail
@@ -87,16 +92,20 @@ echo "server up: pid $SERVER_PID on :${PORT} (ownership asserted)"
 # --- signing helpers (ed25519 trio, OpenSSL 3 -rawin) ---
 openssl genpkey -algorithm ED25519 -out "$WORKDIR/agent.key" 2>/dev/null
 PUBHEX="$(openssl pkey -in "$WORKDIR/agent.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
-sign() { # METHOD PATH TS  -> SIGN_SIG / SIGN_TS
-  printf '%s\n%s\n%s' "$1" "$2" "$3" > "$WORKDIR/pl.txt"
-  SIGN_SIG="$(openssl pkeyutl -sign -rawin -inkey "$WORKDIR/agent.key" -in "$WORKDIR/pl.txt" 2>/dev/null | xxd -p -c 128)"
-  SIGN_TS="$3"
+sign_with() { # KEYFILE METHOD PATH TS  -> SIGN_SIG / SIGN_TS
+  printf '%s\n%s\n%s' "$2" "$3" "$4" > "$WORKDIR/pl.txt"
+  SIGN_SIG="$(openssl pkeyutl -sign -rawin -inkey "$1" -in "$WORKDIR/pl.txt" 2>/dev/null | xxd -p -c 128)"
+  SIGN_TS="$4"
+}
+sign() { sign_with "$WORKDIR/agent.key" "$@"; }   # the battery identity's own key
+sreq_with() { # KEYFILE AGENTID METHOD PATH [data] — signed as AGENTID with ITS OWN key
+  local key="$1" agent="$2" method="$3" path="$4" data="${5:-}"
+  sign_with "$key" "$method" "$path" "$(date +%s)"
+  local args=(-H "X-Agent-ID: $agent" -H "X-Agent-Ts: $SIGN_TS" -H "X-Agent-Sig: $SIGN_SIG")
+  if [ -n "$data" ]; then req "$method" "$path" "$data" "${args[@]}"; else req "$method" "$path" "" "${args[@]}"; fi
 }
 sreq() { # METHOD PATH [data] — signed with the battery key as $AGENT
-  local method="$1" path="$2" data="${3:-}"
-  sign "$method" "$path" "$(date +%s)"
-  local args=(-H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $SIGN_TS" -H "X-Agent-Sig: $SIGN_SIG")
-  if [ -n "$data" ]; then req "$method" "$path" "$data" "${args[@]}"; else req "$method" "$path" "" "${args[@]}"; fi
+  sreq_with "$WORKDIR/agent.key" "$AGENT" "$@"
 }
 
 AGENT="e2e-bat-$(date +%s)"
@@ -178,6 +187,51 @@ if [ "$CODE" = "200" ] && [ "${BODY#*'"messages":[]'}" != "$BODY" ]; then
   PASS=$((PASS+1)); echo "PASS  expired message no longer retrievable"; ev "ttl expiry" 200 200 true
 else
   FAIL=$((FAIL+1)); echo "FAIL  ttl expiry (HTTP $CODE)"; echo "      body: $(printf '%s' "$BODY" | head -c 200)"; ev "ttl expiry" "${CODE:-0}" 200 false
+fi
+
+say "foreign-agent inbox isolation"
+# Two foreign identities (a second and third keypair, not the battery key):
+# deliver needs NO signature, so B's delivery lands in A's inbox, but the
+# signed reads are agent-owned — B's valid signature over A's path is refused
+# 403, and B's own inbox stays empty. The payload round-trip (base64-decode
+# the retrieved payload and compare to the delivered string) is the tick-142
+# precedent: retrieval must hand back the delivered bytes, not a re-encoding.
+FA="e2e-fa-${AGENT}"; FB="e2e-fb-${AGENT}"
+RT_PAYLOAD='{"round_trip":"cr-consensus-1","text":"foreign agent payload"}'
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fa.key" 2>/dev/null
+PUBHEX_A="$(openssl pkey -in "$WORKDIR/fa.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fb.key" 2>/dev/null
+PUBHEX_B="$(openssl pkey -in "$WORKDIR/fb.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+req POST /agents "{\"id\":\"$FA\",\"public_key\":\"$PUBHEX_A\",\"capabilities\":[\"inbox\"]}"; check "foreign agent A register 201 (own keypair)" 201
+req POST /agents "{\"id\":\"$FB\",\"public_key\":\"$PUBHEX_B\"}";                                check "foreign agent B register 201 (different keypair)" 201
+req POST "/agents/$FA/inbox" "{\"payload\":$RT_PAYLOAD}"; check "deliver into A's inbox 201 (deliver needs no signature)" 201 '"id"'
+sreq_with "$WORKDIR/fa.key" "$FA" GET "/agents/$FA/inbox"
+check "A signed retrieve 200 (leased)" 200 '"lease_id"'
+printf '%s' "$BODY" > "$WORKDIR/fa_retrieve.json"
+python3 - "$WORKDIR/fa_retrieve.json" "$RT_PAYLOAD" > "$WORKDIR/fa_rt.out" 2>&1 <<'PYEOF'
+import base64, json, sys
+body = json.load(open(sys.argv[1]))
+want = sys.argv[2]
+got = base64.b64decode(body["messages"][0]["payload"]).decode()
+print("MATCH" if got == want else "MISMATCH got=%r want=%r" % (got, want))
+PYEOF
+if head -1 "$WORKDIR/fa_rt.out" 2>/dev/null | grep -q '^MATCH$'; then
+  PASS=$((PASS+1)); echo "PASS  foreign payload round-trip intact (base64-decoded == delivered)"; ev "foreign payload round-trip" 0 0 true
+else
+  FAIL=$((FAIL+1)); echo "FAIL  foreign payload round-trip (base64-decoded != delivered)"
+  echo "      $(head -c 300 "$WORKDIR/fa_rt.out" 2>/dev/null)"; ev "foreign payload round-trip" 0 0 false
+fi
+sreq_with "$WORKDIR/fb.key" "$FB" GET "/agents/$FA/inbox"
+check "B signed retrieve of A's inbox -> 403 (cross-agent, B's own valid sig)" 403
+sreq_with "$WORKDIR/fb.key" "$FB" GET "/agents/$FB/inbox"
+check "B's own inbox retrieve 200 empty (isolation is per-agent)" 200 '"messages":[]'
+FA_LEASE="$(python3 -c "import json;print(json.load(open('$WORKDIR/fa_retrieve.json'))['lease_id'])" 2>/dev/null)"
+FA_MSG="$(python3 -c "import json;print(json.load(open('$WORKDIR/fa_retrieve.json'))['messages'][0]['id'])" 2>/dev/null)"
+if [ -n "$FA_LEASE" ] && [ -n "$FA_MSG" ]; then
+  sreq_with "$WORKDIR/fa.key" "$FA" POST "/agents/$FA/inbox/ack" "{\"lease_id\":\"$FA_LEASE\",\"message_ids\":[\"$FA_MSG\"]}"
+  check "A signed ack 204 (lease+ids)" 204
+else
+  FAIL=$((FAIL+1)); echo "FAIL  foreign ack path (no lease_id/message id in A's retrieve body)"; ev "foreign ack" 0 204 false
 fi
 
 say "teardown"
