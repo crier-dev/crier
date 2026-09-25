@@ -1228,6 +1228,79 @@ troubleshooting: [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) (CR-FEAT-0
 normative design authority is [`specs/AGENT-ECOSYSTEM.md`](specs/AGENT-ECOSYSTEM.md)
 (CR-SPEC-003).
 
+## Detection & containment (CR-FEAT-030)
+
+Crier could always tell you **who** sent what — after the fact. Per-agent
+ed25519 identity, one delivery choke point, durable failure receipts: that is
+attribution. This is the other half: seeing an intrusion **while it is
+happening**, and ending it in one call. The normative design is
+[`specs/DETECTION.md`](specs/DETECTION.md).
+
+It is opt-in (`CR_DETECT_ENABLED`, default `false`). With the flag unset, none
+of the routes below is registered, no file is written and the delivery path is
+byte-identical to a build without this feature.
+
+**1. An append-only, signed delivery log.** Every delivery outcome — who sent
+what to whom, when, and the verdict the bus reached — is appended to
+`CR_DETECT_LOG` and signed with the server's ed25519 key (`CR_DETECT_KEY`,
+created `0600` on first boot, so the log stays verifiable across restarts).
+Each record carries the hash of the one before it, so editing, deleting or
+reordering a record breaks verification from that point on, and the server
+**refuses to start** on a log it cannot verify rather than appending to a
+history that no longer means anything. `GET /delivery-log` answers a bounded
+page of the in-memory window plus the honest total; `GET /delivery-log/verify`
+re-reads the file and reports the first record that does not verify.
+
+**2. Behaviour baselines, with documented alerts.** Three signals, each one
+alert per agent per window (a signal that fires once per message is a signal
+nobody reads). `GET /alerts` returns them, with the thresholds that are in
+force:
+
+| Signal | Severity | Trips when | Default |
+|--------|----------|------------|---------|
+| `fanout_spike` | critical | one sender reaches N **distinct** targets inside the window | 5 targets in 60s (`CR_DETECT_FANOUT_MIN_TARGETS`, `CR_DETECT_FANOUT_WINDOW_S`) |
+| `new_peer_burst` | critical | one sender opens N first-ever conversations inside the window | 3 in 60s (`CR_DETECT_NEWPEER_MIN_TARGETS`, `CR_DETECT_NEWPEER_WINDOW_S`) |
+| `odd_hour_volume` | warning | one sender delivers N messages inside the quiet window | 3 in 01:00-05:00 UTC (`CR_DETECT_QUIET_MIN_MESSAGES`, `CR_DETECT_QUIET_HOURS`; `0-0` disables it) |
+| `canary_trip` | critical | a delivery is addressed to a canary id, or carries a canary token in its payload | any single occurrence |
+
+**3. The kill-switch — one call, four actions.** `POST /agents/{id}/kill-switch`
+pauses the agent's outbound webhook lane (dropping what it had queued), releases
+the leases it held so its unacked messages go back on the queue, quarantines it
+(the delivery path then refuses both sends **from** it and deliveries **to** it
+with `403 AGENT_QUARANTINED`) and removes its registry row. The response reports
+every action separately, so a partial containment cannot read as a clean one.
+
+**4. Canary tokens.** At boot the server plants canary tokens (`CR_CANARY_TOKENS`,
+or two generated ones, logged and readable at `GET /canaries`) — strings an
+operator puts where an exfiltrating agent would pick them up. Any delivery whose
+payload carries one, or that is addressed to a canary's id, trips
+`canary_trip`.
+
+### Catching and containing a compromised agent
+
+```bash
+BASE=http://127.0.0.1:8767
+# detection on, log into a file you keep
+export CR_DETECT_ENABLED=true
+export CR_DETECT_LOG=delivery.jsonl     # signed with delivery.jsonl.key
+# ... the scenario, against a running server:
+curl -s -X POST $BASE/agents -d '{"id":"peer-1"}'            # and peer-2 .. peer-5
+curl -s -X POST $BASE/agents/peer-1/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'          # and the other peers
+curl -s $BASE/alerts                                          # fanout_spike + new_peer_burst, with evidence
+curl -s -X POST $BASE/agents/compromised/kill-switch \
+     -d '{"reason":"fan-out to 5 new peers"}'                 # ONE call: 4 actions, each reported
+curl -s $BASE/delivery-log/verify                             # the whole file still verifies
+curl -s -X POST $BASE/agents/compromised/inbox \
+     -d '{"sender":"ops","payload":{"x":1}}'                  # 403 AGENT_QUARANTINED (target side)
+```
+
+That run is executed as a test against the real server —
+`TestDetectionCatchesAndContainsACompromisedAgent` in
+`cmd/server/crfeat030_test.go` — which delivers to five new peers, captures the
+alert it trips, contains the agent in one call and then proves the enforcement,
+the log and the restart survival. The capture is in the test's own output.
+
 ## Configuration
 
 All configuration is via environment variables (defaults shown):
@@ -1282,6 +1355,16 @@ All configuration is via environment variables (defaults shown):
 | `CR_ENABLE_PPROF` | `false` | Opt-in: register `GET /debug/pprof/` (plus `cmdline`, `profile`, `symbol`, `trace`, `heap`, `goroutine`, `block`, `mutex`, `threadcreate`) for live Go profiling. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
 | `CR_ENABLE_METRICS` | `false` | Opt-in: register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
 | `CR_A2A_ENABLED` | `false` | Opt-in: A2A (agent-to-agent protocol) interoperability — INT-A2A-001/002, [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md). **Default off, and A2A is an extra rather than first-class support**: with the flag unset nothing A2A-related is registered, and every existing route, response body, auth requirement and storage path behaves exactly as it did before the option existed. The flag is also only HALF the gate — an agent takes part in A2A only if it opted in as well, via the optional `a2a` object on `POST /agents` / `PATCH /agents/{id}` (`{"a2a":{"enabled":true}}`, strictly decoded, absent by default). With the flag set crier publishes exactly ONE A2A surface: `GET /.well-known/agent-card.json?agent_id=<id>` serves the [A2A](https://a2a-protocol.org) Agent Card projected from that agent's registry row (INT-A2A-002) — `404` for an id that is not an opted-in row, `400` when the request names no agent, `Cache-Control: private` + `ETag` for conditional GETs — and nothing else: the JSON-RPC binding, streaming and the push-notification configs land with INT-A2A-003..006. |
+| `CR_DETECT_ENABLED` | `false` | Opt-in: the detection layer (CR-FEAT-030) — signed delivery log, behaviour alerts, canary tokens and the kill-switch, plus the five detection routes. Default off: unset means no route is registered (all five answer `404`), no log file is written and the delivery path is unchanged. Not auth-exempt — the kill-switch requires the Bearer header like every other authenticated route. See [Detection & containment](#detection--containment-cr-feat-030). |
+| `CR_DETECT_LOG` | _(unset — no log written)_ | Path of the append-only signed delivery log. Every delivery outcome is appended and fsynced; alerts and containment are recorded in it too. Unset, alerts and containment still work in memory — nothing is persisted. |
+| `CR_DETECT_KEY` | _(unset — `<CR_DETECT_LOG>.key`)_ | ed25519 signing-key file for the log, created `0600` on first boot and reused after that, so a restarted server still verifies what the previous one wrote. A key file that is unreadable or the wrong length is a startup error, never a silent regeneration. |
+| `CR_DETECT_FANOUT_WINDOW_S` | `60` | Fan-out signal window, seconds. |
+| `CR_DETECT_FANOUT_MIN_TARGETS` | `5` | Distinct targets one sender must reach inside the fan-out window to trip `fanout_spike`. |
+| `CR_DETECT_NEWPEER_WINDOW_S` | `60` | New-peer signal window, seconds. |
+| `CR_DETECT_NEWPEER_MIN_TARGETS` | `3` | First-ever conversations one sender must open inside the window to trip `new_peer_burst`. |
+| `CR_DETECT_QUIET_HOURS` | `1-5` | UTC quiet window `S-E` for the odd-hour signal — start inclusive, end exclusive, wrapping past midnight (`22-6` works). `0-0` disables that signal. |
+| `CR_DETECT_QUIET_MIN_MESSAGES` | `3` | Messages one sender may deliver inside the quiet window before `odd_hour_volume` fires. |
+| `CR_CANARY_TOKENS` | _(unset — two generated per boot, and logged)_ | Comma-separated canary tokens to plant. A delivery addressed to a canary id, or carrying a canary token in its payload, trips `canary_trip`. Pinned tokens keep stable ids across restarts; generated ones rotate per boot. |
 
 ### Durable backend (PostgreSQL)
 
@@ -1325,10 +1408,10 @@ The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an Op
 ```bash
 grep -c '^  /' docs/openapi.yaml                                    # 14 paths
 grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 18 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 17 router paths
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 22 router paths
 ```
 
-The router registers **17 paths**: those 14 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document.
+The router registers **22 paths**: those 14 plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030).
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -1340,6 +1423,7 @@ The router registers **17 paths**: those 14 plus the three spec-hosting routes (
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
 | **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
+| **Detection** (opt-in) | `GET /delivery-log`, `GET /delivery-log/verify`, `GET /alerts`, `GET /canaries`, `POST /agents/{id}/kill-switch` | Signed delivery log, behaviour alerts, canary tokens and the single-call kill-switch (CR-FEAT-030, `CR_DETECT_ENABLED`) |
 
 ### Runtime posture — `GET /status`
 
@@ -1413,7 +1497,8 @@ All core primitives are implemented and tested:
 - **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
-- **API** — 17 router paths registered in `cmd/server/main.go` (`HandleFunc`), documented as 14 paths / 18 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
+- **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
+- **API** — 22 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 17 always-on plus the 5 opt-in detection routes — documented as 14 paths / 18 operations in `docs/openapi.yaml`, wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

@@ -15,6 +15,34 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Detection & containment** (CR-FEAT-030) — the other half of attribution, and
+  it is opt-in (`CR_DETECT_ENABLED`, default `false`; with the flag unset no
+  route is registered, no file is written and the delivery path is unchanged):
+  - an **append-only, ed25519-signed delivery log** (`CR_DETECT_LOG`,
+    `CR_DETECT_KEY`) — one record per delivery outcome (who sent what to whom,
+    when, what the bus decided), hash-chained, fsynced, keyed from a file so it
+    survives restarts, and **refused at startup** if a record was edited,
+    deleted or signed by another key. `GET /delivery-log` pages the window and
+    reports the true total; `GET /delivery-log/verify` re-reads the file and
+    names the first record that does not verify.
+  - **behaviour baselines with alerts** — `fanout_spike` (N distinct targets in
+    a window), `new_peer_burst` (N first-ever conversations), `odd_hour_volume`
+    (N messages inside the quiet window) and `canary_trip`, each one alert per
+    agent per window, each with its thresholds and evidence at `GET /alerts`.
+  - a **single-call kill-switch** (`POST /agents/{id}/kill-switch`) — pause the
+    outbound webhook lane (dropping what was queued), release the leases the
+    agent held, quarantine it (both directions refused with
+    `403 AGENT_QUARANTINED`) and remove its registry row, with every action
+    reported separately so a partial containment cannot read as a clean one.
+  - **canary tokens** (`CR_CANARY_TOKENS`, or two generated per boot and served
+    at `GET /canaries`) — a delivery addressed to a canary id, or carrying a
+    canary token in its payload, trips `canary_trip`.
+  - Acceptance, captured live against the real server wiring:
+    `TestDetectionCatchesAndContainsACompromisedAgent` fans a scripted
+    compromised agent out to five new peers, captures the alert, contains it in
+    one call, proves the enforcement and then proves the log survives a restart
+    with its chain intact. Design authority: `specs/DETECTION.md`. Source: the
+    external review `DISPATCH · CRI-001` by Carter.
 - **`crier keygen`** (CR-FEAT-027) — the signing ceremony, replaced. The server
   binary now generates an ed25519 keypair in-process (no openssl, no xxd),
   writes it as a PKCS#8 PEM at mode `0600` in the same shape

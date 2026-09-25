@@ -43,6 +43,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/detect"
 	"github.com/crier-dev/crier/internal/mcp"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/registry"
@@ -442,6 +443,16 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	// posture. Leaving it set here would make that claim observe the switch this
 	// test turned on, which is a different question from the one it asks.
 	t.Setenv("CR_A2A_ENABLED", "true")
+
+	// CR-FEAT-030: the README and specs/DETECTION.md document the five
+	// detection routes, which exist ONLY when CR_DETECT_ENABLED is on. Same
+	// deal as the two opt-in surfaces above: the booted server must expose
+	// them for those claims to be measurable. The log is written into the
+	// test's own temp dir, so the gate never touches a real one.
+	dir := t.TempDir()
+	t.Setenv("CR_DETECT_ENABLED", "true")
+	t.Setenv("CR_DETECT_LOG", filepath.Join(dir, "delivery.jsonl"))
+	t.Setenv("CR_DETECT_KEY", filepath.Join(dir, "delivery.key"))
 
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
@@ -990,6 +1001,22 @@ func liveDefault(claimID string) (any, error) {
 			return nil, err
 		}
 		return cfg.RateLimitPerMinute, nil
+	case "DETECT-DEFAULT-FANOUT-TARGETS":
+		// CR-FEAT-030: the README's detection table prints the fan-out
+		// threshold. The probe returns the production constant, so the doc
+		// cannot drift from the number the server actually uses.
+		return detect.DefaultFanoutMinTargets, nil
+	case "DETECT-DEFAULT-NEWPEER-TARGETS":
+		return detect.DefaultNewPeerMinTargets, nil
+	case "DETECT-DEFAULT-QUIET-MESSAGES":
+		return detect.DefaultQuietMinMessages, nil
+	case "DETECT-DEFAULT-QUIET-WINDOW":
+		// The window is a PAIR, so the compared value is the documented
+		// default in its wire form. The constants are the ones config.Load
+		// applies when CR_DETECT_QUIET_HOURS is unset (asserted in
+		// config/detection_test.go), so the doc cannot drift from the window
+		// the server really runs.
+		return fmt.Sprintf("%02d:00-%02d:00", detect.DefaultQuietStartHour, detect.DefaultQuietEndHour), nil
 	case "DEFAULT-MESH-KEEPALIVE":
 		return int(mesh.DefaultMeshConfig("").KeepaliveInterval.Seconds()), nil
 	case "DEFAULT-PRESENCE-STALE-AFTER-S":

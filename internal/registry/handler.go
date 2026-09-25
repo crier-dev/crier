@@ -708,6 +708,37 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var req deliverRequest
+
+	// DETECTION (CR-FEAT-030): exactly one observation per delivery request,
+	// carrying the verdict the caller actually received.
+	//
+	// The status recorder is the measurement, not a re-derivation of the
+	// branch: whatever this handler writes is what the log records, so a
+	// branch that returns early (bad JSON, bad payload, a refusal) is logged
+	// too — the log's whole point is that it is not selective. verdictOverride
+	// carries the two outcomes a status code alone cannot distinguish (the
+	// guard's 403 from the detection layer's own 403, and the federation
+	// hold/failure pair). Installed only when a detector is wired: with
+	// detection off, w is the bare ResponseWriter it always was.
+	var verdictOverride string
+	var observationID string
+	if h.detector != nil {
+		rec := newStatusRecorder(w)
+		w = rec
+		defer func() {
+			verdict, transport := deliveryVerdict(rec.status(), verdictOverride)
+			h.detector.Observe(DeliveryObservation{
+				At:        time.Now().UTC(),
+				Sender:    req.Sender,
+				Target:    id,
+				MessageID: observationID,
+				Verdict:   verdict,
+				Transport: transport,
+				Payload:   req.Payload,
+			})
+		}()
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
@@ -756,6 +787,34 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DETECTION CHOKE POINT (CR-FEAT-030): a contained agent may neither send
+	// nor receive. This runs before the message id is minted, before the
+	// federation fallback and before the guard, so a contained agent reaches
+	// no transport at all — and the refusal is itself observed (the deferred
+	// observation above records it), so containment is visible in the log.
+	if h.detector != nil {
+		if h.detector.Quarantined(req.Sender) {
+			verdictOverride = VerdictQuarantined
+			writeJSON(w, http.StatusForbidden, quarantinedResponse{
+				Error:  "AGENT_QUARANTINED",
+				Agent:  req.Sender,
+				Side:   "sender",
+				Detail: "this agent is contained; deliveries from it are refused until an operator clears the quarantine",
+			})
+			return
+		}
+		if h.detector.Quarantined(id) {
+			verdictOverride = VerdictQuarantined
+			writeJSON(w, http.StatusForbidden, quarantinedResponse{
+				Error:  "AGENT_QUARANTINED",
+				Agent:  id,
+				Side:   "target",
+				Detail: "the target agent is contained; deliveries to it are refused until an operator clears the quarantine",
+			})
+			return
+		}
+	}
+
 	msgID := make([]byte, 12)
 	rand.Read(msgID)
 
@@ -765,6 +824,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now().UTC(),
 		TTLSeconds: req.TTLSeconds,
 	}
+	observationID = entry.ID
 	// Resolve the expiry now, from the same instant the store will use, so
 	// the response can report what the message's expiry actually became.
 	if err := resolveMessageExpiry(entry); err != nil {
@@ -823,6 +883,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			// budget expires (asymmetric — never a silent drop, never a
 			// misleading 404).
 			maxHold := h.fed.MaxHold()
+			verdictOverride = VerdictFederationHeld
 			writeJSON(w, http.StatusAccepted, federationHeldResponse{
 				Status:   "held",
 				ID:       held.ID,
@@ -840,6 +901,7 @@ func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
 			// (nothing could receive its terminal FEDERATION_FAILED —
 			// DF-CRIER-129). An explicit bounded failure with the
 			// correlation context, never a 404.
+			verdictOverride = VerdictFederationFailed
 			writeJSON(w, http.StatusBadGateway, federationFailure(req, entry.ID, id, ferr))
 		}
 		return

@@ -18,6 +18,7 @@ import (
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/detect"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/mesh"
@@ -487,6 +488,68 @@ func run(args []string) int {
 	} else {
 		slog.Info("A2A option disabled", "detail",
 			"no A2A route is registered; set CR_A2A_ENABLED=true to publish the Agent Card discovery route")
+
+	}
+
+	// Detection & containment (CR-FEAT-030, specs/DETECTION.md) — OPT-IN.
+	//
+	// The bus could always ATTRIBUTE a delivery after the fact (ed25519
+	// identity, the single delivery choke point, the failure receipts). This
+	// block is what lets an operator see an intrusion WHILE it happens and end
+	// it in one call: an append-only signed delivery log, per-sender behaviour
+	// baselines that raise alerts, a kill-switch and canary tokens.
+	//
+	// Off by default: with CR_DETECT_ENABLED unset nothing here runs — no
+	// route is registered, no file is written, and the delivery path is
+	// byte-identical to a build without this feature. When it IS on and the
+	// configured log cannot be verified (a rewritten or torn record), startup
+	// FAILS rather than appending to a history that no longer means anything.
+	if cfg.Detection.Enabled {
+		det, err := detect.New(detect.Config{
+			LogPath:           cfg.Detection.LogPath,
+			KeyPath:           cfg.Detection.KeyPath,
+			FanoutWindow:      cfg.Detection.FanoutWindow,
+			FanoutMinTargets:  cfg.Detection.FanoutMinTargets,
+			NewPeerWindow:     cfg.Detection.NewPeerWindow,
+			NewPeerMinTargets: cfg.Detection.NewPeerMinTargets,
+			QuietStartHour:    cfg.Detection.QuietStartHour,
+			QuietEndHour:      cfg.Detection.QuietEndHour,
+			QuietMinMessages:  cfg.Detection.QuietMinMessages,
+			CanaryTokens:      cfg.Detection.CanaryTokens,
+		})
+		if err != nil {
+			slog.Error("initialize detection layer", "error", err)
+			return 1
+		}
+		defer det.Close()
+		det.SetStore(regStore)
+		det.SetWebhooks(whDriver)
+		registryHandler.SetDetector(det)
+		dcfg := det.Config()
+		var keyID string
+		if a := det.Audit(); a != nil {
+			keyID = a.KeyID()
+		}
+		slog.Info("detection enabled",
+			"log", cfg.Detection.LogPath, "log_key_id", keyID,
+			"fanout_window_s", int(dcfg.FanoutWindow.Seconds()), "fanout_targets", dcfg.FanoutMinTargets,
+			"newpeer_window_s", int(dcfg.NewPeerWindow.Seconds()), "newpeer_targets", dcfg.NewPeerMinTargets,
+			"quiet_hours_utc", fmt.Sprintf("%02d:00-%02d:00", dcfg.QuietStartHour, dcfg.QuietEndHour),
+			"quiet_min_messages", dcfg.QuietMinMessages,
+			"canaries", len(det.Canaries()))
+		// The canary tokens are printed because they are PLANTED secrets: an
+		// operator has to know them to put one where an exfiltrating agent
+		// would find it. That is the feature, not a leak — but it is also why
+		// the tokens rotate per boot unless CR_CANARY_TOKENS pins them.
+		for _, c := range det.Canaries() {
+			slog.Info("canary planted", "id", c.ID, "token", c.Token)
+		}
+		dh := &detectionHandlers{det: det}
+		r.HandleFunc("/delivery-log", dh.HandleDeliveryLog).Methods("GET")
+		r.HandleFunc("/delivery-log/verify", dh.HandleDeliveryLogVerify).Methods("GET")
+		r.HandleFunc("/alerts", dh.HandleAlerts).Methods("GET")
+		r.HandleFunc("/canaries", dh.HandleCanaries).Methods("GET")
+		r.HandleFunc("/agents/{id}/kill-switch", dh.HandleKillSwitch).Methods("POST")
 	}
 
 	// Opt-in live-inspection surfaces (DF-CRIER-142): GET /metrics and
@@ -923,6 +986,16 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_GUARD_KANBAN_URL         HTTP kanban sink base URL; empty = hermes kanban CLI writer (default empty)")
 	fmt.Fprintln(out, "  CR_ENABLE_PPROF             opt-in: register GET /debug/pprof/* (default false = 404; not auth-exempt)")
 	fmt.Fprintln(out, "  CR_ENABLE_METRICS           opt-in: register GET /metrics, Prometheus text format (default false = 404; not auth-exempt)")
+	fmt.Fprintln(out, "  CR_DETECT_ENABLED           opt-in: signed delivery log + behaviour alerts + kill-switch + canaries, and the five detection routes (default false = 404; not auth-exempt)")
+	fmt.Fprintln(out, "  CR_DETECT_LOG               append-only signed delivery log path (empty = no log; alerts and containment still work)")
+	fmt.Fprintln(out, "  CR_DETECT_KEY               ed25519 signing key file for the log (default <CR_DETECT_LOG>.key, created 0600)")
+	fmt.Fprintln(out, "  CR_DETECT_FANOUT_WINDOW_S   fan-out signal window (default 60)")
+	fmt.Fprintln(out, "  CR_DETECT_FANOUT_MIN_TARGETS distinct targets in that window to trip fanout_spike (default 5)")
+	fmt.Fprintln(out, "  CR_DETECT_NEWPEER_WINDOW_S  new-peer signal window (default 60)")
+	fmt.Fprintln(out, "  CR_DETECT_NEWPEER_MIN_TARGETS first-ever conversations in that window to trip new_peer_burst (default 3)")
+	fmt.Fprintln(out, "  CR_DETECT_QUIET_HOURS       UTC quiet window S-E, start inclusive end exclusive, may wrap (default 1-5)")
+	fmt.Fprintln(out, "  CR_DETECT_QUIET_MIN_MESSAGES messages from one sender in the quiet window to trip odd_hour_volume (default 3)")
+	fmt.Fprintln(out, "  CR_CANARY_TOKENS            comma-separated canary tokens to plant; empty = the server generates them at boot and logs them")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
 }

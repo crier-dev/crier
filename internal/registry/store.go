@@ -95,6 +95,11 @@ type Handler struct {
 	// documented default window, so a Handler built without SetPresence still
 	// reports a crashed agent as stale instead of online forever.
 	presence Presence
+	// detector is the optional detection layer (CR-FEAT-030, detection.go):
+	// every delivery outcome is observed once, and a contained agent is
+	// refused before anything is delivered. Nil (the default) means the
+	// delivery path is byte-identical to a server without detection.
+	detector Detector
 }
 
 // NewHandler creates a Handler that delegates store operations to the
