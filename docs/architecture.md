@@ -74,7 +74,7 @@ Crier speaks the patterns ZeroMQ made standard — prebuilt, so agents never ass
 |---|---|
 | PUB/SUB | Relay: HTTP publish (202) → topic frames over WebSocket |
 | REQ/REP | Mesh REQUEST/RESPONSE between registered peers |
-| PUSH/PULL (pipeline) | Durable lease-based inboxes — **superset**: queues survive peer death and bus restarts when a durable store is configured (`CR_DATABASE_URL`); the in-memory default dies with the process |
+| PUSH/PULL (pipeline) | Durable lease-based inboxes — **superset**: queues survive peer death and bus restarts when a durable store is configured (`CR_DATABASE_URL`); the in-memory backend (demo-only, the start with no `CR_DATABASE_URL`) dies with the process — the documented configuration is the durable one (README § Run) |
 | PAIR (exclusive 1:1) | Direct mesh connection between two peers |
 | ROUTER/DEALER | Prebuilt: crier **is** the broker ZMQ makes you assemble from those sockets |
 | XPUB/XSUB | Prebuilt: the relay is the subscription-forwarding proxy |

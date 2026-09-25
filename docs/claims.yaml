@@ -1059,4 +1059,55 @@ claims:
     doc: docs/capacity-ceiling.md
     quote: "100 relay publishes accepted"
     expect: "100"
+  # --- CR-FEAT-034 (external review DISPATCH · CRI-001, via Bane 2026-09-25) ---
+  # The documented happy path must be the DURABLE one. The anchors below fail the
+  # gate if the prose is edited away, and the COUNT-DOCS-* claims re-measure the
+  # docs themselves (cmd/server/docsclaims_test.go → countHappyPathDurable): a
+  # revert to a non-durable happy path fails the build instead of drifting.
+  #
+  # One claim per doc (-README / -GUIDE) so a failure names the doc that moved:
+  # 1 = the property holds for that doc, 0 = it does not (NOT-DEFAULT: 0 = the
+  # old, non-durable framing is absent, which is what the row requires).
+  - id: COUNT-DOCS-DURABLE-START-README
+    kind: count
+    doc: README.md
+    # The README's Run section is the documented start path, and its FIRST fenced
+    # block must set CR_DATABASE_URL (compose up postgres → run against it).
+    quote: '**The documented path is the durable one.**'
+    expect: 1
+    xfail: null
+  - id: COUNT-DOCS-DURABLE-START-GUIDE
+    kind: count
+    doc: docs/integration-guide.md
+    # §1 (never §6, which was where the durable path used to hide) is the start
+    # path a reader hits first, and its first block is durable.
+    quote: '**The path this guide documents is the durable one.**'
+    expect: 1
+    xfail: null
+  - id: COUNT-DOCS-MEMORY-DEMO-ONLY-README
+    kind: count
+    doc: README.md
+    # The in-memory backend carries the demo-only label wherever it appears.
+    quote: '**The in-memory backend is demo-only.**'
+    expect: 1
+    xfail: null
+  - id: COUNT-DOCS-MEMORY-DEMO-ONLY-GUIDE
+    kind: count
+    doc: docs/integration-guide.md
+    quote: 'demo-only in-memory backend (§1)'
+    expect: 1
+    xfail: null
+  - id: COUNT-DOCS-MEMORY-NOT-DEFAULT-README
+    kind: count
+    doc: README.md
+    # ZERO occurrences of the phrasings that presented the non-durable backend as
+    # the documented default — the review's finding, fixed in prose and pinned here.
+    quote: 'it is NOT the configuration this README'
+    expect: 0
+    xfail: null
+  - id: COUNT-DOCS-MEMORY-NOT-DEFAULT-GUIDE
+    kind: count
+    doc: docs/integration-guide.md
+    quote: 'it is NOT the configuration this guide documents'
+    expect: 0
     xfail: null

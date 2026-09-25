@@ -97,7 +97,7 @@ Every agent has a discoverable identity with capability cards.
 
 ### 4. Inboxes
 
-Durable per-agent FIFO queues with lease-based delivery. Durability is backend-dependent: with `CR_DATABASE_URL` set (PostgreSQL backend) agents — including their `webhook` and `guard` configs — and undelivered messages survive server restarts; without it the in-memory backend is used (process-lifetime only).
+Durable per-agent FIFO queues with lease-based delivery. The documented configuration is the durable one — [Run](#run) starts PostgreSQL and passes `CR_DATABASE_URL`, and then agents (including their `webhook` and `guard` configs) and undelivered messages survive server restarts. Run with no `CR_DATABASE_URL` and the in-memory backend is used instead, which is **demo-only**: the registry and every inbox live in process memory and are gone when the process exits. The backend actually serving is readable at `GET /status` (`"registry_backend"`).
 
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
@@ -220,6 +220,11 @@ stamping).
 ### Prerequisites
 
 - Go 1.26.6 or later
+- **Docker with the Compose plugin — for the durable path, which is the one this
+  README documents** (`docker compose up -d postgres`, step 1 of [Run](#run)).
+  Any PostgreSQL 14+ server works instead of the compose service: point
+  `CR_DATABASE_URL` at it and skip that one line. Start without either and crier
+  falls back to the in-memory backend, which is **demo-only** — see [Run](#run)
 - **Nothing else for the normal path**: `crier keygen` and the first-party clients
   need no OpenSSL and no `xxd` — the keypair is generated in-process and the
   signature is built by the client library (see
@@ -429,24 +434,50 @@ never sign again.
 
 ### Run
 
+**The documented path is the durable one.** Crier's inbox is durable by design,
+so the first two commands start the PostgreSQL backend and then point the server
+at it — there is no backend decision to make:
+
 ```bash
-# Default port :8767
-make run
+docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' make run
 ```
 
+`CR_DATABASE_URL` is the switch that selects the PostgreSQL backend (precedence:
+`CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`); migrations apply
+automatically on startup, and agents — including their `webhook` and `guard`
+configs — and undelivered inbox messages then survive a restart of the server.
+`GET /status` names the backend actually serving, so the posture is readable as
+`"registry_backend":"postgres"`.
+
+**The in-memory backend is demo-only.** Start the server with no
+`CR_DATABASE_URL` (a bare `./bin/crier` or `make run`) and the registry and every
+inbox live in process memory: restart the process and the agents and any
+undelivered messages are gone. That is fine for a throwaway demo, a unit test or
+a five-minute look at the API — it is NOT the configuration this README
+documents, and it is not what to hand a tester who expects an inbox to keep
+their message until they read it.
+
 On a shared host the default port is often already held by a leftover server
-from an earlier session. Check before starting:
+from an earlier session — and the compose host port (5437) can be held too.
+Check both before starting:
 
 ```bash
 ss -tlnp | grep :8767         # who holds the default port? (empty output = free)
+ss -tlnp | grep :5437         # who holds the postgres host port?
 ```
 
 If it is taken, start on a free port and confirm which build answered —
 `GET /version` is one of the five unauthenticated paths:
 
 ```bash
-./bin/crier -port 8768         # or: CRIER_PORT=8768 ./bin/crier
+# Free port for the server instead of the default 8767:
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' CRIER_PORT=8768 ./bin/crier
 curl -s localhost:8768/version # {"version":"...","commit":"..."}
+
+# Host port 5437 taken as well? Move the container, and follow it with the URL:
+CRIER_PG_HOST_PORT=5493 docker compose up -d postgres
+CR_DATABASE_URL='postgres://crier:crier@localhost:5493/crier?sslmode=disable' ./bin/crier
 ```
 
 If the bind fails anyway, the server exits non-zero naming the port, the
@@ -555,7 +586,8 @@ transmission is optional to a car:
 ./bin/crier keygen -out alice.key -id alice   # no openssl, no xxd, no hex surgery
 # …prints the agent id, the public key, the exact POST /agents body, and what to run next.
 
-make run                                      # in another terminal
+docker compose up -d postgres                 # durable backend (see Run above)
+CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' make run
 
 python3 clients/python/round_trip.py --server http://localhost:8767 --id alice --key alice.key
 node    clients/typescript/round-trip.ts --server http://localhost:8767 --id alice --key alice.key
@@ -666,8 +698,10 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content
   -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<id from retrieve>"]}'
 # 204 — message permanently removed (never redelivered after lease expiry)
 
-# Dev shortcut: disable signing for trusted single-user setups
-CR_REQUIRE_AGENT_SIG=false make run
+# Dev shortcut: disable signing for trusted single-user setups. The durable
+# backend is still the documented one; drop the CR_DATABASE_URL assignment and
+# the server runs the demo-only in-memory backend instead.
+CR_REQUIRE_AGENT_SIG=false CR_DATABASE_URL='postgres://crier:crier@localhost:5437/crier?sslmode=disable' make run
 # With signing disabled, POST /agents no longer needs a public_key either —
 # register with just an id:
 #   curl -s -X POST localhost:8767/agents -d '{"id":"agent-1"}'        # 201
@@ -749,8 +783,8 @@ signing `METHOD\n<path>\n<unix-seconds>` — the query string is excluded.
   logged or echoed.
 - **Unset, the bridge generates an ephemeral ed25519 key for that run** and
   signs with it — enough to work against a signed server on a fresh in-memory
-  server, and enough for `CR_REQUIRE_AGENT_SIG=false` servers (which ignore the
-  signature entirely).
+  (demo-only, non-durable) server, and enough for `CR_REQUIRE_AGENT_SIG=false`
+  servers (which ignore the signature entirely).
 - The ephemeral key is regenerated on every run, while a persistent server
   keeps the public key registered by the **first** run. Later runs therefore
   find the id already registered with a *different* key and log an error:
@@ -758,8 +792,8 @@ signing `METHOD\n<path>\n<unix-seconds>` — the query string is excluded.
   `CRIER_AGENT_PRIVATE_KEY_FILE` to the private key whose public half is
   registered for `CRIER_AGENT_ID`, or delete the stale agent
   (`curl -X DELETE localhost:8767/agents/mcp-agent`) and restart, or point the
-  bridge at a fresh in-memory server. Set the variable for any long-lived
-  bridge.
+  bridge at a fresh in-memory server (the demo-only, non-durable backend). Set
+  the variable for any long-lived bridge.
 
 #### MCP tools
 
@@ -1202,7 +1236,7 @@ All configuration is via environment variables (defaults shown):
 |----------|---------|-------------|
 | `CRIER_PORT` | `8767` | Server listen port |
 | `CR_PIDFILE` | _(unset — no pidfile)_ | Pidfile path. When set (or `-pidfile <path>` is passed, or `make run`'s default `.crier.pid` is used), the server writes `{pid, port, binary}` to this file **after** the port is bound and removes it on graceful shutdown; `-stop`/`make stop` read it to stop that exact process safely (ownership-checked against `/proc/<pid>/exe`; a mismatch is refused without signalling). See [Stop / restart](#stop--restart). |
-| `CR_DATABASE_URL` | _(unset — in-memory backend)_ | PostgreSQL connection (optional). When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5437/crier?sslmode=disable`. See [Durable backend (PostgreSQL)](#durable-backend-postgresql) for the runnable compose path. |
+| `CR_DATABASE_URL` | _(unset — the demo-only in-memory backend; [Run](#run) sets it)_ | PostgreSQL connection — **the backend the documented path uses**. When set, the registry and inboxes use the durable PostgreSQL backend (migrations applied automatically on start). Unset, the in-memory backend serves instead: process-lifetime only, so agents and undelivered messages are lost on restart — demo-only, never the configuration to hand a tester. Precedence: `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`. Example: `postgres://crier:crier@localhost:5437/crier?sslmode=disable`. See [Durable backend (PostgreSQL)](#durable-backend-postgresql) for the runnable compose path. |
 | `CR_AUTH_TOKEN` | _(unset — auth disabled)_ | Bearer token for API authentication. When set, all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` — see `internal/middleware/auth.go`) require `Authorization: Bearer <token>`; unset = no auth (local dev). |
 | `CR_REQUIRE_AGENT_SIG` | `true` | Enforce per-agent ed25519 request signing on agent-scoped endpoints (inbox retrieve/ack/stats, DELETE /agents/{id}, and PATCH /agents/{id}). Set `false` only for trusted single-user dev setups. |
 | `CR_REQUIRE_MESH_AUTH` | `false` | Require the ed25519 challenge/response handshake on `GET /mesh/connect/{agentID}` (DF-CRIER-287): a connecting peer must sign a single-use nonce with the private key whose public half the registry holds for that agent id, and is not admitted (and not listed by `GET /mesh/peers`) until the signature verifies. **Default off, deliberately** — existing single-host clients do no handshake, and turning it on requires every connecting agent to hold its key. With it on, a `REQUEST` whose `source.agent_id` is not the authenticated peer is refused `FORBIDDEN` and a reply may only come from the peer the request was addressed to. See [Authentication (opt-in)](#authentication-opt-in) for the migration note. |
@@ -1217,7 +1251,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_FED_NAME` | _(unset — `localhost:<port>`)_ | Optional display name for this relay in the `GET /fed/peers` listing. |
 | `CR_FED_TOKEN` | _(unset — no link auth)_ | Shared secret for federation link authentication. When set, every request this relay sends to a linked relay (deliver forwards and `/agents` discovery) carries `Authorization: Bearer <token>`, so an auth-enabled destination relay accepts the forward instead of returning 401. The linked relay must share the value: set the source relay's `CR_FED_TOKEN` equal to the destination relay's `CR_AUTH_TOKEN`. The secret is never logged, echoed, or included in `GET /fed/peers` output. |
 | `CR_FED_MAX_HOLD_S` | `300` | How long a federated delivery is held at this relay and retried when every link fails transiently, before the sender gets an explicit terminal outcome (DF-CRIER-7, `specs/WEBHOOK-DELIVERY.md` §8.1). Only the transient case is held, and only when the request names a `sender` — an unreportable delivery is answered synchronously with `502 FEDERATION_FAILED` instead of being held (DF-CRIER-129). A hold **recovered** by a later successful retry logs the linked relay's reply but routes it nowhere — the sender's request already answered `202` — so a sender that needs that reply polls the peer's inbox or supplies its own correlation (a `request_id` echoed by the peer's webhook reply path; DF-CRIER-282, `specs/WEBHOOK-DELIVERY.md` §8.1). |
-| `CR_FED_QUEUE_FILE` | _(unset — memory queue)_ | Path of the durable hold-queue document. When set, held deliveries survive a source-relay restart (one atomically rewritten JSON document, `0600`, recovered from `<path>.bak` after a crash). Unset keeps the queue process-lifetime only — held deliveries are lost on restart, the same contract the in-memory registry backend documents for inboxes. A delivery this queue recovers (a retry that later succeeds) logs the linked relay's reply but drops it — the sender already got its `202` — so a sender that needs that reply polls the peer's inbox or supplies its own correlation (DF-CRIER-282, `specs/WEBHOOK-DELIVERY.md` §8.1). |
+| `CR_FED_QUEUE_FILE` | _(unset — memory queue)_ | Path of the durable hold-queue document. When set, held deliveries survive a source-relay restart (one atomically rewritten JSON document, `0600`, recovered from `<path>.bak` after a crash). Unset keeps the queue process-lifetime only — held deliveries are lost on restart, the same demo-only, process-lifetime contract the in-memory registry backend documents for inboxes. A delivery this queue recovers (a retry that later succeeds) logs the linked relay's reply but drops it — the sender already got its `202` — so a sender that needs that reply polls the peer's inbox or supplies its own correlation (DF-CRIER-282, `specs/WEBHOOK-DELIVERY.md` §8.1). |
 | `CR_DATABASE_MAX_CONNS` | `4` | Maximum PostgreSQL pool connections. |
 | `CR_DATABASE_MIN_CONNS` | `0` | Minimum PostgreSQL pool connections kept open (must be ≤ `CR_DATABASE_MAX_CONNS`). |
 | `CR_DATABASE_MAX_CONN_LIFETIME` | `30m` | Maximum lifetime of a pooled connection (Go duration, e.g. `30m`, `1h`). |
@@ -1250,6 +1284,14 @@ All configuration is via environment variables (defaults shown):
 | `CR_A2A_ENABLED` | `false` | Opt-in: A2A (agent-to-agent protocol) interoperability — INT-A2A-001, [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md). **Default off, and A2A is an extra rather than first-class support**: with the flag unset nothing A2A-related is registered, and every existing route, response body, auth requirement and storage path behaves exactly as it did before the option existed. The flag is also only HALF the gate — an agent takes part in A2A only if it opted in as well, via the optional `a2a` object on `POST /agents` / `PATCH /agents/{id}` (`{"a2a":{"enabled":true}}`, strictly decoded, absent by default). This row ships the switch and the opt-in only: no A2A route, card or stream exists yet under either value, and none appear until the later rows of the series land. |
 
 ### Durable backend (PostgreSQL)
+
+This is the backend [Run](#run) documents: its two commands are the
+`docker compose up -d postgres` below plus the server started with
+`CR_DATABASE_URL` pointing at it. Nothing here is optional polish — it is the
+configuration in which crier's promise (an inbox that keeps a delivered message
+until it is read or expires) actually holds across a restart. Everything after
+the first block is tuning for hosts where the default host port or the compose
+project name is already taken.
 
 The `postgres` service in `docker-compose.yml` (image `postgres:16-alpine`, credentials `crier`/`crier`, database `crier`) publishes the container's in-container port 5432 on host port **5437** by default:
 
