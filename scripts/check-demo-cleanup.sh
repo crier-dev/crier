@@ -48,7 +48,10 @@
 # sed/head/…), which is what scripts/bunker-matrix-selftest.sh does with
 # `grep -q "make run"`. `go build -o … ./cmd/server` is a BUILD, not a spawn, and
 # the binary's own meta/control flags (`-version`, `-help`, `-stop`) are not a
-# spawn either — they answer or stop, they never start a listener.
+# spawn either — they answer or stop, they never start a listener. The same goes
+# for the `keygen` subcommand (CR-FEAT-027): `crier keygen` writes a keypair and
+# prints an agent config, and binds no port, so a script whose only crier
+# invocation is `crier keygen` owes neither (a) nor (b).
 #
 # A classified script is COMPLIANT iff BOTH requirements hold:
 #     (a) EXIT-trap cleanup — an EXIT trap whose handler (an inline trap command
@@ -272,6 +275,18 @@ PORT_RE = re.compile(r'CRIER_PORT|-port[ =]|--port[ =]')
 # listener, so such an invocation is not a spawn.
 META_FLAG_RE = re.compile(r'(^|[\s"\'])-(version|help|stop|h)([\s"\']|$)'
                           r'|--(version|help)([\s"\']|$)')
+# The `keygen` SUBCOMMAND (CR-FEAT-027) is the same class of non-spawn as those
+# flags: `crier keygen` generates a keypair, prints the agent config and exits —
+# it binds no port and starts no server. Measured before this rule existed: a
+# fixture whose ONLY crier invocation was `crier keygen` was classified as a
+# relay spawn and REJECTED for missing the (b) ownership assertion, for a port it
+# never binds. The rule needs the subcommand word in the argument position
+# directly after the binary (the binary spelled literally, or through a variable
+# such as "$CRIER_BIN"), so a line that merely mentions "keygen" elsewhere is
+# unaffected.
+SUBCOMMAND_NO_LISTEN_RE = re.compile(
+    r'(?:^|[\s"\'=(])(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|(?:[^\s"\']*/)?crier(?:-mcp)?)'
+    r'[\s"\']*keygen(?:[\s"\']|$)')
 HEREDOC_RE = re.compile(r'<<-?[ \t]*(["\']?)([A-Za-z_][A-Za-z0-9_]*)\1')
 FUNC_RE = re.compile(r'^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{')
 PIDVAR_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=(?:"|\')?\$\{?\!\}?(?:"|\')?\s*$')
@@ -498,8 +513,9 @@ for lidx, (lineno, text) in enumerate(logical):
         word, bounded, inner_bg = peel(toks)
         if word is None:
             continue
-        # the binary's own meta/control flags are not a spawn (see META_FLAG_RE)
-        if META_FLAG_RE.search(text):
+        # the binary's own meta/control flags, and its non-listening `keygen`
+        # subcommand, are not spawns (see META_FLAG_RE / SUBCOMMAND_NO_LISTEN_RE)
+        if META_FLAG_RE.search(text) or SUBCOMMAND_NO_LISTEN_RE.search(text):
             continue
         seg_stripped = seg.strip()
         bg = (seg_stripped.endswith('&') and not seg_stripped.endswith('&&')) \

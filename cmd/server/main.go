@@ -67,6 +67,14 @@ func run(args []string) int {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Subcommands (CR-FEAT-027). `crier keygen` owns its own flag set and never
+	// starts the server, so it is dispatched here — before parseArgs — and every
+	// other argument shape keeps the pre-existing flag behaviour unchanged (a
+	// bare `crier`, `crier -port 9001`, `crier -help` never lands here).
+	if len(args) > 0 && args[0] == "keygen" {
+		return runKeygen(args[1:], os.Stdout)
+	}
+
 	help, showVersion, stop, port, dbURL, pidfilePath, err := parseArgs(args, os.Stdout)
 	if err != nil {
 		// The flag package already printed the error and usage to stdout.
@@ -762,6 +770,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Usage:")
 	fmt.Fprintln(out, "  crier [flags]")
+	fmt.Fprintln(out, "  crier keygen [flags]        generate an ed25519 keypair + the agent config (no openssl, no xxd)")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Flags:")
 	fs.PrintDefaults()

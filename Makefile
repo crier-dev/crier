@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -41,6 +41,7 @@ help:
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
 	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10)"
+	@echo "  client-roundtrip-check  CR-FEAT-027: `crier keygen` + the Python and TypeScript clients through a full signed round-trip on a scratch port (no openssl, no xxd, no packages)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  load-repro-selftest  Prove the bounded load harness (caps, load gate, PDEATHSIG teardown, no survivors) — DF-CRIER-254"
 	@echo "  bunker-matrix-selftest  Prove the bunker-matrix argument surface, its --local safety and its remote refusal — no docker, no bunker, no network (DF-CRIER-81)"
@@ -152,6 +153,26 @@ port-guard-selftest:
 # which `make test` executes.
 scratch-port-rotation-selftest:
 	python3 examples/scratch-port-rotation-selftest.py
+
+# CR-FEAT-027: the signing-ceremony acceptance drive. Registering an agent used
+# to mean openssl 3 + xxd key surgery + a hand-written sig() helper; the external
+# review named that ceremony as the number-one adoption killer, and it is what the
+# last three testers each tripped over. This target runs the replacement end to
+# end on one host with NO crypto tooling installed:
+#   * `crier keygen` writes a PKCS#8 PEM keypair at mode 0600 with no openssl and
+#     no xxd (asserted: PEM header, mode, and the printed public key), and
+#   * the first-party Python and TypeScript clients complete a full signed
+#     round-trip — register, deliver, signed retrieve, signed ack, signed stats,
+#     relay publish/subscribe — plus the negative controls that prove the
+#     signatures are actually verified (an unsigned call and a wrongly-signed call
+#     are both refused), a two-identity alice→bob exchange with the 403 isolation
+#     proof, and a second server with CR_AUTH_TOKEN for the bearer path.
+# It builds and starts its own server on a port the shared selector CHOOSES
+# (scripts/lib/port-guard.sh), asserts it owns that port, and reaps it on exit.
+# Node is optional: the TypeScript arm is SKIPPED LOUDLY when node < 22.6 is what
+# is on PATH, and the Python arms still fail the target if they regress.
+client-roundtrip-check:
+	bash scripts/client-roundtrip.sh
 
 # INT-CI-001: one transient ssh/scp reset on the deploy leg used to kill the whole
 # bunker-e2e battery with no retry and no attribution (CI run 35302932314). This

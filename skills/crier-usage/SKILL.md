@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.5.0
+version: 1.6.0
 ---
 
 # Crier Usage — field guide for agents
@@ -21,6 +21,8 @@ over the mesh. One server binary + an MCP server front-end.
 | What | How |
 |------|-----|
 | HTTP API | `./bin/crier` — 16 endpoints, `docs/openapi.yaml` |
+| Keys | `./bin/crier keygen -out <file>.key -id <agent-id>` — ed25519 keypair (PKCS#8 PEM, mode 0600) + the exact `POST /agents` body. No openssl, no xxd (CR-FEAT-027) |
+| Clients | `clients/python/crier_client.py` (stdlib only) and `clients/typescript/crier.ts` (Node 22.6+, no deps) — register/deliver/retrieve/ack/stats/publish/subscribe as methods; round-trip transcripts in `clients/python/round_trip.py` and `clients/typescript/round-trip.ts`; `make client-roundtrip-check` runs them all |
 | MCP | `make build-mcp && ./bin/crier-mcp` — stdio; run `tools/list` for the live tool inventory (the old "8 tools" figure is stale) |
 | Demo | `./examples/demo.sh` (needs `CR_AUTH_TOKEN` exported if auth is on) |
 | Specs | `docs/specs.md`, `docs/architecture.md`, `specs/ci-003b-postgresql-persistence.md` |
@@ -41,6 +43,11 @@ make test / make test-short / make lint
 Headers: `X-Agent-ID`, `X-Agent-Ts` (unix seconds, ±30s of server clock),
 `X-Agent-Sig` = hex(ed25519_sign(`"METHOD\n/path\nunix-seconds"`, privkey)).
 Method+path are bound into the signature. No sig → 401. Wrong key → 401.
+The path is the URL path only — the query string is NOT signed.
+
+You almost never need to build those headers by hand any more (CR-FEAT-027):
+`./bin/crier keygen` writes the key, and the Python/TypeScript clients build the
+trio. Reach for a client first and the curl recipes only when debugging the wire.
 
 ## ⚠️ The ack gotcha (CR-GAP-014 — check if still open)
 

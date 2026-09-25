@@ -55,6 +55,22 @@ jobs:
       - name: Scratch-port rotation selftest
         run: make scratch-port-rotation-selftest
 
+      # CR-FEAT-027: the signing-ceremony acceptance drive. `crier keygen` plus
+      # the first-party Python and TypeScript clients complete a full signed
+      # round-trip (register → deliver → signed retrieve → signed ack → signed
+      # stats → relay publish/subscribe) against a server this target builds,
+      # starts on a port the shared selector CHOOSES, asserts ownership of and
+      # reaps on exit. The negative controls (an unsigned call and a
+      # wrongly-signed call are both refused) are what keep the green honest: a
+      # server that ignored signatures would pass every positive step and fail
+      # those two. No provider, no key, no network, no crypto tooling: openssl
+      # and xxd are never invoked, and the Python client needs no packages.
+      # The TypeScript arm runs when the runner's node is >= 22.6 and is SKIPPED
+      # LOUDLY (naming the version found and the version needed) when it is not,
+      # so an old runner is a visible skip rather than a red build.
+      - name: Client round-trip (crier keygen + Python/TS clients, no openssl)
+        run: make client-roundtrip-check
+
       # INT-CI-001: ONE transient ssh/scp reset on the deploy leg used to kill the
       # whole bunker-e2e battery with no retry and no attribution — run 35302932314
       # lost the `blocking` cell, and every probe in it, before a single request was

@@ -153,7 +153,19 @@ than the default cadence to reach exhaustion.
 ### Prerequisites
 
 - Go 1.26.6 or later
-- OpenSSL 3.x or later with `xxd` on PATH — the quickstart signing helper uses `openssl pkeyutl -sign -rawin`, an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing (see below). That flag is also a ONE-SHOT operation: the payload must be a seekable file (the helper writes it and signs it with `-in`), because a piped or redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper refuses that too, instead of sending it. If the box has no `xxd` at all (a fresh Debian install does not), **Installing xxd without root** below is the recipe — it needs no root, exactly like the Go install that follows
+- **Nothing else for the normal path**: `crier keygen` and the first-party clients
+  need no OpenSSL and no `xxd` — the keypair is generated in-process and the
+  signature is built by the client library (see
+  [Try it](#try-it) and [clients/README.md](clients/README.md))
+- OpenSSL 3.x or later with `xxd` on PATH — **only for the hand-written curl
+  recipes** and the `sig()` helper below, which use `openssl pkeyutl -sign -rawin`,
+  an OpenSSL 3+ flag. On older OpenSSL the helper fails loudly instead of signing
+  (see below). That flag is also a ONE-SHOT operation: the payload must be a
+  seekable file (the helper writes it and signs it with `-in`), because a piped or
+  redirected payload makes `pkeyutl` fail with a zero-byte signature — the helper
+  refuses that too, instead of sending it. If the box has no `xxd` at all (a fresh
+  Debian install does not), **Installing xxd without root** below is the recipe —
+  it needs no root, exactly like the Go install that follows
 
 #### Installing Go without root
 
@@ -323,6 +335,30 @@ is running.
 Override the version with `make build VERSION=1.2.3`; `make build` with no
 override uses `git describe`.
 
+### Make a keypair — `crier keygen`
+
+The server binary is also the keypair tool, so the two can never disagree about
+what a key looks like:
+
+```bash
+./bin/crier keygen -out alice.key -id alice   # -> alice.key (PKCS#8 PEM, mode 0600) + the agent config
+./bin/crier keygen -h                         # -out, -id, -server, -json, -force
+```
+
+It generates an ed25519 keypair in-process (**no openssl, no xxd, no pip
+install**), writes the private key as a PKCS#8 PEM file — the same shape
+`openssl genpkey -algorithm ED25519` writes, so openssl can still read it and an
+existing key keeps working — and prints the agent id, the hex public key, the
+exact `POST /agents` body and the command that finishes the job. `-json` prints
+the same facts as one machine-readable object for an orchestrator.
+
+Before it prints anything it re-reads the file from disk, parses it with the
+**server's own key loader**, and signs and verifies a sample payload with the
+parsed key — so a printed public key that does not match the file cannot happen.
+It refuses to overwrite an existing key unless you pass `-force`, because a
+keypair is not regenerable: an agent registered with the old public key could
+never sign again.
+
 ### Run
 
 ```bash
@@ -439,6 +475,39 @@ kill <pid>                    # SIGTERM — graceful shutdown
 > [Message guard (LLM)](#message-guard-llm).
 
 ### Try it
+
+Before the curl recipes below, note that **you do not need any of the signing
+ceremony they describe**. Registering an agent used to mean an openssl keypair,
+a DER-offset recipe to extract the public half, and a hand-written `sig()` shell
+helper; that is the step external testers keep tripping over (`DISPATCH ·
+CRI-001`, the dogfood xxd trap), and it is now optional the way a manual
+transmission is optional to a car:
+
+```bash
+./bin/crier keygen -out alice.key -id alice   # no openssl, no xxd, no hex surgery
+# …prints the agent id, the public key, the exact POST /agents body, and what to run next.
+
+make run                                      # in another terminal
+
+python3 clients/python/round_trip.py --server http://localhost:8767 --id alice --key alice.key
+node    clients/typescript/round-trip.ts --server http://localhost:8767 --id alice --key alice.key
+```
+
+Those two scripts are the whole signed round-trip — register, deliver, signed
+retrieve, signed ack, signed stats, relay publish/subscribe — with a printed
+transcript and two negative controls (an unsigned call and a wrongly-signed call
+must both be refused), so the green means the signatures were verified rather
+than ignored. The clients are stdlib-only Python and dependency-free Node, and
+`clients/README.md` documents the method surface and the wire contract.
+`make client-roundtrip-check` runs both of them, plus a two-agent exchange and a
+bearer-token arm, against a server it starts itself — with no openssl and no xxd
+anywhere.
+
+The curl recipes that follow are the same round-trip by hand. They are the
+protocol reference — every header the clients set is spelled out — and they are
+what the docs gate executes on every build, so they stay true. If you are here to
+*use* crier rather than to inspect it, use `crier keygen` and a client and read
+the rest later.
 
 A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except the **five exempt paths** — `/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` (the list is the switch in `internal/middleware/auth.go`) — needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped. Measured on a running server: all five answer `200` with no token, and `GET /agents` answers `401`:
 
