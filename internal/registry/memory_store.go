@@ -71,12 +71,14 @@ func (s *MemoryStore) Unregister(id string) error {
 // (capabilities, webhook) with the caller's copy — the PATCH /agents/{id}
 // path (CR-FEAT-007). Registration identity and registration time are
 // preserved from the stored record; last_seen is ADVANCED to the moment of
-// the update, mirroring PostgresStore.Update (DF-CRIER-156: a PATCH is the
-// only activity the registry observes, so the response's last_seen must be
+// mirroring PostgresStore.Update (DF-CRIER-156: a PATCH is the only
+// agent-owned write the registry observes, so the response's last_seen must be
 // the value that is now persisted — a client can use it to confirm the
-// write). The registry has no heartbeat, so an agent that never PATCHes
-// keeps its registration-time last_seen. Returns an error if the agent is
-// not found.
+// write). Since CR-FEAT-024 that PATCH is one of the three liveness signals
+// this registry records in last_seen — along with a mesh connect and a mesh
+// KEEPALIVE heartbeat, both via Touch — and the status reported for a row is
+// DERIVED from last_seen (presence.go). Returns an error if the agent is not
+// found.
 func (s *MemoryStore) Update(agent *Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,6 +94,34 @@ func (s *MemoryStore) Update(agent *Agent) error {
 	agent.RegisteredAt = existing.RegisteredAt
 	agent.LastSeen = time.Now()
 	s.agents[agent.ID] = agent
+	return nil
+}
+
+// Touch advances an agent's last_seen from a liveness signal — the mesh
+// heartbeat path (CR-FEAT-024, registry.Toucher). Nothing else on the row
+// moves: the stored status stays whatever it was, because the status REPORTED
+// for the row is derived from last_seen at read time (presence.go), not stored.
+//
+// The advance is MONOTONIC: an `at` older than the recorded last_seen (a clock
+// adjustment, a frame replayed out of order) leaves the row where it was, so a
+// heartbeat can never make a live agent look older than its real evidence.
+//
+// Returns ErrAgentNotFound for an unknown id — the ordinary case for a peer
+// that connected without a registry row.
+func (s *MemoryStore) Touch(id string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agent, ok := s.agents[id]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, id)
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	if at.After(agent.LastSeen) {
+		agent.LastSeen = at
+	}
 	return nil
 }
 

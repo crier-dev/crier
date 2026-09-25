@@ -69,6 +69,13 @@ var _ Store = (*PostgresStore)(nil)
 // ListErrorReporter Store capability (store.go, DF-CRIER-199/200).
 var _ ListErrorReporter = (*PostgresStore)(nil)
 
+// Compile-time capability assertion: PostgresStore records liveness evidence
+// (the mesh heartbeat path, presence.go, CR-FEAT-024). HeartbeatSink depends on
+// this interface, so a rename here must fail the build rather than silently
+// wiring no sink — a registry that stops recording heartbeats goes back to
+// reporting a crashed agent as online.
+var _ Toucher = (*PostgresStore)(nil)
+
 // setListError records the failure of the current List call.
 func (s *PostgresStore) setListError(err error) {
 	s.listMu.Lock()
@@ -190,6 +197,11 @@ func (s *PostgresStore) Register(agent *Agent) error {
 	if len(agent.PublicKey) != ed25519.PublicKeySize && len(agent.PublicKey) != 0 {
 		return fmt.Errorf("%w: public key must be %d bytes", ErrInvalidStoreInput, ed25519.PublicKeySize)
 	}
+	// Only the two STORED statuses are registrable (migrations/001's CHECK
+	// constraint is exactly this set). "stale" is deliberately absent: it is
+	// DERIVED per read from `last_seen` (presence.go, CR-FEAT-024) and a caller
+	// registering a row as stale is claiming a conclusion about evidence the
+	// row does not have yet — the next read would derive its real value anyway.
 	if agent.Status != "" && agent.Status != StatusOnline && agent.Status != StatusOffline {
 		return fmt.Errorf("%w: invalid status %q", ErrInvalidStoreInput, agent.Status)
 	}
@@ -468,6 +480,49 @@ WHERE id = $1;`, agent.ID, capsJSON, webhookJSON, guardJSON, a2aJSON, now)
 	// Assigned only after the write succeeded — a failed update must not
 	// report a last_seen that was never persisted.
 	agent.LastSeen = now
+	return nil
+}
+
+// Touch advances an agent's last_seen from a liveness signal — the mesh
+// heartbeat path (CR-FEAT-024, registry.Toucher). It writes ONE column: the
+// registration fields, the stored status and every other field are untouched,
+// so a heartbeat can never reshape a row it is only supposed to date.
+//
+// GREATEST makes the write MONOTONIC: a heartbeat that arrives with a timestamp
+// older than the stored one (clock adjustment, a replayed frame) leaves
+// last_seen where it was. A bare assignment would let such a frame make a live
+// agent look older than its real evidence — the same class of lie the heartbeat
+// exists to remove. RowsAffected still distinguishes the only other outcome:
+// no such row (ErrAgentNotFound).
+//
+// Truncated to microseconds before the write, matching Update: Postgres stores
+// microsecond precision, and truncating here means the value the store applied
+// is exactly the value the column holds.
+//
+// Returns ErrAgentNotFound for an unknown id — the ordinary case for a peer
+// that connected without a registry row, which the mesh sink logs at debug.
+func (s *PostgresStore) Touch(id string, at time.Time) error {
+	if id == "" {
+		return fmt.Errorf("%w: blank ID", ErrInvalidStoreInput)
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	at = at.UTC().Truncate(time.Microsecond)
+
+	ctx, cancel := s.operationContext()
+	defer cancel()
+
+	tag, err := s.pool.Exec(ctx, `
+UPDATE agents
+SET last_seen = GREATEST(last_seen, $2)
+WHERE id = $1;`, id, at)
+	if err != nil {
+		return fmt.Errorf("touch agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, id)
+	}
 	return nil
 }
 

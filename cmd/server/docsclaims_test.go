@@ -972,6 +972,12 @@ func liveDefault(claimID string) (any, error) {
 		return cfg.RateLimitPerMinute, nil
 	case "DEFAULT-MESH-KEEPALIVE":
 		return int(mesh.DefaultMeshConfig("").KeepaliveInterval.Seconds()), nil
+	case "DEFAULT-PRESENCE-STALE-AFTER-S":
+		// CR-FEAT-024: the README prints the shipped staleness window, and the
+		// registry derives every row's status with it. Pinned to the production
+		// constant an unset environment resolves to — not to a literal here —
+		// so a window change that skips the docs fails this gate.
+		return int(registry.NewPresence(0).StaleAfter().Seconds()), nil
 	default:
 		return nil, fmt.Errorf("no live default probe for claim %q", claimID)
 	}

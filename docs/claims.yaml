@@ -271,10 +271,13 @@ claims:
   # CR-GAP-059 (docs-sweep T5): docs/architecture.md is now scanned and carries the
   # same production constant as the README claim. The id is shared on purpose —
   # liveDefault() keys the probe on it, so both docs are pinned to one measurement.
+  # CR-FEAT-024: the sentence moved off "no server-side liveness processing" —
+  # heartbeats ARE processed now (they advance the sender's registry last_seen) —
+  # while it keeps the 30s interval the probe below measures.
   - id: DEFAULT-MESH-KEEPALIVE
     kind: default
     doc: docs/architecture.md
-    quote: "30s interval; no server-side liveness processing"
+    quote: "30s interval; a heartbeat advances the sender's registry liveness"
     expect: 30
     xfail: null
   # DF-CRIER-251: docs/mesh-protocol.md claimed "no server-initiated keepalive"
@@ -302,6 +305,16 @@ claims:
     doc: TESTERS.md
     quote: 'never expires and is reported as `"expires_at":null`'
     expect: null
+    xfail: null
+  # CR-FEAT-024: presence. The README prints the shipped staleness window — three
+  # missed mesh heartbeats — and the registry derives every row's reported status
+  # with it, so the printed number is pinned to the production constant an unset
+  # environment resolves to (probe: cmd/server/docsclaims_test.go).
+  - id: DEFAULT-PRESENCE-STALE-AFTER-S
+    kind: default
+    doc: README.md
+    quote: "CR_PRESENCE_STALE_AFTER_S"
+    expect: 90
     xfail: null
 
   # --- counts (kind: count) — re-measured from source where measurable (openapi

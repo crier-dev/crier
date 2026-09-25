@@ -499,13 +499,22 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, agent)
+	// The 201 body reports the same DERIVED status every other read of this row
+	// reports (CR-FEAT-024). A just-registered row always derives `online`
+	// (last_seen is now), so this is consistency rather than a change — but it
+	// keeps ONE rule behind every status this API ever emits, instead of a
+	// special case a later reader has to know about.
+	writeJSON(w, http.StatusCreated, h.presence.Derive(agent, time.Now()))
 }
 
 // HandleListAgents handles GET /agents — lists all registered agents.
 // With ?capability=abc only agents whose capabilities include abc are
 // returned (capability advertisement/discovery, spec §7, CR-FEAT-007).
 // Without the parameter the behavior is unchanged.
+//
+// Every row's status is DERIVED at this read from its own liveness evidence
+// (CR-FEAT-024, presence.go) against ONE instant, so a dashboard is told
+// `stale` for an agent whose heartbeats stopped instead of `online` forever.
 func (h *Handler) HandleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents := h.store.List()
 	if agents == nil {
@@ -523,10 +532,12 @@ func (h *Handler) HandleListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		agents = filtered
 	}
-	writeJSON(w, http.StatusOK, agentsResponse{Agents: agents})
+	writeJSON(w, http.StatusOK, agentsResponse{Agents: h.presence.DeriveAll(agents, time.Now())})
 }
 
 // HandleGetAgent handles GET /agents/{id} — returns agent detail.
+// The returned status is derived from the row's liveness evidence, exactly as
+// the listing derives it (CR-FEAT-024).
 func (h *Handler) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	agent, err := h.store.Get(id)
@@ -538,7 +549,7 @@ func (h *Handler) HandleGetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, agent)
+	writeJSON(w, http.StatusOK, h.presence.Derive(agent, time.Now()))
 }
 
 // HandleUnregister handles DELETE /agents/{id} — removes an agent.
@@ -669,7 +680,10 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, agent)
+	// The 200 body reports the DERIVED status like every other read of this row
+	// (CR-FEAT-024): a PATCH just advanced last_seen, so it derives `online`
+	// unless the row states `offline`.
+	writeJSON(w, http.StatusOK, h.presence.Derive(agent, time.Now()))
 }
 
 // HandleDeliver handles POST /agents/{id}/inbox — delivers a message.

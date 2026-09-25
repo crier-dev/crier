@@ -6,6 +6,7 @@ import (
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // DF-CRIER-113: GET /status — the effective runtime posture of this process.
@@ -109,6 +110,14 @@ type statusResponse struct {
 	// GuardEnabled reports the LLM message guard master switch
 	// (CR_GUARD_ENABLED, default true).
 	GuardEnabled bool `json:"guard_enabled"`
+	// PresenceStaleAfterS is the EFFECTIVE staleness window the registry
+	// derives a row's status with, in seconds (CR_PRESENCE_STALE_AFTER_S,
+	// CR-FEAT-024). It is reported because it is the number a `stale` row was
+	// judged by: without it an operator reading GET /agents cannot tell a
+	// deliberate 30s window from a misconfigured 10-minute one, and the
+	// environment variable that set it lives in a different place than the
+	// reading.
+	PresenceStaleAfterS int `json:"presence_stale_after_s"`
 	// RegistryBackend is "memory" or "postgres" — the backend actually
 	// serving this process, derived from the same input that selected it.
 	RegistryBackend string `json:"registry_backend"`
@@ -150,16 +159,21 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		MeshAuthRequired:      cfg.RequireMeshAuth,
 		MeshOriginPolicy:      config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
 		GuardEnabled:          cfg.Guard.Enabled,
-		RegistryBackend:       registryBackend,
-		RateLimitPerMinute:    cfg.RateLimitPerMinute,
-		LogLevel:              cfg.LogLevel,
-		LogFormat:             cfg.LogFormat,
-		WebhookSigning:        cfg.Webhook.Secret != "",
-		FederationEnabled:     len(cfg.Federation.Links) > 0,
-		FederationHoldQueue:   federationHoldQueueMode(cfg),
-		MetricsEnabled:        cfg.Observability.EnableMetrics,
-		PProfEnabled:          cfg.Observability.EnablePProf,
-		Build:                 buildinfo.Resolve(),
+		// The EFFECTIVE window, resolved exactly as the registry handler
+		// resolves it (registry.Presence.StaleAfter) — so an unset or
+		// malformed-shaped setting reports the window actually in force rather
+		// than a zero the derivation never uses (CR-FEAT-024).
+		PresenceStaleAfterS: int(registry.NewPresence(cfg.PresenceStaleAfter).StaleAfter().Seconds()),
+		RegistryBackend:     registryBackend,
+		RateLimitPerMinute:  cfg.RateLimitPerMinute,
+		LogLevel:            cfg.LogLevel,
+		LogFormat:           cfg.LogFormat,
+		WebhookSigning:      cfg.Webhook.Secret != "",
+		FederationEnabled:   len(cfg.Federation.Links) > 0,
+		FederationHoldQueue: federationHoldQueueMode(cfg),
+		MetricsEnabled:      cfg.Observability.EnableMetrics,
+		PProfEnabled:        cfg.Observability.EnablePProf,
+		Build:               buildinfo.Resolve(),
 	}
 }
 

@@ -22,7 +22,7 @@ Direct agent-to-agent communication layer.
 - Peer discovery from the live WebSocket connection table (`GET /mesh/peers`); the
   registry is not consulted for mesh peers
 - Token auth
-- Keepalive (client-driven, 30s interval; no server-side liveness processing)
+- Keepalive (client-driven, 30s interval; a heartbeat advances the sender's registry liveness — §3)
 - Request/response correlation
 - Wire format: `docs/mesh-protocol.md` is the authoritative reference. REQUEST and
   RESPONSE frames carry `PeerRef` `source`/`target`, a RESPONSE carries its
@@ -37,7 +37,12 @@ Direct agent-to-agent communication layer.
 Every agent has a discoverable identity.
 - Agent registration with capabilities
 - Public-key identity (ed25519) + per-agent request signing
-- Health checking + capability-based routing
+- Presence derived from liveness evidence (CR-FEAT-024): a mesh socket accepted
+  for the agent, a KEEPALIVE heartbeat on it, or a signed PATCH advances
+  `last_seen`, and the reported `status` — `online` inside the documented
+  staleness window (`CR_PRESENCE_STALE_AFTER_S`, default 90s), `stale` outside it
+  — is derived per read, never stored
+- Capability-based routing
 
 ### 4. Agent Inboxes
 Persistent per-agent inbox for offline delivery.

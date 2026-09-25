@@ -396,6 +396,22 @@ Verified good since the last revision of this file (do not report as broken):
   `KEEPALIVE` still draws no reply at all). Proven by
   `TestMeshMalformedFramesGetInvalidMessage` and `TestMeshWellFormedFramesGetNoError`
   in `internal/mesh`; the shapes are documented in `docs/mesh-protocol.md` §ERROR.
+- **A dead agent's registry row goes `stale`.** `status` is DERIVED per read from
+  the row's liveness evidence (`last_seen`) — a mesh socket accepted for the
+  agent, a `KEEPALIVE` heartbeat on it, or a signed `PATCH /agents/{id}` —
+  against one window, `CR_PRESENCE_STALE_AFTER_S` (default 90s = three missed
+  heartbeats). So: connect a mesh client, kill it mid-session (no unregister, no
+  PATCH), and `GET /agents/<id>` flips `online` → `stale` within that window
+  while `last_seen` stays frozen at the last evidence; reconnect and the SAME row
+  is `online` again on the accept. `GET /status` reports the effective window as
+  `presence_stale_after_s`. Reporting `online` forever — the pre-CR-FEAT-024
+  behaviour, and anything built on it — was the bug, found by this guide's own
+  external review 'DISPATCH · CRI-001'. Proven by
+  `TestPresenceGoesStaleWhenTheAgentDiesEndToEnd` in `cmd/server` (2s window, same
+  rule). Known limit, not a bug: an agent that never opens a mesh socket and
+  never PATCHes reports `stale` once the window passes even while its process
+  runs — the registry is a mesh-presence signal (README §3), and `GET /mesh/peers`
+  is the connection-table view.
 
 Known-good as of this writing: register/deliver/signed retrieve/ack, blocking +
 async webhook, relay publish→subscribe fan-out, bus-to-bus forwarding,

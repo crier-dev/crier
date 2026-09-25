@@ -122,7 +122,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
@@ -156,6 +156,18 @@ paths:
                     type: boolean
                     description: LLM message guard master switch (CR_GUARD_ENABLED, default true). False means the delivery path skips the guard entirely
                     example: true
+                  presence_stale_after_s:
+                    type: integer
+                    description: >-
+                      The EFFECTIVE staleness window, in seconds, that the
+                      registry derives a row's reported `status` with
+                      (CR_PRESENCE_STALE_AFTER_S, CR-FEAT-024; default 90 = three
+                      missed mesh heartbeats). A row with liveness evidence
+                      inside this window reports `online`, and `stale` once
+                      every piece of evidence is older than it — so this is the
+                      number a `stale` row was judged by, reported next to the
+                      status it explains.
+                    example: 90
                   registry_backend:
                     type: string
                     enum: [memory, postgres]
@@ -463,7 +475,18 @@ paths:
           description: When set, only agents advertising this capability are returned (capability discovery, CR-FEAT-007)
       responses:
         "200":
-          description: Array of registered agents (status reflects registration-liveness, not live connection health)
+          description: >-
+            Array of registered agents. `status` is DERIVED per read from each
+            row's liveness evidence (`last_seen`) and the documented staleness
+            window (CR_PRESENCE_STALE_AFTER_S, default 90s = three missed mesh
+            heartbeats; GET /status reports the effective window as
+            presence_stale_after_s): `online` while a mesh connect accepted for
+            the agent, a KEEPALIVE heartbeat on that socket, or a signed PATCH
+            is inside the window — `stale` once none of them is (CR-FEAT-024),
+            so a crashed agent stops being reported online. A row that STATES
+            `offline` stays offline. The value is never stored: the status
+            column keeps the online/offline it was written with, and no sweeper
+            runs.
     post:
       operationId: registryRegisterAgent
       tags: [registry]
@@ -523,7 +546,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Agent detail (status reflects registration-liveness, not live connection health)
+          description: >-
+            Agent detail. `status` is derived per read from this row's liveness
+            evidence and the documented staleness window — `online`, `stale`
+            (no liveness evidence inside CR_PRESENCE_STALE_AFTER_S) or a stated
+            `offline`; see GET /agents and GET /status (CR-FEAT-024).
         "404":
           description: Agent not found
     delete:
