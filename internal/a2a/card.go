@@ -156,10 +156,15 @@ type AgentInterface struct {
 // than having to infer one from an omission.
 type AgentCapabilities struct {
 	// Streaming reports whether this agent supports streaming A2A responses.
-	// It is false today, and that is a measurement, not a default: crier
-	// serves no SSE binding yet (INT-A2A-003), so `true` would promise a
-	// stream this server cannot answer. The relay's own WebSocket subscribe is
-	// NOT this — it is crier's protocol, not the A2A binding.
+	// It is TRUE whenever this card is served at all, and that is a
+	// measurement: the card exists only while CR_A2A_ENABLED is set, and the
+	// JSON-RPC binding that ships with it serves SendStreamingMessage as
+	// Server-Sent Events (INT-A2A-003, specs/A2A-OPTION.md §5.4). §3.3.4 makes
+	// this field load-bearing in the other direction too: a `false` here would
+	// REQUIRE this server to answer SendStreamingMessage with
+	// UnsupportedOperationError, which would be a false statement about a
+	// surface it really does serve. The relay's own WebSocket subscribe is NOT
+	// this — it is crier's protocol, not the A2A binding.
 	Streaming bool `json:"streaming"`
 	// PushNotifications reports what the agent actually has configured: it is
 	// true exactly when the registry row carries a crier webhook (the
@@ -307,7 +312,11 @@ func BuildCard(row CardRow, srv ServerInfo) AgentCard {
 		Version:          srv.Version,
 		DocumentationURL: origin + docsPath,
 		Capabilities: AgentCapabilities{
-			Streaming:         false, // no A2A streaming binding is served yet
+			// TRUE: the JSON-RPC binding served alongside this card answers
+			// SendStreamingMessage with text/event-stream (INT-A2A-003). A
+			// `false` here would, by §3.3.4, require this server to refuse an
+			// operation it serves.
+			Streaming:         true,
 			PushNotifications: row.PushConfigured,
 		},
 		DefaultInputModes:  []string{jsonMediaType},

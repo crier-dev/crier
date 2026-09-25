@@ -82,6 +82,20 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, http.ErrNotSupported
 }
 
+// Flush implements http.Flusher so a streaming handler — Server-Sent Events —
+// can deliver a frame before it returns. Embedding http.ResponseWriter does not
+// promote Flush (it is not part of that interface), so without this the wrapper
+// HIDES the underlying capability: a streaming handler's `w.(http.Flusher)`
+// assertion fails and it cannot stream at all (INT-A2A-003 measured exactly
+// that — 500 "this server cannot stream" on every A2A stream). Same class of
+// hidden capability as Hijack above, same answer: pass the call through when the
+// underlying writer supports it, and stay silent when it does not.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)

@@ -219,10 +219,19 @@ A2A is an EXTRA: default-off, additive-only, two-half gate.
 - Server switch `CR_A2A_ENABLED` (default false) + per-agent block
   `{"a2a":{"enabled":true}}` on `POST /agents` / `PATCH /agents/{id}`. Either
   half alone is inert.
-- **No A2A route exists yet under either value** (INT-A2A-002..006 are future
-  rows): `/.well-known/agent-card.json` and any JSON-RPC path 404 with the
-  switch ON too. `GET /openapi.json` is md5-identical across both postures —
-  verified.
+- **Two A2A routes exist while the switch is ON, and only those two**:
+  `GET /.well-known/agent-card.json?agent_id=<id>` (INT-A2A-002; 404 for any id
+  that is not an opted-in row) and `POST /a2a` (INT-A2A-003 — the JSON-RPC
+  binding; it answers `SendMessage` and `SendStreamingMessage`, and
+  `-32601 MethodNotFoundError` for every other A2A method, naming the row that
+  lands it). With the switch OFF both answer the router's 404, and
+  `GET /openapi.json` is md5-identical across both postures — verified.
+- An A2A `SendMessage` is an ORDINARY crier delivery: it produces an inbox
+  entry (or a push) that `GET /agents/{id}/inbox` returns and
+  `POST /agents/{id}/inbox/ack` acknowledges, with the A2A message's
+  `messageId` used as crier's deduplication key and its parts carrying
+  `alt`/`tags`/`caption`. `SendStreamingMessage` answers
+  `Content-Type: text/event-stream`, one JSON-RPC `data:` frame per event.
 - Strict decode: an unknown key inside the `a2a` object is
   `400 {"error":"a2a: unknown field \"enabld\" (accepted: enabled)"}` and
   registers NOTHING (verify with a follow-up GET → 404). A wrong-TYPED member

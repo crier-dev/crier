@@ -480,8 +480,8 @@ func TestA2ACard_ServedOnlyForOptedInAgents(t *testing.T) {
 	if strings.Join(ids, ",") != "solver,router" {
 		t.Errorf("skill ids = %v, want the row's capabilities in order", ids)
 	}
-	if card.Capabilities.Streaming {
-		t.Error("capabilities.streaming = true — no A2A streaming binding is served yet")
+	if !card.Capabilities.Streaming {
+		t.Error("capabilities.streaming = false — the JSON-RPC binding served beside this card answers SendStreamingMessage (INT-A2A-003)")
 	}
 	if !card.Capabilities.PushNotifications {
 		t.Error("capabilities.pushNotifications = false — this row carries a webhook, so it has a push channel")
