@@ -204,7 +204,7 @@ var openapiDocsTemplate = template.Must(template.New("docs").Parse(`<!DOCTYPE ht
 {{range .Operations}}<tr><td class="method">{{.Method}}</td><td><code>{{.Path}}</code></td><td>{{.Summary}}</td></tr>
 {{end}}</tbody>
 </table>
-<p>This index is generated from that spec at startup. It is a static reference page, <em>not</em> an interactive request console — fire your requests with curl or any HTTP client. This page and the other four auth-exempt endpoints (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) are public — no auth token required. This page is self-contained and works offline (no CDN / Swagger-UI dependency).</p>
+<p>This index is generated from that spec at startup. It is a static reference page, <em>not</em> an interactive request console — fire your requests with curl or any HTTP client. This page and the other auth-exempt endpoints (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>) are public — no auth token required. This page is self-contained and works offline (no CDN / Swagger-UI dependency).</p>
 </body>
 </html>
 `))
