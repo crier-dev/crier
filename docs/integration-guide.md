@@ -240,10 +240,61 @@ Both query spellings are accepted (the documented and the historical):
 |---|---|---|---|
 | `limit` | `max` | `10` | max messages claimed per retrieve; `> 100` → `400` |
 | `lease_seconds` | `lease` | `30` | lease duration in seconds |
+| `wait_seconds` | — | `0` | long-poll budget, `0..120`; outside the range or non-integer → `400` (CR-FEAT-023) |
 
 When both spellings of the same parameter appear in one request, the
 historical one (`max` / `lease`) wins and the alias fills in only what it
 left absent (DF-CRIER-177).
+
+**Stop polling: `?wait_seconds=` (CR-FEAT-023).** The durable lane used to be
+strictly poll-only, which made it the one lane that could not wake a sleeping
+agent. With `wait_seconds=N` the read parks and answers the moment a message is
+claimable:
+
+```bash
+# the same signed retrieve, parked for up to 60s — returns as soon as a
+# delivery lands (the signature covers the PATH, so the query string is not
+# part of it)
+curl -s "localhost:8767/agents/agent-1/inbox?wait_seconds=60" "${AUTH[@]}" \
+  -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}"
+# → 200 {"messages":[{...}],"lease_id":"...","queue_depth":1,"leased_count":1}
+```
+
+If the budget expires with nothing claimable the answer is the **same empty
+body** a poll-only read gives (`messages: []`, `lease_id: ""`, plus the live
+counters above), so a client treats both identically and simply re-polls — a
+long-poll is a drop-in for a poll loop, not a new contract:
+
+```bash
+curl -s "localhost:8767/agents/agent-1/inbox?wait_seconds=5" "${AUTH[@]}" \
+  -H "X-Agent-ID: agent-1" -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: ${SIG}"
+# → 200 {"messages":[],"lease_id":"","queue_depth":0,"leased_count":0}   (after ~5s)
+```
+
+What the budget does and does not change:
+
+- **`0` or absent is exactly today's read** — immediate, no timer, no
+  subscription. The budget is `0..120`; a non-integer, a negative value or
+  anything above `120` is a `400` that names the parameter, because a
+  documented parameter is honored or rejected, never silently ignored
+  (DF-CRIER-180).
+- **Lease, ack and TTL are untouched.** A long-poll is a sequence of ordinary
+  retrieves: whatever it claims is leased by the same rules, and the counters
+  are taken after the claim that produced the response.
+- **Errors are never waited out.** An unregistered agent still answers `404`
+  immediately, and a rejected parameter is answered before anything parks.
+- **A delivery through this relay's deliver endpoint wakes a parked read
+  immediately.** Inbox writes that bypass it — the federation hold queue, the
+  webhook-failure notices, a second relay process sharing the store — surface
+  within about a second.
+
+An agent that cannot hold an HTTP request open at all has the other half: a
+new-message ping on its mesh socket. Connect with
+`?inbox_notify=1` on `GET /mesh/connect/{agentID}` and the server writes one
+`INBOX_NOTIFY` frame there per delivery into that agent's inbox (message id and
+sender; never the payload). It is opt-in per connection and best effort by
+design — the durable read above stays the contract. Wire format:
+[`docs/mesh-protocol.md`](mesh-protocol.md) §INBOX_NOTIFY.
 
 An empty or fully-leased inbox is a **successful read with nothing to claim** —
 not an error, and not a lease:

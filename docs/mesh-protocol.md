@@ -23,6 +23,13 @@ All claims below are verified against `internal/mesh` (live-probed 2026-08-10).
   there is no cryptographic authentication on mesh frames — do not use the mesh
   for privileged operations without an additional application-level auth layer or
   without turning the handshake on.
+- `?inbox_notify=1` on the connect URL opts **that connection** into the
+  new-message ping (§INBOX_NOTIFY): a tick the server writes to this socket when
+  a message lands in the agent's durable inbox. It is opt-in because the frame is
+  unsolicited from the client's point of view — without it the server never
+  writes anything to this socket that the client did not ask for. The value must
+  be a boolean (`1`/`0`/`true`/`false`) or the connect is refused `400` with
+  `{"error":"inbox_notify must be a boolean (1/0/true/false)"}`.
 
 ## Framing
 
@@ -38,7 +45,7 @@ Every message embeds an envelope with four fields:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `type` | string | One of `REGISTER`, `REGISTER_ACK`, `KEEPALIVE`, `REQUEST`, `RESPONSE`, `ERROR`, plus `AUTH_CHALLENGE`, `AUTH_RESPONSE` and `AUTH_OK`, which exist only on a connection to a server started with `CR_REQUIRE_MESH_AUTH=true` (§Authentication) |
+| `type` | string | One of `REGISTER`, `REGISTER_ACK`, `KEEPALIVE`, `REQUEST`, `RESPONSE`, `ERROR`, `INBOX_NOTIFY`, plus `AUTH_CHALLENGE`, `AUTH_RESPONSE` and `AUTH_OK`, which exist only on a connection to a server started with `CR_REQUIRE_MESH_AUTH=true` (§Authentication) |
 | `version` | int | Protocol version, currently `1` |
 | `message_id` | string | Unique ID (24 hex chars, crypto/rand) — see correlation contract |
 | `timestamp` | string | RFC3339 with nanosecond precision, e.g. `2026-08-10T01:55:00.123456789-05:00` (Go `time.Time` JSON encoding) |
@@ -103,6 +110,50 @@ below is a placeholder — this is a frame observed arriving on the socket):
 {"type":"KEEPALIVE","version":1,"message_id":"13f7ac9931a32857e537d1fe",
  "timestamp":"2026-09-18T13:33:50.921105103-05:00","lease_id":"","agent_id":"crier"}
 ```
+
+### INBOX_NOTIFY (server → agent, opt-in)
+
+Sent by the server to an agent whose **connection asked for it** with
+`?inbox_notify=1`, immediately after a delivery has been stored in that agent's
+durable inbox. It is the mesh half of the durable lane's wake-up: the inbox is
+poll-only by history, so an agent that would otherwise poll on a timer can be
+tapped instead. The other half — `?wait_seconds=` on
+`GET /agents/{id}/inbox`, which parks the read until a message is claimable —
+needs no mesh socket at all.
+
+```json
+{"type":"INBOX_NOTIFY","version":1,"message_id":"7a1c9f2e5b6d80314a2f6b90",
+ "timestamp":"2026-09-25T16:31:31.032118-05:00","agent_id":"agent-b",
+ "inbox_message_id":"5dd711e2f6845fd33e64e077","sender":"agent-a"}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `agent_id` | string | The PINGED agent — the owner of the inbox, not the sender |
+| `inbox_message_id` | string | The id the delivery was accepted with, i.e. the same id `GET /agents/{id}/inbox` returns in the entry. Absent only if the store minted no id |
+| `sender` | string | Originating agent id when the delivery named one, else absent |
+
+The frame carries **no payload**: it is a tick, not a delivery. The message is
+already durable when the frame is written, so a client that ignores the ping (or
+never receives it) loses nothing but latency — it still finds the message on its
+next retrieve. There is no reply and no acknowledgement: the client answers by
+retrieving its inbox (and may then ack as usual).
+
+Properties worth relying on, each pinned by a test in `internal/mesh`:
+
+- **Opt-in per connection.** The grant is made by the connect URL and dies with
+  that socket; a client that did not ask receives no unsolicited frame, and a
+  reconnect that does not ask again is not pinged on the old grant.
+- **Best effort, no queue.** A ping written when the socket write fails (or when
+  the agent is not connected here) is dropped with a debug log. It is a
+  notification about a message that is already durable, never a delivery
+  channel, so it is never retried and never buffered.
+- **One frame per delivery.** A burst of deliveries produces a burst of pings;
+  an agent that wants one wake-up per batch should long-poll
+  (`?wait_seconds=`) instead, which answers with the whole claimable batch.
+- **Inbound `INBOX_NOTIFY` is ignored.** The frame has a single direction; a
+  client that echoes one back is recognized and ignored, never answered with
+  `INVALID_MESSAGE` (§Error handling and silent drops).
 
 ### REQUEST (agent → agent, relayed by server)
 
@@ -405,9 +456,11 @@ with an unknown `request_id` is dropped with no error and no log.
   the same socket afterwards. Pinned by `TestMeshMalformedFramesGetInvalidMessage`
   and `TestMeshWellFormedFramesGetNoError` (`internal/mesh`).
 - **Well-formed frames are untouched.** In particular an inbound `KEEPALIVE` is
-  still recognized and ignored with no reply at all (§KEEPALIVE), and a REQUEST
-  that carries no `target.agent_id` is still refused `INVALID_MESSAGE` with a
-  message naming the missing field.
+  still recognized and ignored with no reply at all (§KEEPALIVE), an inbound
+  `INBOX_NOTIFY` is recognized and ignored for the same reason — it is a
+  server→agent frame and has no meaning in that direction (§INBOX_NOTIFY) — and
+  a REQUEST that carries no `target.agent_id` is still refused
+  `INVALID_MESSAGE` with a message naming the missing field.
 - **On an authenticated mesh a frame's identity is checked too (DF-CRIER-287).**
   With `CR_REQUIRE_MESH_AUTH=true` the socket's identity was proven at connect, so
   a `REQUEST` whose `source.agent_id` is not that peer is answered
@@ -429,6 +482,10 @@ with an unknown `request_id` is dropped with no error and no log.
 
 - Server-side `REGISTER_ACK` — the one-way REGISTER is the whole handshake.
 - Keepalive liveness — KEEPALIVE frames have no server-side effect.
+- Ping guarantees — `INBOX_NOTIFY` is best effort: no queue, no retry, no ack,
+  no ordering against other frames. It EXISTS to remove latency, not to promise
+  a wake-up; the durable lane (`GET /agents/{id}/inbox`, with or without
+  `?wait_seconds=`) remains the contract.
 - Automatic reconnect — `DialerConfig` carries `ReconnectBackoff`/`MaxRetries`
   fields, but no code performs retries; a dropped connection is closed for good.
 - Deregister message type (dropped during the CI-002 port; use the registry's

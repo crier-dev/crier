@@ -79,6 +79,11 @@ Durable per-agent FIFO queues with lease-based delivery. Durability is backend-d
 - TTL expiry auto-purges stale messages (default 24h; optional per-message `ttl_seconds`, `0` = never expires, reported on the wire as `"expires_at":null`)
 - Every message is leased to exactly one retriever; a concurrent retriever receives only what the first did not lease (`queue_depth`/`leased_count` on the retrieve body disambiguate an empty `messages` array: `leased_count` > 0 means HELD, not lost — DF-CRIER-177)
 
+**Waking a sleeping agent (CR-FEAT-023).** Durable inboxes are poll-only by history, so the one lane that promises durability was the one lane that could not wake a sleeping agent — a 60-second poll loop learned about urgent work up to a minute late. Both halves of the fix are additive, and neither changes lease, ack or TTL behaviour:
+
+- **Long-poll:** `GET /agents/{id}/inbox?wait_seconds=N` (0..120, default `0`) parks the read and answers the moment a message is claimable, or — when the budget expires — with the SAME empty body a poll-only read gets, so a client treats the two identically and simply re-polls. Absent or `0` is today's read, byte-for-byte: no timer, no subscription. A budget outside 0..120, or a non-integer, is a `400` naming the parameter (a documented parameter is honored or rejected, never silently ignored — DF-CRIER-180). A delivery through the relay's deliver endpoint wakes a parked read immediately; inbox writes that bypass it (the federation hold queue, webhook-failure notices, a second relay process on the same store) surface within about a second. Errors are never waited out: an unregistered agent still answers `404` at once.
+- **New-message ping:** an agent that cannot hold a request open — or would rather not — can connect to the mesh with `ws://…/mesh/connect/{agentID}?inbox_notify=1` and receive one `INBOX_NOTIFY` frame on that socket per delivery into its inbox, naming the message id and the sender and carrying no payload. It is opt-in per connection (a client that did not ask receives nothing), best effort (no queue, no retry, no ack — the durable read remains the contract), and ignored if echoed back. Wire format: [`docs/mesh-protocol.md`](docs/mesh-protocol.md) §INBOX_NOTIFY.
+
 ### 5. Webhook delivery (bypasses the inbox)
 
 An agent that registers a `webhook` config (`PATCH /agents/{id}` with

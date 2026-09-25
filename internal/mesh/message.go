@@ -28,6 +28,12 @@ const (
 	TypeAuthChallenge MessageType = "AUTH_CHALLENGE"
 	TypeAuthResponse  MessageType = "AUTH_RESPONSE"
 	TypeAuthOK        MessageType = "AUTH_OK"
+
+	// TypeInboxNotify is the server→agent new-message ping (CR-FEAT-023):
+	// a tick on the agent's EXISTING mesh socket telling it that a message
+	// has landed in its durable inbox, so an agent that would otherwise poll
+	// on a timer can be woken instead. See InboxNotify.
+	TypeInboxNotify MessageType = "INBOX_NOTIFY"
 )
 
 type Envelope struct {
@@ -105,6 +111,29 @@ type AuthOK struct {
 
 type PeerStatus struct {
 	PendingRequests int `json:"pending_requests"`
+}
+
+// InboxNotify is the server→agent new-message ping (CR-FEAT-023). It is sent
+// by the server to the agent named in agent_id, and only to a connection that
+// ASKED for it: the agent connects with `?inbox_notify=1` on
+// /mesh/connect/{agentID}. The opt-in is per connection, so a client that did
+// not ask can never receive an unsolicited frame.
+//
+// The frame is advisory and carries no payload: the message it names is
+// already durable in the agent's inbox when the frame is sent, so a client
+// that ignores the ping (or never receives it) loses nothing but latency — it
+// still finds the message on its next retrieve. inbox_message_id is the id the
+// delivery was accepted with (the same id GET /agents/{id}/inbox hands back in
+// the entry), and sender is the originating agent id when the delivery named
+// one. There is no reply: the client answers by retrieving its inbox.
+//
+// An inbound INBOX_NOTIFY is recognized and ignored — the frame has no meaning
+// in that direction (see Mesh.handleMessage).
+type InboxNotify struct {
+	Envelope
+	AgentID        string `json:"agent_id"`
+	InboxMessageID string `json:"inbox_message_id,omitempty"`
+	Sender         string `json:"sender,omitempty"`
 }
 
 type Request struct {

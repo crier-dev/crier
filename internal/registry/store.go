@@ -80,13 +80,30 @@ type Handler struct {
 	// (CR-FEAT-010, spec §2). Nil disables the guard (tests,
 	// CR_GUARD_ENABLED=false).
 	guard guard.Filter
+	// notifier wakes reads parked by a long-poll retrieve (?wait_seconds,
+	// CR-FEAT-023) when a delivery lands in an inbox. Created by NewHandler;
+	// every method tolerates a nil receiver, so a zero-value Handler degrades
+	// to fallback polling instead of panicking.
+	notifier *inboxNotifier
+	// inboxPing is the optional new-message ping (CR-FEAT-023) fired after a
+	// delivery is stored, for agents that cannot hold a long-poll open. Nil
+	// disables pings entirely (tests, and any deployment that wires none).
+	inboxPing InboxPinger
 }
 
 // NewHandler creates a Handler that delegates store operations to the
 // provided Store implementation. The handler is safe for concurrent callers
 // if the underlying store is.
 func NewHandler(store Store) *Handler {
-	return &Handler{store: store}
+	return &Handler{store: store, notifier: newInboxNotifier()}
+}
+
+// SetInboxPinger wires the new-message ping fired after a delivery lands in an
+// agent's inbox (CR-FEAT-023). Nil disables it — the poll-only and long-poll
+// lanes stay the whole contract, which is what every pre-CR-FEAT-023 caller
+// and test gets.
+func (h *Handler) SetInboxPinger(p InboxPinger) {
+	h.inboxPing = p
 }
 
 // SetWebhookDriver enables push delivery to agent webhook endpoints.
