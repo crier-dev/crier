@@ -948,6 +948,16 @@ func liveDefault(claimID string) (any, error) {
 			return nil, err
 		}
 		return cfg.RequireAgentSig, nil
+	case "DEFAULT-REQUIRE-MESH-AUTH":
+		// DF-CRIER-287: the mesh handshake is opt-in. The README's environment
+		// table prints that default, and the row's whole migration contract is
+		// that an existing deployment is unaffected — so the printed value is
+		// pinned to the production default an unset environment resolves to.
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, err
+		}
+		return cfg.RequireMeshAuth, nil
 	case "DEFAULT-GUARD-MAX-PAYLOAD-BYTES":
 		cfg, err := config.Load()
 		if err != nil {

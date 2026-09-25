@@ -94,6 +94,18 @@ type statusResponse struct {
 	// RequireAgentSignature reports whether per-agent ed25519 signing is
 	// enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true).
 	RequireAgentSignature bool `json:"require_agent_signature"`
+	// MeshAuthRequired reports whether the mesh connect handshake is enforced
+	// (CR_REQUIRE_MESH_AUTH, default false): true means a peer must answer an
+	// ed25519 challenge before its frames are admitted and before it appears
+	// in GET /mesh/peers. False is the documented default, and it is a real
+	// posture difference — an operator auditing a live server needs to see it
+	// rather than infer it from a log line written at boot.
+	MeshAuthRequired bool `json:"mesh_auth_required"`
+	// MeshOriginPolicy is "allow-all" or "allowlist" — the mode
+	// CR_MESH_ALLOWED_ORIGINS resolves to. The origins themselves are config
+	// (hostnames), so only the mode is reported, exactly as the federation
+	// hold queue reports its durability mode instead of its path.
+	MeshOriginPolicy string `json:"mesh_origin_policy"`
 	// GuardEnabled reports the LLM message guard master switch
 	// (CR_GUARD_ENABLED, default true).
 	GuardEnabled bool `json:"guard_enabled"`
@@ -135,6 +147,8 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 	return statusResponse{
 		AuthEnabled:           cfg.AuthToken != "",
 		RequireAgentSignature: cfg.RequireAgentSig,
+		MeshAuthRequired:      cfg.RequireMeshAuth,
+		MeshOriginPolicy:      config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
 		GuardEnabled:          cfg.Guard.Enabled,
 		RegistryBackend:       registryBackend,
 		RateLimitPerMinute:    cfg.RateLimitPerMinute,

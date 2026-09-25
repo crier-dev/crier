@@ -435,9 +435,14 @@ curl -s -X POST $BASE/relay/publish -H 'Content-Type: application/json' -d '{"to
 
 The mesh is a WebSocket peer layer: connect, send a one-way `REGISTER` frame,
 then exchange `REQUEST`/`RESPONSE` frames that the server relays between
-peers. Unlike the registry/inbox API, mesh frames carry **no bearer or
-signature auth** — do not use the mesh for privileged operations without an
-application-level auth layer.
+peers. Unlike the registry/inbox API, mesh frames carry **no bearer auth**, and
+on the default configuration **no signature auth either** — do not use the mesh
+for privileged operations without an application-level auth layer. For a shared
+or networked deployment, start the server with `CR_REQUIRE_MESH_AUTH=true`: the
+connect is then an ed25519 challenge the peer signs with the key the registry
+holds for it, an unauthenticated connection is refused `AUTH_FAILED` and never
+listed by `GET /mesh/peers`, and a peer can only request as itself
+([`docs/mesh-protocol.md`](mesh-protocol.md) §Authentication).
 
 **Zero-install path — run the shipped driver.** `examples/ws-mesh-demo/run-demo.sh`
 needs no WebSocket client: it starts its own relay on a scratch port it proves is

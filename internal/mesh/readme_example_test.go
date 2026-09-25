@@ -128,6 +128,23 @@ func isMessageID(s string) bool {
 	return true
 }
 
+// isLowerHex reports whether s is non-empty and made only of lowercase hex
+// digits — the shape this package puts on the wire for a nonce and for an
+// ed25519 signature (hex.EncodeToString).
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // TestReadmeMeshFramesDecodeIntoTheWireTypes is the core gate: every frame the
 // README quotes must be a frame this package can marshal and unmarshal, and must
 // carry the fields the README's field table promises.
@@ -335,6 +352,95 @@ func TestReadmeMeshFramesDecodeIntoTheWireTypes(t *testing.T) {
 		}
 	}
 
+	// --- the AUTH_* handshake frames (DF-CRIER-287) -----------------------
+	// These three appear only on a mesh with CR_REQUIRE_MESH_AUTH=true, but the
+	// README quotes them because a client that connects to such a server meets
+	// them FIRST: if the doc's shapes drift from the wire types, a client's
+	// handshake dies before any of the frames above ever arrives.
+	if raw, ok := frames["AUTH_CHALLENGE"]; !ok {
+		t.Errorf("the README mesh example must quote an AUTH_CHALLENGE frame — it is the first frame a client sees on an authenticated mesh")
+	} else {
+		var ch AuthChallenge
+		decodeStrict(t, raw, &ch)
+		assertFrame(t, "AUTH_CHALLENGE", func() []string {
+			var bad []string
+			if ch.Type != TypeAuthChallenge {
+				bad = append(bad, fmt.Sprintf("type=%q", ch.Type))
+			}
+			if ch.Version != 1 {
+				bad = append(bad, fmt.Sprintf("version=%d", ch.Version))
+			}
+			if !isMessageID(ch.MessageID) {
+				bad = append(bad, fmt.Sprintf("message_id=%q is not a 24-hex id", ch.MessageID))
+			}
+			if ch.AgentID == "" {
+				bad = append(bad, "agent_id is empty (the path identity under test)")
+			}
+			if len(ch.Nonce) != 32 || !isLowerHex(ch.Nonce) {
+				bad = append(bad, fmt.Sprintf("nonce=%q is not 32 hex chars", ch.Nonce))
+			}
+			if ch.ExpiresAt.IsZero() {
+				bad = append(bad, "expires_at is missing")
+			}
+			return bad
+		})
+	}
+
+	if raw, ok := frames["AUTH_RESPONSE"]; !ok {
+		t.Errorf("the README mesh example must quote an AUTH_RESPONSE frame — it is the frame a client must send to be admitted")
+	} else {
+		var ar AuthResponse
+		decodeStrict(t, raw, &ar)
+		assertFrame(t, "AUTH_RESPONSE", func() []string {
+			var bad []string
+			if ar.Type != TypeAuthResponse {
+				bad = append(bad, fmt.Sprintf("type=%q", ar.Type))
+			}
+			if ar.AgentID == "" {
+				bad = append(bad, "agent_id is empty")
+			}
+			if len(ar.Nonce) != 32 || !isLowerHex(ar.Nonce) {
+				bad = append(bad, fmt.Sprintf("nonce=%q is not 32 hex chars", ar.Nonce))
+			}
+			// The signature is the hex encoding of a 64-byte ed25519 signature:
+			// 128 hex chars. The README's own example has to be signable-shaped,
+			// or a reader copies a placeholder that can never verify.
+			if len(ar.Signature) != 128 || !isLowerHex(ar.Signature) {
+				bad = append(bad, fmt.Sprintf("signature is %d characters, want 128 hex chars (64-byte ed25519)", len(ar.Signature)))
+			}
+			return bad
+		})
+		// The doc teaches "echo the nonce you were challenged with": the two
+		// quoted frames must agree, or the example cannot complete.
+		if chRaw, ok := frames["AUTH_CHALLENGE"]; ok {
+			var ch AuthChallenge
+			decodeStrict(t, chRaw, &ch)
+			if ar.Nonce != ch.Nonce {
+				t.Errorf("the README's AUTH_RESPONSE nonce (%q) does not echo its AUTH_CHALLENGE nonce (%q) — the example would be refused", ar.Nonce, ch.Nonce)
+			}
+			if ar.AgentID != ch.AgentID {
+				t.Errorf("the README's AUTH_RESPONSE names %q but its challenge named %q", ar.AgentID, ch.AgentID)
+			}
+		}
+	}
+
+	if raw, ok := frames["AUTH_OK"]; !ok {
+		t.Errorf("the README mesh example must quote an AUTH_OK frame — it is how a client knows it was admitted")
+	} else {
+		var okMsg AuthOK
+		decodeStrict(t, raw, &okMsg)
+		assertFrame(t, "AUTH_OK", func() []string {
+			var bad []string
+			if okMsg.Type != TypeAuthOK {
+				bad = append(bad, fmt.Sprintf("type=%q", okMsg.Type))
+			}
+			if okMsg.AgentID == "" {
+				bad = append(bad, "agent_id is empty")
+			}
+			return bad
+		})
+	}
+
 	// The wrong-type direction, so "parses into its documented type" means
 	// something: the RESPONSE's correlation field is exactly what a frame
 	// without one cannot supply.
@@ -402,7 +508,8 @@ func TestReadmeStatesTheCorrelationAndKeepaliveRules(t *testing.T) {
 // meets around it, and it must not quietly lose one.
 func TestReadmeMeshFramesCoverTheDocumentedTypes(t *testing.T) {
 	frames := readmeMeshFrames(t)
-	for _, want := range []string{"REGISTER", "REQUEST", "KEEPALIVE", "RESPONSE", "ERROR"} {
+	for _, want := range []string{"REGISTER", "REQUEST", "KEEPALIVE", "RESPONSE", "ERROR",
+		"AUTH_CHALLENGE", "AUTH_RESPONSE", "AUTH_OK"} {
 		if _, ok := frames[want]; !ok {
 			t.Errorf("the README mesh example no longer quotes a %s frame", want)
 		}
@@ -410,7 +517,9 @@ func TestReadmeMeshFramesCoverTheDocumentedTypes(t *testing.T) {
 	// Every message type the package defines must be handled: either quoted in
 	// the README (and therefore decoded above) or deliberately absent. The one
 	// deliberate absence is REGISTER_ACK — the type exists but no server code
-	// path emits it (docs/mesh-protocol.md §REGISTER_ACK).
+	// path emits it (docs/mesh-protocol.md §REGISTER_ACK). The AUTH_* frames are
+	// quoted even though they only appear on an authenticated mesh, because a
+	// client meeting one has to know its shape before it can answer.
 	if _, quoted := frames[string(TypeRegisterAck)]; quoted {
 		t.Error("the README quotes a REGISTER_ACK frame, which no server code path emits — the doc would teach a handshake that never happens")
 	}

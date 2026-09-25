@@ -17,6 +17,17 @@ const (
 	TypeRequest     MessageType = "REQUEST"
 	TypeResponse    MessageType = "RESPONSE"
 	TypeError       MessageType = "ERROR"
+
+	// The connect handshake (DF-CRIER-287). These three exist only on a
+	// connection whose server requires mesh authentication
+	// (CR_REQUIRE_MESH_AUTH=true): the server challenges the connecting peer,
+	// the peer answers with an ed25519 signature over the challenge, and the
+	// server admits its frames only after that proof. On the default
+	// configuration none of them is ever sent or accepted, and a frame
+	// naming one outside the handshake is refused INVALID_MESSAGE.
+	TypeAuthChallenge MessageType = "AUTH_CHALLENGE"
+	TypeAuthResponse  MessageType = "AUTH_RESPONSE"
+	TypeAuthOK        MessageType = "AUTH_OK"
 )
 
 type Envelope struct {
@@ -49,6 +60,46 @@ type RegisterAck struct {
 type Keepalive struct {
 	Envelope
 	LeaseID string `json:"lease_id"`
+	AgentID string `json:"agent_id"`
+}
+
+// AuthChallenge is the server's first frame on a connection it requires
+// authentication for (DF-CRIER-287): it names the identity the connect URL
+// claims and carries a single-use nonce the peer must sign.
+//
+// agent_id is the PATH claim under verification, not a fact — that is the
+// whole point of the frame. The peer's answer is only accepted if its
+// signature verifies against the public key the registry holds FOR THAT ID,
+// so a peer that cannot sign as agentID never becomes agentID.
+type AuthChallenge struct {
+	Envelope
+	AgentID string `json:"agent_id"`
+	// Nonce is 32 hex chars from crypto/rand, single-use per connection.
+	Nonce string `json:"nonce"`
+	// ExpiresAt is the instant the challenge stops being accepted. The server
+	// also enforces the same bound as a read deadline, so a peer that simply
+	// stops sending is refused rather than parked forever.
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// AuthResponse is the peer's answer to an AuthChallenge.
+//
+// signature is the hex-encoded ed25519 signature over
+// MeshAuthPayload(agent_id, nonce) — a payload that binds the claimed
+// identity to this one challenge, so a signature captured from another
+// connection (or replayed to this one later) verifies nothing.
+type AuthResponse struct {
+	Envelope
+	AgentID   string `json:"agent_id"`
+	Nonce     string `json:"nonce"`
+	Signature string `json:"signature"`
+}
+
+// AuthOK tells the peer its identity is verified and the server now admits
+// its frames. The connection is not registered as a mesh peer before this
+// frame, so a client that never receives it has no peer presence at all.
+type AuthOK struct {
+	Envelope
 	AgentID string `json:"agent_id"`
 }
 

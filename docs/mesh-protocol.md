@@ -7,14 +7,22 @@ All claims below are verified against `internal/mesh` (live-probed 2026-08-10).
 ## Transport
 
 - WebSocket upgrade to `GET /mesh/connect/{agentID}` — the `agentID` in the path is
-  the connecting agent's identity. No bearer token or signature is required on this
-  endpoint (unlike the registry API).
+  the connecting agent's identity.
+- **Whether that identity is verified depends on configuration (DF-CRIER-287).**
+  By default (`CR_REQUIRE_MESH_AUTH` unset) no bearer token and no signature are
+  required on this endpoint, unlike the registry API; with
+  `CR_REQUIRE_MESH_AUTH=true` the server challenges the connection and the peer
+  must sign the challenge with the ed25519 key the registry holds for that agent
+  id before it is admitted as a peer. See §Authentication.
 - The server accepts connections from any origin (the upgrader's origin check
-  defaults to allow-all; `mesh.SetWSCheckOrigin` can restrict it).
-- Connected peers are listed via `GET /mesh/peers` → `{"peers":[{"agent_id":"..."}],"count":N}`.
-- Peer identity is asserted by the URL path only. There is no cryptographic
-  authentication on mesh frames — do not use the mesh for privileged operations
-  without an additional application-level auth layer.
+  defaults to allow-all; `mesh.SetWSCheckOrigin` can restrict it, and the server
+  wires `CR_MESH_ALLOWED_ORIGINS` into it — §Origin policy).
+- Connected peers are listed via `GET /mesh/peers` → `{"peers":[{"agent_id":"..."}],"count":N}`
+  — a peer that has not completed the handshake is not listed.
+- On the default configuration peer identity is asserted by the URL path only, and
+  there is no cryptographic authentication on mesh frames — do not use the mesh
+  for privileged operations without an additional application-level auth layer or
+  without turning the handshake on.
 
 ## Framing
 
@@ -30,7 +38,7 @@ Every message embeds an envelope with four fields:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `type` | string | One of `REGISTER`, `REGISTER_ACK`, `KEEPALIVE`, `REQUEST`, `RESPONSE`, `ERROR` |
+| `type` | string | One of `REGISTER`, `REGISTER_ACK`, `KEEPALIVE`, `REQUEST`, `RESPONSE`, `ERROR`, plus `AUTH_CHALLENGE`, `AUTH_RESPONSE` and `AUTH_OK`, which exist only on a connection to a server started with `CR_REQUIRE_MESH_AUTH=true` (§Authentication) |
 | `version` | int | Protocol version, currently `1` |
 | `message_id` | string | Unique ID (24 hex chars, crypto/rand) — see correlation contract |
 | `timestamp` | string | RFC3339 with nanosecond precision, e.g. `2026-08-10T01:55:00.123456789-05:00` (Go `time.Time` JSON encoding) |
@@ -211,6 +219,152 @@ parsed" (there is nothing to correlate to), not as a missing reply.
 | `FORBIDDEN` | Not authorized |
 | `INTERNAL` | Server-side failure (e.g. route table full) |
 
+## Authentication (opt-in, DF-CRIER-287)
+
+Whether the agent id in the connect URL is *verified* or merely *asserted* is a
+configuration choice. Two settings, one of which changes the wire protocol:
+
+| setting | default | effect |
+|---|---|---|
+| `CR_REQUIRE_MESH_AUTH` | `false` | Connect handshake (below). Unset, no `AUTH_*` frame is ever sent, the path id is taken at face value, and every client in this repository works unchanged. |
+| `CR_MESH_AUTH_TIMEOUT_S` | `10` | How long a challenge stays valid: the peer must answer within it, and the server also enforces it as a read deadline on the pre-auth socket. |
+
+### Handshake
+
+When the handshake is required, the identity is proven before ANY other frame is
+processed, and a connection that has not proven it is not a peer:
+
+1. the WebSocket upgrade succeeds, but the connection is **not** added to the peer
+   table and is **not** listed by `GET /mesh/peers`;
+2. the server sends `AUTH_CHALLENGE`, naming the path identity and a single-use
+   nonce (32 hex chars from `crypto/rand`):
+
+```json
+{"type":"AUTH_CHALLENGE","version":1,"message_id":"5b4c3d2e1f0a9b8c7d6e5f4a",
+ "timestamp":"2026-09-25T11:02:00.123456789-05:00","agent_id":"agent-1",
+ "nonce":"9f1c0a7e4b2d6835a0c1e9f7b4d2638a",
+ "expires_at":"2026-09-25T11:02:10.123456789-05:00"}
+```
+
+3. the peer answers `AUTH_RESPONSE`, echoing the nonce and carrying the hex
+   ed25519 signature over the payload below:
+
+```json
+{"type":"AUTH_RESPONSE","version":1,"message_id":"2e1f0a9b8c7d6e5f4a3b2c1d",
+ "timestamp":"2026-09-25T11:02:00.234567890-05:00","agent_id":"agent-1",
+ "nonce":"9f1c0a7e4b2d6835a0c1e9f7b4d2638a",
+ "signature":"<128 hex chars: the 64-byte ed25519 signature>"}
+```
+
+4. the signature is verified against the public key the registry holds for
+   `agent_id` (`mesh.AgentKeyProvider`, wired to the same store that gates the
+   inbox lane). On success the server sends `AUTH_OK` and admits the connection —
+   starting its read loop, registering it and beginning its keepalive:
+
+```json
+{"type":"AUTH_OK","version":1,"message_id":"1d0e9f8a7b6c5d4e3f2b1a0c",
+ "timestamp":"2026-09-25T11:02:00.345678901-05:00","agent_id":"agent-1"}
+```
+
+### The signed payload
+
+Raw ed25519 over exactly these bytes — no pre-hash, no PKCS#1 framing
+(`mesh.MeshAuthPayload`):
+
+```
+mesh-auth-v1\n<agent_id>\n<nonce>
+```
+
+The prefix domain-separates the handshake from the registry lane's inbox
+signature, which covers `"<METHOD>\n<path>\n<unix-seconds>"` — neither lane's
+signature can be replayed on the other. The payload binds the CLAIMED identity to
+THIS challenge, so a signature captured from an earlier connection verifies
+against neither a different agent id nor a different nonce.
+
+Signing it with OpenSSL ≥ 3 (the payload must be a file: `pkeyutl -sign -rawin`
+fails on a pipe with `unable to determine file size for oneshot operation`, and
+yields a zero-byte signature):
+
+```bash
+printf 'mesh-auth-v1\n%s\n%s' "$AGENT_ID" "$NONCE" > payload.txt
+openssl pkeyutl -sign -rawin -inkey agent.key -in payload.txt | xxd -p -c 128
+```
+
+The `openssl genpkey -algorithm ED25519 -out agent.key` key is the one whose
+hex public half was registered with `POST /agents`; a client can sign with
+`cryptography`'s `Ed25519PrivateKey.sign(MeshAuthPayload)` equivalently.
+
+### Refusals
+
+| situation | answer | socket |
+|---|---|---|
+| no answer within the window | `ERROR` `AUTH_FAILED` ("no AUTH_RESPONSE within …") | closed |
+| first frame is anything but `AUTH_RESPONSE` (e.g. a pre-fix client's `REGISTER`) | `ERROR` `AUTH_FAILED`, naming the frame and the required one | stays open for a correct answer within the same window |
+| frame is not JSON | `ERROR` `INVALID_MESSAGE` (no `request_id`: nothing to correlate to) | stays open |
+| `agent_id` is not the path identity | `ERROR` `AUTH_FAILED` ("an agent may only authenticate as itself") | closed |
+| nonce does not match the challenge | `ERROR` `AUTH_FAILED` ("nonce does not match") | closed |
+| signature is not 128 hex chars | `ERROR` `AUTH_FAILED` ("malformed") | closed |
+| signature does not verify against the registered key | `ERROR` `AUTH_FAILED` ("signature verification failed") | closed |
+| the agent has no registered key (unknown id, or a keyless registration) | `ERROR` `AUTH_FAILED` naming the missing registration | closed |
+| the server requires the handshake but has no key source wired | `ERROR` `AUTH_FAILED` ("no agent key provider") — fail closed | closed |
+
+An `AUTH_*` frame that arrives OUTSIDE the handshake — on a connection that is
+already admitted, or on a server that does not require authentication — is
+refused `INVALID_MESSAGE` naming the frame, not ignored.
+
+### Frame-level identity rules (authenticated mesh only)
+
+Because the socket's identity is now proven, `agent_id` in a frame stops being a
+claim. Two rules are enforced **only** while `CR_REQUIRE_MESH_AUTH=true`:
+
+- a `REQUEST` whose `source.agent_id` is **not** the authenticated peer is refused
+  `FORBIDDEN` ("an agent may only request as itself") and is **not** forwarded —
+  the target never sees a request that names another agent. A `REQUEST` with no
+  `source.agent_id` at all is refused the same way.
+- a `RESPONSE` or `ERROR` may only be sent by the peer the request was addressed
+  to; from any other connection it is refused `FORBIDDEN` and **not** forwarded to
+  the requester.
+
+With the handshake off, neither rule applies: there is no verified identity to
+bind the fields to, and the frames are forwarded exactly as before.
+
+### Migration note
+
+Turning the handshake on is a **client-side** change, not a transparent one:
+
+- every connecting agent must hold the private half of the key registered for it
+  (`POST /agents` with `public_key`); a keyless registration — legal while
+  `CR_REQUIRE_AGENT_SIG=false` (§DF-CRIER-192) — can never authenticate;
+- clients that do not implement the handshake are refused with `AUTH_FAILED`
+  naming the missing `AUTH_RESPONSE`; the server logs the refusal and
+  `GET /status` reports `"mesh_auth_required": true`;
+- the Go client in this repository performs the handshake when
+  `mesh.MeshAuthConfig.SigningKey` is set (and expects the server to challenge it,
+  because `SigningKey` and `Required` describe the same deployment). A client sent
+  to a server that does not challenge it simply proceeds, unchanged;
+- the MCP bridge (`internal/mcp`) is a mesh client too: with the flag on, its
+  socket needs a key, so give it the same `CRIER_AGENT_PRIVATE_KEY_FILE` identity
+  the registry lane uses.
+
+## Origin policy
+
+The WebSocket upgrade rejects a request whose `Origin` header the policy does not
+allow, with `403` and no frame — before the handshake and before any peer exists.
+Two knobs, deliberately separate, because the two lanes have different clients:
+
+| setting | default | lane | rule |
+|---|---|---|---|
+| `CR_WS_ALLOWED_ORIGINS` | unset (all) | relay | when set, the request's `Origin` must match a listed value — an ABSENT `Origin` does not match |
+| `CR_MESH_ALLOWED_ORIGINS` | unset (all) | mesh | when set, a request that CARRIES an `Origin` must match a listed value; a request with NO `Origin` is allowed |
+
+The mesh rule differs on purpose: agent clients (this repository's Go client, the
+Python example below, the MCP bridge, `websocat`) send no `Origin` header at all,
+so applying the relay's rule to the mesh would refuse every legitimate agent the
+moment an operator set an allowlist. The header is the only thing a policy can
+bind, and browsers — the clients that always send it — are what it fences off. The
+mode in force is published by `GET /status` as `mesh_origin_policy`:
+`"allow-all"` or `"allowlist"`.
+
 ## Correlation contract (read this first)
 
 The server routes replies **by the request's `message_id`**, but looks them up **by
@@ -254,6 +408,14 @@ with an unknown `request_id` is dropped with no error and no log.
   still recognized and ignored with no reply at all (§KEEPALIVE), and a REQUEST
   that carries no `target.agent_id` is still refused `INVALID_MESSAGE` with a
   message naming the missing field.
+- **On an authenticated mesh a frame's identity is checked too (DF-CRIER-287).**
+  With `CR_REQUIRE_MESH_AUTH=true` the socket's identity was proven at connect, so
+  a `REQUEST` whose `source.agent_id` is not that peer is answered
+  `ERROR` `FORBIDDEN` ("an agent may only request as itself") and is **not**
+  forwarded — the target never sees it — and a `RESPONSE`/`ERROR` is only accepted
+  from the peer the request was addressed to. With the flag unset (the default)
+  neither check applies, and the frames are forwarded exactly as before
+  (§Authentication).
 - `INVALID_MESSAGE`'s `request_id` is the malformed frame's own `message_id` when
   the envelope was readable; a frame that did not decode as an envelope carries
   none, so the field is **absent** rather than blank (§ERROR, with both captured

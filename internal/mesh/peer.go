@@ -18,11 +18,25 @@ type Mesh struct {
 	pending     map[string]chan *Response
 	pendingMu   sync.RWMutex
 	// routes tracks in-flight agent-to-agent requests so responses can be
-	// routed back to the original requester peer. Keyed by request message ID.
-	routes   map[string]string
+	// routed back to the original requester peer, AND so a reply can be tied
+	// to the peer the request was addressed to. Keyed by request message ID.
+	routes   map[string]meshRoute
 	routesMu sync.RWMutex
 	stopCh   chan struct{}
 	config   MeshConfig
+	// keys resolves an agent's registered ed25519 public key for the connect
+	// handshake (DF-CRIER-287). Nil until SetAgentKeyProvider is called; with
+	// MeshAuthConfig.Required set and no provider, every connect is refused
+	// (fail closed) rather than admitted unverified.
+	keys AgentKeyProvider
+}
+
+// meshRoute is one in-flight agent-to-agent request: who asked, and who was
+// asked. Both are needed — the requester is the destination of the reply, and
+// the target is the only peer allowed to send it (DF-CRIER-287).
+type meshRoute struct {
+	requesterID string
+	targetID    string
 }
 
 type MeshConfig struct {
@@ -32,10 +46,51 @@ type MeshConfig struct {
 	LeaseExpiryFactor  int
 	MaxPendingRequests int
 	RequestTimeout     time.Duration
+	// Auth is the mesh authentication configuration (DF-CRIER-287). The zero
+	// value — Required false, no signing key — is the default and leaves the
+	// accept path and the frame rules exactly as they were before the flag
+	// existed.
+	Auth MeshAuthConfig
+}
+
+// SetAgentKeyProvider wires the registry lookup the connect handshake verifies
+// signatures against (DF-CRIER-287). The server calls it at boot, after the
+// registry store exists; without it a server that requires mesh authentication
+// refuses every connect — never admits an unverified peer.
+func (m *Mesh) SetAgentKeyProvider(keys AgentKeyProvider) {
+	m.mu.Lock()
+	m.keys = keys
+	m.mu.Unlock()
+}
+
+// keyProvider returns the registered key source, or nil when none is wired.
+func (m *Mesh) keyProvider() AgentKeyProvider {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.keys
+}
+
+// authConfig returns the authentication configuration this mesh runs with.
+// Like every other posture, it is fixed at construction: the accept path reads
+// it per request rather than caching a decision made when the first peer
+// connected.
+func (m *Mesh) authConfig() MeshAuthConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.Auth
+}
+
+// AuthRequired reports whether this mesh requires the connect handshake. It is
+// the single question the frame-level identity rules ask, so a caller cannot
+// enforce the socket rules while the accept path skipped the proof.
+func (m *Mesh) AuthRequired() bool {
+	return m.authConfig().Required
 }
 
 // DefaultMeshConfig returns a MeshConfig with sensible defaults:
-// 30s keepalive, 1h lease TTL, 50 max pending requests, 30s request timeout.
+// 30s keepalive, 1h lease TTL, 50 max pending requests, 30s request timeout,
+// and mesh authentication OFF (the shipped default; see
+// docs/mesh-protocol.md §Authentication for how to turn it on).
 func DefaultMeshConfig(agentID string) MeshConfig {
 	return MeshConfig{
 		AgentID:            agentID,
@@ -54,7 +109,7 @@ func NewMesh(config MeshConfig) *Mesh {
 		agentID:     config.AgentID,
 		connections: make(map[string]*PeerConnection),
 		pending:     make(map[string]chan *Response),
-		routes:      make(map[string]string),
+		routes:      make(map[string]meshRoute),
 		stopCh:      make(chan struct{}),
 		config:      config,
 	}
@@ -69,15 +124,49 @@ func (m *Mesh) ConnectPeer(ctx context.Context, peerID, wsURL string) error {
 	conn := NewPeerConnection(peerID, wsURL, DefaultDialerConfig())
 	m.connections[peerID] = conn
 	m.mu.Unlock()
+
+	// The inbound handler is installed BEFORE the dial (DF-CRIER-287). A server
+	// that requires mesh authentication sends its AUTH_CHALLENGE as soon as the
+	// socket upgrades, and the read pump starts inside Connect — so a handler
+	// registered afterwards raced that first frame, and a frame read by the
+	// pump with no handler yet is DROPPED. The challenge would vanish and the
+	// handshake would sit until its deadline for no reason a client could see.
+	authResult := make(chan error, 1)
+	conn.OnMessage(func(data []byte) {
+		m.handlePeerFrame(conn, peerID, data, authResult)
+	})
+
 	if err := conn.Connect(ctx); err != nil {
 		m.mu.Lock()
 		delete(m.connections, peerID)
 		m.mu.Unlock()
 		return fmt.Errorf("connect to %s: %w", peerID, err)
 	}
-	conn.OnMessage(func(data []byte) {
-		m.handleMessage(peerID, data)
-	})
+
+	// A client that expects to authenticate waits for the outcome. It waits
+	// only when its own configuration says the server requires auth: a server
+	// that does not sends no challenge at all, so waiting unconditionally
+	// would turn every connect to a default-configured server into a timeout.
+	if auth := m.authConfig(); auth.Required {
+		timeout := auth.effectiveTimeout()
+		select {
+		case err := <-authResult:
+			if err != nil {
+				conn.Close()
+				m.mu.Lock()
+				delete(m.connections, peerID)
+				m.mu.Unlock()
+				return fmt.Errorf("mesh auth with %s: %w", peerID, err)
+			}
+		case <-time.After(timeout):
+			conn.Close()
+			m.mu.Lock()
+			delete(m.connections, peerID)
+			m.mu.Unlock()
+			return fmt.Errorf("mesh auth with %s: no AUTH_OK within %s (the server is expected to require mesh authentication; check that its registry holds the public key for this agent id)", peerID, timeout)
+		}
+	}
+
 	conn.OnClose(func(err error) {
 		m.mu.Lock()
 		delete(m.connections, peerID)
@@ -93,6 +182,56 @@ func (m *Mesh) ConnectPeer(ctx context.Context, peerID, wsURL string) error {
 	}
 	go m.keepaliveLoop(peerID, conn)
 	return nil
+}
+
+// handlePeerFrame is inbound dispatch for a connection THIS mesh dialed: it
+// resolves the connect handshake (DF-CRIER-287) before the socket's ordinary
+// frames reach the router, so an AUTH_CHALLENGE is never mistaken for a
+// protocol error and a handshake refusal is never swallowed as an unplaceable
+// ERROR.
+//
+// authResult carries the handshake outcome to ConnectPeer. Every send is
+// non-blocking: after the handshake has settled nobody reads that channel, and
+// a blocked read loop is a dead peer.
+func (m *Mesh) handlePeerFrame(conn *PeerConnection, peerID string, data []byte, authResult chan error) {
+	var env Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		// Let the router refuse it: one place reports a malformed frame.
+		m.handleMessage(peerID, data)
+		return
+	}
+	switch env.Type {
+	case TypeAuthChallenge:
+		if err := m.answerAuthChallenge(conn, peerID, data, m.authConfig().SigningKey); err != nil {
+			slog.Warn("mesh auth: challenge unanswered", "peer", peerID, "error", err)
+			select {
+			case authResult <- err:
+			default:
+			}
+		}
+		return
+	case TypeAuthOK:
+		slog.Debug("mesh auth: authenticated", "peer", peerID, "agent_id", m.agentID)
+		select {
+		case authResult <- nil:
+		default:
+		}
+		return
+	case TypeError:
+		// A handshake refusal (AUTH_FAILED) has to surface as a connect error:
+		// nothing this client sent is pending yet, so an ERROR at this point
+		// belongs to the handshake, and forwarding it would leave ConnectPeer
+		// waiting out its own timeout for a refusal the server already sent.
+		var errMsg ErrorMessage
+		if json.Unmarshal(data, &errMsg) == nil && errMsg.Error.Code == ErrCodeAuthFailed {
+			select {
+			case authResult <- fmt.Errorf("server refused the handshake: %s", errMsg.Error.Message):
+			default:
+			}
+			return
+		}
+	}
+	m.handleMessage(peerID, data)
 }
 
 func (m *Mesh) SendRequest(ctx context.Context, targetID, method, path string, body any) (*Response, error) {
@@ -313,8 +452,9 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 			}
 			return
 		}
-		// Agent-initiated request? Forward the response back to the requester.
-		m.forwardResponse(resp.RequestID, data)
+		// Agent-initiated request? Forward the response back to the requester —
+		// if this peer is the one the request was addressed to (DF-CRIER-287).
+		m.forwardResponse(peerID, resp.RequestID, data)
 	case TypeError:
 		var errMsg ErrorMessage
 		if err := json.Unmarshal(data, &errMsg); err != nil {
@@ -340,9 +480,18 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 			return
 		}
 		// Agent-initiated request that failed at the target side.
-		m.forwardResponse(errMsg.RequestID, data)
+		m.forwardResponse(peerID, errMsg.RequestID, data)
+	case TypeAuthChallenge, TypeAuthResponse, TypeAuthOK:
+		// The connect handshake frames (DF-CRIER-287) are defined only INSIDE
+		// the handshake: this connection is past it (it is in the peer table,
+		// so it was either admitted or the server never required auth), which
+		// makes an AUTH_* frame here a client error rather than a handshake
+		// step. Refused with the malformed-frame code, naming why — the
+		// alternative (silence) is the failure mode DF-CRIER-40 removed.
+		m.reportInvalidMessage(peerID, env.MessageID,
+			fmt.Sprintf("malformed frame: %s is only valid during the mesh connect handshake (CR_REQUIRE_MESH_AUTH on the server), and this connection is already admitted", env.Type))
 	default:
-		// An envelope naming a type the protocol does not define (the six in
+		// An envelope naming a type the protocol does not define (the nine in
 		// the envelope table of docs/mesh-protocol.md) is malformed, not
 		// merely unhandled. It used to be dropped with a debug log, so a
 		// client that misspelled a type saw nothing but silence (DF-CRIER-40).
@@ -388,6 +537,28 @@ func (m *Mesh) handleAgentRequest(requesterID string, env Envelope, data []byte)
 		return
 	}
 
+	// Identity is bound to the SOCKET, not to the frame (DF-CRIER-287). With
+	// mesh authentication on, this connection proved it holds requesterID's
+	// private key at connect, so a REQUEST that names a different
+	// source.agent_id is an attempt to speak as another agent: the target
+	// would see the victim's id on a request the victim never sent. Refuse it
+	// (FORBIDDEN, "Not authorized") rather than forward it — without this
+	// check the connect handshake would authenticate the socket and then let
+	// it claim any identity per frame, which is the same hole one layer up.
+	//
+	// Auth-off deployments keep the old behaviour: with no verified identity
+	// there is nothing to bind the field to, and refusing it would break
+	// existing relays that rewrite `source` for their own purposes.
+	if m.AuthRequired() && req.Source.AgentID != requesterID {
+		slog.Warn("mesh: REQUEST refused (source is not the authenticated peer)",
+			"requester", requesterID, "claimed_source", req.Source.AgentID,
+			"target", targetID, "message_id", req.MessageID)
+		m.sendErrorTo(requesterID, req.MessageID, req.TraceID, ErrCodeForbidden,
+			fmt.Sprintf("REQUEST refused: source.agent_id %q is not the authenticated peer %q (on a mesh that requires authentication an agent may only request as itself)",
+				req.Source.AgentID, requesterID))
+		return
+	}
+
 	m.mu.RLock()
 	targetConn, ok := m.connections[targetID]
 	m.mu.RUnlock()
@@ -418,7 +589,7 @@ func (m *Mesh) handleAgentRequest(requesterID string, env Envelope, data []byte)
 			ErrCodeInternal, "mesh route table full")
 		return
 	}
-	m.routes[req.MessageID] = requesterID
+	m.routes[req.MessageID] = meshRoute{requesterID: requesterID, targetID: targetID}
 	m.routesMu.Unlock()
 
 	if err := targetConn.Send(data); err != nil {
@@ -433,10 +604,19 @@ func (m *Mesh) handleAgentRequest(requesterID string, env Envelope, data []byte)
 }
 
 // forwardResponse routes a RESPONSE or ERROR back to the agent that issued
-// the original request, if that agent is still connected.
-func (m *Mesh) forwardResponse(requestID string, data []byte) {
+// the original request, if that agent is still connected — and only if the
+// sender is the peer the request was addressed to (DF-CRIER-287).
+//
+// The sender check is the reply half of socket-bound identity: with mesh
+// authentication on, `senderID` is the peer that proved its key at connect, so
+// a frame answering a request addressed to someone else is not a reply at all
+// — it is a third peer injecting a response into another pair's exchange. Such
+// a frame is refused (FORBIDDEN, to the sender) and NOT forwarded, so the
+// requester never sees it. With authentication off there is no verified sender
+// to compare against, and the frame is forwarded as before.
+func (m *Mesh) forwardResponse(senderID, requestID string, data []byte) {
 	m.routesMu.Lock()
-	requesterID, ok := m.routes[requestID]
+	route, ok := m.routes[requestID]
 	if ok {
 		delete(m.routes, requestID)
 	}
@@ -446,8 +626,17 @@ func (m *Mesh) forwardResponse(requestID string, data []byte) {
 		return
 	}
 
+	if m.AuthRequired() && route.targetID != senderID {
+		slog.Warn("mesh: reply refused (sender is not the request's target)",
+			"sender", senderID, "target", route.targetID, "request_id", requestID)
+		m.sendErrorTo(senderID, requestID, "", ErrCodeForbidden,
+			fmt.Sprintf("reply refused: request %s was addressed to %q, and this connection is %q",
+				requestID, route.targetID, senderID))
+		return
+	}
+
 	m.mu.RLock()
-	conn, ok := m.connections[requesterID]
+	conn, ok := m.connections[route.requesterID]
 	m.mu.RUnlock()
 	if ok {
 		_ = conn.Send(data)
@@ -522,7 +711,7 @@ func (m *Mesh) sendErrorTo(peerID, requestID, traceID, code, message string) {
 // effective guard, refusing every agent-to-agent REQUEST. That is fail-closed
 // and identical to the behaviour before the cap was plumbed through — a
 // misconfigured cap must not silently disable the limit.
-func pruneRoutesLocked(routes map[string]string, now time.Time, cap int) {
+func pruneRoutesLocked(routes map[string]meshRoute, now time.Time, cap int) {
 	if cap <= 0 || len(routes) < cap {
 		return
 	}

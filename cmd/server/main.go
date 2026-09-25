@@ -125,10 +125,16 @@ func run(args []string) int {
 	// cannot drift from the store that actually answers.
 	regBackend := registryBackendForURL(cfg.Database.URL)
 
-	// Configure WebSocket origin check for relay and mesh.
+	// Configure the WebSocket origin check PER LANE (DF-CRIER-287). They are
+	// different clients: the relay is subscribed to from browsers (whose
+	// allowlist may reasonably require an Origin), while every mesh client is
+	// an agent that sends no Origin header at all. CR_WS_ALLOWED_ORIGINS
+	// therefore keeps its relay semantics and CR_MESH_ALLOWED_ORIGINS is the
+	// mesh's own, explicit, opt-in policy — unset, the mesh allows every
+	// origin exactly as before.
 	wsCheck := config.BuildCheckOrigin(cfg.WSAllowedOrigins)
 	relay.SetWSCheckOrigin(wsCheck)
-	mesh.SetWSCheckOrigin(wsCheck)
+	mesh.SetWSCheckOrigin(config.BuildMeshCheckOrigin(cfg.MeshAllowedOrigins))
 
 	r := mux.NewRouter()
 
@@ -194,6 +200,14 @@ func run(args []string) int {
 
 	// P2P mesh
 	meshCfg := mesh.DefaultMeshConfig("crier")
+	// Mesh connect authentication (DF-CRIER-287): with CR_REQUIRE_MESH_AUTH
+	// set, /mesh/connect/{agentID} verifies an ed25519 challenge before the
+	// connection becomes a peer. The key source is wired below, once the
+	// registry store exists — see registryKeyProvider.
+	meshCfg.Auth = mesh.MeshAuthConfig{
+		Required: cfg.RequireMeshAuth,
+		Timeout:  cfg.MeshAuthTimeout,
+	}
 	meshSvc := mesh.NewMesh(meshCfg)
 	r.HandleFunc("/mesh/connect/{agentID}", mesh.HandleConnect(meshSvc))
 	r.HandleFunc("/mesh/peers", mesh.HandlePeers(meshSvc)).Methods("GET")
@@ -225,6 +239,31 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+
+	// Mesh identity (DF-CRIER-287). The connect handshake verifies a peer
+	// against the SAME registry row the inbox lane's signatures are checked
+	// against, so both lanes answer "is this agent who it says it is?" from one
+	// record. Wired here because the store only exists from this point on; with
+	// CR_REQUIRE_MESH_AUTH set and no provider wired, the accept path refuses
+	// every connect rather than admitting an unverified peer (fail closed), so
+	// there is no window in which a required handshake is silently skipped.
+	if cfg.RequireMeshAuth {
+		meshSvc.SetAgentKeyProvider(registryKeyProvider{store: regStore})
+	}
+	meshAuthTimeout := cfg.MeshAuthTimeout
+	if meshAuthTimeout <= 0 {
+		meshAuthTimeout = mesh.DefaultMeshAuthTimeout()
+	}
+	if cfg.RequireMeshAuth {
+		slog.Info("mesh authentication", "required", true,
+			"origin_policy", config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
+			"challenge_timeout", meshAuthTimeout,
+			"keys", "registry ed25519 public key per agent")
+	} else {
+		slog.Info("mesh authentication", "required", false,
+			"origin_policy", config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
+			"detail", "the agent id in /mesh/connect/{agentID} is taken at face value: any client that can reach this port can speak as any registered agent. Set CR_REQUIRE_MESH_AUTH=true to require the ed25519 connect challenge (docs/mesh-protocol.md §Authentication)")
+	}
 
 	// LLM message guard (CR-FEAT-010) — the inbound choke point for every
 	// delivery (webhook POST / inbox store). Constructed BEFORE the routes

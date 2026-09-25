@@ -31,6 +31,27 @@ type Config struct {
 	// RequireAgentSig enforces per-agent ed25519 request signing on inbox
 	// read/ack/stats and agent deletion. Secure by default.
 	RequireAgentSig bool
+	// RequireMeshAuth enforces the ed25519 connect handshake on the mesh
+	// (CR_REQUIRE_MESH_AUTH, DF-CRIER-287). Default FALSE — the mesh is
+	// opt-in, because its lane is used by single-host deployments whose
+	// clients have no key setup, and tightening the default would break them
+	// silently. See docs/mesh-protocol.md §Authentication for the migration
+	// note: turning it on requires every connecting agent to hold the private
+	// half of its registered key.
+	RequireMeshAuth bool
+	// MeshAuthTimeout bounds the mesh connect challenge/response
+	// (CR_MESH_AUTH_TIMEOUT_S). Zero means "the mesh package's own default"
+	// (mesh.DefaultMeshAuthTimeout, 10s) — the value is resolved once, in the
+	// mesh config the server builds, so the constant is never duplicated here.
+	MeshAuthTimeout time.Duration
+	// MeshAllowedOrigins is the mesh-only WebSocket origin allowlist
+	// (CR_MESH_ALLOWED_ORIGINS, comma-separated, "*" = allow all). Empty — the
+	// default — allows every origin, exactly as before. When set, an upgrade
+	// that CARRIES an Origin header must name a listed origin; one that
+	// carries NONE is allowed, because a non-browser mesh client (every
+	// shipped one) sends no Origin and an allowlist that locked those out
+	// would be an outage, not a policy. See config.BuildMeshCheckOrigin.
+	MeshAllowedOrigins string
 	// Webhook holds push-delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	Webhook WebhookConfig
 	// Federation holds relay-to-relay link configuration (CR-FEAT-006).
@@ -300,6 +321,34 @@ func Load() (Config, error) {
 		cfg.RequireAgentSig = parsed
 	}
 
+	// Mesh connect authentication (DF-CRIER-287). Default FALSE, and that is
+	// deliberate: the mesh is the only lane whose clients may have no key
+	// setup at all, so flipping the default would refuse every existing
+	// client at once instead of asking the operator to opt in. When on, a
+	// connecting agent must hold the private half of the key the registry
+	// holds for the id in the connect URL.
+	if v := os.Getenv("CR_REQUIRE_MESH_AUTH"); v != "" {
+		parsed, err := parseTolerantBool("CR_REQUIRE_MESH_AUTH", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.RequireMeshAuth = parsed
+	}
+	// CR_MESH_AUTH_TIMEOUT_S bounds the challenge/response. Unset leaves the
+	// zero value, which the mesh resolves to its own default
+	// (mesh.DefaultMeshAuthTimeout) — one constant, not a copy of it here.
+	if v := os.Getenv("CR_MESH_AUTH_TIMEOUT_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_MESH_AUTH_TIMEOUT_S: %q (want positive seconds)", v)
+		}
+		cfg.MeshAuthTimeout = time.Duration(n) * time.Second
+	}
+	// CR_MESH_ALLOWED_ORIGINS is the MESH-ONLY origin allowlist, separate from
+	// CR_WS_ALLOWED_ORIGINS (which also covers the relay). Unset (default)
+	// allows every origin, as the mesh always has.
+	cfg.MeshAllowedOrigins = os.Getenv("CR_MESH_ALLOWED_ORIGINS")
+
 	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	cfg.Webhook.Secret = os.Getenv("CR_WEBHOOK_SECRET")
 	if v := os.Getenv("CR_WEBHOOK_TIMEOUT_S"); v != "" {
@@ -495,6 +544,65 @@ func BuildCheckOrigin(allowed string) func(r *http.Request) bool {
 	}
 	return func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
+		return allowedSet[origin]
+	}
+}
+
+// MeshOriginPolicy names the policy a mesh origin allowlist resolves to. It is
+// the value GET /status reports ("allow-all" or "allowlist"), so an operator
+// can tell a permissive mesh from a restricted one without reading the
+// environment — the same reason the federation hold queue reports a mode and
+// not a path.
+const (
+	MeshOriginPolicyAllowAll  = "allow-all"
+	MeshOriginPolicyAllowlist = "allowlist"
+)
+
+// MeshOriginPolicy returns the mode CR_MESH_ALLOWED_ORIGINS resolves to.
+func MeshOriginPolicy(allowed string) string {
+	if allowed == "" || allowed == "*" {
+		return MeshOriginPolicyAllowAll
+	}
+	return MeshOriginPolicyAllowlist
+}
+
+// BuildMeshCheckOrigin returns the mesh upgrader's CheckOrigin (DF-CRIER-287).
+//
+// It is deliberately NOT BuildCheckOrigin with a different string. The two
+// lanes have different clients: the relay is subscribed to from browsers, so
+// its allowlist may reasonably require an Origin; the mesh is connected to by
+// agents, and every shipped mesh client (this repo's Go client, the Python
+// worked example, the MCP bridge) sends NO Origin header at all. Reusing the
+// relay's rule on the mesh would therefore reject every legitimate agent the
+// moment an operator set an allowlist — an outage dressed up as a policy.
+//
+// The rule here is stated in the doc, in the same words:
+//
+//   - allowed is empty or "*" (the default): every origin — allow-all, the
+//     mesh's historical behaviour, unchanged.
+//   - otherwise: a request that CARRIES an Origin header must name one of the
+//     listed origins; a request that carries NONE is allowed, because a
+//     non-browser agent client has no origin to declare and the header is the
+//     only thing a policy can bind to. That keeps the protection where it
+//     means something — a browser (or anything else that self-identifies with
+//     an Origin) can no longer open a mesh socket from an unlisted page —
+//     without locking out the agent clients the lane exists for.
+//
+// A rejected upgrade is a 403 from gorilla/websocket's Upgrade, before the
+// handshake and before any frame.
+func BuildMeshCheckOrigin(allowed string) func(r *http.Request) bool {
+	if allowed == "" || allowed == "*" {
+		return func(r *http.Request) bool { return true }
+	}
+	allowedSet := make(map[string]bool)
+	for _, origin := range splitTrim(allowed) {
+		allowedSet[origin] = true
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
 		return allowedSet[origin]
 	}
 }
