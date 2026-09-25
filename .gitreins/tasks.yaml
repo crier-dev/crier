@@ -2258,3 +2258,22 @@ tasks:
   status: complete
   created_at: '2026-09-25T03:22:22.780662+00:00'
   completed_at: '2026-09-25T03:22:30.195596+00:00'
+- id: CR-CONSENSUS-1
+  title: 'External agent delivery path: recipe + live-verified path recommendation
+    + isolation battery cell'
+  criteria:
+  - Recipe in docs/integration-guide.md for an external non-Go agent to sign+register,
+    then deliver -> retrieve-with-lease -> ack against its durable inbox, with the
+    exact curl sequence and the expected status codes (201/201/200/204); the relay
+    path (POST /relay/publish + WS subscribe) verified live including subscribe-before-publish
+    semantics and the 202-with-zero-subscribers drop; the guide states plainly which
+    path an external harness should use (durable inbox vs relay subscription) and
+    why; an E2E battery cell in scripts/e2e-battery.sh registers a foreign agent and
+    proves a published message is retrievable and ackable BY THAT AGENT while a different
+    agent cannot see it (cross-agent negative, e.g. 403) with the payload round-tripping
+    intact; every documented command executes green at HEAD with pasted transcripts;
+    make docs-check, make shell-yaml-check, make gofmt-check and make test-short green;
+    one commit on main with a Co-authored-by trailer.
+  status: complete
+  created_at: '2026-09-25T04:03:14.427757+00:00'
+  completed_at: '2026-09-25T04:18:51.175296+00:00'
