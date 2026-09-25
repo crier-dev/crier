@@ -79,8 +79,12 @@ type Config struct {
 	// registered, so every existing route, body, auth requirement and
 	// storage path behaves exactly as it did before the option existed. The
 	// other half is the per-agent `a2a` block on a registry row (§4.2);
-	// either half alone is inert. Carried only in this row — no code path
-	// consumes it yet (INT-A2A-002..006 add the surfaces).
+	// either half alone is inert.
+	//
+	// Consumed by cmd/server (INT-A2A-002): with it set, the server registers
+	// the A2A Agent Card discovery route and serves a card for agents whose
+	// row opted in — and nothing else. Every other A2A surface is still absent
+	// (§5.2), and with the flag unset even that one route does not exist.
 	A2AEnabled bool
 }
 

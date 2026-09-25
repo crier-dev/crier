@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/config"
+	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
@@ -460,6 +461,33 @@ func run(args []string) int {
 	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
 	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
 	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
+
+	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
+	// OPT-IN extra, and the only A2A surface any row of this series has
+	// registered so far. It exists ONLY while CR_A2A_ENABLED is true, so with
+	// the switch unset the path is unregistered and answers exactly what it
+	// answered before the A2A option existed (the router's JSON 404). With it
+	// set, the route serves a card for an agent whose registry row opted in
+	// (`a2a.enabled`) and refuses every other id with 404 — an agent that did
+	// not opt in is never advertised.
+	//
+	// Nothing existing moves: the route is registered by registerA2ACardRoute
+	// (cmd/server/a2acard.go) rather than here, and it inherits the middleware
+	// chain unchanged — the auth-exempt list is untouched, so with
+	// CR_AUTH_TOKEN set it requires the same Bearer header as every other route.
+	if cfg.A2AEnabled {
+		registerA2ACardRoute(r, regStore, a2aCardOptions{
+			port:                   cfg.Port,
+			authTokenSet:           cfg.AuthToken != "",
+			agentSignatureEnforced: cfg.RequireAgentSig,
+		})
+		slog.Info("A2A option enabled", "route", a2a.AgentCardPath,
+			"serves", "an AgentCard for agents whose registry row opted in (\"a2a\":{\"enabled\":true}); every other id answers 404",
+			"not_registered", "the JSON-RPC binding, streaming and the push-notification methods (INT-A2A-003..005)")
+	} else {
+		slog.Info("A2A option disabled", "detail",
+			"no A2A route is registered; set CR_A2A_ENABLED=true to publish the Agent Card discovery route")
+	}
 
 	// Opt-in live-inspection surfaces (DF-CRIER-142): GET /metrics and
 	// GET /debug/pprof/* exist ONLY when CR_ENABLE_METRICS /

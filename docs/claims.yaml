@@ -1111,3 +1111,19 @@ claims:
     quote: 'it is NOT the configuration this guide documents'
     expect: 0
     xfail: null
+
+  # --- INT-A2A-002 (appended): the OPT-IN A2A Agent Card discovery route.
+  # The README documents this path, so the docs-claims boot sets CR_A2A_ENABLED
+  # for the same reason it sets CR_ENABLE_METRICS / CR_ENABLE_PPROF: the path
+  # exists only while its switch is on, and the claim (plus the README path
+  # scanner) must be able to reach it. With the switch OFF the path answers the
+  # router's own 404 — the half that proves the option is separable — and that
+  # half is gated live in cmd/server/a2a_optin_test.go, not here.
+  # The probe sends no agent_id, so the assertion is "the route is registered":
+  # a selector-less request is answered 400 (which agent?), never 404.
+  - id: ROUTE-A2A-AGENT-CARD
+    kind: route
+    doc: README.md
+    quote: "GET /.well-known/agent-card.json?agent_id=<id>"
+    expect: "/.well-known/agent-card.json"
+    xfail: null

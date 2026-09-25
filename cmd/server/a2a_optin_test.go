@@ -16,12 +16,18 @@ package main
 //     pre-A2A key set (register response and read-back row),
 //  4. that the switch itself is invisible: the two positions produce identical
 //     observations,
-//  5. that the A2A surfaces a later row adds are NOT registered — they answer
-//     404 in every position (specs/A2A-OPTION.md §5.1).
+//  5. that the A2A route surface is exactly what the series has agreed: with the
+//     switch OFF every A2A path (specs/A2A-OPTION.md §5.2) answers 404, and with
+//     it ON exactly the one path a landed row registered answers anything else —
+//     the INT-A2A-002 discovery route, which answers 400 without the agent
+//     selector that a bus needs. Those statuses are recorded OUTSIDE the
+//     pre-A2A maps, so the cross-position comparison below stays a statement
+//     about the surface that existed before the A2A option.
 //
 // Nothing here is derived from the change under test: the expected statuses,
 // bodies and key sets are pinned from the pre-A2A routes and the documented
-// GET /status schema.
+// GET /status schema, and the A2A surface expectations are pinned from the
+// spec's route table.
 
 import (
 	"crypto/ed25519"
@@ -36,6 +42,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crier-dev/crier/internal/a2a"
 )
 
 // preA2AAgentKeys is the key set of a registry row with no optional config —
@@ -48,29 +56,34 @@ var preA2AAgentKeys = []string{
 // inboxRetrieveKeys is the documented body of GET /agents/{id}/inbox.
 var inboxRetrieveKeys = []string{"lease_id", "leased_count", "messages", "queue_depth"}
 
-// futureA2ARoutes are surfaces a later row of this series adds (spec §5.2).
-// This row registers NONE of them, so each must answer 404 with the switch off
-// and on alike — the live half of the "zero new routes" claim.
-var futureA2ARoutes = []string{
-	"/.well-known/agent-card.json",
+// a2aPaths are the paths the A2A series names (specs/A2A-OPTION.md §5.2). Only
+// the discovery path is registered by a landed row (INT-A2A-002, and only while
+// the switch is on); the JSON-RPC binding paths stay unregistered until
+// INT-A2A-003, so each is probed in both switch positions below.
+var a2aPaths = []string{
+	a2a.AgentCardPath,
 	"/a2a",
 	"/a2a/rpc",
 }
 
 // surfaceObservation is one booted server's contract: the status of every
-// probed route, the RAW body of the deterministic ones, and the decoded key set
-// of the ones that carry timestamps or generated ids.
+// probed route, the RAW body of the deterministic ones, the decoded key set of
+// the ones that carry timestamps or generated ids, and — kept separate on
+// purpose — the status of the A2A paths the option governs, which are compared
+// only against the spec's route table and never against the pre-A2A surface.
 type surfaceObservation struct {
 	status map[string]int
 	body   map[string]string
 	keys   map[string][]string
+	a2a    map[string]int
 }
 
 // probeSurface boots the server with the given environment additions, exercises
 // the existing surface, and returns what it observed. sigRequired says whether
 // the boot runs with per-agent signature enforcement on (the secure default),
-// which decides what the agent-scoped routes answer.
-func probeSurface(t *testing.T, env map[string]string, sigRequired bool) surfaceObservation {
+// which decides what the agent-scoped routes answer; a2aEnabled says whether
+// this boot carries the A2A switch.
+func probeSurface(t *testing.T, env map[string]string, sigRequired, a2aEnabled bool) surfaceObservation {
 	t.Helper()
 	base := startTestServerWithEnv(t, env)
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -79,6 +92,7 @@ func probeSurface(t *testing.T, env map[string]string, sigRequired bool) surface
 		status: map[string]int{},
 		body:   map[string]string{},
 		keys:   map[string][]string{},
+		a2a:    map[string]int{},
 	}
 
 	do := func(method, path, payload string) (int, string) {
@@ -128,13 +142,19 @@ func probeSurface(t *testing.T, env map[string]string, sigRequired bool) surface
 	obs.keys["GET /version"] = sortedKeys(t, obs.body["GET /version"])
 	obs.keys["GET /agents"] = sortedKeys(t, obs.body["GET /agents"])
 
-	// --- the future A2A surfaces must not exist ------------------------------
-	for _, path := range futureA2ARoutes {
-		code, body := do(http.MethodGet, path, "")
-		obs.body["GET "+path] = body
-		if code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404 — this row registers no A2A route (specs/A2A-OPTION.md §5.1)", path, code)
-		}
+	// --- the A2A route surface (specs/A2A-OPTION.md §5.2/§5.3) ----------------
+	// Probed for every boot and recorded OUTSIDE the pre-A2A maps above: the
+	// cross-position comparison in the test below must stay a statement about
+	// the surface that existed before the A2A option, and these paths are the
+	// option's own.
+	for _, path := range a2aPaths {
+		code, _ := do(http.MethodGet, path, "")
+		// do() records every probe it makes; this one is deliberately NOT part
+		// of the pre-A2A surface, so its entry is removed immediately — the
+		// cross-position comparison below has to stay a statement about the
+		// routes that existed before the A2A option.
+		delete(obs.status, http.MethodGet+" "+path)
+		obs.a2a[path] = code
 	}
 
 	// --- register an agent and re-read it ------------------------------------
@@ -270,14 +290,19 @@ func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 					for k, v := range g.baseEnv {
 						env[k] = v
 					}
-					obs := probeSurface(t, env, g.sigRequired)
+					obs := probeSurface(t, env, g.sigRequired, tc.envValue == "true")
 					assertPreA2AContract(t, obs, g.sigRequired)
+					assertA2ARouteSurface(t, obs, tc.envValue == "true")
 					observed[tc.name] = obs
 				})
 			}
 
-			// The switch must be INVISIBLE: the two positions answer identically,
-			// on every route, in every shape.
+			// The switch must be INVISIBLE on the surface that existed BEFORE
+			// it: the two positions answer identically, on every pre-A2A
+			// route, in every shape. (The A2A paths themselves are compared
+			// against the spec's route table by assertA2ARouteSurface above —
+			// they are the option's own surface, and the point of this
+			// assertion is everything else.)
 			off := observed["switch unset (default off)"]
 			on := observed["switch on (CR_A2A_ENABLED=true)"]
 			if !reflect.DeepEqual(off.status, on.status) {
@@ -294,6 +319,34 @@ func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 				t.Errorf("body shapes differ between the switch positions:\noff = %v\n on = %v", off.keys, on.keys)
 			}
 		})
+	}
+}
+
+// assertA2ARouteSurface pins the A2A paths to the route table the series has
+// agreed (specs/A2A-OPTION.md §5.2), which is the one part of this surface the
+// switch is SUPPOSED to move:
+//
+//   - with the switch off, every A2A path is unregistered — a plain 404, the
+//     same answer an unregistered path has always given;
+//   - with the switch on, exactly the path a landed row registered exists: the
+//     INT-A2A-002 discovery route, which answers 400 to a request that names no
+//     agent (this bus hosts many agents on one origin, so the path alone cannot
+//     name one — 400 is how "registered, malformed request" differs from
+//     "not registered"). Every other A2A path still answers 404.
+func assertA2ARouteSurface(t *testing.T, obs surfaceObservation, a2aEnabled bool) {
+	t.Helper()
+	position := "off"
+	if a2aEnabled {
+		position = "on"
+	}
+	for _, path := range a2aPaths {
+		want := http.StatusNotFound
+		if a2aEnabled && path == a2a.AgentCardPath {
+			want = http.StatusBadRequest
+		}
+		if got := obs.a2a[path]; got != want {
+			t.Errorf("GET %s = %d with the A2A switch %s, want %d (specs/A2A-OPTION.md §5.2)", path, got, position, want)
+		}
 	}
 }
 
