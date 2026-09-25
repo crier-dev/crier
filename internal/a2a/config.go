@@ -7,10 +7,11 @@
 // half alone is inert, and with the switch unset — the default posture —
 // nothing in this package is reachable through any crier surface.
 //
-// This package deliberately holds ONLY the option's data shape and its strict
-// decoder. The surfaces that will consume them (agent-card projection, the
-// JSON-RPC 2.0 / SSE endpoint, task lifecycle mapping) arrive with
-// INT-A2A-002..006 and are enumerated in specs/A2A-OPTION.md §5.2.
+// This package holds the option's data shape and its strict decoder
+// (INT-A2A-001) and the Agent Card projection with the discovery constants
+// (INT-A2A-002, card.go). The remaining surfaces — the JSON-RPC 2.0 / SSE
+// endpoint and the task lifecycle mapping — arrive with INT-A2A-003..006 and are
+// enumerated in specs/A2A-OPTION.md §5.2.
 package a2a
 
 import (
@@ -38,6 +39,17 @@ type Config struct {
 	// agent. False — the zero value, so an empty `{}` block — means the agent
 	// takes no part in A2A.
 	Enabled bool `json:"enabled,omitempty"`
+}
+
+// OptedIn reports whether this block opts the agent in to A2A.
+//
+// It is the per-agent half of the gate, and it is fail-closed on purpose: an
+// absent block (nil — every pre-A2A registration) and a present-but-false block
+// ("a2a":{} or {"a2a":{"enabled":false}}) both mean the agent takes no part in
+// A2A, so a surface that consults this can never advertise an agent that did not
+// ask to be advertised (specs/A2A-OPTION.md §4.2).
+func (c *Config) OptedIn() bool {
+	return c != nil && c.Enabled
 }
 
 // DecodeConfig strictly decodes ONE `a2a` object, mirroring the discipline the

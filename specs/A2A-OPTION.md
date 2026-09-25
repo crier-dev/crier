@@ -1,8 +1,9 @@
 # A2A-OPTION.md — A2A interoperability as an OPT-IN extra
 
-Status: **DRAFT v1** · 2026-09-25 · Owner: Bane · Tickets: INT-A2A-001 (this doc + the opt-in gate),
-INT-A2A-002..006 (the A2A surfaces themselves — NOT shipped by this row)
-Source: **A2A v1.0.0** (`github.com/a2aproject/a2a`) — section numbers below are that specification's.
+Status: **DRAFT v2** · 2026-09-25 · Owner: Bane · Tickets: INT-A2A-001 (this doc + the opt-in gate),
+INT-A2A-002 (**SHIPPED** — the Agent Card discovery route, §5.3), INT-A2A-003..006 (the remaining A2A
+surfaces — NOT shipped)
+Source: **A2A v1.0.0** (`github.com/a2aproject/A2A`) — section numbers below are that specification's.
 Precedent: `specs/WEBHOOK-DELIVERY.md` (same rigor + format).
 
 ## 1. Goal and standing constraint
@@ -25,7 +26,9 @@ This is a binding statement, not a slogan:
 - **No A2A code is reachable with the option off.** The server-side switch is `CR_A2A_ENABLED`
   (default **false**, §4.1). With it unset — the default posture, and the posture every existing
   deployment is in — crier's registered route table, request handling, response bodies, auth
-  requirements and storage schema are exactly what they were before this option existed.
+  requirements and storage schema are exactly what they were before this option existed. (With it
+  SET, exactly one route exists: the Agent Card discovery route of §5.3, serving only agents that
+  opted in.)
 - **A2A is not on the default path of any existing route.** Deliveries, inbox lifecycle, webhook
   push, the mesh, federation, the guard and the MCP surface are unchanged: nothing in any of them
   consults the A2A switch or the per-agent `a2a` block.
@@ -120,27 +123,109 @@ A2A is reachable only when **both** halves of the gate are on. Either half alone
 
 ## 5. Route surface
 
-### 5.1 With the switch ON and no further rows landed: **zero new routes**
+### 5.1 With the switch OFF: zero new routes — with it ON: exactly one
 
-INT-A2A-001 registers **no** route, handler, middleware or header. This is the checked property, not
-an intention: `cmd/server/main.go`'s route table with `CR_A2A_ENABLED=true` is the same table as with
-it unset, and `GET`-probing the A2A-ish paths below answers the same `404` the router answered before
-the option existed. The switch is *carried* — that is all this row ships.
+With `CR_A2A_ENABLED` unset (the default, and every existing deployment's posture) the route table is
+what it was before the option existed: **no A2A route is registered**, and every A2A path answers the
+router's ordinary `404`. That half is checked live in
+`cmd/server/a2a_optin_test.go` (every A2A path probed in both switch positions) and needs no
+maintenance: it is the statement "the option is separable".
 
-### 5.2 What the later rows add (all FUTURE — not implemented, not registered, not advertised)
+With `CR_A2A_ENABLED=true` the server registers **exactly one** A2A route — the Agent Card discovery
+route of §5.3 — and nothing else. The two positions differ in exactly that one path; every
+pre-existing route answers identically in both (§6).
 
-Listed so the surface is agreed before it exists; each entry names the A2A section it serves. None of
-these is reachable today, under either switch position.
+### 5.2 Route surface inventory
 
-| Future surface | Served for | Registered only when |
+| Surface | Served for | Registered only when | State |
+|---|---|---|---|
+| `GET /.well-known/agent-card.json?agent_id=<id>` — the AgentCard of one registry row | AgentCard discovery (§8.2, §14.3) | `CR_A2A_ENABLED=true` **and** the named row opted in | **SHIPPED (INT-A2A-002), §5.3** |
+| A JSON-RPC 2.0 endpoint accepting `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`, the push-notification-config methods and `GetExtendedAgentCard` | §9.4 core methods | `CR_A2A_ENABLED=true` | FUTURE (INT-A2A-003/004/005) — not registered, answers 404 |
+| SSE streaming (`text/event-stream`) for `SendStreamingMessage` / `SubscribeToTask` | §9.4.2, §9.4.6 | `CR_A2A_ENABLED=true` | FUTURE (INT-A2A-003) — not registered |
+| `agent/authenticatedExtendedCard` (auth-gated extended card) | §3.1.11, §9.4.8 | `CR_A2A_ENABLED=true` | FUTURE — not registered |
+
+Every A2A surface is gated by the server switch **and** targets an agent that opted in with the `a2a`
+block (§4.2). A future row that needs a wider gate must amend this document first.
+
+### 5.3 The Agent Card route (INT-A2A-002, SHIPPED)
+
+`GET /.well-known/agent-card.json?agent_id=<id>` serves the A2A `AgentCard` (§4.4.1) of ONE registry
+row, projected on every request from that row — no card store, no cache, no second source that could
+disagree with `GET /agents/{id}`.
+
+**Why a selector.** §8.2's discovery URL identifies one agent, because in the specification a server
+IS an agent. A crier relay is a bus: many agents share one origin, so the well-known path alone
+cannot name one. `agent_id` is crier's own vocabulary (the `{id}` of `GET /agents/{id}`), and the
+served card carries the same value in its `AgentInterface.tenant` (§4.4.6/§8.3.2), so a client that
+discovers a card here knows what to send back on every A2A request.
+
+| Answer | When |
+|---|---|
+| `200` + `application/a2a+json` | the named row exists **and** its `a2a` block is present with `enabled: true` |
+| `400` | no `agent_id` (or a blank one): the route is registered, the request cannot name an agent |
+| `404` | the id is not a registry row, **or** the row did not opt in — one answer for both, because an A2A client gains nothing from this server listing ids that exist but stayed out (and `GET /agents/{id}` is where that question belongs) |
+| `404` | any answer at all with the switch off: the route does not exist |
+| `405` | any method but `GET` (the router's own JSON fallback) |
+
+**The projection.** Field by field, what the card states and where the value comes from:
+
+| AgentCard field | Source |
+|---|---|
+| `name` | the registry id (the identifier clients address the agent by) |
+| `description` | generated from the row: the id, and the capability tags it advertises. crier's registry has no description field, and prose invented here would read as the agent's own claim |
+| `supportedInterfaces[]` | one entry: `url` = the origin the client reached + `/a2a`, `protocolBinding` = `JSONRPC`, `protocolVersion` = `1.0`, `tenant` = the agent id. **The URL is a forward declaration**: the JSON-RPC endpoint it names lands with INT-A2A-003, and this document fixes the path so that row serves it rather than inventing another |
+| `version` | the serving build's identity (`internal/buildinfo`). The registry row carries no version of its own, and a second, invented one would be a source of truth that could drift |
+| `documentationUrl` | the same origin + `/docs` (the live API documentation of the surface being described) |
+| `capabilities.streaming` | **always `false` today, and always serialized**: crier serves no A2A streaming binding yet, so `true` would promise a stream this server cannot answer. The relay's WebSocket subscribe is not this — it is crier's own protocol |
+| `capabilities.pushNotifications` | `true` exactly when the row carries a crier webhook — the push channel that agent actually has (the object INT-A2A-005 defines the A2A push config to be a view over) |
+| `capabilities.extensions` | omitted (empty): crier declares no extension |
+| `skills[]` | one skill per capability tag, in row order, duplicates collapsed; `id`, `name` and `tags` all carry the tag, and `description` states the tag and that crier's registry stores tags rather than skill prose. Never `null` — `skills` is REQUIRED |
+| `securitySchemes` | the postures actually in force (§5.3.1) |
+| `securityRequirements` | the subset of those a client must present (§5.3.1) |
+| `defaultInputModes` / `defaultOutputModes` | `application/json`: the media type of crier's delivery and retrieval wire (the payload inside the envelope is opaque) |
+| `provider`, `iconUrl`, `signatures` | **absent by construction**: crier has no provider identity to state, serves no icon, and computes no card signature (§7) |
+
+#### 5.3.1 The auth posture (declared, never demanded where a client cannot comply)
+
+The card describes the posture the server is in; it never sets it, and it never adds a requirement to
+any route (§1, §6.4).
+
+| Posture in force | `securitySchemes` | `securityRequirements` |
 |---|---|---|
-| `GET /.well-known/agent-card.json` — the process's own AgentCard | AgentCard discovery (§8.2, §14.3) | `CR_A2A_ENABLED=true` |
-| A JSON-RPC 2.0 endpoint accepting `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`, the push-notification-config methods and `GetExtendedAgentCard` | §9.4 core methods | `CR_A2A_ENABLED=true` |
-| SSE streaming (`text/event-stream`) for `SendStreamingMessage` / `SubscribeToTask` | §9.4.2, §9.4.6 | `CR_A2A_ENABLED=true` |
-| `agent/authenticatedExtendedCard` (auth-gated extended card) | §3.1.11, §9.4.8 | `CR_A2A_ENABLED=true` |
+| no `CR_AUTH_TOKEN`, signatures off | *(none)* | *(none)* — crier requires nothing |
+| no `CR_AUTH_TOKEN`, `CR_REQUIRE_AGENT_SIG` on | `agentSignature` | *(none)* |
+| `CR_AUTH_TOKEN` set | `bearerAuth` | `bearerAuth` |
+| `CR_AUTH_TOKEN` set, `CR_REQUIRE_AGENT_SIG` on | `bearerAuth` + `agentSignature` | `bearerAuth` only |
 
-Every future surface is gated by the server switch **and** targets an agent that opted in with the
-`a2a` block (§4.2). A future row that needs a wider gate must amend this document first.
+- **`bearerAuth`** is an HTTP bearer scheme (§4.5.3) named exactly as crier's own OpenAPI
+  `components.securitySchemes` names it. With `CR_AUTH_TOKEN` set it is REQUIRED of an A2A client,
+  because it is required of every caller — this discovery route included. The route is **not** added
+  to the auth-exempt list in `internal/middleware/auth.go`.
+- **`agentSignature`** is declared as an apiKey-style header scheme (§4.5.2) — the `X-Agent-Sig`
+  header crier's OpenAPI spec already describes — whenever `CR_REQUIRE_AGENT_SIG` enforces it on the
+  signed agent-scoped routes. It is **never** listed in `securityRequirements`: the value is an
+  ed25519 signature over the agent id, a timestamp, the method and the path, signed with the agent's
+  own private key, so a generic A2A client holds nothing that can compute it. Declaring it is honest
+  (it IS enforced); demanding it would advertise a requirement that client is guaranteed to fail.
+
+#### 5.3.2 Caching (§8.6)
+
+- `ETag` — a strong entity tag over the exact bytes served (SHA-256). The spec allows a tag derived
+  from the `version` field; the content hash is the stricter choice, because the card also moves when
+  the ROW behind it moves — a new capability, a webhook added, the auth posture flipped — and those
+  are the updates a client most needs to see.
+- `Cache-Control: private, max-age=60` — `private` and not `public`, because the card is served
+  behind crier's own auth: a shared cache must never hand one client's authorized response to another.
+- A conditional request (`If-None-Match`, including a weak `W/"…"` echo and `*`) is answered `304`
+  with the refreshed validators and no body.
+
+#### 5.3.3 What this route is not
+
+- **It is not a registry query.** It serves only opted-in rows, and it never lists ids.
+- **It is not a second delivery path.** Nothing about delivery, inboxes, webhooks, the mesh or the
+  guard consults it; the card is read-derived from existing state.
+- **It does not make crier A2A-first.** Zero A2A code runs with the switch off, and the single
+  surface that exists with it on serves a description of an agent that asked to be described.
 
 ## 6. Non-regression contract
 
@@ -151,29 +236,39 @@ Every future surface is gated by the server switch **and** targets an agent that
    `GET /status`, `GET /agents` (and `GET /agents/{id}`): unchanged status, unchanged JSON key
    set/order-relevant shape. `GET /status`'s key set is pinned by its own test, so the option adds
    no key there — the switch is deliberately absent from `/status`.
-2. **The registered route table** — no new `HandleFunc`/`Handle` line vs. the pre-change tree, in
-   either switch position (§5.1).
+2. **The registered route table** — with the switch OFF, no new `HandleFunc`/`Handle` line vs. the
+   pre-change tree; with it ON, exactly the one A2A route §5.2 marks SHIPPED, and nothing else
+   (§5.1). Every pre-existing path answers identically in both positions.
 3. **The agent wire shape** — an agent registered without the `a2a` block serializes exactly as
    before (no new key); an agent registered with it gains exactly one optional key, and its core
    fields (`id`, `public_key`, `capabilities`, `status`, `registered_at`, `last_seen`) are unchanged
    in name, type and meaning. Round-trip is asserted both ways through `POST /agents` → `GET
-   /agents/{id}`.
+   /agents/{id}`. The Agent Card is a READ of that row and adds no field to it.
 4. **Auth** — the exempt-path list, the bearer requirement and the ed25519 agent-signature
-   requirement are untouched: no existing route gains an A2A auth requirement, and the `a2a` block
-   does not require signing to be relaxed.
+   requirement are untouched: no existing route gains an A2A auth requirement, the A2A route
+   inherits the same middleware chain as every other authenticated route (it is not added to the
+   exempt list), and neither the `a2a` block nor the card requires signing to be relaxed.
 5. **Strict-decode discipline** — the `a2a` block is rejected (400, key named) on a malformed
    member rather than silently ignored, and a rejected registration leaves the registry untouched.
 6. **Storage** — the durable schema change is one additive nullable column
    (`ALTER TABLE agents ADD COLUMN a2a JSONB NULL`); existing rows read back exactly as before, and
-   an agent with no block stores SQL `NULL`, not an empty object.
+   an agent with no block stores SQL `NULL`, not an empty object. The Agent Card row adds NO
+   migration: it reads the columns that already exist (`capabilities`, `webhook`, `a2a`).
 7. **Everything else** — relay, mesh, federation, guard, webhook delivery, MCP, openapi
    (`docs/openapi.yaml` + its generated `cmd/server/openapi.yaml` copy) and the docs-claims gate are
-   unchanged, because no route, field or default they describe moved.
+   unchanged, because no route, field or default they describe moved. The A2A route is documented as
+   an OPT-IN surface in `README.md` and here — like `/metrics` and `/debug/pprof/*`, the other
+   opt-in paths — rather than in the default-path OpenAPI document.
 
-The gate for all of this is the non-regression test suite shipped with INT-A2A-001:
+The gate for all of this is the non-regression test suite shipped with INT-A2A-001 — still the gate,
+amended only where this row's route moved the surface it describes:
 `internal/registry/a2a_optin_test.go` (wire shape, strict decode, round-trip) and
-`cmd/server/a2a_optin_test.go` (the same route contract booted twice — switch unset and switch
-`true` — and compared, plus a route-table census).
+`cmd/server/a2a_optin_test.go` (every pre-existing route contract booted twice — switch unset and
+switch `true` — compared byte for byte, plus the A2A route surface pinned per switch position from
+§5.2). The card itself is gated by `internal/a2a/card_test.go` (the projection, the security posture
+matrix, the ETag) and `cmd/server/a2acard_test.go` (the route booted for real: 404/400/405/200, the
+refusals, the caching contract, and a structural validation of the served card against the A2A
+v1.0.0 AgentCard shape).
 
 ## 7. Out of scope (binding non-goals for the whole series)
 
@@ -186,16 +281,41 @@ The gate for all of this is the non-regression test suite shipped with INT-A2A-0
   that could disagree with it.
 - **Promoting A2A into the default path.** No A2A code runs unless the operator turned the switch on
   *and* the target agent opted in (§1.1, §4).
+- **Signing Agent Cards (§8.4).** `AgentCardSignature` is a JWS over an RFC 8785-canonicalized card,
+  and crier computes none: it would have to canonicalize with RFC 8785 and sign with an agent's
+  ed25519 key, and a signature produced without a verifiable canonicalization path is worse than no
+  signature at all — it looks verifiable and is not. The card therefore carries no `signatures`
+  member. Crier's registry rows keep their ed25519 public keys (readable, authenticated, from
+  `GET /agents/{id}`); publishing them in the card is a separate decision nobody has asked for.
+- **A provider identity.** `AgentCard.provider` is omitted: the service provider of a crier relay is
+  its OPERATOR, crier has no field for that, and a constant organization string would be a claim
+  about someone else's deployment.
 
-## 8. What INT-A2A-001 shipped
+## 8. What has shipped
+
+### 8.1 INT-A2A-001 — the option and the gate
 
 | Deliverable | Where |
 |---|---|
 | The server switch | `config/config.go` — `A2AEnabled` + `CR_A2A_ENABLED`, default false |
-| The per-agent block | `internal/a2a/config.go` (`Config`, strict `DecodeConfig`); `internal/registry/types.go` (`Agent.A2A`), `internal/registry/handler.go` (`registerRequest.A2A`, `patchRequest.A2A`, `strictA2AMember`) |
+| The per-agent block | `internal/a2a/config.go` (`Config`, `OptedIn`, strict `DecodeConfig`); `internal/registry/types.go` (`Agent.A2A`), `internal/registry/handler.go` (`registerRequest.A2A`, `patchRequest.A2A`, `strictA2AMember`) |
 | Durable persistence of the block | `internal/registry/migrations/005_add_agent_a2a_column.{up,down}.sql`, `internal/registry/postgres_store.go` |
 | Non-regression proof | `internal/registry/a2a_optin_test.go`, `cmd/server/a2a_optin_test.go` |
 | Docs | `README.md` (`CR_A2A_ENABLED` in the environment table), `docs/claims.yaml` + `cmd/server/docsclaims_test.go` (the default is pinned to the production constant), this file, `specs/_index.md` |
 
-Deliberately **not** shipped: any route, any handler, any middleware, any header, any AgentCard
-renderer, and any read of `cfg.A2AEnabled` outside tests. INT-A2A-002..006 start from §5.2.
+Not shipped by that row: any route, any handler, any middleware, any header, any AgentCard renderer,
+and any read of `cfg.A2AEnabled` outside tests.
+
+### 8.2 INT-A2A-002 — the Agent Card route (§5.3)
+
+| Deliverable | Where |
+|---|---|
+| The card model and projection | `internal/a2a/card.go` — `AgentCard` and its nested spec objects, `BuildCard` (pure: row evidence + server posture in, card out), `CardETag`, and the discovery constants (`AgentCardPath`, `AgentCardAgentQueryParam`, `ProtocolVersion`, `ProtocolBindingJSONRPC`, `JSONRPCBindingPath`, `CardMediaType`, `CardCacheMaxAgeSeconds`) |
+| The route and its handler | `cmd/server/a2acard.go` — `registerA2ACardRoute` (called from `run()` only when `cfg.A2AEnabled`), the selector/opt-in refusals, the caching headers and the conditional-GET path |
+| The projection's unit gate | `internal/a2a/card_test.go` — the row projection, the security posture matrix, the omission rules, the ETag |
+| The route's gate (booted server) | `cmd/server/a2acard_test.go` — `404` with the switch off, `400`/`405`/`200`/`404` with it on, the refusals, the caching contract, the auth posture, and a structural validation of the served card against the A2A v1.0.0 AgentCard shape |
+| The non-regression gate, amended | `cmd/server/a2a_optin_test.go` — the pre-existing surface comparison is unchanged; the A2A paths are now asserted per switch position from §5.2 |
+| Docs | §5 of this file (the route, the projection table and the auth posture), `README.md` (`CR_A2A_ENABLED` row now names the route), `docs/claims.yaml` (`ROUTE-A2A-AGENT-CARD`) |
+
+Not shipped by that row, and still absent (404) under both switch positions: the JSON-RPC binding,
+streaming, the task lifecycle, the push-notification methods and the extended card — INT-A2A-003..006.

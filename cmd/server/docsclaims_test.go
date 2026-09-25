@@ -429,6 +429,19 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	// README path tokens to probe.
 	t.Setenv("CR_ENABLE_METRICS", "true")
 	t.Setenv("CR_ENABLE_PPROF", "true")
+	// INT-A2A-002: same rule for the opt-in A2A surface — the README documents
+	// GET /.well-known/agent-card.json, so the booted server must expose it for
+	// the ROUTE-A2A-AGENT-CARD route claim and the README path tokens. With the
+	// switch OFF the path answers the router's 404; that half of the contract is
+	// gated live in a2a_optin_test.go, against the default posture.
+	//
+	// The variable is set for the BOOT and cleared again once the server answers,
+	// because run() reads the configuration exactly once while the DEFAULT-*
+	// claims are probed by calling config.Load() at assertion time — and
+	// DEFAULT-A2A-ENABLED measures the value the README prints, i.e. the UNSET
+	// posture. Leaving it set here would make that claim observe the switch this
+	// test turned on, which is a different question from the one it asks.
+	t.Setenv("CR_A2A_ENABLED", "true")
 
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
@@ -466,6 +479,13 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 			t.Fatalf("server did not start within 10s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+
+	// The A2A switch has done its work: the running server registered the route
+	// from the configuration it read at boot, and the DEFAULT-* probes below must
+	// see the environment as it normally is (see the note where it is set).
+	if err := os.Unsetenv("CR_A2A_ENABLED"); err != nil {
+		t.Fatalf("clear CR_A2A_ENABLED after boot: %v", err)
 	}
 	return baseURL, client
 }
