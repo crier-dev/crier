@@ -50,6 +50,10 @@ var statusScrubbedEnv = []string{
 	// (inherited from the runner or left behind by a sibling test) must not
 	// decide what /status reports.
 	"CR_REQUIRE_MESH_AUTH", "CR_MESH_AUTH_TIMEOUT_S", "CR_MESH_ALLOWED_ORIGINS",
+	// CR-FEAT-024: the presence posture is read from this one, for the same
+	// reason — presence_stale_after_s must report the DEFAULT window unless the
+	// case under test sets it explicitly.
+	"CR_PRESENCE_STALE_AFTER_S",
 	"CR_WEBHOOK_SECRET",
 	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE",
 	"CR_ENABLE_METRICS", "CR_ENABLE_PPROF",
@@ -72,6 +76,8 @@ var statusTopLevelKeys = []string{
 	"mesh_origin_policy",
 	"metrics_enabled",
 	"pprof_enabled",
+	// CR-FEAT-024: the staleness window a row's derived status is judged by.
+	"presence_stale_after_s",
 	"rate_limit_per_minute",
 	"registry_backend",
 	"require_agent_signature",

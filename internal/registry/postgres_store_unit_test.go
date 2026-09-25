@@ -653,6 +653,72 @@ func TestPostgresStoreUnit_Update_AdvancesCallerLastSeen(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Touch — the mesh heartbeat path (CR-FEAT-024)
+// ---------------------------------------------------------------------------
+
+// TestPostgresStoreUnit_Touch_AdvancesLastSeenOnly pins the statement: the
+// heartbeat path writes ONE column through GREATEST, so a heartbeat can never
+// reshape a row it is only supposed to date, and can never move last_seen
+// backwards (an out-of-order or replayed frame). RED on a bare
+// `SET last_seen = $2`: the monotonic guard is gone.
+func TestPostgresStoreUnit_Touch_AdvancesLastSeenOnly(t *testing.T) {
+	s, mock := newMockStore(t)
+	heartbeat := time.Now().UTC().Truncate(time.Microsecond)
+	cap := &capturedTimeArg{}
+
+	mock.ExpectExec(`UPDATE agents SET last_seen = GREATEST\(last_seen, \$2\) WHERE id = \$1`).
+		WithArgs("test-agent", cap).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	require.NoError(t, s.Touch("test-agent", heartbeat))
+	require.NoError(t, mock.ExpectationsWereMet())
+	// The instant handed to the driver is the heartbeat's, microsecond-truncated
+	// to match what the column will hold (the same rule Update applies).
+	require.True(t, cap.asTime(t).Equal(heartbeat),
+		"driver last_seen %v != heartbeat %v", cap.asTime(t), heartbeat)
+}
+
+// TestPostgresStoreUnit_Touch_NotFound: no such row is ErrAgentNotFound — the
+// ordinary case for a peer that connected without a registry row, which the
+// mesh sink logs at debug rather than as a failure.
+func TestPostgresStoreUnit_Touch_NotFound(t *testing.T) {
+	s, mock := newMockStore(t)
+
+	mock.ExpectExec(`UPDATE agents`).
+		WithArgs("missing", pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+
+	err := s.Touch("missing", time.Now())
+	require.True(t, errors.Is(err, ErrAgentNotFound))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Touch_BlankID rejects a blank id without reaching the
+// pool: a statement built around an empty id could only match nothing.
+func TestPostgresStoreUnit_Touch_BlankID(t *testing.T) {
+	s, mock := newMockStore(t)
+	err := s.Touch("", time.Now())
+	require.True(t, errors.Is(err, ErrInvalidStoreInput))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Touch_SQLError: a store failure is returned (the sink
+// warns on it) and is NOT laundered into agent-not-found — a registry that
+// cannot record liveness must not look like a registry that has no such agent.
+func TestPostgresStoreUnit_Touch_SQLError(t *testing.T) {
+	s, mock := newMockStore(t)
+
+	mock.ExpectExec(`UPDATE agents`).
+		WithArgs("test-agent", pgxmock.AnyArg()).
+		WillReturnError(errors.New("connection closed"))
+
+	err := s.Touch("test-agent", time.Now())
+	require.Error(t, err)
+	require.False(t, errors.Is(err, ErrAgentNotFound))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// ---------------------------------------------------------------------------
 // Unregister
 // ---------------------------------------------------------------------------
 

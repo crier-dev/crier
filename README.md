@@ -46,7 +46,7 @@ Direct agent-to-agent communication layer with discovery, keepalive, and request
 
 - Peer discovery via registry
 - One-way REGISTER on connect (fire-and-forget; the server never sends REGISTER_ACK — see `docs/mesh-protocol.md`)
-- 30-second keepalive loop
+- 30-second keepalive loop — a heartbeat is also LIVENESS EVIDENCE for the sender's registry row (see [§3](#3-agent-registry))
 - Concurrent request/response with timeout tracking
 - Clean shutdown with WebSocket close frames
 
@@ -55,20 +55,45 @@ Direct agent-to-agent communication layer with discovery, keepalive, and request
 Every agent has a discoverable identity with capability cards.
 
 - Register/unregister with ed25519 public key
-- List and detail endpoints with registration status (see note below)
+- List and detail endpoints, with a `status` derived from mesh heartbeats (see note below)
 - Capability-based routing (future)
 
-> **What `status` means — registration-liveness only.** An agent's `status` is
-> set to `"online"` at registration and never changes until unregistration; it
-> is NOT live-connection health. `last_seen` is set at registration and
-> advanced by a successful `PATCH /agents/{id}` — that PATCH is the only
-> activity the registry records, and the value it returns is the value now
-> persisted. The registry has no heartbeat source today
-> (mesh KEEPALIVE frames are sent but not processed server-side), so an agent
-> that never PATCHes — including one whose process crashed — still reports
-> `"online"` with a `last_seen` frozen at its registration or last PATCH.
-> For live-connection truth, use the mesh: `GET /mesh/peers` lists agents with
-> an active WebSocket connection (see [Try the Mesh](#try-the-mesh)).
+> **What `status` means — heartbeat-derived presence.** `status` is DERIVED per
+> read from the row's liveness evidence (`last_seen`) and ONE documented window
+> (`CR_PRESENCE_STALE_AFTER_S`, default `90` seconds = three missed mesh
+> heartbeats):
+>
+> | Reported | When |
+> |----------|------|
+> | `online` | liveness evidence inside the window |
+> | `stale` | no evidence inside the window (or none ever) — a crashed agent stops looking alive |
+> | `offline` | the row STATES it is offline (nothing in the server sets this; a stated `offline` outranks the derivation) |
+>
+> The evidence is: a mesh socket **accepted** for that agent
+> (`/mesh/connect/{agentID}` — someone presented itself as that id), a
+> `KEEPALIVE` heartbeat on that socket (the 30s loop every shipped mesh client
+> runs), or a successful signed `PATCH /agents/{id}`. `last_seen` is the instant
+> of the most recent one of those — nothing else refreshes it.
+>
+> The derivation is READ-TIME ONLY: no sweeper runs and nothing is stored, so the
+> row's `status` column keeps the stored `online`/`offline` values it always had,
+> and a dead agent goes `stale` because its evidence AGES rather than because
+> something rewrote the row. A window shorter than the keepalive interval makes a
+> live agent flap to `stale` between beats, so the server warns at startup if you
+> set one. An agent that reconnects is `online` again on the accept, with no
+> manual intervention.
+>
+> Two limits, stated rather than left to be discovered. First, this is a MESH
+> presence statement, not a process-liveness probe: an agent that never opens a
+> mesh socket and never PATCHes reports `stale` once the window passes even while
+> its process is healthy — delivering to it, retrieving its inbox or publishing
+> as it does not refresh the row, because those paths cannot attribute the caller
+> to the agent as confidently as a socket handshake can. Second, the mesh does NOT
+> disconnect a peer that stops heartbeating: it keeps its connection and stays
+> listed by `GET /mesh/peers` — only its registry row goes stale. For
+> live-connection truth with no window at all, read the connection table instead:
+> `GET /mesh/peers` lists agents with an open socket (see
+> [Try the Mesh](#try-the-mesh)).
 
 ### 4. Inboxes
 
@@ -1017,21 +1042,23 @@ and nothing on the server side rewrites it. `TestResponseBodyRelayedVerbatim` in
 
 **Read in a loop and dispatch on `type` — ignore `KEEPALIVE` frames while a reply
 is outstanding.** The server sends a KEEPALIVE to every connected peer every
-30 seconds (`KeepaliveInterval = 30 * time.Second`,
-`internal/mesh/peer.go:42`, the value `cmd/server/main.go:149` runs with; the
-accepted-connection loop is `internal/mesh/peer.go:230`), and a client built on
-this repo's own mesh package sends one on the same cadence and on the same socket
-its reply arrives on (`Mesh.ConnectPeer` → `keepaliveLoop`,
-`internal/mesh/peer.go:94`). A raw WebSocket client does not have to send any —
-the server never processes an inbound KEEPALIVE — but every client has to read
-past them. So the frame after your REQUEST is not necessarily the answer: read
-frames one at a time, dispatch on `type`, and ignore everything that is not the
-`RESPONSE` you are waiting for (correlated as above) or an `ERROR`. A KEEPALIVE
-carries no `request_id` at all, which is what makes the filter safe — but a
-client that treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE
-and sees `status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the
-server sent to the requester (`"agent_id":"crier"` — the server's own mesh
-identity) and the RESPONSE it accepted instead.
+30 seconds (`KeepaliveInterval = 30 * time.Second` in
+`internal/mesh/peer.go`; the value `cmd/server/main.go` runs the mesh with is
+`mesh.DefaultMeshConfig("crier")`, and the accepted-connection loop is
+`Mesh.AcceptPeer` → `keepaliveLoop`), and a client built on this repo's own mesh
+package sends one on the same cadence and on the same socket its reply arrives on
+(`Mesh.ConnectPeer` → `keepaliveLoop`). A raw WebSocket client does not have to
+send any — nothing on the server requires a heartbeat, and a client that sends
+none keeps the row its CONNECT earned and then goes `stale` in the registry once
+the presence window passes (§3) — but every client has to read past them. So the
+frame after your REQUEST is not necessarily the answer: read frames one at a
+time, dispatch on `type`, and ignore everything that is not the `RESPONSE` you
+are waiting for (correlated as above) or an `ERROR`. A KEEPALIVE carries no
+`request_id` at all, which is what makes the filter safe — but a client that
+treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE and sees
+`status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the server
+sent to the requester (`"agent_id":"crier"` — the server's own mesh identity) and
+the RESPONSE it accepted instead.
 
 For the deeper reference — every message type, the error codes, the silent-drop
 rules, a verified Python round-trip — see
@@ -1143,6 +1170,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_REQUIRE_MESH_AUTH` | `false` | Require the ed25519 challenge/response handshake on `GET /mesh/connect/{agentID}` (DF-CRIER-287): a connecting peer must sign a single-use nonce with the private key whose public half the registry holds for that agent id, and is not admitted (and not listed by `GET /mesh/peers`) until the signature verifies. **Default off, deliberately** — existing single-host clients do no handshake, and turning it on requires every connecting agent to hold its key. With it on, a `REQUEST` whose `source.agent_id` is not the authenticated peer is refused `FORBIDDEN` and a reply may only come from the peer the request was addressed to. See [Authentication (opt-in)](#authentication-opt-in) for the migration note. |
 | `CR_MESH_AUTH_TIMEOUT_S` | `10` | How long a mesh connect challenge stays valid — the client must answer with `AUTH_RESPONSE` inside this window, after which the server answers `AUTH_FAILED` and closes the socket. Only read when `CR_REQUIRE_MESH_AUTH=true`. |
 | `CR_MESH_ALLOWED_ORIGINS` | _(unset — all origins allowed)_ | The **mesh's own** WebSocket `Origin` allowlist (`scheme://host:port`, comma-separated; `*` allows all), separate from `CR_WS_ALLOWED_ORIGINS` — which keeps covering the relay. When set, a mesh upgrade that *carries* an `Origin` header must name a listed origin (otherwise `403` before any frame), while a client that sends no `Origin` at all — every agent client, including this repo's — still connects. `GET /status` reports the mode as `mesh_origin_policy`. |
+| `CR_PRESENCE_STALE_AFTER_S` | `90` | How long a registry row may go without **liveness evidence** — a mesh connect accepted for it, a `KEEPALIVE` heartbeat on that socket, or a signed `PATCH /agents/{id}` — before the `status` reported for it becomes `stale` (CR-FEAT-024; see [§3](#3-agent-registry)). The default is three missed mesh heartbeats (3 × 30s), so one dropped tick can never flip a live agent. It is a READ-TIME window: nothing is stored, no sweeper runs, and the stored `status` column keeps its `online`/`offline` values. Setting it below the 30s keepalive interval makes a healthy agent flap to `stale` between beats — the server warns at startup, and `GET /status` reports the effective window as `presence_stale_after_s`. A non-positive or non-integer value is a startup error, never a silently ignored setting. |
 | `CR_LOG_LEVEL` | `info` | Log level. One of `debug`, `info`, `warn`, `error`. |
 | `CR_LOG_FORMAT` | `text` | Log format. One of `text`, `json`. |
 | `CR_RATE_LIMIT_PER_MINUTE` | `100` | Per-agent publish rate limit (events/minute), keyed on the `X-Agent-ID` header. `0` disables rate limiting and the identity requirement. |

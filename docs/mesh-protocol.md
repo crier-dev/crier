@@ -81,20 +81,29 @@ the contract.
 ### KEEPALIVE (both directions)
 
 Sent by each connected client every 30 seconds (`KeepaliveInterval`,
-`internal/mesh/peer.go:keepaliveLoop`). The server **does not process it** — there is
-no liveness bookkeeping and no reply: `handleMessage` recognizes `KEEPALIVE` and
-ignores it, deliberately with no frame back of any kind — not even the
-`INVALID_MESSAGE` an actual malformed frame now draws (see §Error handling and
-silent drops), because the frame is well-formed and simply has no server-side
-effect. The loop keeps the socket warm and detects dead connections via read
-errors; it has no other effect.
+`Mesh.keepaliveLoop`). The server **records it as liveness evidence and sends
+nothing back**: `handleMessage` advances the registry `last_seen` of the peer the
+frame arrived FROM (CR-FEAT-024) and draws no reply of any kind — not even the
+`INVALID_MESSAGE` an actual malformed frame draws (see §Error handling and silent
+drops), because the frame is well-formed and the absence of a response is part of
+the protocol.
+
+Two things that evidence is NOT. It is attributed to the **socket**, never to the
+frame's own `agent_id` field — a peer that names another agent in a KEEPALIVE
+refreshes nothing but its own row, so the field cannot be used to keep a dead
+agent looking alive. And it enforces nothing: the server never disconnects a peer
+for missing heartbeats, so a peer that goes quiet keeps its connection and stays
+listed by `GET /mesh/peers` while its registry row goes `stale` once
+`CR_PRESENCE_STALE_AFTER_S` (default 90s = three missed beats) passes — the
+registry half of that is README §3, and the record is one write per heartbeat per
+agent.
 
 The server sends a KEEPALIVE to every accepted peer every 30 seconds: the accept
-path starts the same loop (`internal/mesh/handler.go:46` →
-`internal/mesh/peer.go:186`), on the same `KeepaliveInterval`
-(`internal/mesh/peer.go:42`) the client loop ticks on. The frame's `agent_id` is the
-SERVER's mesh identity (`internal/mesh/peer.go:237-243` builds it from `m.agentID`;
-the server runs `mesh.DefaultMeshConfig("crier")`, `cmd/server/main.go:149`) — not
+path starts the same loop (`Mesh.AcceptPeer` → `Mesh.keepaliveLoop`), on the same
+`KeepaliveInterval` (`internal/mesh/peer.go`, `MeshConfig.KeepaliveInterval`) the
+client loop ticks on. The frame's `agent_id` is the
+SERVER's mesh identity (`Mesh.keepaliveLoop` builds it from `m.agentID`;
+the server runs `mesh.DefaultMeshConfig("crier")`, `cmd/server/main.go`) — not
 the peer's id — so a raw WebSocket client accepted as some other agent still reads
 `"agent_id":"crier"` on its own socket:
 
@@ -197,8 +206,9 @@ response can find its way back.
 **Bodies are responder-controlled.** A RESPONSE `body` is an opaque JSON value, not a
 string: the server holds the frame's raw bytes (`Response.Body json.RawMessage`,
 `internal/mesh/message.go:79`) and hands the frame it received to the requester's
-connection unchanged (`forwardResponse` calls `conn.Send(data)` with those bytes,
-`internal/mesh/peer.go:402-420`). Nothing unwraps the body, re-encodes it, or
+connection unchanged (`forwardResponse` calls `conn.Send(data)` with those bytes —
+`internal/mesh/peer.go`, the `Mesh.forwardResponse` reply path). Nothing unwraps
+the body, re-encodes it, or
 stringifies it, so the requester decodes the bytes the responder wrote and the JSON
 type is the responder's choice. A responder that puts an object in the field
 (`{"pong": true}`, as in the example above) sends an object and the requester gets an
@@ -456,7 +466,8 @@ with an unknown `request_id` is dropped with no error and no log.
   the same socket afterwards. Pinned by `TestMeshMalformedFramesGetInvalidMessage`
   and `TestMeshWellFormedFramesGetNoError` (`internal/mesh`).
 - **Well-formed frames are untouched.** In particular an inbound `KEEPALIVE` is
-  still recognized and ignored with no reply at all (§KEEPALIVE), an inbound
+  recognized, recorded as liveness evidence for the sender's registry row, and
+  answered with nothing at all (§KEEPALIVE), an inbound
   `INBOX_NOTIFY` is recognized and ignored for the same reason — it is a
   server→agent frame and has no meaning in that direction (§INBOX_NOTIFY) — and
   a REQUEST that carries no `target.agent_id` is still refused
@@ -481,7 +492,11 @@ with an unknown `request_id` is dropped with no error and no log.
 ## Not implemented (do not rely on it)
 
 - Server-side `REGISTER_ACK` — the one-way REGISTER is the whole handshake.
-- Keepalive liveness — KEEPALIVE frames have no server-side effect.
+- Keepalive ENFORCEMENT — a peer that stops sending KEEPALIVEs is never
+  disconnected for it. The only server-side effect a heartbeat has is liveness
+  evidence (the sender's registry `last_seen`, §KEEPALIVE): nothing times a peer
+  out, and a registry row that goes `stale` does not close its socket or remove
+  it from `GET /mesh/peers`.
 - Ping guarantees — `INBOX_NOTIFY` is best effort: no queue, no retry, no ack,
   no ordering against other frames. It EXISTS to remove latency, not to promise
   a wake-up; the durable lane (`GET /agents/{id}/inbox`, with or without

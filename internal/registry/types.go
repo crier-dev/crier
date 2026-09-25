@@ -13,11 +13,19 @@ import (
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
-// AgentStatus represents the online/offline state of an agent.
+// AgentStatus represents the online/stale/offline state of an agent.
+//
+// "online" and "stale" are DERIVED per read from the row's liveness evidence —
+// `last_seen` plus the documented staleness window (see presence.go,
+// CR-FEAT-024) — never stored: an agent whose process died stops being reported
+// online once the window passes, with no sweeper and no write. "offline" is the
+// one value a row can STATE about itself, and a stated offline outranks the
+// derivation.
 type AgentStatus string
 
 const (
 	StatusOnline  AgentStatus = "online"
+	StatusStale   AgentStatus = "stale"
 	StatusOffline AgentStatus = "offline"
 )
 

@@ -239,6 +239,29 @@ func run(args []string) int {
 
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+	// Presence (CR-FEAT-024): the status every registry read reports is DERIVED
+	// from the row's liveness evidence (`last_seen`) and this documented window,
+	// so a crashed agent goes stale instead of reporting "online" forever. The
+	// window is resolved once here from the packages' own default when the
+	// environment sets none.
+	presence := registry.NewPresence(cfg.PresenceStaleAfter)
+	registryHandler.SetPresence(presence)
+	// The evidence that feeds it: mesh sockets accepted for an agent and the
+	// KEEPALIVE heartbeats on them (the sink is nil when the store cannot
+	// touch — a remote proxy — in which case the mesh records nothing and this
+	// is a no-op exactly as before).
+	meshSvc.SetLivenessRecorder(registry.HeartbeatSink(regStore))
+	if presence.StaleAfter() < meshCfg.KeepaliveInterval {
+		// A window shorter than the heartbeat interval flips a HEALTHY agent
+		// to stale between two beats. It is a legal configuration (a test or a
+		// demo wants a tiny window), so it is a warning rather than a
+		// rejection — but it is never a silent one, because the symptom
+		// otherwise looks like agents dying on their own.
+		slog.Warn("presence: staleness window is shorter than the mesh keepalive interval — a live agent will be reported stale between heartbeats",
+			"stale_after", presence.StaleAfter(), "keepalive_interval", meshCfg.KeepaliveInterval)
+	}
+	slog.Info("presence", "stale_after", presence.StaleAfter(),
+		"evidence", "mesh connect + KEEPALIVE heartbeat + signed PATCH; stored status is never rewritten (stale is derived per read)")
 	// New-message ping (CR-FEAT-023): a delivery that lands in an agent's
 	// durable inbox taps an agent that ASKED for it on its existing mesh
 	// socket (/mesh/connect/{agentID}?inbox_notify=1). The long-poll
@@ -827,6 +850,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_DATABASE_URL             PostgreSQL URL (fallbacks: DATABASE_URL, CRIER_DATABASE_URL)")
 	fmt.Fprintln(out, "  CR_AUTH_TOKEN               bearer token required on all requests (empty = auth disabled)")
 	fmt.Fprintln(out, "  CR_REQUIRE_AGENT_SIG        require per-agent ed25519 signatures (default true)")
+	fmt.Fprintln(out, "  CR_PRESENCE_STALE_AFTER_S   how long a registry row may go without liveness evidence before its status reports stale (default 90 = three missed mesh heartbeats)")
 	fmt.Fprintln(out, "  CR_LOG_LEVEL                debug|info|warn|error (default info)")
 	fmt.Fprintln(out, "  CR_LOG_FORMAT               text|json (default text)")
 	fmt.Fprintln(out, "  CR_RATE_LIMIT_PER_MINUTE    relay publish rate limit (default 100)")

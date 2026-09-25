@@ -35,6 +35,12 @@ type Mesh struct {
 	// MeshAuthConfig.Required set and no provider, every connect is refused
 	// (fail closed) rather than admitted unverified.
 	keys AgentKeyProvider
+	// liveness is the optional sink that records evidence of an agent's life
+	// (CR-FEAT-024) — a socket accepted for it, or a KEEPALIVE heartbeat on
+	// that socket. Nil means "no liveness bookkeeping", which is exactly what
+	// this mesh did before the sink existed, so a Mesh built without
+	// SetLivenessRecorder behaves byte-for-byte as before.
+	liveness func(agentID string, at time.Time)
 }
 
 // meshRoute is one in-flight agent-to-agent request: who asked, and who was
@@ -74,6 +80,49 @@ func (m *Mesh) keyProvider() AgentKeyProvider {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.keys
+}
+
+// SetLivenessRecorder wires the sink that records liveness evidence for an
+// agent (CR-FEAT-024): the registry's heartbeat path
+// (registry.HeartbeatSink), or nil to record nothing at all.
+//
+// Called from the socket read path, so the sink must be cheap and must not
+// block on anything a peer can stall: the shipped sink is one single-row
+// last_seen advance, at most once per heartbeat per agent (30s by default).
+// A nil sink — the default, and what every caller that never wires one gets —
+// leaves the mesh's behaviour exactly as it was before this existed.
+func (m *Mesh) SetLivenessRecorder(fn func(agentID string, at time.Time)) {
+	m.mu.Lock()
+	m.liveness = fn
+	m.mu.Unlock()
+}
+
+// recorder returns the wired liveness sink, or nil.
+func (m *Mesh) recorder() func(string, time.Time) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.liveness
+}
+
+// recordLiveness reports that agentID's socket showed evidence of life. It is
+// the ONE call site every piece of liveness evidence in this package goes
+// through, so the mesh cannot record a heartbeat on one path and forget the
+// same event on another.
+//
+// The identity recorded is the SOCKET's (the id the connection was accepted
+// or dialed as), never a frame's self-declared agent_id: with mesh
+// authentication on, the socket id is the identity the connect handshake
+// verified, while an agent_id field is just bytes a peer chose — honouring it
+// would let any connected peer keep a dead agent's row looking alive, which is
+// the exact lie this sink exists to remove. With authentication off the socket
+// id is the path claim, the same trust the rest of the unauthenticated mesh
+// already extends.
+func (m *Mesh) recordLiveness(agentID string) {
+	fn := m.recorder()
+	if fn == nil || agentID == "" {
+		return
+	}
+	fn(agentID, time.Now())
 }
 
 // authConfig returns the authentication configuration this mesh runs with.
@@ -342,6 +391,18 @@ func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
 		slog.Debug("mesh: peer disconnected", "agent_id", agentID, "error", err)
 	})
 
+	// A socket that was just accepted for this agent is liveness evidence
+	// (CR-FEAT-024): the peer is up and speaking as this id on the bus, so its
+	// registry row stops being a registration-time answer and starts being a
+	// presence one. Recorded AFTER the connection is in the peer table, so the
+	// row can never claim liveness for a socket that was not admitted.
+	//
+	// Note the direction: a live socket alone does NOT keep a row fresh — the
+	// KEEPALIVE heartbeat below is what keeps refreshing a quiet agent, and
+	// this one touch is what makes a just-connected agent online immediately
+	// rather than after its first tick.
+	m.recordLiveness(agentID)
+
 	go m.keepaliveLoop(agentID, conn)
 }
 
@@ -456,6 +517,15 @@ func (m *Mesh) register(ctx context.Context, conn *PeerConnection) error {
 	return nil
 }
 
+// keepaliveLoop sends one KEEPALIVE frame per KeepaliveInterval (30s by
+// default) for as long as conn lives, and stops on a send error or on Stop.
+// The accept path starts the same loop for every accepted peer, so both ends
+// heartbeat on the same interval.
+//
+// On the RECEIVING side an inbound KEEPALIVE is liveness evidence: the mesh
+// advances the sending agent's registry `last_seen` through the wired sink
+// (CR-FEAT-024, recordLiveness). That is the only server-side effect — the
+// frame still draws no reply.
 func (m *Mesh) keepaliveLoop(peerID string, conn *PeerConnection) {
 	ticker := time.NewTicker(m.config.KeepaliveInterval)
 	defer ticker.Stop()
@@ -518,12 +588,23 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 		slog.Info("mesh: REGISTER received", "type", env.Type, "agent_id", reg.AgentID,
 			"peer", peerID, "message_id", reg.MessageID)
 	case TypeKeepalive:
-		// Recognized and deliberately ignored: there is no liveness
-		// bookkeeping and no reply of any kind — not even the
-		// INVALID_MESSAGE a malformed frame now draws, because a KEEPALIVE is
-		// perfectly well-formed. The loop keeps the socket warm and detects
-		// dead connections via read errors; it has no other effect.
-		slog.Debug("mesh: KEEPALIVE ignored", "peer", peerID, "message_id", env.MessageID)
+		// Heartbeat: liveness evidence (CR-FEAT-024), and still no reply of
+		// any kind — not even the INVALID_MESSAGE a malformed frame draws,
+		// because a KEEPALIVE is perfectly well-formed and the absence of a
+		// response is part of the protocol.
+		//
+		// The evidence is recorded against the SOCKET's id (peerID), never
+		// against the frame's own agent_id field: see recordLiveness. It is
+		// one store write per heartbeat per agent (30s by default), and with
+		// no liveness sink wired it is nothing at all — which is what every
+		// caller that never calls SetLivenessRecorder still gets.
+		//
+		// What this does NOT do: it does not enforce a heartbeat deadline. A
+		// peer that stops heartbeating keeps its connection and stays in GET
+		// /mesh/peers; only its registry row goes stale (presence.go).
+		m.recordLiveness(peerID)
+		slog.Debug("mesh: KEEPALIVE recorded as liveness evidence", "peer", peerID,
+			"message_id", env.MessageID)
 	case TypeInboxNotify:
 		// Server→agent frame by definition (CR-FEAT-023): the server pings an
 		// agent about its own inbox, so an INBOUND one carries no meaning and

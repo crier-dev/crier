@@ -52,6 +52,15 @@ type Config struct {
 	// shipped one) sends no Origin and an allowlist that locked those out
 	// would be an outage, not a policy. See config.BuildMeshCheckOrigin.
 	MeshAllowedOrigins string
+	// PresenceStaleAfter is how long a registry row may go without liveness
+	// evidence before the status reported for it becomes "stale"
+	// (CR_PRESENCE_STALE_AFTER_S, CR-FEAT-024). Zero means "the registry
+	// package's own default" (registry.DefaultStalenessWindow, 90s = three
+	// missed mesh heartbeats) — resolved once, where the presence rule is
+	// built, so the constant is never duplicated here. Values are
+	// validated at load: a non-positive or non-integer value is a startup
+	// error, never a silently ignored setting.
+	PresenceStaleAfter time.Duration
 	// Webhook holds push-delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	Webhook WebhookConfig
 	// Federation holds relay-to-relay link configuration (CR-FEAT-006).
@@ -348,6 +357,22 @@ func Load() (Config, error) {
 	// CR_WS_ALLOWED_ORIGINS (which also covers the relay). Unset (default)
 	// allows every origin, as the mesh always has.
 	cfg.MeshAllowedOrigins = os.Getenv("CR_MESH_ALLOWED_ORIGINS")
+
+	// CR_PRESENCE_STALE_AFTER_S is how long a registry row may go without
+	// liveness evidence before the status reported for it becomes "stale"
+	// (CR-FEAT-024). Unset leaves the zero value, which the registry resolves
+	// to its own default (registry.DefaultStalenessWindow) — one constant, not
+	// a copy of it here. A non-positive value is refused rather than honored:
+	// a window of 0 would report every row stale the instant its last
+	// heartbeat was a millisecond old, which is a broken presence signal
+	// masquerading as a strict one (the fail-closed direction is wrong here).
+	if v := os.Getenv("CR_PRESENCE_STALE_AFTER_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_PRESENCE_STALE_AFTER_S: %q (want positive seconds)", v)
+		}
+		cfg.PresenceStaleAfter = time.Duration(n) * time.Second
+	}
 
 	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
 	cfg.Webhook.Secret = os.Getenv("CR_WEBHOOK_SECRET")

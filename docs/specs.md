@@ -63,7 +63,7 @@ a naive blocking read stalls or misparses mid-exchange.
 3. `PeerConnection.Close()` sends close frame, cleans up
 4. `Mesh.ConnectPeer()` dials → registers → starts keepalive
 5. `Mesh.SendRequest()` marshals → sends → waits for response with timeout
-6. Keepalive ticker fires every 30s, sends KEEPALIVE message (client-driven only; not processed server-side)
+6. Keepalive ticker fires every 30s, sends KEEPALIVE message (client-driven; nothing on the server requires it, and the receiving server records it as liveness evidence for the sender's registry row — CR-FEAT-024)
 7. `handleMessage()` dispatches RESPONSE to the pending channel; ERROR frames are converted to synthetic RESPONSEs (status 500) into the same channel
 8. Unit tests for message marshal/unmarshal round-trip
 

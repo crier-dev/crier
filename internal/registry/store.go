@@ -89,13 +89,35 @@ type Handler struct {
 	// delivery is stored, for agents that cannot hold a long-poll open. Nil
 	// disables pings entirely (tests, and any deployment that wires none).
 	inboxPing InboxPinger
+	// presence derives the status a row REPORTS from its liveness evidence —
+	// last_seen plus the documented staleness window (CR-FEAT-024, presence.go).
+	// Read-time only: no store write, no sweeper. The zero value means the
+	// documented default window, so a Handler built without SetPresence still
+	// reports a crashed agent as stale instead of online forever.
+	presence Presence
 }
 
 // NewHandler creates a Handler that delegates store operations to the
 // provided Store implementation. The handler is safe for concurrent callers
 // if the underlying store is.
 func NewHandler(store Store) *Handler {
-	return &Handler{store: store, notifier: newInboxNotifier()}
+	return &Handler{
+		store:    store,
+		notifier: newInboxNotifier(),
+		// The documented default window: a Handler that is never configured
+		// derives status the same way a configured one does, just with the
+		// shipped window (CR-FEAT-024).
+		presence: NewPresence(DefaultStalenessWindow),
+	}
+}
+
+// SetPresence configures the rule that derives the status a row REPORTS from
+// its liveness evidence (CR-FEAT-024). A zero or negative window means the
+// documented default — never "every row is stale", which a window of 0 would
+// otherwise mean and which would make the signal useless exactly when an
+// operator is trying to read it.
+func (h *Handler) SetPresence(p Presence) {
+	h.presence = p
 }
 
 // SetInboxPinger wires the new-message ping fired after a delivery lands in an
@@ -226,6 +248,12 @@ func NewMemoryStore() *MemoryStore {
 }
 
 var _ Store = (*MemoryStore)(nil)
+
+// Compile-time capability assertion: MemoryStore records liveness evidence
+// (the mesh heartbeat path, presence.go, CR-FEAT-024), so the shipped default
+// backend — the one a local dev server runs — keeps its registry rows honest
+// too, not just the PostgreSQL backend.
+var _ Toucher = (*MemoryStore)(nil)
 
 // newLeaseID generates a 16-byte crypto-random hex string for lease identification.
 func newLeaseID() (string, error) {
