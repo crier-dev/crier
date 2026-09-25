@@ -1,0 +1,12 @@
+{
+  "tick_id": "crier-2026-09-24-09-53-17",
+  "mode": "serial-fallback",
+  "wave_budget": 12,
+  "reason": "crier prompt-mode contract caps a tick at one worker (tick-390 precedent, recorded in CR-GAP-063 closure event)",
+  "picked": ["INT-MUSTER-001"],
+  "worktrees": [],
+  "dispatched": [],
+  "created_at": "2026-09-24 09:57:00 UTC",
+  "finished_at": "2026-09-25 03:41:00 UTC",
+  "finished_note": "recovered by tick crier-2026-09-25-03-03-41: picked task INT-MUSTER-001 verified against row acceptance, completed with judge PASS 4/4 (verdict 776726fc, commit 122ae30); 0 workers were dispatched, 0 worktrees existed — nothing to merge or clean"
+}
