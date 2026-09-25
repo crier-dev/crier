@@ -2369,3 +2369,11 @@ tasks:
   status: complete
   created_at: '2026-09-25T21:36:28.945616+00:00'
   completed_at: '2026-09-25T21:41:30.277483+00:00'
+- id: CR-FEAT-026
+  title: 'Capability-routed delivery: deliver ?capability=<name> with round-robin'
+  criteria:
+  - deliver?capability=X lands on a live holder via the EXISTING deliver path; zero
+    holders returns a named error; deliver-by-id untouched; docs+tests green
+  status: complete
+  created_at: '2026-09-25T23:16:44.290048+00:00'
+  completed_at: '2026-09-25T23:23:47.469520+00:00'
