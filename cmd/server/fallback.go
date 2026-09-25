@@ -5,6 +5,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/crier-dev/crier/internal/httperr"
 	"github.com/crier-dev/crier/internal/middleware"
@@ -64,9 +65,38 @@ var probeMethods = []string{
 // handler into a JSON 500, and these two fallbacks are constant writers that
 // cannot panic — wrapping them would widen the chain without covering
 // anything.
+//
+// The 404 body is EXTENDED, never replaced, when the request path is one
+// segment away from a route the router serves (CR-FEAT-031, routehint.go): it
+// names the correct shape so a first attempt cannot be lost to guessing. A path
+// with no near miss keeps the byte-identical body of DF-CRIER-213, and the 405
+// is untouched — its Allow header already names the shape.
 func registerRouterFallbacks(r *mux.Router) {
+	// The route table is indexed on the FIRST 404 rather than here: run()
+	// installs these fallbacks early, before most routes exist, and routes are
+	// all registered before the listener is bound, so the first request always
+	// sees the complete table. sync.Once keeps it to one Walk per server, and
+	// the closure is per-router, so two servers in one process (the test
+	// harness boots several) never share an index.
+	var (
+		shapesOnce sync.Once
+		shapes     routeShapes
+	)
+	shapesFor := func() routeShapes {
+		shapesOnce.Do(func() { shapes = newRouteShapes(r) })
+		return shapes
+	}
+
 	r.NotFoundHandler = middleware.RequestID(middleware.Logging(
-		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if hint, ok := shapesFor().hintFor(req); ok {
+				httperr.WriteJSON(w, http.StatusNotFound, notFoundBody{
+					Error:      notFoundMessage,
+					Hint:       hint.Message,
+					DidYouMean: hint.DidYouMean,
+				})
+				return
+			}
 			httperr.WriteJSONError(w, http.StatusNotFound, notFoundMessage)
 		}),
 	))

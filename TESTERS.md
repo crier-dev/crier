@@ -299,6 +299,19 @@ out — that silence is the designed state, not a broken subscription. To confir
 subscription is live, check `GET /relay/topics` (a topic appears there while at
 least one subscriber is connected) or publish to it and read the event back.
 
+**Guessing a path is cheap now (CR-FEAT-031).** If you get the shape wrong, the
+`404` names the shape it nearly was — this exact trap, a topic sent as a query
+string where the route wants it as a path segment, is what the 2026-09-25
+hands-on review spent its first minutes on. The body keeps its
+`{"error":"not found"}` envelope and adds two fields: `did_you_mean` carries the
+route TEMPLATE this server serves (`/relay/subscribe/{topic}`), and `hint` names
+the correction in prose — including the request that would have worked whenever
+your query string carried the value (`?topic=news` → `/relay/subscribe/news`).
+It fires only when the path is exactly one segment away from a route this server
+registers, in either direction; anything else is the plain `404` it always was.
+For the whole list instead of one hint at a time, `/docs` indexes every path and
+`/openapi.json` carries every parameter.
+
 **3. Webhook delivery (blocking + async)** — crier calls YOUR http server:
 
 ```bash
