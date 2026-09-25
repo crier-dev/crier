@@ -1,0 +1,51 @@
+{
+  "tick_id": "crier-2026-09-25-07-05-39",
+  "mode": "wave",
+  "wave_budget": 11,
+  "base_sha": "934af1a",
+  "created_at": "2026-09-25 07:20:00 UTC",
+  "partition_note": "3 independent rows -> 2 worktree workers + 1 foreman-direct. DF-CRIER-279 (internal/webhook/schema.go + driver) and DF-CRIER-283 (cmd/server/main.go + internal/pidfile + README) touch disjoint files; DF-CRIER-286 is a one-file prose fix in cmd/server/openapi.go, trivial per foreman doctrine (foreman-direct). Independence verified from rows: no depends_on edges, disjoint file sets.",
+  "picked": ["DF-CRIER-279", "DF-CRIER-283", "DF-CRIER-286"],
+  "worktrees": [
+    {
+      "task_ids": ["DF-CRIER-279"],
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-279",
+      "branch": "wt/DF-CRIER-279",
+      "base": "origin/main",
+      "base_sha": "934af1a"
+    },
+    {
+      "task_ids": ["DF-CRIER-283"],
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-283",
+      "branch": "wt/DF-CRIER-283",
+      "base": "origin/main",
+      "base_sha": "934af1a"
+    }
+  ],
+  "dispatched": [
+    {
+      "task_ids": ["DF-CRIER-279"],
+      "worker": "w1",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t394-brief-w1.txt",
+      "started_at": "PENDING"
+    },
+    {
+      "task_ids": ["DF-CRIER-283"],
+      "worker": "w2",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t394-brief-w2.txt",
+      "started_at": "PENDING"
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_ids": ["DF-CRIER-286"],
+      "reason": "trivial one-file prose fix (docs exception 1); no worktree needed"
+    }
+  ],
+  "outcomes": [],
+  "finished_at": null
+}

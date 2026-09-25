@@ -2307,3 +2307,23 @@ tasks:
   status: complete
   created_at: '2026-09-25T05:54:38.102343+00:00'
   completed_at: '2026-09-25T06:21:37.797231+00:00'
+- id: df-crier-279-template-missing-key
+  title: 'DF-CRIER-279: openai-compatible schema template silently delivers empty
+    body for payload without text key'
+  criteria:
+  - 'Missing template key fails the delivery loudly with an error naming the path;
+    explicit |default: fallbacks still render; happy-path expansion byte-identical;
+    hermes-http-gateway covered; build/vet/test green in the worktree'
+  status: complete
+  created_at: '2026-09-25T07:24:10.700088+00:00'
+  completed_at: '2026-09-25T07:37:56.378175+00:00'
+- id: df-crier-283-stale-pidfile-takeover
+  title: 'DF-CRIER-283: failed-bind start exits silently with plausible old pidfile;
+    kill $(cat .crier.pid) breaks on JSON shape'
+  criteria:
+  - Failed-bind with live-pid pidfile names pid+port+stop command; dead-pid says stale;
+    no-pidfile unchanged; pidfile schema and -stop semantics untouched; README documents
+    the jq idiom; build/vet/test green in the worktree
+  status: complete
+  created_at: '2026-09-25T07:24:11.351222+00:00'
+  completed_at: '2026-09-25T07:37:56.562653+00:00'
