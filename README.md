@@ -180,6 +180,43 @@ than the default cadence to reach exhaustion.
 
 ## Quick Start
 
+### Install the prebuilt binary (no Go toolchain)
+
+Every release publishes 8 assets: cross-compiled `crier` and `crier-mcp` for
+linux/amd64, linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS`
+manifest. One line fetches the pair for this box, verifies each against that
+manifest, and installs both into `$HOME/.local/bin` — nothing to compile:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
+```
+
+Pin a release instead of the newest, or install somewhere else (`sh -s --`
+passes the flags through the pipe):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.1.0-rc3 --dir "$HOME/bin"
+```
+
+The installer REFUSES an unverified download: a manifest with no entry for the
+binary, a digest that does not match, or a box with neither `sha256sum` nor
+`shasum` is a loud failure that installs nothing — there is deliberately no flag
+to skip the check. It needs `curl` (or `wget`) and nothing else; every artifact
+is a static binary (`CGO_ENABLED=0`), so it does not have to match the libc of
+the machine that built it. Confirm what landed:
+
+```bash
+crier -version        # crier v0.1.0-rc3-<commit> — the tag's own build identity
+crier -port 8767      # the server; crier -help prints every flag
+```
+
+Tester? [TESTERS.md](TESTERS.md) §1 starts from this same install. Prefer to
+build? Everything below is the from-source path, and it produces the same binary
+with the same identity: the release assets are built by
+`scripts/release-artifacts.sh`, which stamps `internal/buildinfo` exactly as
+`make build` does (a `make docs-check` claim fails if either path stops
+stamping).
+
 ### Prerequisites
 
 - Go 1.26.6 or later
@@ -342,8 +379,9 @@ The `v1.2.3-1a2b3c4d` line is what a TAGGED build prints, so it is not what a
 fresh untagged clone shows. One source (`internal/buildinfo`) and one format
 (`v<version>-<commit>[-dirty]`, the `v` glued on only for a real stamped
 version) produce these, and no artifact of one checkout can report a different
-identity — all 4 build paths that compile a crier binary (`make build`,
-`make build-mcp`, `Dockerfile`, `Dockerfile.mcp`) stamp it, and a
+identity — all 6 build paths that compile a crier binary (`make build`,
+`make build-mcp`, the two cross-compile lines in `scripts/release-artifacts.sh`
+that produce the release assets, `Dockerfile`, `Dockerfile.mcp`) stamp it, and a
 `make docs-check` claim fails if one of them stops:
 
 | Build | `-version` prints | Version segment comes from |

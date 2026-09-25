@@ -1040,6 +1040,8 @@ func liveCount(repoRoot, claimID string) (any, error) {
 		return 70, nil
 	case "COUNT-BUILD-PATHS-STAMPED":
 		return countStampedBuildPaths(repoRoot)
+	case "COUNT-RELEASE-ASSETS":
+		return countReleaseAssets(repoRoot)
 	case "COUNT-MCP-TOOLS":
 		return countMCPTools()
 	default:
@@ -1119,22 +1121,28 @@ func soakClaim(repoRoot, claimID string) (any, error) {
 }
 
 // countStampedBuildPaths re-measures the DF-CRIER-171 build-identity claim from
-// source: every shipped build path (Makefile, Dockerfile, Dockerfile.mcp) that
-// runs `go build` for a crier binary must stamp internal/buildinfo, so no
-// artifact of one checkout can report a different identity. It returns how many
-// such invocations are stamped and FAILS when one is not — the defect the claim
-// exists for: Dockerfile built with `-ldflags "-s -w"` alone, so the reference
-// image's /version answered the "dev" sentinel and named no commit.
+// source: every shipped build path (Makefile, Dockerfile, Dockerfile.mcp, and —
+// since CR-FEAT-028 — scripts/release-artifacts.sh, which produces the release
+// assets) that runs `go build` for a crier binary must stamp internal/buildinfo,
+// so no artifact of one checkout can report a different identity. It returns how
+// many such invocations are stamped and FAILS when one is not — the defect the
+// claim exists for: Dockerfile built with `-ldflags "-s -w"` alone, so the
+// reference image's /version answered the "dev" sentinel and named no commit.
 //
 // No Docker required: this reads the recipe text. A Makefile recipe stamps
 // through its CRIER_LDFLAGS variable, so `$(VAR)` references are resolved
 // against the file's own variable definitions before the stamp is looked for.
+// A shell script is read the same way, which is why release-artifacts.sh keeps
+// its `-ldflags` stamp INLINE on the `go build` line instead of in a shell
+// variable: an indirected `$LDFLAGS` is invisible to this scanner, so the one
+// build path that produces what testers download would be the one path that
+// could silently ship without an identity.
 func countStampedBuildPaths(repoRoot string) (any, error) {
 	const stamp = "internal/buildinfo.Version="
 	binaries := []string{"./cmd/server", "./cmd/crier-mcp"}
 
 	total := 0
-	for _, name := range []string{"Makefile", "Dockerfile", "Dockerfile.mcp"} {
+	for _, name := range []string{"Makefile", "Dockerfile", "Dockerfile.mcp", "scripts/release-artifacts.sh"} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, name))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
@@ -1172,9 +1180,39 @@ func countStampedBuildPaths(repoRoot string) (any, error) {
 		}
 	}
 	if total == 0 {
-		return nil, fmt.Errorf("no `go build` invocation for a crier binary found in Makefile/Dockerfile/Dockerfile.mcp — the scanner measured nothing")
+		return nil, fmt.Errorf("no `go build` invocation for a crier binary found in Makefile/Dockerfile/Dockerfile.mcp/scripts/release-artifacts.sh — the scanner measured nothing")
 	}
 	return total, nil
+}
+
+// countReleaseAssets re-measures the CR-FEAT-028 asset-set count from source:
+// the default RELEASE_TARGETS of scripts/release-artifacts.sh, times the two
+// binaries the release ships per target, plus the installer and the checksum
+// manifest. It is the number the README prints ("every release publishes N
+// assets"), so adding a platform to the release without updating that sentence
+// fails the build instead of shipping a release surface nobody can count.
+func countReleaseAssets(repoRoot string) (any, error) {
+	const script = "scripts/release-artifacts.sh"
+	raw, err := os.ReadFile(filepath.Join(repoRoot, script))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", script, err)
+	}
+	// The default lives in `RELEASE_TARGETS="${RELEASE_TARGETS:-linux/amd64 …}"`.
+	m := regexp.MustCompile(`RELEASE_TARGETS="\$\{RELEASE_TARGETS:-([^}"]*)\}"`).FindStringSubmatch(string(raw))
+	if m == nil {
+		return nil, fmt.Errorf("%s no longer carries a RELEASE_TARGETS default — the scanner measured nothing", script)
+	}
+	targets := strings.Fields(m[1])
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("%s declares an EMPTY RELEASE_TARGETS default — a release ships no platform", script)
+	}
+	for _, t := range targets {
+		if _, _, ok := strings.Cut(t, "/"); !ok {
+			return nil, fmt.Errorf("%s: RELEASE_TARGETS entry %q is not an <os>/<arch> pair", script, t)
+		}
+	}
+	// Two binaries per target, plus scripts/install.sh and SHA256SUMS.
+	return len(targets)*2 + 2, nil
 }
 
 var (
@@ -2253,13 +2291,16 @@ func (c countingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // TestCountStampedBuildPathsNegativeControl proves the DF-CRIER-171 build-path
 // claim's probe is alive, on the same files the real claim reads: a copy of the
-// Makefile + both Dockerfiles measures 4 stamped build paths; dropping the
-// stamp from one file (the pre-fix Dockerfile, which built with `-ldflags
-// "-s -w"` alone) must FAIL naming that file; and a scan that finds no `go
-// build` at all must fail as vacuous rather than report 0 successes.
+// Makefile + both Dockerfiles + the release builder (CR-FEAT-028 added
+// scripts/release-artifacts.sh to the probe, since it compiles the binaries a
+// tester downloads) measures 6 stamped build paths; dropping the stamp from one
+// file (the pre-fix Dockerfile, which built with `-ldflags "-s -w"` alone, or
+// the release builder, which would ship an unidentifiable asset) must FAIL
+// naming that file; and a scan that finds no `go build` at all must fail as
+// vacuous rather than report 0 successes.
 func TestCountStampedBuildPathsNegativeControl(t *testing.T) {
 	repoRoot := resolveRepoRoot(t)
-	files := []string{"Makefile", "Dockerfile", "Dockerfile.mcp"}
+	files := []string{"Makefile", "Dockerfile", "Dockerfile.mcp", "scripts/release-artifacts.sh"}
 
 	stage := func(t *testing.T, transform func(name, text string) string) string {
 		t.Helper()
@@ -2269,7 +2310,11 @@ func TestCountStampedBuildPathsNegativeControl(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", name, err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(transform(name, string(raw))), 0o644); err != nil {
+			dst := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				t.Fatalf("mkdir for %s: %v", name, err)
+			}
+			if err := os.WriteFile(dst, []byte(transform(name, string(raw))), 0o644); err != nil {
 				t.Fatalf("write %s: %v", name, err)
 			}
 		}
@@ -2282,8 +2327,8 @@ func TestCountStampedBuildPathsNegativeControl(t *testing.T) {
 		if err != nil {
 			t.Fatalf("healthy copy: %v", err)
 		}
-		if n, ok := got.(int); !ok || n != 4 {
-			t.Errorf("healthy copy measured %v, want 4 stamped build paths", got)
+		if n, ok := got.(int); !ok || n != 6 {
+			t.Errorf("healthy copy measured %v, want 6 stamped build paths", got)
 		}
 	})
 
@@ -2302,12 +2347,99 @@ func TestCountStampedBuildPathsNegativeControl(t *testing.T) {
 		}
 	})
 
+	t.Run("unstamped release builder fails", func(t *testing.T) {
+		// CR-FEAT-028: the release builder is the path that produces what a
+		// tester downloads, so an unstamped `go build` there must be caught too.
+		dir := stage(t, func(name, text string) string {
+			if name == "scripts/release-artifacts.sh" {
+				return strings.ReplaceAll(text, "internal/buildinfo.Version=", "internal/buildinfo.NOT_STAMPED=")
+			}
+			return text
+		})
+		if _, err := countStampedBuildPaths(dir); err == nil {
+			t.Error("probe passed a release builder that stamps nothing — the release artifacts could ship without an identity")
+		} else if !strings.Contains(err.Error(), "release-artifacts.sh") {
+			t.Errorf("probe error does not name the unstamped release builder: %v", err)
+		}
+	})
+
 	t.Run("no build path at all fails as vacuous", func(t *testing.T) {
 		dir := stage(t, func(_, text string) string {
 			return strings.ReplaceAll(text, "go build", "go-build")
 		})
 		if _, err := countStampedBuildPaths(dir); err == nil {
 			t.Error("probe reported success with no build path found — a vacuous 0 is not evidence")
+		}
+	})
+}
+
+// TestCountReleaseAssetsNegativeControl proves the CR-FEAT-028 asset-count probe
+// is alive. The claim ("every release publishes 8 assets") is only worth
+// anything if the number is re-measured from the release builder rather than
+// pinned, AND if a target list that has silently shrunk or been emptied is
+// refused rather than quietly measuring a smaller release: a published release
+// that tells Mac testers the front door is closed for them is the failure this
+// probe exists to catch, and an empty list must never read as "0 assets, all
+// good".
+func TestCountReleaseAssetsNegativeControl(t *testing.T) {
+	repoRoot := resolveRepoRoot(t)
+	const script = "scripts/release-artifacts.sh"
+	const targets = "linux/amd64 linux/arm64 darwin/arm64"
+	raw, err := os.ReadFile(filepath.Join(repoRoot, script))
+	if err != nil {
+		t.Fatalf("read %s: %v", script, err)
+	}
+
+	stage := func(t *testing.T, transform func(string) string) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
+			t.Fatalf("mkdir scripts: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, script), []byte(transform(string(raw))), 0o644); err != nil {
+			t.Fatalf("write %s: %v", script, err)
+		}
+		return dir
+	}
+
+	t.Run("the shipped tree measures the published set", func(t *testing.T) {
+		got, err := countReleaseAssets(repoRoot)
+		if err != nil {
+			t.Fatalf("the real tree: %v", err)
+		}
+		if n, ok := got.(int); !ok || n != 8 {
+			t.Errorf("the real tree measured %v, want 8 assets (3 targets x 2 binaries + installer + SHA256SUMS)", got)
+		}
+	})
+
+	t.Run("a dropped platform measures the smaller set", func(t *testing.T) {
+		dir := stage(t, func(text string) string {
+			return strings.ReplaceAll(text, targets, "linux/amd64 linux/arm64")
+		})
+		got, err := countReleaseAssets(dir)
+		if err != nil {
+			t.Fatalf("two-target copy: %v", err)
+		}
+		if n, ok := got.(int); !ok || n != 6 {
+			t.Errorf("two-target copy measured %v, want 6 — the probe is not reading the default target list", got)
+		}
+	})
+
+	t.Run("an EMPTY target list is refused, not measured as 2", func(t *testing.T) {
+		dir := stage(t, func(text string) string {
+			return strings.ReplaceAll(text, targets, "")
+		})
+		if _, err := countReleaseAssets(dir); err == nil {
+			t.Error("probe accepted an empty RELEASE_TARGETS default — a release shipping no platform is not a smaller release")
+		}
+	})
+
+	t.Run("a malformed target is refused", func(t *testing.T) {
+		dir := stage(t, func(text string) string {
+			return strings.ReplaceAll(text, targets, "linux-amd64")
+		})
+		if _, err := countReleaseAssets(dir); err == nil {
+			t.Error("probe accepted a target that is not an <os>/<arch> pair")
 		}
 	})
 }

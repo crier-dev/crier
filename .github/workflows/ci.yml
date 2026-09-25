@@ -71,6 +71,25 @@ jobs:
       - name: Client round-trip (crier keygen + Python/TS clients, no openssl)
         run: make client-roundtrip-check
 
+      # CR-FEAT-028: the release front door's acceptance drive. `gh release view
+      # v0.1.0-rc2` returned `assets: []`, so the only way in was clone + a Go
+      # toolchain + `make build`. This step builds the asset set the release now
+      # publishes (every release target, so a target that stops compiling fails
+      # here rather than at release time), serves it over a scratch port as a
+      # release tree, and installs from it into a CLEAN BOX — `env -i`, its own
+      # HOME, and a PATH whose `go` is a SHIM that exits 127 and logs the call,
+      # so "installs without a Go toolchain" is proven POSITIVELY instead of
+      # assumed from an absent `go`. The installed binary is then run (/health,
+      # /version, a registration, an inbox delivery, on a port the shared
+      # selector chose and the script asserted it owns). Both negative controls
+      # are load-bearing: a TAMPERED artifact and a manifest with NO ENTRY for
+      # the binary must each be refused BY NAME — a front door that installs an
+      # unverified download is worse than no front door. A `gh` PATH shim then
+      # proves the publish command carries every asset of the set. No network, no
+      # docker, no keys, and the fake ports are picked free by the script itself.
+      - name: Release front door (asset set + clean-box install)
+        run: make install-path-selftest
+
       # INT-CI-001: ONE transient ssh/scp reset on the deploy leg used to kill the
       # whole bunker-e2e battery with no retry and no attribution — run 35302932314
       # lost the `blocking` cell, and every probe in it, before a single request was

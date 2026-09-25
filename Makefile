@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -19,6 +19,11 @@ PIDFILE ?= .crier.pid
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Where the release asset set is assembled (CR-FEAT-028): cross-compiled
+# binaries + scripts/install.sh + SHA256SUMS, attached to the Release object by
+# `make release-upload`. Gitignored — it is build output, never a repo artifact.
+RELEASE_OUTDIR ?= dist
 
 BUILDINFO_PKG := github.com/crier-dev/crier/internal/buildinfo
 CRIER_LDFLAGS := -X $(BUILDINFO_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Commit=$(COMMIT) -X $(BUILDINFO_PKG).BuildTime=$(BUILD_TIME)
@@ -64,7 +69,10 @@ help:
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
 	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
-	@echo "  release           Cut a release: check clean tree + main, run the gates, create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
+	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
+	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
+	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
+	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
@@ -661,6 +669,9 @@ release:
 	echo "release: + make lint";         make lint; \
 	echo "release: + make test-short";   make test-short; \
 	echo "release: OK — gates green (make build && make lint && make test-short)"; \
+	echo "release: building the release asset set (CR-FEAT-028: prebuilt binaries, installer, SHA256SUMS)"; \
+	make release-artifacts VERSION="$$v"; \
+	echo "release: OK — assets in $(RELEASE_OUTDIR)/ (dist/ is build output, never committed)"; \
 	echo "release: creating annotated tag $$v (message: crier $$v)"; \
 	git tag -a "$$v" -m "crier $$v"; \
 	echo "release: created — $$v -> $$(git rev-parse --short HEAD)"; \
@@ -677,7 +688,54 @@ release:
 	else \
 	  echo "release:     (no gitlab remote configured — origin only)"; \
 	fi; \
+	echo "release: then attach the assets to the GitHub Release object (CR-FEAT-028):"; \
+	echo "release:     make release-upload VERSION=$$v              # create/update the Release WITH the assets"; \
+	echo "release:     make release-upload VERSION=$$v DRY_RUN=1    # what it would run, without publishing"; \
+	echo "release: the front door that opens is:"; \
+	echo "release:     curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh"; \
 	echo "release: changelog: CHANGELOG.md (Keep a Changelog); procedure: docs/releases.md"
+
+# CR-FEAT-028 — the release FRONT DOOR: prebuilt binaries + a curl-to-install
+# path. `gh release view v0.1.0-rc2` answered `assets: []`, so the only way in
+# was clone + Go toolchain + `make build`; an external hands-on review filed that
+# as a tester-funnel problem. `make release` now builds the asset set for the tag
+# it cuts (see the release target above); these targets are the halves run by
+# hand, and the acceptance drive.
+#
+# release-artifacts — cross-compiles crier + crier-mcp for every release target
+# (linux/amd64, linux/arm64, darwin/arm64) into RELEASE_OUTDIR (dist/), copies
+# scripts/install.sh in, writes SHA256SUMS and RE-VERIFIES it, then runs the host
+# artifact's `-version` and refuses to leave a set whose identity stamp did not
+# land. It reuses the identity machinery `make build` and the Dockerfile already
+# use (internal/buildinfo), so a release artifact and a local build can never
+# report different identities (DF-CRIER-171).
+release-artifacts:
+	VERSION='$(VERSION)' COMMIT='$(COMMIT)' BUILD_TIME='$(BUILD_TIME)' RELEASE_OUTDIR='$(RELEASE_OUTDIR)' bash scripts/release-artifacts.sh
+
+# release-upload — attaches that set to the GitHub Release object, creating it
+# from the version's own CHANGELOG section when it does not exist yet. This is
+# the publish step docs/releases.md §4 documents; it NEVER pushes or moves a git
+# tag (that half stays a hand command, see §3). DRY_RUN=1 prints the gh commands
+# and publishes nothing.
+release-upload:
+	@case "$(origin VERSION)" in \
+	  'command line'|'environment'|'override') ;; \
+	  *) echo "release-upload: ERROR: refusing the default VERSION '$(VERSION)' (that is git describe output, not a release)"; \
+	     echo "release-upload: ERROR: pass the tag explicitly: make release-upload VERSION=v0.1.0-rc2"; \
+	     exit 1 ;; \
+	esac
+	VERSION='$(VERSION)' RELEASE_OUTDIR='$(RELEASE_OUTDIR)' DRY_RUN='$(DRY_RUN)' bash scripts/release-upload.sh
+
+# install-path-selftest — the CR-FEAT-028 acceptance drive. Builds the asset set
+# (every release target), serves it over a scratch port as a release tree, and
+# installs from it into a clean box whose PATH carries a `go` SHIM that exits
+# 127 — so "installs without a Go toolchain" is proven positively (the shim was
+# never called) instead of assumed. Two negative controls (a tampered artifact,
+# and a manifest with no entry for the binary) prove an unverified download is
+# refused, and a `gh` PATH shim proves the publish command carries every asset.
+# No network, no docker, no keys; ports come from the shared selector.
+install-path-selftest:
+	bash scripts/install-path-selftest.sh
 
 generate:
 	go generate ./...

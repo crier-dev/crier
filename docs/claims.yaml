@@ -375,11 +375,30 @@ claims:
   # claim exists for (the reference image shipped with `-ldflags "-s -w"` only, so
   # its /version answered the "dev" sentinel and named no commit). Run without
   # Docker: it reads the files, it does not build images.
+  #
+  # CR-FEAT-028 added a build path — the two cross-compile lines in
+  # scripts/release-artifacts.sh that produce what a tester downloads — so this
+  # count moved 4 -> 6 and the probe now reads that script too. The stamp must
+  # stay INLINE on those `go build` lines: an indirected `$LDFLAGS` would be
+  # invisible to the scanner and the release artifacts would be the one path that
+  # could ship without an identity.
   - id: COUNT-BUILD-PATHS-STAMPED
     kind: count
     doc: README.md
-    quote: "4 build paths that compile a crier binary"
-    expect: 4
+    quote: "6 build paths that compile a crier binary"
+    expect: 6
+    xfail: null
+  # CR-FEAT-028: the release's front door is its asset set, so the number the
+  # README prints is re-measured from source — the default RELEASE_TARGETS in
+  # scripts/release-artifacts.sh x the two binaries per target, plus the installer
+  # and the checksum manifest. Adding a platform to the release without moving the
+  # sentence fails the build (as does an empty or malformed target list, which the
+  # probe refuses to read as a smaller release).
+  - id: COUNT-RELEASE-ASSETS
+    kind: count
+    doc: README.md
+    quote: "publishes 8 assets"
+    expect: 8
     xfail: null
 
   # --- xfail claims (CR-GAP-062): prose that is FALSE at HEAD, pinned to the board
