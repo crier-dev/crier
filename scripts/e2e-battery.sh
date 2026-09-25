@@ -17,6 +17,12 @@
 #   round-trip INTACT (base64-decoded == delivered) -> B signed retrieve of A's
 #   inbox -> 403 (cross-agent, B's own valid signature) -> B's own inbox 200
 #   empty -> A signed ack 204
+#   spec-generated client (INT-MUSTER-005): a client derived from
+#   docs/openapi.yaml (Muster's openapi-cli when it is on PATH, else the client
+#   emitted by scripts/openapi-client-gen.py) drives register 201 -> deliver 201
+#   -> signed retrieve 200 -> ack 204 with the payload round-tripping intact; the
+#   cell fails CLOSED when the spec cannot be read, and asserts the endpoints it
+#   called are the document's own path keys (8 gates: 32 -> 40)
 #
 # Usage: scripts/e2e-battery.sh [port]     (default 18782; falls back if taken)
 set -uo pipefail
@@ -232,6 +238,199 @@ if [ -n "$FA_LEASE" ] && [ -n "$FA_MSG" ]; then
   check "A signed ack 204 (lease+ids)" 204
 else
   FAIL=$((FAIL+1)); echo "FAIL  foreign ack path (no lease_id/message id in A's retrieve body)"; ev "foreign ack" 0 204 false
+fi
+
+say "spec-generated client E2E (INT-MUSTER-005)"
+# A client GENERATED from docs/openapi.yaml must be able to drive crier end to
+# end: register -> deliver -> signed retrieve -> ack, with the exact statuses
+# 201/201/200/204 and the delivered payload round-tripping intact.
+#
+# Precedence, at battery runtime and inside $WORKDIR only: a Muster
+# `openapi-cli`/`muster` binary on PATH builds the client and drives the flow
+# (scripts/openapi-client-muster.sh, endpoints from the generator's own metadata
+# for docs/openapi.yaml); otherwise the client emitted by
+# scripts/openapi-client-gen.py drives it — the endpoints, body keys and
+# signature-header names of that client are all read out of the document at
+# generation time, so a spec edit changes the client (gates below assert the
+# derived paths are the document's own path keys AND that the calls landed on
+# them). If a generator IS on PATH but cannot produce a driven flow, the cell
+# prints a NOTE and falls back to the spec-derived client: the backend that ran
+# is named in the cell's output, never silently.
+#
+# FAIL CLOSED: a docs/openapi.yaml that cannot be read or parsed FAILS the
+# generation gate (and with it every flow gate below), never a silent skip.
+SPEC="$REPO_ROOT/docs/openapi.yaml"
+GEN_DIR="$WORKDIR/gen"
+mkdir -p "$GEN_DIR"
+SPEC_AGENT="e2e-spec-${AGENT}"
+SPEC_KEY="$WORKDIR/spec.key"
+PAYLOAD_TEXT='{"int_muster_005":"round-trip","n":1}'
+printf '%s' "$PAYLOAD_TEXT" > "$GEN_DIR/payload.json"
+openssl genpkey -algorithm ED25519 -out "$SPEC_KEY" 2>/dev/null
+
+if python3 "$REPO_ROOT/scripts/openapi-client-gen.py" --spec "$SPEC" --out "$GEN_DIR" \
+     --base-url "$CRIER" > "$GEN_DIR/generate.log" 2>&1; then
+  CLIENT_OK=1
+  PASS=$((PASS+1)); echo "PASS  spec-derived client generated from docs/openapi.yaml (client.json + client.sh)"
+  ev "spec client generation" 0 0 true
+  sed 's/^/      /' "$GEN_DIR/generate.log" | sed -n '3,7p'
+else
+  CLIENT_OK=0
+  FAIL=$((FAIL+1)); echo "FAIL  spec-derived client generation — docs/openapi.yaml unreadable/unparseable (fail closed)"
+  sed 's/^/      /' "$GEN_DIR/generate.log" | head -3
+  ev "spec client generation" 0 0 false
+fi
+
+# the derived endpoints ARE the document's paths (each template, a path key)
+if [ "$CLIENT_OK" != 1 ]; then
+  FAIL=$((FAIL+1)); echo "FAIL  client endpoint derivation — no client was generated (fail closed above)"
+  ev "client endpoints from spec" 0 0 false
+elif python3 - "$GEN_DIR/client.json" "$SPEC" <<'PYEOF'
+import json, sys
+contract = json.load(open(sys.argv[1]))
+keys = set()
+for line in open(sys.argv[2]).read().splitlines():
+    stripped = line.strip()
+    if line.startswith("  /") and stripped.endswith(":"):
+        keys.add(stripped[:-1])
+templates = {role: op["path"] for role, op in contract["operations"].items()}
+print("      derived: %s" % ", ".join("%s=%s" % (r, templates[r]) for r in sorted(templates)))
+missing = sorted(p for p in templates.values() if p not in keys)
+if missing:
+    print("      not a path key of the spec: %s" % ", ".join(missing))
+    raise SystemExit(1)
+raise SystemExit(0)
+PYEOF
+then
+  PASS=$((PASS+1)); echo "PASS  client endpoints derived from the spec (every template is a path key of docs/openapi.yaml)"
+  ev "client endpoints from spec" 0 0 true
+else
+  FAIL=$((FAIL+1)); echo "FAIL  client endpoint derivation (a derived endpoint is not a path key of docs/openapi.yaml)"
+  ev "client endpoints from spec" 0 0 false
+fi
+
+GEN_BIN=""
+for cand in openapi-cli muster; do
+  if command -v "$cand" >/dev/null 2>&1; then GEN_BIN="$(command -v "$cand")"; break; fi
+done
+FLOW_VIA="none (client generation failed closed)"
+if [ "$CLIENT_OK" = 1 ] && [ -n "$GEN_BIN" ]; then
+  MUSTER_HOME="$WORKDIR/muster-home"
+  mkdir -p "$MUSTER_HOME"
+  if env HOME="$MUSTER_HOME" XDG_DATA_HOME="$MUSTER_HOME/.local/share" XDG_CONFIG_HOME="$MUSTER_HOME/.config" \
+       "$GEN_BIN" generate "$SPEC" > "$GEN_DIR/muster-generate.log" 2>&1 \
+     && [ -f "$MUSTER_HOME/.local/share/openapi-cli/commands.json" ] \
+     && bash "$REPO_ROOT/scripts/openapi-client-muster.sh" --generator "$GEN_BIN" \
+          --meta "$MUSTER_HOME/.local/share/openapi-cli/commands.json" --contract "$GEN_DIR/client.json" \
+          --out "$GEN_DIR" --base-url "$CRIER" --token "$BAT_TOKEN" --agent "$SPEC_AGENT" \
+          --key "$SPEC_KEY" --payload-file "$GEN_DIR/payload.json" >> "$GEN_DIR/driver.log" 2>&1; then
+    FLOW_VIA="$(basename "$GEN_BIN")-generated client (generate + request), endpoints from its own metadata"
+  else
+    echo "      NOTE: $(basename "$GEN_BIN") is on PATH but produced no driven flow — falling back to the spec-derived client"
+    rm -f "$GEN_DIR"/step-*.json "$GEN_DIR/retrieve-body.json"
+    SPEC_AGENT="${SPEC_AGENT}-sd"
+    bash "$GEN_DIR/client.sh" --out "$GEN_DIR" --base-url "$CRIER" --token "$BAT_TOKEN" \
+      --agent "$SPEC_AGENT" --key "$SPEC_KEY" --payload-file "$GEN_DIR/payload.json" >> "$GEN_DIR/driver.log" 2>&1
+    FLOW_VIA="spec-derived client (scripts/openapi-client-gen.py)"
+  fi
+elif [ "$CLIENT_OK" = 1 ]; then
+  bash "$GEN_DIR/client.sh" --out "$GEN_DIR" --base-url "$CRIER" --token "$BAT_TOKEN" \
+    --agent "$SPEC_AGENT" --key "$SPEC_KEY" --payload-file "$GEN_DIR/payload.json" >> "$GEN_DIR/driver.log" 2>&1
+  FLOW_VIA="spec-derived client (scripts/openapi-client-gen.py)"
+fi
+printf '%s' "$SPEC_AGENT" > "$GEN_DIR/agent-id.txt"
+echo "      client backend: $FLOW_VIA"
+
+step_field() { # role field
+  python3 - "$GEN_DIR/step-$1.json" "$2" <<'PYEOF'
+import json, sys
+try:
+    value = json.load(open(sys.argv[1])).get(sys.argv[2], "")
+except Exception:
+    value = ""
+print(value)
+PYEOF
+}
+flow_gate() { # role want
+  local role="$1" want="$2" got method template
+  got="$(step_field "$role" http)"
+  method="$(step_field "$role" method)"
+  template="$(step_field "$role" template)"
+  if [ ! -f "$GEN_DIR/step-$role.json" ]; then
+    FAIL=$((FAIL+1)); echo "FAIL  generated client $role -> no result (no client drove the flow)"
+    ev "client $role" 0 "$want" false
+    return 0
+  fi
+  if [ "$got" = "$want" ]; then
+    PASS=$((PASS+1)); echo "PASS  generated client ${role} ${method:-?} ${template:-?} -> HTTP $got"
+    ev "client $role" "$got" "$want" true
+  else
+    FAIL=$((FAIL+1)); echo "FAIL  generated client ${role} ${method:-?} ${template:-?} -> HTTP ${got:-none} want $want"
+    echo "      client log: $(head -c 200 "$GEN_DIR/driver.log" 2>/dev/null | tr -d '\n')"
+    ev "client $role" "${got:-0}" "$want" false
+  fi
+}
+flow_gate register 201
+flow_gate deliver 201
+flow_gate retrieve 200
+flow_gate ack 204
+
+# the calls landed on the derived endpoints (observed path == derived template)
+if python3 - "$GEN_DIR" <<'PYEOF'
+import json, os, sys
+out = sys.argv[1]
+agent = open(os.path.join(out, "agent-id.txt")).read()
+problems, seen = [], []
+for role in ("register", "deliver", "retrieve", "ack"):
+    path = os.path.join(out, "step-%s.json" % role)
+    if not os.path.exists(path):
+        problems.append("%s: the generated client produced no result" % role)
+        continue
+    row = json.load(open(path))
+    expected = (row.get("template") or "").replace("{id}", agent)
+    seen.append("%s %s %s" % (role, row.get("method"), row.get("template")))
+    if row.get("path") != expected:
+        problems.append("%s: called %r, the derived template says %r" % (role, row.get("path"), expected))
+print("      observed: %s" % " | ".join(seen))
+for problem in problems:
+    print("      %s" % problem)
+raise SystemExit(1 if problems else 0)
+PYEOF
+then
+  PASS=$((PASS+1)); echo "PASS  generated client called the spec-derived endpoints (observed path == derived template)"
+  ev "client endpoints observed" 0 0 true
+else
+  FAIL=$((FAIL+1)); echo "FAIL  generated client did not call the derived endpoints (see the lines above)"
+  ev "client endpoints observed" 0 0 false
+fi
+
+# the delivered payload survived the round trip (base64-decoded == delivered)
+if python3 - "$GEN_DIR" <<'PYEOF'
+import base64, json, os, sys
+out = sys.argv[1]
+want = open(os.path.join(out, "payload.json")).read()
+body_path = os.path.join(out, "retrieve-body.json")
+if not os.path.exists(body_path):
+    print("      no retrieve body was written")
+    raise SystemExit(1)
+try:
+    body = json.load(open(body_path))
+    got = base64.b64decode(body["messages"][0]["payload"]).decode()
+except Exception as exc:
+    print("      cannot read the retrieved payload: %s" % exc)
+    raise SystemExit(1)
+if got != want:
+    print("      decoded %r != delivered %r" % (got, want))
+    raise SystemExit(1)
+print("      decoded payload == delivered payload: %s" % got)
+raise SystemExit(0)
+PYEOF
+then
+  PASS=$((PASS+1)); echo "PASS  generated client payload round-trip intact (base64-decoded == delivered)"
+  ev "client payload round-trip" 0 0 true
+else
+  FAIL=$((FAIL+1)); echo "FAIL  generated client payload round-trip (base64-decoded != delivered)"
+  ev "client payload round-trip" 0 0 false
 fi
 
 say "teardown"
