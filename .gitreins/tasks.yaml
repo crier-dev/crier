@@ -2361,3 +2361,11 @@ tasks:
   status: complete
   created_at: '2026-09-25T19:37:56.213172+00:00'
   completed_at: '2026-09-25T19:57:17.167282+00:00'
+- id: DF-CRIER-288
+  title: README documents the 409 on duplicate agent registration
+  criteria:
+  - README register step names the 409 idempotency-refusal and its meaning; integration-guide
+    register step mirrors it; docs-check + test-short stay green; no behaviour change
+  status: complete
+  created_at: '2026-09-25T21:36:28.945616+00:00'
+  completed_at: '2026-09-25T21:41:30.277483+00:00'
