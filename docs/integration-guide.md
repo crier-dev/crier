@@ -12,6 +12,9 @@ This is the maintained, user-facing companion to:
 - `examples/demo.sh` — the runnable register → deliver → retrieve → ack round-trip
 - `examples/ws-mesh-demo/` — the runnable **zero-install** relay pub/sub + mesh
   demo: `run-demo.sh` plus a Go WebSocket client, nothing to install
+- `examples/muster-bridge/run-demo.sh` — the runnable **Muster onboarding** path
+  (§10): spec discovery, register → deliver → retrieve → ack with every status
+  asserted, and the measured bearer-only vs signature-required matrix
 
 Everything below was live-verified against a running server. Every leg in this
 guide has a repo-shipped, runnable path — `examples/demo.sh`
@@ -918,4 +921,244 @@ was compared byte-for-byte against the delivered string, and it matched:
 # base64-decoded: {"round_trip":"cr-consensus-1","text":"hello from an external non-Go harness"}
 # ROUND-TRIP: INTACT
 ```
+
+---
+
+## 10. Using crier from Muster
+
+Muster is an external platform that generates an HTTP client from an OpenAPI
+document. Crier ships that document, so a Muster-driven integration is built from
+the spec rather than from an SDK — no Go toolchain, no WebSocket client and no
+vendored library are involved. This section is that onboarding path end to end:
+discover the spec, register an agent, deliver into its inbox, retrieve and ack.
+§10.3 is the half a generated client cannot do for itself: the per-agent ed25519
+signature.
+
+Everything below is real and every status shown was measured live against a relay
+built and started from this checkout in config C (the production default). The
+same run is reproducible with the shipped runner in §10.4, which asserts each of
+those statuses and fails when one of them changes.
+
+### 10.1 Discover the spec: the served copy and the repo source of truth
+
+Two copies of the document exist and they are byte-identical (asserted by
+`TestOpenAPIDocsSpec` and by CI):
+
+| Copy | Where | How to fetch |
+|------|-------|--------------|
+| served | `GET /openapi.json` and `GET /openapi.yaml` on any running relay | both are among the five auth-exempt paths (§1), so a spec fetch needs no token |
+| repo | `docs/openapi.yaml` | the source of truth in a checkout; `cmd/server/openapi.yaml` is the generated copy (`make generate`) the server embeds and serves |
+
+Point the generator at whichever copy fits: `GET /openapi.json` for a JSON
+toolchain and `GET /openapi.yaml` for a YAML one, or `docs/openapi.yaml` for a
+pinned checkout. Measured with no `Authorization` header at all:
+
+```bash
+curl -s localhost:8767/openapi.json | head -c 60        # → {"openapi":"3.1.0","info"…
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8767/openapi.yaml   # → 200
+```
+
+`servers[0]` in the document is the local-development default
+`http://localhost:8767`; override it with the relay's real base URL (see the
+"Muster-generated clients" note at the top of this guide).
+
+### 10.2 The round trip: register, deliver, retrieve, ack
+
+The consumer is one identity with one keypair — the same key format as §2. A
+config C relay (the production default) requires the public half at registration
+and refuses a registration without it, while the writes themselves need no
+signature at all:
+
+```bash
+AGENT=muster-bridge
+AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")     # drop this in config A
+
+# register with the PUBLIC half of the agent's key                            # → 201
+openssl genpkey -algorithm ED25519 -out agent.key
+PUBKEY=$(openssl pkey -in agent.key -pubout -outform DER | tail -c 32 | xxd -p -c 64)
+curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"$AGENT\",\"public_key\":\"$PUBKEY\",\"capabilities\":[\"inbox\"]}"
+# → 201 {"id":"muster-bridge","public_key":"3622469f…","capabilities":["inbox"],"status":"online",…}
+# (no public_key → 400 {"error":"public_key is required"}: with enforcement on,
+#  the key IS the identity — a client that omits the field is not registered)
+
+# deliver — bearer only, NO signature, in every configuration                  # → 201
+curl -s -X POST localhost:8767/agents/$AGENT/inbox "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"payload":{"source":"muster","text":"hello from a Muster-driven integration"}}'
+# → 201 {"id":"816583122b3815b05790b1c4","transport":"inbox","expires_at":"2026-09-26T06:02:26.719729018Z"}
+
+# retrieve — SIGNED in config C: the unsigned read is refused here              # → 401
+curl -s localhost:8767/agents/$AGENT/inbox "${AUTH[@]}"
+# → 401 {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}
+```
+
+That 401 is the boundary a generated client runs into (§10.3). The signed legs
+use §3's `sig()` helper verbatim — OpenSSL ≥ 3, the same
+`hex(ed25519("METHOD\n<path>\n<unix-seconds>"))` the guide documents there — and
+the ack rules of §3 apply unchanged:
+
+```bash
+# retrieve, signed: leases the batch for 30s by default                        # → 200
+TS=$(date +%s)
+printf 'GET\n/agents/%s/inbox\n%s' "$AGENT" "$TS" > payload.txt
+SIG=$(sig)   # helper from §3 Retrieve — fails loudly on OpenSSL < 3
+curl -s localhost:8767/agents/$AGENT/inbox "${AUTH[@]}" \
+  -H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG"
+# → 200 {"messages":[…],"lease_id":"b1e9bbaef27a01f0f17c8d6fd45160f7","queue_depth":2,"leased_count":2}
+
+# ack with THAT lease_id and the ids from that response                        # → 204
+TS=$(date +%s)
+printf 'POST\n/agents/%s/inbox/ack\n%s' "$AGENT" "$TS" > payload.txt
+SIG=$(sig)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/agents/$AGENT/inbox/ack "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -H "X-Agent-ID: $AGENT" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" \
+  -d '{"lease_id":"b1e9bbaef27a01f0f17c8d6fd45160f7","message_ids":["3810068b0517f0394413be49","816583122b3815b05790b1c4"]}'
+# → 204
+```
+
+### 10.3 The auth reality: what a bearer-only generated client can and cannot drive
+
+**crier declares `bearerAuth` globally and `agentSignature` per operation.** The
+document-level `security` is `- bearerAuth: []`, so a generated client applies the
+bearer token to every operation; `components.securitySchemes` adds
+`agentSignature`, an apiKey-style header (`X-Agent-Sig`) whose value is the §3
+signature over the method, the raw path and a unix timestamp, signed with the
+agent's **private** key. A client generated from the spec can send that header —
+it cannot compute it: it holds no private key, and the server binds the value to
+the method, the path, the timestamp and the `X-Agent-ID`.
+
+Five operations declare `agentSignature`. Everything else is drivable by a
+generated (bearer-only) client, and these five are not. Measured on a config C
+relay, all with `Authorization: Bearer <token>` and no signature headers:
+
+| Endpoint | Spec security | Unsigned (bearer only) | With the signature |
+|----------|---------------|------------------------|--------------------|
+| `GET /health`, `GET /version`, `GET /openapi.json`, `GET /openapi.yaml`, `GET /docs` | `security: []` | `200` — no token needed at all | — |
+| `GET /status` | bearerAuth | `200` (`401` without the token) | — |
+| `POST /agents` | bearerAuth | `201` (`400` without `public_key`) | — |
+| `GET /agents` | bearerAuth | `200` (`401` without the token) | — |
+| `GET /agents/{id}` | bearerAuth | `200` | — |
+| `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |
+| `GET /relay/topics` | bearerAuth | `200` | — |
+| `POST /relay/publish` | bearerAuth | `202` | — |
+| `GET /mesh/peers` | bearerAuth | `200` | — |
+| `GET /fed/peers` | bearerAuth | `200` | — |
+| `GET /agents/{id}/inbox` (retrieve) | bearerAuth + agentSignature | `401` | `200` |
+| `GET /agents/{id}/inbox/stats` | bearerAuth + agentSignature | `401` | `200` |
+| `POST /agents/{id}/inbox/ack` | bearerAuth + agentSignature | `401` | `204` |
+| `PATCH /agents/{id}` | bearerAuth + agentSignature | `401` | `200` |
+| `DELETE /agents/{id}` | bearerAuth + agentSignature | `401` | `204` |
+
+The refusal is the same for every one of the five:
+`{"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}`.
+A complete but wrong trio is refused too — a timestamp outside ±30s, a signature
+minted for another path, or a signature presented as another agent are all
+refused (`401`, except the last: a *valid* signature whose `X-Agent-ID` is not the
+`{id}` in the path answers `403`, `may only access its own resources`).
+
+**The spec and the live server agree on this table**, including
+`GET /agents/{id}/inbox/stats`: the document marks that operation with
+`agentSignature` **and** the running relay refuses an unsigned call with `401`
+(and answers `200` once the signature is supplied). An earlier internal note
+believed the stats read was signature-free — it is not, and the row above is the
+measurement that settles it.
+
+Two consequences worth stating plainly:
+
+- **Signature-required endpoints are not reachable from a generated client.**
+  Drive them from your own application code with §3's helper (or from a
+  hand-written client), and keep the generated client on the operations in the
+  `bearerAuth`-only rows.
+- **Config B is the configuration a generated client drives end to end**
+  (`CR_REQUIRE_AGENT_SIG=false`): the same five operations then answer `200`,
+  `200`, `404` (a bogus message id — that is the ack's own validation, not the
+  auth gate), `200` and `204` unsigned, and a bogus signature trio is ignored
+  rather than rejected. Register `201` → deliver `201` → retrieve `200` → ack
+  `204` is the whole path, with nothing to sign.
+
+### 10.4 The runnable example
+
+`examples/muster-bridge/run-demo.sh` walks §10.1–§10.3 against a relay it builds
+and starts itself on a scratch port it proves free **and proves it owns**
+(CR-GAP-069: the `EXIT` trap kills the pid it started, and the port's holder pid
+is asserted to be that pid). The transcript goes to a temp file outside the repo.
+The run pasted below is that script: its scratch port was `18801` (the port
+guard's first candidate, chosen because it was free), while §10.1–§10.2 show the
+guide's documented port `8767` — same binary, same configuration, same statuses.
+
+```bash
+bash examples/muster-bridge/run-demo.sh                                   # config C
+MUSTER_BRIDGE_REQUIRE_SIG=false bash examples/muster-bridge/run-demo.sh   # config B
+```
+
+Every line it prints is an assertion: the run fails if a status moves. Its last
+step is the §10.3 matrix, measured — this is the config C output:
+
+```text
+==> [4/9] register the consumer — bearer token only, NO signature (201)
+    POST /agents (bearer, no signature)            -> 201
+    {"id":"muster-bridge","public_key":"3622469f03b00c5f0a5aa70f00d1eced7ece90265c96f2377171a0140a59c78e","capabilities":["inbox"],"status":"online","registered_at":"2026-09-25T01:02:26.683608904-05:00","last_seen":"2026-09-25T01:02:26.683608904-05:00"}
+    POST /agents without public_key (config C)     -> 400
+    {"error":"public_key is required"}
+
+==> [5/9] deliver into its inbox — bearer token only, NO signature (201, 201)
+    POST /agents/muster-bridge/inbox #1 (no signature) -> 201
+    POST /agents/muster-bridge/inbox #2 (no signature) -> 201
+    {"id":"816583122b3815b05790b1c4","transport":"inbox","expires_at":"2026-09-26T06:02:26.719729018Z"}
+    (the inbox is durable and pull-based: a delivery is stored until it is acked)
+
+==> [6/9] retrieve — GET /agents/muster-bridge/inbox
+    unsigned retrieve (config C)                   -> 401
+    {"error":"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)"}
+    ^ this is the boundary for a spec-generated (bearer-only) client.
+
+==> [7/9] sign the request — the leg no generated client can do
+    signed retrieve                                -> 200
+    signed as: hex(ed25519("GET\n/agents/muster-bridge/inbox\n1790316146"), agent.key)
+    lease_id=b1e9bbaef27a01f0f17c8d6fd45160f7  message_ids=["3810068b0517f0394413be49","816583122b3815b05790b1c4"]
+    envelope: "queue_depth":2,"leased_count":2
+    (a signature is bound to METHOD and path: the same key signing a
+     different path is refused 401, and X-Agent-ID must be the {id} in
+     the path or the request is refused 403.)
+
+==> [8/9] ack the lease — 204, and the inbox is empty again
+    signed ack (POST /agents/muster-bridge/inbox/ack) -> 204
+    signed drain check (GET /agents/muster-bridge/inbox/stats) -> 200
+
+==> [9/9] the MEASURED authorization matrix (INT-MUSTER-003)
+    bearer-only client — every request carries Authorization: Bearer <token> and NO
+    X-Agent-ID / X-Agent-Ts / X-Agent-Sig unless the line says otherwise.
+
+    the five signature-required operations, unsigned (DELETE is last, below):
+    GET  /agents/{id}/inbox (unsigned)             -> 401
+    GET  /agents/{id}/inbox/stats (unsigned)       -> 401
+    POST /agents/{id}/inbox/ack (unsigned, dummy ids) -> 401
+    PATCH  /agents/{id} (unsigned)                 -> 401
+
+    everything else a bearer-only client drives:
+    GET /health (no token)                         -> 200
+    GET /version (no token)                        -> 200
+    GET /docs (no token)                           -> 200
+    GET /status (bearer)                           -> 200
+    GET /status (no token -> refused)              -> 401
+    GET /agents (bearer)                           -> 200
+    GET /agents (no token -> refused)              -> 401
+    GET /agents/{id} (bearer)                      -> 200
+    POST /agents (bearer, new id + public_key)     -> 201
+    POST /agents/{id}/inbox (bearer, deliver)      -> 201
+    GET /relay/topics (bearer)                     -> 200
+    GET /mesh/peers (bearer)                       -> 200
+    GET /fed/peers (bearer)                        -> 200
+    POST /relay/publish (bearer + X-Agent-ID)      -> 202
+
+    DELETE /agents/{id} (unsigned, the 5th signed op) -> 401
+
+==> summary
+    PASS — every measured status matched its claimed code (config C, CR_REQUIRE_AGENT_SIG=true)
+```
+
+The runner's README (`examples/muster-bridge/README.md`) carries the same matrix,
+the environment knobs (`MUSTER_BRIDGE_REQUIRE_SIG`, the token, the port block,
+the 18801+ scratch-port rotation) and the cleanup contract.
 

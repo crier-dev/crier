@@ -618,3 +618,136 @@ claims:
     quote: "The relay (`POST /relay/publish` / `GET /relay/subscribe/{topic}`,"
     expect: "/relay/subscribe/{topic}"
     xfail: null
+  # --- INT-MUSTER-002 / INT-MUSTER-003: the "Using crier from Muster" section
+  # (§10) and its measured authorization declaration. Every quote below is a
+  # VERBATIM line of that section: editing the row (or the transcript line) it
+  # anchors fails the gate with "anchor missing" before the live route probe can
+  # pass. The five `agentSignature` operations are claimed as ROUTES, not as
+  # statuses, because the gate's route rule is "only 404 fails" — the point of
+  # these claims is that every endpoint §10 names is really registered.
+  - id: ROUTE-GUIDE-MUSTER-SPEC-JSON
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-002: the served JSON document a generated client reads.
+    quote: 'Point the generator at whichever copy fits: `GET /openapi.json` for a JSON'
+    expect: "/openapi.json"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-SPEC-YAML
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-002: the served YAML document; the repo source of truth is
+    # docs/openapi.yaml, and cmd/server/openapi.yaml is the generated copy.
+    quote: 'toolchain and `GET /openapi.yaml` for a YAML one, or `docs/openapi.yaml` for a'
+    expect: "/openapi.yaml"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-EXEMPT-HEALTH
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the auth-exempt set the matrix's first row claims — a spec
+    # fetch, a liveness probe and the build identity need no token.
+    quote: '    GET /health (no token)                         -> 200'
+    expect: "/health"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-EXEMPT-VERSION
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the build identity, exempt on the same row.
+    quote: '    GET /version (no token)                        -> 200'
+    expect: "/version"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-EXEMPT-DOCS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the spec viewer, exempt like the two documents.
+    quote: '| `GET /health`, `GET /version`, `GET /openapi.json`, `GET /openapi.yaml`, `GET /docs` | `security: []` | `200` — no token needed at all | — |'
+    expect: "/docs"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-STATUS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: /status is NOT exempt — bearer-required, 401 without it.
+    quote: '| `GET /status` | bearerAuth | `200` (`401` without the token) | — |'
+    expect: "/status"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-REGISTER
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-002: registration is bearer-only in every configuration; the
+    # 400-without-public_key branch is config C's (the key is the identity).
+    quote: '| `POST /agents` | bearerAuth | `201` (`400` without `public_key`) | — |'
+    expect: "/agents"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-AGENTS-LIST
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the registry read a bearer-only client drives.
+    quote: '| `GET /agents` | bearerAuth | `200` (`401` without the token) | — |'
+    expect: "/agents"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-AGENT-GET
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: single-agent read, bearer-only.
+    quote: '| `GET /agents/{id}` | bearerAuth | `200` | — |'
+    expect: "/agents/{id}"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-DELIVER
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-002/003: deliver needs NO signature in any configuration — that
+    # is what makes the inbox a mailbox a generated producer can write to.
+    quote: '| `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |'
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-RETRIEVE
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the retrieve is the boundary — 401 unsigned, 200 signed.
+    quote: '| `GET /agents/{id}/inbox` (retrieve) | bearerAuth + agentSignature | `401` | `200` |'
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-STATS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the row that settles the open question — the spec marks this
+    # operation with agentSignature AND the live relay refuses an unsigned call
+    # with 401 (measured; an earlier internal note believed it was unsigned).
+    quote: '| `GET /agents/{id}/inbox/stats` | bearerAuth + agentSignature | `401` | `200` |'
+    expect: "/agents/{id}/inbox/stats"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-ACK
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: the ack is signed too (204 with the signature).
+    quote: '| `POST /agents/{id}/inbox/ack` | bearerAuth + agentSignature | `401` | `204` |'
+    expect: "/agents/{id}/inbox/ack"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-RELAY-TOPICS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: relay reads stay bearer-only.
+    quote: '| `GET /relay/topics` | bearerAuth | `200` | — |'
+    expect: "/relay/topics"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-RELAY-PUBLISH
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: publish is bearer-only (202, and it needs X-Agent-ID while
+    # rate limiting is on — the §4 contract, replayed by the docs-check recipe).
+    quote: '| `POST /relay/publish` | bearerAuth | `202` | — |'
+    expect: "/relay/publish"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-MESH-PEERS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: mesh reads stay bearer-only.
+    quote: '| `GET /mesh/peers` | bearerAuth | `200` | — |'
+    expect: "/mesh/peers"
+    xfail: null
+  - id: ROUTE-GUIDE-MUSTER-FED-PEERS
+    kind: route
+    doc: docs/integration-guide.md
+    # INT-MUSTER-003: federation peer list, bearer-only.
+    quote: '| `GET /fed/peers` | bearerAuth | `200` | — |'
+    expect: "/fed/peers"
+    xfail: null
