@@ -93,6 +93,29 @@ jobs:
       - name: Bounded load-harness selftest
         run: make load-repro-selftest
 
+      # CR-FEAT-033: the capacity soak publishes numbers (docs/capacity-ceiling.md)
+      # taken from a real crier server, so both the harness and the published
+      # numbers are gated here. The selftest proves the soak's bounds are real —
+      # every cap REFUSES out-of-range requests, the load gate SKIPS a busy host
+      # before a server is started, an exhausted wall-clock budget stops the run
+      # instead of continuing, a real 2-agent soak verifies its own measurement
+      # (frames delivered == frames expected, mesh peers == sockets opened, the
+      # 100/min cap observed) and leaves no server process or listener behind —
+      # with a NEUTER proof so the refusal cannot be vacuous. Everything it runs
+      # is a 2-agent / sub-second fixture except the bounded-stop proof, whose
+      # whole point is that it stops. `make load-soak` then drives the same
+      # harness end to end against a built server on every push.
+      - name: Capacity soak selftest
+        run: make load-soak-selftest
+
+      - name: Capacity soak smoke (2 agents, bounded)
+        # The soak's own load gate honours the repo's 8.0 loadavg rule and SKIPS a
+        # busy host (exit 3) — correct for an operator, but a CI step must not
+        # depend on the runner being idle, so the gate is raised explicitly here.
+        # The fixture is a 2-agent, sub-second measurement (no burn loop), so it
+        # cannot load a shared runner.
+        run: make load-soak LOAD_SOAK_THRESHOLD=64
+
       # DF-CRIER-206: Tier 1 (secrets/go_build/go_lint/go_tests) never reads a
       # shell script or a workflow YAML, so before this step a .sh/.yml-only push
       # got a `Tier 1 Guards: PASS` that verified nothing about it. The checker

@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -44,6 +44,10 @@ help:
 	@echo "  client-roundtrip-check  CR-FEAT-027: `crier keygen` + the Python and TypeScript clients through a full signed round-trip on a scratch port (no openssl, no xxd, no packages)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  load-repro-selftest  Prove the bounded load harness (caps, load gate, PDEATHSIG teardown, no survivors) — DF-CRIER-254"
+	@echo "  load-soak         Bounded capacity soak at 2 agents (CI smoke) — CR-FEAT-033"
+	@echo "  load-soak-baseline  Regenerate docs/soak-baseline.json (2/10/100/1000 agents) — the numbers docs/capacity-ceiling.md publishes (CR-FEAT-033)"
+	@echo "  load-soak-under-load  Run the soak under scripts/load-repro.sh burners — the burners-alongside artifact (CR-FEAT-033)"
+	@echo "  load-soak-selftest  Prove the soak's caps refuse, the gate skips, the budget bounds, the run verifies itself and leaves nothing behind — incl. a NEUTER proof (CR-FEAT-033)"
 	@echo "  bunker-matrix-selftest  Prove the bunker-matrix argument surface, its --local safety and its remote refusal — no docker, no bunker, no network (DF-CRIER-81)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
@@ -196,6 +200,52 @@ transport-retry-selftest:
 # <= 2 workers / <= 2 s and never leaves a burner behind.
 load-repro-selftest:
 	bash scripts/load-repro-selftest.sh
+
+# CR-FEAT-033: the external review measured two real numbers and then wrote the
+# honest sentence — "I did not run a 1000-agent soak; treat the ceiling as
+# unproven" — and named the bottlenecks it could not measure (one relay process,
+# a full WebSocket fan per agent, the 100/min cap as the only backpressure).
+# scripts/load-soak.py is the bounded, repeatable answer: it starts a real server
+# on a scratch port and drives register / inbox-deliver / relay fan-out / mesh fan
+# at 2, 10, 100 and 1000 registered agents, then prints the numbers (and the
+# claim strings docs/capacity-ceiling.md publishes).
+#
+# BOUNDED BY CONSTRUCTION, and that is measured rather than promised: every
+# dimension is capped and REFUSED (never clamped) above its cap, the wall-clock
+# budget is capped at scripts/loadgen.py's own hard lifetime limit, the load gate
+# IS loadgen's (imported — one implementation, not a copy), and the server it
+# starts is owned (kernel parent-death signal + TERM/KILL/VERIFY teardown). The
+# load gate is checked before anything is started, so a busy host is skipped with
+# exit 3 and never gets a server.  `make load-soak-selftest` proves all of it
+# (56 assertions, incl. a NEUTER proof and a real 2-agent run) and is a CI step.
+#
+# `load-soak` is the CI-sized smoke (2 agents, well under a second of
+# measurement). `load-soak-baseline` regenerates the published artifact — run it
+# on a quiet box; on a busy one raise the gate explicitly, because the published
+# baseline itself was measured with the gate raised and the artifact records the
+# threshold and the loadavg it saw (LOAD_SOAK_THRESHOLD=20).
+SOAK_PROFILES ?= 2,10,100,1000
+SOAK_BURNERS ?= 4
+LOAD_SOAK_THRESHOLD ?= 8
+
+load-soak: build
+	python3 scripts/load-soak.py --agents 2 --messages 20 --events 5 --load-threshold $(LOAD_SOAK_THRESHOLD)
+
+load-soak-baseline: build
+	python3 scripts/load-soak.py --agents $(SOAK_PROFILES) --messages 500 --events 20 \
+		--load-threshold $(LOAD_SOAK_THRESHOLD) --output docs/soak-baseline.json
+
+# The burners-alongside run: scripts/load-repro.sh owns the burn (caps, load gate,
+# lockfile, PDEATHSIG teardown) and the soak is its target, so the composition
+# reuses the repo's load-safety machinery end to end. Its claim ids are its own
+# (COUNT-SOAK-UL-*), so it cannot be confused with the baseline artifact.
+load-soak-under-load: build
+	scripts/load-repro.sh --workers $(SOAK_BURNERS) --seconds 60 --load-threshold 64 -- \
+		python3 scripts/load-soak.py --agents 10 --messages 500 --events 20 \
+		--load-threshold 64 --claim-prefix COUNT-SOAK-UL --output docs/soak-under-load.json
+
+load-soak-selftest: build
+	bash scripts/load-soak-selftest.sh
 
 # DF-CRIER-81: scripts/bunker-matrix.sh gained --help/--local and a remote
 # preflight, but its argument surface and the local mode's safety claims (never

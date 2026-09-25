@@ -1,0 +1,192 @@
+{
+  "binary": {
+    "path": "/home/kara/worktrees/crier-CR-FEAT-033/bin/crier",
+    "sha256": "f9007e47f63495fc7870aa472f6e8cf4c2915b2ee8a0a57422099042960122ec"
+  },
+  "claims": {
+    "COUNT-SOAK-UL-DELIVER-10": {
+      "quote": "4259 inbox deliveries/s",
+      "value": "4259"
+    },
+    "COUNT-SOAK-UL-DELIVER-SEQ-10": {
+      "quote": "3794 inbox deliveries/s from one sequential client",
+      "value": "3794"
+    },
+    "COUNT-SOAK-UL-FANOUT-10": {
+      "quote": "35408 relay fan-out frames/s",
+      "value": "35408"
+    },
+    "COUNT-SOAK-UL-MESH-10": {
+      "quote": "10 live mesh sockets",
+      "value": "10"
+    },
+    "COUNT-SOAK-UL-PING-10": {
+      "quote": "inbox ping p95 0.46 ms",
+      "value": "0.46"
+    },
+    "COUNT-SOAK-UL-RATE-10": {
+      "quote": "100 relay publishes accepted",
+      "value": "100"
+    },
+    "COUNT-SOAK-UL-REGISTER-10": {
+      "quote": "10 agents registered in 0.004 s",
+      "value": "0.004"
+    }
+  },
+  "config": {
+    "budget_seconds": 120.0,
+    "claim_prefix": "COUNT-SOAK-UL",
+    "concurrency": 4,
+    "events": 20,
+    "mesh_connections": "auto (one per agent)",
+    "messages": 500,
+    "profiles": [
+      10
+    ],
+    "rate_probe_publishes": 110,
+    "request_timeout_s": 10.0,
+    "sequential_probe": true,
+    "subscribers": "auto (one per agent)"
+  },
+  "exit_code": 0,
+  "git_head": "6628dec7d376e7d687bcce43998162b2d575c414",
+  "host": {
+    "cpus": 16,
+    "loadavg_1m": 23.44,
+    "loadavg_source": "/proc/loadavg",
+    "loadavg_threshold": 64.0
+  },
+  "interrupted": null,
+  "measured_at": "2026-09-25T22:04:31Z",
+  "measured_at_unix": 1790373871,
+  "runs": [
+    {
+      "agents": 10,
+      "binary_version": "0.1.0-rc2-72-g6628dec",
+      "elapsed_s": 0.376,
+      "port": 35433,
+      "port_listener_gone": true,
+      "posture": {
+        "auth": "disabled",
+        "auth_required": null,
+        "rate_limit_per_minute": 100,
+        "registry_backend": "memory"
+      },
+      "rss_kb_after_mesh": 22568,
+      "rss_kb_after_register": 20004,
+      "rss_kb_after_start": 19472,
+      "rss_kb_at_end": 22844,
+      "server_pid": 3593768,
+      "server_stopped_clean": true,
+      "stage_order": [
+        "register",
+        "deliver",
+        "relay_fanout",
+        "mesh_fan",
+        "rate_limit",
+        "deliver_sequential"
+      ],
+      "stages": {
+        "deliver": {
+          "attempted": 500,
+          "concurrency": 4,
+          "elapsed_s": 0.117,
+          "max_ms": 5.53,
+          "ok": 500,
+          "p50_ms": 0.71,
+          "p95_ms": 2.18,
+          "per_s": 4259.0,
+          "requested": 500,
+          "stage": "deliver",
+          "unattempted": 0
+        },
+        "deliver_sequential": {
+          "attempted": 500,
+          "concurrency": 1,
+          "elapsed_s": 0.132,
+          "max_ms": 3.04,
+          "ok": 500,
+          "p50_ms": 0.23,
+          "p95_ms": 0.34,
+          "per_s": 3794.1,
+          "requested": 500,
+          "stage": "deliver",
+          "unattempted": 0
+        },
+        "mesh_fan": {
+          "connect_errors": 0,
+          "connect_s": 0.004,
+          "connections_ok": 10,
+          "connections_per_s": 2296.3,
+          "connections_requested": 10,
+          "peers_immediate": 10,
+          "peers_reported": 10,
+          "peers_settle_s": null,
+          "ping_errors": 0,
+          "ping_p50_ms": 0.29,
+          "ping_p95_ms": 0.46,
+          "ping_samples": 10,
+          "stage": "mesh_fan"
+        },
+        "rate_limit": {
+          "accepted": 100,
+          "cap_observed": true,
+          "elapsed_s": 0.018,
+          "other_status": 0,
+          "probe_agent_id": "soak-rl-probe",
+          "publishes": 110,
+          "rate_limit_per_minute": 100,
+          "rejected_429": 10,
+          "stage": "rate_limit"
+        },
+        "register": {
+          "agent_ids": [
+            "soak-0000",
+            "soak-0001",
+            "soak-0002",
+            "soak-0003",
+            "soak-0004",
+            "soak-0005",
+            "soak-0006",
+            "soak-0007",
+            "soak-0008",
+            "soak-0009"
+          ],
+          "attempted": 10,
+          "elapsed_s": 0.004,
+          "max_ms": 1.42,
+          "ok": 10,
+          "p50_ms": 0.98,
+          "p95_ms": 1.42,
+          "per_s": 2616.2,
+          "requested": 10,
+          "stage": "register",
+          "unattempted": 0
+        },
+        "relay_fanout": {
+          "all_sockets_complete": true,
+          "connect_errors": 0,
+          "connect_s": 0.003,
+          "drain_s": 0.006,
+          "events_published": 20,
+          "frames_expected": 200,
+          "frames_per_s": 35407.9,
+          "frames_received": 200,
+          "max_ms": 0.62,
+          "p50_ms": 0.23,
+          "p95_ms": 0.62,
+          "sockets_complete": 10,
+          "stage": "relay_fanout",
+          "subscribers_connected": 10,
+          "subscribers_requested": 10,
+          "topic": "soak-fanout"
+        }
+      },
+      "truncated": false,
+      "truncated_at": null
+    }
+  ],
+  "schema": "crier-capacity-soak/1",
+  "tool": "scripts/load-soak.py",
+  "warnings": []
+}
