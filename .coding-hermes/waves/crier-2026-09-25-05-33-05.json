@@ -4,16 +4,110 @@
   "wave_budget": 7,
   "created_at": "2026-09-25 05:50:50 UTC",
   "base_sha": "a40e8ea",
-  "picked": ["INT-MUSTER-002", "INT-MUSTER-003", "INT-MUSTER-004", "DF-CRIER-280", "DF-CRIER-284"],
+  "picked": [
+    "INT-MUSTER-002",
+    "INT-MUSTER-003",
+    "INT-MUSTER-004",
+    "DF-CRIER-280",
+    "DF-CRIER-284"
+  ],
   "partition_note": "5 rows -> 3 workers: INT-MUSTER-002+003 combined (both edit docs/integration-guide.md - one worker avoids a same-file merge conflict); DF-CRIER-280+284 combined (both edit the same README non-root install block). INT-MUSTER-004 independent (scripts/ + selftest). Cross-worker file disjointness verified: docs/claims.yaml+w1 only, README+w3 only, scripts/+w2 only.",
   "worktrees": [
-    {"task_ids": ["INT-MUSTER-002", "INT-MUSTER-003"], "worktree": "~/worktrees/crier-INT-MUSTER-002-003", "branch": "wt/INT-MUSTER-002-003", "base": "origin/main", "base_sha": "a40e8ea"},
-    {"task_ids": ["INT-MUSTER-004"], "worktree": "~/worktrees/crier-INT-MUSTER-004", "branch": "wt/INT-MUSTER-004", "base": "origin/main", "base_sha": "a40e8ea"},
-    {"task_ids": ["DF-CRIER-280", "DF-CRIER-284"], "worktree": "~/worktrees/crier-DF-CRIER-280-284", "branch": "wt/DF-CRIER-280-284", "base": "origin/main", "base_sha": "a40e8ea"}
+    {
+      "task_ids": [
+        "INT-MUSTER-002",
+        "INT-MUSTER-003"
+      ],
+      "worktree": "~/worktrees/crier-INT-MUSTER-002-003",
+      "branch": "wt/INT-MUSTER-002-003",
+      "base": "origin/main",
+      "base_sha": "a40e8ea"
+    },
+    {
+      "task_ids": [
+        "INT-MUSTER-004"
+      ],
+      "worktree": "~/worktrees/crier-INT-MUSTER-004",
+      "branch": "wt/INT-MUSTER-004",
+      "base": "origin/main",
+      "base_sha": "a40e8ea"
+    },
+    {
+      "task_ids": [
+        "DF-CRIER-280",
+        "DF-CRIER-284"
+      ],
+      "worktree": "~/worktrees/crier-DF-CRIER-280-284",
+      "branch": "wt/DF-CRIER-280-284",
+      "base": "origin/main",
+      "base_sha": "a40e8ea"
+    }
   ],
   "dispatched": [
-    {"task_ids": ["INT-MUSTER-002", "INT-MUSTER-003"], "worker": "w1", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w1.txt", "started_at": "2026-09-25 05:51:00 UTC"},
-    {"task_ids": ["INT-MUSTER-004"], "worker": "w2", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w2.txt", "started_at": "2026-09-25 05:51:00 UTC"},
-    {"task_ids": ["DF-CRIER-280", "DF-CRIER-284"], "worker": "w3", "model": "deepseek-v4-flash", "provider": "deepseek-foreman", "brief": "/tmp/crier-t393-brief-w3.txt", "started_at": "2026-09-25 05:51:00 UTC"}
-  ]
+    {
+      "task_ids": [
+        "INT-MUSTER-002",
+        "INT-MUSTER-003"
+      ],
+      "worker": "w1",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t393-brief-w1.txt",
+      "started_at": "2026-09-25 05:51:00 UTC"
+    },
+    {
+      "task_ids": [
+        "INT-MUSTER-004"
+      ],
+      "worker": "w2",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t393-brief-w2.txt",
+      "started_at": "2026-09-25 05:51:00 UTC"
+    },
+    {
+      "task_ids": [
+        "DF-CRIER-280",
+        "DF-CRIER-284"
+      ],
+      "worker": "w3",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t393-brief-w3.txt",
+      "started_at": "2026-09-25 05:51:00 UTC"
+    }
+  ],
+  "outcomes": [
+    {
+      "task_ids": [
+        "INT-MUSTER-002",
+        "INT-MUSTER-003"
+      ],
+      "branch": "wt/INT-MUSTER-002-003",
+      "worker_commit": "cf93942",
+      "merged_as": "493dd12",
+      "judge": "PASS (bc84d0d4)"
+    },
+    {
+      "task_ids": [
+        "INT-MUSTER-004"
+      ],
+      "branch": "wt/INT-MUSTER-004",
+      "worker_commit": "035df73",
+      "merged_as": "fe8b98f",
+      "judge": "PASS (d53d754e)"
+    },
+    {
+      "task_ids": [
+        "DF-CRIER-280",
+        "DF-CRIER-284"
+      ],
+      "branch": "wt/DF-CRIER-280-284",
+      "worker_commit": "a1010d2",
+      "merged_as": "771ddf1",
+      "judge": "PASS (2feeddc8)"
+    }
+  ],
+  "finished_at": "2026-09-25 06:38:00 UTC",
+  "finished_note": "all 3 workers delivered; cherry-picked onto main (gated path, merge-commit hook bypass avoided); merged tree green (18/18, docs-check, shell-yaml 39, demo-cleanup 9/9, gofmt, govulncheck 0); judges 3/3 PASS; board commit 0f7ef6e pushed to origin+gitlab, parity 0/0"
 }
