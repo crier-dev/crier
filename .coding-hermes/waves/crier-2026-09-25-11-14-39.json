@@ -1,0 +1,26 @@
+{
+  "tick_id": "crier-2026-09-25-11-14-39",
+  "tick": 396,
+  "mode": "serial-fallback",
+  "reason": "WAVE_BUDGET=1; only one worker-eligible row (DF-CRIER-281). E2E-001 battery is a foreman-direct fixture (no worker). Battery runs in the MAIN tree concurrently with the worktree worker.",
+  "created_at": "2026-09-25T11:20:00+00:00",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-281",
+      "brief": "/tmp/crier-t396-brief-df281.txt",
+      "log": "/tmp/crier-t396-worker-df281.log",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "complete",
+      "outcome": "merged ff-only to main as 2eaf9f2 + 8693ee9; judge tier2 FAIL r1 (7f26817a) -> rework -> tier1+tier2 PASS r2 (1cdf4bfa); gitreins task deleted after verdict"
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_id": "E2E-001",
+      "work": "full E2E live battery at +5 from tick-391 (first tick of due window ~396-401): fresh server :18767 memory backend, e2e+ws probes, SECURITY-001 negatives, stress 20/20",
+      "outcome": "battery 32/32 on :18782 + probes 5/5 ws, 9/9 signed e2e (SECURITY-001 negatives pass) + stress 20/20 x2; event 1112 e2e_verified"
+    }
+  ],
+  "finished_at": "2026-09-25T13:00:00+00:00"
+}
