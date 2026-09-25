@@ -979,6 +979,12 @@ func liveDefault(claimID string) (any, error) {
 
 // liveCount re-measures the number behind an id-keyed kind=count claim from source.
 func liveCount(repoRoot, claimID string) (any, error) {
+	// CR-FEAT-033: the capacity-ceiling figures docs/capacity-ceiling.md publishes
+	// are pinned to the artifact scripts/load-soak.py wrote, not to a number copied
+	// into the claims file (a prefix test, so it is checked before the value switch).
+	if strings.HasPrefix(claimID, "COUNT-SOAK-") {
+		return soakClaim(repoRoot, claimID)
+	}
 	switch claimID {
 	case "COUNT-OPENAPI-PATHS", "COUNT-OPENAPI-OPERATIONS":
 		raw, err := os.ReadFile(filepath.Join(repoRoot, "docs", "openapi.yaml"))
@@ -1033,6 +1039,77 @@ func liveCount(repoRoot, claimID string) (any, error) {
 	default:
 		return nil, fmt.Errorf("no live count probe for claim %q", claimID)
 	}
+}
+
+// soakClaim re-measures one published capacity-soak figure from the artifact the
+// soak itself wrote (CR-FEAT-033).
+//
+// Two sources, both the measurement's own record:
+//
+//   - the CONDITIONS of the run — host CPUs, the 1-minute loadavg the soak
+//     measured at its gate, the commit, the binary's sha256 — come from the
+//     artifact's top-level record, so a page that quotes a condition the run did
+//     not have (a different loadavg, a stale commit, another binary) fails;
+//   - the STAGE numbers come from the artifact's `claims` block, which is written
+//     by the harness from the numbers it just measured, so the page's figure and
+//     the measurement cannot agree by accident.
+//
+// The prefix picks the artifact: the burners-alongside run writes its own claim
+// ids, so the two runs cannot be confused for each other.
+func soakClaim(repoRoot, claimID string) (any, error) {
+	artifact := "docs/soak-baseline.json"
+	if strings.HasPrefix(claimID, "COUNT-SOAK-UL-") {
+		artifact = "docs/soak-under-load.json"
+	}
+	path := filepath.Join(repoRoot, artifact)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the soak artifact %s (regenerate it with `make load-soak-baseline` / `make load-soak-under-load`): %w", artifact, err)
+	}
+	var doc struct {
+		Host struct {
+			CPUs    int     `json:"cpus"`
+			Loadavg float64 `json:"loadavg_1m"`
+		} `json:"host"`
+		GitHead string `json:"git_head"`
+		Binary  struct {
+			SHA256 string `json:"sha256"`
+		} `json:"binary"`
+		Claims map[string]struct {
+			Value string `json:"value"`
+			Quote string `json:"quote"`
+		} `json:"claims"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", artifact, err)
+	}
+	switch {
+	case strings.HasSuffix(claimID, "-HOST-CPUS"):
+		if doc.Host.CPUs <= 0 {
+			return nil, fmt.Errorf("%s records no CPU count", artifact)
+		}
+		return strconv.Itoa(doc.Host.CPUs), nil
+	case strings.HasSuffix(claimID, "-RUN-LOADAVG"):
+		if doc.Host.Loadavg <= 0 {
+			return nil, fmt.Errorf("%s records no measured loadavg", artifact)
+		}
+		return fmt.Sprintf("%.2f", doc.Host.Loadavg), nil
+	case strings.HasSuffix(claimID, "-COMMIT"):
+		if len(doc.GitHead) < 7 {
+			return nil, fmt.Errorf("%s records no commit (%q)", artifact, doc.GitHead)
+		}
+		return doc.GitHead[:7], nil
+	case strings.HasSuffix(claimID, "-BINARY-SHA"):
+		if len(doc.Binary.SHA256) < 12 {
+			return nil, fmt.Errorf("%s records no binary hash (%q)", artifact, doc.Binary.SHA256)
+		}
+		return doc.Binary.SHA256[:12], nil
+	}
+	claim, ok := doc.Claims[claimID]
+	if !ok {
+		return nil, fmt.Errorf("%s carries no claim %q — the page and the measurement disagree (re-run the soak and re-pin this claim)", artifact, claimID)
+	}
+	return claim.Value, nil
 }
 
 // countStampedBuildPaths re-measures the DF-CRIER-171 build-identity claim from

@@ -772,3 +772,259 @@ claims:
     quote: '| `GET /fed/peers` | bearerAuth | `200` | — |'
     expect: "/fed/peers"
     xfail: null
+
+  # --- CR-FEAT-033: the published capacity-ceiling numbers -------------------
+  # docs/capacity-ceiling.md publishes what scripts/load-soak.py measured, and
+  # every figure on that page is pinned here to the artifact that run wrote:
+  #   * `quote` is the string the HARNESS itself prints for that measurement, so
+  #     the page must carry it verbatim (the ordinary anchor check), and
+  #   * `expect` is compared against the artifact's own record by the
+  #     COUNT-SOAK-* arm of liveCount (docsclaims_test.go) — the stage numbers
+  #     come from the artifact's `claims` block, the conditions (host CPUs, the
+  #     measured loadavg, the commit, the binary hash) from its top-level record.
+  # A re-measured artifact and a hand-edited page therefore cannot agree by
+  # accident: change the number without re-running the soak and the anchor fails,
+  # re-run the soak without updating the page and the probe fails (CR-GAP-065
+  # precedent). docs/soak-baseline.json carries the primary profile set,
+  # docs/soak-under-load.json the burners-alongside run (its own claim ids).
+  - id: COUNT-SOAK-HOST-CPUS
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "on a 16-CPU host"
+    expect: "16"
+    xfail: null
+  - id: COUNT-SOAK-RUN-LOADAVG
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "at a 1-minute loadavg of 19.48"
+    expect: "19.48"
+    xfail: null
+  - id: COUNT-SOAK-COMMIT
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "measured at commit 6628dec"
+    expect: "6628dec"
+    xfail: null
+  - id: COUNT-SOAK-BINARY-SHA
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "binary sha256 f9007e47f634"
+    expect: "f9007e47f634"
+    xfail: null
+  - id: COUNT-SOAK-REGISTER-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "2 agents registered in 0.002 s"
+    expect: "0.002"
+    xfail: null
+  - id: COUNT-SOAK-REGISTER-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "10 agents registered in 0.007 s"
+    expect: "0.007"
+    xfail: null
+  - id: COUNT-SOAK-REGISTER-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 agents registered in 0.026 s"
+    expect: "0.026"
+    xfail: null
+  - id: COUNT-SOAK-REGISTER-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "1000 agents registered in 0.308 s"
+    expect: "0.308"
+    xfail: null
+  - id: COUNT-SOAK-DELIVER-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "3197 inbox deliveries/s"
+    expect: "3197"
+    xfail: null
+  - id: COUNT-SOAK-DELIVER-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "3254 inbox deliveries/s"
+    expect: "3254"
+    xfail: null
+  - id: COUNT-SOAK-DELIVER-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "3317 inbox deliveries/s"
+    expect: "3317"
+    xfail: null
+  - id: COUNT-SOAK-DELIVER-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "3638 inbox deliveries/s"
+    expect: "3638"
+    xfail: null
+  - id: COUNT-SOAK-DELIVER-SEQ-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "2519 inbox deliveries/s from one sequential client"
+    expect: "2519"
+    xfail: null
+  - id: COUNT-SOAK-FANOUT-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "10932 relay fan-out frames/s"
+    expect: "10932"
+    xfail: null
+  - id: COUNT-SOAK-FANOUT-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "31630 relay fan-out frames/s"
+    expect: "31630"
+    xfail: null
+  - id: COUNT-SOAK-FANOUT-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "88318 relay fan-out frames/s"
+    expect: "88318"
+    xfail: null
+  - id: COUNT-SOAK-FANOUT-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "239133 relay fan-out frames/s"
+    expect: "239133"
+    xfail: null
+  - id: COUNT-SOAK-MESH-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "2 live mesh sockets"
+    expect: "2"
+    xfail: null
+  - id: COUNT-SOAK-MESH-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "10 live mesh sockets"
+    expect: "10"
+    xfail: null
+  - id: COUNT-SOAK-MESH-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 live mesh sockets"
+    expect: "100"
+    xfail: null
+  - id: COUNT-SOAK-MESH-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "1000 live mesh sockets"
+    expect: "1000"
+    xfail: null
+  - id: COUNT-SOAK-PING-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "inbox ping p95 0.65 ms"
+    expect: "0.65"
+    xfail: null
+  - id: COUNT-SOAK-PING-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "inbox ping p95 1.54 ms"
+    expect: "1.54"
+    xfail: null
+  - id: COUNT-SOAK-PING-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "inbox ping p95 3.31 ms"
+    expect: "3.31"
+    xfail: null
+  - id: COUNT-SOAK-PING-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "inbox ping p95 0.88 ms"
+    expect: "0.88"
+    xfail: null
+  - id: COUNT-SOAK-RATE-2
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 relay publishes accepted"
+    expect: "100"
+    xfail: null
+  - id: COUNT-SOAK-RATE-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 relay publishes accepted"
+    expect: "100"
+    xfail: null
+  - id: COUNT-SOAK-RATE-100
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 relay publishes accepted"
+    expect: "100"
+    xfail: null
+  - id: COUNT-SOAK-RATE-1000
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 relay publishes accepted"
+    expect: "100"
+    xfail: null
+  # The burners-alongside run (docs/soak-under-load.json, its own claim ids).
+  - id: COUNT-SOAK-UL-HOST-CPUS
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "on a 16-CPU host"
+    expect: "16"
+    xfail: null
+  - id: COUNT-SOAK-UL-RUN-LOADAVG
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "at a 1-minute loadavg of 23.44"
+    expect: "23.44"
+    xfail: null
+  - id: COUNT-SOAK-UL-COMMIT
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "measured at commit 6628dec"
+    expect: "6628dec"
+    xfail: null
+  - id: COUNT-SOAK-UL-BINARY-SHA
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "binary sha256 f9007e47f634"
+    expect: "f9007e47f634"
+    xfail: null
+  - id: COUNT-SOAK-UL-REGISTER-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "10 agents registered in 0.004 s"
+    expect: "0.004"
+    xfail: null
+  - id: COUNT-SOAK-UL-DELIVER-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "4259 inbox deliveries/s"
+    expect: "4259"
+    xfail: null
+  - id: COUNT-SOAK-UL-DELIVER-SEQ-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "3794 inbox deliveries/s from one sequential client"
+    expect: "3794"
+    xfail: null
+  - id: COUNT-SOAK-UL-FANOUT-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "35408 relay fan-out frames/s"
+    expect: "35408"
+    xfail: null
+  - id: COUNT-SOAK-UL-MESH-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "10 live mesh sockets"
+    expect: "10"
+    xfail: null
+  - id: COUNT-SOAK-UL-PING-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "inbox ping p95 0.46 ms"
+    expect: "0.46"
+    xfail: null
+  - id: COUNT-SOAK-UL-RATE-10
+    kind: count
+    doc: docs/capacity-ceiling.md
+    quote: "100 relay publishes accepted"
+    expect: "100"
+    xfail: null
