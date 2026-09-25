@@ -376,6 +376,25 @@ paths printed and **nothing is signalled** — the stop command never
 SIGKILLs and never matches by port or process name, so it cannot kill an
 unrelated process.
 
+The pidfile is JSON (`{pid, port, binary}`), not a bare pid, so it cannot be
+fed to `kill`: `kill $(cat .crier.pid)` hands bash the literal `{` and bash
+answers `kill: '{': not a pid or valid job spec`. Read the field yourself, or
+just use `make stop` / `-stop`, which parse the JSON for you and check
+ownership first:
+
+```bash
+kill $(jq -r '.pid' .crier.pid)   # works — jq extracts the pid field
+kill $(cat .crier.pid)            # does NOT work — the file is JSON, not a pid
+```
+
+A failed start says which case you are in. When the bind fails *and* a pidfile
+exists at the configured path, the failure line reports what that file
+records: `pidfile_state=live` with the recorded pid and the exact stop command
+when that process is still serving (the restart did not take the port over),
+or `pidfile_state=stale` when the recorded pid is gone — nothing to stop, and
+the port belongs to someone else. A failed takeover is therefore visible in
+its own output, not only in the plausible-looking file it left behind.
+
 Lost the launcher? A server started detached (`setsid make run …`, then the
 launcher exits) keeps holding its port — that server is exactly what
 `make stop` reaches, because the pidfile names the server process, not the

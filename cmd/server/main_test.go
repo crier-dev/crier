@@ -542,6 +542,226 @@ func TestBindFailureDiagnostic(t *testing.T) {
 	}
 }
 
+// stopCommandLiteral is the exact operator command the failure path must print
+// for a pidfile at path — the form the Makefile builds (bin/crier) and the
+// README's Stop / restart section documents. It is spelled as a literal here,
+// never via the production helper, so these tests compile against the
+// pre-fix tree and fail on the MESSAGE instead of on a missing symbol.
+func stopCommandLiteral(path string) string {
+	return "./bin/crier -stop -pidfile " + path
+}
+
+// captureFailedBind occupies a random free TCP port and drives the server
+// against that occupied port through run() — the TestBindFailureDiagnostic
+// capture (os.Stderr redirect plus a background drain), factored out for the
+// pidfile diagnostics. When pf is non-empty it is passed as -pidfile, and seed
+// (when non-nil) supplies the pidfile to write BEFORE run() is called: a
+// failed bind never writes one, so the file under test must already be on
+// disk. A nil record means "path configured, nothing on disk". The listener
+// stays open for the whole test: closing it would race run()'s bind attempt
+// and could flake green.
+func captureFailedBind(t *testing.T, pf string, seed func(port int) *pidfile.Record) (code int, stderr string, port int) {
+	t.Helper()
+
+	// Deterministic environment: no DB, no auth token, no ambient pidfile.
+	t.Setenv("CR_AUTH_TOKEN", "")
+	t.Setenv("CR_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CRIER_DATABASE_URL", "")
+	t.Setenv("CR_PIDFILE", "")
+	t.Setenv("CRIER_PORT", "1") // overridden by -port below; never a real target
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer ln.Close()
+	port = ln.Addr().(*net.TCPAddr).Port
+
+	if pf != "" {
+		if seed != nil {
+			if rec := seed(port); rec != nil {
+				if err := pidfile.Write(pf, *rec); err != nil {
+					t.Fatalf("seed pidfile %s: %v", pf, err)
+				}
+			}
+		}
+	} else if seed != nil {
+		t.Fatal("seed was supplied without a pidfile path")
+	}
+
+	args := []string{"-port", strconv.Itoa(port)}
+	if pf != "" {
+		args = append(args, "-pidfile", pf)
+	}
+	stderr = captureStderr(t, func() {
+		code = run(args)
+	})
+	return code, stderr, port
+}
+
+// assertBindFailureBaseline pins the DF-CRIER-154 diagnostic shape on the
+// failed-bind path: the same elements TestBindFailureDiagnostic asserts, so
+// the pidfile work (DF-CRIER-283) cannot quietly weaken the pre-existing
+// failure contract.
+func assertBindFailureBaseline(t *testing.T, code int, out string, port int) {
+	t.Helper()
+	if code == 0 {
+		t.Fatalf("run on an occupied port = 0, want non-zero\nstderr:\n%s", out)
+	}
+	if code != 1 {
+		t.Errorf("run on an occupied port = %d, want 1", code)
+	}
+	for _, want := range []string{
+		strconv.Itoa(port),
+		"another process already holds this port",
+		"bind: address already in use",
+		"ss -tlnp | grep :" + strconv.Itoa(port),
+		"-port <n>",
+		"CRIER_PORT",
+		"version=" + buildinfo.String(),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("failure output dropped %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestBindFailurePidfileLiveServerIsNamed is the DF-CRIER-283 AC1 gate. A
+// failed start used to exit quietly while an EXISTING pidfile stayed on disk
+// looking authoritative — plausible, unchanged, and (because it is JSON) not
+// usable as a pid. When the recorded pid is alive and runs this same binary,
+// the failure message must name that pid, name the port, and print the exact
+// stop command, so the operator's next move is spelled out.
+//
+// The fixture is the test process itself: readlink /proc/<pid>/exe and
+// os.Executable() are the same path, so pidfile.SafeToSignal — the ownership
+// check -stop itself uses — sees precisely the "alive, same binary" shape.
+func TestBindFailurePidfileLiveServerIsNamed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crier.pid")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	code, out, port := captureFailedBind(t, path, func(p int) *pidfile.Record {
+		return &pidfile.Record{PID: os.Getpid(), Port: p, Binary: self}
+	})
+
+	assertBindFailureBaseline(t, code, out, port)
+
+	// (a) the pid the pidfile records is named — the operator must learn WHICH
+	// process still owns the port, not merely that something does.
+	if !strings.Contains(out, strconv.Itoa(os.Getpid())) {
+		t.Errorf("failure output does not name the pidfile's pid %d:\n%s", os.Getpid(), out)
+	}
+	// (b) the exact next command, verbatim.
+	wantStop := stopCommandLiteral(path)
+	if !strings.Contains(out, wantStop) {
+		t.Errorf("failure output does not carry the exact stop command %q:\n%s", wantStop, out)
+	}
+	// (c) it says the recorded process is the live authority, not a stale file.
+	if !strings.Contains(out, "pidfile_state=live") {
+		t.Errorf("failure output does not mark the pidfile live:\n%s", out)
+	}
+	if strings.Contains(out, "pidfile_state=stale") {
+		t.Errorf("failure output calls a live pidfile stale:\n%s", out)
+	}
+}
+
+// TestBindFailurePidfileStaleIsReportedNotStopped is the DF-CRIER-283 AC2
+// gate: when the pidfile's pid is DEAD the failure must say the file is stale
+// — and must NOT suggest stopping it, because sending the operator after a
+// dead process is the mirror image of the silent-takeover bug.
+func TestBindFailurePidfileStaleIsReportedNotStopped(t *testing.T) {
+	dead := exec.Command("true")
+	if err := dead.Run(); err != nil {
+		t.Fatalf("run true: %v", err)
+	}
+	deadPID := dead.ProcessState.Pid()
+
+	path := filepath.Join(t.TempDir(), "crier.pid")
+	code, out, port := captureFailedBind(t, path, func(p int) *pidfile.Record {
+		return &pidfile.Record{PID: deadPID, Port: p, Binary: "/opt/crier/bin/crier"}
+	})
+
+	assertBindFailureBaseline(t, code, out, port)
+
+	if !strings.Contains(out, "pidfile_state=stale") {
+		t.Errorf("failure output does not mark the pidfile stale:\n%s", out)
+	}
+	if !strings.Contains(out, strconv.Itoa(deadPID)) {
+		t.Errorf("failure output does not name the dead pid %d:\n%s", deadPID, out)
+	}
+	// The load-bearing negative: no stop suggestion for a dead pid. Both the
+	// exact command and the bare -stop flag are refused here.
+	if cmd := stopCommandLiteral(path); strings.Contains(out, cmd) {
+		t.Errorf("failure output suggests stopping a dead process (%q):\n%s", cmd, out)
+	}
+	if strings.Contains(out, "-stop") {
+		t.Errorf("failure output mentions -stop for a stale pidfile:\n%s", out)
+	}
+}
+
+// TestBindFailureWithoutPidfileIsUnchanged is the DF-CRIER-283 AC3 gate: with
+// no pidfile configured, or none on disk, the failed-bind diagnostic keeps
+// exactly the shape DF-CRIER-154 established — no invented pidfile text and
+// no regression in the elements the older test already asserts.
+func TestBindFailureWithoutPidfileIsUnchanged(t *testing.T) {
+	t.Run("no pidfile configured", func(t *testing.T) {
+		code, out, port := captureFailedBind(t, "", nil)
+		assertBindFailureBaseline(t, code, out, port)
+		if strings.Contains(out, "pidfile") {
+			t.Errorf("failure output invents pidfile text with no pidfile configured:\n%s", out)
+		}
+	})
+
+	t.Run("pidfile path configured but absent on disk", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "absent.pid")
+		code, out, port := captureFailedBind(t, path, nil)
+		assertBindFailureBaseline(t, code, out, port)
+		if strings.Contains(out, "pidfile") {
+			t.Errorf("failure output invents pidfile text for a pidfile that is not on disk:\n%s", out)
+		}
+	})
+}
+
+// TestBindFailurePidfileForeignProcessIsReported: a pidfile whose pid is alive
+// but runs a DIFFERENT binary cannot be acted on safely. The failure message
+// must report the mismatch with both paths and must not suggest the stop
+// command, which would refuse it for the same reason pidfile.SafeToSignal
+// fails closed.
+func TestBindFailurePidfileForeignProcessIsReported(t *testing.T) {
+	sleep := exec.Command("sleep", "30")
+	if err := sleep.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	defer func() {
+		_ = sleep.Process.Kill()
+		_, _ = sleep.Process.Wait()
+	}()
+
+	path := filepath.Join(t.TempDir(), "crier.pid")
+	code, out, port := captureFailedBind(t, path, func(p int) *pidfile.Record {
+		return &pidfile.Record{PID: sleep.Process.Pid, Port: p, Binary: "/opt/crier/bin/crier"}
+	})
+
+	assertBindFailureBaseline(t, code, out, port)
+
+	if !strings.Contains(out, "pidfile_state=foreign") {
+		t.Errorf("failure output does not mark the pidfile foreign:\n%s", out)
+	}
+	if !strings.Contains(out, strconv.Itoa(sleep.Process.Pid)) {
+		t.Errorf("failure output does not name the foreign pid %d:\n%s", sleep.Process.Pid, out)
+	}
+	if !strings.Contains(out, "/opt/crier/bin/crier") {
+		t.Errorf("failure output does not name the recorded binary:\n%s", out)
+	}
+	if cmd := stopCommandLiteral(path); strings.Contains(out, cmd) {
+		t.Errorf("failure output suggests stopping a foreign process (%q):\n%s", cmd, out)
+	}
+}
+
 // TestParseArgs exercises the CLI flag parsing directly (no exec, no server
 // startup). The --help and --version paths are the CR-GAP-005 hard gate.
 func TestParseArgs(t *testing.T) {

@@ -466,10 +466,13 @@ func run(args []string) int {
 	// Bind BEFORE serving: the pidfile must exist only once the port is
 	// actually held, and a failed bind must leave no pidfile behind
 	// (DF-CRIER-194). The existing logServeFailure diagnostic for the
-	// shared-port dead end (DF-CRIER-154) runs unchanged.
+	// shared-port dead end (DF-CRIER-154) keeps its shape and gains a
+	// report of the pidfile already on disk at pfPath when there is one
+	// (DF-CRIER-283) — a failed start leaves that file untouched, so the
+	// operator has to be told whether it still names a live server.
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
-		logServeFailure(cfg.Port, err)
+		logServeFailure(cfg.Port, err, pfPath)
 		return 1
 	}
 	if pfPath != "" {
@@ -485,7 +488,7 @@ func run(args []string) int {
 		}
 	}
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		logServeFailure(cfg.Port, err)
+		logServeFailure(cfg.Port, err, pfPath)
 		return 1
 	}
 	return 0
@@ -499,18 +502,118 @@ func run(args []string) int {
 // binary failed, even when the "crier starting" line above scrolled away or
 // was filtered out. The raw error stays in error= unchanged; any other
 // failure keeps the one-line shape it always had.
-func logServeFailure(port int, err error) {
+//
+// When a pidfile path is configured, the same failure also says what that
+// pidfile now names (DF-CRIER-283). The file is written only after a bind
+// SUCCEEDS, so a failed start leaves the previous one on disk — plausible,
+// authoritative-looking, and impossible to read as a pid — and an operator
+// who reads only the log cannot tell a still-serving predecessor from a
+// stale record. The pidfile contributes attributes only when the file
+// actually exists: no path configured, or nothing on disk, and the
+// diagnostic keeps the exact shape DF-CRIER-154 established.
+func logServeFailure(port int, err error, pfPath string) {
 	if !errors.Is(err, syscall.EADDRINUSE) {
 		slog.Error("server failed", "error", err)
 		return
 	}
-	slog.Error("server failed: another process already holds this port "+
-		"(bind: address already in use)",
+	args := []any{
 		"error", err,
 		"port", port,
 		"hint_holder", fmt.Sprintf("find it with: ss -tlnp | grep :%d", port),
 		"hint_run_elsewhere", "start on a free port instead: -port <n> (or set CRIER_PORT=<n>)",
-		"version", buildinfo.String())
+	}
+	args = append(args, pidfileFailureAttrs(pfPath)...)
+	args = append(args, "version", buildinfo.String())
+	slog.Error("server failed: another process already holds this port "+
+		"(bind: address already in use)", args...)
+}
+
+// stopCommandFor is the exact operator command that stops the server a
+// pidfile names. It is spelled out on the failure path (DF-CRIER-283)
+// because the pidfile itself cannot be fed to kill — it is a JSON document,
+// not a pid, so `kill $(cat .crier.pid)` hands bash the literal "{". The same
+// command is what `make stop` runs and what README's Stop / restart section
+// documents.
+func stopCommandFor(path string) string {
+	return "./bin/crier -stop -pidfile " + path
+}
+
+// pidfileFailureAttrs inspects the pidfile at path after a failed bind and
+// returns the attributes that tell the operator what the file names. The
+// pidfile survives a failed start, so the four shapes below must not blur
+// into each other — each one is a different next move for the operator:
+//
+//   - no path configured, or no file on disk: no attributes at all, because
+//     there is nothing to explain (the DF-CRIER-154 diagnostic is unchanged);
+//   - the recorded pid is alive and IS the recorded binary: this start did
+//     not take the port over. That file is authoritative, so the message
+//     names the pid and port and prints the exact stop command;
+//   - the recorded pid is not running: the file is stale, and there is no
+//     server of this pidfile to stop — saying so is required precisely
+//     because suggesting -stop here would send the operator after a dead
+//     process;
+//   - the file cannot be read, or its pid is alive but runs a DIFFERENT
+//     binary (or /proc cannot be read): the file cannot be acted on. It is
+//     reported with both paths and no stop is suggested, the same fail-closed
+//     stance pidfile.SafeToSignal takes for -stop.
+func pidfileFailureAttrs(path string) []any {
+	if path == "" {
+		return nil
+	}
+	rec, err := pidfile.Read(path)
+	if err != nil {
+		if errors.Is(err, pidfile.ErrNoPidfile) {
+			return nil // nothing on disk: nothing to explain
+		}
+		return []any{
+			"pidfile", path,
+			"pidfile_state", "unreadable",
+			"hint_pidfile", fmt.Sprintf("the pidfile at %s could not be read (%v) — it is not usable state; inspect or remove it before trusting it", path, err),
+		}
+	}
+
+	sigErr := pidfile.SafeToSignal(rec)
+	switch {
+	case sigErr == nil:
+		return []any{
+			"pidfile", path,
+			"pidfile_state", "live",
+			"pidfile_pid", rec.PID,
+			"pidfile_port", rec.Port,
+			"hint_takeover", fmt.Sprintf(
+				"pidfile %s still names a LIVE server: pid %d (port %d) — this start did not take the port over and that process is still serving. Stop it with: %s",
+				path, rec.PID, rec.Port, stopCommandFor(path)),
+		}
+	case errors.Is(sigErr, pidfile.ErrNotAlive):
+		return []any{
+			"pidfile", path,
+			"pidfile_state", "stale",
+			"pidfile_pid", rec.PID,
+			"hint_stale_pidfile", fmt.Sprintf(
+				"pidfile %s is STALE: pid %d (port %d) is not running — there is no server of this pidfile to stop, so do not signal that pid. The port is held by another process; find it with: ss -tlnp | grep :%d",
+				path, rec.PID, rec.Port, rec.Port),
+		}
+	}
+
+	var mismatch *pidfile.MismatchError
+	if errors.As(sigErr, &mismatch) {
+		return []any{
+			"pidfile", path,
+			"pidfile_state", "foreign",
+			"pidfile_pid", rec.PID,
+			"hint_pidfile", fmt.Sprintf(
+				"pidfile %s names pid %d, which is running but is NOT the binary that file recorded — do not signal it (the -stop path refuses this case too). Recorded: %s — running: %s",
+				path, rec.PID, mismatch.Recorded, mismatch.Live),
+		}
+	}
+	return []any{
+		"pidfile", path,
+		"pidfile_state", "unverifiable",
+		"pidfile_pid", rec.PID,
+		"hint_pidfile", fmt.Sprintf(
+			"pidfile %s names pid %d, which could not be verified against the kernel (%v) — do not signal it on this evidence; inspect %s",
+			path, rec.PID, sigErr, path),
+	}
 }
 
 // parseArgs parses crier's CLI flags, writing usage/error output to out.
