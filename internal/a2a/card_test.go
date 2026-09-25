@@ -70,10 +70,11 @@ func TestBuildCard_ProjectsTheRegistryRow(t *testing.T) {
 		t.Errorf("skills = %+v, want %+v", card.Skills, wantSkills)
 	}
 
-	// Capabilities: streaming is false because no A2A streaming binding is
-	// served; pushNotifications mirrors the row's webhook.
-	if card.Capabilities.Streaming {
-		t.Error("capabilities.streaming = true, want false — no A2A streaming binding is served (INT-A2A-003)")
+	// Capabilities: streaming is TRUE because the JSON-RPC binding beside this
+	// card serves SendStreamingMessage (INT-A2A-003); pushNotifications mirrors
+	// the row's webhook.
+	if !card.Capabilities.Streaming {
+		t.Error("capabilities.streaming = false, want true — the JSON-RPC binding serves SendStreamingMessage (INT-A2A-003)")
 	}
 	if !card.Capabilities.PushNotifications {
 		t.Error("capabilities.pushNotifications = false, want true — the row carries a webhook")

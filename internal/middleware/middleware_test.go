@@ -329,3 +329,40 @@ func extractAttr(line, key string) (string, bool) {
 	}
 	return rest[:end], true
 }
+
+// flushRecorder is a ResponseWriter that RECORDS the Flush calls it receives, so
+// the middleware wrapper's pass-through can be proven without a network.
+type flushRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (f *flushRecorder) Flush() { f.flushes++ }
+
+// TestLoggingPreservesFlusher is the INT-A2A-003 seam: the response writer the
+// middleware chain hands a handler must still answer http.Flusher, or a
+// Server-Sent Events handler cannot stream at all (measured live: every A2A
+// stream answered 500 "this server cannot stream" before this pass-through
+// existed, exactly as WebSocket upgrades answered 500 before the Hijack
+// pass-through did).
+func TestLoggingPreservesFlusher(t *testing.T) {
+	captureLogs(t)
+	var sawFlusher bool
+	handler := Logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		sawFlusher = ok
+		if ok {
+			flusher.Flush()
+		}
+	}))
+	recorder := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/stream", nil))
+
+	if !sawFlusher {
+		t.Fatal("the wrapped ResponseWriter does not implement http.Flusher: a streaming handler behind this chain cannot deliver a frame")
+	}
+	if recorder.flushes != 1 {
+		t.Errorf("flushes = %d, want 1 — the call must reach the underlying writer", recorder.flushes)
+	}
+}

@@ -1248,3 +1248,29 @@ claims:
     quote: 'dead-letters?limit=N'
     expect: 1
     xfail: null
+
+  # --- INT-A2A-003 (appended): the opt-in A2A JSON-RPC binding. --------------
+  # The README documents the path, so the docs-claims boot sets CR_A2A_ENABLED
+  # for the same reason it sets it for the Agent Card row above: the path exists
+  # only while its switch is on. The probe is a GET, and this route is POST-only,
+  # so a registered path answers 405 and an unregistered one answers the
+  # router's 404 — i.e. the claim still measures "the route exists" without
+  # needing a request body. The switch-OFF half is gated live in
+  # cmd/server/a2a_optin_test.go, not here.
+  - id: ROUTE-A2A-JSONRPC
+    kind: route
+    doc: README.md
+    quote: "POST /a2a"
+    expect: "/a2a"
+    xfail: null
+
+  # The binding's two method names are the whole wire contract a client codes
+  # against, so the prose that names them is anchored: an edit that drops either
+  # one fails here rather than silently shrinking the documented surface.
+  - id: ANCHOR-A2A-JSONRPC-METHODS
+    kind: anchor
+    doc: README.md
+    # The methods, as §9.4 names them: SendMessage answers a Task or a Message,
+    # SendStreamingMessage answers text/event-stream.
+    quote: "`SendStreamingMessage` (`text/event-stream`"
+    xfail: null

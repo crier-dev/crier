@@ -56,13 +56,13 @@ var preA2AAgentKeys = []string{
 // inboxRetrieveKeys is the documented body of GET /agents/{id}/inbox.
 var inboxRetrieveKeys = []string{"lease_id", "leased_count", "messages", "queue_depth"}
 
-// a2aPaths are the paths the A2A series names (specs/A2A-OPTION.md §5.2). Only
-// the discovery path is registered by a landed row (INT-A2A-002, and only while
-// the switch is on); the JSON-RPC binding paths stay unregistered until
-// INT-A2A-003, so each is probed in both switch positions below.
+// a2aPaths are the paths the A2A series names (specs/A2A-OPTION.md §5.2). The
+// discovery path (INT-A2A-002) and the JSON-RPC binding path (INT-A2A-003) are
+// registered while the switch is on; the remaining spellings stay unregistered,
+// so each is probed in both switch positions below.
 var a2aPaths = []string{
 	a2a.AgentCardPath,
-	"/a2a",
+	a2a.JSONRPCBindingPath,
 	"/a2a/rpc",
 }
 
@@ -328,11 +328,14 @@ func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 //
 //   - with the switch off, every A2A path is unregistered — a plain 404, the
 //     same answer an unregistered path has always given;
-//   - with the switch on, exactly the path a landed row registered exists: the
+//   - with the switch on, exactly the paths landed rows registered exist: the
 //     INT-A2A-002 discovery route, which answers 400 to a request that names no
 //     agent (this bus hosts many agents on one origin, so the path alone cannot
 //     name one — 400 is how "registered, malformed request" differs from
-//     "not registered"). Every other A2A path still answers 404.
+//     "not registered"), and the INT-A2A-003 JSON-RPC binding, which is
+//     POST-only and therefore answers 405 to this probe's GET (again:
+//     registered, and not the method it serves). Every other A2A path still
+//     answers 404.
 func assertA2ARouteSurface(t *testing.T, obs surfaceObservation, a2aEnabled bool) {
 	t.Helper()
 	position := "off"
@@ -341,8 +344,13 @@ func assertA2ARouteSurface(t *testing.T, obs surfaceObservation, a2aEnabled bool
 	}
 	for _, path := range a2aPaths {
 		want := http.StatusNotFound
-		if a2aEnabled && path == a2a.AgentCardPath {
-			want = http.StatusBadRequest
+		if a2aEnabled {
+			switch path {
+			case a2a.AgentCardPath:
+				want = http.StatusBadRequest
+			case a2a.JSONRPCBindingPath:
+				want = http.StatusMethodNotAllowed
+			}
 		}
 		if got := obs.a2a[path]; got != want {
 			t.Errorf("GET %s = %d with the A2A switch %s, want %d (specs/A2A-OPTION.md §5.2)", path, got, position, want)

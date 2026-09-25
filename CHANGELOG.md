@@ -131,6 +131,46 @@ procedure, the gate requirements and the publish step are in
   `/health`, `/version`, a registration and an inbox delivery, and proves both
   unverified-download shapes are refused by name.
 
+- **A2A interoperability, as an opt-in extra** (INT-A2A-001/002/003) — crier
+  can be reached by an [A2A](https://a2a-protocol.org) client **without becoming
+  an A2A-first system**: the whole option is behind `CR_A2A_ENABLED` (default
+  `false`) *and* a per-agent `a2a` block, and with either half absent nothing
+  A2A-related is registered — the route table, response bodies, auth
+  requirements and storage schema are exactly what they were. The binding
+  decision is recorded in `specs/A2A-OPTION.md` (JSON-RPC 2.0 over HTTP with SSE
+  is implemented; gRPC and HTTP+JSON/REST are declared permitted-but-absent):
+  - **`GET /.well-known/agent-card.json?agent_id=<id>`** serves the Agent Card
+    projected from that agent's registry row — no card store, no cache, `404`
+    for an id that is not an opted-in row, `400` when the request names no
+    agent, and `Cache-Control: private` + a body-hashed `ETag` for conditional
+    GETs.
+  - **`POST /a2a`** is the JSON-RPC binding. `SendMessage` translates an A2A
+    message into crier's **existing** delivery path — it calls
+    `POST /agents/{id}/inbox`'s own handler, so the guard, sender idempotency
+    (an A2A `messageId` becomes the deduplication key), the detection layer,
+    federation hold/retry, webhook push, the durable inbox and the lease/ack
+    lifecycle all apply unchanged — and answers a `Task` (accepted: inbox,
+    queued push, or a federation hold with a status message that says so) or a
+    direct `Message` (a target that answered inline). `SendStreamingMessage`
+    answers `text/event-stream`, carrying the task's own inbox lifecycle
+    (submitted → working → completed/failed, closing on the terminal state) and
+    every event published to the task's relay topic — an SSE **adapter** over
+    the existing relay subscription, with the WebSocket path untouched. The part
+    model maps faithfully in both directions: A2A `text`/`raw`/`url`/`data` plus
+    `metadata.alt`/`tags`/`caption` ⇄ crier message parts with `alt`/`tags`/
+    `caption` and reference-or-inline file parts (a `raw` part gains the size and
+    SHA-256 of its decoded bytes; a `url` part stays a reference), and a
+    round-trip test proves a multi-part message survives to a crier consumer
+    with `alt`/`tags` intact. Errors use the specification's own JSON-RPC codes
+    and detail objects (`google.rpc.BadRequest` fieldViolations,
+    `google.rpc.ErrorInfo`), and a refusal raised by the delivery engine carries
+    crier's own status and body verbatim so a client can see exactly what crier
+    said. What is deliberately NOT here: the task lifecycle operations
+    (`GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`), the
+    push-notification configs and the extended card (INT-A2A-004..006) — each
+    answers `-32601 MethodNotFoundError` naming the row that lands it rather
+    than pretending.
+
 ## [0.1.0-rc2] - 2026-09-21
 
 ### Added
