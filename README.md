@@ -208,7 +208,7 @@ Pin a release instead of the newest, or install somewhere else (`sh -s --`
 passes the flags through the pipe):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.1.0-rc3 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.1.0-rc2 --dir "$HOME/bin"
 ```
 
 The installer REFUSES an unverified download: a manifest with no entry for the
