@@ -294,9 +294,11 @@ type Translation struct {
 //   - message and its required members (§4.1.4: messageId, role, parts);
 //   - the oneof of every part, via the shared mapping;
 //   - `taskId`: continuing an existing crier task means addressing an inbox
-//     entry's lifecycle, which is INT-A2A-004's surface. Refused with
-//     UnsupportedOperationError (§5.4) rather than delivered as a new task the
-//     client would not recognise;
+//     entry's lifecycle, which is INT-A2A-004's surface — and which crier
+//     cannot represent as a continuation at all (a task IS its entry). The
+//     ROUTE resolves a task id against crier's own store and answers the
+//     specification's three cases for it (§5.5.3); this branch is the
+//     translation layer's own refusal for a caller that reaches it directly;
 //   - `configuration.taskPushNotificationConfig`: INT-A2A-005's surface.
 //
 // Session and sender mapping, so no later reader has to infer it:
@@ -343,9 +345,16 @@ func Translate(params *SendMessageParams, requestMetadata map[string]any, sender
 		return nil, invalidParams("message.parts", "at least one part is required")
 	}
 	if msg.TaskID != "" {
+		// The ROUTE resolves a task id against crier's store first and answers
+		// the specification's own three cases for it (INT-A2A-004, §5.5.3): a
+		// task id crier holds no record of is TaskNotFoundError, a terminal one
+		// is UnsupportedOperationError naming the state, an open one is this
+		// refusal. This branch is the translation layer's own guard for a caller
+		// that reaches it directly: no task id is ever translated into a
+		// delivery, because a delivery is a NEW task.
 		return nil, NewRPCError(CodeUnsupportedOperationError,
-			"message.taskId: continuing an existing task is not supported by this build — the A2A task lifecycle (GetTask / ListTasks / CancelTask / SubscribeToTask) lands with INT-A2A-004; send a message without message.taskId to start a new task",
-			ErrorInfo{Type: ErrorInfoType, Reason: "TASK_CONTINUATION_UNSUPPORTED", Domain: ErrorDomain,
+			"message.taskId: continuing an existing task is not supported by this build — INT-A2A-004 ships the task lifecycle (GetTask / ListTasks / CancelTask / SubscribeToTask) but not task CONTINUATION, which crier cannot represent: a task IS its inbox entry, and no primitive appends a message to an existing entry. Send a message without message.taskId to start a new task",
+			ErrorInfo{Type: ErrorInfoType, Reason: ReasonTaskContinuationUnsupported, Domain: ErrorDomain,
 				Metadata: map[string]string{"taskId": msg.TaskID}})
 	}
 	if msg.MessageID != "" && len(msg.MessageID) > 128 {
@@ -580,6 +589,14 @@ func (a DeliverAccept) Held() bool { return a.Status == "held" }
 // metadata about a task" (§4.1.1), and these are the facts crier's accept body
 // states that A2A has no field for — kept namespaced so they can never be
 // confused with an agent's own metadata.
+//
+// One shape serves both directions on purpose. A task is written by a
+// SendMessage (whose facts come from the delivery accept) and read back by
+// GetTask / ListTasks / CancelTask (whose facts come from the stored entry), and
+// a client that sees the same task through both must not be handed two
+// different key sets for it. The read path therefore fills the same members it
+// can prove from the entry and states which record it read the state from in
+// StateBasis (INT-A2A-004).
 type CrierMeta struct {
 	Transport        string          `json:"transport,omitempty"`
 	DeliveryMode     string          `json:"delivery_mode,omitempty"`
@@ -588,6 +605,16 @@ type CrierMeta struct {
 	MaxHoldS         int             `json:"max_hold_s,omitempty"`
 	IdempotentReplay bool            `json:"idempotent_replay,omitempty"`
 	Guard            json.RawMessage `json:"guard,omitempty"`
+	// StateBasis names the crier record a READ task's state was resolved from
+	// (INT-A2A-004, specs/A2A-OPTION.md §5.5.2). It is absent on a task a
+	// delivery wrote — the write path reports what the delivery did, not what a
+	// state was read from — and `omitempty` is what keeps that task's metadata
+	// byte-identical to what it was before this field existed.
+	StateBasis string `json:"state_basis,omitempty"`
+	// DeadLetteredAt is when crier's expiry sweep recorded a durable failure
+	// for this task's message, RFC 3339. Absent unless that is what the state
+	// was resolved from.
+	DeadLetteredAt string `json:"dead_lettered_at,omitempty"`
 }
 
 // TaskFromAccept builds the A2A Task for a crier accept that created a task:

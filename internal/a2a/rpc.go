@@ -63,14 +63,20 @@ const (
 	// accessible (§5.4). A delivery answered 404 by the delivery engine — the
 	// target agent is not on this relay after all — is reported with it,
 	// because from an A2A client's point of view the thing it addressed does
-	// not exist here.
+	// not exist here. The task lifecycle raises it for a task id crier holds no
+	// record of at all (INT-A2A-004, §5.5).
 	CodeTaskNotFoundError = -32001
+	// CodeTaskNotCancelableError is -32002: a CancelTask aimed at a task that
+	// is not in a cancelable state (§3.1.5) — already completed, failed or
+	// canceled. INT-A2A-004 owns this code.
+	CodeTaskNotCancelableError = -32002
 	// CodePushNotificationNotSupportedError is -32003: the push-notification
 	// configuration surface is not implemented in this build (INT-A2A-005).
 	CodePushNotificationNotSupportedError = -32003
 	// CodeUnsupportedOperationError is -32004: the operation cannot accept
-	// this request (§3.3.4 capability validation, and a message aimed at an
-	// existing task's continuation until INT-A2A-004 lands the lifecycle).
+	// this request (§3.3.4 capability validation, a message aimed at a task in
+	// a TERMINAL state, a task-lifecycle operation this relay's backend cannot
+	// answer, and — because crier cannot represent one — task continuation).
 	CodeUnsupportedOperationError = -32004
 	// CodeVersionNotSupportedError is -32009: A2A-Version asked for a protocol
 	// version this server does not serve (§3.6, §9.2).

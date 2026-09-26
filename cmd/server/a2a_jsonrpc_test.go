@@ -252,7 +252,7 @@ func TestA2AJSONRPC_RouteExistsOnlyWhenTheOptionIsOn(t *testing.T) {
 	t.Run("switch on", func(t *testing.T) {
 		base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 		client := &http.Client{Timeout: 5 * time.Second}
-		status, body, header := a2aRPC(t, client, base, `{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{"id":"t"}}`)
+		status, body, header := a2aRPC(t, client, base, `{"jsonrpc":"2.0","id":1,"method":"CreateTaskPushNotificationConfig","params":{}}`)
 		if status != http.StatusOK {
 			t.Fatalf("POST %s = %d with the option on, want 200: %s", a2a.JSONRPCBindingPath, status, body)
 		}
@@ -455,8 +455,13 @@ func TestA2AJSONRPC_GatesAndRefusals(t *testing.T) {
 			wantBadFld: "params.tenant",
 		},
 		{
+			// A method no row of this series has landed yet: the push-
+			// notification configs are INT-A2A-005, so they are the methods
+			// that still answer MethodNotFound. (The task lifecycle answered
+			// this until INT-A2A-004 landed it — those methods are exercised
+			// for real in a2a_lifecycle_test.go.)
 			name:      "unknown method",
-			body:      `{"jsonrpc":"2.0","id":1,"method":"ListTasks","params":{}}`,
+			body:      `{"jsonrpc":"2.0","id":1,"method":"CreateTaskPushNotificationConfig","params":{}}`,
 			wantCode:  a2a.CodeMethodNotFound,
 			wantInMsg: "Method not found",
 		},
@@ -492,10 +497,20 @@ func TestA2AJSONRPC_GatesAndRefusals(t *testing.T) {
 			wantInMsg: "INT-A2A-005",
 		},
 		{
-			name:      "a message continuing an existing task (INT-A2A-004)",
+			// INT-A2A-004 resolves a task id against crier's OWN store before
+			// anything is delivered (§5.5.3), and this id names no task this
+			// agent ever had. The answer is the specification's
+			// TaskNotFoundError (§3.4.2: "Agents MUST return a TaskNotFoundError
+			// if the provided taskId does not correspond to an existing task")
+			// and not a delivery: nothing here is accepted. The other two arms
+			// of the same rule — a TERMINAL task is UnsupportedOperationError,
+			// an OPEN one is UnsupportedOperationError because crier cannot
+			// represent a continuation — are covered live in
+			// a2a_lifecycle_test.go against a real inbox entry.
+			name:      "a message naming a task that does not exist",
 			body:      `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"tenant":"` + optedIn + `","message":{"messageId":"m-5","taskId":"t-1","role":"ROLE_USER","parts":[{"text":"x"}]}}}`,
-			wantCode:  a2a.CodeUnsupportedOperationError,
-			wantInMsg: "INT-A2A-004",
+			wantCode:  a2a.CodeTaskNotFoundError,
+			wantInMsg: "no failure record",
 		},
 	}
 

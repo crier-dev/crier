@@ -8,10 +8,12 @@
 // nothing in this package is reachable through any crier surface.
 //
 // This package holds the option's data shape and its strict decoder
-// (INT-A2A-001) and the Agent Card projection with the discovery constants
-// (INT-A2A-002, card.go). The remaining surfaces — the JSON-RPC 2.0 / SSE
-// endpoint and the task lifecycle mapping — arrive with INT-A2A-003..006 and are
-// enumerated in specs/A2A-OPTION.md §5.2.
+// (INT-A2A-001), the Agent Card projection with the discovery constants
+// (INT-A2A-002, card.go), the JSON-RPC 2.0 binding with the part mapping and the
+// SSE contract (INT-A2A-003, rpc.go / parts.go / send.go) and the task-lifecycle
+// mapping onto crier's inbox entry (INT-A2A-004, task.go). The remaining
+// surfaces — the push-notification configs and the extended card — arrive with
+// INT-A2A-005/006 and are enumerated in specs/A2A-OPTION.md §5.2.
 package a2a
 
 import (
