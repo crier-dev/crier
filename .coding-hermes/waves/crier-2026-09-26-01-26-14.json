@@ -1,0 +1,26 @@
+{
+  "tick_id": "crier-2026-09-26-01-26-14",
+  "tick": 402,
+  "mode": "foreman-direct",
+  "reason": "WAVE_BUDGET=8 but no mutually-independent worker-eligible rows: RELEASE-004 is authorization-blocked; QA-CRIER/DF-CRIER-2xx/INT-CRIER-006/DF-CRIER-289/285 are bunker-infra owned; DF-CRIER-290 (open at tick start) became the serial pick. Work shape was recovery + whole-class test fix, no parallel partition.",
+  "created_at": "2026-09-26T01:45:00+00:00",
+  "workers": [],
+  "foreman_direct": [
+    {
+      "task_id": "CR-FEAT-027",
+      "work": "landed the displaced rework commit 3a98106 (116-line delta over merged round 1) as 0e1e470; judged tier2 PASS verdict 1422e005",
+      "outcome": "make client-roundtrip-check ALL ARMS PASSED; CI 36209729365 green incl. new client-roundtrip step"
+    },
+    {
+      "task_id": "CR-FEAT-024",
+      "work": "harvested the staged-but-uncommitted presence-staleness poll fix from the closed worktree as 8e27c96",
+      "outcome": "TestPresenceGoesStaleWhenTheAgentDiesEndToEnd green at HEAD"
+    },
+    {
+      "task_id": "DF-CRIER-290",
+      "work": "whole-class fix 48eefad (9 startup waits 10s->20s + run()-exited diagnostics incl. the shared helper startTestServerWithEnv the filed row missed; SIGTERM waits untouched) + rework c4db682 (diagnostics extended to the 5 satellite helpers after judge r1 FAIL d25af5d4)",
+      "outcome": "judge r2 PASS verdict b9024eaf on c4db682; CI 36211774554 green 4/4; CI reds at 1952160/8e27c96 healed"
+    }
+  ],
+  "finished_at": "2026-09-26T02:05:00+00:00"
+}
