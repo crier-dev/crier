@@ -1250,3 +1250,147 @@ The runner's README (`examples/muster-bridge/README.md`) carries the same matrix
 the environment knobs (`MUSTER_BRIDGE_REQUIRE_SIG`, the token, the port block,
 the 18801+ scratch-port rotation) and the cleanup contract.
 
+---
+
+## 11. A2A interoperability (OPT-IN — an extra, never the default path)
+
+Crier can be reached by an [A2A](https://a2a-protocol.org) client. Read the
+constraint before anything else, because it is binding and it is what every
+status in this section is held to:
+
+> **A2A is an extra, not first-class support.** It must be OPT-IN and
+> DEFAULT-OFF, additive-only, and it must not change the behaviour of anything
+> crier already does. No new auth requirement appears on an existing route, and
+> no existing field changes meaning.
+
+So A2A is reachable only when **both halves of the gate are on** (a server
+switch *and* a per-agent opt-in), it adds exactly **two** routes and no field to
+anything that already existed, and with it off crier behaves exactly as it did
+before the option existed. The normative document is
+[`specs/A2A-OPTION.md`](../specs/A2A-OPTION.md); this section is the operator's
+view of it.
+
+### 11.1 The two halves of the gate
+
+| | | |
+|---|---|---|
+| Server switch | `CR_A2A_ENABLED` | **`CR_A2A_ENABLED` is unset by default** (off). `true`/`1`/`yes` turn it on; anything else fails startup naming the variable. |
+| Per-agent opt-in | the optional `a2a` block on a registry row | `"a2a": {"enabled": true}` on `POST /agents` or `PATCH /agents/{id}`. Absent (the default, and every pre-existing registration) means the agent takes no part in A2A. |
+
+Either half alone is inert. With the switch off the two paths below answer the
+router's own `404` **whatever** the agent's block says; with the switch on, an
+agent that did not opt in answers `404` on the card route and a JSON-RPC
+`InvalidParamsError` on the binding, and its row is untouched — a refused
+registration leaves the registry exactly as it was.
+
+The `a2a` object is **strictly decoded**: a member it does not declare is a `400`
+naming the offending key and the accepted set
+(`a2a: unknown field "enabld" (accepted: enabled)`), never a silently dropped
+member.
+
+### 11.2 What appears when it is on — exactly two routes
+
+| Surface | Method and path | Answers |
+|---|---|---|
+| Agent Card discovery | `GET /.well-known/agent-card.json?agent_id=<id>` | `200` + `application/a2a+json` for an opted-in row, carrying `name`, `supportedInterfaces[0].url` (the JSON-RPC endpoint), `tenant` (the id to send back), `capabilities.streaming`, `capabilities.pushNotifications` (`true` only when the row has a webhook) and one `skills[]` entry per capability tag. `400` when the request names no agent; `404` for an id that is not an opted-in row; `ETag` + `Cache-Control: private, max-age=60`, and a conditional `If-None-Match` request answers `304`. |
+| The JSON-RPC 2.0 binding | `POST /a2a` | `200` + `application/a2a+json` for **every** JSON-RPC answer, a result and an error alike (the correlation is the request `id`); `405` for another HTTP method; `415` naming the two accepted media types for another `Content-Type`; `413` beyond the 4 MiB request ceiling. |
+
+The methods it serves are `SendMessage`, `SendStreamingMessage`, `GetTask`,
+`ListTasks`, `CancelTask`, `SubscribeToTask` and the four push-notification
+configuration operations (`CreateTaskPushNotificationConfig`,
+`GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs`,
+`DeleteTaskPushNotificationConfig`). `GetExtendedAgentCard` is **not** served: it
+answers `MethodNotFoundError` (`-32601`) naming itself, and no extended-card
+capability is claimed.
+
+The binding adds **no auth of its own**: it inherits the same middleware chain as
+every other authenticated route, so with `CR_AUTH_TOKEN` set it needs the same
+`Authorization: Bearer` header, and the auth-exempt list is untouched.
+
+### 11.3 Switching it on
+
+Both halves, in order — the server, then the agent:
+
+```bash
+# 1. the server half: the option is off unless this is set
+CR_A2A_ENABLED=true ./bin/crier                    # (or CRIER_PORT=8767 …)
+
+# 2. the agent half: it takes part only if its own row opted in
+curl -s -X POST localhost:8767/agents -H 'Content-Type: application/json' \
+  -d '{"id":"my-agent","public_key":"<ed25519 pubkey hex>","capabilities":["solver"],"a2a":{"enabled":true}}'
+# → 201 {"id":"my-agent",…,"a2a":{"enabled":true}}   (the row gains exactly one optional key)
+
+# 3. discover the card, then send a message to the `tenant` it advertises
+curl -s 'localhost:8767/.well-known/agent-card.json?agent_id=my-agent'
+# → 200 application/a2a+json  {"name":"my-agent",…,"supportedInterfaces":[{"url":"http://localhost:8767/a2a","protocolBinding":"JSONRPC","tenant":"my-agent",…}],…}
+
+curl -s -X POST localhost:8767/a2a -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{"tenant":"my-agent","message":{"messageId":"m-1","role":"ROLE_USER","parts":[{"text":"hello"}]}}}'
+# → 200 {"jsonrpc":"2.0","id":"1","result":{"task":{"id":"<crier message id>","status":{"state":"TASK_STATE_SUBMITTED"},…}}}
+```
+
+A task **is** a crier inbox entry: the id `SendMessage` answers with is the id the
+delivery returned, and the message is read where it already lives
+(`GET /agents/{id}/inbox`, signed as that agent). `GetTask` reports the entry's
+own state and names the crier record it read it from, in
+`metadata.crier.state_basis`: `inbox-entry-unleased` (`TASK_STATE_SUBMITTED`),
+`inbox-entry-leased` (`TASK_STATE_WORKING`), `inbox-entry-ttl-elapsed-unacked`
+(`TASK_STATE_FAILED`), `dead-letter-recorded` (`TASK_STATE_FAILED`), and
+`canceled-by-request` on a `CancelTask` answer. An acknowledged message is
+**removed** (crier keeps no tombstone), so after an ack `GetTask` answers
+`TaskNotFoundError` (`-32001`) — never an invented `TASK_STATE_COMPLETED`.
+
+Every refusal is the specification's **named** error rather than a silent
+success:
+
+```bash
+# a push configuration for an agent whose row has no webhook (its card already says pushNotifications:false)
+curl -s -X POST localhost:8767/a2a -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"2","method":"CreateTaskPushNotificationConfig","params":{"tenant":"my-agent","taskId":"<task id>","url":"http://127.0.0.1:9000/hook"}}'
+# → 200 {"jsonrpc":"2.0","id":"2","error":{"code":-32003,"message":"push notifications are not supported by agent \"my-agent\": … (capabilities.pushNotifications is false, §3.3.4)…"}}
+```
+
+### 11.4 What it is NOT
+
+- **Not first-class, and not the default path.** With `CR_A2A_ENABLED` unset it
+  registers zero routes and reads no A2A state; the two paths answer `404`, the
+  route table, the response bodies and the auth requirements are what they were
+  before the option existed.
+- **Not a second delivery engine, task store or payload model.** A send is
+  translated into the body `POST /agents/{id}/inbox` already accepts and handed
+  to that route's own handler, so the guard, sender idempotency, the detection
+  layer, federation hold/retry, webhook push, the durable inbox, TTL and the
+  lease/ack lifecycle are the shipped code. There is no A2A column on any crier
+  table and no A2A task index.
+- **Not a second push mechanism.** The push-notification configuration is a view
+  over the agent's existing webhook config, written through `PATCH /agents/{id}`'s
+  own handler; the notification is an ordinary webhook delivery whose body is the
+  A2A `StreamResponse` envelope.
+- **Not a change to any existing route.** No existing path gains an A2A field, a
+  status code or a header; `GET /status` deliberately carries no A2A key; the
+  binding is not added to the auth-exempt list; and a switch-on registry row that
+  carries no `a2a` block serializes with exactly its pre-A2A key set.
+- **Not the gRPC or the HTTP+JSON/REST binding.** Crier implements exactly one
+  A2A binding — JSON-RPC 2.0 over HTTP, with SSE for the streaming methods — and
+  advertises no other.
+- **Not the extended card**, no provider identity, no icon and no card
+  signature: `GetExtendedAgentCard` answers `-32601`, and `provider`, `iconUrl`
+  and `signatures` are absent by construction.
+- **Not a task continuation.** A message that names an existing task id is
+  refused: `TaskNotFoundError` for an id crier holds no record of, and
+  `UnsupportedOperationError` for one in a terminal state or still open, because
+  a crier task is a single inbox entry and delivering "into" it would create a
+  second task under a second id.
+- **Not an authorization mechanism.** A card *describes* the auth posture
+  (crier's `bearerAuth`, and the `agentSignature` scheme it enforces); it never
+  grants anything, and signalling `agentSignature` in a card never makes a
+  generic A2A client able to compute it.
+
+The two halves of the constraint are gated, not merely documented:
+`cmd/server/a2a_optin_test.go` boots the real server in both switch positions and
+compares the pre-existing surface byte for byte, and the committed E2E battery
+(`scripts/e2e-battery.sh`, the *A2A conformance* and *A2A non-regression* cells)
+runs the same comparison against two live servers — the pre-existing surface is
+probed with A2A disabled **and** with it enabled, status by status, shape by
+shape and byte by byte.
+

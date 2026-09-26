@@ -1474,3 +1474,53 @@ claims:
     quote: "#### 5.5.2 The state mapping"
     expect: "/a2a"
     xfail: null
+
+  # --- INT-A2A-006 (appended): the integration guide's OPT-IN A2A section. -----
+  # The section is the operator's view of the option — what it is, how to switch
+  # it on (BOTH halves of the gate) and what it is NOT — and it is scanned by the
+  # path pass because these claims name it. The two route claims are probed LIVE
+  # on the gate's own server, which boots with CR_A2A_ENABLED set for exactly the
+  # reason the README's A2A claims do: the paths exist only while the switch is
+  # on, and with it off they answer the router's own 404 (that half is gated live
+  # in cmd/server/a2a_optin_test.go and in the E2E battery's A2A cells). The
+  # anchors hold the prose that may not drift: the standing constraint verbatim,
+  # the default-off statement, the per-agent opt-in a client has to send, and the
+  # "what it is NOT" heading whose list is the reason the section exists at all.
+  # The behaviour behind them (the card projection, the task lifecycle, the named
+  # capability refusals, the two-switch non-regression comparison) is executed in
+  # cmd/server/a2acard_test.go, a2a_jsonrpc_test.go, a2a_lifecycle_test.go,
+  # a2apush_test.go, a2a_optin_test.go and — live, against two servers — in
+  # scripts/e2e-battery.sh's A2A conformance and non-regression cells. It is not
+  # re-told here.
+  - id: ROUTE-A2A-GUIDE-AGENT-CARD
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "GET /.well-known/agent-card.json?agent_id=<id>"
+    expect: "/.well-known/agent-card.json"
+    xfail: null
+  - id: ROUTE-A2A-GUIDE-JSONRPC
+    kind: route
+    doc: docs/integration-guide.md
+    quote: "POST /a2a"
+    expect: "/a2a"
+    xfail: null
+  - id: ANCHOR-A2A-GUIDE-NOT-FIRST-CLASS
+    kind: anchor
+    doc: docs/integration-guide.md
+    quote: "A2A is an extra, not first-class support"
+    xfail: null
+  - id: ANCHOR-A2A-GUIDE-DEFAULT-OFF
+    kind: anchor
+    doc: docs/integration-guide.md
+    quote: "`CR_A2A_ENABLED` is unset by default"
+    xfail: null
+  - id: ANCHOR-A2A-GUIDE-AGENT-OPT-IN
+    kind: anchor
+    doc: docs/integration-guide.md
+    quote: '"a2a": {"enabled": true}'
+    xfail: null
+  - id: ANCHOR-A2A-GUIDE-WHAT-IT-IS-NOT
+    kind: anchor
+    doc: docs/integration-guide.md
+    quote: "### 11.4 What it is NOT"
+    xfail: null
