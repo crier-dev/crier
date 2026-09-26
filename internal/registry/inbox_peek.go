@@ -63,15 +63,23 @@ func (s *MemoryStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 		if e.ID != messageID {
 			continue
 		}
-		clone := *e
-		clone.Payload = append([]byte(nil), e.Payload...)
-		if e.LeasedAt != nil {
-			at := *e.LeasedAt
-			clone.LeasedAt = &at
-		}
-		return &clone, nil
+		return cloneInboxEntry(e), nil
 	}
 	return nil, fmt.Errorf("%w: %q is not in agent %q's inbox", ErrMessageNotFound, messageID, agentID)
+}
+
+// cloneInboxEntry returns a copy of one stored entry — payload and lease
+// timestamp included — so a caller holding it cannot mutate stored state. It is
+// shared by the two read-only capabilities (Peek, PeekInbox) so their snapshots
+// cannot drift apart.
+func cloneInboxEntry(e *InboxEntry) *InboxEntry {
+	clone := *e
+	clone.Payload = append([]byte(nil), e.Payload...)
+	if e.LeasedAt != nil {
+		at := *e.LeasedAt
+		clone.LeasedAt = &at
+	}
+	return &clone
 }
 
 // Peek reads one inbox row without claiming it, the PostgreSQL half of

@@ -322,6 +322,36 @@ procedure, the gate requirements and the publish step are in
     configuration operations are their own [Unreleased] entry above: INT-A2A-005
     added them as further methods of this same binding.)
 
+- **A2A task lifecycle, mapped onto the inbox entry** (INT-A2A-004) — the four
+  task operations, on the same opt-in `POST /a2a` binding: `GetTask` (the state
+  of one task), `ListTasks` (one agent's tasks, filtered by `contextId`/`status`/
+  `statusTimestampAfter` and cursor-paginated with `pageSize`/`pageToken`),
+  `CancelTask` and `SubscribeToTask`.
+  **There is no second store**: a task IS the inbox entry, its id IS crier's
+  message id, and every state is read from that row's own lifecycle — an
+  unclaimed message is `TASK_STATE_SUBMITTED`, a leased one
+  `TASK_STATE_WORKING`, one past its TTL (or one the expiry sweep recorded in a
+  dead letter) `TASK_STATE_FAILED`, and `CancelTask` — which releases the
+  message's lease and closes it, whatever its lease state — answers
+  `TASK_STATE_CANCELED`. Every task a read returns names the crier record its
+  state came from (`metadata.crier.state_basis`), because the mapping is where
+  an interop adapter most easily lies: there is no `TASK_STATE_COMPLETED` for an
+  acknowledged task, since the ack REMOVES the entry and crier keeps no
+  tombstone — such a task id answers the specification's own `TaskNotFoundError`
+  ("invalid, expired, or already completed and purged") instead of an invented
+  state, and the state mapping table is published in `specs/A2A-OPTION.md`
+  §5.5.2. Refusals are refusals: a message sent to a task in a terminal state is
+  `-32004 UnsupportedOperationError` (mandatory in §3.1.1, and nothing is
+  delivered), a cancel of a terminal task is `-32002 TaskNotCancelableError`,
+  and a message naming an OPEN task is `-32004` too, because crier cannot
+  represent a continuation — a task is one inbox entry. The three store
+  capabilities this needed are OPTIONAL and additive (a lease-free inbox
+  listing, a per-entry close, and a single dead-letter lookup); no existing
+  route, column, method or response body changed, and with the switch off every
+  lifecycle method answers the router's `404` exactly as before. The
+  push-notification configs and the extended card remain INT-A2A-005/006 and
+  still answer `-32601`.
+
 ## [0.1.0-rc2] - 2026-09-21
 
 ### Added

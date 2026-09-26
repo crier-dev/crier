@@ -91,6 +91,15 @@ ignore_paths:
   - /home/bunker-my-lab/ecosystem-images.tar.gz
   - /usr/local/bin          # goose install target (container FS)
   - /usr/local/bin/goose
+  # INT-A2A-004/005 (this merge): specs/A2A-OPTION.md is now scanned, because
+  # ROUTE-A2A-LIFECYCLE-SPEC-ANCHOR names it as the authority for the state-mapping
+  # table. The one path-looking token in that spec which is NOT a crier route is the
+  # A2A REST binding's push-notification config surface: §5.6 names it twice only
+  # to say crier does NOT implement it (the HTTP+JSON/REST binding is §11's MAY,
+  # not built). It is not registered anywhere, so it is ignored rather than
+  # claimed — the JSON-RPC methods that ARE registered are pinned by the
+  # ANCHOR-A2A-* claims.
+  - /tasks/{id}/pushNotificationConfigs
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
@@ -1432,4 +1441,36 @@ claims:
     kind: anchor
     doc: README.md
     quote: "PushNotificationNotSupportedError"
+    xfail: null
+
+  # --- INT-A2A-004 (appended): the A2A task lifecycle. ------------------------
+  # The row ships no route of its own — the four methods extend the SAME
+  # `POST /a2a` binding INT-A2A-003 registered — so the claim that matters here
+  # is about PROSE, not paths: the README states the state-mapping rule a client
+  # codes against (an acknowledged message is reported as not-found, never as an
+  # invented COMPLETED), and it names `metadata.crier.state_basis`, the field the
+  # server puts on every task it reads so no state arrives without the crier
+  # record behind it. Editing that sentence away is exactly the drift this file
+  # exists to fail: the paragraph would then document a lifecycle whose states
+  # have no stated provenance.
+  - id: ANCHOR-A2A-LIFECYCLE-STATES
+    kind: anchor
+    doc: README.md
+    quote: "`metadata.crier.state_basis`"
+    xfail: null
+
+  # The spec is the normative design authority for this row, and it is scanned
+  # only because a claim names it. This claim does double duty, exactly as the
+  # NAMESPACES one above does: it anchors §5.5.2 — the state-mapping table, which
+  # is the row's stated acceptance criterion ("the mapping table is in the
+  # spec") — and it requires the route those operations are served on to exist on
+  # the same live server (only a 404 fails), so the spec and the code are checked
+  # against ONE surface. The switch is set for this claim in the gate's boot, for
+  # the same reason the other A2A claims set it: the path exists only while
+  # CR_A2A_ENABLED is on.
+  - id: ROUTE-A2A-LIFECYCLE-SPEC-ANCHOR
+    kind: route
+    doc: specs/A2A-OPTION.md
+    quote: "#### 5.5.2 The state mapping"
+    expect: "/a2a"
     xfail: null

@@ -550,16 +550,18 @@ func run(args []string) int {
 			authTokenSet:           cfg.AuthToken != "",
 			agentSignatureEnforced: cfg.RequireAgentSig,
 		})
-		// The JSON-RPC binding (INT-A2A-003, §5.4): SendMessage,
-		// SendStreamingMessage and — since INT-A2A-005 — the four
-		// push-notification configuration methods (§5.5). It reuses the
-		// registry handler's HandleDeliver and HandleUpdateAgent — the very
-		// functions POST /agents/{id}/inbox and PATCH /agents/{id} are
-		// registered with — so an A2A send is an ordinary crier delivery
-		// through the guard, idempotency, detection, federation, webhook and
-		// inbox paths, and a push configuration is an ordinary crier webhook
-		// update. Nothing about delivery or configuration is re-implemented
-		// for A2A.
+		// The JSON-RPC binding (INT-A2A-003 §5.4, extended by INT-A2A-004 §5.5 and
+		// INT-A2A-005): SendMessage, SendStreamingMessage, the task lifecycle —
+		// GetTask, ListTasks, CancelTask, SubscribeToTask — and the four
+		// push-notification configuration methods, at the path the card above
+		// advertises. A send and a lifecycle operation reuse the registry
+		// handler's own HandleDeliver — the very function POST /agents/{id}/inbox
+		// is registered with — so an A2A send is an ordinary crier delivery
+		// through the guard, idempotency, detection, federation, webhook and inbox
+		// paths; the lifecycle reads and closes the SAME inbox entry through the
+		// store's read-only and close capabilities; and a push configuration is an
+		// ordinary crier webhook update (HandleUpdateAgent). Nothing about
+		// delivery or configuration is re-implemented for A2A.
 		registerA2ARoute(r, regStore, registryHandler.HandleDeliver, registryHandler.HandleUpdateAgent, relaySvc, a2aOptions{
 			port:                   cfg.Port,
 			authTokenSet:           cfg.AuthToken != "",
@@ -568,8 +570,15 @@ func run(args []string) int {
 		slog.Info("A2A option enabled", "route", a2a.AgentCardPath,
 			"serves", "an AgentCard for agents whose registry row opted in (\"a2a\":{\"enabled\":true}); every other id answers 404",
 			"json_rpc_route", a2a.JSONRPCBindingPath,
-			"methods", a2a.MethodSendMessage+" (a Task or a direct Message), "+a2a.MethodSendStreamingMessage+" (text/event-stream) and the push-notification configuration methods "+a2a.MethodCreateTaskPushNotificationConfig+"/"+a2a.MethodGetTaskPushNotificationConfig+"/"+a2a.MethodListTaskPushNotificationConfigs+"/"+a2a.MethodDeleteTaskPushNotificationConfig+" (a view over the agent's existing webhook config)",
-			"not_registered", "the task lifecycle (GetTask, ListTasks, CancelTask, SubscribeToTask) is INT-A2A-004")
+			"methods", a2a.MethodSendMessage+" (a Task or a direct Message), "+
+				a2a.MethodSendStreamingMessage+" (text/event-stream), "+
+				a2a.MethodGetTask+", "+a2a.MethodListTasks+", "+
+				a2a.MethodCancelTask+", "+a2a.MethodSubscribeToTask+
+				" and the push-notification configuration methods "+
+				a2a.MethodCreateTaskPushNotificationConfig+"/"+a2a.MethodGetTaskPushNotificationConfig+"/"+
+				a2a.MethodListTaskPushNotificationConfigs+"/"+a2a.MethodDeleteTaskPushNotificationConfig+
+				" (a view over the agent's existing webhook config)",
+			"not_registered", "GetExtendedAgentCard (INT-A2A-006)")
 	} else {
 		slog.Info("A2A option disabled", "detail",
 			"no A2A route is registered; set CR_A2A_ENABLED=true to publish the Agent Card discovery route and the JSON-RPC binding")

@@ -168,6 +168,14 @@ func (h *a2aHandler) handle(w http.ResponseWriter, r *http.Request) {
 		h.send(w, r, req, false)
 	case a2a.MethodSendStreamingMessage:
 		h.send(w, r, req, true)
+	case a2a.MethodGetTask:
+		h.getTask(w, r, req)
+	case a2a.MethodListTasks:
+		h.listTasks(w, r, req)
+	case a2a.MethodCancelTask:
+		h.cancelTask(w, r, req)
+	case a2a.MethodSubscribeToTask:
+		h.subscribeToTask(w, r, req)
 	case a2a.MethodCreateTaskPushNotificationConfig:
 		h.pushCreate(w, r, req)
 	case a2a.MethodGetTaskPushNotificationConfig:
@@ -178,8 +186,9 @@ func (h *a2aHandler) handle(w http.ResponseWriter, r *http.Request) {
 		h.pushDelete(w, r, req)
 	default:
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeMethodNotFound, fmt.Sprintf(
-			"Method not found: this binding serves %s, %s and the push-notification configuration methods (%s, %s, %s, %s); the task lifecycle (GetTask, ListTasks, CancelTask, SubscribeToTask) lands with INT-A2A-004 and is not registered, and GetExtendedAgentCard is not part of this option",
+			"Method not found: this binding serves %s, %s, the task lifecycle (%s, %s, %s, %s) and the push-notification configuration methods (%s, %s, %s, %s); GetExtendedAgentCard is not part of this option",
 			a2a.MethodSendMessage, a2a.MethodSendStreamingMessage,
+			a2a.MethodGetTask, a2a.MethodListTasks, a2a.MethodCancelTask, a2a.MethodSubscribeToTask,
 			a2a.MethodCreateTaskPushNotificationConfig, a2a.MethodGetTaskPushNotificationConfig,
 			a2a.MethodListTaskPushNotificationConfigs, a2a.MethodDeleteTaskPushNotificationConfig))))
 	}
@@ -200,6 +209,18 @@ func (h *a2aHandler) send(w http.ResponseWriter, r *http.Request, req *a2a.RPCRe
 	if rpcErr != nil {
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 		return
+	}
+
+	// A message that NAMES a task is answered about that task before anything
+	// is delivered (§3.4.2, §3.1.1): a task id crier holds no record of is not
+	// a task here, a task in a terminal state cannot accept a message at all,
+	// and an open one cannot be continued because a crier task IS its inbox
+	// entry. See §5.5.3 for the three answers and why each is what it is.
+	if params.Message != nil && strings.TrimSpace(params.Message.TaskID) != "" {
+		if rpcErr := h.refuseTaskTarget(target.ID, params.Message.TaskID); rpcErr != nil {
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+			return
+		}
 	}
 
 	tr, err := a2a.Translate(params, params.Metadata, r.Header.Get(a2a.AgentIDHeader), streaming)
@@ -313,6 +334,386 @@ func (h *a2aHandler) refineSendRefusal(err error, target *registry.Agent) *a2a.R
 		a2a.MethodListTaskPushNotificationConfigs, a2a.MethodDeleteTaskPushNotificationConfig),
 		a2a.ErrorInfo{Type: a2a.ErrorInfoType, Reason: "INLINE_PUSH_CONFIG_UNSUPPORTED", Domain: a2a.ErrorDomain,
 			Metadata: map[string]string{"tenant": target.ID}})
+}
+
+// ---------------------------------------------------------------------------
+// The task lifecycle (INT-A2A-004, §5.5)
+// ---------------------------------------------------------------------------
+//
+// An A2A task IS a crier inbox entry: GetTask, ListTasks and CancelTask answer
+// from that entry's own state and mutate nothing but the lease/close semantics
+// crier already has. There is no task store here, no task index, and no A2A
+// field on any crier route — the entry is the record, and the state mapping
+// (specs/A2A-OPTION.md §5.5.2) is the whole of it.
+//
+// The two reads go through the store's OPTIONAL read-only capabilities
+// (registry.InboxPeeker / InboxLister), never through Retrieve: a Retrieve
+// LEASES what it returns, so an A2A read built on it would steal the message
+// from the agent whose task the client is asking about.
+
+// evidence reads everything crier can prove about ONE task id: the inbox entry,
+// through the lease-free peek, and — when the entry is gone — the expiry sweep's
+// durable failure record.
+//
+// A task id crier holds NO record of yields empty evidence, which Resolve turns
+// into the specification's TaskNotFoundError. That is deliberate and is the
+// row's central honesty rule: an acknowledged message is REMOVED (DF-CRIER-32's
+// hard delete, with no tombstone), so after an ack the state cannot be told from
+// that of a message that was transferred, purged with its agent, or never
+// delivered at all — and reporting COMPLETED for it would be a claim crier
+// cannot support. The specification defines TaskNotFoundError for exactly this
+// task ("invalid, expired, or already completed and purged", §3.3.2).
+func (h *a2aHandler) evidence(agentID, taskID string) (a2a.TaskEvidence, *a2a.RPCError) {
+	peeker, ok := h.store.(registry.InboxPeeker)
+	if !ok {
+		return a2a.TaskEvidence{}, a2a.TaskCapabilityUnsupportedError(
+			"the A2A task lifecycle", "a read-only inbox view (registry.InboxPeeker)")
+	}
+	entry, err := peeker.Peek(agentID, taskID)
+	switch {
+	case err == nil:
+		return a2a.TaskEvidence{Entry: &a2a.InboxView{
+			ID:        entry.ID,
+			Payload:   entry.Payload,
+			CreatedAt: entry.CreatedAt,
+			LeasedAt:  entry.LeasedAt,
+			LeaseID:   entry.LeaseID,
+			ExpiresAt: entry.ExpiresAt,
+			ACKed:     entry.ACKed,
+		}}, nil
+
+	case errors.Is(err, registry.ErrMessageNotFound):
+		if looker, ok := h.store.(registry.DeadLetterLookup); ok {
+			dl, found, lookupErr := looker.LookupDeadLetter(agentID, taskID)
+			if lookupErr != nil {
+				slog.Error("A2A task lifecycle: dead-letter lookup failed",
+					"agent_id", agentID, "task_id", taskID, "error", lookupErr)
+				return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInternalError,
+					"the task's failure record could not be read: "+lookupErr.Error())
+			}
+			if found {
+				// The message's TTL elapsed unacknowledged and the sweep
+				// recorded it: crier can state FAILED and say when.
+				return a2a.TaskEvidence{DeadLetteredAt: dl.DeadLetteredAt}, nil
+			}
+		}
+		return a2a.TaskEvidence{}, nil
+
+	case errors.Is(err, registry.ErrInvalidStoreInput):
+		return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInvalidParams, err.Error(),
+			a2a.InvalidParamsDetail(&a2a.InvalidParamsError{Field: "id", Detail: err.Error()}))
+
+	default:
+		slog.Error("A2A task lifecycle: inbox read failed",
+			"agent_id", agentID, "task_id", taskID, "error", err)
+		return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInternalError,
+			"the task could not be read: "+err.Error())
+	}
+}
+
+// getTask serves GetTask (§9.4.3).
+func (h *a2aHandler) getTask(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
+	params, rpcErr := a2a.DecodeGetTaskParams(req.Params)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	target, rpcErr := h.target(params.Tenant)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	ev, rpcErr := h.evidence(target.ID, params.ID)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	now := h.opts.now()
+	state, basis, rpcErr := ev.Resolve(target.ID, params.ID, now)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	task, err := ev.Task(state, basis, params.HistoryLength, now)
+	if err != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
+		return
+	}
+	h.writeRPC(w, a2a.SuccessResponse(req.ID, task))
+}
+
+// listTasks serves ListTasks (§9.4.4): the tasks one agent's inbox holds, with
+// §3.1.4's filters, ordering and cursor pagination.
+//
+// The listing is of the tasks crier's STORE holds — the entries in that inbox,
+// resolved exactly as GetTask resolves them. A message the expiry sweep removed
+// is not in it (its task is no longer in the queue; GetTask still answers FAILED
+// for it from the sweep's own record), and a task crier cannot resolve is not
+// listed rather than listed with an invented state.
+func (h *a2aHandler) listTasks(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
+	params, rpcErr := a2a.DecodeListTasksParams(req.Params)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	target, rpcErr := h.target(params.Tenant)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	lister, ok := h.store.(registry.InboxLister)
+	if !ok {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.TaskCapabilityUnsupportedError(
+			"ListTasks", "a read-only inbox listing (registry.InboxLister)")))
+		return
+	}
+	entries, err := lister.PeekInbox(target.ID)
+	if err != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, listReadError(target.ID, err)))
+		return
+	}
+
+	now := h.opts.now()
+	items := make([]a2a.ListItem, 0, len(entries))
+	for _, entry := range entries {
+		ev := a2a.TaskEvidence{Entry: &a2a.InboxView{
+			ID:        entry.ID,
+			Payload:   entry.Payload,
+			CreatedAt: entry.CreatedAt,
+			LeasedAt:  entry.LeasedAt,
+			LeaseID:   entry.LeaseID,
+			ExpiresAt: entry.ExpiresAt,
+			ACKed:     entry.ACKed,
+		}}
+		state, basis, resolveErr := ev.Resolve(target.ID, entry.ID, now)
+		if resolveErr != nil {
+			// Unreachable: every entry resolved here has evidence. Skipping
+			// rather than asserting a state for it keeps the listing honest if
+			// that ever stops being true.
+			continue
+		}
+		items = append(items, a2a.ListItem{
+			ID:              entry.ID,
+			Evidence:        ev,
+			State:           state,
+			Basis:           basis,
+			StatusTimestamp: ev.StatusTimestamp(now),
+		})
+	}
+
+	page, rpcErr := a2a.BuildListPage(items, params)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	tasks := make([]a2a.ListTask, 0, len(page.Items))
+	for _, item := range page.Items {
+		task, err := item.Evidence.Task(item.State, item.Basis, params.HistoryLength, now)
+		if err != nil {
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
+			return
+		}
+		tasks = append(tasks, task.ForListing(params.IncludeArtifacts))
+	}
+	h.writeRPC(w, a2a.SuccessResponse(req.ID, a2a.ListTasksResult{
+		Tasks:         tasks,
+		NextPageToken: page.NextPageToken,
+		PageSize:      page.PageSize,
+		TotalSize:     page.TotalSize,
+	}))
+}
+
+// listReadError maps a backend failure from the listing read onto the JSON-RPC
+// error it is. An agent that vanished between the tenant check and the read is
+// a not-found for the tenant's tasks — not a server fault — and an unusable
+// agent id is the caller's to fix.
+func listReadError(agentID string, err error) *a2a.RPCError {
+	switch {
+	case errors.Is(err, registry.ErrAgentNotFound):
+		return a2a.TaskNotFoundError("", agentID)
+	case errors.Is(err, registry.ErrInvalidStoreInput):
+		return a2a.NewRPCError(a2a.CodeInvalidParams, err.Error(),
+			a2a.InvalidParamsDetail(&a2a.InvalidParamsError{Field: "params.tenant", Detail: err.Error()}))
+	default:
+		slog.Error("A2A ListTasks: inbox listing failed", "agent_id", agentID, "error", err)
+		return a2a.NewRPCError(a2a.CodeInternalError, "the agent's tasks could not be read: "+err.Error())
+	}
+}
+
+// cancelTask serves CancelTask (§9.4.5).
+//
+// The cancellation is crier's OWN removal, not a state crier invents: the lease
+// on the message is released and the entry is closed (removed from the inbox),
+// which is what `CancelTask` means here — after it, no consumer can retrieve or
+// acknowledge the message, and the task has no entry left to report. It reuses
+// the store's lease/close semantics rather than adding a task store: the entry
+// IS the task, so closing the entry IS cancelling it.
+//
+// The answer is the Task in TASK_STATE_CANCELED, as §3.1.5 requires ("Updated
+// Task with cancellation status"). A LATER read of that task is TaskNotFoundError
+// — the entry is gone and crier keeps no tombstone — which §3.1.5 itself
+// sanctions: "A duplicate cancellation request MAY return TaskNotFoundError if
+// the task has already been canceled and purged."
+//
+// A cancel aimed at a task in a terminal state is refused with
+// TaskNotCancelableError (§3.1.5), never answered with a 200 and a false
+// cancellation: there is no claim left to release and no entry left to close.
+func (h *a2aHandler) cancelTask(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
+	params, rpcErr := a2a.DecodeCancelTaskParams(req.Params)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	target, rpcErr := h.target(params.Tenant)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	ev, rpcErr := h.evidence(target.ID, params.ID)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	now := h.opts.now()
+	state, _, rpcErr := ev.Resolve(target.ID, params.ID, now)
+	if rpcErr != nil {
+		// No record at all: there is no task here to cancel, and the message
+		// says exactly that.
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	if state.IsTerminal() {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.TaskNotCancelableError(ev.TaskID(), state)))
+		return
+	}
+	closer, ok := h.store.(registry.InboxCloser)
+	if !ok {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.TaskCapabilityUnsupportedError(
+			"CancelTask", "a per-entry close (registry.InboxCloser)")))
+		return
+	}
+	if err := closer.CloseEntry(target.ID, ev.TaskID()); err != nil {
+		if errors.Is(err, registry.ErrMessageNotFound) {
+			// The entry left the inbox between the read above and this close —
+			// a consumer acknowledged it, or the sweep took it. Answered as the
+			// not-found it now is rather than as a cancellation that did not
+			// happen.
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.TaskNotFoundError(ev.TaskID(), target.ID)))
+			return
+		}
+		if errors.Is(err, registry.ErrAgentNotFound) {
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.TaskNotFoundError(ev.TaskID(), target.ID)))
+			return
+		}
+		slog.Error("A2A CancelTask: close failed",
+			"agent_id", target.ID, "task_id", ev.TaskID(), "error", err)
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError,
+			"the task could not be closed: "+err.Error())))
+		return
+	}
+
+	slog.Info("A2A CancelTask: lease released and entry closed",
+		"task_id", ev.TaskID(), "agent_id", target.ID, "state_before", state,
+		"request_id", middleware.RequestIDFromContext(r.Context()))
+
+	task, err := ev.Task(a2a.TaskStateCanceled, a2a.StateBasisCanceled, nil, now)
+	if err != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
+		return
+	}
+	h.writeRPC(w, a2a.SuccessResponse(req.ID, task))
+}
+
+// subscribeToTask serves SubscribeToTask (§9.4.6): the SSE view of a task that
+// is not in a terminal state.
+//
+// It reuses the same stream adapter SendStreamingMessage uses — the same
+// lifecycle observation through the read-only peek, and the same relay
+// subscription written as text/event-stream — so a subscription and a streaming
+// send report a task identically. The stream opens with the Task (§9.4.6: "The
+// operation MUST return a Task object as the first event"), then the status
+// changes crier's own store shows, and closes when the task reaches a terminal
+// state.
+//
+// A task in a terminal state is refused with UnsupportedOperationError, as
+// §9.4.6 requires — there are no updates left to stream — and a task id crier
+// holds no record of is TaskNotFoundError.
+func (h *a2aHandler) subscribeToTask(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
+	params, rpcErr := a2a.DecodeSubscribeToTaskParams(req.Params)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	target, rpcErr := h.target(params.Tenant)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	ev, rpcErr := h.evidence(target.ID, params.ID)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	now := h.opts.now()
+	state, basis, rpcErr := ev.Resolve(target.ID, params.ID, now)
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	if state.IsTerminal() {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.SubscribeToTerminalTaskError(ev.TaskID(), state)))
+		return
+	}
+	task, err := ev.Task(state, basis, nil, now)
+	if err != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
+		return
+	}
+	if !h.openStream(w) {
+		return
+	}
+	// The stream derives the task's expiry and its inbox-observability from the
+	// task's own crier metadata, which the read path just filled in — so a
+	// subscription observes exactly the entry a streaming send would, with no
+	// second path through the store.
+	s := &a2aStream{
+		h:      h,
+		w:      w,
+		r:      r,
+		id:     req.ID,
+		target: target.ID,
+		task:   task,
+		state:  state,
+	}
+	s.run()
+}
+
+// refuseTaskTarget answers a SendMessage that names a task (§3.4.2, §3.1.1):
+//
+//   - a task id crier holds no record of gets TaskNotFoundError — "the provided
+//     taskId does not correspond to an existing task" — which, after an ack,
+//     includes the acknowledged task itself, because the entry is removed;
+//   - a task in a TERMINAL state gets UnsupportedOperationError, which §3.1.1
+//     and §3.1.2 make mandatory rather than optional: a message sent to a
+//     completed, failed, canceled or rejected task cannot be accepted, and this
+//     binding refuses it instead of quietly creating a second task under it;
+//   - an OPEN task gets UnsupportedOperationError too, with the reason stated:
+//     crier cannot represent a continuation, so accepting one would deliver a
+//     message that lands as a separate task under a separate id.
+func (h *a2aHandler) refuseTaskTarget(agentID, taskID string) *a2a.RPCError {
+	id := strings.TrimSpace(taskID)
+	ev, rpcErr := h.evidence(agentID, id)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	state, _, rpcErr := ev.Resolve(agentID, id, h.opts.now())
+	if rpcErr != nil {
+		return rpcErr
+	}
+	if state.IsTerminal() {
+		return a2a.TerminalTaskMessageError(id, state)
+	}
+	return a2a.TaskContinuationUnsupportedError(id, state)
 }
 
 // deliverTo runs the translated delivery through crier's own deliver handler —
@@ -609,7 +1010,7 @@ func (s *a2aStream) run() {
 						TaskID:    s.task.ID,
 						Role:      a2a.RoleAgent,
 						Parts: []a2a.Part{a2a.TextPart(fmt.Sprintf(
-							"stream budget of %s elapsed; the task is still %s — poll GetTask or open a new stream to continue watching (the A2A task lifecycle lands with INT-A2A-004)",
+							"stream budget of %s elapsed; the task is still %s — poll GetTask or open a new stream to continue watching",
 							s.h.opts.streamBudget, s.state))},
 					},
 				},

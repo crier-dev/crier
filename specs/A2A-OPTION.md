@@ -2,9 +2,10 @@
 
 Status: **DRAFT v3** · 2026-09-25 · Owner: Bane · Tickets: INT-A2A-001 (this doc + the opt-in gate),
 INT-A2A-002 (**SHIPPED** — the Agent Card discovery route, §5.3), INT-A2A-003 (**SHIPPED** — the
-JSON-RPC binding: SendMessage + SendStreamingMessage, §5.4), INT-A2A-005 (**SHIPPED** — the
-push-notification configuration operations, §5.5), INT-A2A-004/006 (the remaining A2A surfaces — NOT
-shipped)
+JSON-RPC binding: SendMessage + SendStreamingMessage, §5.4), INT-A2A-004 (**SHIPPED** — the task
+lifecycle: GetTask / ListTasks / CancelTask / SubscribeToTask mapped onto the inbox entry, §5.5),
+INT-A2A-005 (**SHIPPED** — the push-notification configuration operations, §5.6), INT-A2A-006 (the
+extended card — the remaining A2A surface, NOT shipped)
 Source: **A2A v1.0.0** (`github.com/a2aproject/A2A`) — section numbers below are that specification's.
 Precedent: `specs/WEBHOOK-DELIVERY.md` (same rigor + format).
 
@@ -72,10 +73,10 @@ The mapping is the normative contract for INT-A2A-002..006. Each row is
 | `AgentCard` (§4.4.1) | the agent registry row — `GET /agents/{id}` | The card is a **projection** of the row, not a second store. Discovery path `GET /.well-known/agent-card.json` (§8.2, §14.3) serves the same projection for the process's own identity. **SHIPPED (INT-A2A-002), §5.3.** |
 | `AgentSkill[]` (§4.4.5) | `agent.capabilities[]` | Each capability tag becomes a skill entry; the projection is one-way (crier's registry stays the source of truth). |
 | `SendMessage` (§9.4.1) | deliver — `POST /agents/{id}/inbox` | The A2A message becomes a crier delivery to the target agent. **SHIPPED (INT-A2A-003), §5.4** — the binding calls that route's own handler, so the guard, idempotency, detection, federation, webhook and inbox paths are the shipped ones. |
-| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted`/`working` = stored or leased; `completed` = acked (retrieved + acknowledged); `canceled` = removed before ack. The crier entry id is the A2A `task.id`. **Partially shipped (INT-A2A-003)**: the states a send can observe are reported on the stream (§5.4.5); the state-read operations (`GetTask`/`ListTasks`/`CancelTask`) are INT-A2A-004. |
-| `SubscribeToTask` / `SendStreamingMessage` (SSE) (§9.4.2, §9.4.6) | relay WS subscribe | A2A's stream is the SSE view of the same subscription surface; the mesh is untouched. **`SendStreamingMessage` SHIPPED (INT-A2A-003), §5.4.5** — an SSE adapter over `Relay.Subscribe` that also reports the task's own inbox lifecycle; `SubscribeToTask` (a stream keyed by an EXISTING task id) is INT-A2A-004. |
+| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted` = stored and unclaimed; `working` = leased; `completed` = acked; `failed` = TTL elapsed unacknowledged (or the sweep recorded the expiry); `canceled` = closed by `CancelTask`. The crier entry id is the A2A `task.id`, and the mapping is the table in §5.5.2. **SHIPPED (INT-A2A-003 §5.4.5 for the streamed states, INT-A2A-004 §5.5 for the read operations)**: the states a send can observe are reported on the stream, and `GetTask`/`ListTasks`/`CancelTask` report and produce the same states from the same entry. |
+| `SubscribeToTask` / `SendStreamingMessage` (SSE) (§9.4.2, §9.4.6) | relay WS subscribe | A2A's stream is the SSE view of the same subscription surface; the mesh is untouched. **SHIPPED (INT-A2A-003 §5.4.5 for `SendStreamingMessage`, INT-A2A-004 §5.5.1 for `SubscribeToTask`)** — one SSE adapter over `Relay.Subscribe` that also reports the task's own inbox lifecycle, reached both by a send that asked for a stream and by a subscription to an existing task id. |
 | `Part` — `text` \| `file` \| `data` — plus `Part.metadata` (§4.1.6) | crier message parts plus `alt`/`tags` | No new payload model: an A2A part maps onto the delivery payload's part metadata. **SHIPPED (INT-A2A-003), §5.4.4** — the mapping is lossless in both directions. |
-| `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism, and no second configuration store. **SHIPPED (INT-A2A-005), §5.5** — the four §9.4.7 operations are a view over that config, and the §4.3.3 notification payload is the config's own schema. An inline `taskPushNotificationConfig` on a send is still REFUSED (§5.5.3) rather than silently accepted. |
+| `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism, and no second configuration store. **SHIPPED (INT-A2A-005), §5.6** — the four §9.4.7 operations are a view over that config, and the §4.3.3 notification payload is the config's own schema. An inline `taskPushNotificationConfig` on a send is still REFUSED (§5.6.3) rather than silently accepted. |
 | `Message.metadata` / extensions (§4.1.4, §9.2) | the envelope's metadata | The envelope stays the carrier; A2A extension URIs ride the `A2A-Extensions` header. **Shipped (INT-A2A-003)** for `SendMessage`: the message's metadata and extensions are preserved verbatim in the delivered payload (§5.4.4). |
 | `AgentCard.securitySchemes` (`AgentCard` §4.4.1, `SecurityScheme` §4.5.1) | crier `bearerAuth` + the custom `agentSignature` scheme | **Additive to the projection only.** Signalling a scheme in a card never adds an auth requirement to an existing crier route (§1, §6). |
 
@@ -142,10 +143,9 @@ exactly those two paths; every pre-existing route answers identically in both (�
 | Surface | Served for | Registered only when | State |
 |---|---|---|---|
 | `GET /.well-known/agent-card.json?agent_id=<id>` — the AgentCard of one registry row | AgentCard discovery (§8.2, §14.3) | `CR_A2A_ENABLED=true` **and** the named row opted in | **SHIPPED (INT-A2A-002), §5.3** |
-| `POST /a2a` — a JSON-RPC 2.0 endpoint accepting `SendMessage` and `SendStreamingMessage`, with `Content-Type: text/event-stream` for the streaming one | §9.4 core methods | `CR_A2A_ENABLED=true` **and** the tenant's row opted in | **SHIPPED (INT-A2A-003), §5.4** |
-| The four push-notification configuration methods on the same endpoint — `CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs`, `DeleteTaskPushNotificationConfig` | §9.4.7 | `CR_A2A_ENABLED=true` **and** the tenant's row opted in **and** that agent has a push channel (a webhook) | **SHIPPED (INT-A2A-005), §5.5** |
-| The JSON-RPC methods `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` on the same endpoint | §9.4 core methods | `CR_A2A_ENABLED=true` | FUTURE (INT-A2A-004) — the endpoint is registered, and each of these methods answers `-32601 MethodNotFoundError` naming the row that lands it |
-| `GetExtendedAgentCard` on the same endpoint | §9.4.8 | — | **FUTURE, and not part of this option's series**: not registered, answers `-32601` |
+| `POST /a2a` — a JSON-RPC 2.0 endpoint accepting `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask` and `SubscribeToTask`, with `Content-Type: text/event-stream` for the two streaming ones | §9.4 core methods | `CR_A2A_ENABLED=true` **and** the tenant's row opted in | **SHIPPED (INT-A2A-003 for the sends §5.4, INT-A2A-004 for the task lifecycle §5.5)** |
+| The four push-notification configuration methods on the same endpoint — `CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs`, `DeleteTaskPushNotificationConfig` | §9.4.7 | `CR_A2A_ENABLED=true` **and** the tenant's row opted in **and** that agent has a push channel (a webhook) | **SHIPPED (INT-A2A-005), §5.6** |
+| `GetExtendedAgentCard` on the same endpoint | §9.4.8 | — | FUTURE (INT-A2A-006) — the endpoint is registered, and this one method answers `-32601 MethodNotFoundError` naming the row that lands it |
 | `agent/authenticatedExtendedCard` (auth-gated extended card) | §3.1.11, §9.4.8 | `CR_A2A_ENABLED=true` | FUTURE — not registered |
 
 Every A2A surface is gated by the server switch **and** targets an agent that opted in with the `a2a`
@@ -248,7 +248,7 @@ needs no second address.
 | HTTP status of a JSON-RPC answer | **`200`**, error or result alike. The JSON-RPC 2.0 binding is id-correlated: a status code would be a second, coarser answer to a question the protocol answers precisely. Only failures that never reach the JSON-RPC layer keep an HTTP status (405, 413, 415) |
 | Request body limit | 4 MiB (`413` beyond it). This is a request-size ceiling, not a message-size policy — crier's delivery itself has no payload limit |
 | Auth | **none of its own**: the route inherits the same middleware chain as every other authenticated route (§6.4), so with `CR_AUTH_TOKEN` set it needs the same Bearer header. The auth-exempt list is untouched |
-| Methods served | `SendMessage` (§9.4.1), `SendStreamingMessage` (§9.4.2) and the four push-notification configuration methods (§9.4.7, §5.5). Any other method answers `-32601 MethodNotFoundError` naming the row that lands it |
+| Methods served | `SendMessage` (§9.4.1), `SendStreamingMessage` (§9.4.2), the task lifecycle — `GetTask` (§9.4.3), `ListTasks` (§9.4.4), `CancelTask` (§9.4.5), `SubscribeToTask` (§9.4.6), all mapped onto the inbox entry, §5.5 — and the four push-notification configuration methods (§9.4.7, §5.6). Any other method (the extended card) answers `-32601 MethodNotFoundError` naming the row that lands it |
 | Target | `params.tenant` — the registry id the card publishes as `AgentInterface.tenant`. It must name a row that opted in (§4.2) |
 
 #### 5.4.1 The delivery is crier's own
@@ -278,7 +278,7 @@ wire and stated so nobody has to infer them:
 | `params.message` | the payload (§5.4.3) | Required, with `messageId`, `role` and at least one part (§4.1.4) |
 | `message.messageId` | `idempotency_key` | A2A §3.3.1's deduplication rule made executable: a retry of the same message id answers with the FIRST delivery's accept — the same task id — instead of delivering the same work twice. Bounded at 128 characters, crier's own limit for the field |
 | `message.contextId` | `session_id` | Both mean "the conversation this belongs to" (CR-FEAT-004) |
-| `message.role` | carried in the payload | Must be `ROLE_USER` or `ROLE_AGENT`; `ROLE_UNSPECIFIED`/absent is `-32602` (the field is REQUIRED) |
+| `message.role` | carried in the payload | Must be `ROLE_USER` or `ROLE_AGENT`; `ROLE_UNSPECIFIED` or absent is `-32602` (the field is REQUIRED) |
 | `message.parts[]` | `payload.parts[]` | §5.4.3 |
 | `message.metadata`, `message.extensions`, `message.referenceTaskIds` | `payload.metadata` / `payload.extensions` / `payload.reference_task_ids` | Preserved verbatim; never interpreted |
 | `message.taskId` | — | Refused with `-32004 UnsupportedOperationError`: continuing an existing crier task means addressing an inbox entry's lifecycle, which is INT-A2A-004's surface. Refusing is the honest answer; silently starting a NEW task under a client's task id would not be |
@@ -292,7 +292,7 @@ wire and stated so nobody has to infer them:
 | `configuration.historyLength` | — | §3.2.4 semantics applied to the returned Task's `history` (§5.4.5) |
 | `configuration.returnImmediately` | `delivery_mode: async` | See §5.4.6 |
 | `configuration.acceptedOutputModes` | — | **Read and not honoured**: crier does not re-encode a payload, and a part's media type is the one the agent that produced it chose. §3.2.2 makes tailoring a SHOULD on the server, and this binding states that it declines it rather than pretending |
-| `configuration.taskPushNotificationConfig` | — | **Refused, never silently accepted**: an inline push configuration on a send is not honoured, because push configuration is its own operation surface (§9.4.7, §5.5) and a send never writes configuration. The refusal is `PushNotificationNotSupportedError` when the target agent has no push channel (§3.3.4's capability answer) and `UnsupportedOperationError` when it has one, naming the four operations. §5.5.3 states why the code differs between the two positions. |
+| `configuration.taskPushNotificationConfig` | — | **Refused, never silently accepted**: an inline push configuration on a send is not honoured, because push configuration is its own operation surface (§9.4.7, §5.6) and a send never writes configuration. The refusal is `PushNotificationNotSupportedError` when the target agent has no push channel (§3.3.4's capability answer) and `UnsupportedOperationError` when it has one, naming the four operations. §5.6.3 states why the code differs between the two positions. |
 | `A2A-Version` header (§9.2) | — | Absent, `1`, `1.0` or `1.x` are served; anything else is `-32009 VersionNotSupportedError` naming the version this server serves (§3.6) |
 | `A2A-Extensions` header (§9.2) | — | Read; crier declares no extension (`capabilities.extensions` is empty, §5.3), so nothing is negotiated and nothing is refused: the header asks, it does not require |
 
@@ -360,20 +360,21 @@ never a re-telling of it.
 |---|---|---|
 | `-32700` | `JSONParseError` | the body is not JSON, or stops mid-value; empty body; trailing data |
 | `-32600` | `InvalidRequestError` | not a JSON-RPC 2.0 request object: wrong `jsonrpc`, missing `method`, missing/`null` id (this binding refuses notifications — every A2A operation answers a correlated response), an unknown envelope member, a batch array |
-| `-32601` | `MethodNotFoundError` | any method but `SendMessage` / `SendStreamingMessage`, naming the row that lands the rest |
-| `-32602` | `InvalidParamsError` | a parameter this binding cannot honour: the missing tenant, a tenant that names no opted-in agent, a required message member, a part whose oneof is not exactly one member, a wrongly-typed metadata member, an unknown request-metadata key — and crier's own `400` from the delivery engine, with its message |
-| `-32603` | `InternalError` | crier could not complete the delivery (a `409` in-flight duplicate, a `5xx`), or the delivery path was unreachable |
-| `-32001` | `TaskNotFoundError` | the delivery engine answered `404`: the target agent is not on this relay or in its federation |
-| `-32003` | `PushNotificationNotSupportedError` | the agent has no push channel: a push-notification configuration operation against a row with no webhook (§5.5.3, §3.3.4), and an inline `configuration.taskPushNotificationConfig` on a send to such an agent |
-| `-32004` | `UnsupportedOperationError` | `message.taskId` (task continuation, INT-A2A-004); an inline `configuration.taskPushNotificationConfig` on a send to an agent that HAS a push channel (§5.5.3); a push configuration whose agent row carries a bring-your-own `custom_schema` (§5.5.4) |
+| `-32601` | `MethodNotFoundError` | any method but the ten this series serves — `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` and the four push-notification configuration operations (§5.6) — naming the row that lands the rest |
+| `-32602` | `InvalidParamsError` | a parameter this binding cannot honour: the missing tenant, a tenant that names no opted-in agent, a required message or task member, a part whose oneof is not exactly one member, a wrongly-typed metadata member, an unknown request-metadata key, a `pageSize` outside 1..100, an unknown `status` name, an unparseable `statusTimestampAfter`, a `pageToken` this server did not mint — and crier's own `400` from the delivery engine, with its message |
+| `-32603` | `InternalError` | crier could not complete the delivery (a `409` in-flight duplicate, a `5xx`), the delivery path was unreachable, or an inbox read failed for a reason that is not "the task is gone" |
+| `-32001` | `TaskNotFoundError` | the delivery engine answered `404` (the target agent is not on this relay or in its federation); or a task-lifecycle operation named a task id crier holds NO record of — including an acknowledged one, whose entry the ack removed (§5.5.2) |
+| `-32002` | `TaskNotCancelableError` | `CancelTask` aimed at a task that is already terminal (§3.1.5, §5.5.4) |
+| `-32003` | `PushNotificationNotSupportedError` | the agent has no push channel: a push-notification configuration operation against a row with no webhook (§5.6.3, §3.3.4), and an inline `configuration.taskPushNotificationConfig` on a send to such an agent |
+| `-32004` | `UnsupportedOperationError` | `message.taskId` (task continuation, §5.5.3); an inline `configuration.taskPushNotificationConfig` on a send to an agent that HAS a push channel (§5.6.3); a push configuration whose agent row carries a bring-your-own `custom_schema` (§5.6.4); a `SubscribeToTask` aimed at a terminal task (§9.4.6); or a task-lifecycle operation on a relay whose inbox backend cannot answer the read or the close it needs |
 | `-32009` | `VersionNotSupportedError` | `A2A-Version` names a version this server does not serve |
-| `-32050` | *(crier's implementation-defined server error)* | crier refused the request for a reason A2A has no name for: a delivery blocked by the target agent's guard (`403 GUARD_BLOCKED`), a quarantined agent (`403 AGENT_QUARANTINED`), or an agent-owned write crier's own signature gate refused (a push-notification configuration write made with `CR_REQUIRE_AGENT_SIG` on, §5.5.3). The reason rides in `ErrorInfo` and crier's own status and body in the `DeliveryRefusal` (delivery) / `ConfigRefusal` (configuration) detail |
+| `-32050` | *(crier's implementation-defined server error)* | crier refused the request for a reason A2A has no name for: a delivery blocked by the target agent's guard (`403 GUARD_BLOCKED`), a quarantined agent (`403 AGENT_QUARANTINED`), or an agent-owned write crier's own signature gate refused (a push-notification configuration write made with `CR_REQUIRE_AGENT_SIG` on, §5.6.3). The reason rides in `ErrorInfo` and crier's own status and body in the `DeliveryRefusal` (delivery) / `ConfigRefusal` (configuration) detail |
 
 `-32005 ContentTypeNotSupportedError` is deliberately **not** produced: crier's delivery payload is
 opaque and the §5.4.3 projection is lossless for any media type, so claiming a media type is
-unsupported would be false. `-32002 TaskNotCancelableError`, `-32006 InvalidAgentResponseError`,
-`-32007 ExtendedAgentCardNotConfiguredError` and `-32008 ExtensionSupportRequiredError` belong to
-operations this row does not serve (INT-A2A-004/005).
+unsupported would be false. `-32006 InvalidAgentResponseError`, `-32007
+ExtendedAgentCardNotConfiguredError` and `-32008 ExtensionSupportRequiredError` belong to operations
+this series does not serve (INT-A2A-005/006).
 
 #### 5.4.5 `SendStreamingMessage` — the SSE adapter
 
@@ -394,9 +395,18 @@ The stream carries **two** things, and says which is which:
    `TASK_STATE_SUBMITTED` (stored, unclaimed) → `TASK_STATE_WORKING` (leased, i.e. a consumer
    retrieved it) → `TASK_STATE_COMPLETED` (acknowledged: the entry was removed before its expiry) or
    `TASK_STATE_FAILED` (its TTL passed unacknowledged, so it can never be retrieved). It closes when
-   the task reaches a terminal state, as §3.1.2 requires. `TASK_STATE_CANCELED` is not asserted, and
-   the reason is stated rather than implied: in crier an inbox entry leaves the store exactly two
-   ways (an ack, and the expiry sweep), and `CancelTask` is INT-A2A-004's operation.
+   the task reaches a terminal state, as §3.1.2 requires.
+   - `TASK_STATE_CANCELED` is not asserted **by this adapter's disappearance inference**, and the
+     reason is stated rather than implied: an entry leaves crier's inbox two ways — an ack, and the
+     expiry sweep — and, since INT-A2A-004, a third: a `CancelTask` (which releases the lease and
+     closes the entry, §5.5.4). The third one is indistinguishable from the first HERE, because both
+     remove the entry and crier keeps no tombstone; the observation is a poll of the store, and the
+     store cannot tell the two apart. The consequences are bounded and are stated in §5.5.4: a live
+     stream open across a cancel reports the task as leaving the inbox without a failure record
+     (`TASK_STATE_COMPLETED`), and the client that cancelled is the one party that knows otherwise —
+     it has the `CancelTask` answer. A `SubscribeToTask`/`SendStreamingMessage` client that did not
+     cancel cannot be misled about its own action, and `GetTask` — the surface a returning client uses
+     — answers `TaskNotFoundError` for both, never an invented state (§5.5.2).
    - The state is read through an **optional read-only store capability** (`registry.InboxPeeker`),
      because the only other read of an inbox — `Retrieve` — LEASES what it returns, and an observer
      built on it would steal the message from the agent whose work it is watching. A backend that
@@ -445,10 +455,11 @@ of approximating it silently:
 
 #### 5.4.7 What this row does not do
 
-- **No task lifecycle operations.** `GetTask`, `ListTasks`, `CancelTask` and `SubscribeToTask` answer
-  `-32601`, as does `GetExtendedAgentCard` (INT-A2A-004; the extended card is not part of this
-  option's series). The push-notification configuration methods do NOT: they are served by INT-A2A-005
-  (§5.5).
+- **No A2A method left unserved but the extended card.** INT-A2A-004 landed the task lifecycle
+  (§5.5) and INT-A2A-005 the push-notification configuration operations (§5.6), so `SendMessage`,
+  `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` and the four
+  `TaskPushNotificationConfig` methods are ALL served by this binding. `GetExtendedAgentCard` is the
+  one method that still answers `-32601` (INT-A2A-006).
 - **No restart resume.** A stream is a live view: an SSE stream does not survive the process, and a
   task's state is re-read from the inbox on each new stream. Nothing is buffered for a client that
   reconnects, because nothing in crier replays a stream.
@@ -458,7 +469,196 @@ of approximating it silently:
   through the same subscription primitive, and the existing relay tests are untouched.
 - **No new auth requirement anywhere**, and no existing field changes meaning (§6).
 
-### 5.5 The push-notification configuration operations (INT-A2A-005, SHIPPED)
+### 5.5 The task lifecycle (INT-A2A-004, SHIPPED)
+
+The four task operations map onto **the inbox entry crier already keeps**. There is no task store, no
+task index, no A2A column on any crier table and no A2A field on any crier route: a task IS a
+delivery, its id IS crier's message id, and every state this section names is derived from the entry's
+own lifecycle (stored → leased → acked / expired / closed) plus the one durable record the expiry
+sweep writes.
+
+The binding decision of §2 applies unchanged (JSON-RPC 2.0, `POST /a2a`, PascalCase method names), and
+so does the gate: each operation names its target with `params.tenant` (the registry id the Agent Card
+publishes as `AgentInterface.tenant`) and is reachable only while `CR_A2A_ENABLED` is set **and** that
+row opted in. An id that is not an opted-in row gets the send operations' own answer (§5.4.4).
+
+#### 5.5.1 The operations
+
+| Method | §  | Request `params` | Result |
+|---|---|---|---|
+| `GetTask` | §9.4.3, §3.1.3 | `tenant` (required here: one origin hosts many agents), `id` (REQUIRED — the task's id), `historyLength` (optional int ≥ 0, §3.2.4) | the `Task` |
+| `ListTasks` | §9.4.4, §3.1.4 | `tenant`, `contextId`, `status` (a `TaskState` name), `pageSize` (1..100, default 50), `pageToken` | `{tasks, nextPageToken, pageSize, totalSize}` |
+| `CancelTask` | §9.4.5, §3.1.5 | `tenant`, `id`, `metadata` (read and carried, never interpreted) | the `Task` in `TASK_STATE_CANCELED` |
+| `SubscribeToTask` | §9.4.6, §3.1.6 | `tenant`, `id` | `200` + `text/event-stream`, the same SSE contract as §5.4.5 |
+
+Everything the §5.4 binding states about the transport applies to these methods too: `POST /a2a` only,
+`application/a2a+json` (or `application/json`) accepted and answered, **HTTP `200` for every JSON-RPC
+answer including an error**, the 4 MiB body ceiling, the `A2A-Version` header check, and no auth
+requirement of its own (the route inherits the same middleware chain as every other authenticated
+route — the auth-exempt list is untouched). Nothing here adds a route: the surface is the one
+`POST /a2a` that INT-A2A-003 registered (§5.2).
+
+Details that are decisions rather than restatements:
+
+- **Every filter of `ListTasks` is honoured or refused, never ignored** (DF-CRIER-180's rule for a
+  request-level parameter): a `pageSize` outside 1..100, a `status` that is not one of §4.1.3's names,
+  a `statusTimestampAfter` that is not an ISO 8601 timestamp and a `pageToken` this server did not mint
+  are each `-32602`, naming the field.
+- **`pageToken` is an opaque KEYSET cursor**, not an offset: it carries the position of the last task
+  of the previous page in the listing's own order (`statusTimestamp` descending, `task.id` descending).
+  That is what keeps a page stable while messages are being claimed and acknowledged underneath it —
+  an offset would skip or repeat tasks as the queue shrinks.
+- **`pageSize` in the response is the size ACTUALLY used**, so a page that ran out of items is not
+  reported as a full one, and `totalSize` is the number of matching tasks BEFORE pagination.
+  `nextPageToken` is always present and empty on the final page (§3.1.4).
+- **The listing is of the tasks crier's store holds** — the entries in that inbox, resolved exactly as
+  `GetTask` resolves them, ordered by §3.1.4's status-timestamp rule. A message the expiry sweep
+  removed is NOT listed (its task is no longer in the queue) even though `GetTask` still answers
+  `FAILED` for it from the sweep's record (§5.5.2).
+- **`history` is the creating message** — crier stores one payload per task, so the history is bounded
+  at one message whatever `historyLength` asks for: absent means that message, `0` means none, `n > 0`
+  means at most `n` of the messages crier holds. The message is projected from the delivery payload
+  when that payload is one of this binding's own envelopes (§5.4.3); a task started by a non-A2A
+  sender has whatever payload it was given, and no A2A message can be reconstructed from it.
+- **`artifacts` is omitted entirely** unless `includeArtifacts` is true, in which case it is present as
+  an empty array: crier keeps no artifact for a task (a task's outputs are relay frames an observing
+  stream forwards, §5.4.5 — never stored rows), and §3.1.4's conditional member is answered rather
+  than dropped.
+- **`SubscribeToTask` reuses the §5.4.5 adapter** — the same lifecycle observation through the
+  read-only peek, the same relay subscription written as `text/event-stream`, the same 120-second
+  stream budget. The stream opens with the `Task` (§9.4.6: "The operation MUST return a Task object as
+  the first event"), reports the states crier's store shows, and closes when the task reaches a
+  terminal state. A task in a terminal state is refused with `-32004 UnsupportedOperationError`
+  (there are no updates left to stream) **as a JSON-RPC answer, never as an empty stream** — the
+  stream's content type is a promise about its body.
+
+#### 5.5.2 The state mapping — the one table this row is held to
+
+**This is where an interop adapter most easily lies about state**, so the mapping is stated as the
+contract it is, is asserted one row at a time in `internal/a2a/task_test.go`, and is named on the wire:
+every task a read returns carries `metadata.crier.state_basis` — the crier record its state was read
+from.
+
+| crier's record | A2A `TaskState` | `state_basis` | read by |
+|---|---|---|---|
+| an inbox entry, unacked, unleased, TTL not elapsed | `TASK_STATE_SUBMITTED` | `inbox-entry-unleased` | `Peek` |
+| an inbox entry, unacked, **leased** (`lease_id` set), TTL not elapsed | `TASK_STATE_WORKING` | `inbox-entry-leased` | `Peek` |
+| an inbox entry, unacked, **past its TTL** (the sweep has not run yet) | `TASK_STATE_FAILED` | `inbox-entry-ttl-elapsed-unacked` | `Peek` |
+| an inbox entry the store reports as **closed** (`acked`) | `TASK_STATE_COMPLETED` | `inbox-entry-closed` | `Peek` |
+| **no entry**, and the expiry sweep recorded this message as a dead letter | `TASK_STATE_FAILED` | `dead-letter-recorded` | `DeadLetterLookup` |
+| **no entry**, and no failure record | **`-32001 TaskNotFoundError`** | *(no state)* | — |
+| the `CancelTask` this request performed | `TASK_STATE_CANCELED` | `canceled-by-request` | the operation's own answer |
+
+Four properties of that table are decisions, and each is stated so a client never has to infer it:
+
+1. **`TASK_STATE_COMPLETED` is only asserted from a closed row, and both shipped backends delete the
+   row when it is acknowledged.** `Ack` is a hard removal (DF-CRIER-32, "permanently removes") and
+   crier keeps no tombstone, so **after an ack there is nothing left to read**. The honest answer for
+   such a task id is therefore `TaskNotFoundError`, which is the specification's own definition of
+   that error — "The specified task ID does not correspond to an existing or accessible task. It might
+   be invalid, expired, or **already completed and purged**" (§3.3.2). Reporting `TASK_STATE_COMPLETED`
+   there would be a claim crier cannot support: a removed id is indistinguishable from one that was
+   transferred to another inbox, purged with its agent, or never delivered at all. The `COMPLETED`
+   transition is observable where it happens — on an open stream (§5.4.5) and in the ack's own `204`;
+   a client that needs a terminal state after the fact must be watching, which is A2A's own model for
+   a task it did not block on. The `inbox-entry-closed` row exists so that a backend which ever
+   retains a closed entry is mapped honestly rather than reported as missing.
+2. **An entry PAST ITS TTL is `FAILED` even before the sweep removes it.** Every consumption path
+   skips an expired row, so the message can never be retrieved and the work cannot complete; reporting
+   the `SUBMITTED` state the row still stores would tell a client to keep waiting for a message nobody
+   can claim. The sweep records the same outcome durably a moment later, which is why the row below it
+   gives the same state from a different record.
+3. **`FAILED` outlives the entry.** Crier's expiry sweep writes a dead letter and a receipt
+   (CR-FEAT-025, "failure is a message, not a mystery"), so a swept task is still reported `FAILED`,
+   with `metadata.crier.dead_lettered_at` naming when the sweep recorded it. This is the only terminal
+   state that is re-readable after the fact, and it is re-readable because crier chose to record it —
+   not because this adapter reconstructed it.
+4. **A never-expiring entry never expires.** `ttl_seconds: 0` stores the zero `ExpiresAt` (DF-CRIER-37),
+   and the mapping reads that as "no expiry", never as "expired long ago".
+
+`Task.status.timestamp` is crier's own timestamp for the state it reports, so §3.1.4's ordering is
+crier's ordering: a lease stamps the instant it was taken, an expiry stamps the instant that elapsed,
+a swept record stamps when the sweep recorded it, and an unclaimed message is as old as its delivery.
+`Task.status.message` explains the two states whose REASON is not in the state's name (`FAILED` and
+`CANCELED`); `SUBMITTED` and `WORKING` carry none, because the state says everything crier knows.
+
+#### 5.5.3 A message that names a task
+
+A `SendMessage` (or `SendStreamingMessage`) whose `message.taskId` names a task is resolved against
+crier's own store **before anything is delivered**, and answered with the specification's own case for
+what it names (§3.4.2, §3.1.1):
+
+| what the task id names | answer | why |
+|---|---|---|
+| nothing crier holds a record of | `-32001 TaskNotFoundError` | §3.4.2: "Agents **MUST** return a `TaskNotFoundError` if the provided `taskId` does not correspond to an existing task". After an ack this includes the acknowledged task itself (§5.5.2). |
+| a task in a TERMINAL state (`COMPLETED`, `FAILED`, `CANCELED`, `REJECTED`) | `-32004 UnsupportedOperationError`, naming the state | §3.1.1/§3.1.2 make this mandatory: "Messages sent to Tasks that are in a terminal state cannot accept further messages." |
+| an OPEN task (`SUBMITTED`, `WORKING`) | `-32004 UnsupportedOperationError`, with the reason stated | crier cannot represent a continuation: a task IS its inbox entry (one message), and no primitive appends a message to an existing entry. Accepting it would deliver a message that lands as a **separate** task under a separate id — which is not a continuation, and the client would not recognise it. |
+
+None of the three is a `200` and none of them delivers anything: a refused message must not reach the
+guard, the inbox or a webhook, and `cmd/server/a2a_lifecycle_test.go` proves it by measuring the
+agent's own queue depth across the refusal.
+
+#### 5.5.4 `CancelTask` — release the lease, close the entry
+
+`CancelTask` is performed with crier's OWN lease/close semantics, not by inventing a task state:
+
+- the lease on the message is **released** and the entry is **closed** — removed from the inbox,
+  whatever its lease state — so after the answer nothing can retrieve or acknowledge the message;
+- the answer is the `Task` in `TASK_STATE_CANCELED` with `state_basis: canceled-by-request`, i.e. the
+  state the operation itself produced, as §3.1.5 requires ("Updated `Task` with cancellation status");
+- a cancel reaches a **queued** message as well as a leased one. That is why the store capability this
+  row added is a per-entry close rather than an `Ack` wrapper: `Ack` requires the caller to hold the
+  lease, and an A2A client never holds one;
+- a cancel aimed at a **terminal** task is `-32002 TaskNotCancelableError` (§3.1.5) — never a `200`
+  reporting a cancellation that did not happen;
+- a cancel aimed at a task with **no record** is `-32001 TaskNotFoundError`. A **duplicate** cancel
+  therefore also answers `-32001`, which §3.1.5 explicitly allows: "A duplicate cancellation request
+  MAY return `TaskNotFoundError` if the task has already been canceled and purged."
+
+**The one residual ambiguity, stated rather than hidden.** Crier keeps no tombstone, so a closed entry
+is indistinguishable from an acknowledged one *by looking at the store*. A stream that is already open
+when a cancel happens therefore reports the task as leaving the inbox without a failure record
+(`TASK_STATE_COMPLETED`, §5.4.5), and `GetTask` after a cancel answers `TaskNotFoundError`. Neither is
+a fabrication — both are the same honest "this task is no longer in the queue" — and the party that is
+never misled is the one that cancelled, because it holds the `CancelTask` answer. Closing this gap
+would need a durable terminal record crier does not keep today; it is deliberately NOT invented here,
+because a second store is exactly what this row forbids (§1.1).
+
+#### 5.5.5 What this row added to crier's store (and what it did not)
+
+Three OPTIONAL store capabilities, in the family `InboxPeeker` opened (INT-A2A-003), with no schema
+change, no migration and no change to any existing method:
+
+| capability | method | contract |
+|---|---|---|
+| `registry.InboxLister` | `PeekInbox(agentID)` | a READ-ONLY, LEASE-FREE snapshot of one agent's inbox, in delivery order. It takes no lock on any entry and mints no lease, because the only other multi-entry read — `Retrieve` — leases what it returns and would steal the messages a listing is describing. `ErrAgentNotFound` for an unknown agent; an empty slice (no error) for a registered agent with nothing queued. |
+| `registry.InboxCloser` | `CloseEntry(agentID, messageID)` | the removal `Ack` performs WITHOUT its lease precondition: the entry is deleted whatever its lease state, and any outstanding lease goes with it. It writes no dead letter and sends no receipt — a closed entry is a message the caller decided would not be worked, not one crier gave up on. |
+| `registry.DeadLetterLookup` | `LookupDeadLetter(agentID, messageID)` | whether the expiry sweep recorded THIS message id, in one lookup. It is not `ListDeadLetters` (a bounded, newest-first page of an archive, which cannot answer "was this one recorded?" once the record is older than a page — and answering "no" from a window that did not reach far enough would turn a recorded failure into an invented not-found). |
+
+All three are implemented by both shipped backends and are OPTIONAL like their predecessors: the
+remote proxy does not implement them, and a task-lifecycle operation on such a backend is refused with
+`-32004 UnsupportedOperationError` naming the capability rather than answered with an invented state.
+
+**No existing crier surface changed to make this possible.** The inbox row's columns, `Ack`,
+`Retrieve`, `PurgeExpired`, the dead-letter destination, the long-poll notifier, the guard, delivery,
+federation, the webhook driver, the mesh, the MCP surface, `docs/openapi.yaml` and its generated copy
+and the docs-claims gate are all exactly what they were: nothing in any of them consults the A2A switch
+or an agent's `a2a` block (§1.1, §6).
+
+#### 5.5.6 What this row does not do
+
+- **No second store, no task index, no tombstone.** A task is the inbox entry; what crier does not
+  record is not reported (§5.5.2).
+- **No task continuation.** A message that names an open task is refused (§5.5.3), because delivering
+  it would create a second task rather than continue the named one.
+- **No artifacts.** `Task.artifacts` is empty (and omitted unless asked for); crier stores no artifact
+  for a task.
+- **No push-notification configs, and no extended card.** Push configuration is INT-A2A-005's surface
+  (§5.6); the extended card (INT-A2A-006) is the one remaining A2A surface and still answers `-32601`.
+- **No change to the relay's WebSocket path, and none to the inbox's own lifecycle semantics** — a
+  cancelled message is removed; nothing about ack, lease or TTL moved.
+
+### 5.6 The push-notification configuration operations (INT-A2A-005, SHIPPED)
 
 §4.3 and §9.4.7's `TaskPushNotificationConfig` operations are served by the SAME binding as every other
 A2A operation: `POST /a2a`, as four JSON-RPC methods. **No new route is registered** — crier
@@ -473,9 +673,9 @@ option does not have.
 | Target | `params.tenant` — the registry id the card publishes as `AgentInterface.tenant`, and it must name an opted-in row (§4.2). Required: one crier origin hosts many agents |
 | The configuration | **crier's existing per-agent webhook config.** There is no second configuration store: the A2A config IS `webhook.Config` (the mapping table's row, §3), which is also the thing `capabilities.pushNotifications` in the Agent Card reports (§5.3) |
 | Id | **Derived, never stored**: `wh-<sha256(tenant ‖ 0x00 ‖ url)[:8] hex>` (`a2a.PushConfigID`). crier has one push channel per agent, so there is nothing to enumerate |
-| The payload | §4.3.3's `StreamResponse` envelope, `Content-Type: application/a2a+json`, sent by crier's EXISTING webhook driver (§5.5.5) |
+| The payload | §4.3.3's `StreamResponse` envelope, `Content-Type: application/a2a+json`, sent by crier's EXISTING webhook driver (§5.6.5) |
 
-#### 5.5.1 Why it is a view rather than a second surface
+#### 5.6.1 Why it is a view rather than a second surface
 
 crier could already push to an agent: the webhook config is the push channel, with retries, a timeout,
 a batch mode, a delivery mode, a schema and an optional named secret. INT-A2A-005 exposes that config
@@ -490,7 +690,7 @@ discovered:
   signing/authentication headers are the shipped code, reached unchanged.
 - **No second write path, and no weakened gate.** The strict `webhook` member decode,
   `webhook.Config.Validate`, the store update and the **agent-owned signature gate** (`requireAgent`,
-  enforced when `CR_REQUIRE_AGENT_SIG` is on) are crier's own. §5.5.3 states what that means for a
+  enforced when `CR_REQUIRE_AGENT_SIG` is on) are crier's own. §5.6.3 states what that means for a
   write made over A2A.
 - **No changed field meaning.** The operation writes `webhook.url`, the notification schema
   (`custom_schema`) and — when the request asks — `webhook.auth_type` / `auth_value_ref`. Every other
@@ -499,13 +699,13 @@ discovered:
   data loss of operator configuration (the DF-CRIER-279 class).
 - **Reads never write.** `Get`/`List` project the row and change nothing.
 
-#### 5.5.2 The object mapping, field by field
+#### 5.6.2 The object mapping, field by field
 
 | A2A `TaskPushNotificationConfig` (§4.3.1) | crier | Rule |
 |---|---|---|
 | `tenant` | the registry id | Echoed. Required by this binding, and identical to `params.tenant` |
-| `id` | the derived id (§5.5) | Returned by create, accepted by get/delete. A client-supplied `id` that is not the derived one is `-32602` naming the derived one: there is no second configuration for it to address |
-| `taskId` | — (client addressing) | **Echoed, not verified.** crier's push configuration is per AGENT, so there is no per-task record to look up — and a pushed delivery creates no inbox entry, so "does this task exist" has no honest answer here (see §5.5.4). The response states the task the client addressed, and nothing more |
+| `id` | the derived id (§5.6) | Returned by create, accepted by get/delete. A client-supplied `id` that is not the derived one is `-32602` naming the derived one: there is no second configuration for it to address |
+| `taskId` | — (client addressing) | **Echoed, not verified.** crier's push configuration is per AGENT, so there is no per-task record to look up — and a pushed delivery creates no inbox entry, so "does this task exist" has no honest answer here (see §5.6.4). The response states the task the client addressed, and nothing more |
 | `url` (REQUIRED) | `webhook.url` | Written on create — this is the endpoint notifications go to, and it is the same field that routes an ordinary delivery to that agent |
 | `token` | — | **Refused** (`-32602`, "token"): crier's webhook config has no per-task notification-token field, and accepting one would promise a value that no delivery ever sends |
 | `authentication.scheme` (§4.3.2) | `webhook.auth_type` | `none` → `auth_type: none` (the named secret is cleared: nothing would use it); `Bearer` → `auth_type: bearer`, which requires the row to already name a secret; anything else is `-32602` naming the two schemes crier's driver can emit. Scheme comparison is case-insensitive (RFC 9110 §11.1) |
@@ -514,7 +714,7 @@ discovered:
 | the list request's `pageToken` | — | **Refused** (`-32602`): crier never issues a page token, so one a client sends did not come from this server. `pageSize` is accepted (and must be ≥ 1); it bounds a list that has at most one entry |
 | the delete result | `{"deleted": true, "id": …, "tenant": …}` | §3.1.10 leaves the confirmation implementation-defined |
 
-#### 5.5.3 The capability answer is a MUST, and the write gate is crier's own
+#### 5.6.3 The capability answer is a MUST, and the write gate is crier's own
 
 **Capability (§3.3.4).** If `AgentCard.capabilities.pushNotifications` is false — which in crier means
 *the row carries no webhook* — then all four operations MUST answer `-32003
@@ -544,16 +744,16 @@ operations for an agent that HAS one, because `-32003` would be a false statemen
 card says `pushNotifications: true`. Either way the request is refused rather than silently accepted,
 and the row is unchanged.
 
-#### 5.5.4 What the operations refuse, and why each refusal is loud
+#### 5.6.4 What the operations refuse, and why each refusal is loud
 
 | Request | Answer | Why |
 |---|---|---|
-| the agent has no webhook | `-32003` | §3.3.4 capability MUST (§5.5.3) |
+| the agent has no webhook | `-32003` | §3.3.4 capability MUST (§5.6.3) |
 | `url` absent or blank | `-32602` (`url`) | §4.3.1 marks it REQUIRED, and crier's own `Validate` adds the `http(s)://` rule |
 | a `url` crier's own route would refuse (not http(s)) | `-32602` with **crier's own message** | The write is validated by crier's route, so the A2A answer quotes it (`crier.ConfigRefusal`) |
-| `id` that is not the derived id | `-32602` (`id`) | one configuration per agent (§5.5) |
+| `id` that is not the derived id | `-32602` (`id`) | one configuration per agent (§5.6) |
 | `token` | `-32602` (`token`) | no such field in crier's config, and no delivery would send it |
-| `authentication.credentials` | `-32602` | crier references a secret by name; it never stores a credential (§5.5.2) |
+| `authentication.credentials` | `-32602` | crier references a secret by name; it never stores a credential (§5.6.2) |
 | `authentication.scheme` that is neither `none` nor `Bearer` | `-32602` | those are the schemes crier's driver emits |
 | `Bearer` with no secret named on the row | `-32602` | otherwise the configuration would claim authentication it does not have |
 | an unknown member anywhere in `params` (including inside `authentication`) | `-32602` naming the member and the accepted set | the strict-decode discipline the send params and the `a2a` registration block are held to |
@@ -567,7 +767,7 @@ raising `TaskNotFoundError` on that basis would be inventing a fact. `TaskNotFou
 where crier really can answer: a configuration id that names no configuration (§3.1.8/§3.1.10's own
 meaning for that error).
 
-#### 5.5.5 The notification payload (§4.3.3)
+#### 5.6.5 The notification payload (§4.3.3)
 
 > When a task update occurs, the agent sends an HTTP POST request to the configured webhook URL. The
 > payload uses the same `StreamResponse` format as streaming operations.
@@ -622,7 +822,7 @@ What that means, precisely:
   additive to the A2A payload, and they are how the receiving side can tell a retry from a first
   attempt.
 
-#### 5.5.6 What this row deliberately does not do
+#### 5.6.6 What this row deliberately does not do
 
 - **It does not build a second push mechanism.** No new route, no new store, no new delivery engine, no
   new queue. The A2A configuration is a view over `webhook.Config` and rides the shipped driver.
@@ -698,7 +898,16 @@ gated by `internal/a2a/push_test.go` (the decoders, the derived id, the projecti
 its code, the notification template) and `cmd/server/a2apush_test.go` (the CRUD transcript against
 crier's own row, the §3.3.4 capability error from all four operations, the notification asserted on
 the wire at the endpoint, crier's own retry loop observed, and a row-unchanged check after every
-refusal).
+refusal). The task lifecycle is gated by `internal/a2a/task_test.go` (the mapping table of §5.5.2 row
+by row, the parameters, the ordering and the cursor, the refusal table) and
+`cmd/server/a2a_lifecycle_test.go` (the route booted for real: the lifecycle transcript —
+undelivered → leased → acked → expired → canceled — the terminal-state refusals, the paginated
+listing, the swept-task arm driven through crier's own sweep, a live `SubscribeToTask`, the per-agent
+gate, and the switch-off 404). Only the two INT-A2A-003 test files whose subject a row's method
+surface moved were amended (`a2a_jsonrpc_test.go`: the method the probe names as unimplemented is the
+extended card, `GetExtendedAgentCard`, now that BOTH the task lifecycle and the push-notification
+methods are served, and a `taskId` naming no task is covered as the `-32001` §5.5.3 makes it); the
+non-regression gate and every crier route test are untouched.
 
 ## 7. Out of scope (binding non-goals for the whole series)
 
@@ -760,16 +969,33 @@ streaming, the task lifecycle, the push-notification methods and the extended ca
 | The route, the deliver REUSE and the SSE adapter | `cmd/server/a2a.go` — `registerA2ARoute` (called from `run()` only when `cfg.A2AEnabled`), the dispatch, `deliverTo` (calls `registry.Handler.HandleDeliver`, the function `POST /agents/{id}/inbox` is registered with), `a2aStream` (lifecycle observation + the relay subscription written as `text/event-stream`) |
 | The read-only store capability the stream needs | `internal/registry/inbox_peek.go` — `InboxPeeker` and its `MemoryStore` / `PostgresStore` implementations. It exists because `Retrieve` LEASES: an observer built on it would steal the message |
 | The middleware seam the stream needs | `internal/middleware/middleware.go` — `responseWriter.Flush`, the same pass-through `Hijack` already had for WebSocket upgrades. Without it every A2A stream answered `500 "this server cannot stream"` (measured) |
-| The unit gate | `internal/a2a/parts_test.go` (the 2-part projection, the lossless round trip, the oneof and metadata refusals, the payload projection, the topic convention), `internal/a2a/send_test.go` (the params strictness, the request mapping, `returnImmediately`/streaming, the refusals, the metadata typing, the version check, the error table, the Task/Message projection, the JSON-RPC envelope rules) |
+| The unit gate | `internal/a2a/parts_test.go` (the 2-part projection, the lossless round trip, the oneof and metadata refusals, the payload projection, the topic convention), `internal/a2a/send_test.go` (the params strictness, the request mapping, `returnImmediately` and streaming, the refusals, the metadata typing, the version check, the error table, the Task/Message projection, the JSON-RPC envelope rules) |
 | The route's gate (booted server) | `cmd/server/a2a_jsonrpc_test.go` — the switch-off 404, the 2-part round trip to a signed consumer with `alt`/`tags` intact, crier's idempotency replay through A2A, every refusal (and the proof that none of them delivered), the content-type rule, the SSE lifecycle transcript with a relay artifact, and the WebSocket relay round trip with the option ON |
 | The non-regression gate, amended | `cmd/server/a2a_optin_test.go` — the pre-existing surface comparison is unchanged; the A2A paths are asserted per switch position from §5.2 (the JSON-RPC path now answers `405` to the probe's GET, i.e. registered and POST-only) |
 | Docs | §5.4 of this file (the binding, the mapping tables, the SSE contract, the deviation, the non-goals), §5.2's route table, §5.3's card projection (`capabilities.streaming` is now `true`), `README.md` (`CR_A2A_ENABLED` row now names the binding), `docs/claims.yaml` (`ROUTE-A2A-JSONRPC`), `CHANGELOG.md` |
 
-Not shipped by that row, and still absent under both switch positions: the task lifecycle operations,
-the push-notification configs and the extended card (INT-A2A-004..006), and any change to the relay's
-WebSocket path (deliberate: the stream is an adapter OVER it).
+Not shipped by that row, and still absent under both switch positions: the extended card
+(INT-A2A-006 — the only surface this option has not built), and any change to the relay's WebSocket
+path (deliberate: the stream is an adapter OVER it).
 
-### 8.4 INT-A2A-005 — the push-notification configuration operations (§5.5)
+### 8.4 INT-A2A-004 — the task lifecycle (§5.5)
+
+| Deliverable | Where |
+|---|---|
+| The state mapping, the request parameters, the ordering/cursor and the refusals | `internal/a2a/task.go` — `TaskEvidence` / `InboxView` and `Resolve` (the §5.5.2 table, as a pure function), `Task` (the projection, including `metadata.crier.state_basis`), `DecodeGetTaskParams` / `DecodeListTasksParams` / `DecodeCancelTaskParams` / `DecodeSubscribeToTaskParams`, `BuildListPage` with `EncodePageToken` / `DecodePageToken`, and the refusal constructors `TaskNotFoundError`, `TaskNotCancelableError`, `TerminalTaskMessageError`, `TaskContinuationUnsupportedError`, `SubscribeToTerminalTaskError`, `TaskCapabilityUnsupportedError` |
+| The error code the row adds | `internal/a2a/rpc.go` — `CodeTaskNotCancelableError` (-32002), and the six method names (also in `task.go`) |
+| The operations, the evidence read and the task-id resolution | `cmd/server/a2a.go` — the dispatch, `evidence` (peek → dead-letter lookup), `getTask`, `listTasks`, `cancelTask`, `subscribeToTask`, `refuseTaskTarget`; the stream adapter is INT-A2A-003's, reused unchanged |
+| The store capabilities the reads and the close need | `internal/registry/inbox_list.go` (`InboxLister`), `internal/registry/inbox_close.go` (`InboxCloser`), `internal/registry/deadletter_lookup.go` (`DeadLetterLookup`) — all OPTIONAL, all implemented by both shipped backends, no migration |
+| The mapping's unit gate | `internal/a2a/task_test.go` — §5.5.2 row by row (record → state → basis), the zero-TTL case, the status timestamps, the task projection, the parameter strictness, the cursor (including its stability when the queue shrinks), the conditional `artifacts` member, and the refusal table |
+| The route's gate (booted server) | `cmd/server/a2a_lifecycle_test.go` — the lifecycle transcript (undelivered → leased → acked → expired → canceled, with every transition named), the terminal-state refusals with the queue measured across them, the queued-cancel case, pagination over a real store, the swept-task arm driven through `registry.Handler.PurgeExpired`, a live `SubscribeToTask`, the per-agent gate, and the switch-off 404 |
+| The non-regression gate | `cmd/server/a2a_optin_test.go` — **unchanged** (the A2A paths are probed per switch position there; this row adds no route). The two INT-A2A-003 test expectations that named the surface this row implements were amended, and are the only test edits in the row: `cmd/server/a2a_jsonrpc_test.go` (a method that is still unimplemented, and the `-32001` for a task id naming no task) |
+| Docs | §5.2's route table, §5.4.4's error table and §5.4.5's CANCELED note, §5.4.7, §3's mapping rows, §6's gate list, this section, `README.md` (`CR_A2A_ENABLED` row now names the lifecycle), `docs/claims.yaml` (`ANCHOR-A2A-LIFECYCLE-STATES`, `ROUTE-A2A-LIFECYCLE-SPEC-ANCHOR` — the second also scans this file, anchoring §5.5.2), `CHANGELOG.md` |
+
+Not shipped by that row: the extended card (INT-A2A-006), any storage change (the three capabilities
+read and close the SAME rows), and any change to the routing, auth, guard, federation, webhook or mesh
+behaviour of the delivery path.
+
+### 8.5 INT-A2A-005 — the push-notification configuration operations (§5.6)
 
 | Deliverable | Where |
 |---|---|
@@ -781,12 +1007,12 @@ WebSocket path (deliberate: the stream is an adapter OVER it).
 | The dispatch and the wiring | `cmd/server/a2a.go` (four `case`s in `handle`, plus `refineSendRefusal` for the inline-on-send answer), `cmd/server/main.go` (passes `HandleUpdateAgent` alongside `HandleDeliver`) |
 | The unit gate | `internal/a2a/push_test.go` — the strict decoders, the derived id, the projection, every refusal and its code, the write-refusal mapping, and the notification template's structure (one-of-four `StreamResponse`, crier-only placeholders, a `|default:` on every optional one) |
 | The route's gate (booted server) | `cmd/server/a2apush_test.go` — the CRUD transcript asserted through BOTH the A2A binding and crier's own `GET /agents/{id}`; the four operations against an agent with no push channel (`-32003`); the notification ASSERTED ON THE WIRE from what the endpoint received (media type, one-of-four envelope, task id/state/context, crier's own dispatch headers); crier's retry loop observed (`X-Crier-Retry: 0`, then `1`); every refusal with the row compared byte-for-byte before and after; the write-gate case under crier's default signature posture (`-32050` + crier's body verbatim, row untouched, reads still work) |
-| Docs | §5.5 of this file (the methods, the mapping table, the capability MUST, the refusals, the payload, the non-goals), §3's mapping row, §5.2's route table, §5.4's served-method list and error table, §6.8 (the non-regression clauses), `README.md` (`CR_A2A_ENABLED` now names the four methods), `docs/claims.yaml` (`ANCHOR-A2A-PUSH-CONFIG-OPERATIONS`), `CHANGELOG.md` |
+| Docs | §5.6 of this file (the methods, the mapping table, the capability MUST, the refusals, the payload, the non-goals), §3's mapping row, §5.2's route table, §5.4's served-method list and error table, §6.8 (the non-regression clauses), `README.md` (`CR_A2A_ENABLED` now names the four methods), `docs/claims.yaml` (`ANCHOR-A2A-PUSH-CONFIG-OPERATIONS`), `CHANGELOG.md` |
 
 Not shipped by that row: any new route (the four operations are methods of the existing binding), any
 new field on a registry row (the configuration IS the existing `webhook` member), any change to
-`internal/webhook`, the task lifecycle (`INT-A2A-004` — an operation addressed at an EXISTING task
-still answers `-32601`) and the extended card.
+`internal/webhook` (the notification rides the shipped driver), and the extended card — INT-A2A-006,
+still `-32601`.
 
-Still absent under both switch positions: the task lifecycle operations and the extended card, and any
-change to the relay's WebSocket path.
+Still absent under both switch positions: the extended card, and any change to the relay's WebSocket
+path.
