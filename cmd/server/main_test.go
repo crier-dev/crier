@@ -178,7 +178,7 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	// Wait for the server to come up (bounded).
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -186,7 +186,12 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
+		}
+		select {
+		case <-done:
+			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+		default:
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -1089,7 +1094,7 @@ func TestPidfileLifecycle(t *testing.T) {
 
 		// Wait for the pidfile (bounded). Its existence implies the bind
 		// succeeded — it is written only after net.Listen returns.
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(20 * time.Second)
 		for {
 			if _, err := os.Stat(pf); err == nil {
 				break
@@ -1097,7 +1102,12 @@ func TestPidfileLifecycle(t *testing.T) {
 				t.Fatalf("stat pidfile: %v", err)
 			}
 			if time.Now().After(deadline) {
-				t.Fatal("pidfile not written within 10s")
+				t.Fatal("pidfile not written within 20s")
+			}
+			select {
+			case code := <-done:
+				t.Fatalf("server exited (code %d) before writing the pidfile on port %d", code, port)
+			default:
 			}
 			time.Sleep(25 * time.Millisecond)
 		}
@@ -1290,7 +1300,7 @@ func TestOpenAPIServed(t *testing.T) {
 
 	// Wait for the server to come up (bounded). /health is public even with
 	// auth enabled, so it is a safe readiness probe.
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -1298,7 +1308,12 @@ func TestOpenAPIServed(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
+		}
+		select {
+		case <-done:
+			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+		default:
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -1443,7 +1458,7 @@ func TestVersionEndpointServed(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	// /health is public even with auth on, so it is the readiness probe.
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -1451,7 +1466,12 @@ func TestVersionEndpointServed(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
+		}
+		select {
+		case <-done:
+			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+		default:
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

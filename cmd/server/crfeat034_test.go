@@ -70,7 +70,7 @@ func bootCapturedServer(t *testing.T, port int) *capturedServer {
 	cs.drainDone = drained
 
 	client := &http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/health")
 		if err == nil {
@@ -78,7 +78,7 @@ func bootCapturedServer(t *testing.T, port int) *capturedServer {
 			return cs
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

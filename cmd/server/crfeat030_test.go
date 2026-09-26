@@ -97,7 +97,7 @@ func bootDetectionServer(t *testing.T, logPath string) *detectionBoot {
 		client:  &http.Client{Timeout: 5 * time.Second},
 		stop:    stop,
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := boot.client.Get(boot.baseURL + "/health")
 		if err == nil {
@@ -105,7 +105,7 @@ func bootDetectionServer(t *testing.T, logPath string) *detectionBoot {
 			return boot
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

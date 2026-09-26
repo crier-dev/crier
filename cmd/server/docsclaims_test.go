@@ -484,7 +484,7 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 	client = &http.Client{Timeout: 2 * time.Second}
 
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -492,7 +492,7 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

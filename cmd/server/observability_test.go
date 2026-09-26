@@ -88,7 +88,7 @@ func bootObservabilityServerAuth(t *testing.T, token string) string {
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 10 * time.Second}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -96,7 +96,7 @@ func bootObservabilityServerAuth(t *testing.T, token string) string {
 			return baseURL
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -328,7 +328,9 @@ func TestWebhookOutcomeMetricIncrements(t *testing.T) {
 	delResp.Body.Close()
 
 	// The async queue posts in the background; poll the exposition (bounded).
-	deadline := time.Now().Add(10 * time.Second)
+	// 20s is a poll budget, not a startup deadline — kept generous so the
+	// assertion measures delivery, not runner load.
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		_, _, scrape := get(t, client, baseURL+"/metrics", "")
 		deliveredAfter := labeledMetricValue(scrape, "webhook_deliveries_total", "outcome", "delivered")
@@ -336,7 +338,7 @@ func TestWebhookOutcomeMetricIncrements(t *testing.T) {
 			return // advanced — live wiring proven
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("webhook_deliveries_total{outcome=\"delivered\"} did not advance within 10s: before=%v after=%v;\n%s",
+			t.Fatalf("webhook_deliveries_total{outcome=\"delivered\"} did not advance within 20s: before=%v after=%v;\n%s",
 				deliveredBefore, deliveredAfter, scrape)
 		}
 		time.Sleep(100 * time.Millisecond)

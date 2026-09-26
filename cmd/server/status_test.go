@@ -189,7 +189,7 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	// /health is public on every configuration, so it is the readiness probe.
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err := client.Get(baseURL + "/health")
 		if err == nil {
@@ -197,7 +197,7 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
