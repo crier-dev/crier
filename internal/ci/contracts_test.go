@@ -224,20 +224,11 @@ func TestReleaseWorkflowContract(t *testing.T) {
 		t.Fatalf("parse release workflow: %v", err)
 	}
 
-	if len(wf.Trigger.Push.Tags) != 2 {
-		t.Fatalf("release workflow tag patterns = %q, want exactly the stable and rc tag patterns", wf.Trigger.Push.Tags)
+	if len(wf.Trigger.Push.Tags) != 1 || wf.Trigger.Push.Tags[0] != "v*" {
+		t.Fatalf("release workflow tag patterns = %q, want the GitHub Actions glob v*", wf.Trigger.Push.Tags)
 	}
-	var hasStable, hasRc bool
-	for _, pattern := range wf.Trigger.Push.Tags {
-		switch pattern {
-		case "v[0-9]+.[0-9]+.[0-9]+":
-			hasStable = true
-		case "v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+":
-			hasRc = true
-		}
-	}
-	if !hasStable || !hasRc {
-		t.Fatalf("release workflow tag patterns = %q, want v[0-9]+.[0-9]+.[0-9]+ and v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+", wf.Trigger.Push.Tags)
+	if !strings.Contains(string(raw), "vX.Y.Z") || !strings.Contains(string(raw), "vX.Y.Z-rcN") {
+		t.Fatal("release workflow does not document the exact stable and rc tag validation")
 	}
 	if wf.Permissions.Contents != "write" {
 		t.Fatalf("release workflow permissions.contents = %q, want \"write\" (contents-only least privilege)", wf.Permissions.Contents)

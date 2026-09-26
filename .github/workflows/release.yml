@@ -46,9 +46,10 @@ name: Release
 
 on:
   push:
+    # GitHub tag filters are globs, not regular expressions. Trigger on the
+    # version namespace, then apply the exact semver/rc validation below.
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+      - "v*"
 
 permissions:
   contents: write
