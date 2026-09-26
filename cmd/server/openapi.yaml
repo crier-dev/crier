@@ -782,7 +782,9 @@ paths:
         X-Crier-Guard-Reason (RFC 3986 percent-encoded),
         X-Crier-Guard-Patterns (comma-joined), X-Crier-Guard-Policy,
         X-Crier-Guard-Provider, X-Crier-Guard-Model, X-Crier-Guard-Error
-        (true on the guard-error path). Batch POSTs carry the worst-case
+        (true on the guard-error path, and on the §6.3 over-cap path whose allow
+        outcomes are flagged errored because the LLM is never consulted there —
+        DF-CRIER-294). Batch POSTs carry the worst-case
         verdict across inner messages; per-message verdicts stay in each
         inner envelope's crier.guard metadata. Redelivery and batch flush
         never re-run the guard — the verdict rides with the message.
@@ -2193,7 +2195,7 @@ components:
           description: Model that produced the verdict
         errored:
           type: boolean
-          description: "true when the verdict came from the guard-error path (§3.6)"
+          description: "true when the verdict is not the product of a completed LLM check: the guard-error path (§3.6) or the §6.3 over-cap path's allow outcomes, where the LLM is never consulted (DF-CRIER-294)"
         quarantined:
           type: boolean
           description: "true when the message was sanitized — the delivered payload is the quarantine notice"

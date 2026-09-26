@@ -379,7 +379,9 @@ fail open exactly as above. Fail-closed resolution is unchanged: `policy.action`
 addressed DF-CRIER-158.
 
 `Result.Errored` is recorded in audit and surfaced as `X-Crier-Guard-Error: true` on the POST /
-in the 403 body. Parsing tolerance (only for the transport, never for the schema): strip
+in the 403 body. It is set by EVERY verdict that is not the product of a completed LLM check: the
+§3.6 error path above AND the §6.3 over-cap path's `allow` outcomes (DF-CRIER-294 — the LLM was
+never consulted there either). Parsing tolerance (only for the transport, never for the schema): strip
 surrounding ```json fences and surrounding whitespace; if the first non-whitespace byte is not
 `{`, scan forward to the first `{` and parse from there; then strict-validate per §3.1. Any
 remaining parse/validation failure = guard error.
@@ -727,9 +729,10 @@ envelope contains `<empty_payload/>` (the LLM sees a deliberate marker, not a mi
 
 - `payload` bytes > `CR_GUARD_MAX_PAYLOAD_BYTES` (default 65536) → **skip the LLM entirely**:
   the guard runs the deterministic pattern pre-scan (§7.1) only. A high-confidence pre-scan hit →
-  `block`; a low-confidence (shape-only) hit only → `allow` with `risk_level: medium`, `reason:
+  `block` with `errored: false` (a deliberate deterministic block, not an incomplete check); a
+  low-confidence (shape-only) hit only → `allow` with `risk_level: medium`, `errored: true`, `reason:
   payload_exceeds_guard_cap: low-confidence prematch only` and the hit names reported in
-  `patterns` (plus `oversize`); no hit → `allow` with `risk_level: medium`, `reason:
+  `patterns` (plus `oversize`); no hit → `allow` with `risk_level: medium`, `errored: true`, `reason:
   payload_exceeds_guard_cap`, `patterns: ["oversize"]`. Rationale: the guard is a filter, not a
   throughput gate; truncated projections could hide attacks, so over-cap payloads get the cheap
   deterministic check and a visible risk marker instead of a blind LLM pass over a prefix.
@@ -743,6 +746,20 @@ envelope contains `<empty_payload/>` (the LLM sees a deliberate marker, not a mi
   hits), which is NOT a clean pass — such a verdict is surfaced in the deliver response `guard`
   object (§9.3), never suppressed. Only a clean allow (risk `low`, no patterns, no error) stays
   absent from that response.
+- **An over-cap ALLOW is never a confident allow (DF-CRIER-294).** The LLM is never consulted on
+  this path, so both `allow` outcomes also set `errored: true` — the same flag the §3.6 error path
+  uses, meaning *this verdict is not the product of a completed check*. Measured defect: a body
+  padded past the cap whose injection is rephrased to miss every §6.4 seed regex returned
+  `decision: allow, risk_level: medium, errored: false` — a verdict that read MORE confident than
+  the `errored: true` allow a normal-size payload gets when its provider is down, i.e. the verdict
+  looked strongest exactly where the payload is least inspectable. `errored: true` is the trust
+  signal here; the DECISION still follows DF-CRIER-31 (a weak or absent prematch never hard-blocks
+  on its own), and the `block` outcome above deliberately keeps `errored: false` so its documented
+  403 body is unchanged. On the wire this shows up as the warn-level audit line
+  (`decision != allow || errored`), the `errored` counter, `X-Crier-Guard-Error: true` on the
+  outbound webhook POST (§7.2) and `guard.errored: true` in the deliver response / inbox entry /
+  `crier.guard` metadata. A client that wants to act only on fully-inspected allows can now
+  express that rule as `decision == allow && !errored`.
 
 ### 6.4 Pattern pre-scan (internal/guard/patterns.go)
 
@@ -989,7 +1006,7 @@ Both endpoints accept an optional `guard` object alongside `webhook`:
 | 21 | router: concurrency cap | 9th concurrent call waits ≤2s or guard error |
 | 22 | router: timeout budget across chain | budget expiry → guard error |
 | 23 | sanitize: quarantine shape | exact §3.5 payload; base64 round-trip of original |
-| 24 | oversize payload (> cap) | LLM never called; prematch hit → block; none → allow/medium/oversize |
+| 24 | oversize payload (> cap) | LLM never called; strong prematch hit → block (errored:false); low-confidence-only or no hit → allow/medium with the `oversize` marker AND `errored:true` (DF-CRIER-294) |
 | 25 | fail_open (default) on all-providers-down | delivered, errored=true, decision allow, and the prematch evidence (empty or low-confidence only) retained in `matched_patterns` |
 | 26 | fail_closed on all-providers-down | action applied (block), errored=true, prematch evidence retained |
 | 27 | blocked deliver (handler-level) | 403 GUARD_BLOCKED, no inbox entry, no webhook POST, no queue item |
@@ -999,7 +1016,7 @@ Both endpoints accept an optional `guard` object alongside `webhook`:
 | 31 | kanban: disabled | no-op writer, zero cards |
 | 32 | audit line shape | exact §7.3 fields present; warn level on block |
 | 33 | guard error + high-confidence prematch hit (DF-CRIER-158) | unreachable provider + fail_open → block/high/errored with the pattern named in `matched_patterns`; fail-open preserved when only low-confidence evidence matched; policy `checks` suppression still applies on the error path |
-| 34 | deliver response guard visibility (DF-CRIER-158) | an allow carrying a risk marker (over-cap `oversize`) is surfaced in the response `guard` object; a clean allow omits it |
+| 34 | deliver response guard visibility (DF-CRIER-158) | an allow carrying a risk marker (over-cap `oversize`) is surfaced in the response `guard` object, carrying `errored:true` (DF-CRIER-294: the LLM was never consulted); a clean allow omits it |
 | 35 | user-message template lockstep (§3.3, DF-CRIER-147) | `UserMessage(...)` rendered for a fixed input is byte-identical to the §3.3 user-message block with its placeholders substituted; the decision-semantics line states sanitize = deliver the LLM-rewritten payload (§3.5) and the wave-1 quarantine-only wording is absent |
 | 36 | mixed-content rule in the prompt (DF-CRIER-147) | the class-independent MIXED CONTENT rule is present (mixed benign + directive → sanitize/medium, block reserved for attack-only payloads) in the full prompt AND survives an attack-class check being disabled |
 | 37 | sanitize escalation through orchestration (DF-CRIER-147) | LLM `sanitize` + risk medium under the default `block_risk: high` is delivered as sanitize (rewrite path, not escalated); `sanitize` + high still escalates to block/high |
@@ -1078,7 +1095,8 @@ None outstanding for implementation. Decisions this spec made where the ticket l
    boundary) — §1.2.
 4. **Policies inline on the agent** (`Agent.Guard`, like `webhook.Config`); no separate policy
    store; server default from env — §4.
-5. **Oversize payloads skip the LLM** (deterministic pre-scan only, risk marked `oversize`) — §6.3.
+5. **Oversize payloads skip the LLM** (deterministic pre-scan only, risk marked `oversize`, allow
+   outcomes flagged `errored: true` — DF-CRIER-294) — §6.3.
 6. **deepseek preset** = `https://api.deepseek.com/v1` + `env:DEEPSEEK_API_KEY` +
    `deepseek-v4-flash`, thinking hard-forbidden on that preset; base URL env-overridable — §5.2.
 7. **`deliverRequest` gains `thread_id` passthrough** (closes the CR-FEAT-004 deliver-API gap) — §9.3.

@@ -163,6 +163,19 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 	// prematch hits may block here — low-confidence shape-only evidence
 	// (b64_blob on an ordinary long alphanumeric/base64-like body) is
 	// reported as evidence but cannot hard-block on its own (DF-CRIER-31).
+	//
+	// DF-CRIER-294: the LLM is never consulted on this path, so an ALLOW here
+	// is not the product of a completed check and sets Errored — the same
+	// flag the §3.6 error path uses for exactly that reason. Without it,
+	// padding a payload past the cap and rephrasing the injection to miss the
+	// seed regexes earned `decision:allow, errored:false`, a verdict that
+	// read MORE confident than the errored allow a small payload gets when
+	// the provider is down: the verdict looked its strongest exactly where
+	// the payload is least inspectable. The DECISION stays `allow` on these
+	// two cases (DF-CRIER-31: a weak or absent prematch may never hard-block
+	// on its own), and the BLOCK case keeps errored:false — it is a
+	// deliberate deterministic block, not an incomplete check, and its 403
+	// contract is unchanged.
 	if len(in.Payload) > g.maxPayloadBytes {
 		strong := g.scanner.HighConfidence(prematch)
 		var res Result
@@ -182,6 +195,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 				Reason:    "payload_exceeds_guard_cap: low-confidence prematch only",
 				Patterns:  append([]string{"oversize"}, prematch...),
 				PolicyID:  policy.ID,
+				Errored:   true,
 			}
 		default:
 			res = Result{
@@ -190,6 +204,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 				Reason:    "payload_exceeds_guard_cap",
 				Patterns:  []string{"oversize"},
 				PolicyID:  policy.ID,
+				Errored:   true,
 			}
 		}
 		res.MessageID = in.MessageID

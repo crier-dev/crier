@@ -316,6 +316,54 @@ func TestAuthorizeAgent_StaleTimestampRejected(t *testing.T) {
 	}
 }
 
+// DF-CRIER-294 — the other half of the ±30 s contract, and the reason the
+// docs (docs/mesh-protocol.md § "Replay protection on the signed lanes") state
+// that the window IS the whole replay defence on these routes: the lane keeps
+// no nonce or signature cache, so a byte-identical signed request presented
+// again INSIDE the window is ACCEPTED. This test pins the DOCUMENTED trade from
+// the executable side. If a nonce/signature cache is ever added, invert this
+// test TOGETHER with that doc paragraph — the pair is the contract, and a
+// silent change to either half is the drift this test exists to catch.
+func TestAuthorizeAgent_InWindowReplayIsAccepted_DocumentedTrade(t *testing.T) {
+	store := NewMemoryStore()
+	h := newSigHandler(store)
+	_, priv := testAgentKeypair(t, store, "agent-1")
+
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	sig := hex.EncodeToString(ed25519.Sign(priv, []byte(http.MethodGet+"\n/agents/agent-1/inbox\n"+ts)))
+
+	// ONE signed request, presented twice with the SAME timestamp + signature.
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/agents/agent-1/inbox", nil)
+		req.Header.Set(HeaderAgentID, "agent-1")
+		req.Header.Set(HeaderAgentTS, ts)
+		req.Header.Set(HeaderAgentSig, sig)
+		rec := httptest.NewRecorder()
+		if err := h.authorizeAgent(rec, req, "agent-1"); err != nil {
+			t.Errorf("presentation %d: authorizeAgent = %v, want the in-window replay ACCEPTED (documented trade: ±%s is the whole defence)", i, err, sigWindow)
+		}
+		if rec.Code != http.StatusOK {
+			t.Errorf("presentation %d: status = %d, want 200", i, rec.Code)
+		}
+	}
+
+	// Outside the window the same lane refuses 401 — that refusal is what makes
+	// the window the defence at all.
+	stale := fmt.Sprintf("%d", time.Now().Add(-10*time.Minute).Unix())
+	staleSig := hex.EncodeToString(ed25519.Sign(priv, []byte(http.MethodGet+"\n/agents/agent-1/inbox\n"+stale)))
+	req := httptest.NewRequest(http.MethodGet, "/agents/agent-1/inbox", nil)
+	req.Header.Set(HeaderAgentID, "agent-1")
+	req.Header.Set(HeaderAgentTS, stale)
+	req.Header.Set(HeaderAgentSig, staleSig)
+	rec := httptest.NewRecorder()
+	if err := h.authorizeAgent(rec, req, "agent-1"); err == nil {
+		t.Errorf("out-of-window timestamp accepted: the ±%s window is the whole replay defence", sigWindow)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
 func TestAuthorizeAgent_UnknownAgentNotFound(t *testing.T) {
 	store := NewMemoryStore()
 	h := newSigHandler(store)

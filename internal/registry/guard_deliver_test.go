@@ -797,8 +797,15 @@ func TestGuardDeliver_RiskMarkedAllowIsSurfaced(t *testing.T) {
 	if !slices.Contains(dr.Guard.Patterns, "oversize") {
 		t.Errorf("patterns = %v, want the oversize risk marker", dr.Guard.Patterns)
 	}
-	if dr.Guard.Errored {
-		t.Errorf("the over-cap fast path is not an error path: %+v", dr.Guard)
+	if !dr.Guard.Errored {
+		// DF-CRIER-294: the over-cap fast path runs no LLM check, so its
+		// allow is NOT the product of a completed verdict and is flagged
+		// errored — the same signal a fail-open error carries. Before this,
+		// padding a payload past the cap and rephrasing the injection to miss
+		// the seed regexes earned an errored:false allow: a verdict that read
+		// MORE confident than the errored one a small payload gets when the
+		// provider is down, exactly where the payload is least inspectable.
+		t.Errorf("the over-cap allow is not a completed LLM check and must carry errored:true: %+v", dr.Guard)
 	}
 	if f.llm.count() != 0 {
 		t.Errorf("over-cap payload must skip the LLM (calls=%d)", f.llm.count())

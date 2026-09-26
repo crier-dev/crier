@@ -407,6 +407,33 @@ Turning the handshake on is a **client-side** change, not a transparent one:
   socket needs a key, so give it the same `CRIER_AGENT_PRIVATE_KEY_FILE` identity
   the registry lane uses.
 
+### Replay protection on the signed lanes — the ±30 s window is the whole defence (DF-CRIER-294)
+
+Crier has two independent signature lanes, and they answer the replay question
+DIFFERENTLY. Neither difference is an accident, and the second one is a bound a client has to
+size its own trust against:
+
+| lane | what is signed | what stops a replay |
+|---|---|---|
+| mesh handshake (`AUTH_RESPONSE`, DF-CRIER-287) | `mesh-auth-v1\n<agent_id>\n<nonce>` (§ The signed payload) | a **single-use nonce** minted per connection (32 hex chars from `crypto/rand`) plus the `CR_MESH_AUTH_TIMEOUT_S` answer window (default 10 s). A captured frame is not reusable: the nonce is never reissued, and a stale or mismatched one is refused `AUTH_FAILED` (§ Refusals). |
+| registry, the agent-scoped HTTP routes that require the trio — `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats`, `GET /agents/{id}/inbox/dead-letters`, `POST /agents/{id}/inbox/transfer`, `DELETE /agents/{id}` and `PATCH /agents/{id}` — via `X-Agent-ID` / `X-Agent-Ts` / `X-Agent-Sig` | `"<METHOD>\n<path>\n<unix-seconds>"` | **only the freshness of `X-Agent-Ts`**: it must be within **±30 s** of server time (`sigWindow`, `internal/registry/agentsig.go`; the constant's own comment reads "Bounded replay protection: a captured request is only valid for sigWindow seconds"). A timestamp outside that window — stale or future — is refused `401 {"error":"request timestamp outside allowed window (±30s)"}`. |
+
+**A byte-identical signed request REPLAYED INSIDE that ±30 s window is ACCEPTED, and the window is
+the WHOLE replay defence on those routes.** The server keeps no per-signature state there —
+`authorizeAgent` decides on the method, the path, the timestamp and the signature alone — so it
+cannot tell a replay from the original, and does not pretend to. Measured (DF-CRIER-294): one signed
+`GET /agents/{id}/inbox` presented twice in a row with the SAME timestamp and signature was
+authorized twice (`200` both times, on the authorization path); the same signature carrying a
+10-minute-old timestamp was refused `401` naming the window. `POST /relay/publish` is outside this
+lane entirely — the trio is not verified there at all (README § Try it; measured).
+
+A nonce/signature cache that would close the gap is deliberately NOT implemented (DF-CRIER-294
+judged it out of scope): a shared cache on the auth path is a new availability dependency, i.e. a
+design change rather than a bug fix. The practical rule for a client is therefore: keep the
+transport confidential (TLS) so a signature cannot be captured in the first place, and treat a
+captured signed request as usable for at most 30 seconds. The handshake lane needs no such caveat —
+its nonce makes each signature usable exactly once.
+
 ## Origin policy
 
 The WebSocket upgrade rejects a request whose `Origin` header the policy does not
@@ -505,6 +532,10 @@ with an unknown `request_id` is dropped with no error and no log.
   fields, but no code performs retries; a dropped connection is closed for good.
 - Deregister message type (dropped during the CI-002 port; use the registry's
   `DELETE /agents/{id}`).
+- Replay rejection on the agent-signed HTTP routes — that lane keeps no nonce cache, so a captured
+  signed request is honoured for as long as its `X-Agent-Ts` stays inside the ±30 s window. That
+  window IS the defence there (§ Replay protection on the signed lanes, DF-CRIER-294); the mesh
+  handshake lane is the one with a single-use nonce.
 
 ## Worked example (Python, verified live)
 
