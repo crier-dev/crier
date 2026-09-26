@@ -1,0 +1,144 @@
+# .github/workflows/release.yml — DF-CRIER-291: publish the release assets on a
+# tag push.
+#
+# WHY THIS EXISTS
+# ---------------
+# The release front door (CR-FEAT-028) built the asset set by hand (`make
+# release`) and attached it to the Release object by hand (`make
+# release-upload`, docs/releases.md §4). Both halves are proven locally by
+# `make install-path-selftest`, but the publish was still a hand step a person
+# can forget — `gh release view v0.1.0-rc2` answered `assets: []` for exactly
+# that reason. The acceptance for DF-CRIER-291 is that a pushed tag produces
+# DOWNLOADABLE assets — crier and crier-mcp for every release target (at
+# minimum linux/amd64 and darwin/arm64), install.sh and SHA256SUMS — on a
+# GitHub Release, from the tag's own commit, with no implicit version.
+#
+# HOW IT STAYS SAFE
+# -----------------
+# - The trigger admits ONLY vX.Y.Z and vX.Y.Z-rcN tags: a workflow dispatch, a
+#   branch push or any other ref can never publish.
+# - VERSION is pinned to GITHUB_REF_NAME (the pushed tag) and re-validated
+#   against the same vX.Y.Z grammar scripts/release-upload.sh enforces; every
+#   later step consumes that one variable, so the binaries, the Release object
+#   and the final verification all name the same version. An rc tag sets
+#   PRERELEASE=1 (the Release is marked prerelease); a stable tag does not.
+# - The checkout is proven to BE the tagged commit
+#   (`git rev-parse refs/tags/${VERSION}^{commit}` vs HEAD) before anything is
+#   built — the same provenance rule release-upload.sh enforces on a hand run.
+#   No floating checkout, no git-describe fallback.
+# - The asset set is built by `make release-artifacts VERSION=<tag>` — the
+#   repo's canonical builder (inline buildinfo stamps, SHA256SUMS written and
+#   re-verified) — and `make install-path-selftest` runs the front door's
+#   acceptance drive on the tagged commit before anything is published.
+# - Publication goes through scripts/release-upload.sh with GH_TOKEN — the
+#   same implementation a hand publish uses (release notes from the tagged
+#   commit's own CHANGELOG section, create-or-upload, compare link against the
+#   previous tag). There is no second publish implementation here and no
+#   --clobber: an existing asset never gets silently overwritten.
+# - The run ends by diffing the Release's attached assets against
+#   dist/SHA256SUMS — `assets: []` (the exact defect CR-FEAT-028 set out to
+#   close) or a partial upload is a RED run, never a silent one.
+#
+# Permissions are least-privilege: `contents: write` is all publishing needs
+# (that scope covers Release objects and their assets); nothing else is
+# granted, at the workflow or the job level.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish the release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history AND every tag: the provenance check below, and
+      # release-upload.sh's compare link against the previous tag.
+      - name: Check out the tagged commit
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go 1.26.6
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.6"
+
+      # One variable, validated once: everything downstream (make,
+      # release-upload.sh, the final verification) consumes this VERSION, so
+      # the workflow can never publish under an implicit or described version.
+      - name: Pin VERSION to the pushed tag (and detect prereleases)
+        run: |
+          version="${GITHUB_REF_NAME}"
+          case "$version" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::GITHUB_REF_NAME '$version' is not a vX.Y.Z tag — refusing to publish from it"; exit 1 ;;
+          esac
+          case "$version" in
+            *-rc[0-9]*) prerelease=1 ;;
+            *) prerelease=0 ;;
+          esac
+          echo "==> publishing ${version} (prerelease=${prerelease})"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "PRERELEASE=${prerelease}" >> "$GITHUB_ENV"
+
+      - name: Prove the checkout IS the tagged commit
+        run: |
+          tag_commit="$(git rev-parse "refs/tags/${VERSION}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          echo "==> tag ${VERSION} -> ${tag_commit}; checkout HEAD -> ${head_commit}"
+          if [ "${tag_commit}" != "${head_commit}" ]; then
+            echo "::error::checked-out HEAD ${head_commit} is NOT the commit ${VERSION} names (${tag_commit}) — refusing to build a floating checkout"
+            exit 1
+          fi
+
+      - name: Build the release asset set for the tag
+        run: make release-artifacts VERSION="${VERSION}"
+
+      - name: Release front-door acceptance drive (clean-box install + publish shim)
+        run: make install-path-selftest
+
+      - name: Publish the Release object with every asset (scripts/release-upload.sh)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CRIER_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ env.PRERELEASE }}
+        run: bash scripts/release-upload.sh
+
+      # The acceptance for DF-CRIER-291 is assets ON the Release object, so the
+      # last word is GitHub's: every asset named by SHA256SUMS must be attached,
+      # and nothing else may be. A release with the object and no assets is the
+      # exact defect this workflow closes — it stays a loud failure here.
+      - name: Verify the Release carries exactly the manifest assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CRIER_REPO: ${{ github.repository }}
+        run: |
+          manifest="dist/SHA256SUMS"
+          [ -f "${manifest}" ] || { echo "::error::${manifest} is missing — the asset set was never built"; exit 1; }
+          manifest_names="$(awk '{n=split($2, a, "/"); print a[n]}' "${manifest}" | LC_ALL=C sort)"
+          [ -n "${manifest_names}" ] || { echo "::error::${manifest} names no assets"; exit 1; }
+          attached="$(gh release view "${VERSION}" --repo "${CRIER_REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort)" || exit 1
+          if [ -z "${attached}" ]; then
+            echo "::error::Release ${VERSION} carries NO assets (assets: []) — the exact defect this workflow exists to close"
+            exit 1
+          fi
+          missing="$(comm -23 <(printf '%s\n' "${manifest_names}") <(printf '%s\n' "${attached}"))"
+          unexpected="$(comm -13 <(printf '%s\n' "${manifest_names}") <(printf '%s\n' "${attached}"))"
+          if [ -n "${missing}" ]; then
+            echo "::error::Release ${VERSION} is missing manifest asset(s):$(echo "${missing}" | tr '\n' ' ')"
+            exit 1
+          fi
+          if [ -n "${unexpected}" ]; then
+            echo "::error::Release ${VERSION} carries asset(s) SHA256SUMS does not know:$(echo "${unexpected}" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "==> Release ${VERSION} carries every manifest asset:"
+          printf '%s\n' "${attached}" | sed 's/^/      /'

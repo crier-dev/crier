@@ -2,6 +2,7 @@ package ci_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,5 +181,148 @@ func TestBunkerWorkflowConcurrencyBoundaries(t *testing.T) {
 	}
 	if matrix.Concurrency.Group == battery.Concurrency.Group {
 		t.Fatal("push bunker jobs and the scheduled ecosystem battery share a cancellation domain")
+	}
+}
+
+// DF-CRIER-291: a tag push must publish the assets. The release workflow is the
+// publish half of docs/releases.md §4, so its contract is pinned here the way
+// the bunker workflow's concurrency boundaries are pinned above — parse the
+// YAML and assert the load-bearing facts: the tag trigger admits only vX.Y.Z
+// and vX.Y.Z-rcN, the token grant is least-privilege, the build is pinned to
+// the tagged commit with an explicit VERSION, the publish goes through the
+// shared scripts/release-upload.sh (never a duplicated `gh release create`,
+// never --clobber), and the run ends by diffing the Release's attached assets
+// against the SHA256SUMS manifest — the `assets: []` regression stays a loud
+// failure instead of a silent one.
+func TestReleaseWorkflowContract(t *testing.T) {
+	raw, err := os.ReadFile(repoPath(".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("read release workflow: %v", err)
+	}
+
+	var wf struct {
+		Trigger struct {
+			Push struct {
+				Tags []string `yaml:"tags"`
+			} `yaml:"push"`
+		} `yaml:"on"`
+		Permissions struct {
+			Contents string `yaml:"contents"`
+		} `yaml:"permissions"`
+		Jobs map[string]struct {
+			RunsOn any `yaml:"runs-on"`
+			Steps  []struct {
+				Name string            `yaml:"name"`
+				Uses string            `yaml:"uses"`
+				With map[string]any    `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
+				Run  string            `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &wf); err != nil {
+		t.Fatalf("parse release workflow: %v", err)
+	}
+
+	if len(wf.Trigger.Push.Tags) != 2 {
+		t.Fatalf("release workflow tag patterns = %q, want exactly the stable and rc tag patterns", wf.Trigger.Push.Tags)
+	}
+	var hasStable, hasRc bool
+	for _, pattern := range wf.Trigger.Push.Tags {
+		switch pattern {
+		case "v[0-9]+.[0-9]+.[0-9]+":
+			hasStable = true
+		case "v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+":
+			hasRc = true
+		}
+	}
+	if !hasStable || !hasRc {
+		t.Fatalf("release workflow tag patterns = %q, want v[0-9]+.[0-9]+.[0-9]+ and v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+", wf.Trigger.Push.Tags)
+	}
+	if wf.Permissions.Contents != "write" {
+		t.Fatalf("release workflow permissions.contents = %q, want \"write\" (contents-only least privilege)", wf.Permissions.Contents)
+	}
+	if strings.Contains(string(raw), "write-all") {
+		t.Error("release workflow grants write-all somewhere — least-privilege regression")
+	}
+
+	var (
+		checkout  bool
+		goSetup   bool
+		ubuntuRun bool
+		ghToken   bool
+		runTexts  []string
+	)
+	for _, job := range wf.Jobs {
+		switch v := job.RunsOn.(type) {
+		case string:
+			if v == "ubuntu-latest" {
+				ubuntuRun = true
+			}
+		case []any:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s == "ubuntu-latest" {
+					ubuntuRun = true
+				}
+			}
+		}
+		for _, step := range job.Steps {
+			if step.Uses != "" {
+				runTexts = append(runTexts, step.Uses)
+			}
+			if step.Run != "" {
+				runTexts = append(runTexts, step.Run)
+			}
+			if strings.HasPrefix(step.Uses, "actions/checkout@") && fmt.Sprint(step.With["fetch-depth"]) == "0" {
+				checkout = true
+			}
+			if strings.HasPrefix(step.Uses, "actions/setup-go@") && fmt.Sprint(step.With["go-version"]) == "1.26.6" {
+				goSetup = true
+			}
+			if _, ok := step.Env["GH_TOKEN"]; ok {
+				ghToken = true
+			}
+		}
+	}
+	blob := strings.Join(runTexts, "\n")
+
+	if !checkout {
+		t.Error("release workflow has no actions/checkout step with fetch-depth: 0 — the tag and the previous tag must both resolve locally (provenance check, compare link)")
+	}
+	if !goSetup {
+		t.Error("release workflow has no actions/setup-go step pinned to go-version 1.26.6 — the toolchain CI builds and tests with")
+	}
+	if !ubuntuRun {
+		t.Error("release workflow runs on no ubuntu-latest job — the host target (linux/amd64) is a shipped release target and release-artifacts.sh executes the host artifact to prove the identity stamp landed")
+	}
+	if !ghToken {
+		t.Error("no release workflow step carries GH_TOKEN in env — gh cannot authenticate non-interactively inside Actions")
+	}
+
+	for _, want := range []struct{ needle, why string }{
+		{"refs/tags/${VERSION}^{commit}", "the workflow must prove the checkout IS the tagged commit (no floating source checkout)"},
+		{"git rev-parse HEAD", "the identity pin compares the tag's commit against the checked-out HEAD"},
+		{"make release-artifacts VERSION=", "the asset set must be built with the tag passed explicitly, never an implicit version"},
+		{"scripts/release-upload.sh", "the publish must go through the shared release-upload script — one publish implementation for hand and CI"},
+		{"SHA256SUMS", "the run must verify the published assets against the checksum manifest"},
+		{"PRERELEASE", "prerelease marking must be wired (rc tags prerelease, stable tags not)"},
+	} {
+		if !strings.Contains(blob, want.needle) {
+			t.Errorf("release workflow steps do not contain %q — %s", want.needle, want.why)
+		}
+	}
+	for _, banned := range []struct{ needle, why string }{
+		{"gh release create", "a second publish implementation beside scripts/release-upload.sh would drift from it"},
+		{"--clobber", "asset upload must never silently overwrite a published binary"},
+	} {
+		if strings.Contains(blob, banned.needle) {
+			t.Errorf("release workflow steps contain %q — %s", banned.needle, banned.why)
+		}
+	}
+	fields := strings.Fields(blob)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "make" && fields[i+1] == "release" {
+			t.Error("release workflow invokes bare `make release` — that target cuts a tag and must never run in CI")
+		}
 	}
 }
