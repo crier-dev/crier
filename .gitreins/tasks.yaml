@@ -2377,3 +2377,20 @@ tasks:
   status: complete
   created_at: '2026-09-25T23:16:44.290048+00:00'
   completed_at: '2026-09-25T23:23:47.469520+00:00'
+- id: CR-FEAT-027-R2
+  title: Land the displaced CR-FEAT-027 rework (roundtrip battery wired into CI)
+  criteria:
+  - make client-roundtrip-check passes end-to-end with the r2 wiring (keygen-sourced
+    keys, python 21 tests / TS 13 tests with loud skips, negative controls enforced);
+    tier1 hook green on commit; CI green post-push
+  status: complete
+  created_at: '2026-09-26T01:46:19.696857+00:00'
+  completed_at: '2026-09-26T01:49:55.481163+00:00'
+- id: DF-CRIER-290
+  title: Close the fixed-10s server-start deadline class in cmd/server tests
+  criteria:
+  - every server-start health wait runs a 20s budget with a run()-exited diagnostic;
+    SIGTERM shutdown waits untouched; CI green on the fix commit
+  status: complete
+  created_at: '2026-09-26T02:16:21.581302+00:00'
+  completed_at: '2026-09-26T02:28:15.555895+00:00'
