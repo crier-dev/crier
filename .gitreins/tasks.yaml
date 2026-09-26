@@ -2421,3 +2421,15 @@ tasks:
   status: complete
   created_at: '2026-09-26T11:39:19.569455+00:00'
   completed_at: '2026-09-26T12:08:22.910065+00:00'
+- id: CI-018
+  title: "Attribute silent early exits of the in-process test server (run()) \u2014\
+    \ exit codes in the boot harness + a log line on the graceful-shutdown path"
+  criteria:
+  - The cmd/server test harness reports the run() exit code whenever a booted server
+    exits before answering /health (message retains the 'server exited before answering
+    /health' prefix), the graceful-shutdown path in run() logs the triggering signal
+    before shutting down, at least one automated test asserts this plumbing, and make
+    test-short is green
+  status: complete
+  created_at: '2026-09-26T15:38:17.354334+00:00'
+  completed_at: '2026-09-26T15:51:48.157116+00:00'
