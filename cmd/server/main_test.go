@@ -70,16 +70,27 @@ func TestServerHealth(t *testing.T) {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	// Wait for the server to come up (bounded).
+	// Wait for the server to come up (bounded). run() RETURNS when it cannot
+	// serve — a bind failure, a rejected config — and that is reported here as
+	// itself, not as an opaque timeout: on CI this exact wait failed with the
+	// port freePort() handed out never even bound, and "did not start within
+	// 10s" said nothing about why. The budget is also deliberately generous,
+	// because a loaded runner starts this in-process server while every other
+	// test binary is starting its own.
 	var resp *http.Response
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		resp, err = client.Get(baseURL + "/health")
 		if err == nil {
 			break
 		}
+		select {
+		case <-done:
+			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+		default:
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 10s: %v", err)
+			t.Fatalf("server did not start within 20s on port %d: %v", port, err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
