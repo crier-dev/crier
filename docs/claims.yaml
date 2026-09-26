@@ -1238,6 +1238,25 @@ claims:
     expect: "/agents/{id}/kill-switch"
     xfail: null
 
+  # DF-CRIER-293: the detection walkthrough is a first-ten-minutes path, and it
+  # used to register its agents keyless — which the DEFAULT posture refuses, so a
+  # copy-paste newcomer never got past the first line of the recipe. The two
+  # anchors pin the two facts the fix publishes (the 400 a keyless registration
+  # earns, and the rule every registration in the recipe now follows); the
+  # `<!-- doccheck -->` blocks in the same section replay the recipe live, so the
+  # verdicts in it are measured against a default-posture server rather than
+  # asserted in prose.
+  - id: ANCHOR-DETECT-RECIPE-KEYED-REGISTRATION
+    kind: anchor
+    doc: README.md
+    quote: "Every registration below carries a public key `crier keygen` printed."
+    xfail: null
+  - id: ANCHOR-DETECT-RECIPE-KEYLESS-400
+    kind: anchor
+    doc: README.md
+    quote: '400 {"error":"public_key is required"}'
+    xfail: null
+
   # --- CR-FEAT-025 (external review DISPATCH · CRI-001, via Bane 2026-09-25) ---
   # Task ownership: idempotency keys, expiry receipts, the dead-letter
   # destination and transfer/reassign. The anchors below fail the gate if the

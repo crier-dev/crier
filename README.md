@@ -1291,28 +1291,115 @@ payload carries one, or that is addressed to a canary's id, trips
 
 ### Catching and containing a compromised agent
 
+**A keyless agent cannot be watched.** Detection attributes behaviour per sender
+and per target, so the registry refuses an identity that carries no public key:
+under the default posture (`CR_REQUIRE_AGENT_SIG` on) a keyless registration —
+`-d '{"id":"peer-1"}'` — answers `400 {"error":"public_key is required"}`, so the
+agent never becomes a row the detection layer could see. `crier keygen` is what
+closes that gap (see [Make a keypair](#make-a-keypair--crier-keygen)): it writes
+the private key and prints the exact `POST /agents` body for the identity it just
+made — public key included.
+**Every registration below carries a public key `crier keygen` printed.**
+
 ```bash
 BASE=http://127.0.0.1:8767
 # detection on, log into a file you keep
 export CR_DETECT_ENABLED=true
 export CR_DETECT_LOG=delivery.jsonl     # signed with delivery.jsonl.key
-# ... the scenario, against a running server:
-curl -s -X POST $BASE/agents -d '{"id":"peer-1"}'            # and peer-2 .. peer-5
+
+# One keypair per agent in the scenario (peer-1 .. peer-5, the compromised
+# sender, the operator). Each keygen writes <id>.key (PKCS#8 PEM, mode 0600) and
+# prints that identity's registration body:
+#   {"id":"peer-1","public_key":"<ed25519 public key — 64 hex characters>"}
+for id in peer-1 peer-2 peer-3 peer-4 peer-5 compromised ops; do
+  ./bin/crier keygen -out "$id.key" -id "$id"
+done
+```
+
+Then the scenario, against a running server. `make docs-check` (CR-GAP-062)
+replays every `curl` line of the marked blocks below against its own
+default-posture server, so each `# -> NNN` verdict is measured rather than
+asserted (the setup lines above are yours to run — the gate boots its own
+server). The `public_key` values are the ones a recorded run of that loop
+printed: paste the hex your own run printed into the same field and every status
+below is identical.
+
+The cast — seven agents, each registered with the public half of its own keygen
+key:
+
+<!-- doccheck -->
+```bash
+curl -s -X POST $BASE/agents \
+     -d '{"id":"peer-1","public_key":"f746c357e41d2cfa1da2ef87943af5beac435ef339de65a85b57d86338fc2e65"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"peer-2","public_key":"c249729cd8b1d15384a2ffcb40bf1ffbc451d05e5aa066441587f127acc5f4a2"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"peer-3","public_key":"669013c1bd2e29a5956fba27727f3f07f14f958cfcb70df955a6d67006cc4cd2"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"peer-4","public_key":"28a0982c04c46d24a91a5fb8f4275d1d1d96fcb03d04ce53779bfaefbaaa36d3"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"peer-5","public_key":"76ea9f493808d219794002651d8fd7e63dd4807f5f258c3e42dc176f349d7e3b"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"compromised","public_key":"5de92dca98d1e9fba715e7a42f62dc4c4c5a1a4a49e8bf62313d48f3ffd12304"}'   # -> 201
+curl -s -X POST $BASE/agents \
+     -d '{"id":"ops","public_key":"9bfb5ff47dcef6d26461b8adf678065cb53b4e17ee3ff54bd2d42cf4fc8f9774"}'   # -> 201
+```
+
+The compromise — the same sender fans out to five peers it had never written to
+before, which is exactly what the documented `fanout_spike` (5 distinct targets
+in 60s) and `new_peer_burst` (3 first-ever pairs in 60s) thresholds measure:
+
+<!-- doccheck -->
+```bash
 curl -s -X POST $BASE/agents/peer-1/inbox \
-     -d '{"sender":"compromised","payload":{"x":1}}'          # and the other peers
-curl -s $BASE/alerts                                          # fanout_spike + new_peer_burst, with evidence
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
+curl -s -X POST $BASE/agents/peer-2/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
+curl -s -X POST $BASE/agents/peer-3/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
+curl -s -X POST $BASE/agents/peer-4/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
+curl -s -X POST $BASE/agents/peer-5/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 201
+```
+
+The alert it trips, with the thresholds that are in force and the evidence behind
+them — then the single containment call, whose four actions are each reported
+separately:
+
+<!-- doccheck -->
+```bash
+curl -s $BASE/alerts     # -> 200
 curl -s -X POST $BASE/agents/compromised/kill-switch \
-     -d '{"reason":"fan-out to 5 new peers"}'                 # ONE call: 4 actions, each reported
-curl -s $BASE/delivery-log/verify                             # the whole file still verifies
+     -d '{"reason":"fan-out to 5 new peers"}'   # -> 200
+```
+
+Containment is enforced in **both** directions — a send *from* the contained
+agent and a fresh delivery *to* it are both refused, and the body names the side
+that refused:
+
+<!-- doccheck -->
+```bash
+curl -s -X POST $BASE/agents/peer-1/inbox \
+     -d '{"sender":"compromised","payload":{"x":1}}'   # -> 403
 curl -s -X POST $BASE/agents/compromised/inbox \
-     -d '{"sender":"ops","payload":{"x":1}}'                  # 403 AGENT_QUARANTINED (target side)
+     -d '{"sender":"ops","payload":{"x":1}}'   # -> 403
+```
+
+And the signed log the operator keeps still verifies end to end:
+
+<!-- doccheck -->
+```bash
+curl -s $BASE/delivery-log/verify     # -> 200
 ```
 
 That run is executed as a test against the real server —
 `TestDetectionCatchesAndContainsACompromisedAgent` in
 `cmd/server/crfeat030_test.go` — which delivers to five new peers, captures the
 alert it trips, contains the agent in one call and then proves the enforcement,
-the log and the restart survival. The capture is in the test's own output.
+the log and the restart survival. The capture is in the test's own output, and
+`make docs-check` replays the same script, so the prose and the two executions
+cannot drift apart.
 
 ## Priority lanes & real backpressure (CR-FEAT-035)
 
