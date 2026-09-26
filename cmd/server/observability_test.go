@@ -98,6 +98,11 @@ func bootObservabilityServerAuth(t *testing.T, token string) string {
 		if time.Now().After(deadline) {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
+		select {
+		case <-done:
+			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+		default:
+		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }

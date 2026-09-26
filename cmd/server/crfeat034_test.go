@@ -80,6 +80,11 @@ func bootCapturedServer(t *testing.T, port int) *capturedServer {
 		if time.Now().After(deadline) {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
+		select {
+		case code := <-cs.done:
+			t.Fatalf("server exited (code %d) before answering /health on port %d", code, port)
+		default:
+		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
