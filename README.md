@@ -193,42 +193,65 @@ than the default cadence to reach exhaustion.
 
 ## Quick Start
 
-### Install the prebuilt binary (no Go toolchain)
+### Install prebuilt binaries (only when release assets are published)
 
-Every release publishes 8 assets: cross-compiled `crier` and `crier-mcp` for
-linux/amd64, linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS`
-manifest. One line fetches the pair for this box, verifies each against that
-manifest, and installs both into `$HOME/.local/bin` — nothing to compile:
+The release workflow publishes 8 assets only after its build and upload steps
+complete: cross-compiled `crier` and `crier-mcp` archives for linux/amd64,
+linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS` manifest. The
+prebuilt installer requires that complete asset set. The existing `v0.1.0-rc2`
+tag has no uploaded assets, so the installer currently fails closed when it
+cannot fetch `SHA256SUMS`; use the from-source fallback below instead.
+
+Once a release has those assets, this command fetches the pair for the current
+machine, verifies each binary against the manifest, and installs both into
+`$HOME/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
 ```
 
-Pin a release instead of the newest, or install somewhere else (`sh -s --`
+To pin a release that has published assets or install somewhere else (`sh -s --`
 passes the flags through the pipe):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.1.0-rc2 --dir "$HOME/bin"
 ```
 
-The installer REFUSES an unverified download: a manifest with no entry for the
-binary, a digest that does not match, or a box with neither `sha256sum` nor
-`shasum` is a loud failure that installs nothing — there is deliberately no flag
-to skip the check. It needs `curl` (or `wget`) and nothing else; every artifact
-is a static binary (`CGO_ENABLED=0`), so it does not have to match the libc of
-the machine that built it. Confirm what landed:
+The installer REFUSES an unverified download: a missing manifest, a manifest
+with no entry for the binary, a digest that does not match, or a box with neither
+`sha256sum` nor `shasum` is a loud failure that installs nothing — there is
+deliberately no flag to skip the check. It needs `curl` (or `wget`) and nothing
+else; every published artifact is a static binary (`CGO_ENABLED=0`), so it does
+not have to match the libc of the machine that built it.
+
+### Install both binaries from source (available now)
+
+This path requires Git, GNU Make, and Go 1.26.6 or later. It checks out the
+existing `v0.1.0-rc2` tag, uses the repository's `build` and `build-mcp` targets,
+and installs both binaries without relying on GitHub release assets:
 
 ```bash
-crier -version        # crier v0.1.0-rc3-<commit> — the tag's own build identity
+git clone --branch v0.1.0-rc2 --depth 1 https://github.com/crier-dev/crier.git
+cd crier
+make build build-mcp
+mkdir -p "$HOME/.local/bin"
+install -m 0755 bin/crier bin/crier-mcp "$HOME/.local/bin/"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Confirm what landed:
+
+```bash
+crier -version        # crier v0.1.0-rc2-<commit> — the tag's own build identity
+crier-mcp --version   # the same build identity
 crier -port 8767      # the server; crier -help prints every flag
 ```
 
-Tester? [TESTERS.md](TESTERS.md) §1 starts from this same install. Prefer to
-build? Everything below is the from-source path, and it produces the same binary
-with the same identity: the release assets are built by
-`scripts/release-artifacts.sh`, which stamps `internal/buildinfo` exactly as
-`make build` does (a `make docs-check` claim fails if either path stops
-stamping).
+Tester? [TESTERS.md](TESTERS.md) §1 covers the install path. The prerequisites
+and expanded build notes below explain how to install Go without root. Source
+builds carry the same identity as release assets: `scripts/release-artifacts.sh`
+stamps `internal/buildinfo` exactly as `make build` and `make build-mcp` do (a
+`make docs-check` claim fails if those paths diverge).
 
 ### Prerequisites
 
