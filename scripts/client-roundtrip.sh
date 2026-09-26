@@ -34,10 +34,14 @@
 #         speaks RFC 6455 over node:net instead of using the header-less global
 #         WebSocket
 #
-# WHAT IT DELIBERATELY DOES NOT DO: invoke openssl. The whole point of the task
-# is that the old recipe (openssl genpkey + `tail -c 32` + xxd + a hand-written
-# sig() helper) is gone, so an arm that fell back to it would prove nothing.
-# `openssl` is not required on PATH and is never called here.
+# WHAT IT DELIBERATELY DOES NOT DO: use openssl to produce a key or a signature.
+# The whole point of the task is that the old recipe (openssl genpkey + `tail -c
+# 32` + xxd + a hand-written sig() helper) is gone, so an arm that fell back to it
+# would prove nothing: every key here comes from `crier keygen` and every
+# signature from the client library. (The clients' own unit-test arms additionally
+# CROSS-CHECK that a keygen key is the same key openssl's DER recipe derives, and
+# those two checks SKIP LOUDLY when openssl is absent — they never produce the
+# material under test.)
 #
 # Requirements: go (toolchain), curl, ss (iproute2, for the port guards), python3
 # (stdlib only — the client needs no packages), and node >= 22.6 for the
@@ -293,4 +297,7 @@ fi
 
 echo
 echo "ALL ARMS PASSED — crier keygen + the Python and TypeScript clients, over the real HTTP/WS API,"
-echo "with real signatures, no openssl, no xxd, and no third-party packages."
+echo "with real signatures: every key came from 'crier keygen' and every signature from a client"
+echo "library, xxd was never used, and nothing third-party was installed. (The unit-test arms also"
+echo "cross-check the openssl DER recipe when openssl is on PATH, and SKIP that check loudly when it"
+echo "is not — the round-trip arms themselves never touch openssl.)"

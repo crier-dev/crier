@@ -181,6 +181,9 @@ scratch-port-rotation-selftest:
 #     proof, and a second server with CR_AUTH_TOKEN for the bearer path.
 # It builds and starts its own server on a port the shared selector CHOOSES
 # (scripts/lib/port-guard.sh), asserts it owns that port, and reaps it on exit.
+# Every key it uses comes from `crier keygen` and every signature from a client
+# library — openssl and xxd are never used to produce either (the two unit-test
+# arms that cross-check the openssl DER recipe skip loudly when openssl is absent).
 # Node is optional: the TypeScript arm is SKIPPED LOUDLY when node < 22.6 is what
 # is on PATH, and the Python arms still fail the target if they regress.
 client-roundtrip-check:

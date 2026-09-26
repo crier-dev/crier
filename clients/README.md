@@ -149,6 +149,12 @@ CRIER_CLIENT_FORCE_PURE_PYTHON=1 python3 -m unittest discover -s clients/python
 node --test clients/typescript/crier.test.ts                         # 13 tests
 ```
 
+Set `CRIER_BIN=<path to a built crier>` so the suites generate their fixtures with
+`crier keygen` (the documented path); without it they fall back to `openssl
+genpkey`. Two tests in each suite additionally CROSS-CHECK that a generated key is
+the same key openssl's DER recipe derives — those skip loudly when openssl is not
+on PATH, because the client does not need it.
+
 Run the whole acceptance drive — keys, both clients, both backends, the two
 negative controls, the two-agent exchange and the bearer-token arm — against a
 server it starts itself:

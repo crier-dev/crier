@@ -15,6 +15,14 @@ surface around it:
     error paths that a non-crypto tester can actually hit (wrong file, a
     PUBLIC KEY block, a non-ed25519 PKCS#8 key).
 
+`openssl` is used by the interop cross-checks here — that a `crier keygen` key is
+the same key openssl's DER recipe derives, the non-ed25519 PKCS#8 rejection (which
+needs an RSA key to reject), and the key-source fallback — and every one of them
+SKIPS LOUDLY when openssl is not on PATH (measured: with `CRIER_BIN` set and no
+openssl, this suite still runs 21 tests, 3 of them skipped). Nothing else in the
+client needs it, and neither round-trip driver uses it to produce a key or a
+signature: the point of `crier keygen` is that the crypto tooling is gone.
+
 The live server cross-check (the Go verifier accepting a signature produced
 here) is clients/python/round_trip.py, driven end to end by
 scripts/client-roundtrip.sh.
@@ -25,6 +33,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -179,6 +188,22 @@ class TestKeyLoading(unittest.TestCase):
         self.binary = os.environ.get("CRIER_BIN", "")
         self._write_real_key()
 
+    @staticmethod
+    def _require(case: unittest.TestCase, tool: str) -> str:
+        """The tool's path, or a LOUD skip naming what is missing and why.
+
+        These are interop checks, not core claims: the client itself signs without
+        any external tool, so a box with no openssl must skip them explicitly
+        rather than fail as if the client were broken.
+        """
+        path = shutil.which(tool)
+        if path is None:
+            case.skipTest(
+                "%s is not on PATH — this test cross-checks the client against it, "
+                "and the client does not need it (that is the point of `crier keygen`)" % tool
+            )
+        return path
+
     def _write_real_key(self) -> None:
         """Prefer `crier keygen` (the documented path); fall back to openssl."""
         if self.binary and os.path.exists(self.binary):
@@ -188,8 +213,14 @@ class TestKeyLoading(unittest.TestCase):
                 capture_output=True,
             )
             return
+        openssl = shutil.which("openssl")
+        if openssl is None:
+            self.skipTest(
+                "no key source: set CRIER_BIN to a built crier binary (or put "
+                "openssl on PATH) — `crier keygen` is how this repo writes keys"
+            )
         subprocess.run(
-            ["openssl", "genpkey", "-algorithm", "ED25519", "-out", self.key_path],
+            [openssl, "genpkey", "-algorithm", "ED25519", "-out", self.key_path],
             check=True,
             capture_output=True,
         )
@@ -202,9 +233,10 @@ class TestKeyLoading(unittest.TestCase):
 
     def test_public_key_matches_the_openssl_der_recipe(self) -> None:
         """The same public key the README's openssl recipe extracts."""
+        openssl = self._require(self, "openssl")
         key = SigningKey.from_pem_file(self.key_path)
         der = subprocess.run(
-            ["openssl", "pkey", "-in", self.key_path, "-pubout", "-outform", "DER"],
+            [openssl, "pkey", "-in", self.key_path, "-pubout", "-outform", "DER"],
             check=True,
             capture_output=True,
         ).stdout
@@ -216,19 +248,27 @@ class TestKeyLoading(unittest.TestCase):
         self.assertIn("crier keygen", str(ctx.exception))
 
     def test_wrong_pem_block_is_named(self) -> None:
+        openssl = self._require(self, "openssl")
         public_only = subprocess.run(
-            ["openssl", "pkey", "-in", self.key_path, "-pubout"],
+            [openssl, "pkey", "-in", self.key_path, "-pubout"],
             check=True,
             capture_output=True,
         ).stdout
         with self.assertRaises(ValueError) as ctx:
             seed_from_pkcs8_pem(public_only)
         self.assertIn("no PKCS#8 PEM private key", str(ctx.exception))
+        # The line-based PEM reader must also refuse bytes that carry no armour at
+        # all, and bytes whose armour names something that is not PRIVATE KEY.
+        for not_a_key in (b"", b"hello world\n", b"-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"):
+            with self.assertRaises(ValueError) as ctx:
+                seed_from_pkcs8_pem(not_a_key)
+            self.assertIn("no PKCS#8 PEM private key", str(ctx.exception))
 
     def test_non_ed25519_pkcs8_is_named(self) -> None:
+        openssl = self._require(self, "openssl")
         rsa = os.path.join(self.tmp.name, "rsa.key")
         subprocess.run(
-            ["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:1024", "-out", rsa],
+            [openssl, "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:1024", "-out", rsa],
             check=True,
             capture_output=True,
         )

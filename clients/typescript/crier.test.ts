@@ -46,6 +46,25 @@ const RFC8032_VECTORS: Array<[string, string, string, string]> = [
 const workdir = mkdtempSync(join(tmpdir(), "crier-ts-test-"));
 after(() => rmSync(workdir, { recursive: true, force: true }));
 
+/**
+ * Is `openssl` on PATH?
+ *
+ * It is used by the interop cross-checks below and NOWHERE else: the client
+ * itself signs through node:crypto and never shells out, and neither round-trip
+ * driver uses openssl to produce a key or a signature. A box without it must SKIP
+ * those checks loudly (naming why) rather than fail as if the client were broken
+ * — measured: with CRIER_BIN set and no openssl, this suite still runs 13 tests,
+ * 2 of them skipped.
+ */
+function hasOpenssl(): boolean {
+  try {
+    execFileSync("openssl", ["version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** A key written by `crier keygen` (the documented path), else by openssl. */
 function writeRealKey(name: string): string {
   const path = join(workdir, `${name}.key`);
@@ -56,6 +75,22 @@ function writeRealKey(name: string): string {
   }
   execFileSync("openssl", ["genpkey", "-algorithm", "ED25519", "-out", path]);
   return path;
+}
+
+/** True when a key can be produced at all, so a test can skip instead of throwing. */
+function keySourceAvailable(): boolean {
+  return Boolean(process.env["CRIER_BIN"]) || hasOpenssl();
+}
+
+const NO_KEY_SOURCE =
+  "no key source: set CRIER_BIN to a built crier binary (or put openssl on PATH) — " +
+  "`crier keygen` is how this repo writes keys";
+const NO_OPENSSL =
+  "openssl is not on PATH — this is an interop cross-check only, and the client " +
+  "does not need openssl (that is the point of `crier keygen`)";
+
+interface Skippable {
+  skip(message?: string): void;
 }
 
 describe("RFC 8032 vectors (cross-language agreement)", () => {
@@ -85,7 +120,9 @@ describe("RFC 8032 vectors (cross-language agreement)", () => {
 });
 
 describe("PKCS#8 key loading", () => {
-  it("loads a crier-keygen key and derives the same public half openssl does", () => {
+  it("loads a crier-keygen key and derives the same public half openssl does", (t: Skippable) => {
+    if (!keySourceAvailable()) return t.skip(NO_KEY_SOURCE);
+    if (!hasOpenssl()) return t.skip(NO_OPENSSL);
     const path = writeRealKey("alice");
     const key = SigningKey.fromPemFile(path);
     assert.equal(key.publicKeyHex.length, 64);
@@ -93,13 +130,14 @@ describe("PKCS#8 key loading", () => {
     assert.equal(key.publicKeyHex, Buffer.from(der).subarray(-32).toString("hex"));
   });
 
-  it("round-trips a hex seed to the same key as the keygen'd file (DER path, no PEM assembled)", () => {
+  it("round-trips a hex seed to the same key as the keygen'd file (DER path, no PEM assembled)", (t: Skippable) => {
     // Regression, twice over: the PEM construction this path used to go through
     // was rejected by OpenSSL when its base64 body wrapped with a trailing
     // newline (an empty line inside the block), and the whole-header literal it
     // needed read as key material to the repo's secrets scanner. fromHex now
     // builds PKCS#8 DER and hands DER to Node, so neither exists — while the
     // key it produces must still be the file's key.
+    if (!keySourceAvailable()) return t.skip(NO_KEY_SOURCE);
     const path = writeRealKey("bob");
     const fromFile = SigningKey.fromPemFile(path);
     const der = createPrivateKey({ key: readFileSync(path, "utf8"), format: "pem", type: "pkcs8" }).export({
@@ -118,8 +156,13 @@ describe("PKCS#8 key loading", () => {
     );
   });
 
-  it("names the fix for a missing file and for a wrong PEM block", () => {
+  it("names the fix for a missing file and for a wrong PEM block", (t: Skippable) => {
     assert.throws(() => SigningKey.fromPemFile(join(workdir, "nope.key")), /crier keygen/);
+    for (const notAKey of ["hello world", "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----"]) {
+      assert.throws(() => SigningKey.fromPemBytes(notAKey), /no PKCS#8 PEM private key/);
+    }
+    if (!keySourceAvailable()) return t.skip(NO_KEY_SOURCE);
+    if (!hasOpenssl()) return t.skip(NO_OPENSSL);
     const publicPem = execFileSync("openssl", ["pkey", "-in", writeRealKey("carol"), "-pubout"]).toString();
     assert.throws(() => SigningKey.fromPemBytes(publicPem), /no PKCS#8 PEM private key/);
     assert.throws(() => SigningKey.fromHex("zz"), /expected 32/);
