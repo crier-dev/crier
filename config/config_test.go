@@ -32,6 +32,7 @@ func unsetAll(t *testing.T) {
 		"CR_FED_TOKEN",
 		"CR_FED_MAX_HOLD_S",
 		"CR_FED_QUEUE_FILE",
+		"CR_INBOX_MAX_BODY_BYTES",
 		"CR_ENABLE_PPROF",
 		"CR_ENABLE_METRICS",
 	} {

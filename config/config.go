@@ -29,6 +29,10 @@ type Config struct {
 	LogLevel           string
 	LogFormat          string
 	RateLimitPerMinute int
+	// InboxMaxBodyBytes bounds the raw request body accepted by POST
+	// /agents/{id}/inbox and POST /capabilities/{capability}/inbox
+	// (CR_INBOX_MAX_BODY_BYTES). Values must be positive; the default is 1 MiB.
+	InboxMaxBodyBytes int
 	// GlobalRateLimitPerMinute is the global inbox-ingest budget
 	// (CR_RATE_LIMIT_GLOBAL_PER_MINUTE, CR-FEAT-035), in deliveries per minute
 	// across every agent. 0 — the default — disables it entirely: the
@@ -257,6 +261,7 @@ func Load() (Config, error) {
 		LogLevel:           "info",
 		LogFormat:          "text",
 		RateLimitPerMinute: 100,
+		InboxMaxBodyBytes:  1 << 20,
 		RequireAgentSig:    true,
 		Webhook: WebhookConfig{
 			Timeout:            30 * time.Second,
@@ -377,6 +382,17 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_PER_MINUTE: %q (want non-negative integer)", v)
 		}
 		cfg.RateLimitPerMinute = n
+	}
+
+	// Inbound inbox request body limit. This is strict and always enabled: a
+	// non-positive or non-integer value is a startup error rather than a silent
+	// unlimited-body fallback.
+	if v := os.Getenv("CR_INBOX_MAX_BODY_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INBOX_MAX_BODY_BYTES: %q (want positive integer)", v)
+		}
+		cfg.InboxMaxBodyBytes = n
 	}
 
 	// Global ingest budget (CR-FEAT-035). Opt-in, and 0 — the default — means

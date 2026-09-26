@@ -142,6 +142,9 @@ type Handler struct {
 	// agent-owned routes (retrieve/ack/stats/unregister). When false, only
 	// the shared Bearer token is required (legacy behavior).
 	requireAgentSig bool
+	// maxInboxBodyBytes bounds the raw body on both inbox delivery routes.
+	// It is set during server wiring and defaults for direct test handlers.
+	maxInboxBodyBytes int64
 	// webhooks pushes deliveries to agent webhook endpoints when configured
 	// (CR-FEAT-001). Nil disables webhook delivery.
 	webhooks *webhook.Driver
@@ -210,6 +213,8 @@ func NewHandler(store Store) *Handler {
 	return &Handler{
 		store:    store,
 		notifier: newInboxNotifier(),
+		// The raw request body cap is shared by by-id and capability delivery.
+		maxInboxBodyBytes: defaultMaxInboxBodyBytes,
 		// The documented default window: a Handler that is never configured
 		// derives status the same way a configured one does, just with the
 		// shipped window (CR-FEAT-024).
@@ -218,6 +223,17 @@ func NewHandler(store Store) *Handler {
 		// honored within (CR-FEAT-025).
 		idempotency: newIdempotencyRegistry(DefaultIdempotencyWindow),
 	}
+}
+
+// SetMaxInboxBodyBytes configures the raw HTTP body limit shared by
+// POST /agents/{id}/inbox and POST /capabilities/{capability}/inbox. A
+// non-positive value restores the documented 1 MiB default.
+func (h *Handler) SetMaxInboxBodyBytes(limit int) {
+	if limit <= 0 {
+		h.maxInboxBodyBytes = defaultMaxInboxBodyBytes
+		return
+	}
+	h.maxInboxBodyBytes = int64(limit)
 }
 
 // SetIdempotencyWindow configures the window within which a sender-supplied

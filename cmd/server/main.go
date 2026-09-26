@@ -256,6 +256,7 @@ func run(args []string) int {
 	}
 
 	registryHandler := registry.NewHandler(regStore)
+	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
 	// Global ingest budget (CR-FEAT-035): a shed on the delivery path itself,
 	// so a runaway producer cannot push every inbox deeper without limit.
@@ -1067,6 +1068,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_LOG_LEVEL                debug|info|warn|error (default info)")
 	fmt.Fprintln(out, "  CR_LOG_FORMAT               text|json (default text)")
 	fmt.Fprintln(out, "  CR_RATE_LIMIT_PER_MINUTE    relay publish rate limit (default 100)")
+	fmt.Fprintln(out, "  CR_INBOX_MAX_BODY_BYTES     maximum raw body for inbox deliveries (default 1048576; invalid values fail startup; over-cap requests return 413 REQUEST_BODY_TOO_LARGE)")
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
 	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")

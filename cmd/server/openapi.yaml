@@ -802,6 +802,13 @@ paths:
         and so is a request that names no `sender`, because that terminal
         notification is addressed to the sender's inbox and the delivery
         would otherwise be held with no possible outcome (DF-CRIER-129).
+
+        The raw HTTP request body is capped by `CR_INBOX_MAX_BODY_BYTES`
+        (default 1048576 bytes). The cap is checked before JSON decoding,
+        guard, idempotency, transport, federation or store work, and applies
+        equally to Content-Length and chunked requests. An over-cap request
+        answers 413 with `{"error":"REQUEST_BODY_TOO_LARGE"}` and has no
+        delivery side effects.
       parameters:
         - name: id
           in: path
@@ -1070,6 +1077,17 @@ paths:
                   error:
                     type: string
                     description: "Human-readable rejection naming the offending field and its allowed values, e.g. 'delivery_mode must be blocking|async|batch', 'payload is required', 'payload must be a JSON object'"
+        "413":
+          description: "The raw request body exceeds CR_INBOX_MAX_BODY_BYTES (default 1048576). Nothing was decoded, dispatched, forwarded, guarded or stored. The stable error is REQUEST_BODY_TOO_LARGE."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum: [REQUEST_BODY_TOO_LARGE]
         "403":
           description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict. Also the NAMESPACE_MISMATCH refusal (CR-FEAT-029): the request named a namespace the TARGET agent is not registered in, and the message was not stored — a delivery cannot cross namespaces by naming one (specs/NAMESPACES.md §5)."
           content:
@@ -1670,6 +1688,13 @@ paths:
         persisted, so a restart, a second process on the same store, or two
         relays behind a load balancer each rotate on their own. This is fairness
         across holders, not exactly-once dispatch.
+
+        The shared raw HTTP request-body cap is `CR_INBOX_MAX_BODY_BYTES`
+        (default 1048576 bytes). It applies before capability selection,
+        JSON decoding, guard, idempotency, transport, federation or store work;
+        Content-Length and chunked requests are both covered. An over-cap
+        request answers 413 with `{"error":"REQUEST_BODY_TOO_LARGE"}` and
+        leaves every holder's queue unchanged.
       parameters:
         - name: capability
           in: path
@@ -1758,6 +1783,17 @@ paths:
           description: "Accepted for webhook push to the resolved holder (`delivery_mode: async|batch`) — queued, NOT stored in the inbox (spec §4), with the same `capability` / `target` fields."
         "400":
           description: "Same refusals as the by-id operation: malformed JSON, a missing/invalid `payload`, an unknown `delivery_mode`, an out-of-range `timeout_ms`/`ttl_seconds`, or an over-long `idempotency_key`. Nothing is dispatched and nothing is stored. A refusal cannot depend on the target, so it is answered before the pool is consulted."
+        "413":
+          description: "The raw request body exceeds CR_INBOX_MAX_BODY_BYTES (default 1048576). Nothing was decoded, capability-selected, dispatched, forwarded, guarded or stored. The stable error is REQUEST_BODY_TOO_LARGE."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum: [REQUEST_BODY_TOO_LARGE]
         "403":
           description: "`GUARD_BLOCKED` — the resolved holder's guard policy blocked the message (never queued, never stored, never POSTed); `AGENT_QUARANTINED` — the sender, or the RESOLVED holder, is contained by the detection layer's kill-switch (CR-FEAT-030)."
         "404":

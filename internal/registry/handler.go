@@ -120,6 +120,14 @@ type deliverRequest struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+const (
+	// defaultMaxInboxBodyBytes is the raw HTTP request-body cap shared by
+	// agent-id and capability-routed inbox delivery.
+	defaultMaxInboxBodyBytes = 1 << 20
+	// requestBodyTooLargeError is stable machine-readable refusal name.
+	requestBodyTooLargeError = "REQUEST_BODY_TOO_LARGE"
+)
+
 // maxTTLSeconds bounds ttl_seconds so the requested lifetime still fits a
 // time.Duration (int64 nanoseconds) without overflowing into a negative
 // interval. 9223372036s ≈ 292 years.
@@ -844,7 +852,45 @@ func (h *Handler) HandleDeliverByCapability(w http.ResponseWriter, r *http.Reque
 // there is no guard response header), while the X-Crier-Guard-* headers exist
 // only on the OUTBOUND webhook POST.
 // ---------------------------------------------------------------------------
+// rejectOversizedBody enforces the shared raw request-body cap before JSON
+// decoding or any delivery-side work. Content-Length rejects cheaply; the
+// MaxBytesReader path covers chunked requests and bodies that do not advertise
+// their length. The response error is deliberately stable so clients can
+// branch on it without parsing prose.
+func (h *Handler) rejectOversizedBody(w http.ResponseWriter, r *http.Request) bool {
+	limit := h.maxInboxBodyBytes
+	if limit <= 0 {
+		limit = defaultMaxInboxBodyBytes
+	}
+	if r.ContentLength > limit {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": requestBodyTooLargeError})
+		return true
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": requestBodyTooLargeError})
+			return true
+		}
+		// Preserve the existing malformed/read-failure response for bodies
+		// that fit the cap but cannot be read to completion.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return true
+	}
+	// Decode from the bounded copy so the existing json.Decoder semantics,
+	// including its handling of trailing whitespace, remain unchanged.
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return false
+}
+
 func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
+	if h.rejectOversizedBody(w, r) {
+		return
+	}
+
 	var req deliverRequest
 
 	// DETECTION (CR-FEAT-030): exactly one observation per delivery request,
