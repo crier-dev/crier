@@ -374,7 +374,7 @@ never a re-telling of it.
 opaque and the §5.4.3 projection is lossless for any media type, so claiming a media type is
 unsupported would be false. `-32006 InvalidAgentResponseError`, `-32007
 ExtendedAgentCardNotConfiguredError` and `-32008 ExtensionSupportRequiredError` belong to operations
-this series does not serve (INT-A2A-005/006).
+this series does not serve (INT-A2A-006).
 
 #### 5.4.5 `SendStreamingMessage` — the SSE adapter
 
