@@ -1,0 +1,33 @@
+{
+  "tick_id": "crier-2026-09-26-11-23-45",
+  "tick": 406,
+  "mode": "wave",
+  "reason": "WAVE_BUDGET=8; exactly 2 mutually-independent unblocked worker-eligible rows exist: DF-CRIER-293 (README detection recipe runs verbatim against default posture, proven by docs-check) and DF-CRIER-294 (guard oversize verdict asymmetry + ±30s replay-window doc). Disjoint file sets: 293 owns README.md + docs/claims.yaml; 294 is scoped to internal/guard + docs/mesh-protocol.md (+ specs) and explicitly NOT README/claims.yaml. Not worker-eligible this tick: QA-CRIER-13/14, DF-CRIER-263/285/289, INT-CRIER-006, QA-CRIER-30 (bunker-infra owned / fleet-tool owned, all bunker hosts down per DF-CRIER-289), DF-CRIER-134 (Bane-actionable external blocker), RELEASE-004 (user-authorization blocked). E2E-001 due window ~406-411 deferred to the next tick (wave tick carries 2 workers + serial gated merges).",
+  "created_at": "2026-09-26T11:35:00+00:00",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-293",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-293",
+      "branch": "wt/DF-CRIER-293",
+      "brief": "/tmp/crier-t406-brief-df293.txt",
+      "log": "/tmp/crier-t406-worker-df293.log",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "complete",
+      "outcome": "worker commit c4ab1c8 (README detection recipe re-keyed with crier keygen public keys + 5 doccheck blocks, recipe replay docs=12 executed_steps=27 verdicts=27, non-vacuity flip-proven); ff-merged to main, full gate green post-merge; judge tier1+tier2 PASS verdict 830328c1 (history dir 5bddb661)"
+    },
+    {
+      "task_id": "DF-CRIER-294",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-294",
+      "branch": "wt/DF-CRIER-294",
+      "brief": "/tmp/crier-t406-brief-df294.txt",
+      "log": "/tmp/crier-t406-worker-df294.log",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "complete",
+      "outcome": "worker commit be31246, rebased to c7a151b on merged main (over-cap guard allows carry errored:true guard.go:198/207 + RED-verified pad-and-evade test; ±30s sigWindow documented as the whole replay defence in docs/mesh-protocol.md:410-436 + executable pin; openapi errored-field definition corrected via make generate); ff-merged to main, full gate green post-merge; judge tier1+tier2 PASS verdict 55452526"
+    }
+  ],
+  "foreman_direct": [],
+  "finished_at": "2026-09-26T12:22:00+00:00"
+}
