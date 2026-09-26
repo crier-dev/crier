@@ -167,9 +167,13 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))
 
 	done := make(chan struct{})
+	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
+	// the deferred close(done) a waiter observes, so whenever this server has
+	// exited, its code is already buffered here.
+	exitCode := make(chan int, 1)
 	go func() {
 		defer close(done)
-		run(nil)
+		exitCode <- run(nil)
 	}()
 
 	self, err := os.FindProcess(os.Getpid())
@@ -201,7 +205,7 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 		}
 		select {
 		case <-done:
-			t.Fatalf("server exited before answering /health on port %d (last error: %v)", port, err)
+			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}
 		time.Sleep(25 * time.Millisecond)

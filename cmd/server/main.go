@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,6 +42,37 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// The process-wide signal guard (CI-018 + QA-CRIER-17).
+//
+// QA-CRIER-17 arms the per-run SIGINT/SIGTERM handler at the TOP of run()
+// precisely so that a caller which signals the process after an early return
+// does not die from the default action. CI-018 stops that per-run registration
+// when its run() returns — a returned run() must not keep consuming later
+// process signals — and stopping the LAST registration would restore the
+// default action, i.e. reopen the exact window QA-CRIER-17 closed. This one
+// registration, armed once for the life of the process and never stopped,
+// keeps the default action disabled no matter how many run() calls have come
+// and gone.
+//
+// It is never read, and that is deliberate: a signal buffered here (size 1, so
+// the runtime never blocks on a delivery) is meant to be DISCARDED — the guard
+// exists to keep the process alive, not to trigger a shutdown; every live
+// server listens on its own per-run channel instead. Measured both ways: with
+// this guard armed TestSigtermAfterEarlyBootFailureIsNotFatal is green, and
+// without it that fixture's child dies with "signal: terminated".
+var (
+	procSignalGuardOnce sync.Once
+	procSignalGuard     chan os.Signal
+)
+
+// armProcSignalGuard registers the process-wide guard exactly once (see above).
+func armProcSignalGuard() {
+	procSignalGuardOnce.Do(func() {
+		procSignalGuard = make(chan os.Signal, 1)
+		signal.Notify(procSignalGuard, syscall.SIGINT, syscall.SIGTERM)
+	})
+}
+
 // run executes the server. It parses CLI flags first so --help/--version
 // return immediately instead of starting the server, then falls through to
 // the env-driven configuration and server startup. It returns a process
@@ -66,8 +98,27 @@ func run(args []string) int {
 	// before the shutdown goroutine below is started is delivered to it
 	// rather than dropped, so moving this call earlier changes no ordering
 	// guarantee the shutdown path relied on.
+	//
+	// CI-018 finishes the job: the per-run channel is now STOPPED when its
+	// run() returns, so a returned run() no longer holds a registration for
+	// the life of the process. That would reopen the window QA-CRIER-17
+	// closed, so the one process-lifetime registration above is armed first
+	// and never stopped.
+	armProcSignalGuard()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Stop THIS run's registration the moment run() returns (CI-018): a
+	// returned run() must not keep consuming process signals meant for a
+	// later boot. The ordering is safe by construction on the serving path —
+	// run() returns only after srv.Serve() returns, Serve() returns only once
+	// srv.Shutdown() has closed the listener, and Shutdown() runs only in the
+	// wait goroutine below AFTER that goroutine consumed sigCh — so by the
+	// time this deferred Stop runs there is no remaining consumer on either
+	// path. It is only safe because the process-wide guard above is armed
+	// first: measured, this defer alone kills the QA-CRIER-17 fixture's child
+	// with "signal: terminated", and with the guard it stays green.
+	defer signal.Stop(sigCh)
 
 	// Subcommands (CR-FEAT-027). `crier keygen` owns its own flag set and never
 	// starts the server, so it is dispatched here — before parseArgs — and every
@@ -705,7 +756,8 @@ func run(args []string) int {
 	// must not outlive the server it names. It is written only after the
 	// bind succeeded (see the listen call below).
 	go func() {
-		<-sigCh
+		sig := <-sigCh
+		logShutdownSignal(sig, cfg.Port)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -762,6 +814,25 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// logShutdownSignal records the signal that took this server down gracefully
+// (CI-018).
+//
+// The graceful path was the ONLY silent early exit of run(): the wait
+// goroutine calls srv.Shutdown, srv.Serve then returns http.ErrServerClosed,
+// and run() returns 0 without a log line of its own. An in-process test whose
+// server was signalled while it was still booting therefore failed with
+// "server exited before answering /health" and a captured log holding ONLY the
+// normal startup lines — the exit REASON was nowhere in the output. This one
+// line is what makes that exit attributable: which signal, on which port, for
+// which build. It is production diagnostics too (an operator reading a
+// container's log sees why the process went away).
+//
+// The body is deliberately a one-liner over slog so a test can intercept
+// slog.SetDefault and read the exact shape that ships.
+func logShutdownSignal(sig os.Signal, port int) {
+	slog.Info("shutdown signal received", "signal", sig.String(), "port", port, "version", buildinfo.String())
 }
 
 // logServeFailure reports a fatal ListenAndServe error. For the shared-host
