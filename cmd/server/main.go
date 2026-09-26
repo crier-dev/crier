@@ -79,31 +79,20 @@ func armProcSignalGuard() {
 // exit code and is the testable entrypoint (main() is a thin wrapper), so
 // TestServerHealth can invoke it without os.Args carrying go test's flags.
 func run(args []string) int {
-	// Arm the process-wide SIGINT/SIGTERM handler BEFORE anything else
-	// (QA-CRIER-17). Every in-process user of run() — the startTestServer /
-	// bootDocsClaimsServer helpers here and in the sibling test files, and
-	// any embedder — shuts a booted server down by signalling the PROCESS,
-	// because that is the only handle they have on it. That contract is only
-	// safe while SOME run() has registered a handler: until then SIGTERM
-	// takes its default action and kills the caller. Several paths below
-	// return early (bad flags, load configuration, an unreachable database,
-	// an invalid guard URL, a federation hold queue that cannot be opened),
-	// so registering at the old site — after all of them, just before the
-	// serve loop — left the window open, and a caller that signalled after
-	// such a return died with no failure line: the testing package cannot
-	// flush a dead process's buffered output, which is why the failure
-	// showed up as a bare package FAIL with no test name.
+	// Arm the process-wide SIGINT/SIGTERM guard BEFORE anything else
+	// (QA-CRIER-17). Production run() shuts a booted server down from an OS
+	// signal; until some channel is registered, SIGTERM takes its default action
+	// and kills the caller. Several paths in runWithSignals return early (bad
+	// flags, configuration, database, guard URL, or hold-queue failures), so the
+	// lifetime guard must exist before any of them. In-process test helpers call
+	// runWithSignals with a private channel instead: their cleanup is scoped to
+	// one server and cannot broadcast a process signal into a sibling or the next
+	// boot (CI-019).
 	//
-	// The channel is buffered (size 1) precisely so a signal that arrives
-	// before the shutdown goroutine below is started is delivered to it
-	// rather than dropped, so moving this call earlier changes no ordering
-	// guarantee the shutdown path relied on.
-	//
-	// CI-018 finishes the job: the per-run channel is now STOPPED when its
-	// run() returns, so a returned run() no longer holds a registration for
-	// the life of the process. That would reopen the window QA-CRIER-17
-	// closed, so the one process-lifetime registration above is armed first
-	// and never stopped.
+	// CI-018 stops this production run's channel when run() returns, so a
+	// completed invocation cannot keep consuming later process signals. The
+	// process-lifetime guard remains registered to preserve QA-CRIER-17's early
+	// failure protection.
 	armProcSignalGuard()
 
 	sigCh := make(chan os.Signal, 1)
@@ -120,6 +109,14 @@ func run(args []string) int {
 	// with "signal: terminated", and with the guard it stays green.
 	defer signal.Stop(sigCh)
 
+	return runWithSignals(args, sigCh)
+}
+
+// runWithSignals owns one server invocation and stops it from the caller's
+// signal channel. Production run() supplies a channel registered with os/signal;
+// in-process callers can supply a private channel so one test server's cleanup
+// cannot broadcast into a sibling or a later boot (CI-019).
+func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// Subcommands (CR-FEAT-027). `crier keygen` owns its own flag set and never
 	// starts the server, so it is dispatched here — before parseArgs — and every
 	// other argument shape keeps the pre-existing flag behaviour unchanged (a

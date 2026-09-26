@@ -158,27 +158,30 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))
 
 	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
+	shutdown := make(chan os.Signal, 1)
+	// exitCode carries runWithSignals()'s return value (CI-018). The send
+	// happens BEFORE the deferred close(done) a waiter observes, so whenever
+	// this server has exited, its code is already buffered here.
 	exitCode := make(chan int, 1)
 	go func() {
 		defer close(done)
-		exitCode <- run(nil)
+		exitCode <- runWithSignals(nil, shutdown)
 	}()
 
-	// Graceful shutdown: main() installs a SIGINT/SIGTERM handler that calls
-	// srv.Shutdown. Send SIGTERM to our own process and wait for main to return.
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
+	// In-process boots use a run-scoped channel (CI-019), not a process signal:
+	// SIGTERM sent to the whole test binary is broadcast to every os/signal
+	// registration and can arrive late enough to kill the next server boot.
 	t.Cleanup(func() {
-		_ = self.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+			return
+		default:
+		}
+		shutdown <- syscall.SIGTERM
 		select {
 		case <-done:
 		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
+			t.Errorf("server did not shut down within 10s of run-scoped SIGTERM")
 		}
 	})
 

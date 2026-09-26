@@ -38,6 +38,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -262,6 +263,28 @@ func TestSignalShutdownReturnsZeroAndLogsTheSignal(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("shutdown log does not contain %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestInProcessServerCleanupIsRunScoped is the CI-019 regression gate. A test
+// helper's cleanup is a server handle, not a request to terminate the process:
+// it must stop its own run without broadcasting SIGTERM to every live run or
+// leaving a redundant process signal that can race with the next boot.
+func TestInProcessServerCleanupIsRunScoped(t *testing.T) {
+	observed := make(chan os.Signal, 1)
+	signal.Notify(observed, syscall.SIGTERM)
+	defer signal.Stop(observed)
+
+	t.Run("server", func(t *testing.T) {
+		startTestServer(t)
+	})
+
+	select {
+	case sig := <-observed:
+		t.Fatalf("in-process server cleanup broadcast %s to the test process", sig)
+	case <-time.After(250 * time.Millisecond):
+		// os/signal delivery is asynchronous. A quiet interval after the helper
+		// has fully stopped proves its cleanup did not signal the process.
 	}
 }
 
