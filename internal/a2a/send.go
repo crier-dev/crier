@@ -82,10 +82,12 @@ type SendMessageConfiguration struct {
 	// so in the spec rather than pretending to tailor output it does not touch.
 	AcceptedOutputModes []string `json:"acceptedOutputModes,omitempty"`
 	// TaskPushNotificationConfig is the A2A push-notification configuration.
-	// The push-config surface is INT-A2A-005's row: while it is absent, asking
-	// for it here is refused with PushNotificationNotSupportedError rather than
-	// silently ignored (a silent accept would tell the client it has push
-	// notifications it will never receive).
+	// An inline one is REFUSED rather than silently ignored (a silent accept
+	// would tell the client it has push notifications it will never receive):
+	// the push configuration is its own operation surface (INT-A2A-005,
+	// CreateTaskPushNotificationConfig and friends, §9.4.7), which is where a
+	// channel is configured and where the target agent's capability is
+	// validated. A send delivers; it never writes configuration.
 	TaskPushNotificationConfig json.RawMessage `json:"taskPushNotificationConfig,omitempty"`
 	// HistoryLength bounds how many recent history messages the returned Task
 	// carries (§3.2.4): unset = this server's default, 0 = no history.
@@ -297,7 +299,10 @@ type Translation struct {
 //     entry's lifecycle, which is INT-A2A-004's surface. Refused with
 //     UnsupportedOperationError (§5.4) rather than delivered as a new task the
 //     client would not recognise;
-//   - `configuration.taskPushNotificationConfig`: INT-A2A-005's surface.
+//   - `configuration.taskPushNotificationConfig`: refused — an inline push
+//     configuration is not accepted on a send; the four §9.4.7 operations
+//     (INT-A2A-005, §5.5) are where a push channel is configured, and they are
+//     where the target agent's capability is validated.
 //
 // Session and sender mapping, so no later reader has to infer it:
 //
@@ -371,8 +376,15 @@ func Translate(params *SendMessageParams, requestMetadata map[string]any, sender
 	if params.Configuration != nil {
 		cfg := params.Configuration
 		if len(strings.TrimSpace(string(cfg.TaskPushNotificationConfig))) > 0 {
+			// The push-configuration surface exists as its own operations
+			// (INT-A2A-005, §9.4.7) and is what validates the target agent's
+			// capability — a send does not write configuration. The refusal is
+			// kept target-agnostic here because this function cannot see the
+			// row; the handler re-codes it to UnsupportedOperationError when
+			// the resolved agent DOES have a push channel, so the answer never
+			// claims a capability the agent has (§5.5.3).
 			return nil, NewRPCError(CodePushNotificationNotSupportedError,
-				"configuration.taskPushNotificationConfig: the A2A push-notification-config surface is not implemented in this build (INT-A2A-005); a crier agent's own webhook configuration is the push channel crier has today",
+				"configuration.taskPushNotificationConfig: an inline push configuration is not accepted on a send — INT-A2A-005 serves push configuration as its own operations (CreateTaskPushNotificationConfig, GetTaskPushNotificationConfig, ListTaskPushNotificationConfigs, DeleteTaskPushNotificationConfig, §9.4.7), which are what configure and validate an agent's push channel",
 				ErrorInfo{Type: ErrorInfoType, Reason: "PUSH_NOTIFICATION_NOT_SUPPORTED", Domain: ErrorDomain})
 		}
 		if cfg.HistoryLength != nil && *cfg.HistoryLength < 0 {

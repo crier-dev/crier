@@ -65,12 +65,17 @@ const (
 	// because from an A2A client's point of view the thing it addressed does
 	// not exist here.
 	CodeTaskNotFoundError = -32001
-	// CodePushNotificationNotSupportedError is -32003: the push-notification
-	// configuration surface is not implemented in this build (INT-A2A-005).
+	// CodePushNotificationNotSupportedError is -32003: the agent has no push
+	// channel. crier's push channel for an agent is its webhook config, so this
+	// is the §3.3.4 capability answer for an agent whose Agent Card states
+	// pushNotifications:false — raised by every push-notification configuration
+	// operation (INT-A2A-005, specs/A2A-OPTION.md §5.5) and by a send carrying an
+	// inline `configuration.taskPushNotificationConfig` to such an agent.
 	CodePushNotificationNotSupportedError = -32003
 	// CodeUnsupportedOperationError is -32004: the operation cannot accept
-	// this request (§3.3.4 capability validation, and a message aimed at an
-	// existing task's continuation until INT-A2A-004 lands the lifecycle).
+	// this request (§3.3.4 capability validation, a message aimed at an
+	// existing task's continuation until INT-A2A-004 lands the lifecycle, and a
+	// push configuration the agent's own webhook config cannot carry — §5.5.3).
 	CodeUnsupportedOperationError = -32004
 	// CodeVersionNotSupportedError is -32009: A2A-Version asked for a protocol
 	// version this server does not serve (§3.6, §9.2).
@@ -80,9 +85,11 @@ const (
 	// JSON-RPC 2.0 §5 reserves -32000..-32099 for implementation-defined
 	// server errors, and A2A's own -32001..-32009 are all spoken for by names
 	// with a different meaning (§5.4) — so a refusal that A2A has no name for,
-	// such as the target agent's message guard blocking the delivery or a
-	// quarantined agent, is reported here with crier's own machine-readable
-	// reason in the error's data, never as an A2A error it is not.
+	// such as the target agent's message guard blocking the delivery, a
+	// quarantined agent, or crier's own agent-owned write gate refusing a
+	// push-configuration write (§5.5.3), is reported here with crier's own
+	// machine-readable reason in the error's data, never as an A2A error it is
+	// not.
 	CodeDeliveryRefused = -32050
 )
 

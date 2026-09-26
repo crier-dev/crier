@@ -1,9 +1,10 @@
 # A2A-OPTION.md — A2A interoperability as an OPT-IN extra
 
-Status: **DRAFT v2** · 2026-09-25 · Owner: Bane · Tickets: INT-A2A-001 (this doc + the opt-in gate),
+Status: **DRAFT v3** · 2026-09-25 · Owner: Bane · Tickets: INT-A2A-001 (this doc + the opt-in gate),
 INT-A2A-002 (**SHIPPED** — the Agent Card discovery route, §5.3), INT-A2A-003 (**SHIPPED** — the
-JSON-RPC binding: SendMessage + SendStreamingMessage, §5.4), INT-A2A-004..006 (the remaining A2A
-surfaces — NOT shipped)
+JSON-RPC binding: SendMessage + SendStreamingMessage, §5.4), INT-A2A-005 (**SHIPPED** — the
+push-notification configuration operations, §5.5), INT-A2A-004/006 (the remaining A2A surfaces — NOT
+shipped)
 Source: **A2A v1.0.0** (`github.com/a2aproject/A2A`) — section numbers below are that specification's.
 Precedent: `specs/WEBHOOK-DELIVERY.md` (same rigor + format).
 
@@ -74,7 +75,7 @@ The mapping is the normative contract for INT-A2A-002..006. Each row is
 | `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted`/`working` = stored or leased; `completed` = acked (retrieved + acknowledged); `canceled` = removed before ack. The crier entry id is the A2A `task.id`. **Partially shipped (INT-A2A-003)**: the states a send can observe are reported on the stream (§5.4.5); the state-read operations (`GetTask`/`ListTasks`/`CancelTask`) are INT-A2A-004. |
 | `SubscribeToTask` / `SendStreamingMessage` (SSE) (§9.4.2, §9.4.6) | relay WS subscribe | A2A's stream is the SSE view of the same subscription surface; the mesh is untouched. **`SendStreamingMessage` SHIPPED (INT-A2A-003), §5.4.5** — an SSE adapter over `Relay.Subscribe` that also reports the task's own inbox lifecycle; `SubscribeToTask` (a stream keyed by an EXISTING task id) is INT-A2A-004. |
 | `Part` — `text` \| `file` \| `data` — plus `Part.metadata` (§4.1.6) | crier message parts plus `alt`/`tags` | No new payload model: an A2A part maps onto the delivery payload's part metadata. **SHIPPED (INT-A2A-003), §5.4.4** — the mapping is lossless in both directions. |
-| `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism. INT-A2A-005; until then a `taskPushNotificationConfig` on a send is refused with `PushNotificationNotSupportedError` (§5.4.4) rather than silently accepted. |
+| `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism, and no second configuration store. **SHIPPED (INT-A2A-005), §5.5** — the four §9.4.7 operations are a view over that config, and the §4.3.3 notification payload is the config's own schema. An inline `taskPushNotificationConfig` on a send is still REFUSED (§5.5.3) rather than silently accepted. |
 | `Message.metadata` / extensions (§4.1.4, §9.2) | the envelope's metadata | The envelope stays the carrier; A2A extension URIs ride the `A2A-Extensions` header. **Shipped (INT-A2A-003)** for `SendMessage`: the message's metadata and extensions are preserved verbatim in the delivered payload (§5.4.4). |
 | `AgentCard.securitySchemes` (`AgentCard` §4.4.1, `SecurityScheme` §4.5.1) | crier `bearerAuth` + the custom `agentSignature` scheme | **Additive to the projection only.** Signalling a scheme in a card never adds an auth requirement to an existing crier route (§1, §6). |
 
@@ -142,7 +143,9 @@ exactly those two paths; every pre-existing route answers identically in both (�
 |---|---|---|---|
 | `GET /.well-known/agent-card.json?agent_id=<id>` — the AgentCard of one registry row | AgentCard discovery (§8.2, §14.3) | `CR_A2A_ENABLED=true` **and** the named row opted in | **SHIPPED (INT-A2A-002), §5.3** |
 | `POST /a2a` — a JSON-RPC 2.0 endpoint accepting `SendMessage` and `SendStreamingMessage`, with `Content-Type: text/event-stream` for the streaming one | §9.4 core methods | `CR_A2A_ENABLED=true` **and** the tenant's row opted in | **SHIPPED (INT-A2A-003), §5.4** |
-| The JSON-RPC methods `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`, the push-notification-config methods and `GetExtendedAgentCard` on the same endpoint | §9.4 core methods | `CR_A2A_ENABLED=true` | FUTURE (INT-A2A-004/005) — the endpoint is registered, and each of these methods answers `-32601 MethodNotFoundError` naming the row that lands it |
+| The four push-notification configuration methods on the same endpoint — `CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs`, `DeleteTaskPushNotificationConfig` | §9.4.7 | `CR_A2A_ENABLED=true` **and** the tenant's row opted in **and** that agent has a push channel (a webhook) | **SHIPPED (INT-A2A-005), §5.5** |
+| The JSON-RPC methods `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` on the same endpoint | §9.4 core methods | `CR_A2A_ENABLED=true` | FUTURE (INT-A2A-004) — the endpoint is registered, and each of these methods answers `-32601 MethodNotFoundError` naming the row that lands it |
+| `GetExtendedAgentCard` on the same endpoint | §9.4.8 | — | **FUTURE, and not part of this option's series**: not registered, answers `-32601` |
 | `agent/authenticatedExtendedCard` (auth-gated extended card) | §3.1.11, §9.4.8 | `CR_A2A_ENABLED=true` | FUTURE — not registered |
 
 Every A2A surface is gated by the server switch **and** targets an agent that opted in with the `a2a`
@@ -245,7 +248,7 @@ needs no second address.
 | HTTP status of a JSON-RPC answer | **`200`**, error or result alike. The JSON-RPC 2.0 binding is id-correlated: a status code would be a second, coarser answer to a question the protocol answers precisely. Only failures that never reach the JSON-RPC layer keep an HTTP status (405, 413, 415) |
 | Request body limit | 4 MiB (`413` beyond it). This is a request-size ceiling, not a message-size policy — crier's delivery itself has no payload limit |
 | Auth | **none of its own**: the route inherits the same middleware chain as every other authenticated route (§6.4), so with `CR_AUTH_TOKEN` set it needs the same Bearer header. The auth-exempt list is untouched |
-| Methods served | `SendMessage` (§9.4.1) and `SendStreamingMessage` (§9.4.2). Any other method answers `-32601 MethodNotFoundError` naming the row that lands it |
+| Methods served | `SendMessage` (§9.4.1), `SendStreamingMessage` (§9.4.2) and the four push-notification configuration methods (§9.4.7, §5.5). Any other method answers `-32601 MethodNotFoundError` naming the row that lands it |
 | Target | `params.tenant` — the registry id the card publishes as `AgentInterface.tenant`. It must name a row that opted in (§4.2) |
 
 #### 5.4.1 The delivery is crier's own
@@ -289,7 +292,7 @@ wire and stated so nobody has to infer them:
 | `configuration.historyLength` | — | §3.2.4 semantics applied to the returned Task's `history` (§5.4.5) |
 | `configuration.returnImmediately` | `delivery_mode: async` | See §5.4.6 |
 | `configuration.acceptedOutputModes` | — | **Read and not honoured**: crier does not re-encode a payload, and a part's media type is the one the agent that produced it chose. §3.2.2 makes tailoring a SHOULD on the server, and this binding states that it declines it rather than pretending |
-| `configuration.taskPushNotificationConfig` | — | Refused with `-32003 PushNotificationNotSupportedError`: the A2A push-config surface is INT-A2A-005's. A silent accept would tell the client it has push notifications it will never receive |
+| `configuration.taskPushNotificationConfig` | — | **Refused, never silently accepted**: an inline push configuration on a send is not honoured, because push configuration is its own operation surface (§9.4.7, §5.5) and a send never writes configuration. The refusal is `PushNotificationNotSupportedError` when the target agent has no push channel (§3.3.4's capability answer) and `UnsupportedOperationError` when it has one, naming the four operations. §5.5.3 states why the code differs between the two positions. |
 | `A2A-Version` header (§9.2) | — | Absent, `1`, `1.0` or `1.x` are served; anything else is `-32009 VersionNotSupportedError` naming the version this server serves (§3.6) |
 | `A2A-Extensions` header (§9.2) | — | Read; crier declares no extension (`capabilities.extensions` is empty, §5.3), so nothing is negotiated and nothing is refused: the header asks, it does not require |
 
@@ -361,10 +364,10 @@ never a re-telling of it.
 | `-32602` | `InvalidParamsError` | a parameter this binding cannot honour: the missing tenant, a tenant that names no opted-in agent, a required message member, a part whose oneof is not exactly one member, a wrongly-typed metadata member, an unknown request-metadata key — and crier's own `400` from the delivery engine, with its message |
 | `-32603` | `InternalError` | crier could not complete the delivery (a `409` in-flight duplicate, a `5xx`), or the delivery path was unreachable |
 | `-32001` | `TaskNotFoundError` | the delivery engine answered `404`: the target agent is not on this relay or in its federation |
-| `-32003` | `PushNotificationNotSupportedError` | `configuration.taskPushNotificationConfig` (INT-A2A-005) |
-| `-32004` | `UnsupportedOperationError` | `message.taskId` (task continuation, INT-A2A-004) |
+| `-32003` | `PushNotificationNotSupportedError` | the agent has no push channel: a push-notification configuration operation against a row with no webhook (§5.5.3, §3.3.4), and an inline `configuration.taskPushNotificationConfig` on a send to such an agent |
+| `-32004` | `UnsupportedOperationError` | `message.taskId` (task continuation, INT-A2A-004); an inline `configuration.taskPushNotificationConfig` on a send to an agent that HAS a push channel (§5.5.3); a push configuration whose agent row carries a bring-your-own `custom_schema` (§5.5.4) |
 | `-32009` | `VersionNotSupportedError` | `A2A-Version` names a version this server does not serve |
-| `-32050` | *(crier's implementation-defined server error)* | crier refused the delivery for a reason A2A has no name for: `403 GUARD_BLOCKED`, `403 AGENT_QUARANTINED`. The reason rides in `ErrorInfo` and crier's body in the `DeliveryRefusal` detail |
+| `-32050` | *(crier's implementation-defined server error)* | crier refused the request for a reason A2A has no name for: a delivery blocked by the target agent's guard (`403 GUARD_BLOCKED`), a quarantined agent (`403 AGENT_QUARANTINED`), or an agent-owned write crier's own signature gate refused (a push-notification configuration write made with `CR_REQUIRE_AGENT_SIG` on, §5.5.3). The reason rides in `ErrorInfo` and crier's own status and body in the `DeliveryRefusal` (delivery) / `ConfigRefusal` (configuration) detail |
 
 `-32005 ContentTypeNotSupportedError` is deliberately **not** produced: crier's delivery payload is
 opaque and the §5.4.3 projection is lossless for any media type, so claiming a media type is
@@ -443,7 +446,9 @@ of approximating it silently:
 #### 5.4.7 What this row does not do
 
 - **No task lifecycle operations.** `GetTask`, `ListTasks`, `CancelTask` and `SubscribeToTask` answer
-  `-32601`, as does every push-notification method and `GetExtendedAgentCard` (INT-A2A-004/005).
+  `-32601`, as does `GetExtendedAgentCard` (INT-A2A-004; the extended card is not part of this
+  option's series). The push-notification configuration methods do NOT: they are served by INT-A2A-005
+  (§5.5).
 - **No restart resume.** A stream is a live view: an SSE stream does not survive the process, and a
   task's state is re-read from the inbox on each new stream. Nothing is buffered for a client that
   reconnects, because nothing in crier replays a stream.
@@ -452,6 +457,185 @@ of approximating it silently:
 - **No change to the relay.** The WebSocket path is byte-for-byte what it was; the SSE adapter reads
   through the same subscription primitive, and the existing relay tests are untouched.
 - **No new auth requirement anywhere**, and no existing field changes meaning (§6).
+
+### 5.5 The push-notification configuration operations (INT-A2A-005, SHIPPED)
+
+§4.3 and §9.4.7's `TaskPushNotificationConfig` operations are served by the SAME binding as every other
+A2A operation: `POST /a2a`, as four JSON-RPC methods. **No new route is registered** — crier
+implements exactly ONE binding (§2: JSON-RPC 2.0 over HTTP + SSE), so there is no
+`/tasks/{id}/pushNotificationConfigs…` REST surface and adding one would be a third A2A route this
+option does not have.
+
+| | |
+|---|---|
+| Methods | `CreateTaskPushNotificationConfig` (§3.1.7), `GetTaskPushNotificationConfig` (§3.1.8), `ListTaskPushNotificationConfigs` (§3.1.9), `DeleteTaskPushNotificationConfig` (§3.1.10) — the §9.4.7 names, verbatim |
+| Endpoint | `POST /a2a`, under §5.4's content-type, body limit, auth and `A2A-Version` rules |
+| Target | `params.tenant` — the registry id the card publishes as `AgentInterface.tenant`, and it must name an opted-in row (§4.2). Required: one crier origin hosts many agents |
+| The configuration | **crier's existing per-agent webhook config.** There is no second configuration store: the A2A config IS `webhook.Config` (the mapping table's row, §3), which is also the thing `capabilities.pushNotifications` in the Agent Card reports (§5.3) |
+| Id | **Derived, never stored**: `wh-<sha256(tenant ‖ 0x00 ‖ url)[:8] hex>` (`a2a.PushConfigID`). crier has one push channel per agent, so there is nothing to enumerate |
+| The payload | §4.3.3's `StreamResponse` envelope, `Content-Type: application/a2a+json`, sent by crier's EXISTING webhook driver (§5.5.5) |
+
+#### 5.5.1 Why it is a view rather than a second surface
+
+crier could already push to an agent: the webhook config is the push channel, with retries, a timeout,
+a batch mode, a delivery mode, a schema and an optional named secret. INT-A2A-005 exposes that config
+through the operations A2A defines, and **reuses crier's own write path to do it**: a create or a
+delete is the body `PATCH /agents/{id}` already accepts, handed to that route's OWN handler
+(`registry.Handler.HandleUpdateAgent` — the function the route is registered with), exactly as
+`SendMessage` hands a delivery to `HandleDeliver` (§5.4.1). The consequences are stated rather than
+discovered:
+
+- **No second delivery engine, and no second payload model.** The notification is an ordinary webhook
+  delivery: the guard, the queue, the retry budget, the circuit breaker, the batch coalescer and the
+  signing/authentication headers are the shipped code, reached unchanged.
+- **No second write path, and no weakened gate.** The strict `webhook` member decode,
+  `webhook.Config.Validate`, the store update and the **agent-owned signature gate** (`requireAgent`,
+  enforced when `CR_REQUIRE_AGENT_SIG` is on) are crier's own. §5.5.3 states what that means for a
+  write made over A2A.
+- **No changed field meaning.** The operation writes `webhook.url`, the notification schema
+  (`custom_schema`) and — when the request asks — `webhook.auth_type` / `auth_value_ref`. Every other
+  field of that config (retries, timeout_ms, batch, delivery_mode, schema_template) is PRESERVED:
+  the A2A object has no field for it, and resetting what a request cannot express would be silent
+  data loss of operator configuration (the DF-CRIER-279 class).
+- **Reads never write.** `Get`/`List` project the row and change nothing.
+
+#### 5.5.2 The object mapping, field by field
+
+| A2A `TaskPushNotificationConfig` (§4.3.1) | crier | Rule |
+|---|---|---|
+| `tenant` | the registry id | Echoed. Required by this binding, and identical to `params.tenant` |
+| `id` | the derived id (§5.5) | Returned by create, accepted by get/delete. A client-supplied `id` that is not the derived one is `-32602` naming the derived one: there is no second configuration for it to address |
+| `taskId` | — (client addressing) | **Echoed, not verified.** crier's push configuration is per AGENT, so there is no per-task record to look up — and a pushed delivery creates no inbox entry, so "does this task exist" has no honest answer here (see §5.5.4). The response states the task the client addressed, and nothing more |
+| `url` (REQUIRED) | `webhook.url` | Written on create — this is the endpoint notifications go to, and it is the same field that routes an ordinary delivery to that agent |
+| `token` | — | **Refused** (`-32602`, "token"): crier's webhook config has no per-task notification-token field, and accepting one would promise a value that no delivery ever sends |
+| `authentication.scheme` (§4.3.2) | `webhook.auth_type` | `none` → `auth_type: none` (the named secret is cleared: nothing would use it); `Bearer` → `auth_type: bearer`, which requires the row to already name a secret; anything else is `-32602` naming the two schemes crier's driver can emit. Scheme comparison is case-insensitive (RFC 9110 §11.1) |
+| `authentication.credentials` | `webhook.auth_value_ref` (a NAME, never a value) | **Refused** (`-32602`) and never returned. crier stores no credential in a registry row: it references a secret by name and resolves it at send time. A credential posted here would either be stored where secrets do not belong or dropped while the client believed it was sent — so it is refused, loudly |
+| the list response's `configs[]` | the one configuration | At most ONE entry: one push channel per agent. `nextPageToken` is never returned |
+| the list request's `pageToken` | — | **Refused** (`-32602`): crier never issues a page token, so one a client sends did not come from this server. `pageSize` is accepted (and must be ≥ 1); it bounds a list that has at most one entry |
+| the delete result | `{"deleted": true, "id": …, "tenant": …}` | §3.1.10 leaves the confirmation implementation-defined |
+
+#### 5.5.3 The capability answer is a MUST, and the write gate is crier's own
+
+**Capability (§3.3.4).** If `AgentCard.capabilities.pushNotifications` is false — which in crier means
+*the row carries no webhook* — then all four operations MUST answer `-32003
+PushNotificationNotSupportedError`, and they do: the error names the agent, the capability and the fix,
+and carries `google.rpc.ErrorInfo` with reason `PUSH_NOTIFICATION_NOT_SUPPORTED`. There is no silent
+success and no empty-but-200 list: an agent with no push channel has no configuration to describe, and
+saying otherwise would report a channel that does not exist. This is the same honesty DF-CRIER-279
+forced into the templating path — a green answer over a capability that is absent is worse than an
+error, because the client codes against it.
+
+**The write gate.** Create and delete reach crier's agent-owned update route. With
+`CR_REQUIRE_AGENT_SIG` in force — crier's secure DEFAULT — that route requires the TARGET agent's
+ed25519 signature, and an A2A client cannot compute it (the signature covers the method, the path and
+a timestamp of the PATCH route; §5.3.1 already states that a generic A2A client holds nothing that can
+produce `agentSignature`). The operations therefore answer crier's own `401`/`403` with its reason
+verbatim, as `-32050` plus a `crier.ConfigRefusal` detail carrying the status and body crier wrote, and
+**the row is left untouched**. This surface does not weaken that gate, and it does not invent a second
+authorization for the same field: an A2A client that is allowed to write must be a deployment whose
+posture allows it (signature enforcement off — crier's documented trusted-single-user posture) or must
+have the agent itself perform the update. Reads (`Get`/`List`) are unaffected: they ask the relay a
+question and rewrite nothing.
+
+**The inline configuration on a send.** `configuration.taskPushNotificationConfig` stays REFUSED. A
+send delivers; it never writes configuration. The code is the capability answer where that is true —
+`-32003` for an agent with no push channel — and `-32004 UnsupportedOperationError` naming the four
+operations for an agent that HAS one, because `-32003` would be a false statement about an agent whose
+card says `pushNotifications: true`. Either way the request is refused rather than silently accepted,
+and the row is unchanged.
+
+#### 5.5.4 What the operations refuse, and why each refusal is loud
+
+| Request | Answer | Why |
+|---|---|---|
+| the agent has no webhook | `-32003` | §3.3.4 capability MUST (§5.5.3) |
+| `url` absent or blank | `-32602` (`url`) | §4.3.1 marks it REQUIRED, and crier's own `Validate` adds the `http(s)://` rule |
+| a `url` crier's own route would refuse (not http(s)) | `-32602` with **crier's own message** | The write is validated by crier's route, so the A2A answer quotes it (`crier.ConfigRefusal`) |
+| `id` that is not the derived id | `-32602` (`id`) | one configuration per agent (§5.5) |
+| `token` | `-32602` (`token`) | no such field in crier's config, and no delivery would send it |
+| `authentication.credentials` | `-32602` | crier references a secret by name; it never stores a credential (§5.5.2) |
+| `authentication.scheme` that is neither `none` nor `Bearer` | `-32602` | those are the schemes crier's driver emits |
+| `Bearer` with no secret named on the row | `-32602` | otherwise the configuration would claim authentication it does not have |
+| an unknown member anywhere in `params` (including inside `authentication`) | `-32602` naming the member and the accepted set | the strict-decode discipline the send params and the `a2a` registration block are held to |
+| the row already carries a bring-your-own `custom_schema` | `-32004`, reason `PUSH_CONFIG_CUSTOM_SCHEMA_SET` | crier resolves a `custom_schema` BEFORE any named template, so a configuration with one cannot also promise §4.3.3's payload shape. The alternative — overwriting the operator's schema without saying so — is exactly the silent loss this option refuses. The fix is named: clear it on the agent row, or keep it and configure the push channel there |
+| `pageToken` on list; `taskId` missing on get/list/delete; `id` missing on get/delete | `-32602` naming the field | the required members of §3.1.8–§3.1.10, and a page token this server never issued |
+
+**Not checked, and stated so:** the operations do NOT verify that `taskId` names an existing task. In
+crier a push-configured agent's deliveries are pushed (transport `webhook`), which creates NO inbox
+entry, so "the task id does not exist in the inbox" is indistinguishable from "the task was pushed" —
+raising `TaskNotFoundError` on that basis would be inventing a fact. `TaskNotFoundError` IS raised
+where crier really can answer: a configuration id that names no configuration (§3.1.8/§3.1.10's own
+meaning for that error).
+
+#### 5.5.5 The notification payload (§4.3.3)
+
+> When a task update occurs, the agent sends an HTTP POST request to the configured webhook URL. The
+> payload uses the same `StreamResponse` format as streaming operations.
+
+The notification is the payload shape §4.3.3 fixes, delivered by crier's existing webhook driver. It is
+expressed in crier's OWN bring-your-own-schema mechanism, so nothing about the driver changes: a create
+installs the config's `custom_schema` (which crier's resolution rule already prefers over a named
+template) with
+
+- `request_shape.method` = `POST`,
+- `request_shape.headers["Content-Type"]` = `application/a2a+json` (§14.1.1's media type — the same one
+  a stream frame is served with), and
+- `request_shape.body` = the template below, rendered by the driver from the envelope of the delivery it
+  is sending.
+
+```json
+{"task": {
+  "id": "{{crier.message_id}}",
+  "contextId": "{{crier.session_id|default:}}",
+  "status": {"state": "TASK_STATE_SUBMITTED"},
+  "metadata": {"crier": {
+    "transport": "webhook", "kind": "…", "delivery_mode": "…",
+    "sender": "…", "target": "…", "thread_id": "…",
+    "request_id": "…", "namespace": "…"}}}}
+```
+
+What that means, precisely:
+
+- **The envelope is a `StreamResponse` with exactly one member set** — here `task`, the same shape a
+  `SendMessage` answer carries for an accepted push delivery (§5.4.4's `202` row). The template is
+  valid JSON before rendering and after, so the body cannot arrive unparseable.
+- **`task.id` is the delivery's message id** — crier's one identifier for the work, the same value
+  `SendMessage` returned as the Task id. `TASK_STATE_SUBMITTED` is what that state means here: the
+  message is durable/queued for the target and nothing has claimed it yet. No state this server cannot
+  observe is asserted.
+- **The task's content is NOT duplicated into the notification.** crier's payload is opaque, a
+  non-object payload does not survive crier's template context, and a notification that silently
+  dropped the body would be worse than one that does not claim to carry it. The message itself is read
+  where it already lives (`GET /agents/{id}/inbox`, §5.4.1) — a push notification is a notification,
+  not a second payload store.
+- **Every optional field carries an explicit `|default:`** because crier's templating FAILS a delivery
+  loudly on a placeholder the context cannot fill (DF-CRIER-279): a delivery with no session id renders
+  `"contextId": ""` rather than failing. `crier.message_id` is the one always-present field.
+- **The delivery MODE is the agent's existing one.** A `blocking` config makes the delivery
+  synchronous (the endpoint's reply is the sender's reply — crier's own contract, unchanged), an
+  `async` config queues it, a `batch` config coalesces several deliveries into one POST. The
+  notification is one `StreamResponse` per POST; under `batch` the POST carries the batch's own
+  delivery id, and `metadata.crier.kind` states `batch` — the operation does not change a config's
+  delivery semantics, and the spec says so rather than implying a per-message guarantee it cannot make.
+- **crier's own headers travel with it** (`X-Crier-Event`, `X-Crier-Target`, `X-Crier-Session`,
+  `X-Crier-Retry`, the guard headers, and `X-Crier-Signature` when `CR_WEBHOOK_SECRET` is set). They are
+  additive to the A2A payload, and they are how the receiving side can tell a retry from a first
+  attempt.
+
+#### 5.5.6 What this row deliberately does not do
+
+- **It does not build a second push mechanism.** No new route, no new store, no new delivery engine, no
+  new queue. The A2A configuration is a view over `webhook.Config` and rides the shipped driver.
+- **It does not give an agent a push channel it does not have.** An agent with no webhook has no push
+  notifications, and every operation says so.
+- **It does not store a credential.** `authentication.credentials` is refused; the secret stays a named
+  reference resolved out of band.
+- **It does not implement REST (`/tasks/{id}/pushNotificationConfigs…`)** — §11's binding is MAY and
+  not built (§2). The same four operations are served as JSON-RPC methods, which is the binding crier
+  implements.
+- **It does not implement the extended Agent Card**, and no `extendedAgentCard` capability is claimed.
+- **It does not make A2A first-class.** Every bit of it is behind `CR_A2A_ENABLED` and the per-agent
+  opt-in, and with the switch off the route does not exist (§5.1).
 
 ## 6. Non-regression contract
 
@@ -485,6 +669,17 @@ of approximating it silently:
    unchanged, because no route, field or default they describe moved. The A2A route is documented as
    an OPT-IN surface in `README.md` and here — like `/metrics` and `/debug/pprof/*`, the other
    opt-in paths — rather than in the default-path OpenAPI document.
+8. **The push-notification configuration operations (INT-A2A-005)** add no route and no field, so
+   clause 7's surfaces stay as they are, and they are held to four further properties:
+   - the notification is delivered by the EXISTING webhook driver — a webhook test that passes today
+     passes unchanged, because nothing in `internal/webhook` moved;
+   - the write goes through `PATCH /agents/{id}`'s own handler, so crier's webhook validation, strict
+     member decode and agent-owned signature gate apply to it exactly as they do to a direct PATCH;
+   - a write that is REFUSED leaves the row byte-identical (asserted per refusal in
+     `cmd/server/a2apush_test.go`), so a refused A2A operation can never half-configure an agent;
+   - every field of a webhook config the A2A object has no member for (retries, timeout_ms, batch,
+     delivery_mode, schema_template) is PRESERVED by the write, so an existing agent's delivery
+     behaviour is not changed as a side effect of configuring a push channel.
 
 The gate for all of this is the non-regression test suite shipped with INT-A2A-001 — still the gate,
 amended only where a row's route moved the surface it describes:
@@ -498,7 +693,12 @@ v1.0.0 AgentCard shape). The JSON-RPC binding is gated by `internal/a2a/parts_te
 `internal/a2a/send_test.go` (the part mapping both directions, the request mapping, the error table,
 the streaming oneofs) and `cmd/server/a2a_jsonrpc_test.go` (the route booted for real: the 2-part
 round trip to a consumer with `alt`/`tags` intact, every refusal, the SSE lifecycle transcript, and a
-WebSocket relay round trip with the option ON).
+WebSocket relay round trip with the option ON). The push-notification configuration operations are
+gated by `internal/a2a/push_test.go` (the decoders, the derived id, the projection, every refusal and
+its code, the notification template) and `cmd/server/a2apush_test.go` (the CRUD transcript against
+crier's own row, the §3.3.4 capability error from all four operations, the notification asserted on
+the wire at the endpoint, crier's own retry loop observed, and a row-unchanged check after every
+refusal).
 
 ## 7. Out of scope (binding non-goals for the whole series)
 
@@ -568,3 +768,25 @@ streaming, the task lifecycle, the push-notification methods and the extended ca
 Not shipped by that row, and still absent under both switch positions: the task lifecycle operations,
 the push-notification configs and the extended card (INT-A2A-004..006), and any change to the relay's
 WebSocket path (deliberate: the stream is an adapter OVER it).
+
+### 8.4 INT-A2A-005 — the push-notification configuration operations (§5.5)
+
+| Deliverable | Where |
+|---|---|
+| The four §9.4.7 method names, the derived configuration id and the strict params decoders | `internal/a2a/push.go` — `MethodCreateTaskPushNotificationConfig` / `MethodGetTaskPushNotificationConfig` / `MethodListTaskPushNotificationConfigs` / `MethodDeleteTaskPushNotificationConfig`, `PushConfigID`, `Decode*Push*`, `CreatePushConfigParams` / `PushConfigRefParams` / `ListPushConfigsParams` |
+| The A2A object and the projection out of a row | `internal/a2a/push.go` — `TaskPushNotificationConfig`, `PushAuthenticationInfo`, `ListPushConfigsResponse`, `DeletePushConfigResult`, `PushRow` (plain values: this package still imports nothing from `internal/registry` or `internal/webhook`), `ProjectPushConfig`, `MatchPushConfigID` |
+| The validation of a write, and every refusal | `internal/a2a/push.go` — `ValidatePushCreate`, `PushWrite`, `AuthNone` / `AuthBearer`; `PushNotSupportedError` (the §3.3.4 capability answer), `PushWriteRefused` and the `crier.ConfigRefusal` detail that carries crier's own status and body verbatim |
+| The §4.3.3 payload shape | `internal/a2a/push.go` — `pushNotificationBody` and `PushNotificationShape()` (body template, `Content-Type: application/a2a+json`, `raw` reply extraction). The shape is a CONSTANT here and is installed on the config's `custom_schema` by the handler; crier's template engine and driver are untouched |
+| The four handlers, the deliver-style reuse and the config merge | `cmd/server/a2apush.go` — `pushCreate` / `pushGet` / `pushList` / `pushDelete`, `pushRef`, `pushRow`, `pushWebhookConfig`, `patchTo` (calls `registry.Handler.HandleUpdateAgent`, the function `PATCH /agents/{id}` is registered with, exactly as `deliverTo` calls `HandleDeliver`) |
+| The dispatch and the wiring | `cmd/server/a2a.go` (four `case`s in `handle`, plus `refineSendRefusal` for the inline-on-send answer), `cmd/server/main.go` (passes `HandleUpdateAgent` alongside `HandleDeliver`) |
+| The unit gate | `internal/a2a/push_test.go` — the strict decoders, the derived id, the projection, every refusal and its code, the write-refusal mapping, and the notification template's structure (one-of-four `StreamResponse`, crier-only placeholders, a `|default:` on every optional one) |
+| The route's gate (booted server) | `cmd/server/a2apush_test.go` — the CRUD transcript asserted through BOTH the A2A binding and crier's own `GET /agents/{id}`; the four operations against an agent with no push channel (`-32003`); the notification ASSERTED ON THE WIRE from what the endpoint received (media type, one-of-four envelope, task id/state/context, crier's own dispatch headers); crier's retry loop observed (`X-Crier-Retry: 0`, then `1`); every refusal with the row compared byte-for-byte before and after; the write-gate case under crier's default signature posture (`-32050` + crier's body verbatim, row untouched, reads still work) |
+| Docs | §5.5 of this file (the methods, the mapping table, the capability MUST, the refusals, the payload, the non-goals), §3's mapping row, §5.2's route table, §5.4's served-method list and error table, §6.8 (the non-regression clauses), `README.md` (`CR_A2A_ENABLED` now names the four methods), `docs/claims.yaml` (`ANCHOR-A2A-PUSH-CONFIG-OPERATIONS`), `CHANGELOG.md` |
+
+Not shipped by that row: any new route (the four operations are methods of the existing binding), any
+new field on a registry row (the configuration IS the existing `webhook` member), any change to
+`internal/webhook`, the task lifecycle (`INT-A2A-004` — an operation addressed at an EXISTING task
+still answers `-32601`) and the extended card.
+
+Still absent under both switch positions: the task lifecycle operations and the extended card, and any
+change to the relay's WebSocket path.

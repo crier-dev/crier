@@ -15,6 +15,37 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **A2A push-notification configuration as a view over crier's webhook config**
+  (INT-A2A-005, `specs/A2A-OPTION.md` §5.5). The four `TaskPushNotificationConfig`
+  operations of the A2A specification (`CreateTaskPushNotificationConfig`,
+  `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs`,
+  `DeleteTaskPushNotificationConfig`, §9.4.7) are served as methods of the
+  existing `POST /a2a` binding — **no new route** — and they configure the push
+  channel crier already has: the agent's webhook config. There is no second
+  store, no second delivery engine and no second write path. A create or a delete
+  is the body `PATCH /agents/{id}` already accepts, handed to that route's OWN
+  handler, so crier's strict `webhook` member decode, its `webhook.Config`
+  validation and its agent-owned signature gate apply to an A2A write exactly as
+  they do to a direct one, and every field the A2A object has no member for
+  (`retries`, `timeout_ms`, `batch`, `delivery_mode`, `schema_template`) is
+  PRESERVED rather than reset. The configuration id is **derived**
+  (`wh-<sha256(tenant‖url)>`), never stored, so there is no second source of
+  truth to disagree with the row. **The capability answer is a MUST, not a
+  nicety** (§3.3.4): an agent with no webhook — the same condition its Agent Card
+  reports as `capabilities.pushNotifications: false` — gets
+  `PushNotificationNotSupportedError` (`-32003`) from all four operations, never
+  a silent success. `authentication.credentials` and `token` are refused rather
+  than stored or dropped, because crier references a secret by NAME
+  (`auth_value_ref`) and holds no credential to return; an inline
+  `configuration.taskPushNotificationConfig` on a send stays refused, now naming
+  the operations that do configure a channel. The notification itself is
+  §4.3.3's `StreamResponse` envelope, `Content-Type: application/a2a+json`,
+  delivered by the shipped webhook driver: the payload shape is the config's
+  `custom_schema`, so the driver, its retries, its batching and its headers are
+  untouched. Default-off and additive: with `CR_A2A_ENABLED` unset nothing here
+  exists, no route or field was added, and a refused write leaves the row
+  byte-identical. A2A remains an extra, not first-class support.
+
 - **Capability-routed delivery — the registry's capability index as a dialable
   worker pool** (CR-FEAT-026). `GET /agents?capability=solver` could already tell
   you who advertises a capability, but delivery still required naming ONE agent
@@ -285,10 +316,11 @@ procedure, the gate requirements and the publish step are in
     `google.rpc.ErrorInfo`), and a refusal raised by the delivery engine carries
     crier's own status and body verbatim so a client can see exactly what crier
     said. What is deliberately NOT here: the task lifecycle operations
-    (`GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`), the
-    push-notification configs and the extended card (INT-A2A-004..006) — each
-    answers `-32601 MethodNotFoundError` naming the row that lands it rather
-    than pretending.
+    (`GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`) and the extended
+    card (INT-A2A-004/006) — each answers `-32601 MethodNotFoundError` naming
+    the row that lands it rather than pretending. (The push-notification
+    configuration operations are their own [Unreleased] entry above: INT-A2A-005
+    added them as further methods of this same binding.)
 
 ## [0.1.0-rc2] - 2026-09-21
 

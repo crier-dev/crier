@@ -1413,3 +1413,23 @@ claims:
     quote: "**CR-FEAT-029**"
     expect: "/namespaces"
     xfail: null
+
+  # --- INT-A2A-005 (appended): the opt-in A2A push-notification configuration
+  # operations. They add no ROUTE (they are methods of the /a2a binding the
+  # ROUTE-A2A-JSONRPC claim above already anchors), so what is pinned here is the
+  # documented surface: the README's opt-in table must keep naming all four
+  # methods a client codes against, and the capability answer §3.3.4 makes a MUST
+  # must stay named — that is the one call a client has to handle differently.
+  # The behaviour (CRUD onto the webhook config, the §3.3.4 not-supported answer,
+  # the §4.3.3 payload) is executed in cmd/server/a2apush_test.go and
+  # internal/a2a/push_test.go, not re-told here.
+  - id: ANCHOR-A2A-PUSH-CONFIG-OPERATIONS
+    kind: anchor
+    doc: README.md
+    quote: "`CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs` and `DeleteTaskPushNotificationConfig`"
+    xfail: null
+  - id: ANCHOR-A2A-PUSH-CONFIG-NOT-SUPPORTED
+    kind: anchor
+    doc: README.md
+    quote: "PushNotificationNotSupportedError"
+    xfail: null

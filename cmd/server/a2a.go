@@ -93,7 +93,11 @@ type a2aOptions struct {
 //
 // deliver is the registry handler's HandleDeliver, passed in rather than
 // reconstructed: the binding reuses the delivery path, it does not own it.
-func registerA2ARoute(r *mux.Router, store registry.Store, deliver http.HandlerFunc, relaySvc *relay.Relay, opts a2aOptions) {
+// patch is HandleUpdateAgent, the function PATCH /agents/{id} is registered
+// with, for the same reason: the push-notification configuration operations
+// (INT-A2A-005) write the agent's webhook config through crier's own update
+// route rather than through a second write path.
+func registerA2ARoute(r *mux.Router, store registry.Store, deliver, patch http.HandlerFunc, relaySvc *relay.Relay, opts a2aOptions) {
 	if opts.streamBudget <= 0 {
 		opts.streamBudget = defaultStreamBudget
 	}
@@ -103,7 +107,7 @@ func registerA2ARoute(r *mux.Router, store registry.Store, deliver http.HandlerF
 	if opts.now == nil {
 		opts.now = time.Now
 	}
-	h := &a2aHandler{store: store, deliver: deliver, relay: relaySvc, opts: opts}
+	h := &a2aHandler{store: store, deliver: deliver, patch: patch, relay: relaySvc, opts: opts}
 	r.HandleFunc(a2a.JSONRPCBindingPath, h.handle).Methods(http.MethodPost)
 }
 
@@ -111,8 +115,11 @@ func registerA2ARoute(r *mux.Router, store registry.Store, deliver http.HandlerF
 type a2aHandler struct {
 	store   registry.Store
 	deliver http.HandlerFunc
-	relay   *relay.Relay
-	opts    a2aOptions
+	// patch is the registry update handler: the write path the push-notification
+	// configuration operations reuse.
+	patch http.HandlerFunc
+	relay *relay.Relay
+	opts  a2aOptions
 }
 
 // handle dispatches one JSON-RPC 2.0 request (§9.4). Every JSON-RPC response —
@@ -161,10 +168,20 @@ func (h *a2aHandler) handle(w http.ResponseWriter, r *http.Request) {
 		h.send(w, r, req, false)
 	case a2a.MethodSendStreamingMessage:
 		h.send(w, r, req, true)
+	case a2a.MethodCreateTaskPushNotificationConfig:
+		h.pushCreate(w, r, req)
+	case a2a.MethodGetTaskPushNotificationConfig:
+		h.pushGet(w, r, req)
+	case a2a.MethodListTaskPushNotificationConfigs:
+		h.pushList(w, r, req)
+	case a2a.MethodDeleteTaskPushNotificationConfig:
+		h.pushDelete(w, r, req)
 	default:
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeMethodNotFound, fmt.Sprintf(
-			"Method not found: this binding serves %s and %s; the task lifecycle (GetTask, ListTasks, CancelTask, SubscribeToTask) and the push-notification methods are later rows (INT-A2A-004/005) and are not registered",
-			a2a.MethodSendMessage, a2a.MethodSendStreamingMessage))))
+			"Method not found: this binding serves %s, %s and the push-notification configuration methods (%s, %s, %s, %s); the task lifecycle (GetTask, ListTasks, CancelTask, SubscribeToTask) lands with INT-A2A-004 and is not registered, and GetExtendedAgentCard is not part of this option",
+			a2a.MethodSendMessage, a2a.MethodSendStreamingMessage,
+			a2a.MethodCreateTaskPushNotificationConfig, a2a.MethodGetTaskPushNotificationConfig,
+			a2a.MethodListTaskPushNotificationConfigs, a2a.MethodDeleteTaskPushNotificationConfig))))
 	}
 }
 
@@ -187,7 +204,7 @@ func (h *a2aHandler) send(w http.ResponseWriter, r *http.Request, req *a2a.RPCRe
 
 	tr, err := a2a.Translate(params, params.Metadata, r.Header.Get(a2a.AgentIDHeader), streaming)
 	if err != nil {
-		h.writeRPC(w, a2a.ErrorResponse(req.ID, refusalError(err)))
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, h.refineSendRefusal(err, target)))
 		return
 	}
 
@@ -269,6 +286,33 @@ func notA2ATarget(id string) *a2a.RPCError {
 		"params.tenant %q is not an A2A agent on this relay: either no such agent is registered, or the agent has not opted in (set \"a2a\":{\"enabled\":true} on POST /agents or PATCH /agents/{id})", id),
 		a2a.InvalidParamsDetail(&a2a.InvalidParamsError{Field: "params.tenant",
 			Detail: "names no opted-in A2A agent on this relay"}))
+}
+
+// refineSendRefusal corrects the one send-path refusal that depends on a fact
+// the translator cannot see.
+//
+// A send carrying an inline `configuration.taskPushNotificationConfig` is
+// refused with PushNotificationNotSupportedError, and for an agent with NO push
+// channel that is exactly right: §3.3.4 makes the capability answer a MUST, and
+// the request asks for a capability the agent does not have. For an agent that
+// HAS one — a webhook is configured, its Agent Card says pushNotifications:true
+// — the same error would be a false statement about the agent, so the refusal is
+// re-coded here, where the resolved target row is known, as
+// UnsupportedOperationError naming the operations that DO configure the channel
+// (§9.4.7). The send is never silently accepted either way, and no inline
+// configuration is ever written: a send delivers, it does not configure.
+func (h *a2aHandler) refineSendRefusal(err error, target *registry.Agent) *a2a.RPCError {
+	rpc := refusalError(err)
+	if rpc.Code != a2a.CodePushNotificationNotSupportedError || !pushRow(target).Configured {
+		return rpc
+	}
+	return a2a.NewRPCError(a2a.CodeUnsupportedOperationError, fmt.Sprintf(
+		"configuration.taskPushNotificationConfig: an inline push configuration is not accepted on a send, and agent %q already has a push channel (its Agent Card says pushNotifications:true). Push configuration is its own operation surface — %s, %s, %s, %s (§9.4.7) — and a send never writes configuration",
+		target.ID,
+		a2a.MethodCreateTaskPushNotificationConfig, a2a.MethodGetTaskPushNotificationConfig,
+		a2a.MethodListTaskPushNotificationConfigs, a2a.MethodDeleteTaskPushNotificationConfig),
+		a2a.ErrorInfo{Type: a2a.ErrorInfoType, Reason: "INLINE_PUSH_CONFIG_UNSUPPORTED", Domain: a2a.ErrorDomain,
+			Metadata: map[string]string{"tenant": target.ID}})
 }
 
 // deliverTo runs the translated delivery through crier's own deliver handler —
