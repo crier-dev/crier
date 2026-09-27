@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -124,9 +125,49 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-// startTestServer boots the server in-process via run(nil) on a free port
-// with auth disabled and no database, waits until it answers /health, and
-// registers the same SIGTERM shutdown the smoke tests use. It returns the
+// runScopedServer is the shared lifecycle for servers booted inside this test
+// process. Its shutdown channel is deliberately not registered with os/signal:
+// cleanup can stop only this runWithSignals invocation and cannot broadcast a
+// late SIGTERM into another test or server boot (QA-CRIER-33).
+type runScopedServer struct {
+	done     chan struct{}
+	exitCode chan int
+	shutdown chan os.Signal
+	stopOnce sync.Once
+}
+
+func startRunScopedServer(args []string) *runScopedServer {
+	run := &runScopedServer{
+		done:     make(chan struct{}),
+		exitCode: make(chan int, 1),
+		shutdown: make(chan os.Signal, 1),
+	}
+	go func() {
+		defer close(run.done)
+		run.exitCode <- runWithSignals(args, run.shutdown)
+	}()
+	return run
+}
+
+func (r *runScopedServer) stop(t testing.TB) {
+	t.Helper()
+	r.stopOnce.Do(func() {
+		select {
+		case <-r.done:
+			return
+		case r.shutdown <- syscall.SIGTERM:
+		}
+		select {
+		case <-r.done:
+		case <-time.After(10 * time.Second):
+			t.Errorf("server did not shut down within 10s of run-scoped SIGTERM")
+		}
+	})
+}
+
+// startTestServer boots the server in-process through the shared run-scoped
+// lifecycle on a free port with auth disabled and no database, waits until it
+// answers /health, and registers private-channel cleanup. It returns the
 // base URL, so an endpoint contract can be asserted against the REAL router
 // (middleware included) instead of a hand-built handler under test.
 func startTestServer(t *testing.T) string {
@@ -157,33 +198,9 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))
 
-	done := make(chan struct{})
-	shutdown := make(chan os.Signal, 1)
-	// exitCode carries runWithSignals()'s return value (CI-018). The send
-	// happens BEFORE the deferred close(done) a waiter observes, so whenever
-	// this server has exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- runWithSignals(nil, shutdown)
-	}()
-
-	// In-process boots use a run-scoped channel (CI-019), not a process signal:
-	// SIGTERM sent to the whole test binary is broadcast to every os/signal
-	// registration and can arrive late enough to kill the next server boot.
-	t.Cleanup(func() {
-		select {
-		case <-done:
-			return
-		default:
-		}
-		shutdown <- syscall.SIGTERM
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of run-scoped SIGTERM")
-		}
-	})
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	t.Cleanup(func() { run.stop(t) })
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -200,7 +217,7 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}
@@ -229,17 +246,12 @@ const (
 
 // TestSigtermAfterEarlyBootFailureIsNotFatal is the QA-CRIER-17 gate.
 //
-// WHY IT EXISTS. Every in-process helper in this package — startTestServer and
-// TestServerHealth here, bootDocsClaimsServer in docsclaims_test.go,
-// bootObservabilityServer in observability_test.go — shuts its server down by
-// sending SIGTERM to the WHOLE TEST PROCESS (run()'s handler calls
-// srv.Shutdown; the test process is the only handle the harness has). That is
-// safe ONLY while a run() has already registered the process-wide handler. If
-// the handler is not registered, SIGTERM takes its DEFAULT action and kills the
-// test binary, and a signal death is reported as a bare package FAIL: the
-// testing package buffers each test's output and cannot flush a dead process,
-// so the failing test's name and message are destroyed. That is exactly the
-// observed QA-CRIER-17 shape (an intermittent
+// WHY IT EXISTS. Production run() owns process SIGTERM handling, including on
+// early returns before a server can start. If that handler is not registered,
+// SIGTERM takes its DEFAULT action and kills the process, and a signal death is
+// reported as a bare package FAIL: the testing package buffers each test's
+// output and cannot flush a dead process, so the failing test's name and message
+// are destroyed. That is exactly the observed QA-CRIER-17 shape (an intermittent
 // "FAIL github.com/crier-dev/crier/cmd/server 8.337s" with no "--- FAIL:"
 // line, so the failure could never be named — and 25 re-runs of the package
 // passed because the window is a per-process, per-boot-startup condition).
@@ -268,9 +280,9 @@ func TestSigtermAfterEarlyBootFailureIsNotFatal(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("the child test binary did not survive its own SIGTERM: %v\n"+
-			"  The child is the pre-fix shape of every in-process helper's cleanup: run()\n"+
-			"  returned 1 before it armed the process-wide SIGINT/SIGTERM handler, so the\n"+
-			"  harness's shutdown signal took its default action and killed the test binary.\n"+
+			"  The child is the pre-fix production run() shape: run() returned 1 before\n"+
+			"  it armed the process-wide SIGINT/SIGTERM handler, so a later process\n"+
+			"  shutdown signal took its default action and killed the test binary.\n"+
 			"  A signal death is reported as a bare package FAIL — everything the testing\n"+
 			"  package had buffered for the failing test, including its name, is lost.\n"+
 			"child output:\n%s", err, out)
@@ -328,7 +340,7 @@ func qa17EarlyBootFailureChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find own process: %v", err)
 	}
-	// Exactly what every in-process helper's t.Cleanup does to a booted server.
+	// Exercise the production process-signal contract after an early return.
 	if err := self.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal self: %v", err)
 	}
@@ -1089,19 +1101,9 @@ func TestPidfileLifecycle(t *testing.T) {
 		port := freePort(t)
 		pf := filepath.Join(t.TempDir(), "crier.pid")
 
-		done := make(chan int)
-		go func() {
-			done <- run([]string{"-port", strconv.Itoa(port), "-pidfile", pf})
-		}()
-		selfProc, _ := os.FindProcess(os.Getpid())
-		t.Cleanup(func() {
-			_ = selfProc.Signal(syscall.SIGTERM)
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Errorf("server did not shut down within 10s of SIGTERM")
-			}
-		})
+		run := startRunScopedServer([]string{"-port", strconv.Itoa(port), "-pidfile", pf})
+		exitCode := run.exitCode
+		t.Cleanup(func() { run.stop(t) })
 
 		// Wait for the pidfile (bounded). Its existence implies the bind
 		// succeeded — it is written only after net.Listen returns.
@@ -1116,8 +1118,8 @@ func TestPidfileLifecycle(t *testing.T) {
 				t.Fatal("pidfile not written within 20s")
 			}
 			select {
-			case code := <-done:
-				t.Fatalf("server exited (code %d) before writing the pidfile on port %d", code, port)
+			case <-run.done:
+				t.Fatalf("server exited (code %d) before writing the pidfile on port %d", runExitCode(exitCode), port)
 			default:
 			}
 			time.Sleep(25 * time.Millisecond)
@@ -1274,11 +1276,6 @@ func TestStopRunningServer(t *testing.T) {
 // purpose — the spec endpoints must stay reachable without a token (exempt
 // from middleware.Auth like /health) while the rest of the API stays locked.
 func TestOpenAPIServed(t *testing.T) {
-	// Skip on Go 1.25 — same SIGTERM-in-go-test caveat as TestServerHealth.
-	if strings.HasPrefix(runtime.Version(), "go1.25") {
-		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
-	}
-
 	t.Setenv("CR_AUTH_TOKEN", "test-token")
 	t.Setenv("CR_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
@@ -1287,28 +1284,9 @@ func TestOpenAPIServed(t *testing.T) {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
 
-	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- run(nil)
-	}()
-
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = self.Signal(syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
-		}
-	})
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	t.Cleanup(func() { run.stop(t) })
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -1326,7 +1304,7 @@ func TestOpenAPIServed(t *testing.T) {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}
@@ -1437,11 +1415,6 @@ func TestOpenAPIDocsSpec(t *testing.T) {
 // hardcoded string), and it is reachable without a token while auth is
 // enabled — exempt from middleware.Auth exactly like /health.
 func TestVersionEndpointServed(t *testing.T) {
-	// Skip on Go 1.25 — same SIGTERM-in-go-test caveat as TestServerHealth.
-	if strings.HasPrefix(runtime.Version(), "go1.25") {
-		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
-	}
-
 	t.Setenv("CR_AUTH_TOKEN", "test-token")
 	t.Setenv("CR_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
@@ -1450,28 +1423,9 @@ func TestVersionEndpointServed(t *testing.T) {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
 
-	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- run(nil)
-	}()
-
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = self.Signal(syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
-		}
-	})
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	t.Cleanup(func() { run.stop(t) })
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -1488,7 +1442,7 @@ func TestVersionEndpointServed(t *testing.T) {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}

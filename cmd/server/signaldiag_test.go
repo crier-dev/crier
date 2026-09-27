@@ -34,6 +34,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"net"
 	"net/http"
@@ -212,6 +215,11 @@ func TestSignalShutdownReturnsZeroAndLogsTheSignal(t *testing.T) {
 		t.Fatalf("find own process: %v", err)
 	}
 	t.Cleanup(func() {
+		select {
+		case <-done:
+			return
+		default:
+		}
 		_ = self.Signal(syscall.SIGTERM)
 		select {
 		case <-done:
@@ -285,6 +293,79 @@ func TestInProcessServerCleanupIsRunScoped(t *testing.T) {
 	case <-time.After(250 * time.Millisecond):
 		// os/signal delivery is asynchronous. A quiet interval after the helper
 		// has fully stopped proves its cleanup did not signal the process.
+	}
+}
+
+// TestOnlySignalContractTestsSendProcessSIGTERM is the construction proof for
+// QA-CRIER-33. Process SIGTERM delivery belongs only to tests that explicitly
+// exercise production's os/signal contract. Generic in-process server helpers
+// must stop through runWithSignals' private channel, otherwise their cleanup can
+// be delivered after that helper returned and terminate or stop a later run.
+func TestOnlySignalContractTestsSendProcessSIGTERM(t *testing.T) {
+	allowed := map[string]bool{
+		"TestServerHealth": true,
+		"TestSignalShutdownReturnsZeroAndLogsTheSignal": true,
+		"qa17EarlyBootFailureChild":                     true,
+	}
+	seenAllowed := make(map[string]bool, len(allowed))
+	var unexpected []string
+
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob test sources: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no *_test.go files found — process-signal scan would be vacuous")
+	}
+
+	fset := token.NewFileSet()
+	for _, name := range files {
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) != 1 {
+					return true
+				}
+				signalCall, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || signalCall.Sel.Name != "Signal" {
+					return true
+				}
+				sig, ok := call.Args[0].(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				pkg, ok := sig.X.(*ast.Ident)
+				if !ok || pkg.Name != "syscall" || sig.Sel.Name != "SIGTERM" {
+					return true
+				}
+
+				where := fset.Position(call.Pos())
+				if allowed[fn.Name.Name] {
+					seenAllowed[fn.Name.Name] = true
+				} else {
+					unexpected = append(unexpected, fmt.Sprintf("%s (%s)", where, fn.Name.Name))
+				}
+				return true
+			})
+		}
+	}
+
+	if len(unexpected) > 0 {
+		t.Fatalf("generic in-process server cleanup still signals the whole process at %s; use the shared run-scoped lifecycle",
+			strings.Join(unexpected, ", "))
+	}
+	for name := range allowed {
+		if !seenAllowed[name] {
+			t.Errorf("explicit process-signal contract %s no longer sends SIGTERM; update the allowlist only if production signal coverage moved", name)
+		}
 	}
 }
 

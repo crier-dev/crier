@@ -29,7 +29,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -45,10 +44,9 @@ type detectionBoot struct {
 	stop    func()
 }
 
-// bootDetectionServer starts run(nil) on a free port with detection enabled and
-// returns a handle whose stop() drives the same graceful SIGTERM path
-// `make stop` uses. Each call is a fresh process image as far as the log is
-// concerned: new store, new router, fresh read of the log file.
+// bootDetectionServer starts the server on a free port with detection enabled
+// and returns a handle whose stop() uses the shared private shutdown channel.
+// Each call has a new store, router, and fresh read of the log file.
 func bootDetectionServer(t *testing.T, logPath string) *detectionBoot {
 	t.Helper()
 
@@ -67,33 +65,9 @@ func bootDetectionServer(t *testing.T, logPath string) *detectionBoot {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))
 
-	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- run(nil)
-	}()
-
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
-	stopped := false
-	stop := func() {
-		if stopped {
-			return
-		}
-		stopped = true
-		_ = self.Signal(syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
-		}
-	}
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	stop := func() { run.stop(t) }
 	t.Cleanup(stop)
 
 	boot := &detectionBoot{
@@ -112,7 +86,7 @@ func bootDetectionServer(t *testing.T, logPath string) *detectionBoot {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}

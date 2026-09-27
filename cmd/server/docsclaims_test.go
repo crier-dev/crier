@@ -31,12 +31,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -419,10 +417,6 @@ func loadClaimsFile(t *testing.T, repoRoot string) claimsFile {
 
 func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Helper()
-	// Skip on Go 1.25 — same SIGTERM-in-go-test caveat as TestOpenAPIServed.
-	if strings.HasPrefix(runtime.Version(), "go1.25") {
-		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
-	}
 
 	t.Setenv("CR_AUTH_TOKEN", "test-token")
 	t.Setenv("CR_DATABASE_URL", "")
@@ -462,28 +456,9 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
 
-	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- run(nil)
-	}()
-
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = self.Signal(syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
-		}
-	})
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	t.Cleanup(func() { run.stop(t) })
 
 	baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 	client = &http.Client{Timeout: 2 * time.Second}
@@ -499,7 +474,7 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}

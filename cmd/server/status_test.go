@@ -23,12 +23,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -152,10 +150,9 @@ func scrubStatusEnv(t *testing.T) {
 	}
 }
 
-// bootStatusServer boots the real server in-process via run(nil) with the
-// scrubbed environment plus the case's overrides, waits until it answers
-// /health, and registers the same SIGTERM shutdown the package's other live
-// tests use. It returns the base URL.
+// bootStatusServer boots the real server in-process through the shared
+// run-scoped lifecycle with the scrubbed environment plus the case's overrides,
+// waits until it answers /health, and returns the base URL.
 func bootStatusServer(t *testing.T, env map[string]string) string {
 	t.Helper()
 
@@ -166,28 +163,9 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", strconv.Itoa(port))
 
-	done := make(chan struct{})
-	// exitCode carries run()'s return value (CI-018). The send happens BEFORE
-	// the deferred close(done) a waiter observes, so whenever this server has
-	// exited, its code is already buffered here.
-	exitCode := make(chan int, 1)
-	go func() {
-		defer close(done)
-		exitCode <- run(nil)
-	}()
-
-	self, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("find own process: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = self.Signal(syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Errorf("server did not shut down within 10s of SIGTERM")
-		}
-	})
+	run := startRunScopedServer(nil)
+	exitCode := run.exitCode
+	t.Cleanup(func() { run.stop(t) })
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -204,7 +182,7 @@ func bootStatusServer(t *testing.T, env map[string]string) string {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case <-done:
+		case <-run.done:
 			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
 		default:
 		}

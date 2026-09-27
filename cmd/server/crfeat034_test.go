@@ -17,11 +17,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -35,7 +33,8 @@ import (
 type capturedServer struct {
 	port      int
 	buf       *syncBuffer
-	done      chan int
+	run       *runScopedServer
+	t         testing.TB
 	r, w      *os.File
 	saved     *os.File
 	drainDone chan struct{}
@@ -54,13 +53,13 @@ func bootCapturedServer(t *testing.T, port int) *capturedServer {
 	saved := os.Stderr
 	os.Stderr = w
 
-	cs := &capturedServer{port: port, buf: &syncBuffer{}, done: make(chan int, 1), r: r, w: w, saved: saved}
+	cs := &capturedServer{port: port, buf: &syncBuffer{}, t: t, r: r, w: w, saved: saved}
 	// Registered BEFORE the server starts: a t.Fatalf below must still restore
 	// os.Stderr and reap the server, or every later test in this package logs
 	// into a pipe nobody drains.
 	t.Cleanup(cs.Stop)
 
-	go func() { cs.done <- run(nil) }()
+	cs.run = startRunScopedServer(nil)
 
 	drained := make(chan struct{})
 	go func() {
@@ -81,24 +80,20 @@ func bootCapturedServer(t *testing.T, port int) *capturedServer {
 			t.Fatalf("server did not start within 20s: %v", err)
 		}
 		select {
-		case code := <-cs.done:
-			t.Fatalf("server exited (code %d) before answering /health on port %d", code, port)
+		case <-cs.run.done:
+			t.Fatalf("server exited (code %d) before answering /health on port %d", runExitCode(cs.run.exitCode), port)
 		default:
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-// Stop is idempotent: one SIGTERM to this test process (the same graceful path
-// make stop uses), then the pipe is closed, drained and os.Stderr restored.
+// Stop is idempotent: it stops only this run through its private shutdown
+// channel, then closes and drains the stderr pipe.
 func (c *capturedServer) Stop() {
 	c.stopOne.Do(func() {
-		if self, err := os.FindProcess(os.Getpid()); err == nil {
-			_ = self.Signal(syscall.SIGTERM)
-		}
-		select {
-		case <-c.done:
-		case <-time.After(10 * time.Second):
+		if c.run != nil {
+			c.run.stop(c.t)
 		}
 		_ = c.w.Close()
 		if c.drainDone != nil {
@@ -118,9 +113,6 @@ func (c *capturedServer) Logs() string { return c.buf.String() }
 // the consequence, the fix and the machine-readable durable=false field, all
 // measured on what the REAL run() wrote.
 func TestMemoryBackendWarningIsLoud(t *testing.T) {
-	if strings.HasPrefix(runtime.Version(), "go1.25") {
-		t.Skip("skipping on Go 1.25: SIGTERM handling in go test differs from 1.26")
-	}
 	t.Setenv("CR_AUTH_TOKEN", "")
 	t.Setenv("CR_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
