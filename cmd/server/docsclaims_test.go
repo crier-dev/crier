@@ -1141,13 +1141,17 @@ func liveCount(repoRoot, claimID string) (any, error) {
 		}
 		return len(paths), nil
 	case "COUNT-COVERAGE-THRESHOLD":
-		raw, err := os.ReadFile(filepath.Join(repoRoot, "Makefile"))
+		// QA-CRIER-34: the gate's logic (and its 70.0 default) moved from
+		// an inline Makefile recipe into scripts/check-coverage.sh, so the
+		// probe follows the source of truth — the Makefile is now only a
+		// thin wrapper that invokes the checker.
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "check-coverage.sh"))
 		if err != nil {
 			return nil, err
 		}
-		re := regexp.MustCompile(`below 70% threshold`)
+		re := regexp.MustCompile(`COVERAGE_THRESHOLD:-70\.0`)
 		if !re.Match(raw) {
-			return nil, fmt.Errorf("Makefile no longer carries the 70.0%% coverage threshold")
+			return nil, fmt.Errorf("scripts/check-coverage.sh no longer carries the 70.0%% coverage threshold")
 		}
 		return 70, nil
 	case "COUNT-BUILD-PATHS-STAMPED":
