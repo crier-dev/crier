@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -42,7 +42,8 @@ help:
 	@echo "  lint              Static analysis (go vet ./...)"
 	@echo "  coverage          Run tests and print total coverage"
 	@echo "  coverage-html     Generate coverage.html"
-	@echo "  coverage-check    Fail if coverage is below the 70% threshold"
+	@echo "  coverage-check    Fail if coverage is below the 70% threshold — fail-closed: a failed suite or missing/unparseable data is a refusal (QA-CRIER-34), never a PASS"
+	@echo "  coverage-selftest Prove that gate still refuses a failed suite / stale profile / empty or unparseable coverage data, incl. neuter proofs (QA-CRIER-34)"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
 	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10)"
@@ -133,16 +134,44 @@ coverage:
 coverage-html: coverage
 	go tool cover -html=coverage.out -o coverage.html
 
+# QA-CRIER-34: the coverage gate used to be a recipe that swallowed its own
+# failure. `go test`'s status was discarded (`> /dev/null 2>&1;` unchecked),
+# so a RED suite left a stale or missing coverage.out, and with an empty
+# COVERAGE value `bc` ERRORED (printed a syntax error, exited nonzero) —
+# which the `[ ... = "1" ]` test read as "not below threshold", printing
+# `PASS: Coverage  meets 70% threshold` with exit 0. Measured on this tree
+# before the fix, with a PATH shim making `go test` exit 1:
+#
+#     cover: open coverage.out: no such file or directory
+#     Total coverage: %
+#     (standard_in) 1: syntax error
+#     PASS: Coverage % meets 70% threshold        (exit 0)
+#
+# and with a stale 99.9% coverage.out left on disk, the same red run graded
+# the PREVIOUS tree. Both greens were labels, not earned.
+#
+# The recipe is now a thin, fail-closed wrapper around
+# scripts/check-coverage.sh, which:
+#   1. removes any stale profile, runs the -short suite through the
+#      coverage build, and REFUSES on a nonzero suite status (naming the
+#      failing package(s) from go test's own output) — the exit status is
+#      the verdict, never discarded;
+#   2. refuses a missing/unreadable coverage.out (exit 3);
+#   3. refuses an empty/unparseable `total:` value (exit 3) — a vacuous
+#      PASS over missing data is unreachable by construction;
+#   4. compares the number against the threshold (default 70.0).
+# Exit codes: 0 pass, 1 below threshold, 2 suite failed, 3 missing/
+# unparseable data, 4 misuse/missing go. Every refusal prints a
+# `REFUSED  coverage-check:` line naming the reason, and never a PASS.
+# `make coverage-selftest` proves all of it — including the two vacuous
+# shapes above, on scratch fixtures (no repo suite tampering needed) —
+# with NEUTER proofs that the refusals are caused by the checks they
+# credit.
 coverage-check:
-	@go test -short -count=1 -coverprofile=coverage.out ./... > /dev/null 2>&1; \
-	COVERAGE=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$3}' | sed 's/%//'); \
-	echo "Total coverage: $${COVERAGE}%"; \
-	if [ "$$(echo "$${COVERAGE} < 70.0" | bc)" = "1" ]; then \
-		echo "FAIL: Coverage $${COVERAGE}% is below 70% threshold"; \
-		exit 1; \
-	else \
-		echo "PASS: Coverage $${COVERAGE}% meets 70% threshold"; \
-	fi
+	bash scripts/check-coverage.sh
+
+coverage-selftest:
+	bash scripts/check-coverage.sh --selftest
 
 docs-check:
 	go test -short -count=1 -run 'TestDocsClaims' ./cmd/server
