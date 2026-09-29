@@ -51,6 +51,11 @@ type Relay struct {
 	// means one implicit realm whose publish cap is rateLimitPerMinute and
 	// whose rate-limit key is the bare agent id, exactly as before.
 	namespaces *namespace.Registry
+
+	// pongWait is the subscriber silence bound for the WS subscribe loop
+	// (QA-CRIER-35): armed as the read deadline at subscribe, extended by
+	// every pong. 0 means defaultPongWait. SetPongWait scales it for tests.
+	pongWait time.Duration
 }
 
 // namespaceSep separates the realm from the topic in the relay's internal
