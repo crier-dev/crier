@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -27,6 +28,37 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 	// Default: allow all origins. Override with SetWSCheckOrigin.
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// pongWait bounds how long a relay subscriber may stay silent (QA-CRIER-35):
+// the read deadline is armed at subscribe and extended by every pong (and any
+// other inbound frame). A half-open subscriber — laptop asleep, NAT entry
+// dropped, no TCP FIN ever sent — otherwise never unblocks ReadMessage, and
+// its subscription, goroutine and 64-slot event buffer leak forever.
+// Default 60s, mirroring the mesh keepalive cadence (30s ping, deadline = 2×).
+// SetPongWait scales both for tests.
+const defaultPongWait = 60 * time.Second
+
+// SetPongWait overrides the relay's subscriber silence bound. A zero or
+// negative value restores the default, so a bad config can never disable the
+// bound outright.
+func (r *Relay) SetPongWait(d time.Duration) {
+	if d <= 0 {
+		d = defaultPongWait
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pongWait = d
+}
+
+// PongWait reports the current subscriber silence bound.
+func (r *Relay) PongWait() time.Duration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.pongWait <= 0 {
+		return defaultPongWait
+	}
+	return r.pongWait
 }
 
 // SetWSCheckOrigin replaces the WebSocket upgrader's CheckOrigin for relay subscriptions.
@@ -273,6 +305,25 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 		"namespace", namespace.Display(nsName),
 		"agent_id", subscriber, "request_id", rid)
 
+	// Liveness bound (QA-CRIER-35): the deadline is armed here and extended by
+	// every pong the client answers with. A half-open subscriber — laptop
+	// asleep, NAT mapping dropped, no TCP FIN ever sent — never unblocks
+	// ReadMessage on its own, so without this its subscription (goroutine +
+	// 64-slot event channel) would stay in r.subs forever and subscriber
+	// counts would drift. Mirrors the mesh socket's bounded-read posture
+	// (internal/mesh auth/keepalive): a peer that says nothing is eventually
+	// refused, not parked forever.
+	pongWait := r.PongWait()
+	pingPeriod := pongWait / 2
+	if err := conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		slog.Warn("relay: set subscribe read deadline", "topic", topic,
+			"agent_id", subscriber, "error", err, "request_id", rid)
+		return
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
 	// Detect client disconnect via read pump.
 	done := make(chan struct{})
 	go func() {
@@ -280,6 +331,28 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
+			}
+		}
+	}()
+
+	// Ping pump (QA-CRIER-35): one ping per pingPeriod on its own goroutine —
+	// it must not share the read pump's loop, or the ticker would only be
+	// consulted between reads and a silent client would never be pinged at
+	// all. WriteControl is the one write gorilla documents as safe to call
+	// concurrently with the event frames written below; a failing ping ends
+	// the pump and the read deadline reaps the subscription on schedule.
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil,
+					time.Now().Add(10*time.Second)); err != nil {
+					return
+				}
 			}
 		}
 	}()
