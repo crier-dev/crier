@@ -226,7 +226,14 @@ func (m *Mesh) ConnectPeer(ctx context.Context, peerID, wsURL string) error {
 
 	conn.OnClose(func(err error) {
 		m.mu.Lock()
-		delete(m.connections, peerID)
+		// Unregister only THIS connection: a reconnect (or a recovery path)
+		// can have replaced the map entry for peerID while this socket
+		// lingered, and that late close must not unregister the live
+		// replacement (CR-GAP-071) — its REQUEST/RESPONSE routing would
+		// start answering "peer not connected" until it reconnected again.
+		if m.connections[peerID] == conn {
+			delete(m.connections, peerID)
+		}
 		m.mu.Unlock()
 		slog.Debug("mesh: peer disconnected", "agent_id", peerID, "error", err)
 	})
@@ -380,14 +387,18 @@ func (m *Mesh) AcceptPeer(agentID string, conn *PeerConnection) {
 	})
 	conn.OnClose(func(err error) {
 		m.mu.Lock()
-		// The ping opt-in belongs to THIS connection, so it is released with
-		// it — but only while this connection is still the registered one: a
-		// socket replaced by a reconnect can close late, and that late close
-		// must not revoke the live connection's grant.
+		// Everything released here belongs to THIS connection — the ping
+		// opt-in and the peer-table entry itself — and only while this
+		// connection is still the registered one: a socket replaced by a
+		// reconnect can close late, and that late close must not unregister
+		// the live replacement or revoke its grant (CR-GAP-070). Without the
+		// identity check on the entry delete, a stale close left the live
+		// peer unreachable — REQUEST/RESPONSE frames drew "peer not
+		// connected" until it reconnected again.
 		if m.connections[agentID] == conn {
 			delete(m.inboxNotify, agentID)
+			delete(m.connections, agentID)
 		}
-		delete(m.connections, agentID)
 		m.mu.Unlock()
 		slog.Debug("mesh: peer disconnected", "agent_id", agentID, "error", err)
 	})
