@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -555,6 +556,56 @@ func (m *Mesh) keepaliveLoop(peerID string, conn *PeerConnection) {
 	}
 }
 
+// sendRegisterAck answers a peer's REGISTER with one REGISTER_ACK frame
+// (CR-REVIEW-002): the positive signal that the handshake completed, so a
+// first-connect client can tell "registered" from "silently dropped" instead of
+// waiting up to a full keepalive interval for the first KEEPALIVE.
+//
+// It echoes the REGISTER's message_id in request_id — the correlation field
+// RESPONSE and ERROR use — and reports the server's own cadence and horizon
+// (KeepaliveInterval, LeaseTTL). The frame carries no agent_id: the identity is
+// the socket the ack is written to, not a field derived from the REGISTER.
+//
+// Best effort, like every other server→peer frame (PingInbox, the keepalive
+// loop): a write to a peer that just went away is logged at debug and changes
+// nothing about the registration — the peer was accepted into the connection
+// table before this runs, and the ack is a signal, not a barrier.
+func (m *Mesh) sendRegisterAck(peerID, registerMessageID string) {
+	m.mu.RLock()
+	conn, connected := m.connections[peerID]
+	m.mu.RUnlock()
+	if !connected || conn == nil {
+		slog.Debug("mesh: REGISTER_ACK not sent (peer not connected)",
+			"peer", peerID, "register_message_id", registerMessageID)
+		return
+	}
+
+	now := time.Now()
+	ack := &RegisterAck{
+		Envelope: Envelope{
+			Type:      TypeRegisterAck,
+			Version:   1,
+			MessageID: newMessageID(),
+			Timestamp: now,
+		},
+		RequestID:           registerMessageID,
+		ExpiresAt:           now.Add(m.config.LeaseTTL),
+		KeepaliveIntervalMs: int(m.config.KeepaliveInterval.Milliseconds()),
+	}
+	data, err := Marshal(ack)
+	if err != nil {
+		slog.Warn("mesh: marshal REGISTER_ACK", "peer", peerID, "error", err)
+		return
+	}
+	if err := conn.Send(data); err != nil {
+		slog.Debug("mesh: REGISTER_ACK not delivered", "peer", peerID, "error", err)
+		return
+	}
+	slog.Debug("mesh: REGISTER_ACK sent", "peer", peerID,
+		"message_id", ack.MessageID, "register_message_id", registerMessageID,
+		"keepalive_interval_ms", ack.KeepaliveIntervalMs)
+}
+
 func (m *Mesh) handleMessage(peerID string, data []byte) {
 	var env Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -571,22 +622,47 @@ func (m *Mesh) handleMessage(peerID string, data []byte) {
 	switch env.Type {
 	case TypeRequest:
 		m.handleAgentRequest(peerID, env, data)
-	case TypeRegister, TypeRegisterAck:
+	case TypeRegister:
 		// The handshake payload is logged at info (agent id + peer) so the
-		// REGISTER lifecycle is traceable. Inbound REGISTER/REGISTER_ACK
-		// still have no state handler in the mesh router — the handshake is
-		// owned by the connecting side (Mesh.register) — so this logs what
-		// arrived rather than claiming it was processed. A payload that does
-		// not match the REGISTER shape is malformed, and malformed frames are
-		// refused rather than dropped (DF-CRIER-40).
+		// REGISTER lifecycle is traceable, and a REGISTER that was read
+		// successfully is ANSWERED: the peer gets one REGISTER_ACK on this
+		// socket (sendRegisterAck), which is the positive signal that it is
+		// registered rather than silently dropped (CR-REVIEW-002). A payload
+		// that does not match the REGISTER shape is malformed, and malformed
+		// frames are refused rather than dropped (DF-CRIER-40).
 		var reg Register
 		if err := json.Unmarshal(data, &reg); err != nil {
 			m.reportInvalidMessage(peerID, env.MessageID,
 				fmt.Sprintf("malformed %s frame: %v", env.Type, err))
 			return
 		}
-		slog.Info("mesh: REGISTER received", "type", env.Type, "agent_id", reg.AgentID,
+		slog.Info("mesh: REGISTER received", "agent_id", reg.AgentID,
 			"peer", peerID, "message_id", reg.MessageID)
+		m.sendRegisterAck(peerID, reg.MessageID)
+	case TypeRegisterAck:
+		// Server→agent frame by definition (CR-REVIEW-002): the ack answers a
+		// REGISTER on the socket it arrived on, so an INBOUND one carries no
+		// meaning here and is recognized rather than refused or answered — the
+		// same treatment KEEPALIVE and INBOX_NOTIFY get, and the reason a
+		// client that echoes an ack back cannot start an ack ping-pong.
+		//
+		// It is decoded against its OWN shape first, unlike the REGISTER
+		// branch above: the ack's shape is defined by the emit path, so a
+		// frame claiming REGISTER_ACK whose fields are not the ack's (a
+		// REGISTER-only lease_ttl_ms, say) is refused INVALID_MESSAGE like any
+		// other malformed frame instead of being waved through as
+		// well-formed. Pinned by
+		// TestMeshMalformedFramesGetInvalidMessage.
+		var ack RegisterAck
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&ack); err != nil {
+			m.reportInvalidMessage(peerID, env.MessageID,
+				fmt.Sprintf("malformed %s frame: %v", env.Type, err))
+			return
+		}
+		slog.Debug("mesh: REGISTER_ACK ignored (server→agent frame)", "peer", peerID,
+			"message_id", env.MessageID, "request_id", ack.RequestID)
 	case TypeKeepalive:
 		// Heartbeat: liveness evidence (CR-FEAT-024), and still no reply of
 		// any kind — not even the INVALID_MESSAGE a malformed frame draws,

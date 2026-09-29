@@ -57,10 +57,33 @@ type Capabilities struct {
 	MaxConcurrentSessions int      `json:"max_concurrent_sessions"`
 }
 
+// RegisterAck is the server's answer to a REGISTER (CR-REVIEW-002): the
+// positive signal that the handshake completed, written back on the same socket
+// the REGISTER arrived on. Before it was emitted a first-connect client saw no
+// frame at all until the first KEEPALIVE (30s by default), which is
+// indistinguishable from a relay that never read the REGISTER.
+//
+// request_id is the REGISTER's own message_id — the same correlation field
+// RESPONSE and ERROR carry, so a client matches an ack to its handshake frame
+// exactly the way it matches a reply to a request. The frame carries no
+// agent_id: the identity is the socket it arrives on (the id the connect URL
+// claimed, and the identity the handshake verified when the mesh requires
+// authentication), not a field the server echoes back. It is a
+// connection-lifecycle frame like KEEPALIVE, not a reply to an application
+// REQUEST: nothing is routed, nothing waits for it, and it has no trace_id.
 type RegisterAck struct {
 	Envelope
-	ExpiresAt           time.Time `json:"expires_at"`
-	KeepaliveIntervalMs int       `json:"keepalive_interval_ms"`
+	// RequestID is the message_id of the REGISTER this frame acknowledges.
+	RequestID string `json:"request_id"`
+	// ExpiresAt is the horizon of the registration lease the server grants
+	// under its configured LeaseTTL (mesh.DefaultMeshConfig: 1h after the
+	// ack). It is NOT an eviction deadline — nothing closes a socket or drops
+	// a peer when it passes (docs/mesh-protocol.md §Not implemented).
+	ExpiresAt time.Time `json:"expires_at"`
+	// KeepaliveIntervalMs is the cadence this socket will receive server
+	// KEEPALIVE frames at (MeshConfig.KeepaliveInterval, 30000 by default),
+	// i.e. how long a silent socket is still healthy.
+	KeepaliveIntervalMs int `json:"keepalive_interval_ms"`
 }
 
 type Keepalive struct {

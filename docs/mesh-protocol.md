@@ -54,8 +54,13 @@ Every message embeds an envelope with four fields:
 
 ### REGISTER (client → server)
 
-Sent once immediately after the WebSocket upgrade. **Fire-and-forget**: the client
-does not wait for a reply, and the server never sends one (see "Not implemented").
+Sent once immediately after the WebSocket upgrade. The server answers it with
+exactly one `REGISTER_ACK` on the same socket (§REGISTER_ACK) — the handshake is
+still one-way in the sense that nothing is gated on the ack and a client that
+never reads it registers just the same, but the ack is the positive signal that
+the REGISTER was accepted, and it arrives before the socket's first `KEEPALIVE`
+(30 s by default, i.e. the wait a client used to face with no way to tell
+"registered" from "dropped").
 
 ```json
 {"type":"REGISTER","version":1,"message_id":"0e64c4d94d584d3fb9d09fcf",
@@ -71,12 +76,54 @@ does not wait for a reply, and the server never sends one (see "Not implemented"
 | `lease_ttl_ms` | int | Requested lease TTL |
 | `capabilities` | object | `version`, `topics[]`, `max_concurrent_sessions` |
 
-### REGISTER_ACK (defined, never sent)
+### REGISTER_ACK (server → agent)
 
-The `REGISTER_ACK` **type exists in the codebase** (`internal/mesh/message.go`) with
-`expires_at` and `keepalive_interval_ms` fields, but **no server code path ever
-emits it**. Treat any received `REGISTER_ACK` as a protocol extension, not part of
-the contract.
+The server's answer to a `REGISTER`: one frame, on the same socket the REGISTER
+arrived on, written once the handshake frame has been read and accepted. It is
+the positive signal a first-connect client needs — before it was emitted, the
+socket stayed empty until the first `KEEPALIVE`, which is indistinguishable from
+a relay that never read the REGISTER.
+
+```json
+{"type":"REGISTER_ACK","version":1,"message_id":"13f7ac9931a32857e537d1fe",
+ "timestamp":"2026-08-10T01:55:00.223456789-05:00","request_id":"0e64c4d94d584d3fb9d09fcf",
+ "expires_at":"2026-08-10T02:55:00.223456789-05:00","keepalive_interval_ms":30000}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `request_id` | string | **The `message_id` of the REGISTER being acknowledged** — the same correlation field `RESPONSE` and `ERROR` carry, so a client matches an ack to its own handshake frame the way it matches a reply to a request |
+| `expires_at` | string | The horizon of the registration lease the server grants under its configured `LeaseTTL` (`time.Time`; 1 h after the ack by default). It is **not** an eviction deadline: nothing closes a socket or drops a peer when it passes (§Not implemented) |
+| `keepalive_interval_ms` | int | The cadence this socket will receive server `KEEPALIVE` frames at (`KeepaliveInterval`, `30000` by default) — i.e. how long a silent socket is still healthy |
+
+The frame carries **no `agent_id` and no payload**: the identity is the socket it
+arrives on (the id the connect URL claimed, and the identity the connect
+handshake verified when the server runs with `CR_REQUIRE_MESH_AUTH=true`), and
+there is nothing for the client to answer. It is a connection-lifecycle frame
+like `KEEPALIVE`, not a reply to an application `REQUEST` — it is not routed, it
+never touches the pending-request or route tables, and it carries no `trace_id`.
+Its two numbers are the **server's** own (configured `KeepaliveInterval`,
+`LeaseTTL`), never values echoed back from the REGISTER: two peers with different
+configurations each get their own server's cadence.
+
+One ack per accepted REGISTER: a socket that registers twice reads an ack for
+each, correlated with the REGISTER it answers. The ack is best effort in the same
+sense every server→agent frame is (`INBOX_NOTIFY`, the keepalive loop) — a write
+to a peer that has already gone away is logged and dropped, and the registration
+is unaffected, because the server put the peer in its connection table before it
+answered.
+
+An **inbound** `REGISTER_ACK` has no meaning — the frame is server→agent — so it
+is recognized and ignored rather than answered, exactly like an inbound
+`KEEPALIVE` or `INBOX_NOTIFY`: a client that echoes an ack back cannot start an
+ack ping-pong. It is still decoded against the shape above before it is ignored,
+so a frame claiming `REGISTER_ACK` whose fields are not the ack's (a
+REGISTER-only `lease_ttl_ms`, a `request_id` that is not a string) is refused
+`INVALID_MESSAGE` like any other malformed frame (§Error handling and silent
+drops). Its malformed arms — a well-formed ack drawing no reply, and a
+wrong-shaped one drawing `INVALID_MESSAGE` — are pinned by
+`TestMeshRegisterAckAnswersOnlyRegister` and
+`TestMeshMalformedFramesGetInvalidMessage` (`internal/mesh`).
 
 ### KEEPALIVE (both directions)
 
@@ -498,7 +545,11 @@ with an unknown `request_id` is dropped with no error and no log.
   `INBOX_NOTIFY` is recognized and ignored for the same reason — it is a
   server→agent frame and has no meaning in that direction (§INBOX_NOTIFY) — and
   a REQUEST that carries no `target.agent_id` is still refused
-  `INVALID_MESSAGE` with a message naming the missing field.
+  `INVALID_MESSAGE` with a message naming the missing field. The one well-formed
+  frame in that list that IS answered is the `REGISTER`: one `REGISTER_ACK` back
+  (§REGISTER_ACK), which is the handshake signal, not a reply to a request —
+  and an inbound `REGISTER_ACK` is recognized and ignored like the others, so
+  echoing one draws nothing.
 - **On an authenticated mesh a frame's identity is checked too (DF-CRIER-287).**
   With `CR_REQUIRE_MESH_AUTH=true` the socket's identity was proven at connect, so
   a `REQUEST` whose `source.agent_id` is not that peer is answered
@@ -518,7 +569,11 @@ with an unknown `request_id` is dropped with no error and no log.
 
 ## Not implemented (do not rely on it)
 
-- Server-side `REGISTER_ACK` — the one-way REGISTER is the whole handshake.
+- Registration EVICTION — `REGISTER_ACK.expires_at` reports the horizon of the
+  lease the server grants, but nothing acts on it: a peer stays connected and
+  listed by `GET /mesh/peers` as long as its socket lives, and the mesh keeps no
+  lease record to expire (the `LeaseTTL` it reports is the configured value, not
+  a per-peer timer).
 - Keepalive ENFORCEMENT — a peer that stops sending KEEPALIVEs is never
   disconnected for it. The only server-side effect a heartbeat has is liveness
   evidence (the sender's registry `last_seen`, §KEEPALIVE): nothing times a peer
@@ -558,11 +613,20 @@ async def main():
     a = await websockets.connect(WS.format("agent-a"))
     b = await websockets.connect(WS.format("agent-b"))
 
-    # One-way registration (no REGISTER_ACK will arrive)
-    await a.send(frame("REGISTER", agent_id="agent-a", lease_id="", lease_ttl_ms=3600000,
+    # One REGISTER per socket, and each is answered with one REGISTER_ACK that
+    # echoes the REGISTER's message_id in request_id — read it before anything
+    # else, or it is the frame the code below sees first.
+    mid_a = uuid.uuid4().hex[:24]
+    await a.send(frame("REGISTER", message_id=mid_a, agent_id="agent-a", lease_id="", lease_ttl_ms=3600000,
                        capabilities={"version": "0.1.0", "max_concurrent_sessions": 10}))
-    await b.send(frame("REGISTER", agent_id="agent-b", lease_id="", lease_ttl_ms=3600000,
+    mid_b = uuid.uuid4().hex[:24]
+    await b.send(frame("REGISTER", message_id=mid_b, agent_id="agent-b", lease_id="", lease_ttl_ms=3600000,
                        capabilities={"version": "0.1.0", "max_concurrent_sessions": 10}))
+
+    ack_a = json.loads(await a.recv())
+    print("A registered:", ack_a["type"] == "REGISTER_ACK" and ack_a["request_id"] == mid_a)
+    ack_b = json.loads(await b.recv())
+    print("B registered:", ack_b["type"] == "REGISTER_ACK" and ack_b["request_id"] == mid_b)
 
     # agent-a -> agent-b REQUEST; the message_id must be echoed as request_id
     mid = uuid.uuid4().hex[:24]

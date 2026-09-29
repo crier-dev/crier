@@ -45,7 +45,7 @@ Central message relay. Agents publish events to topics; subscribers receive them
 Direct agent-to-agent communication layer with discovery, keepalive, and request/response correlation.
 
 - Peer discovery via registry
-- One-way REGISTER on connect (fire-and-forget; the server never sends REGISTER_ACK — see `docs/mesh-protocol.md`)
+- REGISTER on connect, answered by one `REGISTER_ACK` that echoes the REGISTER's `message_id` (the handshake is one-way — nothing waits on the ack; see `docs/mesh-protocol.md`)
 - 30-second keepalive loop — a heartbeat is also LIVENESS EVIDENCE for the sender's registry row (see [§3](#3-agent-registry))
 - Concurrent request/response with timeout tracking
 - Clean shutdown with WebSocket close frames
@@ -999,8 +999,9 @@ Flags and the step-by-step transcript: `examples/ws-mesh-demo/README.md`.
 `ws://localhost:8767/mesh/connect/agent-1`. Two terminals, one frame each:
 
 ```bash
-# Terminal A — connect as agent-1 and paste the REGISTER frame below. It is
-# fire-and-forget: any RFC3339 timestamp works and the server never replies.
+# Terminal A — connect as agent-1 and paste the REGISTER frame below. Any
+# RFC3339 timestamp works, and the server answers with exactly one
+# REGISTER_ACK frame (the handshake is still one-way: nothing waits on it).
 websocat ws://localhost:8767/mesh/connect/agent-1
 
 # Terminal B — the peer is now visible (no token needed unless CR_AUTH_TOKEN is set):
@@ -1018,8 +1019,8 @@ two `websocat` sessions.
 #### The frames
 
 Every frame is one JSON object in one WebSocket **text** frame with a trailing
-newline (`json.Marshal` + `\n`, `internal/mesh/message.go:107`). These eight are
-the whole wire contract — the five below every client sees, plus the three that
+newline (`json.Marshal` + `\n`, `internal/mesh/message.go:107`). These nine are
+the whole wire contract — the six below every client sees, plus the three that
 appear **only** on a server started with `CR_REQUIRE_MESH_AUTH=true` (see
 [Authentication](#authentication-opt-in) before you build a client); every field
 name exists in `internal/mesh/message.go` and only the marked values are yours
@@ -1028,6 +1029,7 @@ to generate:
 <!-- mesh-frames:start -->
 ```json
 {"type":"REGISTER","version":1,"message_id":"f0e1d2c3b4a5968778695a4b","timestamp":"2026-09-18T09:15:00.123456789-05:00","agent_id":"agent-1","lease_id":"","lease_ttl_ms":3600000,"capabilities":{"version":"0.1.0","topics":[],"max_concurrent_sessions":10}}
+{"type":"REGISTER_ACK","version":1,"message_id":"a1b2c3d4e5f60718293a4b5c","timestamp":"2026-09-18T09:15:00.223456789-05:00","request_id":"f0e1d2c3b4a5968778695a4b","expires_at":"2026-09-18T10:15:00.223456789-05:00","keepalive_interval_ms":30000}
 {"type":"REQUEST","version":1,"message_id":"9d8f0a1b2c3d4e5f6a7b8c9d","timestamp":"2026-09-18T09:15:01.123456789-05:00","source":{"agent_id":"agent-1"},"target":{"agent_id":"agent-2"},"method":"GET","path":"/ping","body":{"hello":"world"},"trace_id":"f1e2d3c4b5a69788796a5b4c","timeout_ms":5000}
 {"type":"KEEPALIVE","version":1,"message_id":"7c6b5a493827160514233241","timestamp":"2026-09-18T09:15:31.123456789-05:00","lease_id":"","agent_id":"agent-1"}
 {"type":"RESPONSE","version":1,"message_id":"3f2a1b0c9d8e7f6a5b4c3d2e","timestamp":"2026-09-18T09:15:01.234567890-05:00","request_id":"9d8f0a1b2c3d4e5f6a7b8c9d","source":{"agent_id":"agent-2"},"status_code":200,"body":{"pong":true},"trace_id":"f1e2d3c4b5a69788796a5b4c"}
@@ -1052,6 +1054,8 @@ and who fills them:
 | `REGISTER` | `agent_id` | The connecting agent — should match the id in the connect URL. |
 | `REGISTER` | `lease_id` / `lease_ttl_ms` | Registry lease; empty / requested TTL on connect. |
 | `REGISTER` | `capabilities` | `{version, topics[], max_concurrent_sessions}` — informational. |
+| `REGISTER_ACK` | `request_id` | **The `message_id` of the REGISTER being acknowledged** — the server sends exactly one ack per REGISTER, on the same socket, and it carries no `agent_id`: the socket it arrives on is the identity. |
+| `REGISTER_ACK` | `expires_at` / `keepalive_interval_ms` | Server → peer: the registration horizon it grants (`LeaseTTL`, 1h) and the cadence it will send `KEEPALIVE` at on this socket (`30000`). Neither is an eviction promise — a peer lives as long as its socket does. |
 | `KEEPALIVE` | `lease_id` / `agent_id` | Sender's lease (empty) and identity. No `request_id`. |
 | `REQUEST` | `source` / `target` | `{"agent_id": "<id>"}` — you and the peer you address. `target.agent_id` is what the server routes on; a REQUEST without one is answered `INVALID_MESSAGE`. |
 | `REQUEST` | `method` / `path` | Your application-level route (e.g. `GET` / `/ping`). The server does not interpret them. |
@@ -1164,7 +1168,11 @@ time, dispatch on `type`, and ignore everything that is not the `RESPONSE` you
 are waiting for (correlated as above) or an `ERROR`. A KEEPALIVE carries no
 `request_id` at all, which is what makes the filter safe — but a client that
 treats "the next frame" as the answer reads a KEEPALIVE as a RESPONSE and sees
-`status_code: 0`. The demo prints exactly this: the KEEPALIVE frame the server
+`status_code: 0`. The same applies to the `REGISTER_ACK` for your own handshake,
+which now arrives first on a fresh socket: it carries a `request_id` too — the
+REGISTER's `message_id`, never a REQUEST's — so a filter that matches on
+`request_id` (rather than on `type` alone) drops it for the right reason. The
+demo prints exactly this: the KEEPALIVE frame the server
 sent to the requester (`"agent_id":"crier"` — the server's own mesh identity) and
 the RESPONSE it accepted instead.
 

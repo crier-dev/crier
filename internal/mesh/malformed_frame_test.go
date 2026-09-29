@@ -172,6 +172,14 @@ func TestMeshMalformedFramesGetInvalidMessage(t *testing.T) {
 // frames the protocol defines and the server deliberately ignores must NOT draw
 // an INVALID_MESSAGE, or the new refusal would fire on healthy traffic —
 // KEEPALIVE above all, which every connected peer sends every 30s.
+//
+// One well-formed frame now earns a reply, and it is not a refusal: the
+// REGISTER is answered with one REGISTER_ACK (CR-REVIEW-002), so the first
+// frame on this socket is that ack, correlated with reg-1. Reading it here is
+// what keeps the control meaningful — the frame the client reads NEXT is still
+// the refusal of the malformed frame below, and it carries no request_id, so
+// the server demonstrably answered only the REGISTER and answered KEEPALIVE and
+// REGISTER_ACK with nothing at all.
 func TestMeshWellFormedFramesGetNoError(t *testing.T) {
 	clientA, serverA := startAgentEndpoint(t)
 	connA := clientA()
@@ -190,12 +198,28 @@ func TestMeshWellFormedFramesGetNoError(t *testing.T) {
 		}
 	}
 
+	// The single reply the frames above earn: the ack for reg-1. A server that
+	// answered KEEPALIVE (or that answered the inbound REGISTER_ACK back) would
+	// break this arm, because that reply would either arrive first or arrive as
+	// a second frame before the refusal below.
+	ackRaw, ackEnv := readOneFrame(t, connA, "the well-formed KEEPALIVE/REGISTER/REGISTER_ACK")
+	if ackEnv.Type != TypeRegisterAck {
+		t.Fatalf("first reply to the well-formed frames is a %s, want %s (raw: %s)", ackEnv.Type, TypeRegisterAck, ackRaw)
+	}
+	var ack RegisterAck
+	if err := json.Unmarshal(ackRaw, &ack); err != nil {
+		t.Fatalf("unmarshal the REGISTER_ACK: %v (raw: %s)", err, ackRaw)
+	}
+	if ack.RequestID != "reg-1" {
+		t.Errorf("REGISTER_ACK request_id = %q, want reg-1 — the ack must answer the REGISTER and nothing else", ack.RequestID)
+	}
+
 	// One malformed frame follows on the same socket, with no readable
 	// message_id, so its refusal carries no request_id. The FIRST frame the
-	// client reads must be that refusal: had the server answered any of the
-	// frames above, that reply would arrive first (and would carry the id of
-	// the frame it answered — ka-1/reg-1/ack-1 — which is exactly what the
-	// request_id assertion below rejects).
+	// client reads NOW must be that refusal: had the server answered any of the
+	// frames above with a second reply, or with an ERROR, it would arrive here
+	// (and would carry the id of the frame it answered — ka-1/reg-1/ack-1 —
+	// which is exactly what the request_id assertion below rejects).
 	errMsg, raw := malformedFrameReply(t, connA, `definitely not a frame`)
 	if !strings.Contains(errMsg.Error.Message, "not a JSON envelope") {
 		t.Errorf("ERROR message = %q, want it to describe the unreadable frame", errMsg.Error.Message)

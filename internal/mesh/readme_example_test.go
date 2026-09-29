@@ -281,6 +281,67 @@ func TestReadmeMeshFramesDecodeIntoTheWireTypes(t *testing.T) {
 		t.Errorf("the README's RESPONSE uses the same id for its own message_id and its request_id (%q) — the example could not show which field correlates", resp.MessageID)
 	}
 
+	// --- REGISTER_ACK (CR-REVIEW-002: the handshake is answered) ----------
+	// The ack is the first frame a connecting client can read, so the doc has
+	// to quote it AND the quoted frame has to demonstrate the correlation: a
+	// client that cannot tell which REGISTER an ack answers has gained nothing
+	// over the silent socket this replaced.
+	if ackRaw, quoted := frames["REGISTER_ACK"]; !quoted {
+		t.Errorf("the README mesh example must quote a REGISTER_ACK frame — the server answers every REGISTER with one, and it is the frame that tells a first-connect client it was registered rather than dropped")
+	} else {
+		var ack RegisterAck
+		decodeStrict(t, ackRaw, &ack)
+		assertFrame(t, "REGISTER_ACK", func() []string {
+			var bad []string
+			if ack.Type != TypeRegisterAck {
+				bad = append(bad, fmt.Sprintf("type=%q", ack.Type))
+			}
+			if ack.Version != 1 {
+				bad = append(bad, fmt.Sprintf("version=%d", ack.Version))
+			}
+			if !isMessageID(ack.MessageID) {
+				bad = append(bad, fmt.Sprintf("message_id=%q is not a 24-hex id", ack.MessageID))
+			}
+			if ack.Timestamp.IsZero() {
+				bad = append(bad, "timestamp is missing")
+			}
+			if !isMessageID(ack.RequestID) {
+				bad = append(bad, fmt.Sprintf("request_id=%q is not a 24-hex id", ack.RequestID))
+			}
+			if ack.ExpiresAt.IsZero() {
+				bad = append(bad, "expires_at is missing (the granted registration horizon)")
+			}
+			if ack.KeepaliveIntervalMs == 0 {
+				bad = append(bad, "keepalive_interval_ms is 0 (the server reports the cadence it will send at)")
+			}
+			if ack.MessageID == ack.RequestID {
+				bad = append(bad, "message_id and request_id are the same value")
+			}
+			return bad
+		})
+
+		// The correlation and the two shipped numbers, on the quoted frame: a
+		// REGISTER_ACK that answers some other REGISTER, or that quotes a
+		// cadence/horizon the server does not use, is exactly the drift this
+		// gate exists to catch.
+		if regRaw, ok := frames["REGISTER"]; ok {
+			var reg Register
+			decodeStrict(t, regRaw, &reg)
+			if ack.RequestID != reg.MessageID {
+				t.Errorf("the README's REGISTER_ACK does not correlate with its REGISTER: request_id=%q, REGISTER.message_id=%q — the ack must echo the handshake frame's id",
+					ack.RequestID, reg.MessageID)
+			}
+		}
+		if want := int(DefaultMeshConfig("").KeepaliveInterval.Milliseconds()); ack.KeepaliveIntervalMs != want {
+			t.Errorf("the README's REGISTER_ACK quotes keepalive_interval_ms=%d, but the shipped KeepaliveInterval is %d ms — the doc must state the cadence the server really uses",
+				ack.KeepaliveIntervalMs, want)
+		}
+		if want := DefaultMeshConfig("").LeaseTTL; ack.ExpiresAt.Sub(ack.Timestamp) != want {
+			t.Errorf("the README's REGISTER_ACK expires_at is %s after its own timestamp, but the shipped LeaseTTL is %s — the doc must state the horizon the server really grants",
+				ack.ExpiresAt.Sub(ack.Timestamp), want)
+		}
+	}
+
 	// --- KEEPALIVE --------------------------------------------------------
 	kaRaw, ok := frames["KEEPALIVE"]
 	if !ok {
@@ -504,24 +565,26 @@ func TestReadmeStatesTheCorrelationAndKeepaliveRules(t *testing.T) {
 }
 
 // TestReadmeMeshFramesCoverTheDocumentedTypes makes the frame set explicit: the
-// example must show the exchange (REQUEST + RESPONSE) and the frames a client
-// meets around it, and it must not quietly lose one.
+// example must show the exchange (REQUEST + RESPONSE), the handshake answered
+// (REGISTER + REGISTER_ACK) and the frames a client meets around it, and it
+// must not quietly lose one.
 func TestReadmeMeshFramesCoverTheDocumentedTypes(t *testing.T) {
 	frames := readmeMeshFrames(t)
-	for _, want := range []string{"REGISTER", "REQUEST", "KEEPALIVE", "RESPONSE", "ERROR",
+	for _, want := range []string{"REGISTER", "REGISTER_ACK", "REQUEST", "KEEPALIVE", "RESPONSE", "ERROR",
 		"AUTH_CHALLENGE", "AUTH_RESPONSE", "AUTH_OK"} {
 		if _, ok := frames[want]; !ok {
 			t.Errorf("the README mesh example no longer quotes a %s frame", want)
 		}
 	}
-	// Every message type the package defines must be handled: either quoted in
-	// the README (and therefore decoded above) or deliberately absent. The one
-	// deliberate absence is REGISTER_ACK — the type exists but no server code
-	// path emits it (docs/mesh-protocol.md §REGISTER_ACK). The AUTH_* frames are
-	// quoted even though they only appear on an authenticated mesh, because a
-	// client meeting one has to know its shape before it can answer.
-	if _, quoted := frames[string(TypeRegisterAck)]; quoted {
-		t.Error("the README quotes a REGISTER_ACK frame, which no server code path emits — the doc would teach a handshake that never happens")
+	// This list is the whole contract, so quoting a frame must be a positive
+	// requirement rather than a tolerated one: before CR-REVIEW-002 the check
+	// below asserted the OPPOSITE for REGISTER_ACK (the type existed with no
+	// server path emitting it, so quoting it would have taught a handshake that
+	// never happened). The server now answers every REGISTER with one ack, so
+	// the README must show it and the loop above is what fails when it is
+	// removed.
+	if _, quoted := frames[string(TypeRegisterAck)]; !quoted {
+		t.Error("the README mesh example must quote a REGISTER_ACK frame — the server answers a REGISTER with one, so a client that does not dispatch on it reads the handshake ack as an unexpected frame")
 	}
 }
 
