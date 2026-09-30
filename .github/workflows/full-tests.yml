@@ -1,0 +1,108 @@
+name: Full test suite
+
+# CI-020 — the CI leg that exists because these tests had none.
+#
+# Every existing leg runs a SUBSET: ci.yml's Test step and the coverage job both
+# run `go test -short`, the integration job is tag-scoped
+# (`-tags=integration ./internal/registry/`) and the OpenAPI job is `-run`-scoped.
+# So three `-short`-gated registration tests in cmd/crier-mcp/registration_test.go
+# (TestRunSelfRegistersBridgeIdentity, TestRunRegistersWithSuppliedKeyFile,
+# TestRunSurvivesRegistrationFailure) and five non-short probes in
+# examples/ws-mesh-demo (run_demo_e2e_test.go: TestRunDemoEndToEndOnAScratchPort,
+# TestRunDemoRefusesAForeignServerOnItsPort,
+# TestRunDemoRotatesPastAnOccupiedFirstCandidate,
+# TestRunDemoFailsClosedWhenEveryCandidateIsOccupied; and
+# run_demo_ambient_proxy_test.go: TestDemoIsReachableUnderADeadAmbientProxy)
+# executed in NO leg at all. Nothing guarded them against rot; all eight were
+# measured green (`go test ./... -count=1`, 22/22 packages ok) in the change that
+# added this file.
+#
+# Shape: a SEPARATE workflow rather than a job inside ci.yml, because `schedule:`
+# is workflow-scoped — adding it to ci.yml would also run the coverage,
+# integration and OpenAPI jobs nightly, changing the cadence of four jobs this
+# change does not own. Here the schedule triggers exactly the full suite, PRs stay
+# fast on ci.yml, and the slow probes get a real (if nightly) home instead of
+# being skipped forever.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * *" # daily 05:00 UTC
+
+permissions:
+  contents: read
+
+# A manual run never cancels a scheduled peer: the groups are event-scoped.
+concurrency:
+  group: full-tests-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  full-tests:
+    name: Full suite (no -short)
+    runs-on: ubuntu-latest
+    # Headroom, not a guess: the measured local `go test ./... -count=1` run is
+    # ~1 minute (the ws-mesh e2e probes are ~27 s of it, the crier-mcp build+run
+    # probes ~7 s). 30 minutes absorbs a cold module cache and a loaded runner
+    # while still failing a real hang instead of hiding it.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.6"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # The whole suite, NO -short — this is the point of the leg. `-v` so the
+      # next step can prove from the log which tests actually ran; `tee` so the
+      # log survives the step (GitHub's bash shell runs with pipefail, so a
+      # failing `go test` still fails this step).
+      - name: Full test suite (no -short)
+        run: go test ./... -count=1 -v 2>&1 | tee full-tests.log
+
+      # A green suite is NOT evidence that these eight tests ran: they were
+      # green-by-absence for their whole life, and a future `t.Skip` would make
+      # this leg exactly that silence one level up. So the leg asserts, from the
+      # log it just produced, that every test it exists for reported `--- PASS`
+      # at top level (subtest lines are indented, so they never match) and fails
+      # naming any that is missing, skipped or failed.
+      - name: Prove the previously-unrun probes actually ran
+        run: |
+          set -euo pipefail
+          missing=0
+          for t in \
+            TestRunDemoEndToEndOnAScratchPort \
+            TestRunDemoRefusesAForeignServerOnItsPort \
+            TestRunDemoRotatesPastAnOccupiedFirstCandidate \
+            TestRunDemoFailsClosedWhenEveryCandidateIsOccupied \
+            TestDemoIsReachableUnderADeadAmbientProxy \
+            TestRunSelfRegistersBridgeIdentity \
+            TestRunRegistersWithSuppliedKeyFile \
+            TestRunSurvivesRegistrationFailure
+          do
+            if grep -qF -- "--- PASS: ${t} " full-tests.log; then
+              echo "ran + passed: ${t}"
+            else
+              echo "DID NOT PASS (missing / skipped / failed): ${t}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "CI-020: this leg no longer exercises a probe it exists for."
+            exit 1
+          fi
+
+      - name: Upload full-suite log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: full-tests-log
+          path: full-tests.log
