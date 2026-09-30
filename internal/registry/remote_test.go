@@ -654,3 +654,141 @@ func TestRemoteStore_RegisterCarriesTheNamespace(t *testing.T) {
 		}
 	})
 }
+
+// TestRemoteStore_NotFoundNamesTheSubjectNotTheProxy (CR-GAP-072) pins the
+// attribution of every 404 the shared do() path maps: the object a 404 names
+// is the SUBJECT the call operates on (the {id} in the route), never the
+// proxy credential the store authenticates with.
+//
+// Pre-fix, do() answered `fmt.Errorf("%w: %q", ErrAgentNotFound, s.agentID)`
+// for every 404 on every route, so a bridge identified as "proxy-agent"
+// asking about "ghost-subject" was told `agent not found: "proxy-agent"` — an
+// identity it never asked about, which sends the caller off to re-register
+// the WRONG agent. doAck already decoded its own 404s (DF-CRIER-32); the
+// shared path did not.
+func TestRemoteStore_NotFoundNamesTheSubjectNotTheProxy(t *testing.T) {
+	const (
+		proxy   = "proxy-agent"
+		subject = "ghost-subject"
+	)
+
+	// Every subject-bearing endpoint owes the same attribution: the sentinel
+	// intact, the SUBJECT named, and the proxy credential absent.
+	assertSubjectAttribution := func(t *testing.T, op string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: err = nil, want a 404 failure", op)
+		}
+		if !errors.Is(err, ErrAgentNotFound) {
+			t.Errorf("%s: err = %v, want it to wrap ErrAgentNotFound", op, err)
+		}
+		if !strings.Contains(err.Error(), subject) {
+			t.Errorf("%s: err = %q, want the SUBJECT agent %q named", op, err, subject)
+		}
+		if strings.Contains(err.Error(), proxy) {
+			t.Errorf("%s: err = %q, names the PROXY credential %q instead of the subject", op, err, proxy)
+		}
+	}
+
+	t.Run("subject-bearing routes on a real registry name the subject", func(t *testing.T) {
+		srv, _ := newRemoteTestServer(t)
+		rs := NewRemoteStore(srv.URL, proxy, "")
+
+		_, err := rs.Get(subject)
+		assertSubjectAttribution(t, "Get", err)
+
+		assertSubjectAttribution(t, "Unregister", rs.Unregister(subject))
+
+		assertSubjectAttribution(t, "Deliver",
+			rs.Deliver(subject, &InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}))
+
+		_, _, err = rs.Retrieve(subject, 30*time.Second, 5)
+		assertSubjectAttribution(t, "Retrieve", err)
+
+		_, _, _, err = rs.Stats(subject)
+		assertSubjectAttribution(t, "Stats", err)
+	})
+
+	t.Run("a bodyless 404 is still attributed to the subject", func(t *testing.T) {
+		// The attribution must come from the CALL's subject, not from
+		// anything the server chose to say: a bare 404 carries no envelope.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(srv.Close)
+
+		rs := NewRemoteStore(srv.URL, proxy, "")
+		_, _, err := rs.Retrieve(subject, 30*time.Second, 5)
+		assertSubjectAttribution(t, "Retrieve (bare 404)", err)
+	})
+
+	t.Run("the server's own reason is preserved as detail", func(t *testing.T) {
+		// The registry's 404 body names the reason; keeping it means a caller
+		// that needs the finer class (agent missing vs endpoint missing) can
+		// still read it, the same way doAck keeps its endpoint's wording.
+		srv, _ := newRemoteTestServer(t)
+		rs := NewRemoteStore(srv.URL, proxy, "")
+
+		_, err := rs.Get(subject)
+		if err == nil || !strings.Contains(err.Error(), ErrAgentNotFound.Error()) {
+			t.Fatalf("Get: err = %v, want the server's agent-not-found reason carried through", err)
+		}
+	})
+
+	t.Run("a route with no agent is not laundered into agent-not-found", func(t *testing.T) {
+		// GET /agents and POST /agents name no agent, so a 404 there cannot
+		// mean one is missing: it is the endpoint itself the server does not
+		// have. Laundering that into ErrAgentNotFound is the other half of
+		// CR-GAP-072 — it makes a missing route look like a missing agent.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"route not found"}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		rs := NewRemoteStore(srv.URL, proxy, "")
+		rep, ok := any(rs).(listErrReporter)
+		if !ok {
+			t.Fatal("RemoteStore does not implement ListErrorReporter")
+		}
+		rs.List()
+
+		err := rep.ListError()
+		if err == nil {
+			t.Fatal("ListError() = nil after a 404 on GET /agents, want the recorded failure")
+		}
+		if errors.Is(err, ErrAgentNotFound) {
+			t.Errorf("GET /agents 404 = %v, want a route/endpoint failure, not ErrAgentNotFound", err)
+		}
+		if !strings.Contains(err.Error(), "404") || !strings.Contains(err.Error(), "GET /agents") {
+			t.Errorf("GET /agents 404 = %q, want it to name the status and the route", err)
+		}
+	})
+
+	t.Run("an unknown message acked through a proxy is message-not-found", func(t *testing.T) {
+		// The ack leg answers two different 404s (DF-CRIER-32): for a
+		// registered agent the missing MESSAGE must not be reported as a
+		// missing agent — and never as the proxy's identity.
+		srv, _ := newRemoteTestServer(t)
+		rs := NewRemoteStore(srv.URL, proxy, "")
+
+		keyBytes, err := hex.DecodeString(strings.Repeat("a1", 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rs.Register(&Agent{ID: subject, PublicKey: HexKey(keyBytes)}); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+
+		ackErr := rs.Ack(subject, "lease-that-never-existed", []string{"msg-that-never-existed"})
+		if !errors.Is(ackErr, ErrMessageNotFound) {
+			t.Errorf("Ack unknown message: err = %v, want ErrMessageNotFound", ackErr)
+		}
+		if errors.Is(ackErr, ErrAgentNotFound) {
+			t.Errorf("Ack unknown message reported as agent-not-found: %v", ackErr)
+		}
+		if strings.Contains(ackErr.Error(), proxy) {
+			t.Errorf("Ack unknown message names the proxy credential: %q", ackErr)
+		}
+	})
+}

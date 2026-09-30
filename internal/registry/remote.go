@@ -176,7 +176,18 @@ func (s *RemoteStore) send(method, path string, body any) (int, []byte, error) {
 	return resp.StatusCode, raw, nil
 }
 
-func (s *RemoteStore) do(method, path string, body any, out any) error {
+// do performs one request and maps the shared status vocabulary onto the
+// Store's sentinels. subject is the agent the endpoint OPERATES ON — the
+// {id} in the route — and is the identity a 404 is attributed to (CR-GAP-072);
+// pass "" for a route that names no agent (POST /agents, GET /agents).
+//
+// The store's own agentID is the proxy credential the request authenticates
+// with. It names nothing the caller asked about, so it is never used as the
+// missing object: doing so answered `agent not found: "<proxy>"` for every
+// 404 on every route, which tells a bridge to re-register the wrong agent and
+// hides the endpoint-specific classes (route mismatch, message not found)
+// that doAck already reports.
+func (s *RemoteStore) do(method, path, subject string, body any, out any) error {
 	status, raw, err := s.send(method, path, body)
 	if err != nil {
 		return err
@@ -190,7 +201,7 @@ func (s *RemoteStore) do(method, path string, body any, out any) error {
 		}
 		return nil
 	case http.StatusNotFound:
-		return fmt.Errorf("%w: %q", ErrAgentNotFound, s.agentID)
+		return mapNotFound(method, path, subject, raw)
 	case http.StatusConflict:
 		return ErrAgentExists
 	case http.StatusBadRequest:
@@ -200,11 +211,37 @@ func (s *RemoteStore) do(method, path string, body any, out any) error {
 	}
 }
 
+// mapNotFound turns a 404 into the failure class its ENDPOINT can mean,
+// keyed by the call's subject instead of the proxy credential (CR-GAP-072).
+//
+//   - a route that names an agent (/agents/{id}, /agents/{id}/inbox,
+//     /agents/{id}/inbox/stats) keeps ErrAgentNotFound semantics, naming the
+//     SUBJECT, with the server's own error body preserved as detail so a
+//     caller that needs the finer reason can still read it (the pattern
+//     doAck established for its endpoint, DF-CRIER-32);
+//   - a route that names no agent cannot answer "agent not found" at all, so
+//     its 404 is the ENDPOINT missing on that server: reported as a route
+//     failure rather than laundered into the agent-not-found sentinel.
+func mapNotFound(method, path, subject string, raw []byte) error {
+	body := strings.TrimSpace(string(raw))
+	if subject == "" {
+		return fmt.Errorf("remote %s %s: endpoint not found (status %d, no agent is named by this route): body %q",
+			method, path, http.StatusNotFound, body)
+	}
+	if body == "" {
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, subject)
+	}
+	return fmt.Errorf("%w: %q: %s", ErrAgentNotFound, subject, body)
+}
+
 // doAck is the ack path's error decoder. On this endpoint a 404 means the
-// requested message ID does not exist (not "agent not found", which is the
-// shared do() mapping) and a 409 means the message exists under a different
-// lease — the two failure classes clients must be able to tell apart
-// (DF-CRIER-32).
+// requested message ID does not exist (not "agent not found", which is what
+// the shared do() answers for its subject-bearing routes) and a 409 means the
+// message exists under a different lease — the two failure classes clients
+// must be able to tell apart (DF-CRIER-32). It keeps its own decoder rather
+// than routing through do() because ITS 404 carries two classes in the body;
+// do() keys its 404 by the call's subject and preserves the body as detail
+// (CR-GAP-072).
 func (s *RemoteStore) doAck(agentID string, body any) error {
 	path := "/agents/" + url.PathEscape(agentID) + "/inbox/ack"
 	status, raw, err := s.send(http.MethodPost, path, body)
@@ -250,12 +287,15 @@ func (s *RemoteStore) Register(agent *Agent) error {
 	if ns := namespace.Canonical(agent.Namespace); ns != "" {
 		body["namespace"] = ns
 	}
-	return s.do(http.MethodPost, "/agents", body, nil)
+	// POST /agents names no agent in its route: a 404 here is the endpoint
+	// missing, not an agent (the registered id is the body's, and the server
+	// answers 409 for an id it already holds).
+	return s.do(http.MethodPost, "/agents", "", body, nil)
 }
 
 func (s *RemoteStore) Get(id string) (*Agent, error) {
 	var agent Agent
-	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(id), nil, &agent); err != nil {
+	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(id), id, nil, &agent); err != nil {
 		return nil, err
 	}
 	return &agent, nil
@@ -275,7 +315,8 @@ func (s *RemoteStore) List() []*Agent {
 	var out struct {
 		Agents []*Agent `json:"agents"`
 	}
-	if err := s.do(http.MethodGet, "/agents", nil, &out); err != nil {
+	// GET /agents lists the registry: no agent is named by the route.
+	if err := s.do(http.MethodGet, "/agents", "", nil, &out); err != nil {
 		slog.Error("remote list", "error", err, "store_url", s.baseURL)
 		s.listMu.Lock()
 		s.listErr = err
@@ -302,7 +343,7 @@ func (s *RemoteStore) ListError() error {
 }
 
 func (s *RemoteStore) Unregister(id string) error {
-	return s.do(http.MethodDelete, "/agents/"+url.PathEscape(id), nil, nil)
+	return s.do(http.MethodDelete, "/agents/"+url.PathEscape(id), id, nil, nil)
 }
 
 func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
@@ -331,7 +372,12 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	if entry.Priority != MinMessagePriority {
 		body["priority"] = entry.Priority
 	}
-	if err := s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox", body, &out); err != nil {
+	// A 404 on this endpoint means the TARGET agent has no inbox here; the
+	// subject is the target, so that is the identity the error names even when
+	// the store itself is a proxy for it (CR-GAP-072). When a downstream
+	// answers 404 for a reason of its own (a route it does not serve), the
+	// body is carried through as detail rather than being flattened away.
+	if err := s.do(http.MethodPost, "/agents/"+url.PathEscape(agentID)+"/inbox", agentID, body, &out); err != nil {
 		return err
 	}
 	entry.ID = out.ID // the server assigns the id
@@ -353,7 +399,7 @@ func (s *RemoteStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		Messages []*InboxEntry `json:"messages"`
 		LeaseID  string        `json:"lease_id"`
 	}
-	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(agentID)+"/inbox?"+q.Encode(), nil, &out); err != nil {
+	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(agentID)+"/inbox?"+q.Encode(), agentID, nil, &out); err != nil {
 		return nil, "", err
 	}
 	if out.Messages == nil {
@@ -384,7 +430,7 @@ func (s *RemoteStore) Stats(agentID string) (queueDepth, leasedCount int, oldest
 		LeasedCount int   `json:"leased_count"`
 		OldestAgeMs int64 `json:"oldest_age_ms"`
 	}
-	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(agentID)+"/inbox/stats", nil, &out); err != nil {
+	if err := s.do(http.MethodGet, "/agents/"+url.PathEscape(agentID)+"/inbox/stats", agentID, nil, &out); err != nil {
 		return 0, 0, 0, err
 	}
 	return out.QueueDepth, out.LeasedCount, time.Duration(out.OldestAgeMs) * time.Millisecond, nil
