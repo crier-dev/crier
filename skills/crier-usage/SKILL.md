@@ -330,3 +330,31 @@ See `docs/dogfood/2026-08-09-integration.md` and
 `docs/dogfood/2026-09-08-integration.md` (webhook + federation leg) for the
 full integration reports and `docs/dogfood/diagnostics.md` for the
 build/behavior trail.
+
+## Mesh REGISTER_ACK + REQUEST shape (live-verified 2026-10-01 @ 649d9e3)
+
+- **REGISTER now answers** with one `REGISTER_ACK` on the same socket:
+  `request_id` = your REGISTER's `message_id`, `keepalive_interval_ms` = the
+  server's cadence, `expires_at` = lease horizon. No `agent_id`, no payload.
+  Wait for it (sub-ms) instead of assuming silence means "dropped".
+- **REQUEST needs `source:{agent_id}` AND `target:{agent_id}`** — top-level
+  `agent_id`/`to`/`payload` shapes get `INVALID_MESSAGE: missing target peer id
+  (expected target.agent_id)`. RESPONSE must echo `request_id` = the REQUEST's
+  `message_id`; `body` is responder-controlled JSON, relayed verbatim.
+- Unknown target → `ERROR` `CONTROLLER_OFFLINE` carrying your `request_id`;
+  garbage → `ERROR` `INVALID_MESSAGE`.
+- `?inbox_notify=1` on the connect URL gives one `INBOX_NOTIFY` per durable
+  delivery (`inbox_message_id` = the deliver response id, `sender` = the
+  sender), no payload, no ack. Opt-in per connection.
+- Relay subscribe URL is `/relay/subscribe/{topic}` (wildcards ok). A wildcard
+  socket held idle 35s+ still receives publishes (keepalive fix landed
+  QA-CRIER-35, verified live).
+
+## crier keygen — the no-openssl, no-xxd agent path (live-verified 2026-10-01)
+
+```bash
+./bin/crier keygen -out agent.key -id my-agent -server http://127.0.0.1:8767 -json
+# stdout: JSON with .registration — POST it to /agents verbatim
+# agent.key: PKCS#8 ed25519, mode 0600 — feed to crier-mcp via CRIER_AGENT_PRIVATE_KEY_FILE
+```
+`keygen -force` overwrites (refuses by default — a keypair is not regenerable).

@@ -431,3 +431,36 @@ curl -sS -X POST "$R1/agents/remote/inbox" -H 'Content-Type: application/json' \
 `${PIPESTATUS[0]}` or you will read a green next to a failed command. And after
 appending to the board, re-read the tail — a count printed by the writing step
 is not evidence that the row landed.
+
+## 2026-10-01 run — wire-format lessons from the fresh-use pass (HEAD 649d9e3)
+
+Things this run's integrator hit that a doc-only reading would have missed:
+
+1. **Mesh REQUEST has TWO required objects — build them, don't guess.** The
+   frame that works is
+   `{"type":"REQUEST","source":{"agent_id":"…"},"target":{"agent_id":"…"},…}`.
+   The first instinct (`agent_id` top-level, or `to`, or `payload`) is refused
+   `INVALID_MESSAGE: missing target peer id (expected target.agent_id)`. The
+   error message IS the fastest teacher — read it before re-shaping the frame.
+
+2. **The retrieve payload is base64-encoded JSON of the delivered body.**
+   `payload: "eyJrIjoicHJvYmUifQ=="` — decode before grepping for your keys.
+   (Same trap recorded on 2026-09-16; it is still the first surprise.)
+
+3. **The guard's clean pass is INVISIBLE by design.** No `guard` object on the
+   deliver body and none on the stored entry = clean allow OR guard disabled;
+   you cannot distinguish those from the response. The `errored:true` verdict
+   (provider missing/down) is the loud one. Plan assertions accordingly: absence
+   of the object is not evidence the guard ran.
+
+4. **Fail-open guard adds ~1s latency to every deliver even with no key** (the
+   router still walks the chain before skipping); with a working key the deliver
+   costs one DeepSeek RTT (~0.8-1.4s from this host). Budget test timeouts for
+   the guarded path accordingly, or set `CR_GUARD_ENABLED=false` for
+   deterministic keyless runs.
+
+5. **`crier keygen` replaces the openssl+xxd dance for fresh agents** — one
+   command emits the exact registration JSON to POST and a PKCS#8 key file the
+   MCP bridge accepts via `CRIER_AGENT_PRIVATE_KEY_FILE`. On a bare Debian box
+   (no xxd) this is the only documented path that works unchanged
+   (DF-CRIER-280).
