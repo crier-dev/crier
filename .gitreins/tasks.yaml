@@ -2486,3 +2486,30 @@ tasks:
   status: complete
   created_at: '2026-09-30T10:28:27.039677+00:00'
   completed_at: '2026-09-30T10:28:38.103035+00:00'
+- id: RELEASE-007
+  title: Rebuild and restart the fleet-serving crier on :8767 from a clean origin/main
+    HEAD
+  criteria:
+  - GET /version returns modified:false with a commit that git rev-parse --verify
+    on origin/main resolves; /health 200; fleet agents re-registered and reachable
+  status: complete
+  created_at: '2026-10-01T00:00:48.664330+00:00'
+  completed_at: '2026-10-01T00:06:30.556058+00:00'
+- id: QA-CRIER-36
+  title: bunker-matrix.sh exits 0 when every cell was skipped
+  criteria:
+  - bunker-matrix.sh must exit nonzero (or emit a loud explicit summary) when 0 cells
+    pass and all cells were skipped; a selftest or regression proof must demonstrate
+    the skipped-only shape no longer yields a vacuous green
+  status: complete
+  created_at: '2026-10-01T10:21:18.562914+00:00'
+  completed_at: '2026-10-01T11:06:46.339933+00:00'
+- id: DOC-CRIER-1
+  title: Fix AGENTS.md layout section listing nonexistent internal/config package
+  criteria:
+  - 'AGENTS.md layout line lists real top-level package paths: config listed at top
+    level (not internal/config), grep of AGENTS.md shows no ''internal/config''; repo
+    builds and docs-check passes'
+  status: complete
+  created_at: '2026-10-01T17:42:59.807865+00:00'
+  completed_at: '2026-10-01T17:58:39.916640+00:00'
