@@ -65,8 +65,11 @@ Modes
                     cell that posture cannot honestly answer (a sig-enforcing
                     server, a guard-disabled server for guard-on, a missing
                     DEEPSEEK_API_KEY, a missing --sink for blocking). Exit code
-                    is 0 iff zero PROBES failed; skips are reported, not
-                    failures.
+                    0 iff at least one probe ran and none failed; 1 when any
+                    probe failed; 2 when NOTHING was verified (every cell
+                    skipped, or nothing ran at all) — skips are reported, not
+                    failures, and a run that verified nothing is a failure, not
+                    a pass.
 
 Options
   --host <host>     host running crier (default 127.0.0.1)
@@ -378,5 +381,31 @@ else
     '{"payload":{"text":"What vegetable is in plot B?"},"sender":"alice","session_id":"sx","delivery_mode":"blocking","timeout_ms":15000}'
 fi
 
+# HEADER NOTE (QA-CRIER-36): the exit verdict used to be the bare test
+# `[[ $FAIL -eq 0 ]]`, so a run in which EVERY cell was skipped (and a run that
+# probed nothing at all) exited 0 — a vacuous green that the usage text's own
+# contract ("skips are reported, not failures") never authorised. The verdict is
+# now computed by matrix_verdict(): any failure exits 1; a run with zero
+# failures must also have actually PROBED something (PASS > 0) to exit 0; an
+# all-skipped or zero-cell run exits 2 with a loud line on both streams and the
+# summary line is still printed first, on every path.
+
+matrix_verdict() { # computes the exit code from PASS/FAIL/SKIP
+  # FAIL>0 -> exit 1 (the historic behaviour, preserved).
+  if (( FAIL > 0 )); then
+    return 1
+  fi
+  # FAIL=0 and PASS>0 -> exit 0: at least one cell was actually verified.
+  if (( PASS > 0 )); then
+    return 0
+  fi
+  # FAIL=0 and PASS=0 -> vacuous green: nothing was verified (all cells
+  # skipped, or nothing ran at all). Treated as failure with exit 2.
+  echo "FATAL: vacuous green — $PASS pass / $FAIL fail / $SKIP skipped: no cell was actually verified; treating as failure"
+  echo "FATAL: vacuous green — $PASS pass / $FAIL fail / $SKIP skipped: no cell was actually verified; treating as failure" >&2
+  return 2
+}
+
 echo "== matrix done: $PASS pass / $FAIL fail / $SKIP skipped (evidence $EVIDENCE) =="
-[[ $FAIL -eq 0 ]]
+matrix_verdict
+exit $?

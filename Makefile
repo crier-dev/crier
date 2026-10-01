@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -55,6 +55,8 @@ help:
 	@echo "  load-soak-under-load  Run the soak under scripts/load-repro.sh burners — the burners-alongside artifact (CR-FEAT-033)"
 	@echo "  load-soak-selftest  Prove the soak's caps refuse, the gate skips, the budget bounds, the run verifies itself and leaves nothing behind — incl. a NEUTER proof (CR-FEAT-033)"
 	@echo "  bunker-matrix-selftest  Prove the bunker-matrix argument surface, its --local safety and its remote refusal — no docker, no bunker, no network (DF-CRIER-81)"
+	@echo "  bunker-matrix-verdict-check  Drive the matrix's extracted verdict fn through the QA-CRIER-36 contract table (all-skipped -> 2) — no server, no network"
+	@echo "  bunker-matrix-verdict-selftest  Prove that checker still rejects a wrong verdict table / missing function / re-introduced bare test, incl. a neuter proof (QA-CRIER-36)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
 	@echo "  shell-yaml-selftest  Prove that checker still rejects broken shell/YAML and accepts a clean pair (DF-CRIER-206)"
 	@echo "  make-docker-check  Check every tracked Makefile (make -n dry-parse) and Dockerfile (hadolint, or the built-in python3 parse) — DF-CRIER-209"
@@ -296,6 +298,22 @@ load-soak-selftest: build
 # no network, fully deterministic.
 bunker-matrix-selftest:
 	bash scripts/bunker-matrix-selftest.sh
+
+# QA-CRIER-36: scripts/bunker-matrix.sh used to end in the bare test
+# `[[ $FAIL -eq 0 ]]`, so a run in which EVERY cell was skipped exited 0 — a
+# vacuous green that verified nothing while reading as a pass. The verdict now
+# lives in matrix_verdict() (FAIL>0 -> 1; FAIL=0 with PASS>0 -> 0; FAIL=0 with
+# PASS=0 -> 2 + a loud line on both streams), and this gate drives the REAL
+# extracted function through the whole contract table — no server, no deploy,
+# no network — and refuses a re-introduced bare test in code. The selftest
+# proves the checker still rejects a mutated table / a missing function / the
+# bare test re-introduced as code, accepts the clean matrix (whose header
+# comment MENTIONS the old line on purpose) and carries a NEUTER proof.
+bunker-matrix-verdict-check:
+	bash scripts/check-bunker-matrix-verdict.sh
+
+bunker-matrix-verdict-selftest:
+	bash scripts/check-bunker-matrix-verdict.sh --selftest
 
 # DF-CRIER-206: the Tier-1 guard battery (secrets/go_build/go_lint/go_tests) never
 # reads a shell script or a workflow YAML, so a .sh/.yml-only diff used to get a

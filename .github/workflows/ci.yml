@@ -155,6 +155,11 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --user pyyaml || true
           make shell-yaml-check
           make shell-yaml-selftest
+          # QA-CRIER-36: the bunker matrix's verdict table (an all-skipped run
+          # must exit 2, never 0) — driven through the real extracted function,
+          # no server and no network; the selftest keeps the checker honest.
+          make bunker-matrix-verdict-check
+          make bunker-matrix-verdict-selftest
 
       # DF-CRIER-278: the tier-2 judge's input budget is the most expensive knob in
       # the repo, and a board-only diff has nothing in it a larger budget would
