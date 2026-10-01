@@ -461,7 +461,11 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Cleanup(func() { run.stop(t) })
 
 	baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
-	client = &http.Client{Timeout: 2 * time.Second}
+	// 10s: a fixed 2s timeout flaked under fleet host load (register POSTs on
+	// peer-3/peer-5 exceeded 2s while the server itself was healthy) — same
+	// timing-race class as INT-CI-004. Generous ceiling; a real failure still
+	// fails the probe on non-2xx verdicts, not on the timeout.
+	client = &http.Client{Timeout: 10 * time.Second}
 
 	deadline := time.Now().Add(20 * time.Second)
 	for {

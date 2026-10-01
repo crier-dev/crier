@@ -30,7 +30,8 @@ Config is env-driven (`CRIER_PORT`, `CR_DATABASE_URL`, `CR_AUTH_TOKEN`, `CR_REQU
 
 - `cmd/server` — HTTP/WS relay server
 - `cmd/crier-mcp` — MCP server exposing registry + inbox tools
-- `internal/{relay,mesh,registry,middleware,config,mcp}` — packages
+- `config/` — env/flag config loading (top-level package, not under internal/)
+- `internal/` — internal packages (a2a, buildinfo, detect, federation, guard, mcp, mesh, middleware, namespace, ratelimit, registry, relay, webhook; partial list)
 - `docs/` — architecture.md, specs.md, mesh-protocol.md, openapi.yaml
 - `specs/` — AGENT-ECOSYSTEM.md, LLM-MESSAGE-GUARD.md, WEBHOOK-DELIVERY.md, ci-003b-postgresql-persistence.md
 - `examples/demo.sh` — runnable register → deliver → signed retrieve → ack round-trip
