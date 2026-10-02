@@ -876,7 +876,10 @@ func TestA2AJSONRPCStreaming_RefusesBeforeItStreams(t *testing.T) {
 // POST /relay/publish fans out (the SSE adapter subscribes through the same
 // Relay.Subscribe; it does not alter what a WebSocket subscriber sees).
 func TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn(t *testing.T) {
-	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
+	base := startTestServerWithEnv(t, map[string]string{
+		"CR_A2A_ENABLED":           "true",
+		"CR_RATE_LIMIT_PER_MINUTE": "0",
+	})
 
 	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/relay/subscribe/a2a.regression.topic"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -888,7 +891,10 @@ func TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn(t *testing.T) {
 	// Subscribing is not instantaneous with respect to a publish on another
 	// connection, so the publish is retried until the frame arrives — the
 	// relay is a live fan-out bus with no replay, exactly as it was before this
-	// row.
+	// row. The server runs with CR_RATE_LIMIT_PER_MINUTE=0 (cap 0 = that
+	// namespace is not rate limited at all) so the retry loop cannot burn the
+	// default 100/min per-agent publish budget under full-suite contention
+	// (CI-017: a lagging WS subscribe used to shed a late retry as 429).
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		resp, err := publishToRelay(base, `{"topic":"a2a.regression.topic","event":{"hello":"world"}}`)
@@ -896,7 +902,13 @@ func TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn(t *testing.T) {
 			t.Fatalf("POST /relay/publish: %v", err)
 		}
 		if resp.StatusCode != http.StatusAccepted {
-			t.Fatalf("POST /relay/publish = %d, want 202", resp.StatusCode)
+			// A shed publish (429) inside the window is a retryable
+			// timing artifact, not a protocol failure.
+			if time.Now().After(deadline) {
+				t.Fatalf("POST /relay/publish = %d, want 202 (still shed after the retry window)", resp.StatusCode)
+			}
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 		_, frame, err := conn.ReadMessage()
