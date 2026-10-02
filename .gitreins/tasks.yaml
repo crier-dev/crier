@@ -2513,3 +2513,14 @@ tasks:
   status: complete
   created_at: '2026-10-01T17:42:59.807865+00:00'
   completed_at: '2026-10-01T17:58:39.916640+00:00'
+- id: CI-017
+  title: Harden TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn against per-agent
+    rate-limit burnout
+  criteria:
+  - The test starts its server with CR_RATE_LIMIT_PER_MINUTE=0 so the retry loop cannot
+    burn the 100/min cap; non-202 publish responses inside the retry window are retried
+    until the deadline instead of failing immediately; go build && go vet pass; targeted
+    test passes -count=3; make test-short passes
+  status: complete
+  created_at: '2026-10-02T19:26:25.228202+00:00'
+  completed_at: '2026-10-02T19:29:49.136956+00:00'
