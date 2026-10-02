@@ -56,6 +56,16 @@ func (s *MCPServer) requireAgentID() error {
 	return nil
 }
 
+// bridgeSender is the envelope sender stamped on every delivery this bridge
+// makes: the bridge's own agent id (CRIER_AGENT_ID). It is the identity the
+// server authenticates the request as, and it is what makes a delivery
+// attributable by the receiver — and what gives a terminal outcome an address
+// to be reported to (CR-FEAT-025: a MESSAGE_EXPIRED receipt is written into
+// the SENDER's inbox). In-process mode has no bridge identity, so it returns
+// "" and the delivery is stored exactly as it was before this existed: no
+// sender, no error.
+func (s *MCPServer) bridgeSender() string { return s.agentID }
+
 // ---- send_message ---------------------------------------------------------
 
 // handleSendMessage delivers a message to an agent's inbox. When reply_to is
@@ -82,6 +92,11 @@ func (s *MCPServer) handleSendMessage(args json.RawMessage) (any, error) {
 	entry := &registry.InboxEntry{
 		AgentID: in.AgentID,
 		Payload: raw,
+		// The envelope sender is this bridge's own identity: the receiver can
+		// attribute the delivery to an address instead of a payload
+		// convention, and CR-FEAT-025's terminal-outcome reporting has
+		// somewhere to send a MESSAGE_EXPIRED receipt.
+		Sender: s.bridgeSender(),
 	}
 	if err := s.store.Deliver(in.AgentID, entry); err != nil {
 		return nil, err
@@ -168,7 +183,12 @@ func (s *MCPServer) handleAskAgent(args json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	entry := &registry.InboxEntry{AgentID: in.AgentID, Payload: raw}
+	// The request leg is a delivery from this bridge, so it carries this
+	// bridge's identity as the envelope sender too. That is what lets the
+	// answering bridge address its reply to the requester without relying on
+	// a payload convention (the reply leg is send_message + reply_to, and
+	// that delivery stamps the REPLIER's own id the same way).
+	entry := &registry.InboxEntry{AgentID: in.AgentID, Payload: raw, Sender: s.bridgeSender()}
 	if err := s.store.Deliver(in.AgentID, entry); err != nil {
 		return nil, err
 	}

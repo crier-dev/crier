@@ -149,6 +149,12 @@ func (s *MCPServer) handleDeliverMessage(args json.RawMessage) (any, error) {
 	entry := &registry.InboxEntry{
 		AgentID: in.AgentID,
 		Payload: []byte(in.Payload),
+		// Same envelope-sender rule as send_message: a delivery made through
+		// this bridge is FROM this bridge, and the stored row names the
+		// address a terminal outcome is reported to. The tool's advertised
+		// schema and behaviour are unchanged — sender was never an input
+		// field, and an in-process bridge with no identity still stores none.
+		Sender: s.bridgeSender(),
 	}
 	if err := s.store.Deliver(in.AgentID, entry); err != nil {
 		return nil, err

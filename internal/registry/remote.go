@@ -353,6 +353,17 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	body := map[string]any{
 		"payload": json.RawMessage(entry.Payload),
 	}
+	// Forward the envelope sender verbatim when the caller named one
+	// (CR-FEAT-025). The server stores it WITH the message and it is the
+	// address a terminal outcome is reported to — a MESSAGE_EXPIRED receipt
+	// goes into the SENDER's inbox — so a proxy that dropped it would leave
+	// that report unaddressable for exactly the deliveries that cross this
+	// store. Absent stays absent: an empty sender is not forwarded as "" but
+	// omitted, keeping "not recorded" a single representation (the server
+	// stores an absent value as SQL NULL, never as an empty string).
+	if entry.Sender != "" {
+		body["sender"] = entry.Sender
+	}
 	// The realm is deliberately NOT forwarded as a claim (CR-FEAT-029): the
 	// downstream relay resolves it from ITS OWN row for the target agent, and a
 	// claim is only ever checked against that. Forwarding the proxy's local
