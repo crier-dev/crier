@@ -94,10 +94,20 @@ Every agent has a discoverable identity with capability cards.
 > live-connection truth with no window at all, read the connection table instead:
 > `GET /mesh/peers` lists agents with an open socket (see
 > [Try the Mesh](#try-the-mesh)).
+>
+> **`stale` is presence evidence, not a delivery gate.** Inbox delivery never
+> consults this window (and never refreshes it): `POST /agents/{id}/inbox` to a
+> `stale` agent still answers `201` and stores the message in the durable inbox,
+> retrievable and ackable through a server restart exactly like a delivery to an
+> `online` agent. Only mesh/relay presence — and the live-holder ranking of
+> capability-routed delivery (§4) — reads it. A `stale` target is a statement
+> about observability, not a failed send.
 
 ### 4. Inboxes
 
 Durable per-agent FIFO queues with lease-based delivery. The documented configuration is the durable one — [Run](#run) starts PostgreSQL and passes `CR_DATABASE_URL`, and then agents (including their `webhook` and `guard` configs) and undelivered messages survive server restarts. Run with no `CR_DATABASE_URL` and the in-memory backend is used instead, which is **demo-only**: the registry and every inbox live in process memory and are gone when the process exits. The backend actually serving is readable at `GET /status` (`"registry_backend"`).
+
+**Delivery does not depend on `status`.** A target's reported `status` is mesh-presence evidence only (§3), so a `stale` agent is still a valid delivery target: `POST /agents/{id}/inbox` answers `201` and stores the message in this durable inbox, retrievable and ackable even after a server restart — nothing on the deliver path reads or requires a fresh heartbeat, and a sender never has to wait for one. Only the capability-pool's live-holder ranking below consults liveness at all, and even there a pool with no live holder still accepts the message.
 
 - Lease prevents double-delivery: messages are leased for N seconds on retrieval
 - ACK confirms delivery; un-ACKed messages return to queue after lease expiry
