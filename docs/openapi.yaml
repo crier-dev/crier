@@ -678,6 +678,9 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/XAgentID"
+        - $ref: "#/components/parameters/XAgentTs"
+        - $ref: "#/components/parameters/XAgentSig"
       security:
         - bearerAuth: []
           agentSignature: []
