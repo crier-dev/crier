@@ -1,0 +1,31 @@
+{
+  "tick_id": "crier-2026-10-02-01-02-23",
+  "project": "crier",
+  "wave_budget": 3,
+  "dispatched": 2,
+  "tasks": [
+    {
+      "id": "DF-CRIER-295",
+      "priority": "P2",
+      "complexity": 3,
+      "title": "Signed HTTP request wire format absent from openapi.yaml",
+      "worktree": null,
+      "branch": null,
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-296",
+      "priority": "P3",
+      "complexity": 3,
+      "title": "Registry-only agent status 'stale' docs clarification",
+      "worktree": null,
+      "branch": null,
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman"
+    }
+  ],
+  "created_at": "2026-10-02T01:02:23-05:00"
+,
+  "finished_at": "2026-10-02T10:55:06-05:00"
+}
