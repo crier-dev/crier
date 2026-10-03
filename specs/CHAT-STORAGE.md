@@ -1,9 +1,16 @@
 # CHAT-STORAGE.md — the dual backend: JSONL as the ordered append log, PostgreSQL as the query view
 
-Status: **DRAFT v1** · 2026-10-03 · **CR-CHAT-006**
-Source material: `~/crier-interface/GOALS.md` (non-negotiable 7, G11, decision D6 and the recommendation
-under it), `specs/ci-003b-postgresql-persistence.md` (the shipped persistence), and the three fleet
-precedents named in the goal (boards = JSONL keep-LAST; DuckBrain = git-backed JSONL row-images; the
+Status: **DRAFT v2** · 2026-10-03 · **CR-CHAT-006** + **CR-CHAT-014**
+REVISION 2026-10-03 (v2): folded in Bane's detail pass — the `asset` kind carried BY REFERENCE on BOTH
+backends (§3.10, **D9**/CR-CHAT-014), the bundle that carries references and re-imports WITHOUT the bytes
+plus what a reader sees then (§6.4), asset retention/GC and the per-namespace bucket/prefix policy (§6.5),
+the TASK message kind on the message record (§3.7, **D12**/CR-CHAT-018), the corrected DEPTH rule — a
+`thread` record exists only for a deliberate branch (§3.6, **D11** correction/CR-CHAT-017), the
+federated-delivery shape in the JSONL log (§2.5), and the rule that trust material (peer keys) never travels
+in a session bundle (§6.2, CR-CHAT-024/025). No v1 statement is contradicted.
+Source material: `~/crier-interface/GOALS.md` (non-negotiable 7 and 8; G11, G15, G19, G21; decisions D6,
+D9, D11, D12, D14), `specs/ci-003b-postgresql-persistence.md` (the shipped persistence), and the three
+fleet precedents named in the goal (boards = JSONL keep-LAST; DuckBrain = git-backed JSONL row-images; the
 scheduler's JSONL deploy API).
 
 This document is the normative design authority for how the comms interface STORES and TRANSPORTS its
@@ -18,7 +25,8 @@ message).
 **Glossary (normative; the exact terms every CHAT spec uses).** A **Principal** is a HUMAN user, distinct
 from an agent, and can speak AS a bound agent. An **Agent** is a registered crier agent, with a CLASS
 (`personal` | `service`), an OWNER and capabilities. A **Session** is a durable conversation: participants
-(principals + agents), membership, an ordered transcript. A **Thread** is a reply subtree inside a session.
+(principals + agents), membership, an ordered transcript. A **Thread** is a subtree inside a session, created ONLY by a deliberate branch (**D11**): a reply
+stays in its thread and never descends on its own.
 An **Address** is a tag: `@agent`, `@team:x`, `@cap:y`, `@ns/*`, `#session`. A **Grant** is an ACL entry
 binding a principal to an agent / group / session / capability. A **Namespace** is the realm/tenant wall
 (already shipped: auth posture, rate limits, retention).
@@ -126,7 +134,7 @@ revision.
 | Field | Rule |
 |---|---|
 | `v` | the envelope FORMAT version (integer, starts at 1). A reader that sees a `v` it does not know **refuses the bundle loudly** rather than skipping lines. |
-| `kind` | one of `principal` `agent` `binding` `scope` `session` `thread` `message` `grant` `audit`. Closed set: an unknown kind makes the import fail, naming it. |
+| `kind` | one of `principal` `agent` `binding` `scope` `session` `thread` `message` `grant` `audit` `asset`. Closed set: an unknown kind makes the import fail, naming it. (The envelope's `kind` names the RECORD class; a message BODY's own `kind` names the message KIND — `plain` \| `addressed` \| `task`, §3.7. Do not conflate the two.) |
 | `id` | the object's id. `(kind, id)` is the object's identity for keep-LAST (§4). |
 | `rev` | the record-version of that object, monotonic per `(kind, id)`, starting at 1. A `rev` that is not a positive integer is refused. |
 | `ts` | when this version was created (RFC 3339 / UTC). Never the wall clock of the importer. |
@@ -139,6 +147,36 @@ lease, ack, TTL, priority, `delivery_sequence` — i.e. operational state about 
 revision of a domain object. The log carries the `message` record (what was said, by whom, in which
 session/thread); the queue carries the delivery. Conflating them would put a lease timestamp in the
 transport form and make a bundle's content depend on who has read it.
+
+### 2.5 A federated delivery in the JSONL log (the CHAT-FEDERATION.md seam)
+
+A delivery that crosses to or from a linked peer is logged like any other record — but its AUTHOR states the
+remote origin, because the transcript has to be able to say WHERE a message came from:
+
+```json
+{"v":1,"kind":"message","id":"msg_01J9ZC0R","rev":1,"ts":"2026-10-03T20:04:11Z","hash":"sha256:…",
+ "author":{"principal":"prin_fed_peer_01J9Z…","remote_instance":"peer","remote_ref":"ada"},
+ "namespace":"","body":{"session":"3f9a7c2e-…","thread":null,"kind":"addressed",
+         "addresses":[{"tag":"@peer/atlas","type":"agent","ref":"peer/atlas"}]}}
+```
+
+Rules:
+
+- **The `author` names the LOCAL shadow principal plus `remote_instance` / `remote_ref`**
+  (CHAT-PERMISSIONS.md §2.5, D14). The local half is an ordinary principal id, so every existing read path
+  works unchanged; the remote pair is how the log states the origin.
+- **A remote participant is never written as a bare foreign id.** The log records the local shadow; the
+  peer instance and ref ride alongside it. A bundle therefore round-trips without needing to reach the peer.
+- **Trust material does not travel here.** Peer KEYS, a peer's published key set and any federation secret
+  are NOT record bodies and NOT bundle members (§6.2): a session bundle is a conversation, not a trust
+  store. The trust design is `specs/CHAT-TRUST.md` (CR-CHAT-025).
+- **The delivery leg itself is not this log's business.** Hold/retry and the `FEDERATION_FAILED` receipt are
+  owned by WEBHOOK-DELIVERY.md and `specs/CHAT-FEDERATION.md`; the log records only that the message exists
+  and who authored it.
+
+**NOT BUILT:** no federated authorship, no shadow participation, no peer-key store. Owed: the federated
+delivery path and `GET /fed/address?instance=<i>&agent=<a>` (CR-CHAT-023/026), and the peer-key store
+(CR-CHAT-024/025).
 
 ---
 
@@ -243,6 +281,15 @@ read), and `root_message` is what makes a thread reconstructable from the transc
 Projection: `threads(id PK, rev, session REFERENCES sessions(id) ON DELETE CASCADE, parent_message,
 root_message, depth INT CHECK (depth >= 1), created_at, closed_at)`.
 
+**A `thread` record exists ONLY for a DELIBERATELY BRANCHED subtree (D11, corrected — CR-CHAT-017).** A
+reply STAYS IN THREAD: it is a `message` whose `thread` points at the thread it already belongs to, at the
+SAME level as its parent. Depth is NEVER a function of who replied or how many replied, and addressing a
+non-member (or a group, or a capability) does not create a thread. A new `thread` record — and a `depth`
+increment — is written only when an explicit branch action creates one (`POST /messages/{id}/branch`, NOT
+BUILT); `depth` here therefore counts DELIBERATE branches from the session root, not reply nesting. An
+earlier draft of the sub-thread rule auto-spawned on a tag; that is wrong and is not implemented by this
+shape.
+
 ### 3.7 `message`
 
 ```json
@@ -251,12 +298,14 @@ root_message, depth INT CHECK (depth >= 1), created_at, closed_at)`.
  "body":{"session":"3f9a7c2e-6b1d-4e2a-9c7e-1d2f8a4be9c1","thread":null,
          "addresses":[{"tag":"@cap:data-capabilities","type":"capability","ref":"data-capabilities"}],
          "payload":{"parts":[{"type":"text","text":"Kick off the data sweep for the new environment."}]},
-         "kind":"message","idempotency_key":"…","delivered":[{"agent":"kappa","message_id":"msg_…"}],
+         "attachments":[{"ref":"asset_01J9ZB3K","kind":"asset"}],
+         "kind":"addressed","task":null,"idempotency_key":"…",
+         "delivered":[{"agent":"kappa","message_id":"msg_…"}],
          "guard":{"decision":"allow","policy":"builtin-default"},
          "created_at":"2026-10-03T18:28:03Z","edited_at":null}}
 ```
 
-Three rules, each closing a hole a naive transcript leaves open:
+Five rules, each closing a hole a naive transcript leaves open:
 
 - **`author` names the human AND the agent** — this is T3's fix (CHAT-PERMISSIONS.md §2.3): the bus sees
   the agent, the record names the human.
@@ -266,6 +315,17 @@ Three rules, each closing a hole a naive transcript leaves open:
 - **`delivered` names the inbox entries the message fanned out into** (§2.4): the session-level record is
   the message; its deliveries are the queue rows. A message with no `delivered` entries is a message that
   was recorded and not dispatched, which is a state worth being able to see.
+- **`kind` is the message KIND, a closed set `plain` | `addressed` | `task` (D12).** A `plain` message has
+  no `addresses`; an `addressed` message has at least one (a tag marks the intended reader and **nothing
+  executes**); a `task` is the explicit "do this" kind and is the ONLY kind that may create work or be
+  dispatched to a capability/group for EXECUTION. A `task` carries
+  `task:{"id":"task_…","state":"open|claimed|running|done|failed","owner":null}`, and every state
+  transition is a NEW record-version (`rev` increments) — never an in-place rewrite. Conflating `addressed`
+  and `task` is how a tag becomes a remote command; the two are structurally distinguishable here, on the
+  wire and in the transcript.
+- **`attachments` carries asset REFERENCES, never bytes (D9, CR-CHAT-014; §3.10).** An attachment is
+  `{"ref":"asset_…","kind":"asset"}`. The record never carries a blob, a base64 body, or a URL that bypasses
+  the fetch check. An asset is authorized PER FETCH (CHAT-PERMISSIONS.md §6.9).
 
 Projection: `messages(id PK, rev, session REFERENCES sessions(id) ON DELETE CASCADE, thread, author
 jsonb, addresses jsonb, payload jsonb, guard jsonb, created_at, edited_at)` with a CHECK that at least one
@@ -310,6 +370,38 @@ superseded by a new line, because a mutable audit trail is not an audit trail.
 
 Projection: `audit(id PK, rev, event, principal, as_agent, details jsonb, session, ts)` with an index on
 `(namespace, ts)` for the trail view B draws, and on `(principal, ts)` for "what did this human do".
+
+### 3.10 `asset`
+
+An asset (a file, an image, "stuff") is METADATA plus a reference to bytes that live in object storage (S3
+or any S3-compatible store — MinIO, R2, Ceph). **The record carries the REFERENCE, never the bytes** (G15,
+D9). This is also what keeps a file from becoming a 32 MB inbox payload (the missing body cap was
+DF-CRIER-292, since fixed).
+
+```json
+{"v":1,"kind":"asset","id":"asset_01J9ZB3K","rev":1,"ts":"2026-10-03T18:27:55Z",
+ "author":{"principal":"prin_01J9Z6V0Q7","as_agent":"atlas"},"namespace":"acme",
+ "body":{"store":"s3","bucket":"crier-acme","key":"assets/2026/10/01J9ZB3K/canary.png",
+         "sha256":"…","bytes":20481,"media_type":"image/png","filename":"canary.png",
+         "attached_to":{"kind":"message","ref":"msg_01J9Z7K4"},
+         "created_at":"2026-10-03T18:27:55Z","created_by":"prin_01J9Z6V0Q7",
+         "retention_seconds":86400,"deleted_at":null}}
+```
+
+| Field | Rule |
+|---|---|
+| `store` | the object-store driver: `s3` \| `minio` \| `r2` \| `ceph` (all S3-compatible). A closed set; an unknown driver refuses the import. |
+| `bucket` / `key` | the OBJECT LOCATOR. The bucket and prefix are chosen by the per-namespace policy (§6.5) from the SERVER side, never taken verbatim from a request. **Nothing here is a fetchable URL** — a delivery returns a crier asset reference, and the bytes are reached only through the checked fetch (CHAT-PERMISSIONS.md §6.9). |
+| `sha256` / `bytes` / `media_type` | the object's integrity and size, recorded AT UPLOAD. A reader can verify what it fetched; a size that contradicts `bytes` is a finding. |
+| `attached_to` | the message (or session) the asset belongs to. `null` for an asset uploaded but not yet attached — an orphan, and §6.5's GC is what reaps it. |
+| `retention_seconds` | the asset's lifetime, defaulting to the NAMESPACE's `retention_seconds` (NAMESPACES.md §4.4) and never longer than it. |
+| `deleted_at` | a tombstone (§6.5). The record is never removed; a fetch of a tombstoned asset is a NAMED refusal (`410 ASSET_GONE`), not a `404`. |
+
+**Both backends.** JSONL: one `asset` record-version per line, exactly as above, with the same idempotent
+key `(kind, id, rev)` and keep-LAST rules (§4). PostgreSQL: `assets(id PK, rev, store, bucket, key,
+sha256, bytes, media_type, filename, attached_kind, attached_ref, namespace, created_at, created_by,
+retention_seconds, deleted_at)` with a UNIQUE `(store, bucket, key)` and an index on
+`(attached_kind, attached_ref)`. **The bytes are in NEITHER backend** — they live in the object store.
 
 ---
 
@@ -490,6 +582,11 @@ Three rules about the manifest:
 - An import that finds a resolved secret in a record body is refused with `400 BUNDLE_SECRET_INLINE`,
   naming the kind, the id and the field. A transport format that can carry a secret is a leak vector, and
   the refusal is the cheapest place to stop it.
+- **Trust material never travels in a session bundle.** Peer keys, a peer's published key set, a federation
+  secret (`CR_FED_TOKEN`) and any private key are NOT record bodies and NOT bundle members: a bundle is a
+  conversation, not a trust store (CR-CHAT-024/025, `specs/CHAT-TRUST.md`). An import that finds one is
+  refused `400 BUNDLE_TRUST_MATERIAL`, naming the file and the member — the sibling of
+  `BUNDLE_SECRET_INLINE`, with the same reasoning.
 
 ### 6.3 The import path
 
@@ -522,6 +619,59 @@ The shared contract:
 **NOT BUILT:** no bundle exporter, no `crier-bundlectl`, no `POST /bundles/import`, no `GET
 /sessions/{id}/bundle`, no manifest, no hash check, no asset references, no `bundle.import` audit event.
 
+### 6.4 The bundle carries REFERENCES, not bytes (D9, CR-CHAT-014)
+
+A bundle is transport for the LOG, and the log carries asset references — so a bundle that names an asset
+re-imports WITHOUT the bytes. That is the intended property, not a limitation, and its consequences are
+stated:
+
+- **A re-import needs no object store.** The `asset` records and every `attachments` reference land in the
+  receiving instance's view; the bytes stay where the exporting instance put them (its bucket/prefix, §6.5).
+  The import reports the asset RECORDS it created; it does not report the assets as "complete".
+- **A reader sees a NAMED state, never a silent placeholder.** When a client renders a message whose
+  attachment is not fetchable (the reference points at a bucket this instance cannot reach, the object was
+  GC'd, or the asset is tombstoned), the state is **`asset_unavailable`**: the transcript shows the
+  attachment's NAME, size and `sha256` — all of which travel in the record — with an explicit "bytes not
+  available here" affordance. A broken image with no explanation, or a fabricated empty file, is a lie about
+  the record.
+- **A failed fetch is a NAMED refusal**, not a `500`: `404 ASSET_NOT_FOUND` (no such record) /
+  `410 ASSET_GONE` (tombstoned) / `502 ASSET_BACKEND_UNAVAILABLE` (the store is unreachable). The three are
+  different questions and the caller can act on each. (Owed routes: `GET /assets/{id}` and
+  `GET /assets/{id}/content` — NOT BUILT.)
+- **A bundle never grants access.** The manifest's `assets[]` list (§6.1) is an INDEX for the importer, not
+  a permission: importing a bundle does not let anyone fetch an asset their local grants do not already
+  allow (CHAT-PERMISSIONS.md §6.9 — the check is per fetch).
+- **An optional blob carrier, explicitly chosen.** A bundle MAY carry an `assets.blobs/` directory for a
+  self-contained offline hand-off, but that is OPT-IN and the default is references-only; a bundle that
+  carries blobs says so in the manifest (`assets[].included: true`) so a reference-only reader is never
+  surprised.
+
+### 6.5 Asset retention, GC, and the per-namespace bucket/prefix policy
+
+- **Per-namespace bucket/prefix policy.** The bucket and key prefix an instance writes an asset to are
+  chosen by the NAMESPACE, not the caller: `assets.bucket` and `assets.prefix` are per-namespace policy
+  axes (the shape of the four in NAMESPACES.md §4 — declared once, inherited when unset). Unset means a
+  single deployment-level bucket with a `namespace/<canonical>/` prefix, so an unconfigured deployment
+  behaves as before. A namespace can never write into another namespace's prefix: the key is composed by
+  the SERVER from the namespace's policy, and a caller-supplied key outside it is `400 INVALID_ASSET_KEY`.
+- **Retention follows the namespace's `retention_seconds`.** An asset's default lifetime is the namespace's
+  retention (§3.10), and an explicit `retention_seconds` may only SHORTEN it, never outlive it — the
+  bounded-by-realm rule sessions already use (CHAT-SESSIONS.md §3.5). An asset whose message has been
+  retention-reaped is tombstoned, not silently deleted (§3.10 `deleted_at`).
+- **GC is a reconciliation, not a deletion sweep.** The reaper deletes OBJECT BYTES only for an asset whose
+  `deleted_at` tombstone was already written and audited, and it writes ONE `storage.asset.gc` audit record
+  naming every object it removed (a `kind:"audit"` line, §3.9). An asset whose RECORD still exists but whose
+  bytes are missing is a FINDING (`asset_bytes_missing`, the §5.3 class), never a repair: the log is the log
+  of record and the object store is a peer that can diverge.
+- **Orphans are reaped by reference count.** An asset with `attached_to: null` past a grace period is
+  tombstoned by the same audited operation; the grace period exists because upload and attach are two
+  requests and a transient gap between them is normal.
+
+**NOT BUILT:** no asset record, no `assets` table, no bucket/prefix policy axis, no reaper, no
+`storage.asset.gc` audit event and no fetch refusal codes. Owed by **CR-CHAT-014**: `POST /assets` (upload),
+`GET /assets/{id}` / `GET /assets/{id}/content` (fetch, per-fetch grant check), and the per-namespace
+`assets.bucket` / `assets.prefix` config keys.
+
 ---
 
 ## 7. What is NOT built, and the open questions
@@ -538,12 +688,23 @@ The shared contract:
    `audit` — none exists. Migrations 001–008 ship `agents`, `inbox_entries` and `dead_letters` only.
 6. **The two additive columns** `agents.class` / `agents.owner`.
 7. **`GET /sessions/{id}/bundle`** and any storage-shaped route.
-8. **Asset storage.** No S3 integration, no asset record, no per-fetch authorization (CR-CHAT-014).
+8. **Asset storage.** No S3 integration, no `asset` record, no `assets` table, no per-fetch authorization,
+   no bucket/prefix policy and no GC (§3.10, §6.4, §6.5). Owed by CR-CHAT-014: `POST /assets` (upload),
+   `GET /assets/{id}` / `GET /assets/{id}/content` (fetch, per-fetch grant check), and the per-namespace
+   `assets.bucket` / `assets.prefix` config keys.
 9. **A first-class peer in the CONFIG sense.** There is no `CR_STORAGE_LOG_ROOT` (or equivalent) and no
    `Store` implementation backed by the log. The `Store` interface (`internal/registry/store.go`) is
    implemented by `MemoryStore` and `PostgresStore`; a log-backed implementation does not exist, and the
    log-first write path of §2.3 is therefore not merely unimplemented — the current architecture has no
    seam for it. That is the largest piece of work this spec implies, and naming it is the point.
+10. **The TASK message kind and its lifecycle.** §3.7's `kind:"task"` and its state transitions are a
+    contract; no route creates or advances a task. Owed: `POST /tasks`, `POST /tasks/{id}/claim` /
+    `POST /tasks/{id}/complete` (CHAT-PERMISSIONS.md §6.11).
+11. **Federated authorship in the log.** §2.5's shadow-principal `author` block is a contract; nothing
+    writes a remote origin. Owed by **CR-CHAT-023/026**: the federated delivery path plus
+    `GET /fed/address?instance=<i>&agent=<a>` (the local shadow resolution, CHAT-ADDRESSING.md §1.5).
+12. **Trust-material exclusion.** §6.2's `400 BUNDLE_TRUST_MATERIAL` refusal does not exist, and no peer-key
+    store exists (CR-CHAT-024/025).
 
 ### 7.2 Open questions
 
@@ -579,15 +740,30 @@ The shared contract:
    protocol honest: the JSONL *is* the wire format we already speak"*. The shipped wire is JSON over HTTP;
    JSONL is one JSON object per line. **PROPOSED-DEFAULT:** the bundle is JSONL; the API stays
    JSON-over-HTTP (no NDJSON streaming endpoint is added by this spec).
+8. **Where does an asset's bytes-vs-reference join live for a bundle that carries blobs?** §6.4 makes blobs
+   opt-in, but their manifest entry, hash and placement are targets. **PROPOSED-DEFAULT:** `assets.blobs/`
+   mirrors the content-addressed key path, the manifest lists every blob with its `sha256`, and an importer
+   recomputes the hash before accepting a blob — a blob whose hash disagrees is refused rather than stored.
+9. **Does GC delete bytes the moment a message is retention-reaped, or after a grace period?** The object
+   store and the record store expire on independent clocks. **PROPOSED-DEFAULT:** the tombstone is written
+   at reaping (audited) and the bytes are deleted by the GC pass on its own schedule, so the two never
+   disagree silently; a fetch in the interregnum is `410 ASSET_GONE`, not `404` (§3.10).
 
 ---
 
 ## 8. Status line
 
-`DRAFT v1 · 2026-10-03 · CR-CHAT-006`
+`DRAFT v2 · 2026-10-03 · CR-CHAT-006 + CR-CHAT-014`
+
+REVISION 2026-10-03 (v2): §2.5 (a federated delivery in the log), §3.6 (a `thread` exists only for a
+deliberate branch — the corrected D11 rule), §3.7 (the message `kind` and `attachments`), §3.10 (the `asset`
+record on both backends), §6.2 (trust material never travels), §6.4 (references, not bytes) and §6.5
+(retention, GC, bucket/prefix policy); §7.1's NOT BUILT list extended, each new affordance naming its owed
+endpoint.
 
 Statements describing behaviour that does not exist are marked **NOT BUILT** in place (§2.4 `inbox_entries`,
-§5.4, §6.3, §7.1). The JSONL log, the projection, the reconciler, the bundle and every new table are
-unbuilt; the PostgreSQL persistence of `agents` / `inbox_entries` / `dead_letters` (CR-FEAT-034,
-`specs/ci-003b-postgresql-persistence.md`) is shipped and is extended, never replaced. Nothing here may be
-added to `docs/claims.yaml` until the log layer exists, because claims execute against a live server.
+§2.5, §3.6, §3.7, §3.10, §5.4, §6.3, §6.4, §6.5, §7.1). The JSONL log, the projection, the reconciler, the
+bundle, asset storage and every new table are unbuilt; the PostgreSQL persistence of `agents` /
+`inbox_entries` / `dead_letters` (CR-FEAT-034, `specs/ci-003b-postgresql-persistence.md`) is shipped and is
+extended, never replaced. Nothing here may be added to `docs/claims.yaml` until the log layer exists,
+because claims execute against a live server.

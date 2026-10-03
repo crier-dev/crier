@@ -1,6 +1,15 @@
 # CHAT-PERMISSIONS.md — principals, agent classes, roles, grants and the delivery ACL
 
-Status: **DRAFT v1** · 2026-10-03 · **CR-CHAT-003** + **CR-CHAT-007** + **CR-CHAT-012**
+Status: **DRAFT v2** · 2026-10-03 · **CR-CHAT-003** + **CR-CHAT-007** + **CR-CHAT-012** + **CR-CHAT-013** + **CR-CHAT-014** + **CR-CHAT-018**
+REVISION 2026-10-03 (v2): folded in Bane's detail pass as normative content — §2.5 (a remote participant is a
+LOCAL shadow principal marked `remote`, **D14**; federation's only credential TODAY is the one shared
+`CR_FED_TOKEN`), §6.9 (an asset fetch is checked PER FETCH against the caller's grant — an asset is never a
+permission bypass, **D9**/CR-CHAT-014), §6.10 (a group is a grant SUBJECT and a membership edit is a
+permission change, **D8**/CR-CHAT-013), §6.11 (a TASK is a different authority than a message,
+**D12**/CR-CHAT-018), and the corrected depth rule cross-referenced from §6.10–§6.11 (a reply STAYS IN
+THREAD, **D11**/CR-CHAT-017). The refusal table §6.7, the audit vocabulary §7.4 and the NOT BUILT list §8.1
+are expanded; §1.3's out-of-scope list now says explicitly that asset AUTHORIZATION and the LOCAL half of
+federation are IN scope. No v1 statement is contradicted.
 Source material: the four approved UI options produced 2026-10-03 (read in full with a vision pass; the
 drawn labels quoted below are transcribed from the images, and **nothing here is quoted that an image
 does not carry**), `~/crier-interface/GOALS.md` (G3, G7, G13, G14; decisions D2, D3, D7, D8), and the
@@ -20,7 +29,8 @@ session/thread objects and the interface surface are the sibling's `specs/CHAT-I
 **Glossary (normative; the exact terms every CHAT spec uses).** A **Principal** is a HUMAN user, distinct
 from an agent, and can speak AS a bound agent. An **Agent** is a registered crier agent, with a CLASS
 (`personal` | `service`), an OWNER and capabilities. A **Session** is a durable conversation: participants
-(principals + agents), membership, an ordered transcript. A **Thread** is a reply subtree inside a session.
+(principals + agents), membership, an ordered transcript. A **Thread** is a subtree inside a session, created ONLY by a deliberate branch (**D11**): a reply
+stays in its thread and never descends on its own.
 An **Address** is a tag: `@agent`, `@team:x`, `@cap:y`, `@ns/*`, `#session`. A **Grant** is an ACL entry
 binding a principal to an agent / group / session / capability. A **Namespace** is the realm/tenant wall
 (already shipped: auth posture, rate limits, retention).
@@ -68,9 +78,12 @@ roles; the grant model and the grant matrix (action × subject); the DELIVERY AC
 `@cap:` and `#session`; the refusals; audit lines.
 
 **Out of scope (binding):** the session/thread data model and the interface layout (sibling specs); the
-tag grammar itself (CR-CHAT-004); the storage/transport shape (CR-CHAT-006); assets and S3 (CR-CHAT-014);
-the dots/grokbot bridge (CR-CHAT-008). **Namespaces stay the outer wall and are reused, not replaced** —
-this spec adds an inner wall and never re-opens the outer one.
+tag grammar itself (CR-CHAT-004); the storage/transport shape (CR-CHAT-006); asset STORAGE and the S3
+integration (CR-CHAT-014, `specs/CHAT-STORAGE.md`) — but the AUTHORIZATION of an asset fetch is IN scope
+(§6.9), because it is a permission question and must not become a bypass; federation and peer trust
+(CR-CHAT-023/024/025, `specs/CHAT-FEDERATION.md` + `specs/CHAT-TRUST.md`) — but the LOCAL consequence of a
+remote participant is IN scope (§2.5); the dots/grokbot bridge (CR-CHAT-008). **Namespaces stay the outer
+wall and are reused, not replaced** — this spec adds an inner wall and never re-opens the outer one.
 
 ---
 
@@ -153,6 +166,55 @@ Login is a session cookie or OIDC (D2's recommendation). The one normative requi
 it: **the login outcome is a principal id, and every subsequent write carries `principal_id` + `as_agent`,
 or it carries neither.** There is no third state — a request that says "anonymous" is refused on any
 surface the ACL is armed for (§6.7), because an unattributable write is exactly what T3 is.
+
+### 2.5 Remote principals — a LOCAL shadow, so grants stay local (D14, CR-CHAT-023/026)
+
+A **remote participant** is a human or agent that lives on ANOTHER crier instance. It is not a new kind of
+record and not a second grant model: it is represented LOCALLY as a **shadow principal** marked `remote`,
+so every authorization decision in this document runs unchanged against a local principal id.
+
+```json
+{
+  "id": "prin_fed_peer_01J9Z…",
+  "kind": "principal",
+  "display_name": "Ada @ peer",
+  "namespace": "",
+  "role": "member",
+  "status": "active",
+  "remote": true,
+  "remote_instance": "peer",
+  "remote_ref": "ada",
+  "created_at": "2026-10-03T20:00:00Z",
+  "last_login_at": null
+}
+```
+
+| Field | Rule |
+|---|---|
+| `remote` | `true` for a shadow; absent (the `omitempty` discipline) for a local principal. A shadow is otherwise an ordinary principal row. |
+| `remote_instance` / `remote_ref` | the peer instance and the participant's ref ON that peer. The LOCAL id is the shadow's own id; these two fields are how the audit names where it came from. |
+| `role` | the shadow holds a LOCAL role and LOCAL grants like any principal. **A remote participant never carries its origin's grants across the boundary** — a grant is local or it does not exist. That is the whole point of D14. |
+
+Three binding consequences:
+
+1. **Grants stay local.** A delivery from or to a remote participant is authorized by the same
+   `may_deliver` predicate (§3.2) against the same local shadow principal. There is no remote grant
+   evaluation and no delegation of authorization across the link.
+2. **Trust-by-reach, stated as it exists TODAY.** The only federation credential shipped is ONE shared
+   secret — `CR_FED_TOKEN` (the source's `CR_FED_TOKEN` equals the destination's `CR_AUTH_TOKEN`) — so a
+   linked peer is trusted to speak for ANY identity it names: peers cannot be told apart, given different
+   access, or revoked individually. That residual is what `specs/CHAT-FEDERATION.md` and
+   `specs/CHAT-TRUST.md` (peer keys, mutual auth, a chain to an anchor) exist to close; it is **not**
+   closed here, and this spec must not be read as claiming otherwise.
+3. **The audit names the origin.** An audit line for a remote actor carries the shadow principal id AND
+   `remote_instance`/`remote_ref` (§7.4), so a transcript can state that a decision involved another
+   instance.
+
+**NOT BUILT:** no shadow-principal record, no `remote` field, no remote resolution and no peer-key trust.
+Owed: `GET /fed/address?instance=<i>&agent=<a>` (the local shadow resolution, CHAT-ADDRESSING.md §1.5) and
+the peer-key link (CR-CHAT-024). The shipped federation credential remains the single shared `CR_FED_TOKEN`;
+`specs/CHAT-FEDERATION.md` (CR-CHAT-023/024) and `specs/CHAT-TRUST.md` (CR-CHAT-025) own the cross-instance
+design, and this spec fixes only the LOCAL half.
 
 ---
 
@@ -472,6 +534,9 @@ effective_sender(request):
       return the principal
   if request carries X-Agent-ID (an agent's own signed call):
       return the agent's owner for a `personal` agent, else "the namespace" for a `service` agent
+  if request arrives over the federation link (CR_FED_TOKEN today):
+      return the LOCAL shadow principal for the named remote participant (§2.5)
+      # a remote actor NEVER resolves to a local agent's own reach, and carries no remote grants
   else:
       return anonymous
 ```
@@ -540,6 +605,9 @@ the weakest role in the system would be the strongest attack: bind to any agent,
 | `@cap:y` with no holder at all | `404 NO_CAPABLE_AGENT` (**shipped** — resolution precedes nothing; a nonexistent pool is not an authorization question) |
 | malformed address | `400 INVALID_ADDRESS` (CHAT-ADDRESSING.md §4) |
 | address resolves to nothing | `404 UNKNOWN_ADDRESS` (CHAT-ADDRESSING.md §4) |
+| an asset fetch whose caller lacks the read grant on the message that owns it (§6.9) | `403 ASSET_FORBIDDEN` (**NOT BUILT**) |
+| creating a TASK without the task authority (§6.11) | `403 DELIVERY_FORBIDDEN`, `"reason":"NO_TASK_AUTHORITY"` (**NOT BUILT**) |
+| a remote actor whose local shadow holds no grant (§2.5) | `403 DELIVERY_FORBIDDEN`, `"principal":"remote"` (**NOT BUILT**) |
 
 The body is machine-readable, and names the decision inputs so a UI can explain itself without parsing prose:
 
@@ -593,6 +661,105 @@ Step 9's position is deliberate: **authorization before content inspection.** A 
 able to reach the guard (an LLM lane), because otherwise a forbidden sender can spend the deployment's
 guard budget — the same noisy-neighbour reasoning NAMESPACES.md §4.2 uses for `guard_enabled: false`.
 
+### 6.9 An asset is a permission check, not a URL (D9, CR-CHAT-014)
+
+An asset (a file, an image, "stuff") is carried BY REFERENCE: the record holds an asset id, never the bytes
+(CHAT-STORAGE.md §3.10). That makes the fetch a NEW access point, and the rule is absolute:
+
+> **An asset must NEVER become a permission bypass.** The bytes are reachable only through a check made
+> against the caller's LIVE grant at the moment of the fetch — never at upload, and never cached.
+
+The check, in full:
+
+- **Per fetch, not at upload.** A fetch resolves the caller's effective sender (§6.3) and requires the
+  action the asset's owning message requires: the `read` action on the message's session, or the `read`
+  action on the agent whose inbox carried it — the same action that let the caller SEE the message.
+  Uploading an asset grants nothing to anyone.
+- **A reference is not a capability.** The object locator (bucket/key, CHAT-STORAGE.md §3.10) is never
+  returned to a client; a delivery returns a crier asset reference. If a deployment hands out a pre-signed
+  URL, it is short-lived and issued only AFTER the check has passed — the URL is a consequence of the
+  check, never a substitute for it.
+- **Restricting the message restricts the bytes.** If the message is later restricted — the read grant
+  revoked, the attachment removed, the message retention-reaped — the NEXT fetch is refused, because the
+  check is derived from the LIVE grant and not from a stored "was allowed". **Honest limit, stated:** a byte
+  already handed over cannot be un-fetched; per-fetch checking bounds the window, and short-lived URLs
+  bound it further. That is exactly why the check is per fetch (D9) rather than an inherited permission.
+- **The refusal is NAMED:** `403 ASSET_FORBIDDEN` (**NOT BUILT**), carrying the asset ref and a reason
+  (`NO_GRANT` / `MESSAGE_RESTRICTED` / `ASSET_GONE`), so a UI can distinguish "you may not" from "no longer
+  available" (CHAT-STORAGE.md §6.4 gives the fetch-side states).
+
+**NOT BUILT:** no asset object, no per-fetch check, no `403 ASSET_FORBIDDEN`. Owed by CR-CHAT-014:
+`POST /assets` (upload), `GET /assets/{id}` (the checked reference), `GET /assets/{id}/content` (the bytes
+or a short-lived redirect). The storage shape is `specs/CHAT-STORAGE.md` §3.10/§6.4/§6.5.
+
+### 6.10 A group is a grant SUBJECT, and membership is DATA — never authority (D8, CR-CHAT-013)
+
+The grant matrix §6.2 already binds a Grant to a `group` subject: `invoke` delivers to the named group,
+`admin` edits its roster. This section states the two rules that keep that from silently widening anyone's
+rights:
+
+1. **A group is a subject, not a role.** Holding `invoke` on `group:x` means "may address the group"; it
+   confers NO action on any MEMBER, and NO `read` on any history — a group has no history of its own, it is
+   a routing set, and the messages live in sessions (CHAT-STORAGE.md §3.5).
+2. **A group is curated and editable, and the edit is a PERMISSION-RELEVANT change.** Whoever holds `admin`
+   on `group:x` may add or remove members. That edit:
+   - does **not** confer any new action on a member ADDED — an added agent is reachable by the group's
+     existing `invoke` right and holds exactly the role and grants it already had;
+   - does **not** confer any new action on the EDITOR — `admin` on a group is a right over the roster, not
+     over the members;
+   - is **AUDITED** as a permission change (`group.membership.changed`, §7.4, **NOT BUILT**), because a
+     change that alters who a group's messages reach is indistinguishable from an attack if it is silent;
+   - is resolved **per request** (the effective-permission computation is per delivery, §6.6), so routing
+     always follows the CURRENT roster and a stale cached set can never be used to reach a removed member.
+
+**The named group vs the capability target:** a named group is a curated roster (membership is DATA); a
+capability target is a dynamic pool resolved by the shipped selector (`POST /capabilities/{capability}/inbox`
+→ ONE live holder, round-robin) and is NOT a fan-out. The two are different things and neither may silently
+become the other (CHAT-ADDRESSING.md §1.4).
+
+**Cross-reference — depth (D11 corrected, CR-CHAT-017):** nothing here changes message nesting. A delivery
+to a group or capability reaches each member through the existing per-agent path, and the message in a
+thread STAYS IN THREAD — depth is never a function of how many recipients a tag reached (CHAT-ADDRESSING.md
+§2.6).
+
+**NOT BUILT:** no group object, no roster, no membership route, no `group.membership.changed` event. Owed by
+CR-CHAT-022: `POST /groups`, `GET /groups`, `GET /groups/{id}`, `PATCH /groups/{id}/members`.
+
+### 6.11 A TASK is a different authority than a message (D12, CR-CHAT-018)
+
+The message-kind split (plain / addressed / task) is a SAFETY property: conflating an addressed message
+with an action is how a tag becomes a remote command (CHAT-ADDRESSING.md §2.5). Authorization follows the
+kind:
+
+| Kind | The authority required | May address | May create work? |
+|---|---|---|---|
+| `plain` | `send` on the session (§6.3) | the session | no |
+| `addressed` | `send` on the session / `send` on the agent (§6.3) | an agent, or a group/capability (NOTIFY only) | **no** — a tag never executes |
+| `task` | the **task authority**: `invoke` on the TARGET, plus `send` on the session it sits in | an agent, or a group/capability **for EXECUTION** | **yes** — the only kind that may |
+
+Rules, stated as the authority model:
+
+- **Addressing a group/capability is not the same right as TASKING it.** `@team:x`/`@cap:y` with the
+  `invoke` action may be used to ADDRESS (notify) or to EXECUTE, and the two uses are distinguishable on
+  the wire by the message KIND — an addressed message to a capability notifies the addressed set and
+  executes nothing; a task to a capability is dispatched for execution.
+- **Creating a TASK requires the task authority** — `invoke` on the target (an agent, or the
+  group/capability), plus `send` on the session the task is raised in. The matrix's `invoke` cell is
+  therefore the cell that matters for execution: it is what distinguishes "may call this pool/roster" from
+  "may talk in this room".
+- **A TASK is a record with a lifecycle, not a message with a flag.** It has state
+  (open/claimed/running/done/failed), and every transition is an audited, append-only record-version
+  (CHAT-STORAGE.md §3.7). A `task.created` audit line names the creator and the target (§7.4).
+- **Who may create one:** a principal holding `invoke` on the target and `send` on the session (a `member`
+  with that grant, or above). A `viewer` and a grantless stranger are refused `403 DELIVERY_FORBIDDEN`
+  `"reason":"NO_TASK_AUTHORITY"` (**NOT BUILT**), the same code as every other authorization refusal (§6.7).
+- **A tag that is NOT a task is never enough.** No amount of addressing — an agent, a group, a capability,
+  a wildcard — creates work. Execution is a separate, explicit kind.
+
+**NOT BUILT:** no task kind, no task authority, no task route and no `task.created` event. Owed:
+`POST /tasks`, `POST /tasks/{id}/claim`, `POST /tasks/{id}/complete`, and the `kind:"task"` value on the
+session append/write path.
+
 ---
 
 ## 7. Worked examples
@@ -644,7 +811,7 @@ a `200` on the read), not assert a table.
 The event vocabulary is anchored on what Option B **draws** in its `AUDIT TRAIL` table — columns
 `Time | Principal | Event | Details`, with these exact events transcribed: `session.complete`,
 `message.send`, `lease.renew`, `session.start`, `permission.grant`, `agent.degraded`, `queue.depth`,
-`heartbeat`. This spec adds the four the permission model needs, marked **NOT BUILT**:
+`heartbeat`. This spec adds the events the permission model needs, marked **NOT BUILT**:
 
 | Event | Written when | `Details` |
 |---|---|---|
@@ -655,6 +822,10 @@ The event vocabulary is anchored on what Option B **draws** in its `AUDIT TRAIL`
 | `binding.create` (**NOT BUILT**) | a principal binds to an agent | the binding id |
 | `scope.declared` / `scope.reach.changed` (**NOT BUILT**) | a scope is declared / widened | the scope id |
 | `principal.login` (**NOT BUILT**) | a principal authenticates | the session id |
+| `group.membership.changed` (**NOT BUILT**) | a named group's roster is edited (§6.10, CR-CHAT-022) | the group id + the adds/removes |
+| `task.created` (**NOT BUILT**) | a TASK is created (§6.11, CR-CHAT-018) | the task id + the target |
+| `asset.fetched` / `asset.fetch.denied` (**NOT BUILT**) | an asset fetch succeeds / is refused (§6.9, CR-CHAT-014) | the asset ref + the owning message |
+| `delivery.remote` (**NOT BUILT**) | a delivery to/from a remote shadow principal (§2.5) | the shadow principal + `remote_instance`/`remote_ref` |
 
 `delivery.allowed` is deliberately included: an audit that records only denials cannot answer "who sent
 this", which is T3's question.
@@ -682,6 +853,20 @@ this", which is T3's question.
    seven events this spec adds exist only in this document.
 10. **Class/owner/role badges in the UI.** None of the four approved options draws a class label, an owner
     name or an `OWNER` chip (§3.3, §5.3). No UI work may present one until the data model ships.
+11. **Named groups as grant subjects.** No group object, no roster, no membership route and no
+    `group.membership.changed` audit event. Owed by **CR-CHAT-022**: `POST /groups`, `GET /groups`,
+    `GET /groups/{id}`, `PATCH /groups/{id}/members` (**NOT BUILT**). Until they ship, `subject.type: group`
+    is a contract with no object behind it.
+12. **Asset authorization.** There is no asset object, no per-fetch check and no `403 ASSET_FORBIDDEN`.
+    Owed by **CR-CHAT-014**: `POST /assets` (upload), `GET /assets/{id}` (the checked reference),
+    `GET /assets/{id}/content` (the bytes; a short-lived redirect is acceptable only after the check
+    passes) (**NOT BUILT**).
+13. **The TASK authority.** No task kind, no task authority, no `POST /tasks`, no
+    `403 … NO_TASK_AUTHORITY`. The message-kind split (D12) is a contract with no construct behind it.
+14. **Remote shadow principals.** No `remote` field, no shadow record, no remote resolution and no `403`
+    for a grantless remote actor. Owed by **CR-CHAT-023/024** (§2.5): `GET /fed/address?instance=<i>&agent=<a>`
+    (the local shadow resolution, CHAT-ADDRESSING.md §1.5) and the peer-key link; the shipped federation
+    credential remains the single shared `CR_FED_TOKEN`.
 
 ### 8.2 Open questions
 
@@ -712,6 +897,11 @@ this", which is T3's question.
 7. **Where is `mint` enforced?** `POST /agents` today is a deployment-level route with no notion of who is
    registering. **PROPOSED-DEFAULT:** `mint` is checked on the registration route for `personal` agents and
    on the namespace for `service` ones, and an unarmed deployment keeps the shipped behaviour.
+8. **Is an asset fetch re-checked when the message it belongs to is later restricted?** §6.9 says YES — the
+   check is per fetch, so restricting the message takes effect on the NEXT fetch, not retroactively on bytes
+   already handed over. **PROPOSED-DEFAULT:** per-fetch (D9), with the honest limit that a byte already
+   fetched cannot be un-fetched; short-lived signed URLs bound the window, and the storage side states the
+   bundle behaviour (CHAT-STORAGE.md §6.4).
 
 ---
 
@@ -748,8 +938,14 @@ accident. Recorded so the UI does not ship a colour rule that contradicts the AP
 
 ## 9. Status line
 
-`DRAFT v1 · 2026-10-03 · CR-CHAT-003 + CR-CHAT-007 + CR-CHAT-012`
+`DRAFT v2 · 2026-10-03 · CR-CHAT-003 + CR-CHAT-007 + CR-CHAT-012 + CR-CHAT-013 + CR-CHAT-014 + CR-CHAT-018`
+
+REVISION 2026-10-03 (v2): §2.5 (remote shadow principals — D14), §6.9 (asset fetch is a permission check —
+D9), §6.10 (groups as grant subjects — D8), §6.11 (the task authority — D12); §6.3's effective-sender rule
+extended for a remote actor; §6.7's refusal table, §7.4's audit vocabulary and §8.1's NOT BUILT list each
+extended, and every new affordance names its owed endpoint. §7.4's intro count was also corrected (it said
+"four" over a table of seven).
 
 Statements in this document that describe behaviour which does not exist are marked **NOT BUILT** in place
-(§2.3, §3.3, §4.3, §5.3, §6.7, §7.4, §8.1). Nothing here may be added to `docs/claims.yaml` until the
-corresponding code ships, because claims execute against a live server.
+(§2.3, §2.5, §3.3, §4.3, §5.3, §6.7, §6.9, §6.10, §6.11, §7.4, §8.1). Nothing here may be added to
+`docs/claims.yaml` until the corresponding code ships, because claims execute against a live server.
