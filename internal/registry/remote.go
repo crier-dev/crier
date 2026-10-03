@@ -34,6 +34,9 @@ import (
 // ed25519 private key via WithSigningKey: every request then carries fresh
 // X-Agent-Ts / X-Agent-Sig headers signing "METHOD\n<path>\n<unix-seconds>"
 // (path excludes the query string) — the exact payload the server verifies.
+// A request WITH a body additionally carries X-Agent-Body-SHA256 and signs the
+// 4-line transcript "METHOD\n<path>\n<ts>\nsha256:<hex>", binding the body to
+// the signature (CR-CHAT-027); a bodyless request keeps the 3-line form.
 type RemoteStore struct {
 	baseURL string
 	agentID string
@@ -55,9 +58,11 @@ type RemoteOption func(*RemoteStore)
 // private key: each request is stamped with a fresh unix-seconds timestamp in
 // X-Agent-Ts and a hex-encoded signature over "METHOD\n<path>\n<ts>" in
 // X-Agent-Sig, where <path> is the escaped URL path with the query string
-// excluded. The public half of the key must be registered for the agent
-// server-side (see the Register public_key field). A nil key keeps the store
-// unsigned — correct for servers running CR_REQUIRE_AGENT_SIG=false.
+// excluded. A request that carries a body is body-bound (CR-CHAT-027): the
+// signature covers a 4th "sha256:<hex>" line and the digest is sent in
+// X-Agent-Body-SHA256. The public half of the key must be registered for the
+// agent server-side (see the Register public_key field). A nil key keeps the
+// store unsigned — correct for servers running CR_REQUIRE_AGENT_SIG=false.
 func WithSigningKey(priv ed25519.PrivateKey) RemoteOption {
 	return func(s *RemoteStore) { s.priv = priv }
 }
@@ -89,16 +94,49 @@ func NewRemoteStore(baseURL, agentID, token string, opts ...RemoteOption) *Remot
 // r.URL.Path — the DECODED path, query string excluded — so the client signs
 // req.URL.Path (not EscapedPath): for a path that needs escaping the wire
 // form differs (%20 vs space) and only the decoded form verifies.
+//
+// BODY BINDING (CR-CHAT-027): when req carries a body the signature instead
+// covers the 4-line transcript "METHOD\n<path>\n<ts>\nsha256:<hex>" and the
+// digest travels in X-Agent-Body-SHA256, so the server can recompute it and
+// refuse a body swapped between signing and delivery. A request with NO body
+// (GET/DELETE — the store passes nil) keeps the original 3-line transcript and
+// sends NO body-digest header, which is exactly the legacy request shape.
 func (s *RemoteStore) signRequest(req *http.Request) {
 	if len(s.priv) == 0 {
 		return
 	}
 	ts := time.Now().Unix()
 	tsStr := strconv.FormatInt(ts, 10)
-	payload := []byte(req.Method + "\n" + req.URL.Path + "\n" + tsStr)
-	sig := ed25519.Sign(s.priv, payload)
+	digest := requestBodyDigest(req)
+	if digest != "" {
+		req.Header.Set(HeaderAgentBodySHA256, digest)
+	}
+	sig := ed25519.Sign(s.priv, agentSigPayload(req.Method, req.URL.Path, tsStr, digest))
 	req.Header.Set(HeaderAgentTS, tsStr)
 	req.Header.Set(HeaderAgentSig, hex.EncodeToString(sig))
+}
+
+// requestBodyDigest returns the lowercase hex sha256 of req's body, restoring
+// the body afterwards so the transport can still send it, or "" when the
+// request has no body. "" is the signal to keep the 3-line transcript: a
+// bodyless request is signed exactly as it was before body binding existed.
+func requestBodyDigest(req *http.Request) string {
+	if req.Body == nil || req.Body == http.NoBody {
+		return ""
+	}
+	b, err := io.ReadAll(req.Body)
+	// The body is closed before it is replaced: a caller may hand in a real
+	// reader, and reading it to EOF does not release it. Its error is not
+	// actionable here — the request still has a body to send — so it is
+	// explicitly discarded rather than left unchecked.
+	_ = req.Body.Close()
+	req.Body = io.NopCloser(bytes.NewReader(b))
+	if err != nil {
+		// Cannot read our own in-memory body: keep what was read so the
+		// transport reports the real error, and do not claim a binding.
+		return ""
+	}
+	return sha256Hex(b)
 }
 
 // LoadEd25519PrivateKeyFile reads and parses a private key from a PEM file.

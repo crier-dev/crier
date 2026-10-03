@@ -711,6 +711,15 @@ paths:
         or invalidly signed PATCH is rejected with 401; an agent may only
         update itself (the X-Agent-ID must match the {id} in the path,
         else 403).
+
+        This PATCH has a body, so the caller MAY bind that body to the
+        signature with X-Agent-Body-SHA256 (CR-CHAT-027): send the lowercase
+        hex sha256 of the exact body and sign
+        "PATCH\n/agents/{id}\n<unix-seconds>\nsha256:<hex>" instead. A body
+        that does not match the signed digest is refused with 401
+        "body digest mismatch" — so a body swapped after signing no longer
+        rides the request signature. Omitted, the 3-line contract above
+        applies unchanged.
       parameters:
         - name: id
           in: path
@@ -720,6 +729,7 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+        - $ref: "#/components/parameters/XAgentBodySHA256"
       security:
         - bearerAuth: []
           agentSignature: []
@@ -1389,6 +1399,13 @@ paths:
         "POST\n/agents/{id}/inbox/ack\n<unix-seconds>". An unsigned or invalidly
         signed ack is rejected with 401; an agent may only ack its own inbox
         (the X-Agent-ID must match the {id} in the path, else 403).
+
+        The ack body MAY be bound to the signature with X-Agent-Body-SHA256
+        (CR-CHAT-027): send the lowercase hex sha256 of the exact body and sign
+        "POST\n/agents/{id}/inbox/ack\n<unix-seconds>\nsha256:<hex>". A body
+        that does not match the signed digest is refused with 401
+        "body digest mismatch". Omitted, the 3-line contract above applies
+        unchanged.
       parameters:
         - name: id
           in: path
@@ -1398,6 +1415,7 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+        - $ref: "#/components/parameters/XAgentBodySHA256"
       security:
         - bearerAuth: []
           agentSignature: []
@@ -1466,6 +1484,14 @@ paths:
         own rebalance; an operator acting on a dead holder's behalf uses the
         shared relay token (CR_AUTH_TOKEN) with signature enforcement off, the
         same authorization the other inbox routes accept.
+
+        The transfer body MAY be bound to the signature with
+        X-Agent-Body-SHA256 (CR-CHAT-027): send the lowercase hex sha256 of the
+        exact body and sign
+        "POST\n/agents/{id}/inbox/transfer\n<unix-seconds>\nsha256:<hex>". A
+        body that does not match the signed digest is refused with 401
+        "body digest mismatch". Omitted, the 3-line contract above applies
+        unchanged.
       parameters:
         - name: id
           in: path
@@ -1476,6 +1502,7 @@ paths:
         - $ref: "#/components/parameters/XAgentID"
         - $ref: "#/components/parameters/XAgentTs"
         - $ref: "#/components/parameters/XAgentSig"
+        - $ref: "#/components/parameters/XAgentBodySHA256"
       security:
         - bearerAuth: []
           agentSignature: []
@@ -1886,6 +1913,25 @@ components:
       description: Hex-encoded ed25519 signature (128 hex chars) over the payload "<METHOD>\n<path>\n<unix-seconds>" where path is the raw URL path (query string excluded).
       schema:
         type: string
+    XAgentBodySHA256:
+      name: X-Agent-Body-SHA256
+      in: header
+      required: false
+      description: |-
+        OPT-IN body binding (CR-CHAT-027). When PRESENT, the per-agent
+        signature must cover the request body: send the lowercase hex sha256
+        of the exact body and sign
+        "<METHOD>\n<path>\n<unix-seconds>\nsha256:<hex>". The server recomputes
+        sha256 of the delivered body and, if it does not match this value (or
+        the signature does not verify over the digest-bearing transcript),
+        rejects the request with 401 "body digest mismatch" — so a body
+        swapped between the signed request and its delivery no longer rides a
+        still-valid request signature. ABSENT (the default, and always for a
+        bodyless GET/DELETE) the verification is the original 3-line
+        "<METHOD>\n<path>\n<unix-seconds>" contract, unchanged.
+      schema:
+        type: string
+        pattern: "^[0-9a-fA-F]{64}$"
     XCrierNamespace:
       name: X-Crier-Namespace
       in: header
@@ -1945,6 +1991,13 @@ components:
         POST /agents/{id}/inbox/ack, POST /agents/{id}/inbox/transfer and
         GET /agents/{id}/inbox/dead-letters; an unsigned or invalidly signed
         request is rejected with 401.
+
+        OPT-IN body binding (CR-CHAT-027): a caller MAY additionally send
+        X-Agent-Body-SHA256 (lowercase hex sha256 of the exact request body)
+        and sign "<METHOD>\n<path>\n<unix-seconds>\nsha256:<hex>", which binds
+        the body to the signature: a body that differs from the signed digest
+        is refused with 401 "body digest mismatch". Absent the header, the
+        3-line contract above is unchanged.
   schemas:
     InboxEntry:
       type: object

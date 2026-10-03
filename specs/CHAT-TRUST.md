@@ -94,10 +94,12 @@ pre-registered can still be believed, and the exact meaning of that belief.
 
 **Two honest limits of this primitive, stated because the trust model must not build on a fiction:**
 
-1. **This signature authenticates a REQUEST, not a MESSAGE PAYLOAD.** It covers the method, the path and
-   a timestamp — **not the body**. A "signed message" in the sense of "the payload's author is
-   cryptographically bound to this payload" is **NOT BUILT**; §5.1 proposes the shape, and §9 items 3
-   carries it as owed.
+1. **This signature authenticates a REQUEST, and — OPT-IN — the BODY it carries.** By default it covers
+   the method, the path and a timestamp — **not the body**. A caller MAY bind the body by sending
+   `X-Agent-Body-SHA256` and signing `<METHOD>\n<path>\n<ts>\nsha256:<hex>` (CR-CHAT-027, §9 item 3); a
+   swapped body is then refused with a named `401 body digest mismatch`. Unbound (the default) it is
+   still a request signature, not a message signature: the federated §5.1 transcript and its `TRUST_*`
+   verdicts are **NOT BUILT**.
 2. **A delivery's `sender` is recorded, not verified.** `deliverRequest.Sender` is a self-declared string
    (CHAT-PERMISSIONS.md §1.1). The key exists; the bus's delivery path does not yet check it against the
    key.
@@ -288,8 +290,9 @@ Two properties of the order are decisions, stated because they are easy to get b
 - **It does not prove the signer is honest.** It proves a key signed bytes. Content safety is the guard's
   layer (LLM-MESSAGE-GUARD.md) and identity is CHAT-PERMISSIONS.md's.
 - **It does not prove the payload is the one delivered**, unless the payload digest is inside the signed
-  bytes (§5.1); the shipped request signature does not cover the body (§2.1 limit 1), so until item 3 of
-  §9 ships, a "verified signature" is a verified REQUEST, not a verified MESSAGE.
+  bytes. The shipped request signature covers the body only when the caller OPTS IN
+  (`X-Agent-Body-SHA256`, §2.1 limit 1, §9 item 3): without it — and for the federated §5.1 transcript,
+  which is unbuilt — a "verified signature" is a verified REQUEST, not a verified MESSAGE.
 - **It does not prove the key was uncompromised at signing time.** A revoked-after-signing record is
   verified and suspect at once (§7.5) — the model states this rather than resolving it away, because it
   cannot.
@@ -459,9 +462,17 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 1. **The trust anchor store and record.** No anchor, no `accepted_by`, no route. Owed: §3.
 2. **Delegation / voucher records and the chain walk.** No record, no scope evaluation, no `max_depth`,
    no D16 enforcement. Owed: §4.
-3. **A signed MESSAGE payload.** The shipped signature covers `<METHOD>\n<path>\n<ts>` — NOT the body
-   (agentsig.go; §2.1 limit 1). Until a payload binding exists, "a signed message" is not a claim this
-   system can make. Owed: §5.1.
+3. **A signed MESSAGE payload.** The shipped request signature covered `<METHOD>\n<path>\n<ts>` — NOT the
+   body (`agentsig.go`; §2.1 limit 1). **REQUEST-LEVEL BODY BINDING: BUILT (OPT-IN), CR-CHAT-027.** A
+   caller now opts in by sending `X-Agent-Body-SHA256` and signing
+   `<METHOD>\n<path>\n<ts>\nsha256:<hex>`: the server recomputes sha256 of the raw request body,
+   requires it to equal the header, and verifies the digest-bearing transcript, refusing a body swapped
+   after signing with a named `401 body digest mismatch` (`authorizeAgent`; client side
+   `RemoteStore.signRequest`). Absent the header the transcript is the original 3-line form,
+   byte-for-byte, so no caller changes. **STILL OWED:** the federated §5.1 transcript
+   `crier-trust-v1\n<peer_id>\n<agent_id>\n<message_id>\n<sha256(payload)>\n<ts>` and the `TRUST_*`
+   verdicts (item 4) — §5.1 is owed for a payload crossing instances, this item for the shipped request
+   path.
 4. **The eight `TRUST_*` verdicts.** `TRUST_MALFORMED`, `TRUST_NO_PATH_TO_ANCHOR`,
    `TRUST_DELEGATION_OUT_OF_SCOPE`, `TRUST_DELEGATION_EXPIRED`, `TRUST_KEY_REVOKED`,
    `TRUST_SIGNATURE_INVALID`, `TRUST_REPLAY_WINDOW`, `TRUST_REVOKED_AFTER_SIGNING`. None exists; there is
@@ -507,8 +518,10 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 
 ## 11. Status line
 
-`DRAFT v1 · 2026-10-03 · CR-CHAT-024 + CR-CHAT-025`
+`DRAFT v1 · 2026-10-03 · CR-CHAT-024 + CR-CHAT-025 + CR-CHAT-027`
 
 Statements in this document that describe behaviour which does not exist are marked **NOT BUILT** in place
 (§3.2, §4.4, §5.3, §6.3, §7.5, §8.3) and enumerated in §9. Nothing here may be added to `docs/claims.yaml`
-until the corresponding code ships, because claims execute against a live server.
+until the corresponding code ships, because claims execute against a live server. §9 item 3 is now split:
+its REQUEST-LEVEL body binding has shipped (CR-CHAT-027), while the federated §5.1 transcript it also
+names remains unbuilt.

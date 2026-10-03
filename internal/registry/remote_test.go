@@ -193,27 +193,35 @@ func TestRemoteStore_SendsAgentIDHeader(t *testing.T) {
 
 // sigCapture records the per-agent signature headers of every request plus
 // the raw signed payload reconstructed exactly the way the server rebuilds
-// it (r.Method + "\n" + r.URL.Path + "\n" + ts). The mutex makes concurrent
-// retrieve/ack traffic race-free.
+// it (r.Method + "\n" + r.URL.Path + "\n" + ts, plus the body-digest line when
+// the request opted into body binding, CR-CHAT-027). The mutex makes
+// concurrent retrieve/ack traffic race-free.
 type sigCapture struct {
 	mu      sync.Mutex
 	methods []string
 	paths   []string
 	sigs    [][]byte
 	ts      []string
+	digests []string
+	bodies  [][]byte
 }
 
 // middleware returns an http.Handler wrapper that records the request, then
-// delegates to next (the real registry handler).
+// delegates to next (the real registry handler). The body is read and restored
+// so the delegated handler still sees it (exactly what authorizeAgent does).
 func (c *sigCapture) middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ts := r.Header.Get(HeaderAgentTS)
 		raw, _ := hex.DecodeString(r.Header.Get(HeaderAgentSig))
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		c.mu.Lock()
 		c.methods = append(c.methods, r.Method)
 		c.paths = append(c.paths, r.URL.Path)
 		c.sigs = append(c.sigs, raw)
 		c.ts = append(c.ts, ts)
+		c.digests = append(c.digests, r.Header.Get(HeaderAgentBodySHA256))
+		c.bodies = append(c.bodies, body)
 		c.mu.Unlock()
 		next(w, r)
 	}
@@ -226,6 +234,16 @@ func (c *sigCapture) snapshot() (methods, paths []string, sigs [][]byte, ts []st
 		append([]string(nil), c.paths...),
 		append([][]byte(nil), c.sigs...),
 		append([]string(nil), c.ts...)
+}
+
+// bodySnapshot returns the X-Agent-Body-SHA256 value and raw body of every
+// captured request, aligned by index with snapshot(). A "" digest means the
+// request did not opt into body binding (3-line transcript).
+func (c *sigCapture) bodySnapshot() (digests []string, bodies [][]byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.digests...),
+		append([][]byte(nil), c.bodies...)
 }
 
 // newCapturingSigServer is newRemoteTestServerSigning with the four
@@ -327,12 +345,21 @@ func TestRemoteStore_SignedLifecycle(t *testing.T) {
 	// above (secure default) returns 401/403 before touching the store, so
 	// reaching this point already proves ed25519.Verify passed. Re-verify the
 	// signatures independently anyway, plus the exact payload contract.
+	//
+	// CR-CHAT-027: the ack carries a body, so its signature covers the 4-line
+	// body-bound transcript; the two GETs and the DELETE carry no body, so
+	// they keep the original 3-line form and send NO digest header.
 	methods, paths, sigs, tss := cap.snapshot()
+	digests, bodies := cap.bodySnapshot()
+	if len(digests) != len(methods) || len(bodies) != len(methods) {
+		t.Fatalf("captured %d digests / %d bodies for %d requests", len(digests), len(bodies), len(methods))
+	}
 	if len(methods) != 4 {
 		t.Fatalf("captured %d signed requests, want 4 (retrieve, stats, ack, unregister)", len(methods))
 	}
 	wantMethods := []string{http.MethodGet, http.MethodGet, http.MethodPost, http.MethodDelete}
 	wantSuffixes := []string{"/inbox", "/inbox/stats", "/inbox/ack", ""}
+	wantBound := []bool{false, false, true, false} // body binding only where a body is sent
 	for i, path := range paths {
 		if methods[i] != wantMethods[i] || !strings.HasSuffix(path, wantSuffixes[i]) {
 			t.Fatalf("request %d = %s %s, want %s …%s", i, methods[i], path, wantMethods[i], wantSuffixes[i])
@@ -348,8 +375,20 @@ func TestRemoteStore_SignedLifecycle(t *testing.T) {
 		if len(sigs[i]) != ed25519.SignatureSize {
 			t.Fatalf("request %d: signature size = %d", i, len(sigs[i]))
 		}
-		if !ed25519.Verify(pub, []byte(methods[i]+"\n"+path+"\n"+tss[i]), sigs[i]) {
-			t.Fatalf("request %d: signature does not verify over %q", i, methods[i]+"\n"+path+"\n"+tss[i])
+		payload := methods[i] + "\n" + path + "\n" + tss[i]
+		if wantBound[i] {
+			if digests[i] == "" {
+				t.Fatalf("request %d (%s %s): body-bearing request sent no X-Agent-Body-SHA256", i, methods[i], path)
+			}
+			if want := sha256Hex(bodies[i]); digests[i] != want {
+				t.Fatalf("request %d: X-Agent-Body-SHA256 = %q, want sha256 of the body (%s)", i, digests[i], want)
+			}
+			payload += "\nsha256:" + digests[i]
+		} else if digests[i] != "" {
+			t.Fatalf("request %d (%s %s): bodyless request sent X-Agent-Body-SHA256 = %q, want the legacy 3-line form with no header", i, methods[i], path, digests[i])
+		}
+		if !ed25519.Verify(pub, []byte(payload), sigs[i]) {
+			t.Fatalf("request %d: signature does not verify over %q", i, payload)
 		}
 	}
 }
@@ -428,6 +467,61 @@ func TestRemoteStore_SignatureContractPayload(t *testing.T) {
 	}
 	if !ed25519.Verify(pub, []byte("GET\n"+paths[0]+"\n"+tss[0]), sigs[0]) {
 		t.Fatalf("signature does not verify over the decoded path %q", paths[0])
+	}
+}
+
+// TestRemoteStore_SignRequestBodyBinding pins the CLIENT half of CR-CHAT-027
+// (requirement 4): a request that carries a body is signed over the 4-line
+// transcript and sends X-Agent-Body-SHA256 = sha256(body); a bodyless request
+// (GET/DELETE) keeps the original 3-line transcript and omits the header. The
+// signed body must still be readable afterwards — signRequest restores it so
+// the transport can send it.
+func TestRemoteStore_SignRequestBodyBinding(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	rs := NewRemoteStore("http://crier.invalid", "a", "", WithSigningKey(priv))
+
+	body := []byte(`{"k":"v"}`)
+	req := httptest.NewRequest(http.MethodPost, "/agents/a/inbox", bytes.NewReader(body))
+	rs.signRequest(req)
+
+	digest := req.Header.Get(HeaderAgentBodySHA256)
+	if digest == "" {
+		t.Fatal("body-bearing request sent no X-Agent-Body-SHA256")
+	}
+	if want := sha256Hex(body); digest != want {
+		t.Fatalf("X-Agent-Body-SHA256 = %q, want sha256 of the body (%s)", digest, want)
+	}
+	sig, err := hex.DecodeString(req.Header.Get(HeaderAgentSig))
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	if !ed25519.Verify(pub, agentSigPayload(http.MethodPost, "/agents/a/inbox", req.Header.Get(HeaderAgentTS), digest), sig) {
+		t.Fatal("signature does not verify over the 4-line body-bound transcript")
+	}
+	// The body must survive signing (it is the request the transport sends).
+	got, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read signed body: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body after signing = %q, want %q", got, body)
+	}
+
+	// A bodyless request stays on the legacy 3-line contract, header omitted.
+	get := httptest.NewRequest(http.MethodGet, "/agents/a/inbox", nil)
+	rs.signRequest(get)
+	if got := get.Header.Get(HeaderAgentBodySHA256); got != "" {
+		t.Fatalf("bodyless request sent X-Agent-Body-SHA256 = %q, want it omitted", got)
+	}
+	gsig, err := hex.DecodeString(get.Header.Get(HeaderAgentSig))
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	if !ed25519.Verify(pub, agentSigPayload(http.MethodGet, "/agents/a/inbox", get.Header.Get(HeaderAgentTS), ""), gsig) {
+		t.Fatal("bodyless signature does not verify over the legacy 3-line transcript")
 	}
 }
 

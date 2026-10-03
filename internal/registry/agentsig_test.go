@@ -1,11 +1,13 @@
 package registry
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -405,6 +407,205 @@ func TestAuthorizeAgent_KeylessAgentFailsClosed401(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "no registered public key") {
 		t.Fatalf("body = %q, want it to name the missing key", rec.Body.String())
+	}
+}
+
+// --- CR-CHAT-027: OPT-IN body binding. A request that sends
+// X-Agent-Body-SHA256 must sign the 4-line transcript and prove the digest it
+// claims matches the DELIVERED body, so a body swapped between signing and
+// delivery is refused with a NAMED outcome instead of riding the still-valid
+// request signature.
+
+// bodySignedRequest builds a request whose signature is body-bound: the body
+// digest travels in X-Agent-Body-SHA256 and the ed25519 signature is over the
+// 4-line transcript "METHOD\n<path>\n<ts>\nsha256:<hex>".
+func bodySignedRequest(t *testing.T, priv ed25519.PrivateKey, agentID, method, path string, body []byte) *http.Request {
+	t.Helper()
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	digest := sha256Hex(body)
+	sig := ed25519.Sign(priv, agentSigPayload(method, path, ts, digest))
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set(HeaderAgentID, agentID)
+	req.Header.Set(HeaderAgentTS, ts)
+	req.Header.Set(HeaderAgentBodySHA256, digest)
+	req.Header.Set(HeaderAgentSig, hex.EncodeToString(sig))
+	return req
+}
+
+// TestAuthorizeAgent_BodyBinding is the CR-CHAT-027 acceptance table. Every
+// row that opts in sends X-Agent-Body-SHA256; the case that leaves it ABSENT
+// pins that the legacy 3-line path is byte-identical (pass and fail both).
+func TestAuthorizeAgent_BodyBinding(t *testing.T) {
+	const (
+		agentID = "agent-1"
+		method  = http.MethodPost
+		path    = "/agents/agent-1/inbox/ack"
+	)
+	body := []byte(`{"lease_id":"L1","message_ids":["m1"]}`)
+	altered := []byte(`{"lease_id":"L1","message_ids":["m2"]}`) // same shape, swapped payload
+
+	type tc struct {
+		name string
+		// build returns the request under test and, for the success rows, the
+		// body that must survive authorization untouched (nil to skip the
+		// restore check).
+		build           func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte)
+		wantStatus      int
+		wantErrContains string
+	}
+
+	tests := []tc{
+		{
+			name: "matching body verifies and the body survives for the handler",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				return bodySignedRequest(t, priv, agentID, method, path, body), body
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "headline: body altered AFTER signing, header present, fails with the named outcome",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				req := bodySignedRequest(t, priv, agentID, method, path, body)
+				// The delivery swaps the body but keeps the (still valid)
+				// signature and digest of the body that was signed.
+				req.Body = io.NopCloser(bytes.NewReader(altered))
+				return req, nil
+			},
+			wantStatus:      http.StatusUnauthorized,
+			wantErrContains: "body digest mismatch",
+		},
+		{
+			name: "header present but digest does not match the actual body",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				// A legacy 3-line signature plus a digest header claiming a
+				// different body: the header's presence makes the binding
+				// mandatory, so it cannot be satisfied by a valid request sig.
+				ts := fmt.Sprintf("%d", time.Now().Unix())
+				req := httptest.NewRequest(method, path, bytes.NewReader(body))
+				req.Header.Set(HeaderAgentID, agentID)
+				req.Header.Set(HeaderAgentTS, ts)
+				req.Header.Set(HeaderAgentBodySHA256, sha256Hex(altered))
+				req.Header.Set(HeaderAgentSig, hex.EncodeToString(ed25519.Sign(priv, agentSigPayload(method, path, ts, ""))))
+				return req, nil
+			},
+			wantStatus:      http.StatusUnauthorized,
+			wantErrContains: "body digest mismatch",
+		},
+		{
+			name: "digest matches the body but the signature excludes it — the transcript is bound",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				ts := fmt.Sprintf("%d", time.Now().Unix())
+				req := httptest.NewRequest(method, path, bytes.NewReader(body))
+				req.Header.Set(HeaderAgentID, agentID)
+				req.Header.Set(HeaderAgentTS, ts)
+				req.Header.Set(HeaderAgentBodySHA256, sha256Hex(body))
+				req.Header.Set(HeaderAgentSig, hex.EncodeToString(ed25519.Sign(priv, agentSigPayload(method, path, ts, ""))))
+				return req, nil
+			},
+			wantStatus:      http.StatusUnauthorized,
+			wantErrContains: "signature verification failed",
+		},
+		{
+			name: "empty body bound with sha256 of the empty string verifies",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				return bodySignedRequest(t, priv, agentID, method, path, []byte{}), []byte{}
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "header present but empty is a named failure, not a silent fallback",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				req := signedRequest(t, priv, agentID, method, path)
+				req.Header.Set(HeaderAgentBodySHA256, "") // Set stores the value verbatim
+				return req, nil
+			},
+			wantStatus:      http.StatusUnauthorized,
+			wantErrContains: "X-Agent-Body-SHA256 is present but empty",
+		},
+		{
+			name: "header ABSENT: legacy 3-line path still passes",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				return signedRequest(t, priv, agentID, http.MethodGet, "/agents/agent-1/inbox"), nil
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "header ABSENT: a bad signature still fails as before",
+			build: func(t *testing.T, priv ed25519.PrivateKey) (*http.Request, []byte) {
+				_, attackerPriv, _ := ed25519.GenerateKey(rand.Reader)
+				_ = priv
+				return signedRequest(t, attackerPriv, agentID, http.MethodGet, "/agents/agent-1/inbox"), nil
+			},
+			wantStatus:      http.StatusUnauthorized,
+			wantErrContains: "signature verification failed",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			h := newSigHandler(store)
+			_, priv := testAgentKeypair(t, store, agentID)
+
+			req, wantBody := test.build(t, priv)
+
+			if test.wantStatus == http.StatusOK {
+				rec := httptest.NewRecorder()
+				if err := h.authorizeAgent(rec, req, agentID); err != nil {
+					t.Fatalf("authorizeAgent = %v, want success", err)
+				}
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200", rec.Code)
+				}
+				if wantBody != nil {
+					got, err := io.ReadAll(req.Body)
+					if err != nil {
+						t.Fatalf("read restored body: %v", err)
+					}
+					if !bytes.Equal(got, wantBody) {
+						t.Fatalf("body after authorization = %q, want it left intact (%q)", got, wantBody)
+					}
+				}
+				return
+			}
+
+			status, msg, raw := deniedMessage(t, h, req, agentID)
+			if status != test.wantStatus {
+				t.Fatalf("status = %d, want %d (body %q)", status, test.wantStatus, raw)
+			}
+			if !strings.Contains(msg, test.wantErrContains) {
+				t.Fatalf("error = %q, want it to contain %q", msg, test.wantErrContains)
+			}
+			if test.wantErrContains == "body digest mismatch" &&
+				strings.Contains(msg, "signature verification failed") {
+				t.Fatalf("error = %q: a digest mismatch must be its OWN outcome, not the generic signature failure", msg)
+			}
+		})
+	}
+}
+
+// TestHandleAck_BodyBindingRejectsAlteredBody drives the headline case through
+// the REAL route handler (not authorizeAgent alone): a signed ack whose body is
+// swapped after signing is refused 401 with the named outcome, so the gap the
+// row names — a body swapped between the signed request and its delivery — is
+// closed on the delivered path, not just in a unit.
+func TestHandleAck_BodyBindingRejectsAlteredBody(t *testing.T) {
+	store := NewMemoryStore()
+	h := newSigHandler(store)
+	_, priv := testAgentKeypair(t, store, "agent-1")
+
+	signedBody := []byte(`{"lease_id":"L1","message_ids":["m1"]}`)
+	req := bodySignedRequest(t, priv, "agent-1", http.MethodPost, "/agents/agent-1/inbox/ack", signedBody)
+	req = withURLVar(req, "agent-1")
+	req.Body = io.NopCloser(bytes.NewReader([]byte(`{"lease_id":"L1","message_ids":["m2"]}`)))
+
+	rec := httptest.NewRecorder()
+	h.HandleAck(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "body digest mismatch") {
+		t.Fatalf("body = %q, want the named body-binding outcome", rec.Body.String())
 	}
 }
 

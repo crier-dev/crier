@@ -1,10 +1,13 @@
 package registry
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,12 +19,74 @@ const (
 	HeaderAgentID  = "X-Agent-ID"
 	HeaderAgentTS  = "X-Agent-Ts"
 	HeaderAgentSig = "X-Agent-Sig"
+
+	// HeaderAgentBodySHA256 opts a request into BODY BINDING (CR-CHAT-027). A
+	// client that wants the per-agent signature to cover the request body
+	// sends the lowercase hex sha256 of that exact body here and signs the
+	// 4-line transcript built by agentSigPayload. The header is OPTIONAL: when
+	// it is ABSENT the request verifies over the original 3-line transcript,
+	// byte-for-byte as before, so no existing caller changes behaviour. It is
+	// omitted for a request with no body (GET/DELETE) — see RemoteStore
+	// signRequest — but a caller MAY bind an empty body by sending the sha256
+	// of the empty string.
+	HeaderAgentBodySHA256 = "X-Agent-Body-SHA256"
 )
 
 // sigWindow is the maximum allowed skew between the client timestamp and
 // server time. Bounded replay protection: a captured request is only valid
 // for sigWindow seconds.
 const sigWindow = 30 * time.Second
+
+// Named outcomes of a body-binding failure (CR-CHAT-027). They are distinct
+// from "signature verification failed" because they name a different client
+// mistake: the caller opted into body binding, so the body it signed and the
+// body it delivered are not the same bytes — nothing is wrong with its key.
+const (
+	// agentSigBodyDigestEmptyError: the header is present but carries no
+	// digest — a signing step that produced nothing. Named rather than
+	// treated as "absent" so a client that MEANT to bind its body is told
+	// the binding did not happen instead of silently falling back to the
+	// request-only transcript (same reasoning as DF-CRIER-236's empty
+	// X-Agent-Sig).
+	agentSigBodyDigestEmptyError = "X-Agent-Body-SHA256 is present but empty — a client opting into body binding must send the lowercase hex sha256 of the request body it signed"
+
+	// agentSigBodyDigestMismatchError: the headline gap this closes. The
+	// digest the caller claims (or the body the caller signed) does not match
+	// the delivered bytes, so a body swapped between signing and delivery is
+	// refused instead of authorized by the still-valid request signature.
+	agentSigBodyDigestMismatchError = "body digest mismatch: X-Agent-Body-SHA256 does not match sha256 of the delivered request body (the signed body differs from the delivered body)"
+
+	// agentSigBodyUnreadableError: the body could not be read to compute its
+	// digest, so the binding cannot be checked; fail closed.
+	agentSigBodyUnreadableError = "X-Agent-Body-SHA256: the request body could not be read to compute its digest"
+)
+
+// agentSigPayload builds the canonical transcript the per-agent signature
+// covers. With bodyDigest empty it is the ORIGINAL 3-line form
+//
+//	<METHOD>\n<path>\n<unix-seconds>
+//
+// byte-for-byte, so every pre-CR-CHAT-027 caller verifies unchanged. With a
+// non-empty bodyDigest (the lowercase hex sha256 of the request body) a 4th
+// line names the digest:
+//
+//	<METHOD>\n<path>\n<unix-seconds>\nsha256:<hex>
+//
+// Client and server build the transcript through this ONE function so the
+// wire contract cannot drift between them.
+func agentSigPayload(method, path, ts, bodyDigest string) []byte {
+	if bodyDigest == "" {
+		return []byte(method + "\n" + path + "\n" + ts)
+	}
+	return []byte(method + "\n" + path + "\n" + ts + "\nsha256:" + bodyDigest)
+}
+
+// sha256Hex returns the lowercase hex encoding of sha256(b) — the digest form
+// both the transcript and X-Agent-Body-SHA256 use.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
 // agentSigError wraps an authorization failure with the HTTP status to return.
 type agentSigError struct {
@@ -40,6 +105,16 @@ func (e *agentSigError) Error() string { return e.message }
 //	X-Agent-ID:  the agent claiming to act
 //	X-Agent-Ts:  unix timestamp (seconds), must be within ±30s of server time
 //	X-Agent-Sig: hex-encoded ed25519 signature over the payload
+//
+// OPT-IN BODY BINDING (CR-CHAT-027): a caller that sends
+// X-Agent-Body-SHA256 (the lowercase hex sha256 of the raw request body) must
+// sign the extended transcript "<METHOD>\n<path>\n<unix-seconds>\nsha256:<hex>"
+// (agentSigPayload). The server recomputes sha256 of the delivered body and
+// refuses the request unless (a) it matches the header and (b) the signature
+// verifies over the transcript that includes that digest — so a body swapped
+// between the signed request and its delivery is rejected with a NAMED outcome
+// instead of being authorized by the still-valid request signature. When the
+// header is ABSENT the verification is the original 3-line form, unchanged.
 //
 // The caller's X-Agent-ID must match the target agent in the URL — an agent
 // can only read/ack/delete its own inbox. Callers that lack a registered key
@@ -132,7 +207,30 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 				"(64-byte ed25519 signature), got %d character(s) (%q)", len(sigRaw), sigRaw))
 	}
 
-	payload := []byte(r.Method + "\n" + r.URL.Path + "\n" + tsRaw)
+	payload := agentSigPayload(r.Method, r.URL.Path, tsRaw, "")
+	if vals := r.Header.Values(HeaderAgentBodySHA256); len(vals) > 0 {
+		// OPT-IN body binding (CR-CHAT-027). The header is present, so the
+		// caller claims the signature covers a body digest: compute it from
+		// the DELIVERED bytes and require the claim to match before verifying
+		// the signature over the extended transcript.
+		claimed := strings.ToLower(strings.TrimSpace(strings.Join(vals, ",")))
+		if claimed == "" {
+			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestEmptyError)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyUnreadableError)
+		}
+		// Restore the body: authorization runs BEFORE the handler's own read
+		// (ack/transfer/patch decode from r.Body), so consuming it here would
+		// turn a correctly signed request into an empty-body one.
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		actual := sha256Hex(body)
+		if claimed != actual {
+			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestMismatchError)
+		}
+		payload = agentSigPayload(r.Method, r.URL.Path, tsRaw, actual)
+	}
 	if !ed25519.Verify(rawKey, payload, sig) {
 		return h.agentSigFail(w, http.StatusUnauthorized, "signature verification failed")
 	}
