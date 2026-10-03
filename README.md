@@ -1845,9 +1845,9 @@ Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default*
 
 All core primitives are implemented and tested:
 
-- **Relay** — Thread-safe in-memory pub/sub, 87.5% coverage, 7/7 GitReins PASS
+- **Relay** — Thread-safe in-memory pub/sub, 94.1% coverage, 7/7 GitReins PASS
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
-- **Registry + Inboxes** — Net-new, 78.3% coverage, 8/8 GitReins PASS
+- **Registry + Inboxes** — Net-new, 77.5% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
