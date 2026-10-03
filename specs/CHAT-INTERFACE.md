@@ -1,7 +1,22 @@
 # CHAT-INTERFACE.md — the crier comms interface (spec of record)
 
-Status: **DRAFT v1** · 2026-10-03 · Owner: Bane · Tickets: **CR-CHAT-001** (this document — the spec of
+Status: **DRAFT v2** · 2026-10-03 · Owner: Bane · Tickets: **CR-CHAT-001** (this document — the spec of
 record for the series) and **CR-CHAT-009** (the web-client MVP this document scopes)
+REVISION v2 · 2026-10-03 — folded Bane's detail pass into this document. **Added:** the channel /
+direct-message / NAMED-GROUP surfaces, with the curated-group ≠ dynamic-capability rule stated where the
+reader meets it (**CR-CHAT-013**, decision **D8**); an attachment carried **by reference** in the mapping
+table only (**CR-CHAT-014**, **D9**, designed by `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`); the
+nested-thread + request→thread flow as this interface's **acceptance test** (**CR-CHAT-015**); the
+late-join context-share prompt (**CR-CHAT-016**, **D10**); the navigability block — depth collapse,
+timeline rail, generated per-thread summaries, search that returns LOCATION (**CR-CHAT-017**, second
+half); and the three message **kinds** — plain / addressed / TASK-ACTION — with a tag as addressing only
+(**CR-CHAT-018**, **D12**). **Corrected:** the depth rule (**CR-CHAT-017**, decision **D11**) — a
+**reply STAYS IN THREAD**; agents talking to each other inside a thread are messages at the SAME level,
+and a sub-thread exists only when **deliberately branched**. v1 left this open (`CHAT-SESSIONS.md` §6
+item 5) and its reply-record mechanism (a reply's `parent_id` = the immediate parent) could be read as
+"a reply-to-a-reply is a deeper level". **That reading is wrong**; it is corrected in place in
+`CHAT-SESSIONS.md` §4.2 / §4.3 / §4.5 and its §6 item 5 is now ANSWERED. Nothing was changed silently:
+every correction is stated at its point of correction and the new material is additive to v1.
 Source material: the four approved UI options generated 2026-10-03 —
 `A` channels + threads, `B` operator console, `C` triage inbox, `D` chat + capability map
 (`~/.hermes/cache/images/openai_codex_gpt-image-2-medium_20261003_1243{19,30,31,32}_*.png`).
@@ -11,7 +26,11 @@ renders its text as unreadable placeholder boxes (option `C` does this for most 
 says so instead of inventing a label.
 Companions in this series (different owners, not written here): `specs/CHAT-SESSIONS.md` (the
 session + threading half of this document), `specs/CHAT-PERMISSIONS.md` (CR-CHAT-003),
-`specs/CHAT-ADDRESSING.md` (CR-CHAT-004), `specs/CHAT-STORAGE.md` (CR-CHAT-006).
+`specs/CHAT-ADDRESSING.md` (CR-CHAT-004), `specs/CHAT-STORAGE.md` (CR-CHAT-006), and two rows authored
+concurrently by their own owners — `specs/CHAT-FEDERATION.md` (CR-CHAT-023 + CR-CHAT-024) and
+`specs/CHAT-TRUST.md` (CR-CHAT-024 + CR-CHAT-025). Neither of those two is on disk as of this line; they
+are named here, and indexed in `_index.md` with the same honesty, so this document's boundaries cannot be
+misread as gaps in the series.
 Precedent: `specs/NAMESPACES.md`, `specs/A2A-OPTION.md` (same rigor + format).
 
 ---
@@ -30,8 +49,13 @@ This document is the **spec of record for crier's human↔agent comms interface*
    the normative content is what all four agree on plus the honest record of where they differ.
 3. **The mapping from every drawn UI element to the crier primitive or endpoint that serves it** (§4),
    with `NOT BUILT` stated where nothing serves it yet **and what is owed named**.
-4. **The two invariants** (§5) that no later row in this series may break.
-5. **The decisions of record** for the decisions that belong to this document (§1.3).
+4. **The interface's acceptance test** (§1.4) — the one test the whole interface is judged against
+   (CR-CHAT-015), stated in Bane's own terms.
+5. **The additions of the v2 detail pass** (§3.8): channels / direct messages / named groups
+   (CR-CHAT-013), navigability without depth (CR-CHAT-017), message kinds (CR-CHAT-018) and the
+   late-join context prompt (CR-CHAT-016) — each mapped to its endpoint and its true status in §4.
+6. **The invariants** (§5) that no later row in this series may break.
+7. **The decisions of record** for the decisions that belong to this document (§1.3).
 
 ### 1.2 What this document is NOT normative for
 
@@ -65,11 +89,56 @@ spec of record is a usable index:
 | **D5** | **Where it ships:** the chat surface ships as a **client of the stock server** — a browser client (option: served by crier itself, under the existing server binary/landing surface) that calls only documented public REST/WS. | this document, §5.1 + §7 | *A separate service with its own backend (a bespoke BFF).* Rejected: a second truth, and the MVP's own acceptance (CR-CHAT-009) requires a full round-trip against a stock crier with no private endpoints. This document does not decide *static files from the existing binary* vs *a separately hosted client of the same API* — both satisfy §5.1; §6 carries it. |
 | **D6** | **Dual backend:** JSONL is the **ordered append log and the transport form**; PostgreSQL is the **query view built from it**. No two-way live writes. | `CHAT-STORAGE.md` (CR-CHAT-006) — referenced by `CHAT-SESSIONS.md` §5 | *Two independent stores with live two-way writes.* Rejected: distributed-transaction territory; a conflict loses either way, and a mismatch would be silent drift instead of a finding. |
 
+### 1.3.1 Decisions added by this revision (D10, D11, D12)
+
+The decision ledger has since grown past D6. The decisions of record that bind **this document** beyond
+D1–D6 are **D10–D12**; their normative text is in §3.8 and in `CHAT-SESSIONS.md`, and each names the
+alternative it beat:
+
+| # | Decision | Recorded in | Alternative it beat, and why |
+|---|---|---|---|
+| **D10** | **Late-join context** is an explicit choice — `none` / `summary` (**default**) / `since <message-id>` / `full` — recorded on the thread as a system event naming the mode and the boundary message id. | §3.8.4 + `CHAT-SESSIONS.md` §4.6 | *Quietly hand every joiner the whole history.* Rejected: an agent given everything is indistinguishable from one given nothing, so its answer cannot be explained and "what did it know when it replied" stops being answerable. |
+| **D11** | **Addressing a non-member does NOT spawn a sub-thread.** A reply **stays in thread**; agents talking to each other inside a thread are messages at the **same level**; a sub-thread is created **only when deliberately branched** (an explicit action or shortcut) — never automatically and never merely because a tag was used. | §3.8.2 + `CHAT-SESSIONS.md` §4.5 | *Auto-spawn a level on a tag, or on every reply.* Rejected: it makes depth a function of who replied and how many replied, which fragments one conversation into a tree nobody asked for. **This reverses a v1-era recommendation and is stated as a correction, not quietly applied** (revision line, above; `CHAT-SESSIONS.md` §6 item 5 now ANSWERED). |
+| **D12** | **A tag is ADDRESSING, not an action.** Three message kinds — plain / addressed / TASK-ACTION — are structurally distinguishable on the wire, in storage and in the transcript; only TASK-ACTION may create work or carry a lifecycle. | §3.8.3 + `CHAT-SESSIONS.md` §4.4 | *Treat `@agent` as "execute this".* Rejected: conflating *addressed* with *task* is how a chat becomes a system that silently does things — a tag would become a remote command and an addressed reply would fan out to strangers. |
+
+Decisions **D8** (group kinds) and **D9** (asset permissions) are recorded by `CHAT-ADDRESSING.md` /
+`CHAT-PERMISSIONS.md` and `CHAT-STORAGE.md` respectively; **D13/D14** and **D16** are recorded by the two
+companion specs named at the top of this document. This document only states the two consequences the
+reader of §2 and §4 needs — that a **named** group and a **capability** target are different address
+kinds and are never conflated, and that an attachment is a **reference** — and does not restate their
+design, which is not its to state.
+
+### 1.4 The acceptance test this interface is judged against (CR-CHAT-015)
+
+This is the whole interface's acceptance, in Bane's own terms (2026-10-03), because it is the problem the
+interface exists to solve:
+
+> *"I want to talk to the same agent on the same project but different features … this interface allows
+> me to shape multiple messages when I send a request to the agents, make that thread and then reply in
+> that chat, so I can talk about different parts. Top level, but each thread breaks down deeper."*
+
+Stated as a test, on **one project with one agent**:
+
+1. **Two features are discussed in two PARALLEL threads with no cross-talk.** A message in one thread is
+   not delivered to, ordered against, or rendered inside the other.
+2. **The top level shows the feature conversations distinctly** — as separate threads, not as one
+   interleaved stream of messages.
+3. **A request becomes a thread.** Sending a request does not append to a flat log: it opens (or joins) a
+   thread whose root is that request, and the replies live inside it.
+4. **A thread nests deeper** — the tree supports at least three levels.
+5. **Every message in the tree is reconstructable with its exact parent** from the transcript alone
+   (`CHAT-SESSIONS.md` §4.3).
+
+If Telegram could pass that test, this interface would not be needed. Tests 1–3 are what the
+channel/thread structure owes (CR-CHAT-013/015); test 4 is bounded by the depth rule (D11 — a level is
+**earned**, §3.8.2); test 5 is `CHAT-SESSIONS.md` §4.3.
+
 ---
 
 ## 2. The objects
 
-Seven terms, each one paragraph. `Status` names what exists on the bus today.
+Seven terms from v1, plus three added in v2 (Channel, Direct Message, Named Group), each one paragraph.
+`Status` names what exists on the bus today.
 
 **Principal** — a HUMAN user, distinct from an agent. A Principal can **speak AS a bound agent**, so the
 bus only ever sees agents while permissions and audit stay per-human. *Web / storage status:* **NOT
@@ -113,6 +182,37 @@ permission matrix, a permission chip) is therefore rendered from a source that d
 retention (`retention_seconds`) per realm, plus migration 008's NULL-means-default storage. *Status:*
 **SHIPPED** (`specs/NAMESPACES.md`, CR-FEAT-029). It is the outer wall in this series: a session lives in
 exactly one realm, and no surface here may bridge two.
+
+**Channel** *(v2)* — a **project/namespace-scoped top-level room** (CR-CHAT-013): the place a project
+lives, and the top level the CR-CHAT-015 flow needs ("top level … each thread breaks down deeper"). A
+channel is **not a new object** — it is a **session** whose `kind` is `channel` (`CHAT-SESSIONS.md` §1.2):
+its top level is the project conversation, its threads carry the detail, and it is realm-scoped exactly
+like every other session (no channel bridges two realms). *Status:* **NOT BUILT** — it is the session
+object with a `kind`, owed to CR-CHAT-002 and its route to CR-CHAT-019. The drawn evidence is `A`'s
+session index and `C`'s conversation cards; neither says "channel" and neither is treated as a label
+source.
+
+**Direct Message** *(v2)* — a **1:1 conversation between a Principal and one Agent** (CR-CHAT-013). Like a
+channel it is **a session** with a `kind` (`direct`), not a third primitive: one membership model, one
+transcript, one fan-out rule. It exists so "talk to this one agent about this one thing" stops being a room
+everyone can see. *Status:* **NOT BUILT** — owed CR-CHAT-002 (the session object + `kind`) and CR-CHAT-003
+(what a DM implies for grants, which this document does not decide).
+
+**Named Group** *(v2)* — a **curated, editable set of agents that one message can target at once**
+(CR-CHAT-013, decision **D8**). It is **not a session** and **not a role**: it has no transcript and no
+state of its own. The distinction this document must never let muddy, because both are called "groups":
+
+> A **NAMED group** is **CURATED**: an explicit roster, inspectable and editable by whoever holds the
+> grant, and a message to it routes to the **CURRENT** members — the set is enumerable before the send.
+> A **CAPABILITY target** is **DYNAMIC**: it already ships as a **SELECTOR**
+> (`POST /capabilities/{capability}/inbox` — one live holder per delivery, round-robin). Both are
+> addressable — `@team:x` vs `@cap:y` — and the two are never conflated, on the wire or in the UI
+> (§3.7 item 4 pins the same rule for `D`'s halo).
+
+*Status:* **NOT BUILT** — no group object, no roster and no group fan-out exists today. Owed: CR-CHAT-013
+(the surface), CR-CHAT-022 (the group object + roster), CR-CHAT-004 (the `@team:x` grammar), CR-CHAT-003
+(who may edit a roster). The drawn evidence is `A`'s "Add participants" group rows (`Engineering` 4 …) and
+`D`'s `@Infra-Team` "Team · 6 members" row; their names and counts are placeholder.
 
 ---
 
@@ -315,6 +415,75 @@ the pair above is.
 
 ---
 
+## 3.8 Structure added by the v2 detail pass
+
+Four blocks, added on Bane's 2026-10-03 detail pass. Each is **structure** (not skin); each has a mapping
+row in §4; and none of them is drawn in any of the four images — where a block extends a drawn element,
+that is stated. §3.1's citation rule is unchanged: no wording is taken from a mock.
+
+### 3.8.1 Channels, direct messages and named groups (CR-CHAT-013)
+
+- **A channel list** — the Z2 index's subject may be **channels** (project rooms), not only sessions or
+  agents. A channel is the project's **top level**; the feature conversations live in its threads, which
+  is the shape §1.4's test 2 requires.
+- **A direct-message entry point** — a way to open or continue a **1:1 with one agent**. It is the same
+  room object with a `kind` (`CHAT-SESSIONS.md` §1.2), so it is one list, one membership model and one
+  transcript — not a second inbox.
+- **Named-group rows and a group picker** — `A`'s drawn "Add participants" group rows (`Engineering` 4 …)
+  and `D`'s typed `@Infra-Team` "Team · 6 members" row become **addressable** targets: a message sent to a
+  named group is delivered to each **current** member of that curated roster, through the existing
+  per-participant path (`CHAT-SESSIONS.md` §3.4 rule 7).
+- **The curated-vs-capability rule in the UI** (the same rule §3.7 item 4 pins for `D`'s halo, restated
+  because the picker is where it is easiest to get wrong): a **named group** row may show its roster and
+  its count because both are data; a **capability** row must be drawn as "**one holder takes each
+  delivery**", never as a broadcast. The two are distinguishable at a glance (a roster glyph vs a
+  capability glyph) because they behave differently under the same word, "group".
+
+### 3.8.2 Navigating depth without getting deep (CR-CHAT-017, second half)
+
+Under the depth rule (D11, `CHAT-SESSIONS.md` §4.5) the default shape of a conversation is **flat**: a
+reply stays in thread. Depth exists only where someone deliberately branched. Navigation therefore has two
+jobs — show the branches that **do** exist, and never make the reader walk them:
+
+- **Depth collapse** — below a configurable depth (**default 3**) a branch collapses into an **expandable
+  summary card**. The default is a number with a meaning, not a magic constant: three is the deepest a
+  reader is asked to follow before the interface offers to summarise instead.
+- **A timeline rail** — the branch structure of the thread **and where the reader currently is**. This is
+  the same rail §3.3 item 12 draws for reply elbows, given a whole-thread job.
+- **Per-thread and per-sub-thread summaries** — always an **INDEX**: generated, visibly **marked as
+  generated**, with the raw messages **one click underneath**, and **never** replacing the record
+  (`CHAT-SESSIONS.md` §4.7 fixes the data property; this section fixes the surface).
+- **Search that returns LOCATION** — a hit is a **path**, not a fragment:
+  `namespace > channel > thread > sub-thread > message`, filterable by **agent**, **capability**,
+  **has-attachment** and **unresolved**.
+
+### 3.8.3 Message kinds in the stream (CR-CHAT-018, D12)
+
+The transcript renders **three kinds distinctly** (`CHAT-SESSIONS.md` §4.4 owns the wire and storage
+side):
+
+1. **PLAIN MESSAGE** — a message in a thread; no obligation.
+2. **ADDRESSED MESSAGE** — a tag marks the **intended reader**. **Nothing executes**, and nothing fans
+   out to a third party as a task. This is the default meaning of a tag, and it is drawn as emphasis on
+   the addressed participant, never as a command.
+3. **TASK / ACTION** — the explicit "do this" kind, **rendered differently** (a distinct card, not a
+   bubble) because it is the **only** kind that may create work or carry a lifecycle.
+
+**This is a safety property, not a styling choice.** A UI that renders an addressed message the way it
+renders a task teaches the operator that a tag runs things. A tag must not be clickable into execution,
+and the task affordance must be an explicit, separate action. §5.3 states it as an invariant.
+
+### 3.8.4 The late-join context prompt (CR-CHAT-016, D10)
+
+Adding an agent (or a human) to a thread **in flight** asks **how much context to share** — **none** /
+**summary** (default) / **since <message-id>** / **full** — and the answer is **recorded on the thread as
+a system event** naming the **mode** and the **boundary message id** (`CHAT-SESSIONS.md` §4.6 owns the
+record). The surface must state the **boundary**, not just the word: "summary" alone cannot explain a
+reply whose substance came from the summary's edge. A later change to the mode is permitted and is itself
+recorded.
+
+---
+
 ## 4. The mapping table
 
 Every UI element, the crier primitive or endpoint that serves it, and its status. `SHIPPED` = exists on
@@ -357,15 +526,25 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 31 | **Composer** text input + send | the deliver call: `POST /agents/{id}/inbox` with `payload` (+ `sender`, `request_id`, `delivery_mode`, `timeout_ms`, `priority`, `ttl_seconds`, `idempotency_key`) | **SHIPPED** for a single named target. Composing **into a session** (fan-out to N participants) is **NOT BUILT** (owed: CR-CHAT-002; CHAT-SESSIONS.md §3). |
 | 32 | **Target chip** (`B` "Agent Bus") and the popover's resolved handle | the URL path's agent id, or the capability route (row 28) | **SHIPPED** as two routes; the unified "what am I sending to" control is a client composition. |
 | 33 | **Keyboard hints** (`A` `⌘ K`, "Shift + Enter for newline") | none — client-local | **NOT BUILT** by design; no server meaning. |
-| 34 | **Attachment / embedded block** (`A` `txt` and `bash` blocks; `D`'s cards) | `payload` is opaque (`json.RawMessage` on the deliver body / `[]byte` on the entry); the existing convention reads `payload.text` | **SHIPPED** as an opaque payload — crier defines **no** message-content schema, so a code block is the sender's shape rendered by the client. Attachment *upload/storage* of files is **NOT BUILT**. |
+| 34 | **Attachment / embedded block** (`A` `txt` and `bash` blocks; `D`'s cards) | `payload` is opaque (`json.RawMessage` on the deliver body / `[]byte` on the entry); the existing convention reads `payload.text` | **SHIPPED** as an opaque payload — crier defines **no** message-content schema, so a code block is the sender's shape rendered by the client. An **attachment** is carried **BY REFERENCE** (an asset id): the bytes live in object storage and the **wire never carries them** (CR-CHAT-014, D9). The reference *is* the shipped opaque payload; the **upload / fetch surface is NOT BUILT**, and its design — per-fetch authorization, bucket/prefix policy, GC — is `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`, **not this document**. |
 | 35 | **Tag chips** `# planning` … (`A`) | none — `InboxEntry` has no tag or label field | **NOT BUILT**. Owed: a decision whether a chip is a **relay topic** (fan-out, no history), a session label, or an address form — CR-CHAT-004 / CR-CHAT-005. |
 | 36 | **Message overflow `•••`** (`D`), copy glyphs (`A`), paperclip, emoji, split-send chevron | none — client-local affordances | **NOT BUILT** by design; any action behind them (edit, delete, quote, react) is out of scope (§6). |
 | 37 | **Add-participant** affordance (`A`) | none | **NOT BUILT** (owed: CR-CHAT-002 membership). |
 | 38 | **Namespace / realm wall** behind every element above | `GET /namespaces`; realm decided at registration, delivery, transfer, relay publish + subscribe; per-realm auth posture, rate limit, guard settings, retention | **SHIPPED** (CR-FEAT-029) — and every session-scoped surface owed above must be realm-scoped on arrival. |
+| 39 | **Channel list** — the Z2 index of **channels** (project rooms) (§3.8.1) | none | **NOT BUILT**. Owed: the session list narrowed to a channel kind — `GET /sessions?kind=channel` (or `GET /channels`) — CR-CHAT-013 on the session of CR-CHAT-002; route owed to CR-CHAT-019. |
+| 40 | **Direct-message entry point** — a 1:1 with one agent (§3.8.1) | none | **NOT BUILT**. Owed: the session `kind` (`direct`) + open/list (CR-CHAT-002 / CR-CHAT-013). What a DM implies for grants is CR-CHAT-003. |
+| 41 | **Named-group row / picker**, and "send one message to a curated set at once" (§3.8.1) | none — the capability route (`POST /capabilities/{capability}/inbox`, row 28) is a **different, dynamic** target and is **not** this | **NOT BUILT**. Owed: the named-group object and roster (`POST`/`GET /groups`) and the group fan-out (CR-CHAT-013 / CR-CHAT-022); the `@team:x` grammar is CR-CHAT-004. |
+| 42 | **Depth collapse** below a configurable depth (**default 3**) into an expandable summary card (§3.8.2) | none | **NOT BUILT**. Owed: a transcript read carrying ancestry/depth (`GET /sessions/{id}/messages`, CR-CHAT-019) + the client collapse rule; the default depth is 3. |
+| 43 | **Timeline rail** — branch structure + current position (§3.8.2) | none | **NOT BUILT**. Owed: a branch/ancestry projection over the transcript (the same read as row 42) — it is the drawn rail (row 15) given a whole-thread job. |
+| 44 | **Per-thread / per-sub-thread summary card** — generated, marked generated, raw messages one click under (§3.8.2) | none | **NOT BUILT**. Owed: a summary surface + a generated marker + the raw-message link (CR-CHAT-017). Who generates it and where it is stored is undecided (§6). |
+| 45 | **Search that returns LOCATION** — `namespace > channel > thread > sub-thread > message`, filterable by agent / capability / has-attachment / unresolved (§3.8.2) | none | **NOT BUILT**. Owed: a search read over the transcript tree (CR-CHAT-017; whether it is an index or a scan is CR-CHAT-020, §6). |
+| 46 | **Attachment chip / asset reference** on a message (§3.8, CR-CHAT-014) | none — the payload is opaque today (row 34) | **NOT BUILT**. Owed: the upload/fetch surface. An asset id rides the message; the **bytes live in object storage** and the wire never carries them — design is `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`, not this document. |
+| 47 | **Late-join context-share prompt** — none / summary / since / full, recorded as a system event naming the mode **and the boundary message id** (§3.8.4) | none | **NOT BUILT**. Owed: the recorded share mode + boundary on the thread-membership event (CR-CHAT-016; the record shape is `CHAT-SESSIONS.md` §4.6). |
+| 48 | **Message-kind rendering** — plain vs addressed vs **TASK/ACTION**, visibly distinct (§3.8.3) | none | **NOT BUILT**. Owed: the three kinds distinguishable **on the wire, in storage and in the transcript** (CR-CHAT-018; the record field is `CHAT-SESSIONS.md` §4.4, and it must **not** overload the shipped deliver-body `kind`, which is the envelope kind — `message`/`configure`/`configure_ack`). |
 
 ---
 
-## 5. The two invariants
+## 5. The invariants (the two from v1, plus the v2 safety invariant)
 
 ### 5.1 The UI is a CLIENT of the same REST/WS — no parallel truth, no second delivery path
 
@@ -397,6 +576,18 @@ Binding on every row in this series and on every client built from it:
   the A2A binding are untouched by this series; regressing any of them is a worse outcome than not
   shipping the UI. CR-CHAT-009's acceptance restates it: *the existing pages/landing are untouched.*
 
+### 5.3 A tag is addressing, never an action (CR-CHAT-018, D12) — the v2 safety invariant
+
+- **A tag on a message says who the message is for. It never says "execute this".** Tagging an agent
+  produces an **addressed** message; nothing runs, no work is created, and no third party receives a task
+  or a fan-out. A **TASK/ACTION** is a separate, explicit kind and the **only** kind that may create work
+  (`CHAT-SESSIONS.md` §4.4 — the three kinds and their obligations).
+- **The three kinds are distinguishable on every surface** — wire, storage, transcript and render. A
+  client that cannot tell an addressed message from a task has turned a tag into a remote command, which
+  is the failure this invariant exists to prevent; a UI that draws them the same is a defect, not a style.
+- **Additive to v1's two invariants, and binding on every later row in the series** exactly as they are.
+  Nothing here relaxes §5.1 (one delivery path, a client of the public API) or §5.2 (no regression).
+
 ---
 
 ## 6. Open questions — what the images do NOT determine
@@ -419,7 +610,11 @@ Binding on every row in this series and on every client built from it:
    owned by CR-CHAT-003.
 8. **`C`'s left-rail nav labels** are unreadable placeholder boxes; the icons suggest inbox / chat /
    group / box / document but no label is recorded and none is invented here.
-9. **`D`'s "Thread view" selector** — what the alternative view is (flat? by agent?) is not drawn.
+9. **`D`'s "Thread view" selector** — what the alternative view is (flat? by agent?) is still not drawn,
+   but the question it gestures at is now **decided**: under D11 the default shape is **flat** (a reply
+   stays in thread) and depth exists only where someone deliberately branched (§3.8.2, `CHAT-SESSIONS.md`
+   §4.5). What remains open is only which *presentation* the selector switches between — a flat list and
+   the branch rail are views over the same tree, not two shapes of the data.
 10. **The legible-token requirement** — §4 rows 26/27 require every tag a popover offers to be
     resolvable. `A`'s `@dev-agents` is not resolvable today unless it is a capability name; whether the
     grammar invents group addresses or maps them onto capabilities is CR-CHAT-004's decision.
@@ -427,11 +622,30 @@ Binding on every row in this series and on every client built from it:
 12. **Where the client is served from** (static files from the existing binary vs a separately hosted
     client of the same public API) — D5 fixes *that it is a client*; the packaging is undecided.
 
+Added with the v2 detail pass — open, and deliberately not answered here:
+
+13. **The named-group object's shape** — storage, roster ownership, and who may edit it (CR-CHAT-022 /
+    CR-CHAT-003). This document fixes only that a named group is **curated** and addressable, and that it
+    is never conflated with a capability target.
+14. **Summary generation** (CR-CHAT-017) — who generates a per-thread summary, where it is stored, and
+    whether it is cached. What is **not** open: it is an index, marked generated, with the raw messages
+    one click underneath, and it never replaces the record (`CHAT-SESSIONS.md` §4.7).
+15. **Search** (CR-CHAT-017 / CR-CHAT-020) — an index over the transcript or a scan. What is not open is
+    that a hit returns its **location**, as a path, with the four filters.
+16. **The share-mode boundary when the boundary message is itself summarised away** (CR-CHAT-016) — if
+    `since <message-id>` names a message that has since aged out, the recorded boundary must still be
+    resolvable or must be reported as a hole; the record is the requirement here, the resolution is not
+    decided.
+17. **Attachments** (CR-CHAT-014) — the upload path, per-fetch authorization, bucket/prefix policy and GC
+    are **not designed in this document**; they belong to `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`. The
+    only claim made here is the one the mapping table states: an attachment is a **reference**, and the
+    wire never carries the bytes.
+
 ---
 
 ## 7. Status
 
-**Status: DRAFT v1 · 2026-10-03 · CR-CHAT-001 (+ CR-CHAT-009 for the MVP).**
+**Status: DRAFT v2 · 2026-10-03 · CR-CHAT-001 (+ CR-CHAT-009 for the MVP).**
 
 This document is a **specification of an interface that does not exist yet**. Concretely, **not built**:
 
@@ -451,6 +665,14 @@ This document is a **specification of an interface that does not exist yet**. Co
 - **No queue-depth history / trend, no graded health severity, no fleet presence aggregate, no per-message
   latency, no lease renewal, no session lifecycle state, no session visibility/privacy field, no file
   attachments, no tag/label field on a message.**
+- **Nothing added in v2 is built.** No channel, no direct message, no named-group object or roster
+  (CR-CHAT-013 — `@team:x` is grammar, not a group); no message kind on the wire, in storage or in the
+  transcript, and the shipped envelope `kind` (`message` | `configure` | `configure_ack`) is a **different
+  field** and is not the message kind (CR-CHAT-018); no sub-thread branch operation, no `parent_thread_id`,
+  no anchor, so the depth rule (D11) is a rule with nothing behind it yet (CR-CHAT-017); no recorded
+  late-join context share (CR-CHAT-016); no depth collapse, no timeline rail, no generated summary and no
+  location-returning search (CR-CHAT-017); no attachment upload/fetch surface (CR-CHAT-014 — the reference
+  is the shipped opaque payload, the bytes are not, and the design is not this document's).
 - **No UI at all** — the four images are layout references with placeholder lettering (CR-CHAT-011); no
   HTML client exists in this repository.
 
@@ -461,4 +683,7 @@ per-namespace policy (auth posture, rate limits, guard settings, retention), the
 and `GET /status` / `GET /health`.
 
 Not claimed, and not to be claimed in `docs/claims.yaml`, until they exist: session reads and writes,
-membership, transcripts, threading, principals, grants, roles, the address grammar, and the web client.
+membership, transcripts, threading, principals, grants, roles, the address grammar, and the web client —
+nor any of the v2 additions: channels, direct messages, the named-group object and its fan-out, the
+message kinds, sub-thread branching, the late-join context record, depth collapse, timeline rails,
+generated summaries, location-returning search, or attachment upload/fetch.
