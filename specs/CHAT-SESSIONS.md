@@ -1,18 +1,40 @@
 # CHAT-SESSIONS.md — the session and threading model
 
-Status: **DRAFT v1** · 2026-10-03 · Owner: Bane · Tickets: **CR-CHAT-002** (the session object, data model,
+Status: **DRAFT v2** · 2026-10-03 · Owner: Bane · Tickets: **CR-CHAT-002** (the session object, data model,
 membership, ordered transcript, per-namespace retention) and **CR-CHAT-005** (threading: session vs
 thread vs topic, reply semantics)
+REVISION v2 · 2026-10-03 — folded Bane's detail pass into this document. **Added:** the session `kind` —
+`channel` (a project-scoped top-level room) and `direct` (a 1:1) are the SAME object (§1.2, **CR-CHAT-013**);
+the named-group fan-out rule (§2.1, §3.4 rule 7 — a curated roster fans out, a capability stays a selector,
+**D8**); the three message **kinds** (§4.4 — plain / addressed / TASK-ACTION, a tag is addressing and the
+only kind that may create work, **CR-CHAT-018**, **D12**); the **depth rule** (§4.5 — a reply STAYS IN
+THREAD; a sub-thread exists only when deliberately branched, **CR-CHAT-017**, **D11**); the late-join
+context-share record (§4.6, **CR-CHAT-016**, **D10**); the navigability data properties (§4.7 —
+collapse is derivable, a summary is an index, search returns LOCATION, **CR-CHAT-017**); and the record
+shapes for all of it (§5 — `message_kind`, `chat_threads`, `chat_context_shares`, `session.thread.branch`
+and `session.member.context`). The two rows that are not this document's are named here only for
+completeness: **CR-CHAT-014** (attachments — this document carries just the scope note that the asset
+**reference** rides the opaque `payload` and the bytes do not, §5.2) and **CR-CHAT-015** (nested threads
+and the request→thread flow — the acceptance test is stated in `CHAT-INTERFACE.md` §1.4, and the
+data-side property it leans on is §4.3 here). **Corrected (D11):** v1 left thread depth **open** (§6 item 5 asked
+"arbitrarily deep, or flat with `parent_id` used for quoting only?") and its reply record named `parent_id`
+as *the immediate parent* (§4.2), which could be read as "a reply-to-a-reply is a deeper level". **That is
+not the rule.** `parent_id` is reply **attribution**; a reply never changes `thread_id` and never deepens
+the tree; a level is created **only** by a deliberate branch. §4.2 / §4.3 are corrected in place, §4.5 is
+new, and §6 item 5 is marked ANSWERED — nothing was left silently contradictory.
 Series: `specs/CHAT-INTERFACE.md` (the spec of record — objects, UI surface, the element→endpoint mapping),
 `specs/CHAT-PERMISSIONS.md` (CR-CHAT-003 — principals, roles, grants), `specs/CHAT-ADDRESSING.md`
 (CR-CHAT-004 — the tag grammar), `specs/CHAT-STORAGE.md` (CR-CHAT-006 — the dual backend, the bundle, the
-reconciler).
+reconciler), plus two rows authored concurrently by their own owners and **not on disk as of this line**:
+`specs/CHAT-FEDERATION.md` (CR-CHAT-023 + CR-CHAT-024) and `specs/CHAT-TRUST.md` (CR-CHAT-024 +
+CR-CHAT-025).
 Visual source of truth for the surface: the four approved UI options of 2026-10-03 — `A` channels +
 threads, `B` operator console, `C` triage inbox, `D` chat + capability map — read as layout references
 whose lettering is placeholder (CR-CHAT-011). Cited below as `(A)`…`(D)`.
 Precedent: `specs/NAMESPACES.md`, `specs/A2A-OPTION.md` (same rigor + format).
-Decisions of record owned here: **D1** (a session is an aggregate over durable inbox deliveries — §3.4)
-and the D6 reference (§5).
+Decisions of record owned here: **D1** (a session is an aggregate over durable inbox deliveries — §3.4),
+**D10** (late-join context — §4.6), **D11** (the depth rule, revised — §4.5), **D12** (message kinds —
+§4.4), and the D6 reference (§5).
 
 ---
 
@@ -31,6 +53,7 @@ share; it is **not** a bus primitive and **not** a new transport (§4, D1).
 | `id` | string, opaque, URL-safe | yes | The session's identity. It is the **same value** the wire already carries as `session_id` — on the deliver body (`POST /agents/{id}/inbox`, CR-FEAT-004), on the webhook envelope (`crier.session_id`) and in the federation hold record — and the same value the guard resolves `session:<id>` policy keys against. One identity, no mapping table. |
 | `namespace` | string | yes | The realm the session lives in. `""` is the default namespace (the shipped canonical spelling). A session is attached to exactly one realm, and no surface in this series may move it or bridge two realms (`specs/NAMESPACES.md`). |
 | `title` | string | no | Display only. Drawn in every option (`A` "Build Plan", `D` "#A7F3 · Multi-Agent Task" as a subtitle). Never an addressing target. |
+| `kind` | enum `channel` \| `direct` | yes | The session's **shape** (CR-CHAT-013). `channel` = a **project-scoped top-level room**: the place a project lives, whose **top level is the project conversation** and whose threads carry the detail. `direct` = a **1:1** with one agent. A channel and a DM are the **same object** with different defaults — one membership model, one transcript, one fan-out rule (§3.4) — not two primitives. A session record with no `kind` reads as `channel`, so a record written before this field existed is not a third shape. **NOT BUILT.** |
 | `created_at` | timestamp | yes | When the session was created. |
 | `created_by` | Principal | yes | Who created it. Recorded as an **event** (§2.3), so it is auditable; a session whose creator cannot be named is invalid. |
 | `state` | enum `open` \| `closed` | yes | See §1.3. |
@@ -96,6 +119,16 @@ plus explicit grants; **cross-owner is default-deny**. A session does not weaken
 added to a room is reachable in that room by the room's members per its grants, and a delivery to it from
 outside the room is still refused without one.
 
+**A named group is not a session** (CR-CHAT-013, D8). A **named group** is a curated, editable **set of
+agents** — an address target with a roster, and nothing else: no participants, no transcript, no state. A
+message addressed to it is delivered to each **current** member as one fan-out delivery per member (§3.4
+rule 7), which makes a group send the **same shape** as a session send, with the same per-target
+idempotency and the same recorded audience. It is deliberately **not** the capability selector: a
+capability target resolves to **one live holder**, a named group delivers to **every** member it currently
+holds — the two are different address kinds (`@team:x` vs `@cap:y`) and must never be conflated. Who may
+edit a roster, how a group is stored, and what a group grant means are CR-CHAT-003 / CR-CHAT-022; this
+document fixes only the delivery shape.
+
 ### 2.2 Who may join
 
 **Explicitly, by invitation.** A principal or agent becomes a member when an `add` event names them.
@@ -111,8 +144,13 @@ history, and it is a different primitive by design.
 
 Membership is an **append-only event sequence**, never a mutable set:
 
-- `session.member.add` — carries `member_type` (principal | agent), `member_id`, `role`, `actor`, `ts`.
+- `session.member.add` — carries `member_type` (principal | agent), `member_id`, `role`, `actor`, `ts`, and
+  — for a join to a **thread in flight** — an optional `context_share` naming the share mode and the
+  boundary message id (§4.6, D10).
 - `session.member.remove` — carries `member_type`, `member_id`, `actor`, `ts`, optional `reason`.
+- `session.member.context` — a **later change** to a member's `context_share` (§4.6 rule 3): carries
+  `member_type`, `member_id`, `context_share`, `actor`, `ts`. It is a new event, never a rewrite of the
+  `add` — "what did it know when it replied" stays answerable after the fact.
 - A role change is a `remove` + `add` pair (or a distinct `role.change` event — an implementation choice,
   **NOT BUILT** either way). It is never an in-place edit.
 
@@ -224,6 +262,12 @@ Rules that make it safe:
 6. **Cost is visible, not hidden.** N participants means N deliveries; the room's audience is knowable
    before the send (that is why §2.2 refuses open self-join). A send to a large room is a large write, and
    the interface must be able to say so.
+7. **A named group fans out; a capability does not** (CR-CHAT-013, D8). A message addressed to a **named
+   group** issues one delivery **per distinct current member** through the same path — the roster is
+   curated data, so the set is enumerable and recordable *before* the send, exactly as a session audience
+   is, and each delivery carries the same per-target idempotency key (rule 2). A **capability** target
+   resolves to **one** holder (rule 4). The two are different address kinds and are never conflated: a
+   group's audience is knowable, a capability's holder is decided at delivery time and is recorded then.
 
 **NOT BUILT:** the one-call fan-out. A client can compose it today by issuing one
 `POST /agents/{id}/inbox` per participant with a shared `session_id` / `thread_id` — but there is no
@@ -256,13 +300,18 @@ server route, no membership list to enumerate, and no record returned. Owed: `PO
 |---|---|---|---|---|
 | **topic** | A named fan-out channel. A "channel" in the broadcast sense is a topic. | Relay pub/sub: `POST /relay/publish`, `GET /relay/subscribe/{topic}` (WebSocket), `GET /relay/topics`. Subscriber-side wildcards `*` (one segment) and `>` (one or more trailing segments); scoped to a namespace, so two realms using the identical literal topic are disjoint sets; no cross-realm bridging. | **NONE** — a subscriber that is offline misses the event. That is the primitive's contract, not a bug. | every current subscriber |
 | **inbox** | A durable, directed message slot for ONE agent. | `POST /agents/{id}/inbox` (deliver) · `GET /agents/{id}/inbox` (retrieve, with `lease` / `lease_seconds` / `limit` / `wait`) · `POST /agents/{id}/inbox/ack` · `GET /agents/{id}/inbox/stats` · `POST /agents/{id}/inbox/transfer` · `GET /agents/{id}/inbox/dead-letters`. Capability addressing: `POST /capabilities/{capability}/inbox` (resolves to one holder). | **DURABLE** — the message waits through the agent being offline, with TTL, lease/ack, dead-lettering, federation fallback. | exactly one agent id |
-| **session** | The **durable room**: participants, membership, an ordered transcript. This document. | **Nothing of its own.** A session is an **aggregate** over inbox deliveries (§3.4, D1). Its `session_id` is already a wire tag (deliver body, webhook `crier.session_id`, federation hold) and a guard policy key. | **DURABLE**, per §3.5. | N principals + agents |
-| **thread** | A **reply subtree inside one session**. | Carried as `thread_id` on the same deliver body (CR-FEAT-004) and as a guard policy key (`thread:<id>`) — so the guard can already scope a policy to a conversation or a thread. | durable with its session | N, inside one session |
+| **session** | The **durable room**: participants, membership, an ordered transcript. This document. A **channel** (a project-scoped top-level room) and a **direct message** (1:1 with one agent) are session `kind`s (§1.2), not new levels. | **Nothing of its own.** A session is an **aggregate** over inbox deliveries (§3.4, D1). Its `session_id` is already a wire tag (deliver body, webhook `crier.session_id`, federation hold) and a guard policy key. | **DURABLE**, per §3.5. | N principals + agents |
+| **thread** | A **named reply subtree inside one session**: a thread root plus its replies, or a **sub-thread deliberately branched** off a message in another thread (§4.5). A reply never leaves its thread and never adds a level. | Carried as `thread_id` on the same deliver body (CR-FEAT-004) and as a guard policy key (`thread:<id>`) — so the guard can already scope a policy to a conversation or a thread. | durable with its session | N, inside one session (a **tree** of threads) |
 
 **The rule the UI must obey:** there is no fourth concept. `A`'s channels + threads, `B`'s session
 console, `C`'s conversation cards and `D`'s session hub are all views over *session* (Z3) with *topic* as
 the only fan-out-without-history primitive, and *inbox* as the only delivery mechanism. A UI element that
 needs a level not in this table is a finding, not a new primitive.
+
+Two v2 additions do **not** add a level, and it is worth saying so explicitly because both sound like they
+might: a **channel** and a **direct message** are session `kind`s (§1.2), so they are views over *session*;
+a **named group** is an **address target over agents** (§2.1), not a room and not a level. The only tree in
+this model is the **thread tree**, and it grows only by a deliberate branch (§4.5).
 
 Note what is **PARTIAL** today: `thread_id` is a **wire tag and a policy key, not a stored field** —
 `registry.InboxEntry` carries no `session_id` and no `thread_id`. A thread is therefore **not
@@ -276,8 +325,9 @@ transcript is the record (§4.3).
 | Field | Meaning |
 |---|---|
 | `session_id` | The room. Same identity as the deliver body's `session_id`. |
-| `thread_id` | The **root** message id of the subtree — not the immediate parent. One key per subtree. |
-| `parent_id` | The **immediate** parent's message id. Present on a reply, absent on a thread root. |
+| `thread_id` | The **thread this record belongs to** — the id of that thread's ROOT message. One key per thread. A reply **never** carries a new `thread_id`: replying does not move a record out of its thread (D11, §4.5). |
+| `parent_id` | The **immediate** parent's message id — what this record replies to. Present on a reply, absent on a thread root. It is **reply attribution, not depth**: a reply-to-a-reply is at the SAME level, in the SAME thread (D11, §4.5). |
+| `message_kind` | `plain` \| `addressed` \| `task` — the three kinds of §4.4. Required, and **not** the deliver body's existing `kind` (that field is the envelope kind: `message` \| `configure` \| `configure_ack`) — a different field, never overloaded (§4.4 rule 4). |
 | `message_id` | This message's id, identical to the id the deliver path returns (one identity, §3.4 rule 1). |
 | author | The authoring agent id, **plus** the Principal when a human spoke as it (CR-CHAT-007). |
 | `ts`, `seq` | Ordering (§3.1). |
@@ -286,6 +336,10 @@ transcript is the record (§4.3).
 **Root vs reply.** A message with no `parent_id` is a **thread root**; its `thread_id` **is its own
 message id**. A reply's `thread_id` is the root's id, which is what makes a subtree a single lookup and
 what makes `A`'s "4 replies" pill and `D`'s connector rail derivable from data rather than maintained.
+**A reply does not deepen the thread**: replying is level-preserving, and the depth rule (§4.5, D11) is why
+the default shape of a conversation is flat. This sentence is a **correction** — v1 named `parent_id` as
+"the immediate parent" and left depth open; the record fields are unchanged, but their reading is now
+fixed: `parent_id` says *what was replied to*, never *how deep this is*.
 
 **The default audience**, when the sender names no address:
 
@@ -324,6 +378,11 @@ Consequences:
 
 - `parent_id` and `thread_id` are on **every** message record — a root's `parent_id` is absent, and its
   `thread_id` equals its own `message_id`. There is no "obvious from context" case.
+- **A record's LEVEL is its thread, never its `parent_id` chain.** Depth is a thread's position in the
+  **thread tree** (§4.5): the thread's `parent_thread_id` and `anchor_message_id` state where it hangs,
+  and a reply's `parent_id` states only what it replied to. A reconstruction therefore attaches records
+  to their replies **without inferring a level from reply hops** — the correction D11 makes (§4.2). A
+  reader that treats a three-deep `parent_id` chain as three levels has misread the record.
 - A record whose `thread_id` is not the id of any root in the same transcript, or whose `parent_id` names
   a message that is not in the transcript, is a **broken thread**: it is **reported as a finding**, never
   silently re-rooted or dropped. (A record can legitimately reference a parent that was removed by
@@ -334,6 +393,144 @@ Consequences:
 - The audience is recorded on each record (§4.2), so a reconstruction does not have to replay membership
   to know who was addressed — and conversely, membership replay (§2.3) and thread reconstruction are
   independent, so neither depends on the other's correctness.
+
+### 4.4 Message kinds — a tag is addressing, not an action (CR-CHAT-018, D12)
+
+Three kinds. They are **structurally distinguishable on the wire, in storage and in the transcript**, not
+merely by reading the text:
+
+| Kind | What it is | Obligation | May create work / carry a lifecycle |
+|---|---|---|---|
+| **plain** | A message in a thread, seen by the thread's participants. | none | no |
+| **addressed** | A message carrying one or more `Address` tags (`specs/CHAT-ADDRESSING.md`). The tagged agent is the **intended reader**; everyone else still sees it per the thread's own audience rule (§4.2). | none — **nothing executes** | no |
+| **task** | The explicit "do this" kind. | the addressee is asked to act | **yes — this kind only** |
+
+Rules:
+
+1. **A tag is addressing.** `@agent` inside a message says "this is for you". It does **not** mean "execute
+   this", it does **not** fan out to other agents as a task, and it does **not** create a sub-thread
+   (§4.5, D11). This is the **safety property**: conflating *addressed* with *task* is how a chat with
+   agents becomes a system that silently does things — a tag would be a remote command and an addressed
+   reply would fan out work to strangers.
+2. **Only `task` may create work**, be claimed, run, complete or fail. Plain and addressed messages have
+   no lifecycle. A `task` is also the only kind that may be addressed to a capability or a named group
+   **for execution** (§2.1, §3.4).
+3. **The kinds are data, not inference.** A record carries its kind; a reader must be able to tell an
+   addressed message from a task **without guessing from its text**, and a client must not upgrade a kind
+   on its own (no client-side "this looked like a task").
+4. **The field is NOT the shipped envelope `kind`.** The deliver body's existing `kind` is the **envelope
+   kind** — `message` (default) | `configure` | `configure_ack` (`docs/openapi.yaml`, the deliver request)
+   — and it must **not** be overloaded: a `configure` directive and a task are different things. The
+   message kind therefore rides its **own record field** (`message_kind`, §5), and how it maps onto the
+   deliver body is a decision for CR-CHAT-018 / CR-CHAT-019 — never a redefinition of an existing field.
+5. **Rendering follows the kind** (`CHAT-INTERFACE.md` §3.8.3): an addressed message is emphasis on the
+   addressed participant; a task is a distinct card. Drawing them alike is a defect.
+
+**NOT BUILT:** no wire field, no stored field and no record type carries the message kind today; the
+three-way distinction exists only as this rule. The one identity discipline of §3.4 is unaffected — a
+message has one id across the room whatever its kind.
+
+### 4.5 The depth rule — depth is EARNED (CR-CHAT-017, decision D11)
+
+> **A reply STAYS IN THREAD.** Agents talking to each other inside a thread are messages at the
+> **same level** — not new levels. Depth is **not** a function of who replied, of how many replied, or of
+> a tag being used. A **sub-thread** is created **only when deliberately branched** (an explicit action or
+> a shortcut the sender takes on purpose), and the **thread tree** is the only thing that deepens.
+
+**This corrects an earlier answer**, and the correction is stated rather than quietly applied. v1 left the
+question **open** — §6 item 5 asked whether a thread is "arbitrarily deep, or flat with `parent_id` used
+for quoting only" — and its reply record (§4.2) named `parent_id` as *the immediate parent*, which can be
+read as *a reply-to-a-reply is a deeper level*. **That reading is wrong.** `parent_id` is reply
+attribution; a level is a **thread**; a thread appears only when one is deliberately created. Under D11, §6
+item 5 is **ANSWERED** (below).
+
+Consequences, all binding:
+
+1. **Addressing a non-member does NOT spawn.** A message that tags an agent who is not in the current
+   thread's audience does **not** spray the thread to them and does **not** open a level. The tag is
+   addressing (§4.4); the audience rule is §4.2, and a sender who tags someone outside the audience sees
+   the **resolution** (who would be notified) before the send.
+2. **A deliberate branch creates a sub-thread.** When the sender takes the explicit branch action — a
+   command, a shortcut, a pick in the UI — a **sub-thread** is created: a **new thread** whose root is the
+   triggering message, anchored to the message it branched from in the parent thread. The parent thread is
+   left **byte-identical apart from an anchor** to the child: no message is moved, re-parented or copied,
+   and **branching issues no fan-out by itself**.
+3. **The parent's anchor is the whole trace.** The branch is recorded once, on the child thread (`§5.1`,
+   `session.thread.branch`), carrying `parent_thread_id` and `anchor_message_id`. Nothing about the
+   parent's messages changes, so a reader who never opens the child sees the parent exactly as it was.
+4. **A sub-thread is a thread.** It has its own `thread_id` (its root's message id), it is a normal
+   address target (`thread_id` on the deliver body, §4.1), and it obeys every rule in this document
+   including §4.3's reconstruction property, extended by the thread tree.
+5. **Depth is data, not layout.** The UI may collapse, summarise and rail the tree
+   (`CHAT-INTERFACE.md` §3.8.2; §4.7 here), but the tree it draws is the thread tree the records state —
+   **never** a reply count, a participation count or any inferred shape.
+6. **Two branches from one message are siblings, not levels.** Branching twice from the same message
+   creates two parallel sub-threads; neither is deeper than the other, and each carries its own anchor.
+
+**NOT BUILT:** no branch operation, no `parent_thread_id`, no anchor field and no sub-thread record exists
+today — the rule has nothing behind it yet.
+
+### 4.6 Late join — the context-share record (CR-CHAT-016, decision D10)
+
+Adding an agent (or a human) to a thread **in flight** asks **how much context to share**. Four modes:
+
+| Mode | What the joiner is given |
+|---|---|
+| `none` | nothing from before the join — the joiner starts fresh |
+| `summary` | a generated digest — **the default** (D10) |
+| `since <message-id>` | the messages after a named **boundary** message |
+| `full` | the whole thread history |
+
+Rules:
+
+1. **The answer is recorded on the thread as a system event**, naming the **mode** and the **boundary
+   message id** — as part of the member-add event, or as the `session.member.context` event that follows it
+   (§2.3). Without that record, an agent given everything is indistinguishable from one given nothing, and
+   *why it answered as it did* is unanswerable.
+2. **`summary` is a generated index**, not a replacement for the record: it is marked generated, and the
+   raw messages remain reachable underneath it (§4.7 rule 2). A joiner given `summary` can always reach the
+   raw thread.
+3. **A later change is permitted and is itself recorded.** Changing the mode appends a
+   `session.member.context` event — a new record, never a rewrite of the add. The transcript therefore
+   shows the share history, and "what did it know when it replied" stays answerable at any later point.
+4. **A spawned sub-thread inherits the question.** A sub-thread's first member-add records its own share
+   mode and boundary, defaulting to `summary` like any other join (§4.5).
+5. **A share mode never widens the audience.** What a joiner is *given* is a context decision recorded on
+   the room; **who receives deliveries** stays the audience rule of §4.2 and the fan-out of §3.4. A share
+   mode cannot make a non-participant a recipient, and it cannot reach into an inbox: the delivery mechanics
+   are unchanged.
+6. **`none` is a first-class answer, not a failure.** It is recorded like any other, so a joiner that was
+   deliberately given nothing is distinguishable from one whose context was never decided.
+
+**NOT BUILT:** nothing records a share mode or a boundary message id today; there is no join-time prompt
+and no `session.member.context` event. Owed: CR-CHAT-016 (the surface and the record) with the shape in §5.
+
+### 4.7 Navigability — what the record must support (CR-CHAT-017, second half)
+
+The visual surface is `CHAT-INTERFACE.md` §3.8.2. The properties **these records must have**, so the UI is
+never asked to invent structure the transcript does not carry:
+
+1. **Collapse is derivable.** A reader can compute a message's **level** (its thread's depth in the thread
+   tree) and a thread's **branch factor** from the records alone: `thread_id`, `parent_thread_id` and the
+   anchor (§4.5) give the tree, and `seq` gives the order. A collapse threshold (**default 3**) is a
+   **client rule over that data** — never a stored shape and never a server-side truncation.
+2. **A summary is an INDEX, never a record.** A summary — per thread or per sub-thread — is **generated**,
+   is **marked as generated**, and **never replaces** the raw messages: the messages it summarises stay in
+   the transcript and the summary points at them. A summary that exists without its raw messages under it
+   is a defect, because the transcript is the record (§4.3).
+3. **Search returns LOCATION.** A hit must be answerable as a **path**:
+   `namespace > channel > thread > sub-thread > message`. The transcript tree supplies every element of
+   that path (the session's `namespace`, its `kind`, the thread, its parent thread, the message), and the
+   search is filterable by **agent**, **capability**, **has-attachment** and **unresolved**.
+4. **"Unresolved" is derivable, not a trusted flag.** A thread holding a `task`-kind message with no
+   terminal outcome, or a message whose delivery outcomes are incomplete (§3.2), is **unresolved** — a
+   query over the records, not a separate bit a client is trusted to maintain.
+5. **Attachment presence is derivable per message.** Whether a message carries an attachment is a property
+   of the message's (opaque) payload — the asset **reference** of CR-CHAT-014 — so the `has-attachment`
+   filter needs the reference on the message, not a content index.
+
+**NOT BUILT:** no depth/ancestry read, no summary surface, no generated marker and no search read exist.
+The route work is CR-CHAT-017 / CR-CHAT-019 / CR-CHAT-020.
 
 ---
 
@@ -351,44 +548,72 @@ shape on both sides**, so the two views are built from the same facts and a roun
 One **record per line**, `v` (record version) first, so a reader can dispatch on a version it knows:
 
 ```
-{"v":1,"type":"session.create","session_id":"…","seq":1,"ts":"…","namespace":"…","title":"…","created_by":{…},"retention_seconds":86400}
-{"v":1,"type":"session.member.add","session_id":"…","seq":2,"ts":"…","member_type":"agent","member_id":"atlas","role":"member","actor":{…}}
-{"v":1,"type":"session.member.remove","session_id":"…","seq":3,"ts":"…","member_type":"agent","member_id":"atlas","actor":{…},"reason":"…"}
-{"v":1,"type":"session.message","session_id":"…","seq":4,"ts":"…","message_id":"…","thread_id":"…","author":{…},"payload":…,
+{"v":1,"type":"session.create","session_id":"…","seq":1,"ts":"…","namespace":"…","kind":"channel","title":"…","created_by":{…},"retention_seconds":86400}
+{"v":1,"type":"session.member.add","session_id":"…","seq":2,"ts":"…","member_type":"agent","member_id":"atlas","role":"member","actor":{…},
+ "context_share":{"mode":"summary","boundary_message_id":"…"}}
+{"v":1,"type":"session.member.context","session_id":"…","seq":3,"ts":"…","member_type":"agent","member_id":"atlas","context_share":{"mode":"full"},"actor":{…}}
+{"v":1,"type":"session.member.remove","session_id":"…","seq":4,"ts":"…","member_type":"agent","member_id":"atlas","actor":{…},"reason":"…"}
+{"v":1,"type":"session.message","session_id":"…","seq":5,"ts":"…","message_id":"…","thread_id":"…","message_kind":"addressed","author":{…},"payload":…,
  "audience":{"rule":"session"|"reply-default"|"explicit","targets":[{"kind":"agent","id":"nimbus"},…]},
  "outcomes":[{"target":"nimbus","outcome":"delivered","inbox_entry_id":"…"}],"idempotency_key":"…"}
-{"v":1,"type":"session.thread.reply","session_id":"…","seq":5,"ts":"…","message_id":"…","thread_id":"…","parent_id":"…","author":{…},"payload":…,
+{"v":1,"type":"session.thread.branch","session_id":"…","seq":6,"ts":"…","thread_id":"…","parent_thread_id":"…","anchor_message_id":"…","root_message_id":"…","actor":{…},"reason":"…"}
+{"v":1,"type":"session.thread.reply","session_id":"…","seq":7,"ts":"…","message_id":"…","thread_id":"…","parent_id":"…","message_kind":"plain","author":{…},"payload":…,
  "audience":{…},"outcomes":[…],"idempotency_key":"…"}
-{"v":1,"type":"session.close","session_id":"…","seq":6,"ts":"…","actor":{…},"reason":"…"}
-{"v":1,"type":"session.reopen","session_id":"…","seq":7,"ts":"…","actor":{…}}
+{"v":1,"type":"session.close","session_id":"…","seq":8,"ts":"…","actor":{…},"reason":"…"}
+{"v":1,"type":"session.reopen","session_id":"…","seq":9,"ts":"…","actor":{…}}
 ```
 
 Fields shared by every record: `v`, `type`, `session_id`, `seq`, `ts`. `session.message` and
-`session.thread.reply` carry `message_id`, `thread_id`, `author`, `payload`, `audience`, `outcomes`,
-`idempotency_key`; `thread.reply` additionally carries `parent_id`. Replay: order by `(session_id, seq)`,
-**keep-LAST** per `(session_id, seq)` (identical duplicates are no-ops), idempotent by `message_id` for
-message records. A `session.message` whose `outcomes` are incomplete is a message with unresolved
-deliveries — a repairable state (§3.2), not a corrupt line.
+`session.thread.reply` carry `message_id`, `thread_id`, **`message_kind`** (`plain` \| `addressed` \|
+`task` — §4.4), `author`, `payload`, `audience`, `outcomes`, `idempotency_key`; `thread.reply`
+additionally carries `parent_id`. The **thread tree** is recorded by `session.thread.branch` — the new
+thread's `thread_id` plus `parent_thread_id` and `anchor_message_id` (§4.5) — and the **late-join
+context** by the optional `context_share` on `session.member.add` and by `session.member.context` for a
+later change (§4.6). A `session.member.add` for a **channel** join carries no `context_share` unless the
+room is in flight; a `session.message` or `session.thread.reply` record is a **thread root** when its
+`thread_id` equals its own `message_id`, and the only record that creates a new `thread_id` is
+`session.thread.branch`. Replay: order by `(session_id, seq)`, **keep-LAST** per `(session_id, seq)`
+(identical duplicates are no-ops), idempotent by `message_id` for message records. A `session.message`
+whose `outcomes` are incomplete is a message with unresolved deliveries — a repairable state (§3.2), not a
+corrupt line.
 
 ### 5.2 PostgreSQL — the query view
 
 Built from the log; never written in parallel with it (D6). Table and column names are fixed here so the
 view and the client cannot invent two schemas:
 
-- `chat_sessions(id PK, namespace, title, created_by, created_at, state, closed_at, retention_seconds,
-  group_id, visibility)` — one row per session, the projection of `create`/`close`/`reopen`.
+- `chat_sessions(id PK, namespace, kind, title, created_by, created_at, state, closed_at,
+  retention_seconds, group_id, visibility)` — one row per session, the projection of
+  `create`/`close`/`reopen`. `kind` is `channel` \| `direct` (§1.2), so a channel list and a DM list are
+  two queries over one table — not two tables.
 - `chat_session_members(session_id FK, member_type, member_id, role, added_at, removed_at, added_by,
   removed_by)` — the projection of the membership events; a membership **at time T** is a query over
   `added_at <= T AND (removed_at IS NULL OR removed_at > T)`.
-- `chat_transcript(session_id, seq, message_id, thread_id, parent_id, author_type, author_id,
+- `chat_transcript(session_id, seq, message_id, thread_id, parent_id, message_kind, author_type, author_id,
   principal_id, payload, guard jsonb, audience jsonb, created_at, PRIMARY KEY (session_id, seq))` — the
   projection of message records. `(session_id, seq)` is the ordering key; `thread_id` + `parent_id` are
-  what §4.3 requires; `guard` carries the shipped `guard.Meta` so a flagged message is queryable, not
-  just rendered.
+  what §4.3 requires (`parent_id` is **attribution**; a message's LEVEL is its thread, read from
+  `chat_threads` below); `message_kind` is `plain` \| `addressed` \| `task` (§4.4), so the
+  addressed-vs-task distinction is **queryable**, not only parsed from text; `guard` carries the shipped
+  `guard.Meta` so a flagged message is queryable, not just rendered.
 - `chat_deliveries(session_id, message_id, target_agent_id, inbox_entry_id, outcome, updated_at,
   PRIMARY KEY (session_id, message_id, target_agent_id))` — the per-target fan-out outcome (§3.2). It is
   a **projection**, not a queue: the authoritative delivery is the agent's inbox entry, and this row is
   how the room reads its outcome back.
+- `chat_threads(thread_id PK, session_id, parent_thread_id, root_message_id, anchor_message_id, created_by,
+  created_at)` — the projection of `session.thread.branch` (§4.5): the **thread tree**, one row per thread.
+  A root thread has `parent_thread_id` NULL and `anchor_message_id` NULL; a sub-thread names both. The
+  tree is what depth (§4.7 rule 1) is a query over — never `parent_id` hop-counting.
+- `chat_context_shares(session_id, member_type, member_id, mode, boundary_message_id, set_by, set_at)` —
+  the projection of the member's latest `context_share` (§4.6, D10). A **latest-state** row for the
+  question "what does this member hold", with the **events** (`session.member.add` /
+  `session.member.context`) remaining the record of how it changed.
+
+Two v2 notes on scope, so neither is smuggled in through the shapes above: the **named group** is **not**
+a session table (its object and roster are CR-CHAT-022, its grants CR-CHAT-003 — this document only fixes
+that its send fans out like a session send, §3.4 rule 7), and an **attachment** is a **reference inside
+the (opaque) `payload`**, not a table here — its storage, authorization and lifecycle are
+`specs/CHAT-STORAGE.md` and `specs/CHAT-PERMISSIONS.md` (CR-CHAT-014, D9).
 
 Two properties the shapes exist to guarantee: a session round-trips through Postgres **and** through a
 JSONL bundle with identical content, and a divergence between the two is **detected** rather than
@@ -409,12 +634,15 @@ accepted (`CHAT-STORAGE.md`).
 3. **Transcript vs delivery retention.** Should the transcript be retainable **longer** than the message
    TTL for a realm (so a room keeps its history after inboxes have expired)? Today the realm has one
    `retention_seconds`; a second axis is an owner decision.
-4. **Are DMs a session type?** A two-party conversation is expressible as a session with two members, but
-   whether it is the *same* object with a `direct` flag, or a distinct type with different visibility
-   defaults, is undecided — and CR-CHAT-003 owns what a DM implies for grants.
-5. **Thread depth / reply-to-reply.** The images draw nested connectors (`D`) and a single reply cluster
-   (`A`). Is a thread arbitrarily deep, or flat with `parent_id` used for quoting only? §4.3 works either
-   way, but the UI rules differ.
+4. **Are DMs a session type? — ANSWERED (v2).** Yes: a DM is the **same object** with `kind: direct`
+   (§1.2), a 1:1 with one agent, not a third primitive — one membership model, one transcript, one
+   fan-out rule. The *permission* consequence (what a DM implies for grants, and whether a DM defaults to
+   different visibility) remains CR-CHAT-003's, and is not fixed here.
+5. **Thread depth / reply-to-reply. — ANSWERED, and the earlier reading was WRONG (v2, D11).** v1 asked
+   whether a thread is arbitrarily deep, or flat with `parent_id` for quoting only. The rule is §4.5: **a
+   reply STAYS IN THREAD** — agents talking to each other are messages at the **same level** — and a
+   sub-thread is created **only when deliberately branched**. `parent_id` is attribution, not depth. What
+   the images draw as nested connectors (`D`) is therefore the **thread tree**, which is flat by default.
 6. **Can a thread span sessions?** A strict no is assumed (a thread is inside one session). If a
    cross-room reply is ever wanted, it is a new primitive and needs a decision, not a field reuse.
 7. **Edit / delete / react.** Out of scope here; if wanted, they are **new records** (never mutations),
@@ -422,6 +650,8 @@ accepted (`CHAT-STORAGE.md`).
    menu is not drawn.
 8. **Session groups.** `group` (CR-CHAT-010) is reserved but its semantics — is a group a namespace, a
    label, or a room-of-rooms — are undecided; a room-of-rooms must not become a second membership model.
+   **This is not the named group of §2.1** (CR-CHAT-013): that is an **address target over agents**, with
+   no session grouping semantics at all. The two must not be merged in storage or in naming.
 9. **Presence of a *human* participant.** The registry's derived presence is mesh/registry evidence for
    **agents**; a Principal's online state has no server signal and would need one (or the UI must not
    draw a dot for a human). `A` draws a presence dot on every avatar, including principals.
@@ -430,11 +660,33 @@ accepted (`CHAT-STORAGE.md`).
 11. **Who may close a session**, and can a member be removed from a closed room? §1.3 forbids new records
     after close, so the answer must be "reopen first" or "close is not absolute".
 
+Added with the v2 detail pass — open, and deliberately not answered here:
+
+12. **The named-group object** (CR-CHAT-022 / CR-CHAT-003) — its storage, its roster, who may edit it and
+    what a group grant means. This document fixes only the **delivery shape** (§2.1, §3.4 rule 7).
+13. **Summary generation** (CR-CHAT-017) — who generates a per-thread summary, where it is stored and
+    whether it is cached. Not open: it is an **index** — generated, marked generated, raw messages one
+    click under it, never replacing the record (§4.7 rule 2).
+14. **Search** (CR-CHAT-017 / CR-CHAT-020) — an index over the transcript or a scan. Not open: a hit
+    returns its **location** as a path, with the four filters (§4.7 rule 3).
+15. **The message kind on the wire** (CR-CHAT-018 / CR-CHAT-019) — the record field is fixed here
+    (`message_kind`, §5); how it maps onto the deliver call, and whether a `task` reuses the shipped
+    lease/ack lifecycle or carries a lifecycle of its own, is the row's decision. What is fixed: the
+    shipped envelope `kind` is **not** the message kind and is not redefined (§4.4 rule 4).
+16. **A boundary that has aged out** (CR-CHAT-016) — when `since <message-id>` names a message removed by
+    retention, the recorded share is a **hole** that must be reported as one; how the reader distinguishes
+    it from a never-shared context is undecided (it is the same distinction §4.3's broken-thread finding
+    needs).
+17. **The attachment reference's shape** (CR-CHAT-014 / CR-CHAT-006) — the reference rides the opaque
+    `payload`; its exact form, and whether the transcript duplicates it as a column for the
+    `has-attachment` filter (§4.7 rule 5), is `CHAT-STORAGE.md`'s decision alongside
+    `CHAT-PERMISSIONS.md` for fetch authorization (D9).
+
 ---
 
 ## 7. Status
 
-**Status: DRAFT v1 · 2026-10-03 · CR-CHAT-002 + CR-CHAT-005.**
+**Status: DRAFT v2 · 2026-10-03 · CR-CHAT-002 + CR-CHAT-005.**
 
 **Not built** — this document specifies objects and rules that no route implements:
 
@@ -456,6 +708,16 @@ accepted (`CHAT-STORAGE.md`).
 - **No lease renewal** — the lease is taken per retrieve and released by ack; the renewal event `B` draws
   has no operation behind it.
 - **No session state surface, no visibility/privacy field, no session group, no edits or reactions.**
+- **Nothing added in v2 is built either.** No session `kind` — no channel and no DM (§1.2, CR-CHAT-013);
+  no named-group object, roster or group fan-out (§2.1, §3.4 rule 7 — `@team:x` is grammar, not a group);
+  no `message_kind` on any wire field, stored field or record, and the shipped envelope `kind`
+  (`message` | `configure` | `configure_ack`) is a **different field** that this document forbids
+  overloading (§4.4); no branch operation, no `session.thread.branch` record, no `parent_thread_id` and no
+  anchor, so the depth rule (D11, §4.5) is a rule with nothing behind it; no context-share record
+  (`session.member.context`) and no join-time prompt (§4.6, D10); no depth/ancestry read, no generated
+  summary, no generated marker and no search that returns a location (§4.7); no asset reference beyond the
+  shipped opaque `payload`, and no attachment upload/fetch (CR-CHAT-014 — designed by `CHAT-PERMISSIONS.md`
+  / `CHAT-STORAGE.md`, not here).
 
 **Shipped and reused, not to be reinvented:** the durable inbox with lease / ack / TTL / dead letters
 (`GET /agents/{id}/inbox`, `/ack`, `/stats`, `/transfer`, `/dead-letters`), idempotent delivery
@@ -464,4 +726,7 @@ accepted (`CHAT-STORAGE.md`).
 primitive, the guard verdict metadata, and the derived agent presence (CR-FEAT-024).
 
 Not claimed, and not to be claimed in `docs/claims.yaml`, until they exist: sessions, membership,
-transcripts, threads, the fan-out, session retention, session state, and the session storage shapes.
+transcripts, threads, the fan-out, session retention, session state, and the session storage shapes — nor
+any v2 addition: session `kind` (channel / direct), the named-group fan-out, the message kinds, sub-thread
+branching, the depth rule, the late-join context record, the navigability properties, or the attachment
+reference.
