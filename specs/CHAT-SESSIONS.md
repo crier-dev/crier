@@ -11,8 +11,12 @@ only kind that may create work, **CR-CHAT-018**, **D12**); the **depth rule** (�
 THREAD; a sub-thread exists only when deliberately branched, **CR-CHAT-017**, **D11**); the late-join
 context-share record (§4.6, **CR-CHAT-016**, **D10**); the navigability data properties (§4.7 —
 collapse is derivable, a summary is an index, search returns LOCATION, **CR-CHAT-017**); and the record
-shapes for all of it (§5 — `message_kind`, `chat_threads`, `chat_context_shares`, the `session.thread.branch`
-and `session.member.context` records). **Corrected (D11):** v1 left thread depth **open** (§6 item 5 asked
+shapes for all of it (§5 — `message_kind`, `chat_threads`, `chat_context_shares`, `session.thread.branch`
+and `session.member.context`). The two rows that are not this document's are named here only for
+completeness: **CR-CHAT-014** (attachments — this document carries just the scope note that the asset
+**reference** rides the opaque `payload` and the bytes do not, §5.2) and **CR-CHAT-015** (nested threads
+and the request→thread flow — the acceptance test is stated in `CHAT-INTERFACE.md` §1.4, and the
+data-side property it leans on is §4.3 here). **Corrected (D11):** v1 left thread depth **open** (§6 item 5 asked
 "arbitrarily deep, or flat with `parent_id` used for quoting only?") and its reply record named `parent_id`
 as *the immediate parent* (§4.2), which could be read as "a reply-to-a-reply is a deeper level". **That is
 not the rule.** `parent_id` is reply **attribution**; a reply never changes `thread_id` and never deepens
