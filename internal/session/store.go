@@ -93,10 +93,29 @@ type Record struct {
 	RootMessageID   string `json:"root_message_id,omitempty"`
 }
 
-// Validate checks the record against the §5.1 contract. It is the same check
-// every store applies before a line is written or projected, so a malformed
-// record is refused at the boundary rather than becoming a corrupt line.
-func (r *Record) Validate() error {
+// Validate checks the record against the §5.1 WRITE contract: the shape every
+// line this package writes must satisfy. It is the same check every store
+// applies before a line is written or projected, so a malformed record is
+// refused at the boundary rather than becoming a corrupt line.
+//
+// A message record MUST carry thread_id here: that is the shape this package
+// writes (CR-CHAT-005). A reader is more forgiving — see validateReadable.
+func (r *Record) Validate() error { return r.validate(true) }
+
+// validateReadable is Validate as a READER applies it: identical, except that
+// a message record with NO thread_id is accepted rather than refused.
+//
+// thread_id shipped as a wire tag (CR-FEAT-004) long before it was stored on
+// the record, so a transcript line written by that generation — or a bundle
+// imported from one — carries no thread_id. Such a record is not malformed:
+// §4.3 makes the thread reconstructable from the transcript ALONE, so the
+// reader derives the key (State.resolveThreads) instead of refusing the
+// record. Nothing on the write path uses this check, which is what keeps the
+// tolerance strictly one-directional: the package still never WRITES a
+// thread-less message.
+func (r *Record) validateReadable() error { return r.validate(false) }
+
+func (r *Record) validate(requireThreadID bool) error {
 	if r == nil {
 		return fmt.Errorf("%w: nil record", ErrInvalidRecord)
 	}
@@ -144,7 +163,7 @@ func (r *Record) Validate() error {
 		if r.MessageID == "" {
 			return fmt.Errorf("%w: %s without message_id", ErrInvalidRecord, r.Type)
 		}
-		if r.ThreadID == "" {
+		if requireThreadID && r.ThreadID == "" {
 			return fmt.Errorf("%w: %s without thread_id", ErrInvalidRecord, r.Type)
 		}
 		if !validMessageKind(r.MessageKind) {
@@ -158,7 +177,10 @@ func (r *Record) Validate() error {
 				return fmt.Errorf("%w: session.message carries parent_id %q (a reply is session.thread.reply)",
 					ErrInvalidRecord, r.ParentID)
 			}
-			if r.ThreadID != r.MessageID {
+			// A root's thread_id IS its own message id (§4.3). A legacy record
+			// that carries NONE is tolerated on the read path (and derived); a
+			// record carrying a DIFFERENT id is malformed either way.
+			if r.ThreadID != "" && r.ThreadID != r.MessageID {
 				return fmt.Errorf("%w: a thread root's thread_id %q must equal its message_id %q (§4.3)",
 					ErrInvalidRecord, r.ThreadID, r.MessageID)
 			}
@@ -215,15 +237,20 @@ func (r *Record) MarshalLine() ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// ParseRecord parses one JSONL line into a Record and validates it. A caller
-// that sees ErrInvalidRecord has an unknown or malformed line; the log is the
-// log of record, so it is reported, never silently dropped.
+// ParseRecord parses one JSONL line into a Record and validates it against the
+// §5.1 READ contract (validateReadable): a message record that carries no
+// thread_id — the pre-persisted shape CR-FEAT-004 wrote — is accepted, because
+// §4.3 makes the thread reconstructable from the transcript alone and the
+// reader derives the key. Everything else is checked exactly as Validate
+// checks it. A caller that sees ErrInvalidRecord has an unknown or malformed
+// line; the log is the log of record, so it is reported, never silently
+// dropped.
 func ParseRecord(line []byte) (*Record, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidRecord, err)
 	}
-	if err := rec.Validate(); err != nil {
+	if err := rec.validateReadable(); err != nil {
 		return nil, err
 	}
 	return &rec, nil

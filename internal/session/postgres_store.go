@@ -448,6 +448,13 @@ func (s *PostgresStore) Load(ctx context.Context, sessionID string) (*State, err
 	if st.ContextShares, err = s.loadContextShares(ctx, sessionID); err != nil {
 		return nil, err
 	}
+	// A transcript read from the view is completed the same way the log's is:
+	// a row that carries no thread key — thread_id '' from a generation before
+	// the field was stored (CR-FEAT-004), or a dump made by one — gets its key
+	// DERIVED from the transcript, exactly as Replay derives it from the log
+	// (§4.3). Doing it in one shared pass is what keeps the two projections of
+	// the same facts ONE value.
+	st.resolveThreads()
 	st.normalize()
 	return st, nil
 }

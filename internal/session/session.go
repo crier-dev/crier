@@ -307,6 +307,11 @@ type State struct {
 	Messages      []*Message
 	Threads       []*Thread
 	ContextShares []*MemberContext
+	// Findings is what a reconstruction had to DECIDE about a thread key
+	// (§4.3): a derived key for a legacy thread-less record, or a broken
+	// thread it refused to re-root. Empty for a transcript that states every
+	// key, which is the shape this package writes.
+	Findings []ThreadFinding
 }
 
 // Replay reconstructs a session's State from its transcript records ALONE
@@ -331,7 +336,10 @@ func Replay(sessionID string, recs []*Record) (*State, error) {
 			return nil, fmt.Errorf("%w: record seq %d names session %q, want %q",
 				ErrInvalidRecord, rec.Seq, rec.SessionID, sessionID)
 		}
-		if err := rec.Validate(); err != nil {
+		// A record read from the log is checked against the READ contract, so
+		// a legacy line written before thread_id was stored (CR-FEAT-004) is
+		// reconstructable rather than refused (§4.3).
+		if err := rec.validateReadable(); err != nil {
 			return nil, err
 		}
 		if idx, ok := lastIdx[rec.Seq]; ok {
@@ -352,6 +360,7 @@ func Replay(sessionID string, recs []*Record) (*State, error) {
 	if st.Session == nil {
 		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
+	st.resolveThreads()
 	st.normalize()
 	return st, nil
 }
@@ -406,10 +415,11 @@ func (st *State) apply(rec *Record) error {
 		m.RemovedAt = &at
 		m.RemovedBy = actorID(rec.Actor)
 	case RecordMessage, RecordThreadReply:
+		// The thread a root message defines is materialised by
+		// resolveThreads AFTER the fold, so a legacy thread-less record is
+		// given its derived key first and the §5.2 root row is created from
+		// the record's FINAL thread_id, never from an empty one.
 		st.upsertMessage(rec)
-		if rec.Type == RecordMessage {
-			st.ensureRootThread(rec)
-		}
 	case RecordThreadBranch:
 		st.upsertThread(rec)
 	case RecordClose:
@@ -508,25 +518,194 @@ func (st *State) upsertMessage(rec *Record) {
 	st.Messages = append(st.Messages, m)
 }
 
-// ensureRootThread materialises the thread a root message defines. A thread
+// ThreadFindingKind is the closed set of §4.3 thread findings. A finding is
+// REPORTED, never applied silently: a reader that derives or cannot resolve a
+// thread key must be able to say so.
+type ThreadFindingKind string
+
+const (
+	// FindingDerivedThread is a message that reached the reader with no
+	// thread_id — the pre-persisted (CR-FEAT-004) shape §5.1's reader
+	// tolerates — for which the thread key was DERIVED from the transcript.
+	FindingDerivedThread ThreadFindingKind = "derived-thread-id"
+	// FindingBrokenThread is a §4.3 broken thread: a record whose thread_id
+	// names no root in the transcript, or whose parent_id names a message
+	// that is not in it. It is never silently re-rooted or dropped; Detail
+	// names which case it is (an unknown thread, or a retention hole).
+	FindingBrokenThread ThreadFindingKind = "broken-thread"
+)
+
+// ThreadFinding is one §4.3 finding about a record's thread key, carried on
+// the State so a caller can see that a reconstruction made a decision rather
+// than losing the fact.
+type ThreadFinding struct {
+	MessageID string            `json:"message_id"`
+	Kind      ThreadFindingKind `json:"kind"`
+	// ThreadID is the DERIVED key for a FindingDerivedThread, and the key the
+	// record named (empty when it named none) for a FindingBrokenThread.
+	ThreadID string `json:"thread_id,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
+	Detail   string `json:"detail"`
+}
+
+// ensureRootThreadOf materialises the thread a root message defines. A thread
 // root's thread_id IS its own message id (§4.3), and the §5.2 view keeps one
 // chat_threads row per thread — so a root thread gets a row with no parent and
 // no anchor, which is exactly how §5.2 describes it ("A root thread has
-// parent_thread_id NULL and anchor_message_id NULL").
-func (st *State) ensureRootThread(rec *Record) {
-	if st.Thread(rec.ThreadID) != nil {
+// parent_thread_id NULL and anchor_message_id NULL"). It is called after
+// resolveThreads has given every root its final, possibly derived, key.
+func (st *State) ensureRootThreadOf(m *Message) {
+	if m == nil || m.ParentID != "" || m.ThreadID == "" {
 		return
 	}
-	t := &Thread{
-		ID:            rec.ThreadID,
-		SessionID:     rec.SessionID,
-		RootMessageID: rec.MessageID,
-		CreatedAt:     rec.TS,
+	if st.Thread(m.ThreadID) != nil {
+		return
 	}
-	if rec.Author != nil {
-		t.CreatedBy = *rec.Author
+	st.Threads = append(st.Threads, &Thread{
+		ID:            m.ThreadID,
+		SessionID:     m.SessionID,
+		RootMessageID: m.ID,
+		CreatedBy:     m.Author,
+		CreatedAt:     m.CreatedAt,
+	})
+}
+
+// resolveThreads completes the transcript's thread keys and reports what it
+// had to decide (§4.3, §4.5). It runs once, after the fold, and it is the ONE
+// place a missing thread_id is filled — so every backend (the JSONL log via
+// Replay and the PostgreSQL view via Load) derives the SAME key from the same
+// facts, which is what keeps the two projections one value.
+//
+// It performs three passes:
+//
+//  1. BACKFILL. A message with no thread_id (the legacy shape, tolerated by
+//     validateReadable) gets one: a root's is its own message id (§4.3), and a
+//     reply's is the key of the nearest ancestor that has one — the thread key
+//     of its parent chain. This is the THREAD KEY, not a level: §4.5/D11 make
+//     parent_id reply ATTRIBUTION, and a level remains a walk of the thread
+//     tree (ThreadDepth). Deriving a grouping key from the chain is exactly
+//     what §4.3 says the transcript must support; it never deepens a thread.
+//     A chain that leaves the transcript is left unresolved and REPORTED.
+//  2. ROOT ROWS. Every root message materialises its §5.2 chat_threads row —
+//     including a root whose key was just derived.
+//  3. FINDINGS. Every message whose thread key names no root in the transcript
+//     is reported as the §4.3 broken thread that it is. Nothing is re-rooted.
+func (st *State) resolveThreads() {
+	byID := make(map[string]*Message, len(st.Messages))
+	for _, m := range st.Messages {
+		byID[m.ID] = m
 	}
-	st.Threads = append(st.Threads, t)
+
+	// 1. Backfill the legacy shape.
+	for _, m := range st.Messages {
+		if m.ThreadID != "" {
+			continue
+		}
+		if m.ParentID == "" {
+			m.ThreadID = m.ID
+			st.Findings = append(st.Findings, ThreadFinding{
+				MessageID: m.ID,
+				Kind:      FindingDerivedThread,
+				ThreadID:  m.ID,
+				Detail:    "legacy record carried no thread_id; derived from its own message id, the thread key of a root (§4.3)",
+			})
+			continue
+		}
+		if key, parent := resolveParentChain(byID, m); key != "" {
+			m.ThreadID = key
+			st.Findings = append(st.Findings, ThreadFinding{
+				MessageID: m.ID,
+				Kind:      FindingDerivedThread,
+				ThreadID:  key,
+				ParentID:  parent,
+				Detail:    "legacy record carried no thread_id; derived from its parent chain (§4.3)",
+			})
+			continue
+		}
+		st.Findings = append(st.Findings, ThreadFinding{
+			MessageID: m.ID,
+			Kind:      FindingBrokenThread,
+			ParentID:  m.ParentID,
+			Detail:    "record carries no thread_id and its parent_id names no message in this transcript, so the thread key cannot be derived; a broken thread is reported, never silently re-rooted (§4.3)",
+		})
+	}
+
+	// 2. One root row per root message (§4.3, §5.2).
+	for _, m := range st.Messages {
+		st.ensureRootThreadOf(m)
+	}
+
+	// 3. §4.3's broken threads: a key that names no root, a parent_id that
+	//    names no message, or a thread whose root was retained away. Each is
+	//    REPORTED and nothing is re-rooted. A record the backfill pass left
+	//    unresolved was already reported there, so it is not reported twice.
+	for _, m := range st.Messages {
+		if m.ThreadID == "" {
+			continue
+		}
+		t := st.Thread(m.ThreadID)
+		if t == nil {
+			st.Findings = append(st.Findings, ThreadFinding{
+				MessageID: m.ID,
+				Kind:      FindingBrokenThread,
+				ThreadID:  m.ThreadID,
+				ParentID:  m.ParentID,
+				Detail:    "thread_id names no root in this transcript — a §4.3 broken thread, reported and not re-rooted",
+			})
+			continue
+		}
+		if t.RootMessageID != "" && byID[t.RootMessageID] == nil {
+			st.Findings = append(st.Findings, ThreadFinding{
+				MessageID: m.ID,
+				Kind:      FindingBrokenThread,
+				ThreadID:  m.ThreadID,
+				ParentID:  m.ParentID,
+				Detail:    "thread_id names a known thread whose root message is not in this transcript — a retention hole, not an unknown thread (§4.3)",
+			})
+			continue
+		}
+		if m.ParentID != "" && byID[m.ParentID] == nil {
+			st.Findings = append(st.Findings, ThreadFinding{
+				MessageID: m.ID,
+				Kind:      FindingBrokenThread,
+				ThreadID:  m.ThreadID,
+				ParentID:  m.ParentID,
+				Detail:    "parent_id names a message that is not in this transcript — a §4.3 broken thread (a retention hole, or a reply to a message that was never stored)",
+			})
+		}
+	}
+}
+
+// resolveParentChain walks a message's parent_id chain to the nearest ancestor
+// that carries a thread key and returns it, along with the immediate parent it
+// looked up. It returns "" when the chain leaves the transcript or cycles.
+//
+// It walks parent_id to recover a MISSING grouping key, and nothing else:
+// parent_id is reply attribution and a reply never deepens a thread
+// (§4.2/§4.5, D11). Depth comes from ThreadDepth over the thread tree.
+func resolveParentChain(byID map[string]*Message, m *Message) (threadID, parentID string) {
+	parentID = m.ParentID
+	seen := map[string]bool{m.ID: true}
+	cur := m
+	for {
+		p, ok := byID[cur.ParentID]
+		if !ok {
+			return "", parentID
+		}
+		if seen[p.ID] {
+			return "", parentID // a cycle cannot exist in a valid transcript
+		}
+		seen[p.ID] = true
+		if p.ThreadID != "" {
+			return p.ThreadID, parentID
+		}
+		if p.ParentID == "" {
+			// The ancestor is a root: its own message id IS its thread key
+			// (§4.3), and it will be given that key in its own backfill pass.
+			return p.ID, parentID
+		}
+		cur = p
+	}
 }
 
 func (st *State) upsertThread(rec *Record) {
@@ -566,6 +745,14 @@ func (st *State) normalize() {
 			return st.ContextShares[i].MemberType < st.ContextShares[j].MemberType
 		}
 		return st.ContextShares[i].MemberID < st.ContextShares[j].MemberID
+	})
+	// Findings are ordered by the record they are about, then by kind, so two
+	// projections of the same facts report them in the same order.
+	sort.SliceStable(st.Findings, func(i, j int) bool {
+		if st.Findings[i].MessageID != st.Findings[j].MessageID {
+			return st.Findings[i].MessageID < st.Findings[j].MessageID
+		}
+		return st.Findings[i].Kind < st.Findings[j].Kind
 	})
 	for _, m := range st.Messages {
 		sort.SliceStable(m.Outcomes, func(i, j int) bool { return m.Outcomes[i].Target < m.Outcomes[j].Target })
@@ -636,6 +823,52 @@ func (st *State) ThreadMessages(threadID string) []*Message {
 		}
 	}
 	return out
+}
+
+// ReplyChain returns the recorded reply chain of one message — the thread root
+// first, then each message replied to in turn, ending with messageID itself —
+// and reports whether that chain is COMPLETE inside the transcript. It is the
+// §4.3 reconstruction for a single leaf ("attach each record to its
+// parent_id") and it needs nothing but the messages in State: no side table,
+// no membership lookup, no client state. It is what CR-CHAT-005 owes every
+// later read surface (CR-CHAT-019).
+//
+// A chain is complete (true) when the walk reaches a thread root inside this
+// transcript. It is incomplete (false) when the message is unknown, or when a
+// parent_id names a message that is not here — a retention hole, which §4.3
+// requires the reader to be able to tell apart from a whole chain rather than
+// treat as a different tree. The part that IS recorded is still returned.
+//
+// parent_id is reply ATTRIBUTION, never depth (D11, §4.5): the length of this
+// chain counts how many messages were replied to in sequence, NOT how many
+// levels the thread tree has. A caller asking "how deep is this?" asks
+// ThreadDepth about the message's thread_id.
+func (st *State) ReplyChain(messageID string) ([]*Message, bool) {
+	msg := st.Message(messageID)
+	if msg == nil {
+		return nil, false
+	}
+	complete := true
+	var chain []*Message
+	seen := map[string]bool{msg.ID: true}
+	for m := msg; ; {
+		chain = append(chain, m)
+		if m.ParentID == "" {
+			break
+		}
+		parent := st.Message(m.ParentID)
+		if parent == nil || seen[parent.ID] {
+			complete = false
+			break
+		}
+		seen[parent.ID] = true
+		m = parent
+	}
+	// Reverse in place so the chain reads root → leaf.
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, complete
 }
 
 // CanonicalJSON renders v with sorted object keys and no insignificant
