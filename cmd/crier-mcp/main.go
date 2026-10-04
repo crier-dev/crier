@@ -97,11 +97,16 @@ var bridgeCapabilities = []string{"mcp", "bridge"}
 // server: the agent id it acts as, the public half of its signing key, and
 // where that key came from. Remote is false for the Postgres/in-memory
 // backends, where no server-side registration is needed.
+//
+// Token is the shared bearer token the same remote mode resolved, carried here
+// so the dagger control client (CR-CHAT-033) presents the SAME credential the
+// store does. It is never logged.
 type bridgeIdentity struct {
 	Remote    bool
 	AgentID   string
 	PublicKey ed25519.PublicKey
 	KeySource string
+	Token     string
 }
 
 func main() {
@@ -155,16 +160,22 @@ func run(args []string) int {
 		// registration mode and mirror the HTTP handler's conditional rule —
 		// with enforcement off, register_agent may omit public_key.
 		AllowKeylessAgents: !cfg.RequireAgentSig,
+		// CR-CHAT-033: with CRIER_HTTP_URL set the server also exposes the
+		// dagger control routes, so the bridge builds a REST client for them
+		// and carries the same bearer token the store resolved. The bridge
+		// holds no run records of its own — a run started here is visible on
+		// the server (and in the thread) immediately.
+		DaggerToken: identity.Token,
 	})
 
-	// DF-CRIER-153: in the default in-process mode four of the advertised
-	// tools cannot work at all (get_messages / ask_agent need a bridge
-	// identity, mesh_peers a server URL, mesh_request a mesh URL), and a
-	// client only discovers that at call time. tools/list is the only
-	// metadata it sees, so those tools name their variables in their own
-	// descriptions (internal/mcp) — and the operator gets ONE line here,
-	// before the first client call. slog writes to stderr by default, so the
-	// JSON-RPC wire on stdout stays clean.
+	// DF-CRIER-153: in the default in-process mode several advertised tools
+	// cannot work at all (get_messages / ask_agent need a bridge identity,
+	// mesh_peers and the six dagger control tools need a server URL,
+	// mesh_request a mesh URL), and a client only discovers that at call
+	// time. tools/list is the only metadata it sees, so those tools name
+	// their variables in their own descriptions (internal/mcp) — and the
+	// operator gets ONE line here, before the first client call. slog writes
+	// to stderr by default, so the JSON-RPC wire on stdout stays clean.
 	reportMsg, reportAttrs := mcp.ToolSurfaceReport(
 		modeName(os.Getenv(mcp.EnvHTTPURL) != "", cfg.Database.URL != ""),
 		server.ToolCount(),
@@ -245,6 +256,7 @@ func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error
 		// bearer token (DF-CRIER-195).
 		token := resolveBridgeToken(
 			os.Getenv(tokenVarBridge), os.Getenv(tokenVarAlias), true, slog.Default())
+		identity.Token = token.Token
 		return registry.NewRemoteStore(url, agentID, token.Token, opts...), identity, func() {}, nil
 	}
 	if cfg.Database.URL != "" {
@@ -365,6 +377,14 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=true (the secure default). Key material")
 	fmt.Fprintln(out, "                              is never logged.")
 	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Dagger control (CR-CHAT-033 — needs CRIER_HTTP_URL, like mesh_peers):")
+	_, _ = fmt.Fprintln(out, "  The server exposes /dagger/runs when it runs with CR_DAGGER_URL set. The")
+	_, _ = fmt.Fprintln(out, "  bridge then offers create_run / run_status / cancel_run / resume_run /")
+	_, _ = fmt.Fprintln(out, "  rewind_run / run_skill, which drive the run records the SERVER holds.")
+	_, _ = fmt.Fprintln(out, "  crier never executes a DAG: these tools call the executor the server is")
+	_, _ = fmt.Fprintln(out, "  configured with, and a terminal outcome is delivered to the requesting")
+	_, _ = fmt.Fprintln(out, "  agent's inbox through the ordinary delivery path.")
+	_, _ = fmt.Fprintln(out)
 	fmt.Fprintln(out, "Bridge registration (remote mode, automatic — no operator step):")
 	fmt.Fprintln(out, "  On startup crier-mcp registers CRIER_AGENT_ID on the server, idempotently:")
 	fmt.Fprintln(out, "  an existing registration is left untouched, so re-running is a no-op.")

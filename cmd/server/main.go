@@ -591,6 +591,33 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// must not be able to read it on a server that has auth on.
 	r.HandleFunc("/namespaces", registryHandler.HandleListNamespaces).Methods("GET")
 
+	// Dagger control surface (CR-CHAT-033) — OPT-IN and additive. The six
+	// /dagger routes exist only when CR_DAGGER_URL names an executor: this is
+	// a CLIENT of a surface crier does not own (decision D18), never a second
+	// executor, and a terminal run is delivered to its requester through the
+	// shipped inbox path (see cmd/server/daggerctl.go). With the variable
+	// unset registerDaggerRoutes returns (nil, nil) and registers nothing, so
+	// the served surface is unchanged.
+	daggerSvc, err := registerDaggerRoutes(r, cfg.Dagger, regStore)
+	if err != nil {
+		slog.Error("initialize dagger control", "error", err)
+		return 1
+	}
+	if daggerSvc != nil {
+		// The watcher STOPS when this invocation returns (serve ends,
+		// shutdown completes), so a test server or a restart never leaves a
+		// poller behind. A zero CR_DAGGER_POLL_S disables it entirely; the
+		// poller only ever READS the executor.
+		watchCtx, stopWatch := context.WithCancel(context.Background())
+		defer stopWatch()
+		go daggerSvc.Watch(watchCtx)
+		slog.Info("dagger control surface enabled",
+			"url", cfg.Dagger.URL,
+			"store_dir", cfg.Dagger.StoreDir,
+			"poll_interval_s", int(cfg.Dagger.PollInterval.Seconds()),
+			"note", "crier holds run records only; the DAG runs on the dagger surface it calls")
+	}
+
 	// Effective runtime posture + the LIVE queue depth (DF-CRIER-113,
 	// CR-FEAT-035). Registered here rather than with /health, /version and the
 	// spec-hosting routes above because its body now carries a measurement of

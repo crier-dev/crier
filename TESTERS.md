@@ -585,7 +585,7 @@ curl -s -X POST localhost:8768/agents/alice/inbox -H 'Content-Type: application/
 ```bash
 go build -o bin/crier-mcp ./cmd/crier-mcp
 CRIER_HTTP_URL=http://localhost:8767 CRIER_AGENT_ID=my-bridge ./bin/crier-mcp
-# then point any MCP client at it: 13 tools (deliver_message, ask_agent, get_messages, ...)
+# then point any MCP client at it: 19 tools (deliver_message, ask_agent, get_messages, ...)
 ```
 
 ## 3. Known rough edges (skip these, or expect them)

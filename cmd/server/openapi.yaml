@@ -25,6 +25,8 @@ tags:
     description: WebSocket peer mesh — connect and list peers.
   - name: federation
     description: Cross-relay federation peer list.
+  - name: dagger
+    description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
 paths:
   # ── Health ──
   # /health exempt — middleware.Auth exempts it from the bearer check
@@ -1940,6 +1942,240 @@ paths:
         "401":
           description: Missing or invalid bearer token (when CR_AUTH_TOKEN is set — this route is NOT auth-exempt)
 
+  # ── Dagger control (CR-CHAT-033) ──
+  # The OPT-IN control surface over a Hermes-dagger pipeline. crier does NOT
+  # embed a second executor (decision D18): every route here is a CLIENT call
+  # to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds
+  # only the run's record (id, state, evidence references, requesting agent).
+  # All six routes exist ONLY while CR_DAGGER_URL is set; with it unset they
+  # are not registered at all and answer the router's JSON 404.
+  #
+  # A run that reaches a terminal state (`succeeded` / `failed` / `cancelled`)
+  # is delivered to the REQUESTING agent's durable inbox exactly once, through
+  # the shipped delivery path (the same store write a MESSAGE_EXPIRED receipt
+  # uses) — never a side channel.
+  /dagger/runs:
+    post:
+      operationId: daggerCreateRun
+      tags: [dagger]
+      summary: Create a Dagger run
+      description: |-
+        Start a prompt-driven DAG on the dagger surface this server is
+        configured with (CR_DAGGER_URL) and record it. The run id comes from
+        the executor; crier never mints one, because an id it invented would
+        name nothing the executor could be asked about.
+
+        The create records the REQUESTING agent: when the run reaches a
+        terminal state, the outcome is delivered to that agent's durable inbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id, prompt]
+              properties:
+                agent_id:
+                  type: string
+                  description: The agent the run is started for — the inbox a terminal outcome is delivered to.
+                prompt:
+                  type: string
+                  description: The prompt describing the DAG to run.
+      responses:
+        "201":
+          description: The run was created and recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "400":
+          description: "`invalid dagger request` — a missing `agent_id`/`prompt`, or a body member this operation does not declare."
+        "502":
+          description: "The dagger surface refused the create (transport failure, non-2xx answer) — NOTHING is recorded locally, because crier never falls back to executing anything itself."
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — the server runs with no dagger bridge wired (CR_DAGGER_URL unset)."
+  /dagger/runs/{id}:
+    get:
+      operationId: daggerRunStatus
+      tags: [dagger]
+      summary: Read a Dagger run's record
+      description: |-
+        Observe a run: crier asks the dagger surface for the current state and
+        returns the record it holds, updating it with what the executor
+        reported. The FIRST observation of a terminal state delivers the
+        outcome to the requesting agent's inbox.
+
+        A status word the server cannot map is recorded as `unknown` rather
+        than guessed at, and `unknown` is NOT terminal — it never fires a
+        completion.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run id returned by the create operation.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run's record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "404":
+          description: "`dagger run not found` — crier holds no record for this id, or the executor does not know it."
+        "502":
+          description: The dagger surface could not be reached to observe the run.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/runs/{id}/cancel:
+    post:
+      operationId: daggerCancelRun
+      tags: [dagger]
+      summary: Cancel a Dagger run
+      description: |-
+        Ask the executor to cancel a running DAG. The state the executor reports
+        wins; a cancel that reported no state is recorded as `cancelled`, which
+        is what cancelling means.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run id to cancel.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run's updated record (terminal `cancelled` on success).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "404":
+          description: "`dagger run not found`."
+        "502":
+          description: The dagger surface refused the cancel.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/runs/{id}/resume:
+    post:
+      operationId: daggerResumeRun
+      tags: [dagger]
+      summary: Resume a Dagger run from its last checkpoint
+      description: |-
+        Ask the executor to continue a paused DAG from its last checkpoint. The
+        state the executor reports wins; a resume that reported no state is
+        recorded as `running`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run id to resume.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run's updated record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "404":
+          description: "`dagger run not found`."
+        "502":
+          description: The dagger surface refused the resume.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/runs/{id}/rewind:
+    post:
+      operationId: daggerRewindRun
+      tags: [dagger]
+      summary: Rewind a Dagger run to a node
+      description: |-
+        Ask the executor to discard checkpoints from `node_id` onward. The node
+        id is passed to the executor VERBATIM: crier holds no graph, so it
+        never validates a node against one.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Run id to rewind.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id]
+              properties:
+                node_id:
+                  type: string
+                  description: The node to rewind to; forwarded to the executor unchanged.
+      responses:
+        "200":
+          description: The run's updated record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "400":
+          description: "`invalid dagger request` — a missing `node_id`, or a body member this operation does not declare."
+        "404":
+          description: "`dagger run not found`."
+        "502":
+          description: The dagger surface refused the rewind.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/skills/{skill}/run:
+    post:
+      operationId: daggerRunSkill
+      tags: [dagger]
+      summary: Run a registered Dagger skill
+      description: |-
+        Run a skill REGISTERED with the executor. crier never loads or
+        interprets a skill: it names it, and the executor's answer becomes the
+        run's record. As with the create operation, the run's terminal outcome
+        is delivered to the requesting agent's inbox.
+      parameters:
+        - name: skill
+          in: path
+          required: true
+          description: Name of a skill the executor has registered.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id:
+                  type: string
+                  description: The agent the run is started for — the inbox a terminal outcome is delivered to.
+                args:
+                  type: object
+                  description: Optional skill arguments (opaque JSON; forwarded unchanged).
+                  additionalProperties: true
+      responses:
+        "201":
+          description: The skill run was created and recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerRunRecord"
+        "400":
+          description: "`invalid dagger request` — a missing `agent_id`, or a body member this operation does not declare."
+        "404":
+          description: "`dagger run not found` — the executor does not know a skill by that name, or refused it as absent."
+        "502":
+          description: The dagger surface refused the skill run.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+
 components:
   parameters:
     XAgentID:
@@ -2378,3 +2614,68 @@ components:
         idempotent_replay:
           type: boolean
           description: "Present (true) when this accept was answered from the recorded accept of an EARLIER delivery under the same `idempotency_key` (CR-FEAT-025) — nothing was queued by this request, and `id` is the message the first delivery queued."
+    DaggerRunRecord:
+      type: object
+      required: [run_id, state, requesting_agent, kind]
+      description: |-
+        crier's record of one Dagger run (CR-CHAT-033): the run id the executor
+        returned, the state it last reported, the requesting agent, and
+        references to the run's evidence. It is the REST body, the stored
+        record and the MCP tool result — one shape, so a reader cannot tell
+        them apart. The record is a REFERENCE to the executor's state, never a
+        copy of its graph: crier holds no nodes, no results and no scheduler.
+      properties:
+        run_id:
+          type: string
+          description: The run id the executor assigned. crier never mints one.
+        state:
+          type: string
+          enum: [running, succeeded, failed, cancelled, unknown]
+          description: |-
+            The lifecycle state crier acts on. `succeeded` / `failed` /
+            `cancelled` are TERMINAL and are the only states delivered to the
+            requesting agent. `unknown` is a status word crier could not map —
+            it is recorded rather than guessed at, and it is NOT terminal, so
+            it never fires a completion.
+        requesting_agent:
+          type: string
+          description: The agent whose inbox a terminal outcome is delivered to. Recorded at create time and never re-resolved.
+        kind:
+          type: string
+          enum: [prompt, skill]
+          description: What created the run.
+        prompt:
+          type: string
+          description: The create prompt (present when kind is `prompt`).
+        skill:
+          type: string
+          description: The skill name (present when kind is `skill`).
+        evidence:
+          type: array
+          items:
+            type: string
+          description: Opaque references the executor reported (checkpoint ids, artifact urls, …). crier never interprets them.
+        nodes:
+          type: array
+          description: The last reported node shape, when the executor supplied one.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              status:
+                type: string
+              error:
+                type: string
+        notified:
+          type: boolean
+          description: True once the terminal outcome was delivered to the requesting agent's inbox. This is what makes delivery exactly-once across repeated observations.
+        notify_error:
+          type: string
+          description: Why a terminal delivery did not land, when it did not. A missing notification is a reported fact, never a silence.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

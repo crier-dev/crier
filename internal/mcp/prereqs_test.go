@@ -25,6 +25,14 @@ var expectedPrerequisites = map[string][]string{
 	"ask_agent":    {EnvAgentID},
 	"mesh_peers":   {EnvHTTPURL},
 	"mesh_request": {EnvMeshURL, EnvAgentID},
+	// CR-CHAT-033: the dagger control tools address the run records on the
+	// Crier server, so they gate on the server URL exactly as mesh_peers does.
+	"create_run": {EnvHTTPURL},
+	"run_status": {EnvHTTPURL},
+	"cancel_run": {EnvHTTPURL},
+	"resume_run": {EnvHTTPURL},
+	"rewind_run": {EnvHTTPURL},
+	"run_skill":  {EnvHTTPURL},
 }
 
 // uniqueStrings returns the input with duplicates removed, order preserved.
@@ -50,8 +58,8 @@ func uniqueStrings(in []string) []string {
 func TestToolDescriptionsNameTheirPrerequisites(t *testing.T) {
 	s := New(registry.NewMemoryStore())
 	defs := s.toolDefinitions()
-	if len(defs) != 13 {
-		t.Fatalf("advertised tools = %d, want 13", len(defs))
+	if len(defs) != 19 {
+		t.Fatalf("advertised tools = %d, want 19", len(defs))
 	}
 
 	advertised := make(map[string]bool, len(defs))
@@ -99,9 +107,14 @@ func TestToolDescriptionsNameTheirPrerequisites(t *testing.T) {
 // TestUnavailableToolsInMode pins the startup helper across the modes the
 // bridge can start in.
 func TestUnavailableToolsInMode(t *testing.T) {
-	if n := New(registry.NewMemoryStore()).ToolCount(); n != 13 {
-		t.Fatalf("ToolCount() = %d, want 13", n)
+	if n := New(registry.NewMemoryStore()).ToolCount(); n != 19 {
+		t.Fatalf("ToolCount() = %d, want 19", n)
 	}
+
+	// daggerUnavailable is the six CR-CHAT-033 tools, in toolPrerequisites
+	// order. They need CRIER_HTTP_URL like mesh_peers, so every mode without
+	// a server URL reports them as unavailable.
+	dagger := []string{"create_run", "run_status", "cancel_run", "resume_run", "rewind_run", "run_skill"}
 
 	cases := []struct {
 		name            string
@@ -113,13 +126,13 @@ func TestUnavailableToolsInMode(t *testing.T) {
 	}{
 		{
 			name:            "in-process, no env at all",
-			wantUnavailable: []string{"get_messages", "ask_agent", "mesh_peers", "mesh_request"},
+			wantUnavailable: append([]string{"get_messages", "ask_agent", "mesh_peers", "mesh_request"}, dagger...),
 			wantMissing:     []string{EnvAgentID, EnvHTTPURL, EnvMeshURL},
 		},
 		{
 			name:            "bridge identity only",
 			agentID:         "bridge",
-			wantUnavailable: []string{"mesh_peers", "mesh_request"},
+			wantUnavailable: append([]string{"mesh_peers", "mesh_request"}, dagger...),
 			wantMissing:     []string{EnvHTTPURL, EnvMeshURL},
 		},
 		{
@@ -137,7 +150,7 @@ func TestUnavailableToolsInMode(t *testing.T) {
 			// mesh_request adds no new one).
 			name:            "mesh url without identity",
 			meshURL:         "ws://localhost:8767/mesh/connect/bridge",
-			wantUnavailable: []string{"get_messages", "ask_agent", "mesh_peers", "mesh_request"},
+			wantUnavailable: append([]string{"get_messages", "ask_agent", "mesh_peers", "mesh_request"}, dagger...),
 			wantMissing:     []string{EnvAgentID, EnvHTTPURL},
 		},
 		{
@@ -198,10 +211,11 @@ func TestToolSurfaceReportPinsStartupLine(t *testing.T) {
 		if got["mode"] != "in-process" {
 			t.Errorf("mode = %v, want in-process", got["mode"])
 		}
-		if got["tools"] != 13 || got["available_tools"] != 9 {
-			t.Errorf("tools/available_tools = %v/%v, want 13/9", got["tools"], got["available_tools"])
+		if got["tools"] != 19 || got["available_tools"] != 9 {
+			t.Errorf("tools/available_tools = %v/%v, want 19/9", got["tools"], got["available_tools"])
 		}
-		wantUnavailable := []string{"get_messages", "ask_agent", "mesh_peers", "mesh_request"}
+		wantUnavailable := []string{"get_messages", "ask_agent", "mesh_peers", "mesh_request",
+			"create_run", "run_status", "cancel_run", "resume_run", "rewind_run", "run_skill"}
 		if !reflect.DeepEqual(got["unavailable_tools"], wantUnavailable) {
 			t.Errorf("unavailable_tools = %v, want %v", got["unavailable_tools"], wantUnavailable)
 		}
@@ -214,12 +228,12 @@ func TestToolSurfaceReportPinsStartupLine(t *testing.T) {
 	t.Run("fully configured", func(t *testing.T) {
 		msg, attrs := ToolSurfaceReport("remote/bridge", tools,
 			"bridge", "http://localhost:8767", "ws://localhost:8767/mesh/connect/bridge")
-		const want = "MCP tool surface: all 13 advertised tools are available in this mode"
+		const want = "MCP tool surface: all 19 advertised tools are available in this mode"
 		if msg != want {
 			t.Errorf("msg = %q, want %q", msg, want)
 		}
 		got := attrsMap(t, attrs)
-		if got["mode"] != "remote/bridge" || got["tools"] != 13 {
+		if got["mode"] != "remote/bridge" || got["tools"] != 19 {
 			t.Errorf("attrs = %v", got)
 		}
 		if _, ok := got["unavailable_tools"]; ok {

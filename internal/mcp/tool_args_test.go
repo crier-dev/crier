@@ -66,7 +66,7 @@ type toolArgsCase struct {
 	wantOK bool
 }
 
-// toolArgsCases covers all 13 advertised tools (spec §4).
+// toolArgsCases covers all 19 advertised tools (spec §4).
 func toolArgsCases(t *testing.T) []toolArgsCase {
 	t.Helper()
 	key := validTestKey(t)
@@ -191,6 +191,54 @@ func toolArgsCases(t *testing.T) []toolArgsCase {
 			// bridge — but only after its arguments were accepted.
 			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
 				return rawJSON(t, map[string]any{"target": "args-agent", "method": "PING", "path": "/ping"})
+			},
+			wantOK: false,
+		},
+		// CR-CHAT-033 — the dagger control tools. argsTestServer has an HTTP
+		// URL, so their gate passes and the arguments decode is observable;
+		// the calls themselves fail against the stand-in server, which
+		// answers a peers body no run record can be decoded from. Valid
+		// arguments must therefore never be an ARGUMENTS error, and unknown
+		// members must still be rejected by name.
+		{
+			tool: "create_run",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"agent_id": "args-agent", "prompt": "build"})
+			},
+			wantOK: false,
+		},
+		{
+			tool: "run_status",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"run_id": "run-1"})
+			},
+			wantOK: false,
+		},
+		{
+			tool: "cancel_run",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"run_id": "run-1"})
+			},
+			wantOK: false,
+		},
+		{
+			tool: "resume_run",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"run_id": "run-1"})
+			},
+			wantOK: false,
+		},
+		{
+			tool: "rewind_run",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"run_id": "run-1", "node_id": "node-2"})
+			},
+			wantOK: false,
+		},
+		{
+			tool: "run_skill",
+			args: func(t *testing.T, _ *MCPServer) json.RawMessage {
+				return rawJSON(t, map[string]any{"agent_id": "args-agent", "skill": "summarize", "args": map[string]any{"lang": "es"}})
 			},
 			wantOK: false,
 		},

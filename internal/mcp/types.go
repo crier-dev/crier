@@ -206,3 +206,35 @@ type MeshRequestOutput struct {
 	Body       map[string]any `json:"body"`
 	TraceID    string         `json:"trace_id"`
 }
+
+// Dagger control tool inputs (CR-CHAT-033). The outputs are daggerctl's own
+// RunRecord, so the tool result, the REST body and the stored JSONL line are
+// one shape.
+
+type CreateRunInput struct {
+	AgentID string `json:"agent_id"`
+	Prompt  string `json:"prompt"`
+}
+
+type RunStatusInput struct {
+	RunID string `json:"run_id"`
+}
+
+type CancelRunInput struct {
+	RunID string `json:"run_id"`
+}
+
+type ResumeRunInput struct {
+	RunID string `json:"run_id"`
+}
+
+type RewindRunInput struct {
+	RunID  string `json:"run_id"`
+	NodeID string `json:"node_id"`
+}
+
+type RunSkillInput struct {
+	AgentID string         `json:"agent_id"`
+	Skill   string         `json:"skill"`
+	Args    map[string]any `json:"args,omitempty"`
+}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -49,6 +50,11 @@ type MCPServer struct {
 	agentID string // bridge identity (own inbox / mesh identity)
 	httpURL string // remote server URL for mesh_peers
 	bridge  *meshBridge
+	// dagger is the dagger control surface (CR-CHAT-033). It drives the run
+	// records the crier SERVER holds — never a second copy — so a run started
+	// from a thread is visible in that thread. Nil means the dagger tools
+	// refuse with the CRIER_HTTP_URL gate.
+	dagger daggerctl.Control
 
 	mu       sync.Mutex
 	buffered []*registry.InboxEntry // pulled by ask_agent polling, unseen by the harness
@@ -74,6 +80,14 @@ type Options struct {
 	// ZERO value is false and preserves the fail-closed default — public_key
 	// required — for every constructor that does not opt in.
 	AllowKeylessAgents bool
+	// Dagger is the explicit dagger control surface (CR-CHAT-033). Leave it
+	// nil and the bridge builds one from HTTPURL when that is set, which is
+	// what cmd/crier-mcp does; a caller that already holds a *daggerctl.Service
+	// (an in-process bridge) passes it here instead.
+	Dagger daggerctl.Control
+	// DaggerToken is the bearer token the auto-built dagger REST client
+	// presents to the Crier server. It is ignored when Dagger is set.
+	DaggerToken string
 }
 
 // New creates an MCPServer backed by the given Store.
@@ -94,6 +108,14 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 	}
 	if opts.MeshURL != "" && opts.AgentID != "" {
 		s.bridge = newMeshBridge(opts.AgentID, opts.MeshURL)
+	}
+	// The dagger control surface is reachable whenever the server URL is
+	// known: the tools then drive the SAME run records the server holds
+	// through its documented REST surface (CR-CHAT-033). With no URL there is
+	// nothing to address, so the tools refuse with the CRIER_HTTP_URL gate.
+	s.dagger = opts.Dagger
+	if s.dagger == nil && s.httpURL != "" {
+		s.dagger = daggerctl.NewRESTClient(s.httpURL, opts.DaggerToken)
 	}
 	s.registerTools()
 	return s
@@ -119,6 +141,14 @@ func (s *MCPServer) registerTools() {
 	s.tools["ask_agent"] = s.handleAskAgent
 	s.tools["mesh_peers"] = s.handleMeshPeers
 	s.tools["mesh_request"] = s.handleMeshRequest
+	// Dagger control (CR-CHAT-033). The executor is the dagger surface crier
+	// calls; these tools only create, observe and control a run.
+	s.tools["create_run"] = s.handleCreateRun
+	s.tools["run_status"] = s.handleRunStatus
+	s.tools["cancel_run"] = s.handleCancelRun
+	s.tools["resume_run"] = s.handleResumeRun
+	s.tools["rewind_run"] = s.handleRewindRun
+	s.tools["run_skill"] = s.handleRunSkill
 }
 
 // Serve runs the stdio JSON-RPC loop. Blocks until shutdown.
@@ -319,6 +349,39 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 			Name:        "mesh_request",
 			Description: "Live REQUEST/RESPONSE round-trip to another agent over the mesh (requires the bridge's own WebSocket connection). Use for liveness/RPC; LLM content should ride the durable inbox (ask_agent). Requires CRIER_MESH_URL and CRIER_AGENT_ID — the bridge opens its own mesh connection only when both are set, so without them the call fails.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","description":"Target agent identifier"},"method":{"type":"string","description":"Application-level method, e.g. GET or PING"},"path":{"type":"string","description":"Application-level path, e.g. /ping"},"body":{"description":"Opaque JSON body"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 15000)"}},"required":["target","method","path"]}`),
+		},
+		// Dagger control (CR-CHAT-033). crier CLIENTs the dagger surface; it
+		// never executes a DAG. Requires CRIER_HTTP_URL — the run records live
+		// on the Crier server, and these tools address them there.
+		{
+			Name:        "create_run",
+			Description: "Create a Dagger run and return its run id and record. The DAG is executed by the dagger surface crier calls, never by crier itself. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"The agent the run is started for — the inbox a terminal outcome is delivered to"},"prompt":{"type":"string","description":"The prompt describing the DAG to run"}},"required":["agent_id","prompt"]}`),
+		},
+		{
+			Name:        "run_status",
+			Description: "Observe a Dagger run: returns its record (run id, state, evidence references, requesting agent). Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"run_id":{"type":"string","description":"Run id returned by create_run or run_skill"}},"required":["run_id"]}`),
+		},
+		{
+			Name:        "cancel_run",
+			Description: "Cancel a running Dagger run and return its updated record. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"run_id":{"type":"string","description":"Run id to cancel"}},"required":["run_id"]}`),
+		},
+		{
+			Name:        "resume_run",
+			Description: "Resume a paused Dagger run from its last checkpoint and return its updated record. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"run_id":{"type":"string","description":"Run id to resume"}},"required":["run_id"]}`),
+		},
+		{
+			Name:        "rewind_run",
+			Description: "Rewind a Dagger run to a node, discarding checkpoints from that node onward, and return its updated record. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"run_id":{"type":"string","description":"Run id to rewind"},"node_id":{"type":"string","description":"Node to rewind to — passed to the executor verbatim"}},"required":["run_id","node_id"]}`),
+		},
+		{
+			Name:        "run_skill",
+			Description: "Run a skill registered with the dagger executor and return the new run's id and record. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"The agent the run is started for — the inbox a terminal outcome is delivered to"},"skill":{"type":"string","description":"Name of a skill registered with the executor"},"args":{"type":"object","description":"Optional skill arguments (opaque JSON)"}},"required":["agent_id","skill"]}`),
 		},
 	}
 }

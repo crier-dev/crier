@@ -33,6 +33,10 @@ type toolPrerequisite struct {
 //	mesh_request           -> s.bridge == nil, i.e. CRIER_MESH_URL AND
 //	                          CRIER_AGENT_ID are both set (NewWithOptions
 //	                          builds the mesh bridge only when both are)
+//	create_run, run_status, cancel_run, resume_run, rewind_run, run_skill
+//	                        -> s.dagger == nil, i.e. CRIER_HTTP_URL is unset,
+//	                          so there is no server whose run records the
+//	                          tools could address (internal/mcp/dagger.go)
 //
 // Every tool listed here must also name its variables in its own Description:
 // the tools/list response is the only metadata an MCP client sees before it
@@ -44,6 +48,16 @@ var toolPrerequisites = []toolPrerequisite{
 	{Tool: "ask_agent", EnvVars: []string{EnvAgentID}},
 	{Tool: "mesh_peers", EnvVars: []string{EnvHTTPURL}},
 	{Tool: "mesh_request", EnvVars: []string{EnvMeshURL, EnvAgentID}},
+	// CR-CHAT-033: the dagger control tools address the run records the Crier
+	// SERVER holds, so they need the server base URL like mesh_peers does.
+	// The executor itself is reached by the SERVER (CR_DAGGER_URL), never by
+	// the bridge — crier embeds no executor.
+	{Tool: "create_run", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "run_status", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "cancel_run", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "resume_run", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "rewind_run", EnvVars: []string{EnvHTTPURL}},
+	{Tool: "run_skill", EnvVars: []string{EnvHTTPURL}},
 }
 
 // UnavailableTools returns the tools that cannot work in a server built with

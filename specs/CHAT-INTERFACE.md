@@ -687,3 +687,39 @@ membership, transcripts, threading, principals, grants, roles, the address gramm
 nor any of the v2 additions: channels, direct messages, the named-group object and its fan-out, the
 message kinds, sub-thread branching, the late-join context record, depth collapse, timeline rails,
 generated summaries, location-returning search, or attachment upload/fetch.
+
+---
+
+## Dagger control
+
+*Added by **CR-CHAT-033** (2026-10-04) as an addendum to this document's series. The dagger surface is
+not a UI element, so it is recorded here rather than as a row of §4's mapping table. §5's invariants —
+one delivery path, no parallel truth, a client of the shipped API — bind it unchanged, and nothing in
+§1–§7 moves because of it.*
+
+A crier surface (an MCP tool plus REST routes) by which a Hermes instance or an agent **creates and
+controls a Dagger pipeline**: create a run, observe its status, cancel it, resume it from a checkpoint,
+rewind to a node, and run a registered skill.
+
+**The boundary rule (decision D18): crier does NOT embed a second executor.** Every verb is a request to
+the EXISTING dagger surface, and crier holds only the run id, the state the executor last reported,
+references to its evidence, and the agent that asked for it. A second scheduler would be a second truth.
+
+- **The bridge is the whole vocabulary.** `internal/daggerctl.DaggerBridge` is create / status / cancel /
+  resume / rewind / run-skill and nothing else; the only implementation this repository ships speaks
+  HTTP/JSON to the endpoint named by `CR_DAGGER_URL`. A bridge that refuses a create leaves **no local
+  record** — there is no fallback engine that could have produced one.
+- **Why it belongs on the bus.** Control has to be addressable and auditable like any other work: the six
+  routes exist only while `CR_DAGGER_URL` is set, and the run's outcome is delivered to the REQUESTING
+  agent through the **shipped inbox path** — the same durable store write a `MESSAGE_EXPIRED` receipt
+  uses (§5.1's one-delivery-path rule), exactly once, rather than a side channel.
+- **States.** `running` / `succeeded` / `failed` / `cancelled` / `unknown`. Only the three terminal
+  states are delivered; `unknown` is a word crier could not map, so it is recorded, not guessed at, and
+  it never fires a completion.
+- **The MCP halves.** `create_run`, `run_status`, `cancel_run`, `resume_run`, `rewind_run`, `run_skill` —
+  they drive the run records the SERVER holds, so a run started inside a thread is visible in that
+  thread.
+
+**Not decided here** (the rows that own them): running a DAG **as a scheduling engine** — DAG nodes that
+invoke crier, and crier events that trigger a DAG — is **CR-CHAT-034**; **remote or local execution
+targets** for the same interface are **CR-CHAT-035**. This section claims neither.

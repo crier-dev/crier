@@ -453,6 +453,24 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Setenv("CR_DETECT_LOG", filepath.Join(dir, "delivery.jsonl"))
 	t.Setenv("CR_DETECT_KEY", filepath.Join(dir, "delivery.key"))
 
+	// CR-CHAT-033: same rule for the opt-in dagger control surface — the
+	// README documents the six /dagger routes, so the booted server must
+	// expose them for the scanned README path tokens to probe. The executor is
+	// a stub in this process (crier holds no executor by design, decision D18)
+	// and the run-record store is the test's own temp dir, never a real one.
+	// The watcher is off so nothing polls the stub on a timer. One run is
+	// seeded under the probe id in TestDocsClaims so the README's
+	// GET /dagger/runs/{id} token resolves to a LIVE record rather than to the
+	// documented 404 for an unknown id.
+	daggerStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"run_id":"` + docsClaimsProbeAgent + `","status":"running"}`))
+	}))
+	t.Cleanup(daggerStub.Close)
+	t.Setenv("CR_DAGGER_URL", daggerStub.URL)
+	t.Setenv("CR_DAGGER_STORE_DIR", t.TempDir())
+	t.Setenv("CR_DAGGER_POLL_S", "0")
+
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
 
@@ -515,6 +533,30 @@ func registerAgent(t *testing.T, client *http.Client, baseURL, id string) {
 	}
 }
 
+// seedDaggerProbeRun creates one dagger run under the probe agent, so the
+// README's documented GET /dagger/runs/{id} token resolves to a live record
+// when the scanned-path pass substitutes the probe id for the template
+// placeholder (CR-CHAT-033). The stub executor configured by
+// bootDocsClaimsServer answers exactly this run id.
+func seedDaggerProbeRun(t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"agent_id":%q,"prompt":"docs-claims probe"}`, docsClaimsProbeAgent)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/dagger/runs", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("seed dagger run: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("seed dagger run: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("seed dagger run: status %d, want 201", resp.StatusCode)
+	}
+}
+
 // normalizeRoutePath substitutes "{...}" placeholders and concrete agent ids in
 // agent-scoped paths with a registered probe agent, so probing exercises the ROUTE
 // rather than the resource.
@@ -545,6 +587,11 @@ func TestDocsClaims(t *testing.T) {
 	registerAgent(t, client, baseURL, "agent-1")
 	registerAgent(t, client, baseURL, "bob")
 	registerAgent(t, client, baseURL, "alice")
+	// CR-CHAT-033: seed one dagger run under the probe id, so the README's
+	// documented GET /dagger/runs/{id} resolves to a live record when the
+	// scanned-path pass probes the template with the probe agent substituted.
+	// The stub executor answers exactly this run id (bootDocsClaimsServer).
+	seedDaggerProbeRun(t, client, baseURL)
 	// Identity the CR-GAP-062 ttl_seconds xfail probe drives. The webhook
 	// default-mode probe registers its OWN identity with the webhook attached
 	// (an update would need a signed request; the default is only observable

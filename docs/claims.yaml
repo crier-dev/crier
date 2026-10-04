@@ -73,6 +73,12 @@ ignore_paths:
   # live routes, already covered by the route-count claim.
   - /var/lib/crier/permissions
   - /permissions.jsonl
+  # CR-CHAT-033: the README's dagger-control env rows document the run-record
+  # store directory and its file. Filesystem paths an operator writes, not API
+  # routes; the six dagger control routes the section names are live routes
+  # (the docs gate boots with CR_DAGGER_URL set) and are covered below.
+  - /var/lib/crier/dagger
+  - /runs.jsonl
   # integration-guide.md:
   - /intel                 # illustrative mesh REQUEST path (the target agent's own path — same class as /ping above)
   - /mesh/connect/         # prose URL form `ws://…/mesh/connect/<agentID>`; the scanner probes the literal with an EMPTY id (a real connect with an id IS a live route)
@@ -351,31 +357,38 @@ claims:
     kind: count
     doc: README.md
     # CR-FEAT-026 added POST /capabilities/{capability}/inbox and CR-FEAT-029
-    # added GET /namespaces to the spec, so the merged pair is 18 paths /
-    # 22 operations and both moved with it.
+    # added GET /namespaces to the spec, so the merged pair was 18 paths /
+    # 22 operations. CR-CHAT-033 added the six opt-in dagger control routes
+    # (/dagger/runs, /dagger/runs/{id}, its cancel/resume/rewind siblings and
+    # /dagger/skills/{skill}/run), so the pair is 24 / 28 and both moved with
+    # it. The routes are OPT-IN at runtime (CR_DAGGER_URL) but they are
+    # declared operations in the document all the same, and this count's unit
+    # is the document.
     quote: "docs/openapi.yaml"
-    expect: 18
+    expect: 24
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
     doc: README.md
     # CR-GAP-057: the README now names the unit ("13 paths and 17 operations")
     # instead of the old conflatable "17 endpoints"; only the anchor moved.
-    # DF-CRIER-113 added GET /status to the spec, so the pair is 14 paths /
+    # DF-CRIER-113 added GET /status to the spec, so the pair was 14 paths /
     # 18 operations and both the anchor and the expectation moved with it.
     # CR-FEAT-025 added POST /agents/{id}/inbox/transfer and
-    # GET /agents/{id}/inbox/dead-letters, so the pair is 16 / 20 and both
-    # moved with it again. CR-FEAT-026 added
-    # POST /capabilities/{capability}/inbox and CR-FEAT-029 added GET
-    # /namespaces, so the merged pair is 18 / 22.
-    quote: "22 operations"
-    expect: 22
+    # GET /agents/{id}/inbox/dead-letters (16 / 20); CR-FEAT-026 and
+    # CR-FEAT-029 added POST /capabilities/{capability}/inbox and
+    # GET /namespaces (18 / 22); CR-CHAT-033 added the six dagger control
+    # operations (24 / 28), one per route above.
+    quote: "28 operations"
+    expect: 28
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
     doc: TESTERS.md
-    quote: "13 tools"
-    expect: 13
+    # CR-CHAT-033 added the six dagger control tools (create_run, run_status,
+    # cancel_run, resume_run, rewind_run, run_skill), so 13 -> 19.
+    quote: "19 tools"
+    expect: 19
     xfail: null
   # CR-GAP-057: the README now publishes the same MCP inventory (a tools table
   # with per-tool arguments). Same id and the same live probe (a real tools/list
@@ -384,8 +397,8 @@ claims:
   - id: COUNT-MCP-TOOLS
     kind: count
     doc: README.md
-    quote: "13 tools"
-    expect: 13
+    quote: "19 tools"
+    expect: 19
     xfail: null
   - id: COUNT-ROUTER-PATHS
     kind: count

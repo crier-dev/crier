@@ -12,9 +12,9 @@ package mcp
 // exclusion set below is where that decision is written down and enforced, and
 // the one-line justification per entry is the reason a future reader needs.
 //
-// The relationship is MANY-TO-MANY, not one tool per operation: 13 tools
-// exercise 10 covered spec operations, 9 operations are explicitly excluded, and
-// several tools share an operation (deliver_message and send_message both
+// The relationship is MANY-TO-MANY, not one tool per operation: 19 tools
+// exercise 16 covered spec operations, 12 operations are explicitly excluded,
+// and several tools share an operation (deliver_message and send_message both
 // deliver to the durable inbox; retrieve_inbox and get_messages both retrieve it;
 // get_messages and ack_messages both ack it). This guard therefore checks the
 // ACCOUNTING in all four drift directions rather than equality of names.
@@ -74,6 +74,16 @@ var toolCoverage = map[string][]string{
 	"inbox_stats":    {"inboxStats"},
 	"mesh_peers":     {"meshListPeers"},
 	"mesh_request":   {"meshConnect"},
+	// CR-CHAT-033 — the dagger control tools. Each one addresses exactly one
+	// of crier's own /dagger operations (the dagger surface the SERVER calls
+	// is not part of this spec), so the mapping is one tool to one
+	// operationId rather than the shared-operation shape above.
+	"create_run": {"daggerCreateRun"},
+	"run_status": {"daggerRunStatus"},
+	"cancel_run": {"daggerCancelRun"},
+	"resume_run": {"daggerResumeRun"},
+	"rewind_run": {"daggerRewindRun"},
+	"run_skill":  {"daggerRunSkill"},
 }
 
 // excludedOperations is the ratified exclusion set: every spec operation crier-mcp

@@ -90,6 +90,13 @@ the agent economy.
 - The OpenAPI 3.1 spec (`docs/openapi.yaml`) is the contract of record for the HTTP
   surface and is served live (`/openapi.json`, `/openapi.yaml`, `/docs`); the MCP tool
   surface mirrors it and is hand-registered in `internal/mcp/server.go`
+- Dagger control (CR-CHAT-033) is a **client**, never a second executor: the six
+  opt-in dagger control routes (`cmd/server/daggerctl.go`, `internal/daggerctl`)
+  call the dagger HTTP/JSON surface named by `CR_DAGGER_URL`, hold only the run's
+  record — id, state, evidence references, requesting agent — and deliver a
+  terminal outcome through the ordinary inbox path. There is no DAG evaluation,
+  no node execution and no scheduler inside crier (decision D18 in
+  `specs/CHAT-INTERFACE.md`: a second scheduler would be a second truth)
 - Events are opaque caller JSON, passed through verbatim — the bus assigns no id or
   content hash (`internal/relay/handler.go`); mesh frames carry a crypto/rand
   `message_id` for correlation

@@ -126,6 +126,38 @@ type Config struct {
 	// read, no snapshot is taken and every delivery is authorized exactly as
 	// it was before this feature existed.
 	Permissions PermissionsConfig
+	// Dagger holds the dagger control surface (CR_DAGGER_URL, CR-CHAT-033).
+	// Opt-in: with CR_DAGGER_URL unset the six /dagger routes are not
+	// registered at all, so a deployment that does not control DAGs serves
+	// exactly the surface it served before this feature existed.
+	Dagger DaggerConfig
+}
+
+// DaggerConfig is the dagger control surface's posture (CR-CHAT-033).
+//
+// The surface is a CLIENT of an executor crier does not own (decision D18), so
+// what is configured here is a URL to call and where crier keeps the run
+// records it holds. Nothing here makes crier execute anything.
+type DaggerConfig struct {
+	// URL is CR_DAGGER_URL: the base URL of the dagger HTTP/JSON surface.
+	// Empty — the default — registers no dagger route.
+	URL string
+	// Token is CR_DAGGER_TOKEN: the optional bearer token presented to that
+	// surface. Never logged.
+	Token string
+	// StoreDir is CR_DAGGER_STORE_DIR: the JSONL directory holding run
+	// records. Empty resolves to defaultDaggerStoreDir; a directory the
+	// process cannot create fails startup rather than silently losing run
+	// records on the next restart.
+	StoreDir string
+	// PollInterval is CR_DAGGER_POLL_S: how often the watcher re-observes a
+	// live run so a completion reaches its requester without the requester
+	// polling. Zero DISABLES the watcher (the run is then observed only when
+	// someone asks). A negative or non-integer value is a startup error.
+	PollInterval time.Duration
+	// Timeout is CR_DAGGER_TIMEOUT_S: the per-request budget for a call to
+	// the dagger surface. Zero resolves to the bridge's own default.
+	Timeout time.Duration
 }
 
 // PermissionsConfig is the delivery-ACL deployment posture (CR-CHAT-003).
@@ -802,7 +834,67 @@ func Load() (Config, error) {
 		cfg.Permissions.StoreDir = defaultPermissionsDir
 	}
 
+	// Dagger control surface (CR-CHAT-033). OPT-IN and additive: with
+	// CR_DAGGER_URL unset nothing below takes effect and main.go registers no
+	// /dagger route, so the served surface is exactly what it was before this
+	// feature existed. The interval and timeout are validated even when the
+	// surface is off, so a typo is named rather than silently ignored.
+	poll, pollSet, err := parseSeconds("CR_DAGGER_POLL_S", os.Getenv("CR_DAGGER_POLL_S"))
+	if err != nil {
+		return cfg, err
+	}
+	timeout, timeoutSet, err := parseSeconds("CR_DAGGER_TIMEOUT_S", os.Getenv("CR_DAGGER_TIMEOUT_S"))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Dagger.URL = strings.TrimSpace(os.Getenv("CR_DAGGER_URL"))
+	cfg.Dagger.Token = os.Getenv("CR_DAGGER_TOKEN")
+	cfg.Dagger.StoreDir = strings.TrimSpace(os.Getenv("CR_DAGGER_STORE_DIR"))
+	if cfg.Dagger.URL != "" {
+		if cfg.Dagger.StoreDir == "" {
+			cfg.Dagger.StoreDir = defaultDaggerStoreDir
+		}
+		// Unset → the documented default; an explicit 0 disables the watcher
+		// (and, for the timeout, selects the bridge's own default).
+		cfg.Dagger.PollInterval = defaultDaggerPollInterval
+		if pollSet {
+			cfg.Dagger.PollInterval = poll
+		}
+		if timeoutSet {
+			cfg.Dagger.Timeout = timeout
+		}
+	}
+
 	return cfg, nil
+}
+
+// defaultDaggerStoreDir is the dagger run-record directory when
+// CR_DAGGER_STORE_DIR is unset (CR-CHAT-033), matching the registry's other
+// on-disk state locations. A process that cannot create it fails startup
+// rather than silently losing run records on the next restart.
+const defaultDaggerStoreDir = "/var/lib/crier/dagger"
+
+// defaultDaggerPollInterval is how often the watcher re-observes a live run.
+// Five seconds is a control-surface cadence, not a scheduler: it bounds how
+// long a finished DAG can go unnoticed, and the executor is only ever READ.
+const defaultDaggerPollInterval = 5 * time.Second
+
+// parseSeconds reads an optional whole-seconds variable. set=false means the
+// variable was absent (the caller applies its default); a negative or
+// non-integer value is a startup error, never a silently ignored setting.
+func parseSeconds(name, v string) (d time.Duration, set bool, err error) {
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return 0, false, nil
+	}
+	n, convErr := strconv.Atoi(trimmed)
+	if convErr != nil {
+		return 0, false, fmt.Errorf("invalid %s: %q (want whole seconds)", name, v)
+	}
+	if n < 0 {
+		return 0, false, fmt.Errorf("invalid %s: %q (must not be negative)", name, v)
+	}
+	return time.Duration(n) * time.Second, true, nil
 }
 
 // defaultPermissionsDir is the delivery ACL's JSONL store root when
