@@ -2554,3 +2554,12 @@ tasks:
   status: complete
   created_at: '2026-10-04T05:57:36.134602+00:00'
   completed_at: '2026-10-04T06:25:29.950974+00:00'
+- id: CR-CHAT-003
+  title: 'Permissions: principals, roles, grants, delivery ACL'
+  criteria:
+  - A principal without a delivery grant is refused with a NAMED error when addressing
+    an agent; the four roles (owner/admin/member/viewer) are demonstrated; the refusal
+    is tested, not asserted
+  status: complete
+  created_at: '2026-10-04T12:25:17.902262+00:00'
+  completed_at: '2026-10-04T12:56:20.694967+00:00'
