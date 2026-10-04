@@ -986,6 +986,21 @@ paths:
                     a SEND — holding one does not by itself admit the
                     delivery, which is still checked against the action `send`
                     on the target (§6.5).
+                addressing:
+                  type: string
+                  description: |-
+                    The optional addressing "to line" (CR-CHAT-004,
+                    specs/CHAT-ADDRESSING.md §1.1): a comma/semicolon/whitespace
+                    separated address list of `@agent`, `@team:x`, `@cap:y`,
+                    `@ns/…`, `@instance/agent` and `#session`, at most 64
+                    addresses. Absent (or empty) is the pre-CR-CHAT-004 request
+                    and changes nothing. A malformed address is refused with 400
+                    `{"error":"INVALID_ADDRESS","address":…,"reason":…,"detail":…}`
+                    naming the offending token and the rule — never silently
+                    ignored. The header `X-Crier-Addressing` carries the same
+                    value; the body field wins when both are present. The list
+                    is PARSED, never executed: a tag is addressing, not a task
+                    (§2.5), so no fan-out and no work follow from it.
                 ttl_seconds:
                   type: integer
                   minimum: 0
@@ -1081,7 +1096,7 @@ paths:
         "400":
           description: |
             Invalid request — nothing is dispatched to the target's webhook and
-            no inbox entry is created. Four classes:
+            no inbox entry is created. Five classes:
 
             (a) the body is not JSON;
             (b) a store-level input is invalid (`ttl_seconds` negative, or above
@@ -1107,6 +1122,17 @@ paths:
             Like (c), this check runs BEFORE the transport/store choice and is
             therefore identical for a webhook target, an inbox-only agent and
             an unknown agent.
+            (e) the optional `addressing` "to line" is malformed (CR-CHAT-004,
+            specs/CHAT-ADDRESSING.md §4): a bad character, an empty token
+            (`@`, `#`, `@team:`, `@cap:`, `@ns/`), a reserved-prefix misuse, a
+            trailing separator, a second `#` room in one write, or more than
+            `maxAddressesPerWrite` (64) addresses. The body is
+            `{"error":"INVALID_ADDRESS","address":"@team:","reason":"EMPTY_GROUP_NAME","detail":"…"}`
+            — a machine-readable NAMED refusal naming the offending token and
+            the rule, never a silent drop. Like (c) and (d), it runs BEFORE the
+            transport/store choice: nothing is dispatched and nothing is stored.
+            A request with no `addressing` field (or an empty one) is exactly
+            the pre-CR-CHAT-004 request.
           content:
             application/json:
               schema:

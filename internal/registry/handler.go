@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/crier-dev/crier/internal/a2a"
+	"github.com/crier-dev/crier/internal/addressing"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/metrics"
@@ -130,7 +131,25 @@ type deliverRequest struct {
 	// 403 DELIVERY_FORBIDDEN reason NO_BINDING. A binding is a speech right and
 	// does NOT itself admit a send (§6.5).
 	AsAgent string `json:"as_agent,omitempty"`
+	// Addressing is the optional addressing "to line" (CR-CHAT-004,
+	// specs/CHAT-ADDRESSING.md §1.1): a comma/semicolon/whitespace separated
+	// address list — `@agent`, `@team:x`, `@cap:y`, `@ns/…`, `@instance/agent`
+	// and `#session` — at most 64 addresses. It is ADDITIVE: absent (or empty)
+	// leaves the delivery byte-identical to the pre-CR-CHAT-004 request.
+	//
+	// When present it is PARSED, not executed (D12, §2.5): a malformed address
+	// is a 400 INVALID_ADDRESS naming the offending token and the rule, and a
+	// well-formed one is accepted and recorded nowhere yet — resolution,
+	// authorization and dispatch are other rows' work. The HTTP header
+	// X-Crier-Addressing carries the same value; the body field wins when both
+	// are present.
+	Addressing string `json:"addressing,omitempty"`
 }
+
+// HeaderAddressing is the request header spelling of deliverRequest.Addressing,
+// so a sender whose body is generated elsewhere can carry the "to line"
+// without reshaping its payload. The JSON field wins when both are present.
+const HeaderAddressing = "X-Crier-Addressing"
 
 const (
 	// defaultMaxInboxBodyBytes is the raw HTTP request-body cap shared by
@@ -193,6 +212,32 @@ func validateDeliverParameters(req *deliverRequest) error {
 		return fmt.Errorf("priority must be %d..%d", MinMessagePriority, MaxMessagePriority)
 	}
 	return nil
+}
+
+// validateDeliverAddressing parses the optional addressing "to line" of a
+// deliver request (CR-CHAT-004). The value comes from the request body's
+// `addressing` field, or — when that is absent — the X-Crier-Addressing
+// header; absent in both places is a no-op, so a send with no addressing field
+// is UNCHANGED.
+//
+// It is deliberately parse-only (specs/CHAT-ADDRESSING.md §2.5, D12): a tag is
+// ADDRESSING, never an instruction. Nothing resolves, fans out or executes
+// here; the parser's one job on this path is to refuse a malformed address
+// with its named 400 instead of ignoring it, so a typo cannot silently deliver
+// to nobody.
+//
+// It uses ParseWrite, not ParseList, because §1.3 gives a write at most one
+// `#` room — a second `#` is INVALID_ADDRESS (MULTIPLE_SESSIONS).
+func validateDeliverAddressing(req *deliverRequest, header http.Header) error {
+	raw := strings.TrimSpace(req.Addressing)
+	if raw == "" {
+		raw = strings.TrimSpace(header.Get(HeaderAddressing))
+	}
+	if raw == "" {
+		return nil
+	}
+	_, err := addressing.ParseWrite(raw)
+	return err
 }
 
 // The published deliver contract's required `payload` field, as the 400 error
@@ -979,6 +1024,21 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	// answer is identical for webhook targets, inbox-only targets and
 	// unregistered targets: nothing is dispatched, nothing is stored.
 	if err := validateDeliverParameters(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// The optional addressing "to line" (CR-CHAT-004). Parse-only (D12): a
+	// malformed address is refused with the §4 named body — never ignored —
+	// and a well-formed one is accepted here and acted on nowhere (resolution
+	// and delivery wiring are not this row's scope). Absent leaves the request
+	// byte-identical to before.
+	if err := validateDeliverAddressing(&req, r.Header); err != nil {
+		var aerr *addressing.Error
+		if errors.As(err, &aerr) {
+			writeJSON(w, http.StatusBadRequest, aerr.Refusal())
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
