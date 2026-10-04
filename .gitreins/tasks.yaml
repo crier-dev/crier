@@ -2538,3 +2538,19 @@ tasks:
   status: complete
   created_at: '2026-10-03T12:16:06.570049+00:00'
   completed_at: '2026-10-03T12:27:04.467989+00:00'
+- id: CR-CHAT-027
+  title: Bind the per-agent signature to the message body
+  criteria:
+  - a signed delivery whose body was altered after signing FAILS verification with
+    a NAMED outcome; request-line-only verification keeps working for callers that
+    do not opt into body binding; full go test suite green
+  status: complete
+  created_at: '2026-10-03T22:55:33.522547+00:00'
+  completed_at: '2026-10-04T05:55:58.535833+00:00'
+- id: CR-CHAT-002
+  title: Session data model
+  criteria:
+  - schema + fan-out + depth rule + tests
+  status: complete
+  created_at: '2026-10-04T05:57:36.134602+00:00'
+  completed_at: '2026-10-04T06:25:29.950974+00:00'
