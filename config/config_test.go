@@ -35,6 +35,8 @@ func unsetAll(t *testing.T) {
 		"CR_INBOX_MAX_BODY_BYTES",
 		"CR_ENABLE_PPROF",
 		"CR_ENABLE_METRICS",
+		"CR_PERMISSIONS_ENABLED",
+		"CR_PERMISSIONS_DIR",
 	} {
 		t.Setenv(k, "")
 	}

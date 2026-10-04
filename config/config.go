@@ -120,6 +120,38 @@ type Config struct {
 	// empty, which is a deployment with exactly one implicit namespace —
 	// every behaviour this server had before the feature existed.
 	Namespaces NamespaceConfig
+	// Permissions arms the DELIVERY ACL (CR_PERMISSIONS_ENABLED /
+	// CR_PERMISSIONS_DIR, CR-CHAT-003, specs/CHAT-PERMISSIONS.md §6). Default
+	// OFF, so the shipped trust-by-reach posture is unchanged: no class is
+	// read, no snapshot is taken and every delivery is authorized exactly as
+	// it was before this feature existed.
+	Permissions PermissionsConfig
+}
+
+// PermissionsConfig is the delivery-ACL deployment posture (CR-CHAT-003).
+//
+// The spec separates two statements this struct keeps separate (§6.4 rule 2):
+// the absence of a GRANT denies (the ACL's rule), while the absence of an ACL
+// DEPLOYMENT leaves legacy behaviour unchanged. This switch is the second one.
+//
+// Bootstrap note: because an ACL deployment only ever evaluates a CLASSED
+// agent row, and no agent is classed until a `permission.agent` record exists
+// (the registry row has no class — §8.1 item 3), arming the ACL against an
+// existing fleet — every row unclassed — is a no-op. There is therefore no
+// window in which flipping this switch locks a running fleet out; the
+// fleet-wide lock a naive default-deny would cause cannot occur, because
+// nothing is classed until an operator classifies it.
+type PermissionsConfig struct {
+	// Enabled is CR_PERMISSIONS_ENABLED — the master switch. False (the
+	// default) wires no checker at all.
+	Enabled bool
+	// StoreDir is CR_PERMISSIONS_DIR: the JSONL store root the ACL reads. It
+	// holds principals, bindings, grants and agent-class records as one
+	// append-only log (<dir>/permissions.jsonl). Empty means the documented
+	// default, /var/lib/crier/permissions when the process can write it; when
+	// it cannot, startup fails naming the directory rather than silently
+	// arming an ACL over an unwritable store.
+	StoreDir string
 }
 
 // NamespaceConfig carries the realm policy document as RAW input. Like
@@ -754,8 +786,30 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("CR_NAMESPACES and CR_NAMESPACES_FILE are both set — declare the namespace document in exactly one place")
 	}
 
+	// Delivery ACL (CR-CHAT-003, specs/CHAT-PERMISSIONS.md §6). OPT-IN and
+	// default OFF: with CR_PERMISSIONS_ENABLED unset no checker is wired and
+	// the delivery path is byte-identical to a build without this feature.
+	// Same tolerant bool dialect as CR_GUARD_ENABLED / CR_A2A_ENABLED.
+	if v := os.Getenv("CR_PERMISSIONS_ENABLED"); v != "" {
+		parsed, err := parseTolerantBool("CR_PERMISSIONS_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Permissions.Enabled = parsed
+	}
+	cfg.Permissions.StoreDir = os.Getenv("CR_PERMISSIONS_DIR")
+	if cfg.Permissions.Enabled && strings.TrimSpace(cfg.Permissions.StoreDir) == "" {
+		cfg.Permissions.StoreDir = defaultPermissionsDir
+	}
+
 	return cfg, nil
 }
+
+// defaultPermissionsDir is the delivery ACL's JSONL store root when
+// CR_PERMISSIONS_DIR is unset (CR-CHAT-003). It matches the registry's other
+// on-disk state locations; a process that cannot create it fails startup
+// rather than silently arming an ACL over an unwritable store.
+const defaultPermissionsDir = "/var/lib/crier/permissions"
 
 // parseHourRange reads a "S-E" UTC hour range (0..23 each, start inclusive,
 // end exclusive). A declared range is HONORED or REFUSED, never ignored: an

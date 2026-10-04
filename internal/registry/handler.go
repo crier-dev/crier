@@ -118,6 +118,18 @@ type deliverRequest struct {
 	// target agent is registered in. Anything else is refused with
 	// NAMESPACE_MISMATCH — a message cannot cross realms by naming one.
 	Namespace string `json:"namespace,omitempty"`
+	// PrincipalID names the HUMAN principal this delivery is made by
+	// (CR-CHAT-003, specs/CHAT-PERMISSIONS.md §6.3). It is the request's
+	// principal_id; with AsAgent it says "this human speaks AS this agent".
+	// Absent is the anonymous sender: allowed on an unclassed target (the
+	// shipped posture) and refused on a classed one when the delivery ACL is
+	// armed. The field is inert while no permissions checker is wired.
+	PrincipalID string `json:"principal_id,omitempty"`
+	// AsAgent is the agent a principal speaks AS (§2.3/§6.3). A principal
+	// sender must hold a live binding to it, or the delivery is refused with
+	// 403 DELIVERY_FORBIDDEN reason NO_BINDING. A binding is a speech right and
+	// does NOT itself admit a send (§6.5).
+	AsAgent string `json:"as_agent,omitempty"`
 }
 
 const (
@@ -1102,6 +1114,17 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		}
 	}
 
+	// ▼ DELIVERY ACL — ADDRESS level (CR-CHAT-003, specs/CHAT-PERMISSIONS.md
+	// §6.8 step 4). A pool/roster address is authorized on the ADDRESS, before
+	// holder selection, so a refused `@cap:y` delivery consumes NO rotation
+	// turn (§6.4 rule 1) and has no store side effect. This runs after the
+	// idempotency key was resolved (a refusal therefore releases the key, so a
+	// corrected retry under the same key is delivered rather than answered
+	// with a replay of the refusal) and before routeCapability below.
+	if h.authorizeCapabilityAddress(w, r, &req, capability) {
+		return
+	}
+
 	// ▼ CAPABILITY ROUTING (CR-FEAT-026, capability.go) — the sender named a
 	// capability instead of an agent id, so the holder is chosen NOW: after
 	// every body and parameter validation (a 400 answers the REQUEST, never the
@@ -1202,6 +1225,17 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 			entry.TTLSeconds = &ttl
 		}
 		logNamespaceDeliver(id, targetNS, req.Sender)
+	}
+
+	// ▼ DELIVERY ACL — TARGET level (CR-CHAT-003, specs/CHAT-PERMISSIONS.md
+	// §6.8 step 7). An AGENT address needs the row's class and owner, so this
+	// runs after step 6 (the target fetch and the realm resolution) and
+	// before the guard choke point below: authorization before content
+	// inspection, so a refused sender can never spend the deployment's guard
+	// budget. An unclassed target is allowed here and the ACL has nothing to
+	// say about it (§8.1).
+	if h.authorizeAgentTarget(w, r, &req, target) {
+		return
 	}
 
 	// Resolve the expiry now, from the same instant the store will use, so

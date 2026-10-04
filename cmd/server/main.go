@@ -326,6 +326,28 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// delivery pins every message to the TARGET's realm, and the realm supplies
 	// the retention default and the guard settings for deliveries into it.
 	registryHandler.SetNamespacePolicies(nsReg)
+	// Delivery ACL (CR-CHAT-003, specs/CHAT-PERMISSIONS.md §6). OPT-IN: with
+	// CR_PERMISSIONS_ENABLED unset no checker is wired and every delivery is
+	// authorized exactly as it was before this feature existed. When armed, a
+	// CLASSED agent target is default-deny: a delivery whose effective sender
+	// holds no live grant, ownership rule or scope reach is refused with 403
+	// DELIVERY_FORBIDDEN and a machine-readable reason. An unclassed target is
+	// unchanged either way (§8.1).
+	permsChecker, err := buildPermissions(cfg)
+	if err != nil {
+		slog.Error("initialize delivery acl", "error", err)
+		return 1
+	}
+	if permsChecker != nil {
+		registryHandler.SetPermissionsChecker(permsChecker)
+		slog.Info("delivery acl armed",
+			"store_dir", cfg.Permissions.StoreDir,
+			"detail", "classed targets are default-deny; unclassed targets keep the shipped posture (CR-CHAT-003)")
+	} else {
+		slog.Info("delivery acl",
+			"enabled", false,
+			"detail", "no ACL deployed: deliveries are authorized exactly as before CR-CHAT-003")
+	}
 	// Presence (CR-FEAT-024): the status every registry read reports is DERIVED
 	// from the row's liveness evidence (`last_seen`) and this documented window,
 	// so a crashed agent goes stale instead of reporting "online" forever. The

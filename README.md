@@ -1707,6 +1707,39 @@ All configuration is via environment variables (defaults shown):
 | `CR_CANARY_TOKENS` | _(unset — two generated per boot, and logged)_ | Comma-separated canary tokens to plant. A delivery addressed to a canary id, or carrying a canary token in its payload, trips `canary_trip`. Pinned tokens keep stable ids across restarts; generated ones rotate per boot. |
 | `CR_NAMESPACES` | _(unset — one implicit namespace)_ | The namespace (realm) policy document, inline JSON (CR-FEAT-029): `{"namespaces":[{"name":"acme","rate_limit_per_minute":240,"retention_seconds":86400}]}`. Per-realm auth posture (`auth`/`token_ref`), rate limit, guard settings (`guard_enabled`/`guard_policy`) and retention, each **inherited when unset**. Unknown fields, duplicate names, an invalid name, a `token` posture with no resolvable `env:VAR` secret, or a `retention_seconds < 1` fail the boot. Set at most one of this and `CR_NAMESPACES_FILE`. See [Namespaces (realms)](#namespaces-realms--per-realm-policy-cr-feat-029). |
 | `CR_NAMESPACES_FILE` | _(unset)_ | Path to the same document (CR-FEAT-029). An unreadable file fails the boot rather than silently serving no namespaces. |
+| `CR_PERMISSIONS_ENABLED` | `false` | Opt-in: the **delivery ACL** (CR-CHAT-003, [`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6). Default off — with the flag unset no checker is wired and every delivery is authorized exactly as it shipped: the bus is trust-by-reach and a delivery carries only the deployment token. When ON, a delivery to a **classed** agent target is **default-deny**: an effective sender holding no live grant, no ownership rule (§3.2) and no scope reach is refused `403 DELIVERY_FORBIDDEN` with a machine-readable `reason` (`NO_GRANT`, `NO_BINDING`, or `principal: anonymous`). The refusal covers both surfaces §6.4 names — `POST /agents/{id}/inbox` (action `send`) and `POST /capabilities/{capability}/inbox` (action `invoke`), the pool address being checked **before** holder selection so a refused pool delivery consumes no rotation turn. An **unclassed** agent row is unchanged either way (§8.1), so arming the ACL against an existing fleet is a no-op. |
+| `CR_PERMISSIONS_DIR` | `/var/lib/crier/permissions` when enabled, otherwise unset | Directory of the delivery ACL's append-only JSONL store (`<dir>/permissions.jsonl`): principals, bindings, grants and agent-class records, folded keep-LAST per id (§6.6 tombstones are retained). An enabled ACL whose directory cannot be created **fails the boot** rather than silently serving the trust-by-reach posture while claiming the ACL is armed. See [Delivery ACL](#delivery-acl--principals-roles-and-grants-cr-chat-003). |
+
+### Delivery ACL — principals, roles and grants (CR-CHAT-003)
+
+`CR_PERMISSIONS_ENABLED` arms the delivery ACL of
+[`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6: *the permission
+model must let me talk to MY agents but NOT to YOURS* (§3.2). It is the inner
+wall; namespaces (§1.1) remain the outer one and are reused, not replaced —
+namespace membership is deliberately **not** blanket permission.
+
+- **The store.** One append-only JSONL log under `CR_PERMISSIONS_DIR` holding
+  four record kinds — `permission.principal`, `permission.binding`,
+  `permission.grant` and `permission.agent` (the class, owner and scope reach
+  the ACL reads). It is folded by keep-LAST per id, so a **revocation is a
+  tombstone**: the record stays, `revoked_at`/`revoked_by` are set, and the
+  next delivery treats it as absent (§6.6). A PostgreSQL implementation
+  (`internal/permissions.PostgresStore`, integration-tagged) shares the same
+  `Store` interface and the same append-only `(id, seq)` key.
+- **The sender.** A delivery names its human with `principal_id` + `as_agent`
+  (the agent the human speaks AS) and must hold a live binding to it (§2.3,
+  §6.3) — a binding is a speech right, **not** a send. No identity is the
+  `anonymous` sender: allowed on an unclassed target, refused on a classed one.
+- **The rule.** `personal` allows its owner or a live `send` grant; a
+  `service` agent allows a live grant or a scope reach set, and is otherwise
+  reachable by an `admin`/`owner` in the **same realm** only. A role is an
+  action bundle, never a reach badge — an `admin` cannot reach another owner's
+  `personal` agent, and a `viewer` may read but not send (§5.2, §6.5).
+- **Bootstrap.** Nothing is classed until an operator writes a
+  `permission.agent` record, so enabling the ACL over an existing fleet changes
+  nothing; and the owner rule means a `personal` agent is never orphaned from
+  its owner. There is no window in which arming the switch locks a running
+  deployment out.
 
 ### Durable backend (PostgreSQL)
 

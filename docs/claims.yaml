@@ -66,6 +66,13 @@ ignore_paths:
   # filesystem path an operator writes, not an API route — the route that
   # reports the same policy set is GET /namespaces, claimed live below.
   - /etc/crier/namespaces.json
+  # CR-CHAT-003: the README's delivery-ACL section documents the ACL's on-disk
+  # store — the JSONL log directory and its file. Filesystem paths an operator
+  # writes, not API routes; the two delivery surfaces the section names
+  # (POST /agents/{id}/inbox and POST /capabilities/{capability}/inbox) are
+  # live routes, already covered by the route-count claim.
+  - /var/lib/crier/permissions
+  - /permissions.jsonl
   # integration-guide.md:
   - /intel                 # illustrative mesh REQUEST path (the target agent's own path — same class as /ping above)
   - /mesh/connect/         # prose URL form `ws://…/mesh/connect/<agentID>`; the scanner probes the literal with an EMPTY id (a real connect with an id IS a live route)

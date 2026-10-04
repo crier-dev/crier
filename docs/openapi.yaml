@@ -962,6 +962,30 @@ paths:
                     namespaces by naming one. The stored message carries the
                     TARGET's realm whatever this member said, and the realm is
                     recorded with the message so a retrieve reports it.
+                principal_id:
+                  type: string
+                  description: |-
+                    The HUMAN principal this delivery is made by (CR-CHAT-003,
+                    specs/CHAT-PERMISSIONS.md §6.3). With `as_agent` it says
+                    "this human speaks AS this agent". Pairing it with a
+                    delivery asserts a person's identity — the request must
+                    also hold a live BINDING to `as_agent` (§2.3), because a
+                    human writes as an agent and never as an anonymous bus
+                    identity. Absent is the anonymous sender: allowed on an
+                    unclassed target (the shipped posture) and refused on a
+                    classed one while the delivery ACL is armed
+                    (`CR_PERMISSIONS_ENABLED`). The field is inert while no
+                    ACL is deployed.
+                as_agent:
+                  type: string
+                  description: |-
+                    The agent a principal speaks AS (§2.3/§6.3). Required
+                    whenever `principal_id` is present: a principal that names
+                    no binding is refused with 403 DELIVERY_FORBIDDEN and
+                    `"reason":"NO_BINDING"`. A binding is a SPEECH right, not
+                    a SEND — holding one does not by itself admit the
+                    delivery, which is still checked against the action `send`
+                    on the target (§6.5).
                 ttl_seconds:
                   type: integer
                   minimum: 0
@@ -1104,7 +1128,7 @@ paths:
                     type: string
                     enum: [REQUEST_BODY_TOO_LARGE]
         "403":
-          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict. Also the NAMESPACE_MISMATCH refusal (CR-FEAT-029): the request named a namespace the TARGET agent is not registered in, and the message was not stored — a delivery cannot cross namespaces by naming one (specs/NAMESPACES.md §5)."
+          description: "Message blocked by the LLM message guard (CR-FEAT-010, spec §2.1) — never queued, never stored, never POSTed; the body carries the verdict. Also the NAMESPACE_MISMATCH refusal (CR-FEAT-029): the request named a namespace the TARGET agent is not registered in, and the message was not stored — a delivery cannot cross namespaces by naming one (specs/NAMESPACES.md §5). Also the DELIVERY ACL refusal (CR-CHAT-003, specs/CHAT-PERMISSIONS.md §6.7), present only while `CR_PERMISSIONS_ENABLED` arms the ACL and only for a CLASSED target: the effective sender holds no live grant, no ownership rule (§3.2) and no scope reach, and the delivery is refused with `{\"error\":\"DELIVERY_FORBIDDEN\",\"reason\":\"NO_GRANT\"|\"NO_BINDING\",\"principal\":…,\"as_agent\":…,\"target\":{…},\"action\":…,\"detail\":…}` — a machine-readable body a client branches on, with no store side effect."
           content:
             application/json:
               schema:

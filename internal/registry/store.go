@@ -12,6 +12,7 @@ import (
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/namespace"
+	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/ratelimit"
 	"github.com/crier-dev/crier/internal/webhook"
 )
@@ -204,6 +205,15 @@ type Handler struct {
 	// member. All methods on *namespace.Registry are nil-safe for exactly this
 	// reason — the zero Handler is the unconfigured deployment.
 	namespaces *namespace.Registry
+	// permissions is the DELIVERY ACL (CR-CHAT-003,
+	// specs/CHAT-PERMISSIONS.md §6). Nil (the default) means no ACL is
+	// deployed: every delivery is authorized exactly as it was before this
+	// feature existed (§6.4 rule 2 — the absence of an ACL deployment is not
+	// the same statement as the absence of a grant). When wired, the two
+	// insertion points in deliver() (§6.8 steps 4 and 7) refuse a delivery
+	// whose effective sender holds no live grant, ownership rule or scope
+	// reach, with 403 DELIVERY_FORBIDDEN and a machine-readable reason.
+	permissions *permissions.Checker
 }
 
 // NewHandler creates a Handler that delegates store operations to the
@@ -293,6 +303,18 @@ func (h *Handler) SetGuardFilter(f guard.Filter) {
 // SetRequireAgentSig toggles per-agent ed25519 signature enforcement.
 func (h *Handler) SetRequireAgentSig(enabled bool) {
 	h.requireAgentSig = enabled
+}
+
+// SetPermissionsChecker arms the DELIVERY ACL (CR-CHAT-003,
+// specs/CHAT-PERMISSIONS.md §6). Nil — the default — leaves the delivery path
+// exactly as it shipped: no class is read, no snapshot is taken and every
+// authorization decision is the pre-CR-CHAT-003 one. Wiring a checker is what
+// makes a CLASSED target default-deny; an unclassed target is unchanged either
+// way, because an unclassed row keeps the shipped trust-by-reach posture
+// (§8.1). Same setter shape as SetGuardFilter, so the public constructor stays
+// stable for existing callers.
+func (h *Handler) SetPermissionsChecker(c *permissions.Checker) {
+	h.permissions = c
 }
 
 var (
