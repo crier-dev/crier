@@ -16,6 +16,12 @@
 //
 // The package is self-contained: it does not extend or reinterpret
 // internal/registry, it only consumes registry.Store for fan-out.
+//
+// The nested reads over that tree and the request→thread flow of CR-CHAT-015
+// live beside it: tree.go (RootThreads / SessionThreads / ThreadTree /
+// MessageTree) reads a session as one entry per conversation with its replies
+// attached by parent_id, and flow.go (OpenRequest / Reply) opens a thread from
+// a request and keeps every reply inside the thread it answers.
 package session
 
 import (

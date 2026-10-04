@@ -20,6 +20,14 @@ var (
 	// applied to a closed session (§1.3). Closing does not delete; it stops
 	// admission.
 	ErrSessionClosed = errors.New("session is closed")
+	// ErrMessageNotFound is returned by the request→thread flow (OpenRequest /
+	// Reply) when a record names more than nothing: a reply whose parent_id is
+	// not in the session's transcript.
+	ErrMessageNotFound = errors.New("message not found")
+	// ErrThreadMismatch is returned when a reply names a thread other than its
+	// parent's. A reply never carries a new thread_id and never moves out of its
+	// thread (§4.5, D11), so the contradiction is refused, not repaired.
+	ErrThreadMismatch = errors.New("thread mismatch")
 )
 
 // RecordFormatVersion is the envelope version this package writes and the only
