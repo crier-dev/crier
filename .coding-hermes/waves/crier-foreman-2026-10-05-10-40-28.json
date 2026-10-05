@@ -1,0 +1,25 @@
+{
+  "tick_id": "crier-foreman-2026-10-05-10-40-28",
+  "mode": "wave",
+  "created_at": "2026-10-05T15:55:00Z",
+  "workers": [
+    {
+      "task_id": "CR-GUARD-JEV-1",
+      "brief": "/tmp/crier-t-brief-CR-GUARD-JEV-1.md",
+      "scope": "internal/guard/{router.go,jev.go,router_test.go,jev_test.go} (+1 choke-point test file if needed)",
+      "worktree": "/home/kara/worktrees/crier-CR-GUARD-JEV-1",
+      "branch": "wt/CR-GUARD-JEV-1",
+      "base_sha": "0980891",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "QA-CRIER-37",
+      "brief": "/tmp/crier-t-brief-QA-CRIER-37.md",
+      "scope": "scripts selftest cell owning the port-guard selftest; optional iproute2 install in CI workflow",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-37",
+      "branch": "wt/QA-CRIER-37",
+      "base_sha": "0980891",
+      "status": "dispatched"
+    }
+  ]
+}
