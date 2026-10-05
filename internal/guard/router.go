@@ -60,6 +60,20 @@ var Presets = map[string]Preset{
 		// is NOT shipped as a fallback slot (DF-CRIER-149).
 		Models: []string{"google/gemma-4-31b-it"},
 	},
+	// jev (CR-GUARD-JEV-1) is a DECISIONS model, not a chat model, and the
+	// only preset whose transport is not /chat/completions: the BaseURL below
+	// IS the full decisions endpoint (nothing is appended) and the client
+	// sends {"model","state","questions"} instead of messages. It is a named
+	// preset rather than a special case so a policy can name it, chain it and
+	// fail over to/from it exactly like deepseek/groq/nvidia; router.Check
+	// selects the transport by this name. See internal/guard/jev.go for the
+	// endpoint contract and the decisions→verdict mapping.
+	"jev": {
+		Name:      "jev",
+		BaseURL:   "https://openrouter.ai/api/alpha/decisions",
+		APIKeyRef: "env:OPENROUTER_API_KEY",
+		Models:    []string{"typesafe/jev-1.13"},
+	},
 }
 
 // RouterOptions wires the router (spec §5.4 / §9.1 env).
@@ -283,8 +297,18 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 			continue
 		}
 
-		client := NewClient(baseURL, apiKey, model, spec.ThinkingEnabled, r.timeout)
-		content, cerr := client.Complete(ctx, messages)
+		// Provider class selects the transport (CR-GUARD-JEV-1). The "jev"
+		// preset speaks the decisions endpoint and returns the SAME raw
+		// verdict JSON the chat transport returns, so retry, failover,
+		// providerSignal and the downstream ParseVerdict are unchanged.
+		// Every other preset is the OpenAI-compatible chat transport.
+		complete := func() (string, error) {
+			if spec.Provider == "jev" {
+				return NewJevClient(baseURL, apiKey, model, r.timeout).Complete(ctx, jevState(messages))
+			}
+			return NewClient(baseURL, apiKey, model, spec.ThinkingEnabled, r.timeout).Complete(ctx, messages)
+		}
+		content, cerr := complete()
 		if cerr == nil {
 			r.circuit.recordSuccess(key)
 			landed()
@@ -312,7 +336,7 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 			failed(ctx.Err())
 			return "", "", "", ctx.Err()
 		}
-		content, cerr2 := client.Complete(ctx, messages)
+		content, cerr2 := complete()
 		if cerr2 == nil {
 			r.circuit.recordSuccess(key)
 			landed()
