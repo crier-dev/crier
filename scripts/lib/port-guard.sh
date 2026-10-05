@@ -70,6 +70,13 @@
 #       clobbered. Idempotent.
 #
 # DEPENDENCIES: bash 4+, coreutils, ss (iproute2), curl. No lsof/pgrep/fuser.
+#   The LIBRARY exits 2 when `ss` is missing — a consumer cannot verify a port
+#   holder without it, so it fails closed. The SELFTEST is the one exception
+#   (QA-CRIER-37): a scratch runner that ships no iproute2 (the act container
+#   catthehacker/ubuntu has no `ss`) cannot exercise the guards at all, so the
+#   selftest SKIPS the cell loudly (one `SKIP: …` line naming ss/iproute2) and
+#   exits 0 instead of reding the pipeline as if the PRODUCT were broken. The
+#   library's refusal is unchanged and ARM H below proves it.
 # EXIT CODES:   1 = the situation the guard exists for (abort the run),
 #               2 = misuse (bad argument) or a missing dependency.
 #
@@ -754,7 +761,24 @@ _pg_selftest() {
     return 2
   fi
 
-  _pg_require_ss
+  # ── ambient-tool skip-guard (QA-CRIER-37) ───────────────────────────────────
+  # This selftest is a SELF-CHECK of the harness, not a verification of a diff:
+  # a scratch runner that ships no iproute2 (the act container
+  # catthehacker/ubuntu has no `ss`) cannot exercise the port guards at all, and
+  # exiting 2 there reports a broken RUNNER as a broken PRODUCT — it reds the
+  # whole pipeline on a commit that cannot affect the harness. So SKIP the cell
+  # LOUDLY and exit 0. The LIBRARY is untouched: every consumer
+  # (require_free_port / assert_port_owned / wait_http_or_die /
+  # select_scratch_port / port_holder_pid) still calls _pg_require_ss and exits 2
+  # when `ss` is missing, and ARM H below pins that — this changes only what the
+  # SELFTEST does when the ambient tool is absent, never what a consumer gets.
+  # The probe idiom is the sibling checkers' (scripts/check-shell-yaml.sh:
+  # actionlint-or-PyYAML; scripts/check-make-docker.sh: hadolint-or-python3):
+  # name the tool and the mode, and never let absence be silent.
+  if ! command -v ss >/dev/null 2>&1; then
+    echo "SKIP: port-guard selftest — 'ss' (iproute2) is not on PATH; the guards find the port holder with it and this cell cannot exercise them without it. Install the iproute2 package on this runner (Debian/Ubuntu: apt-get install -y iproute2) to run the cell. The library's refusal to start without 'ss' is unchanged — this only skips the self-check."
+    return 0
+  fi
   _pg_require_tool curl "the selftest drives wait_http_or_die"
 
   _pg_SELFTEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/port-guard-selftest.XXXXXX")" || {
@@ -923,6 +947,49 @@ _pg_selftest() {
       fails=$((fails + 1))
     else
       echo "PASS: ARM G: loopback is off the ambient proxy — a bare curl under HTTP_PROXY=$dead_proxy cannot reach the decoy (rc=$rc_bare) while wait_http_or_die polls the same url green, and no_proxy/NO_PROXY = $merged_want with the operator's entries preserved"
+    fi
+  fi
+
+  # ── ARM H: the LIBRARY still fails closed when ss is absent (QA-CRIER-37) ────
+  # The skip-guard at the top of this function is for a TOOL-LESS scratch runner;
+  # it must not soften a real consumer. Each public guard calls _pg_require_ss,
+  # which exits 2 when `ss` (iproute2) is missing — an unreachable port holder
+  # cannot be verified, so failing closed there is correct, and this arm pins it
+  # so a later refactor cannot quietly turn the library's refusal into a skip too.
+  # `ss` is stripped by running ONE guard in a child whose PATH is a single EMPTY
+  # directory, so `command -v ss` cannot find the ambient binary; a masking shim
+  # placed earlier on PATH does NOT hide a later entry (measured — `command -v`
+  # walks past a directory or a non-executable file named `ss`), which is why the
+  # PATH is emptied rather than shimmed. bash is invoked by ABSOLUTE path because
+  # the child's PATH carries nothing.
+  if [ "$arms_skipped" -eq 0 ]; then
+    checks=$((checks + 1)) # ARM H — counted even when the fixture cannot be built
+    local arm_h_empty="" arm_h_bash="" arm_h_out="" arm_h_rc=0
+    arm_h_empty="$tmp/arm-h-empty"
+    mkdir -p "$arm_h_empty"
+    arm_h_bash="$(command -v bash 2>/dev/null)"
+    if [ -z "$arm_h_bash" ]; then
+      echo "port-guard selftest: FAIL: ARM H needs an absolute bash to drive the no-ss child" >&2
+      fails=$((fails + 1))
+    else
+      arm_h_out="$(env PATH="$arm_h_empty" "$arm_h_bash" -c '. "$1"; require_free_port 65535 "selftest-arm-h"' _ "$self" 2>&1)" || arm_h_rc=$?
+      if [ "$arm_h_rc" -ne 2 ]; then
+        echo "port-guard selftest: FAIL: ARM H: the library exited $arm_h_rc without ss, not 2 — a consumer must fail closed when the port holder cannot be found" >&2
+        echo "  output: $arm_h_out" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$arm_h_out" | grep -q "needs 'ss' on PATH"; then
+        echo "port-guard selftest: FAIL: ARM H: the no-ss refusal did not name ss (output: $arm_h_out)" >&2
+        fails=$((fails + 1))
+      elif ! printf '%s\n' "$arm_h_out" | grep -q 'iproute2'; then
+        echo "port-guard selftest: FAIL: ARM H: the no-ss refusal did not name iproute2 (output: $arm_h_out)" >&2
+        fails=$((fails + 1))
+      elif printf '%s\n' "$arm_h_out" | grep -q '^SKIP'; then
+        echo "port-guard selftest: FAIL: ARM H: the library SKIPPED instead of failing closed — a consumer must never get a skip" >&2
+        echo "  output: $arm_h_out" >&2
+        fails=$((fails + 1))
+      else
+        echo "PASS: ARM H: the library still fails closed without ss (require_free_port -> exit 2, naming 'ss' + iproute2, no SKIP)"
+      fi
     fi
   fi
 
@@ -1290,9 +1357,9 @@ SHIM
     return 1
   fi
   if [ "$arms_skipped" -eq 0 ]; then
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm + 3 decoy-bind arms + 3 candidate-rotation arms)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm + 3 decoy-bind arms + 3 candidate-rotation arms + the no-ss refusal arm)"
   else
-    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm; the decoy-bind and candidate-rotation arms were skipped by PG_SELFTEST_SKIP_ARMS)"
+    echo "port-guard selftest: $checks/$checks checks behaved (3 guards + the loopback-proxy arm; the decoy-bind, candidate-rotation and no-ss refusal arms were skipped by PG_SELFTEST_SKIP_ARMS)"
   fi
   return 0
 }
@@ -1339,6 +1406,13 @@ consecutive ports it picks as free and squatters it starts and owns:
           cannot reach the decoy on 127.0.0.1 while wait_http_or_die still polls
           it green, and the merged no_proxy/NO_PROXY keeps the operator's own
           entries (QA-CRIER-21).
+  ARM H — the LIBRARY still fails closed without `ss`: one guard run in a child
+          whose PATH is empty exits 2 naming ss/iproute2, so the selftest's
+          skip-guard never softens a real consumer (QA-CRIER-37).
+When `ss` (iproute2) is not on PATH the selftest prints one
+`SKIP: port-guard selftest — 'ss' (iproute2) is not on PATH …` line and exits 0
+instead of exiting 2: it is a self-check of the harness, and a tool-less scratch
+runner (the act container) must not red the pipeline as if the product broke.
 PG_SELFTEST_SKIP_ARMS=1 runs the guards only (that is how the arms re-run this
 selftest as a child, bounding the recursion).
 EOF
