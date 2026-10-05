@@ -10,7 +10,10 @@
       "worktree": "/home/kara/worktrees/crier-CR-GUARD-JEV-1",
       "branch": "wt/CR-GUARD-JEV-1",
       "base_sha": "0980891",
-      "status": "dispatched"
+      "status": "merged+judged",
+      "commit": "29dc377",
+      "merge_commit": "38aa174",
+      "verdict": "346ae725 PASS"
     },
     {
       "task_id": "QA-CRIER-37",
@@ -19,7 +22,12 @@
       "worktree": "/home/kara/worktrees/crier-QA-CRIER-37",
       "branch": "wt/QA-CRIER-37",
       "base_sha": "0980891",
-      "status": "dispatched"
+      "status": "merged+judged",
+      "commit": "0981534",
+      "merge_commit": "56771b8",
+      "verdict": "1fb80815 PASS"
     }
-  ]
+  ],
+  "finished_at": "2026-10-05T11:40:00+00:00",
+  "outcome": "both workers merged to main, tier2 PASS, pushed origin+gitlab"
 }
