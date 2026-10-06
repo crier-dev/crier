@@ -2604,3 +2604,17 @@ tasks:
   status: complete
   created_at: '2026-10-06T13:06:01.037378+00:00'
   completed_at: '2026-10-06T13:07:00.484393+00:00'
+- id: CR-CHAT-012
+  title: Agent classes & resource ownership spec
+  criteria:
+  - 'Write specs/CHAT-AGENT-CLASSES.md defining: (1) two agent classes (personal vs
+    service/shared), (2) owner relation for personal agents, (3) OWNS/SCOPE relation
+    for service agents over resources (systems, code), (4) default-reachability matrix
+    per class (personal: reachable by owner + granted principals; service: reachable
+    per scope; cross-owner default-deny), (5) scope as an explicit inspectable object.
+    PASS: spec document exists, defines both classes with ownership rules, states
+    default-reachability matrix, includes tests or acceptance criteria for cross-owner
+    denial.'
+  status: complete
+  created_at: '2026-10-06T13:24:59.741669+00:00'
+  completed_at: '2026-10-06T13:35:46.983390+00:00'
