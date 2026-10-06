@@ -38,6 +38,9 @@ const (
 	// DefaultSessionLogRoot is the JSONL log root used when the jsonl backend
 	// is selected and CR_SESSION_LOG_ROOT is unset.
 	DefaultSessionLogRoot = "crier-sessions"
+	// DefaultGroupRoot is the named-group roster log directory used when
+	// CR_GROUP_ROOT is unset (CR-CHAT-013).
+	DefaultGroupRoot = "crier-groups"
 )
 
 // SessionConfig selects the chat-session storage backend (CR-CHAT-006):
@@ -54,6 +57,9 @@ type SessionConfig struct {
 	// ordered append log and the transport form. It defaults to
 	// DefaultSessionLogRoot when the jsonl backend is selected.
 	LogRoot string
+	// GroupRoot is CR_GROUP_ROOT: the named-group roster log directory
+	// (CR-CHAT-013). It defaults to DefaultGroupRoot when unset.
+	GroupRoot string
 }
 
 // ResolvedSessionBackend returns the effective backend: the explicit
@@ -503,6 +509,10 @@ func Load() (Config, error) {
 	}
 	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
 	cfg.Session.LogRoot = strings.TrimSpace(os.Getenv("CR_SESSION_LOG_ROOT"))
+	cfg.Session.GroupRoot = strings.TrimSpace(os.Getenv("CR_GROUP_ROOT"))
+	if cfg.Session.GroupRoot == "" {
+		cfg.Session.GroupRoot = DefaultGroupRoot
+	}
 
 	// Per-backend defaults, so the one switch is enough to run: a deployment
 	// that selects sqlite needs no CR_SQLITE_PATH, and one that selects jsonl

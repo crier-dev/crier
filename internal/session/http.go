@@ -70,6 +70,11 @@ type HTTPOptions struct {
 	// the ACL is not deployed; a restricted session's reads then fall back to
 	// membership as the only evidence available.
 	Permissions *permissions.Checker
+	// Groups is the NAMED-group roster store (CR-CHAT-013, §1.4). Nil means
+	// the group surface is unconfigured: the routes answer 503
+	// GROUPS_UNCONFIGURED and a `group` audience target on a send is a
+	// RECORDED skip (FanoutRecipients), never a guessed delivery.
+	Groups GroupStore
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
@@ -704,7 +709,11 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Seq = seq
 
-	recipients, skipped := FanoutRecipients(aud, nil)
+	// The roster of every `group` target is resolved HERE, fresh, at send
+	// time (CR-CHAT-013, §1.4 consequence 1): a roster edit routes the NEXT
+	// send to the CURRENT members, never a cached set. A nil store leaves
+	// every group target a recorded skip.
+	recipients, skipped := FanoutRecipients(aud, h.resolveGroupRoster(r.Context(), aud))
 	_ = skipped // deliberately-not-fanned-out targets are recorded in the audience
 	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm

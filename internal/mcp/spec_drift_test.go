@@ -138,6 +138,15 @@ var excludedOperations = map[string]string{
 	"addSessionParticipant":   "POST /sessions/{id}/participants — \"Add a participant to a session\" (CR-CHAT-019): same transport gap as listSessionParticipants. Reclassify when the bridge grows session support.",
 	"compileSessionMessages":  "POST /sessions/{id}/compile — \"Compile (merge) messages into ONE cited context bundle\" (CR-CHAT-028): the merge resolves sources across sessions and fans the result out through the session membership, all of it served by internal/session, which the crier-mcp bridge's RemoteStore does not extend, so no bridge tool could execute it. Reclassify when the bridge grows session support.",
 	"expandCompiledMessage":   "GET /sessions/{id}/messages/{mid}/expand — \"Resolve a compiled message's citations back to their originals\" (CR-CHAT-028): the resolution reads a compiled message out of a session transcript and re-resolves each part against its source session, again internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	// CR-CHAT-013 — the named-group surface. Same transport gap as the session
+	// operations: the roster store lives in internal/session (served by
+	// cmd/server's HTTP routes), and the crier-mcp bridge's RemoteStore does
+	// not extend it, so a tool would have nothing to call. Reclassify when the
+	// bridge grows group support.
+	"createGroup":        "POST /groups — \"Create a named agent group (a curated roster addressable as @team:x)\" (CR-CHAT-013): the roster store is internal/session state RemoteStore does not extend, so no bridge tool could execute it. Reclassify when the bridge grows group support.",
+	"listGroups":         "GET /groups — \"List the named groups of the request's realm\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
+	"getGroup":           "GET /groups/{name} — \"Read one named group's CURRENT roster\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
+	"updateGroupMembers": "PATCH /groups/{name}/members — \"Add and/or remove members (one edit event over the current roster)\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.
