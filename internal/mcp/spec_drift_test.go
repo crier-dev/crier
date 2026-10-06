@@ -138,6 +138,11 @@ var excludedOperations = map[string]string{
 	"addSessionParticipant":   "POST /sessions/{id}/participants — \"Add a participant to a session\" (CR-CHAT-019): same transport gap as listSessionParticipants. Reclassify when the bridge grows session support.",
 	"compileSessionMessages":  "POST /sessions/{id}/compile — \"Compile (merge) messages into ONE cited context bundle\" (CR-CHAT-028): the merge resolves sources across sessions and fans the result out through the session membership, all of it served by internal/session, which the crier-mcp bridge's RemoteStore does not extend, so no bridge tool could execute it. Reclassify when the bridge grows session support.",
 	"expandCompiledMessage":   "GET /sessions/{id}/messages/{mid}/expand — \"Resolve a compiled message's citations back to their originals\" (CR-CHAT-028): the resolution reads a compiled message out of a session transcript and re-resolves each part against its source session, again internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	// CR-CHAT-016 — the late-join context-share surface. Both routes read and
+	// write internal/session share state (chat_context_shares) that RemoteStore
+	// does not expose, so the bridge has no tool for them yet.
+	"getMemberContext": "GET /sessions/{id}/participants/{member_type}/{member_id}/context — \"What a member was given when it joined\" (CR-CHAT-016, §4.6 D10): the joiner's materialized context view, read from internal/session share state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"setMemberContext": "PUT /sessions/{id}/participants/{member_type}/{member_id}/context — \"Change a member's context share\" (CR-CHAT-016, §4.6 rule 3): appends a session.member.context event in internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

@@ -2173,6 +2173,13 @@ paths:
         refused (NAMESPACE_MISMATCH) — two realms must not share one room.
 
         A closed session admits no membership change (§1.3).
+
+        The late-join context answer (§4.6, D10): `context_share` names how
+        much of the in-flight conversation the joiner is given — `none`
+        (fresh) | `summary` (a generated digest) | `since` (the messages
+        after `boundary_message_id`) | `full` (the whole history). Absent,
+        it defaults to `summary` — and the default answer is RECORDED as
+        part of the membership event, never left undecided.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
@@ -2195,6 +2202,74 @@ paths:
           description: No such session in this realm (SESSION_NOT_FOUND)
         "409":
           description: The session is closed (SESSION_CLOSED), or the agent is in another realm (NAMESPACE_MISMATCH)
+
+  # ── Late-join context share (CR-CHAT-016, §4.6 D10) ──
+  # Adding a participant to an in-flight conversation asks how much context to
+  # share; the answer (or the `summary` default) is recorded on the thread as
+  # a system event. These two routes surface the joiner's MATERIALIZED view —
+  # what it was given, and why it answers as it does — and the recorded LATER
+  # change of that answer.
+  /sessions/{id}/participants/{member_type}/{member_id}/context:
+    get:
+      operationId: getMemberContext
+      tags: [sessions]
+      summary: What a member was given when it joined — the materialized context view
+      description: |-
+        The joiner's context share (§4.6, D10): the recorded `share` (mode +
+        boundary), who set it and when, the MATERIALIZED view of what the
+        joiner was given (for `summary`, a `generated_summary` digest — an
+        index that never replaces the raw messages, §4.7 rule 2; for `since`
+        and `full`, the given message ids in seq order), and an
+        `explanation` tying the joiner's reply state to what it holds.
+
+        `decided: false` marks a member whose share was never decided —
+        distinct from an explicit `none` (§4.6 rule 6).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The member's materialized context view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberContextView"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session or member in this realm (SESSION_NOT_FOUND / MEMBER_NOT_FOUND)
+    put:
+      operationId: setMemberContext
+      tags: [sessions]
+      summary: Change a member's context share — recorded as a new event
+      description: |-
+        A LATER change to the member's context share (§4.6 rule 3): the new
+        answer is appended as a `session.member.context` record — a new
+        event, never a rewrite of the join. A `since` change names an
+        existing `boundary_message_id` (CONTEXT_BOUNDARY_NOT_FOUND
+        otherwise). A closed session admits no change (SESSION_CLOSED).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetMemberContextRequest"
+      responses:
+        "200":
+          description: The recorded share change (the latest-state row).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberContextState"
+        "400":
+          description: "A malformed request: an unknown mode, or a `since` mode without a boundary message id (INVALID_CONTEXT_SHARE), or a boundary that does not exist (CONTEXT_BOUNDARY_NOT_FOUND)"
+        "404":
+          description: No such session or member in this realm (SESSION_NOT_FOUND / MEMBER_NOT_FOUND)
+        "409":
+          description: The session is closed and admits no change (SESSION_CLOSED)
 
   # ── Compile / merge (CR-CHAT-028) ──
   # Select N messages — from one thread, from several, or across sessions of
@@ -3179,6 +3254,87 @@ components:
         actor:
           type: string
           description: The agent id recording the change; falls back to the X-Agent-ID header.
+    SetMemberContextRequest:
+      type: object
+      required: [mode]
+      description: A LATER change to a member's context share (§4.6 rule 3) — recorded as a session.member.context event, never a rewrite of the join.
+      properties:
+        mode:
+          type: string
+          enum: [none, summary, full, since]
+        boundary_message_id:
+          type: string
+          description: Required when mode is `since` — the messages after this id are what the member is given.
+        actor:
+          type: string
+          description: The agent id recording the change; falls back to the X-Agent-ID header.
+    MemberContextState:
+      type: object
+      required: [session_id, member_type, member_id, mode, set_at]
+      description: The latest-state context-share row for one member (§5.2 chat_context_shares); the events remain the record of how it changed.
+      properties:
+        session_id:
+          type: string
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        mode:
+          type: string
+          enum: [none, summary, full, since]
+        boundary_message_id:
+          type: string
+        set_by:
+          type: string
+        set_at:
+          type: string
+          format: date-time
+    MemberContextView:
+      type: object
+      required: [session_id, member_type, member_id, decided, given_count, explanation]
+      description: |-
+        The member's MATERIALIZED context view (§4.6, D10): the recorded share,
+        what the member was given at its join, and the explanation tying its
+        reply state to what it holds.
+      properties:
+        session_id:
+          type: string
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        decided:
+          type: boolean
+          description: False only for a member whose share was never decided — distinct from an explicit `none` (§4.6 rule 6).
+        share:
+          type: object
+          description: The latest recorded share answer; absent while undecided.
+          properties:
+            mode:
+              type: string
+              enum: [none, summary, full, since]
+            boundary_message_id:
+              type: string
+        set_by:
+          type: string
+        set_at:
+          type: string
+          format: date-time
+        generated_summary:
+          type: string
+          description: The GENERATED digest text for mode `summary` — an index, never a replacement for the raw messages (§4.7 rule 2).
+        given_message_ids:
+          type: array
+          items:
+            type: string
+          description: The message ids the member was given, in seq order (modes `since` and `full`).
+        given_count:
+          type: integer
+        explanation:
+          type: string
+          description: Why the joiner's reply state is what it is — what it was given, and what was withheld.
     SessionParticipant:
       type: object
       required: [member_type, member_id, role, added_at, active]
