@@ -2583,3 +2583,14 @@ tasks:
   status: complete
   created_at: '2026-10-05T10:50:28.061519+00:00'
   completed_at: '2026-10-05T11:08:14.309696+00:00'
+- id: CR-CHAT-006
+  title: "Dual backend \u2014 SQLite + PostgreSQL behind shared Store contract (CR-CHAT-006)"
+  criteria:
+  - internal/session exposes a shared Store contract; SQLite (modernc.org/sqlite)
+    and PostgreSQL (pgx) sit behind one sql_store.go with per-engine dialect adapters;
+    config CR_SESSION_BACKEND=sqlite|postgres selects at runtime; JSONL remains the
+    portable transport; parity tests cover append/duplicate/restart; go build/vet/test
+    green; docs updated; no PostgreSQL URL required for the SQLite path
+  status: complete
+  created_at: '2026-10-06T12:45:37.131736+00:00'
+  completed_at: '2026-10-06T12:46:54.910129+00:00'
