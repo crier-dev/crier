@@ -364,10 +364,12 @@ claims:
     # it. The routes are OPT-IN at runtime (CR_DAGGER_URL) but they are
     # declared operations in the document all the same, and this count's unit
     # is the document. CR-CHAT-019 added the three session paths (/sessions,
-    # /sessions/{id}/messages, /sessions/{id}/participants), so the pair is
-    # 27 / 34.
+    # /sessions/{id}/messages, /sessions/{id}/participants), so the pair was
+    # 27 / 34. CR-CHAT-028 added the compile/merge and per-part expand paths
+    # (/sessions/{id}/compile and /sessions/{id}/messages/{mid}/expand, one and
+    # one operation), so the pair is 29 / 36.
     quote: "docs/openapi.yaml"
-    expect: 27
+    expect: 29
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -382,9 +384,10 @@ claims:
     # GET /namespaces (18 / 22); CR-CHAT-033 added the six dagger control
     # operations (24 / 28), one per route above; CR-CHAT-019 added six session
     # operations — GET/POST /sessions, GET/POST /sessions/{id}/messages and
-    # GET/POST /sessions/{id}/participants (27 / 34).
-    quote: "34 operations"
-    expect: 34
+    # GET/POST /sessions/{id}/participants (27 / 34); CR-CHAT-028 added the
+    # compile operation and the per-part expand operation (29 / 36).
+    quote: "36 operations"
+    expect: 36
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -419,13 +422,16 @@ claims:
     # CR-FEAT-029 registered GET /namespaces, so the merged count was
     # 18 API + 3 spec-hosting + 5 detection = 26. CR-CHAT-019 registered the
     # three session-API paths (/sessions, /sessions/{id}/messages,
-    # /sessions/{id}/participants), so the merged count is
-    # 18 API + 3 session + 3 spec-hosting + 5 detection = 29. Note the
-    # README's "21 always-on" line counts the 18 API + 3 spec-hosting routes;
-    # that line is prose the same number measures, and it moved with it —
-    # CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting).
-    quote: "29 router paths"
-    expect: 29
+    # /sessions/{id}/participants), so the merged count was
+    # 18 API + 3 session + 3 spec-hosting + 5 detection = 29. CR-CHAT-028
+    # registered the compile route and the per-part expand route, so the
+    # merged count is 18 API + 5 session + 3 spec-hosting + 5 detection = 31.
+    # Note the README's "always-on" line counts the 18 API + 3 spec-hosting
+    # routes; that line is prose the same number measures, and it moved with it
+    # — CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting),
+    # and CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting).
+    quote: "31 router paths"
+    expect: 31
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

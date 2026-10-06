@@ -534,6 +534,61 @@ never asked to invent structure the transcript does not carry:
 **NOT BUILT:** no depth/ancestry read, no summary surface, no generated marker and no search read exist.
 The route work is CR-CHAT-017 / CR-CHAT-019 / CR-CHAT-020.
 
+### 4.8 Compile — gathering N messages into ONE cited bundle (CR-CHAT-028)
+
+**A COMPILE selects N messages**, from one thread, from several threads or from what the humans said,
+**MERGES them into ONE payload**, and **hands that payload to an agent by tagging it**. It answers a
+different question from a quote or a reply, and the two are not the same affordance:
+
+| Affordance | What it answers | What it carries |
+|---|---|---|
+| **reply / quote** | "in answer to **X**" | an id **pointer** (`parent_id`), plus whatever text the sender wrote |
+| **compile** | "here is everything relevant, gathered" | the source **content inline**, plus a **provenance citation per part** |
+
+Both are needed. A reply attributes a remark to the message it answers; a compile assembles a working set
+for a reader who was not there.
+
+**The design rule that makes a merged message safe — all of it binding:**
+
+1. **A merged message must not become an untraceable blob.** Every part carries a
+   **provenance citation** — the `source_session_id` and `source_message_id` it came from — and the part's
+   content travels **with** that citation. There is no shape in which a part has content and no source.
+2. **The merged message is a NEW message.** It has its own `message_id`, it opens its own thread (a
+   citation is **not** `parent_id`: a compile is not a reply, and §4.2's reply attribution is unchanged),
+   and it is recorded by the ordinary message record. The **sources are not mutated**: nothing is moved,
+   re-parented, copied over or deleted, so a source's own thread and content are exactly what they were.
+3. **The sources stay resolvable to anyone who may read them.** A recipient can take a part's citation and
+   resolve it back to the original — its content **and its location** (session, message id, author,
+   timestamp, `seq`, thread). The resolution runs as the **reader**, not as the compiler: a part whose
+   source the reader may not read resolves to a **named gap**, never to content.
+4. **A source the compiler could not read is OMITTED WITH A NAMED GAP — or the merge is refused.** A
+   source that is in another realm, does not exist, is not in the session that was named, or lies in a
+   session the compiler is neither a member of nor granted a read on (§4 row 13 of `CHAT-INTERFACE.md`)
+   is emitted as a part with `cited: false` and a machine-readable **reason**, carrying its citation.
+   A source is **never silently included** (content must not leak) and **never silently dropped** (the
+   reader must be able to see both that it was named and why it is missing). A merge in which **every**
+   source is unreadable is **refused** outright, rather than shipped as an empty shell.
+5. **Tagging an agent is ADDRESSING, never an action** (§4.4, D12). A compiled message is `plain` or
+   `addressed` and can never be `task`; a tag on a compile is never an instruction to execute. This is the
+   v2 safety invariant applied to the one affordance most likely to be mistaken for "go do this".
+6. **No second delivery path.** The compiled message is fanned out through the shipped delivery path
+   (§3.4) exactly as any other message is — one `POST /agents/{id}/inbox` per participant, with the same
+   guard choke point, durable inbox write, lease / ack / TTL, dead-lettering and federation fallback.
+7. **A compile writes nothing to its sources' sessions.** The only record it appends is its own message in
+   the session it was compiled into.
+
+**Where it lives.** `POST /sessions/{id}/compile` performs the merge and the fan-out, and
+`GET /sessions/{id}/messages/{mid}/expand` resolves a compiled message's citations back to their
+originals. Both are ADDITIVE to CR-CHAT-019's session surface and are clients of the same primitives
+(`docs/openapi.yaml` is the wire contract; `internal/session` is the implementation).
+
+**Built:** CR-CHAT-028 ships both routes, the new-message property, per-part citations, the reader-scoped
+expand and the omit-with-named-gap / refuse behaviour above.
+**Owed:** the per-principal **grant** check that would let a source be readable by a grant where membership
+does not apply is `CHAT-PERMISSIONS.md` (CR-CHAT-003). Until it ships, a private source resolves by
+**membership** alone, and every non-member outcome is the named gap of rule 4 — the structural branch is
+in place, so arming the ACL adds a decision to an existing refusal, not a new code path.
+
 ---
 
 ## 5. Storage shape

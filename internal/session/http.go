@@ -671,24 +671,48 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_AUDIENCE", err.Error())
 		return
 	}
+
+	view, ok := h.sendMessage(w, r, sess, msg, aud)
+	if !ok {
+		return
+	}
+	// The DURABLE record keeps the outcome vocabulary (the §5.2
+	// chat_deliveries projection has no reason column), so the immediate
+	// REFUSAL reason is carried on the response — this is the caller's
+	// explanation, and §3.2 requires a refused outcome to be shown, never
+	// swallowed.
+	view.Outcomes = outcomeViews(msg.Outcomes)
+	writeJSON(w, http.StatusCreated, view)
+}
+
+// sendMessage performs §3.2's ordering for ONE new message record: the
+// transcript record is written FIRST as the intent (message id + resolved
+// audience), the fan-out follows through the shipped inbox path, and each
+// target's outcome is written back onto the SAME record. It is the one place
+// that ordering lives, so a sender — a session message (CR-CHAT-019) or a
+// compiled bundle (CR-CHAT-028) — cannot drift from it.
+//
+// It answers false having already written the error, and returns the read-back
+// view of the recorded message with the outcome vocabulary attached.
+func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Session, msg *Message, aud Audience) (transcriptMessage, bool) {
 	msg.Audience = aud
 
 	seq, err := h.store.NextSeq(r.Context(), sess.ID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return
+		return transcriptMessage{}, false
 	}
 	msg.Seq = seq
 
 	recipients, skipped := FanoutRecipients(aud, nil)
 	_ = skipped // deliberately-not-fanned-out targets are recorded in the audience
-	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, now)
+	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm
 
 	// 1. The transcript record, as the intent.
 	if err := h.store.PostMessage(r.Context(), msg); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return
+		return transcriptMessage{}, false
 	}
 
 	// 2. One delivery per participant through the shipped inbox path.
@@ -699,33 +723,26 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		// so the caller can retry the same message id without a re-send.
 		writeAPIError(w, http.StatusBadGateway, "FANOUT_INCOMPLETE",
 			fmt.Sprintf("the transcript record is durable (message %q) but the fan-out did not complete: %v", msg.ID, err))
-		return
+		return transcriptMessage{}, false
 	}
 
 	// 3. Write the outcomes back onto the same record (same seq, keep-LAST).
 	msg.Outcomes = append(crossRealm, outcomes...)
 	if err := h.store.PostMessage(r.Context(), msg); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return
+		return transcriptMessage{}, false
 	}
 
 	st, err := h.store.Load(r.Context(), sess.ID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return
+		return transcriptMessage{}, false
 	}
 	recorded := st.Message(msg.ID)
 	if recorded == nil {
 		recorded = msg
 	}
-	view := h.messageViewOf(st, recorded)
-	// The DURABLE record keeps the outcome vocabulary (the §5.2
-	// chat_deliveries projection has no reason column), so the immediate
-	// REFUSAL reason is carried on the response — this is the caller's
-	// explanation, and §3.2 requires a refused outcome to be shown, never
-	// swallowed.
-	view.Outcomes = outcomeViews(msg.Outcomes)
-	writeJSON(w, http.StatusCreated, view)
+	return h.messageViewOf(st, recorded), true
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,12 +1023,32 @@ func (h *Handler) checkRetention(realm string, want *int) error {
 // the session. The caller names itself with the shipped X-Agent-ID header, or
 // with principal_id / as_agent query parameters.
 func (h *Handler) authorizeRead(ctx context.Context, r *http.Request, sess *Session, st *State) error {
+	return h.authorizeReadAs(ctx, callerIdentity(r), sess, st)
+}
+
+// callerIdentity names the caller of a READ from the shipped identity
+// convention: the X-Agent-ID header for an agent, and principal_id (or
+// X-Crier-Principal) with an optional as_agent for a human. A read carries no
+// body to name a sender in, so this is the only identity a GET has.
+func callerIdentity(r *http.Request) AuthorRef {
+	return AuthorRef{
+		Agent:     strings.TrimSpace(r.Header.Get(registry.HeaderAgentID)),
+		Principal: strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("principal_id"), r.Header.Get(headerPrincipal))),
+		AsAgent:   strings.TrimSpace(r.URL.Query().Get("as_agent")),
+	}
+}
+
+// authorizeReadAs is authorizeRead's rule with the caller named explicitly, so
+// a POST (which names its caller in the BODY) can be held to the same rule a
+// GET is — which is what CR-CHAT-028's compile needs when it reads a SOURCE
+// session that belongs to another caller's request.
+func (h *Handler) authorizeReadAs(ctx context.Context, who AuthorRef, sess *Session, st *State) error {
 	if sess.Visibility != VisibilityPrivate {
 		return nil
 	}
-	agent := strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
-	principal := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("principal_id"), r.Header.Get(headerPrincipal)))
-	asAgent := strings.TrimSpace(r.URL.Query().Get("as_agent"))
+	agent := who.Agent
+	principal := who.Principal
+	asAgent := who.AsAgent
 
 	now := h.now()
 	for _, m := range st.Members {

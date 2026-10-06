@@ -83,15 +83,26 @@ func newAPIHarness(t *testing.T, store Repository) *apiHarness {
 	}
 	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
 	r := mux.NewRouter()
+	registerSessionRoutes(r, h)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+	return &apiHarness{srv: srv, reg: reg}
+}
+
+// registerSessionRoutes wires the session API surface on r: every route the
+// handler serves, so a harness drives the REAL surface rather than a
+// hand-built subset (a route built but never registered fails in the wiring
+// test, cmd/server/sessionapi_test.go).
+func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions", h.HandleListSessions).Methods(http.MethodGet)
 	r.HandleFunc("/sessions", h.HandleCreateSession).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages", h.HandleTranscript).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleListParticipants).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleAddParticipant).Methods(http.MethodPost)
-	srv := httptest.NewServer(r)
-	t.Cleanup(srv.Close)
-	return &apiHarness{srv: srv, reg: reg}
+	// CR-CHAT-028: compile (merge) and the per-part expand.
+	r.HandleFunc("/sessions/{id}/compile", h.HandleCompile).Methods(http.MethodPost)
+	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", h.HandleExpandCompiledMessage).Methods(http.MethodGet)
 }
 
 func (h *apiHarness) do(t *testing.T, method, path string, body any, out any, headers map[string]string) int {

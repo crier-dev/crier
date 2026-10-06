@@ -2196,6 +2196,115 @@ paths:
         "409":
           description: The session is closed (SESSION_CLOSED), or the agent is in another realm (NAMESPACE_MISMATCH)
 
+  # ── Compile / merge (CR-CHAT-028) ──
+  # Select N messages — from one thread, from several, or across sessions of
+  # the realm — MERGE them into ONE payload and hand it to an agent by tagging
+  # it. Distinct from a quote/reply: a reply answers "in answer to X" with an id
+  # pointer, a compile answers "here is everything relevant, gathered" with the
+  # content INLINE plus a PROVENANCE citation per part (specs/CHAT-SESSIONS.md
+  # §4.8). The merged message is a NEW message and rides the shipped delivery
+  # path (no second delivery path, CHAT-INTERFACE.md §5.1).
+  /sessions/{id}/compile:
+    post:
+      operationId: compileSessionMessages
+      tags: [sessions]
+      summary: Compile (merge) messages into ONE cited context bundle
+      description: |-
+        Gathers the named sources into ONE new message in this session and hands
+        it to the tagged agents through the shipped inbox path — the same guard
+        choke point, durable inbox write, lease/ack/TTL and federation fallback
+        every delivery uses (specs/CHAT-SESSIONS.md §3.4, §4.8).
+
+        `message_ids` is the shorthand form for sources of THIS session;
+        `sources` names `{session_id, message_id}` for a source in another
+        session of the same realm. A source named in both forms is gathered once.
+
+        The merged message is a NEW message: it opens its own thread and the
+        sources are never mutated, moved or re-parented — they stay resolvable to
+        anyone who may read them. Every part carries `{source_session_id,
+        source_message_id}` so a recipient can expand it back to its original
+        (GET /sessions/{id}/messages/{mid}/expand).
+
+        A source the compiler could NOT read — another realm, a session or
+        message that does not exist, or a private session the compiler is neither
+        a member of nor granted a read on — is OMITTED WITH A NAMED GAP: the part
+        is still present with `cited: false` and its reason in `omitted`. A
+        source is never silently included and never silently dropped; a merge
+        whose every source is unreadable is refused (422
+        COMPILE_NO_READABLE_SOURCE).
+
+        `message_kind` is `plain` or `addressed` (the default is `addressed`
+        when targets are named) and can never be `task`: a compile is addressing,
+        never an instruction to execute (D12, §4.4).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompileSessionRequest"
+      responses:
+        "201":
+          description: The ONE recorded compiled message, its parts and its completeness.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompileSessionResponse"
+        "400":
+          description: "A malformed request: an absent author (AUTHOR_REQUIRED), no source, a source with an empty message_id, an invalid message_kind (a `task` compile is refused, D12), or an invalid audience"
+        "403":
+          description: The session's realm refuses the credential (NAMESPACE_UNAUTHORIZED)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+        "409":
+          description: The session is closed and admits no new message (SESSION_CLOSED)
+        "422":
+          description: No source could be read — the merge is refused, naming every gap (COMPILE_NO_READABLE_SOURCE)
+        "502":
+          description: The transcript record is durable but the fan-out did not complete (FANOUT_INCOMPLETE)
+        "503":
+          description: No inbox deliverer is wired, so a compiled message cannot be fanned out (SESSION_DELIVERY_UNCONFIGURED)
+
+  /sessions/{id}/messages/{mid}/expand:
+    get:
+      operationId: expandCompiledMessage
+      tags: [sessions]
+      summary: Resolve a compiled message's citations back to their originals
+      description: |-
+        Resolves every part of a compiled message (CR-CHAT-028) back to the
+        ORIGINAL it came from, reporting that message's content and location: the
+        source session, the message id, the author, the timestamp, the `seq` and
+        the thread (§4.8).
+
+        The resolution runs as the CALLER, not as the compiler: a part whose
+        source the caller may not read is reported with `resolved: false` and a
+        NAMED gap rather than served. A source stays resolvable to anyone who may
+        read it.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - name: mid
+          in: path
+          required: true
+          description: The compiled message's id.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: One resolved (or named-gap) row per part of the compiled message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpandCompiledMessageResponse"
+        "400":
+          description: The message is not a compiled bundle (NOT_COMPILED)
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: "No such session in this realm (SESSION_NOT_FOUND), or no such message (MESSAGE_NOT_FOUND)"
+
   # ── Dagger control (CR-CHAT-033) ──
   # The OPT-IN control surface over a Hermes-dagger pipeline. crier does NOT
   # embed a second executor (decision D18): every route here is a CLIENT call
@@ -3265,3 +3374,119 @@ components:
           type: string
         request_id:
           type: string
+    CompileSessionRequest:
+      type: object
+      description: |-
+        The sources to merge and where the merged message goes. At least one
+        source is required; a source with an empty `message_id` is refused rather
+        than skipped.
+      properties:
+        message_ids:
+          type: array
+          description: The shorthand form — message ids of THIS session, gathered across threads or within one.
+          items:
+            type: string
+        sources:
+          type: array
+          description: The explicit form — `{session_id, message_id}`, for a source in another session of the same realm (an absent `session_id` means this session).
+          items:
+            type: object
+            required: [message_id]
+            properties:
+              session_id:
+                type: string
+              message_id:
+                type: string
+        note:
+          type: string
+          description: The compiler's optional note; it becomes the bundle's `text`.
+        sender:
+          type: string
+          description: The authoring agent id.
+        principal_id:
+          type: string
+          description: A human principal acting as the author (with optional `as_agent`).
+        as_agent:
+          type: string
+        message_kind:
+          type: string
+          description: "`plain` or `addressed` only. A compile is addressing, never an instruction to execute (D12): `task` is refused."
+          enum: [plain, addressed]
+        targets:
+          type: array
+          description: The agents (or principals) to hand the compiled message to. Absent = every active participant except the author.
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [agent, group, capability, principal]
+              id:
+                type: string
+        idempotency_key:
+          type: string
+    CompileSessionResponse:
+      type: object
+      required: [message, parts_count, resolved_count, omitted_count]
+      properties:
+        message:
+          $ref: "#/components/schemas/TranscriptMessage"
+        parts_count:
+          type: integer
+          description: How many parts the bundle carries, resolved and omitted alike.
+        resolved_count:
+          type: integer
+          description: How many parts carry their source's content inline.
+        omitted_count:
+          type: integer
+          description: How many parts carry a named gap instead of content.
+        gaps:
+          type: array
+          description: The named reasons, in source order, for every omitted part.
+          items:
+            type: string
+    ExpandCompiledMessageResponse:
+      type: object
+      required: [message_id, session_id, parts, count, resolved_count, omitted_count]
+      properties:
+        message_id:
+          type: string
+        session_id:
+          type: string
+        parts:
+          type: array
+          items:
+            type: object
+            required: [source_session_id, source_message_id, cited, resolved]
+            properties:
+              source_session_id:
+                type: string
+              source_message_id:
+                type: string
+              cited:
+                type: boolean
+              resolved:
+                type: boolean
+              content:
+                type: object
+                description: The original message's payload — present only when resolved.
+              author:
+                type: object
+                description: The original message's author — present only when resolved.
+              created_at:
+                type: string
+                format: date-time
+              seq:
+                type: integer
+                description: The original's seq in its own session.
+              thread_id:
+                type: string
+              omitted:
+                type: string
+                description: The named gap — present exactly when resolved is false.
+        count:
+          type: integer
+        resolved_count:
+          type: integer
+        omitted_count:
+          type: integer

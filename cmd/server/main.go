@@ -612,9 +612,15 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleListParticipants).Methods("GET")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleAddParticipant).Methods("POST")
+	// Compile / merge (CR-CHAT-028): gather N cited sources into ONE new
+	// message (POST) and resolve a part's citation back to its original (GET).
+	// Additive to CR-CHAT-019, over the same store, and the compiled message
+	// rides the SAME fan-out path (no second delivery path).
+	r.HandleFunc("/sessions/{id}/compile", sessHandler.HandleCompile).Methods("POST")
+	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", sessHandler.HandleExpandCompiledMessage).Methods("GET")
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
-		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants")
+		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
 
 	// Dagger control surface (CR-CHAT-033) — OPT-IN and additive. The six
 	// /dagger routes exist only when CR_DAGGER_URL names an executor: this is
