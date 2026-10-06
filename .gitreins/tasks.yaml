@@ -2653,3 +2653,12 @@ tasks:
   status: complete
   created_at: '2026-10-06T19:50:46.572870+00:00'
   completed_at: '2026-10-06T19:51:37.318217+00:00'
+- id: QA-CRIER-30
+  title: 'Upgrade cell retest: battery tree-upgrade arm for Go repo'
+  criteria:
+  - "Re-run bunker-qa.sh fresh-system battery on crier; the upgrade cell must grade\
+    \ OK (tag v0.1.0-rc1 tree -> HEAD reinstall) or N/A with reason \u2014 no more\
+    \ 'no installable previous release' FAIL"
+  status: complete
+  created_at: '2026-10-06T21:09:42.362820+00:00'
+  completed_at: '2026-10-06T21:23:44.246168+00:00'
