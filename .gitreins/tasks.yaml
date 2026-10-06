@@ -2618,3 +2618,29 @@ tasks:
   status: complete
   created_at: '2026-10-06T13:24:59.741669+00:00'
   completed_at: '2026-10-06T13:35:46.983390+00:00'
+- id: CR-CHAT-019
+  title: 'API UPGRADE core object surfaces: sessions, cross-agent transcript, persisted
+    thread_id'
+  criteria:
+  - 'Implement CHAT-INTERFACE.md spec section 4 rows 8-15,24,31,37: GET/POST /sessions,
+    session object fields (title,id,start,audience count,lifecycle state,visibility),
+    GET /sessions/{id}/messages ordered cross-agent transcript, GET/POST /sessions/{id}/participants,
+    POST fan-out into a session, and thread_id PERSISTED on the stored message record
+    (InboxEntry gains thread_id so threads are reconstructable from storage alone).
+    All surfaces realm-scoped/namespaced. PASS: go test ./... green; new tests create
+    a session, add two agents + human, deliver fan-out, and read one ordered transcript
+    per participant with parents resolvable; a restart/reopen proves thread tree reconstructable
+    from storage alone.'
+  status: complete
+  created_at: '2026-10-06T14:07:22.554749+00:00'
+  completed_at: '2026-10-06T14:38:49.908243+00:00'
+- id: CR-CHAT-028
+  title: Compile and merge messages into a context bundle
+  criteria:
+  - "select messages across two threads, merge, tag an agent; the agent receives one\
+    \ message whose parts each cite a source id; expanding a part resolves to the\
+    \ original; a source the compiler could not read is omitted with a named gap or\
+    \ the merge is refused \u2014 never silently included"
+  status: complete
+  created_at: '2026-10-06T15:17:01.417575+00:00'
+  completed_at: '2026-10-06T15:49:09.888164+00:00'
