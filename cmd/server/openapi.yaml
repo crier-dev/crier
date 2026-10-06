@@ -25,6 +25,8 @@ tags:
     description: WebSocket peer mesh — connect and list peers.
   - name: federation
     description: Cross-relay federation peer list.
+  - name: sessions
+    description: "Chat sessions (CR-CHAT-019): the session object, the ordered cross-agent transcript, membership and fan-out into a session, per specs/CHAT-INTERFACE.md §4. Every surface is realm-scoped, and a message sent into a session is delivered through the SHIPPED inbox path — there is no second delivery path."
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
 paths:
@@ -1942,6 +1944,258 @@ paths:
         "401":
           description: Missing or invalid bearer token (when CR_AUTH_TOKEN is set — this route is NOT auth-exempt)
 
+  # ── Sessions (CR-CHAT-019) ──
+  # The core session object surfaces of specs/CHAT-INTERFACE.md §4 (rows 8-15,
+  # 24, 31, 37). A session is an AGGREGATE over the durable inbox deliveries
+  # that already exist (specs/CHAT-SESSIONS.md §3.3): a message sent into one is
+  # delivered by one POST per participant through the shipped inbox path, and
+  # the transcript record is that room's ordered log. Every surface is
+  # realm-scoped: the session carries the namespace it was created in, reads
+  # resolve X-Crier-Namespace, and a fan-out refuses a target in another realm.
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [sessions]
+      summary: List chat sessions (a view over the session objects)
+      description: |-
+        The session list (specs/CHAT-INTERFACE.md §4 rows 8, 9): every session
+        in the request's realm, each with its lifecycle state, its audience and
+        participant counts, its message and thread counts and the last message's
+        preview. It is a VIEW over the same session objects every other session
+        route serves from — not a second object.
+
+        Filters narrow the view without changing it: `state` (open | closed,
+        row 12), `kind` (channel | direct, the channel/DM narrowing of row 39),
+        `min_messages` and `min_participants` (the count filters of row 9).
+
+        Realm: `X-Crier-Namespace` selects the realm (absent = the default), so
+        the list can never show a session from another realm. A namespace this
+        server does not declare is 400 UNKNOWN_NAMESPACE — never a silent
+        fallback to the default.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, closed]
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [channel, direct]
+        - name: min_messages
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - name: min_participants
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The sessions this realm holds, sorted by id.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions, count]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Session"
+                  count:
+                    type: integer
+        "400":
+          description: A malformed filter, or a namespace this server does not declare (UNKNOWN_NAMESPACE)
+        "401":
+          description: Missing or invalid credentials (the bearer token, or a token-posture realm's X-Crier-Namespace-Token)
+    post:
+      operationId: createSession
+      tags: [sessions]
+      summary: Create a chat session (room)
+      description: |-
+        Opens a session (specs/CHAT-INTERFACE.md §4 rows 10, 11). The creator is
+        recorded on the session (`created_by`, or `principal_id`/`as_agent`):
+        §1.4 of specs/CHAT-SESSIONS.md refuses a request that cannot name one, so
+        it is NEVER defaulted to a service identity.
+
+        Creating does not imply inviting (§1.4): the creator is not added
+        automatically. `members` may name initial participants, each recorded as
+        a membership event with its own role.
+
+        `namespace` (or `X-Crier-Namespace`) is the realm the room lives in and
+        is recorded with it; a name this server does not declare is refused. A
+        session may declare a `retention_seconds` SHORTER than its realm's,
+        never longer (§3.5).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: The created session object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: "A malformed request: an absent creator (CREATED_BY_REQUIRED), an unknown kind or visibility, or a retention longer than the realm's"
+        "401":
+          description: Missing or invalid credentials
+        "409":
+          description: A session with that id already exists (SESSION_EXISTS)
+
+  /sessions/{id}/messages:
+    get:
+      operationId: readSessionTranscript
+      tags: [sessions]
+      summary: Read the ordered cross-agent transcript of a session
+      description: |-
+        THE ordered cross-agent transcript (specs/CHAT-INTERFACE.md §4 row 14):
+        every participant's messages, in `seq` order (the ordering authority —
+        never `created_at` alone, §3.1), each with a resolvable `parent_id`, the
+        thread it belongs to (`thread_id`, `root_id`), its kind and its thread
+        depth and reply depth (rows 42, 43).
+
+        The reconstruction is from storage ALONE (specs/CHAT-SESSIONS.md §4.3) —
+        no client state, no membership lookup. `findings` reports what it had to
+        DECIDE about a thread key, so a derived or broken thread is visible
+        rather than hidden.
+
+        A session whose `visibility` is `private` requires the caller to be a
+        member (X-Agent-ID) or to hold a read permission on it (CR-CHAT-003);
+        otherwise 403 VISIBILITY_FORBIDDEN.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The session object and its ordered transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTranscript"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+    post:
+      operationId: postSessionMessage
+      tags: [sessions]
+      summary: Send a message into a session (fan-out to its participants)
+      description: |-
+        Composes INTO a session (specs/CHAT-INTERFACE.md §4 row 31): one message
+        delivered to each participant through the SHIPPED inbox path — the same
+        guard choke point, durable inbox write, lease/ack/TTL and federation
+        fallback every delivery uses. There is no second delivery path
+        (specs/CHAT-SESSIONS.md §3.4).
+
+        Ordering follows §3.2 exactly: the transcript record is written first as
+        the intent (message id + resolved audience), the fan-out follows, and
+        each target's outcome is written back onto the same record. The
+        `audience` is the caller's explicit `targets`, or every active
+        participant except the author; a `principal` target is recorded but has
+        no inbox to deliver to (reached through a bound agent, CR-CHAT-007).
+
+        Threading (§4.5, D11): name `parent_id` to reply — the reply STAYS in its
+        parent's thread. Omit it and the message opens a new thread whose id is
+        the message's own id. A reply never carries a new thread_id.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostSessionMessageRequest"
+      responses:
+        "201":
+          description: The recorded transcript message, with its per-target outcomes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptMessage"
+        "400":
+          description: A malformed request (an absent author or payload, an unknown message kind, a parent that does not exist, or a thread mismatch)
+        "403":
+          description: The session's realm refuses the credential (NAMESPACE_UNAUTHORIZED)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+        "409":
+          description: The session is closed and admits no new message (SESSION_CLOSED)
+        "502":
+          description: The transcript record is durable but the fan-out did not complete (FANOUT_INCOMPLETE)
+
+  /sessions/{id}/participants:
+    get:
+      operationId: listSessionParticipants
+      tags: [sessions]
+      summary: List a session's participants
+      description: |-
+        The membership of a session (specs/CHAT-INTERFACE.md §4 row 24): each
+        participant with its type (agent | principal), its role and its
+        `active` flag. A removed member is returned with `active: false` rather
+        than erased — membership is a recorded event, not a mutable set
+        (specs/CHAT-SESSIONS.md §2.3, §2.4). `count` counts the ACTIVE members.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The membership rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionParticipants"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+    post:
+      operationId: addSessionParticipant
+      tags: [sessions]
+      summary: Add a participant to a session
+      description: |-
+        Records a membership event (specs/CHAT-INTERFACE.md §4 rows 24, 37):
+        `member_type` (agent | principal), `member_id` and a role (default
+        `member`). An agent that is already registered in ANOTHER realm is
+        refused (NAMESPACE_MISMATCH) — two realms must not share one room.
+
+        A closed session admits no membership change (§1.3).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddParticipantRequest"
+      responses:
+        "201":
+          description: The recorded participant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionParticipant"
+        "400":
+          description: A malformed request (an unknown member_type, or an absent member_id)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+        "409":
+          description: The session is closed (SESSION_CLOSED), or the agent is in another realm (NAMESPACE_MISMATCH)
+
   # ── Dagger control (CR-CHAT-033) ──
   # The OPT-IN control surface over a Hermes-dagger pipeline. crier does NOT
   # embed a second executor (decision D18): every route here is a CLIENT call
@@ -2254,6 +2508,13 @@ components:
         it on the relay. A missing or wrong credential is 401
         NAMESPACE_UNAUTHORIZED; a namespace with the default `shared` posture
         never asks for one.
+      schema:
+        type: string
+    SessionID:
+      name: id
+      in: path
+      required: true
+      description: The session's id (an opaque, URL-safe token). A session in another realm reads as 404 — the realm wall never confirms that a session it will not serve exists.
       schema:
         type: string
   securitySchemes:
@@ -2679,3 +2940,328 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    # ── Sessions (CR-CHAT-019, specs/CHAT-INTERFACE.md §4) ──
+    Session:
+      type: object
+      required: [id, kind, created_at, created_by, state]
+      description: |-
+        The session object (CHAT-INTERFACE.md §4 row 11): title, id, start
+        timestamp, audience count, lifecycle state and visibility.
+      properties:
+        id:
+          type: string
+        namespace:
+          type: string
+          description: The realm the session lives in. Omitted for the default realm (the canonical spelling of "default" is the empty string).
+        kind:
+          type: string
+          enum: [channel, direct]
+          description: A channel (a project room) and a direct message (a 1:1) are the SAME object with different defaults (CHAT-SESSIONS.md §1.2).
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: The session's start time.
+        created_by:
+          type: object
+          description: Who created the session. Never a service identity (§1.4).
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        state:
+          type: string
+          enum: [open, closed]
+          description: "The lifecycle (§1.3): open accepts records; closed admits no new message, reply or membership change and retains the transcript."
+        closed_at:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+          enum: [realm, private]
+          description: "The privacy field (row 13). Omitted/`realm` = readable within the realm; `private` restricts reads to members (or a CR-CHAT-003 read grant)."
+        audience_count:
+          type: integer
+          description: The number of ACTIVE agent participants — the size of the fan-out set a send resolves to.
+        participant_count:
+          type: integer
+          description: Every active participant, agents and principals.
+        message_count:
+          type: integer
+        thread_count:
+          type: integer
+        last_message_at:
+          type: string
+          format: date-time
+        preview:
+          type: string
+          description: The `text` of the last message's payload, truncated (the existing `payload.text` convention).
+    CreateSessionRequest:
+      type: object
+      description: POST /sessions — the creator is required (§1.4).
+      properties:
+        id:
+          type: string
+          description: Optional. Absent mints one.
+        title:
+          type: string
+        kind:
+          type: string
+          enum: [channel, direct]
+        namespace:
+          type: string
+          description: The realm to create the room in; must be one this server declares.
+        visibility:
+          type: string
+          enum: [realm, private]
+        retention_seconds:
+          type: integer
+          minimum: 1
+          description: A message lifetime SHORTER than the realm's, never longer (§3.5).
+        created_by:
+          type: object
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        principal_id:
+          type: string
+          description: An alternative spelling of `created_by.principal`.
+        as_agent:
+          type: string
+        members:
+          type: array
+          description: Optional initial membership. Creating does not imply inviting — the creator is not added automatically.
+          items:
+            $ref: "#/components/schemas/AddParticipantRequest"
+    AddParticipantRequest:
+      type: object
+      required: [member_type, member_id]
+      properties:
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        role:
+          type: string
+          description: The member's single role. Defaults to `member`. The role VOCABULARY is CHAT-PERMISSIONS.md's (CR-CHAT-003); it is stored as data.
+        context_share:
+          type: object
+          description: The late-join context answer (§4.6, D10), recorded on the membership event.
+          properties:
+            mode:
+              type: string
+              enum: [none, summary, full, since]
+            boundary_message_id:
+              type: string
+        actor:
+          type: string
+          description: The agent id recording the change; falls back to the X-Agent-ID header.
+    SessionParticipant:
+      type: object
+      required: [member_type, member_id, role, added_at, active]
+      properties:
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        role:
+          type: string
+        added_at:
+          type: string
+          format: date-time
+        removed_at:
+          type: string
+          format: date-time
+        active:
+          type: boolean
+        context_share:
+          type: object
+          properties:
+            mode:
+              type: string
+            boundary_message_id:
+              type: string
+    SessionParticipants:
+      type: object
+      required: [session_id, participants, count]
+      properties:
+        session_id:
+          type: string
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionParticipant"
+        count:
+          type: integer
+          description: The number of ACTIVE participants.
+    TranscriptMessage:
+      type: object
+      required: [id, thread_id, seq, message_kind, author, audience, created_at]
+      description: |-
+        One transcript record (row 14) with its ancestry (rows 42, 43).
+      properties:
+        id:
+          type: string
+        thread_id:
+          type: string
+          description: The thread's root message id. A reply NEVER carries a new thread_id (§4.5, D11).
+        parent_id:
+          type: string
+          description: The immediate parent's message id — reply ATTRIBUTION, not depth. Absent on a thread root.
+        parent_resolvable:
+          type: boolean
+          description: True when parent_id names a message in this transcript, or the message is a root. False is the §4.3 broken-thread case.
+        root_id:
+          type: string
+        seq:
+          type: integer
+          format: int64
+          description: The ordering authority within the session (§3.1).
+        message_kind:
+          type: string
+          enum: [plain, addressed, task]
+          description: "The three structural kinds (§4.4, D12). NOT the shipped envelope `kind` (message | configure | configure_ack)."
+        author:
+          type: object
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        payload:
+          type: object
+          description: The opaque message body. The existing convention reads `payload.text`.
+        audience:
+          type: object
+          required: [rule, targets]
+          properties:
+            rule:
+              type: string
+              enum: [session, reply-default, explicit]
+            targets:
+              type: array
+              items:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                    enum: [agent, group, capability, principal]
+                  id:
+                    type: string
+        outcomes:
+          type: array
+          description: The per-target fan-out result (§3.2). A `refused` outcome is shown, never swallowed.
+          items:
+            type: object
+            properties:
+              target:
+                type: string
+              outcome:
+                type: string
+                enum: [delivered, leased, acked, expired, refused]
+              inbox_entry_id:
+                type: string
+              detail:
+                type: string
+                description: Why a delivery was refused, when the caller is being told about their own send. Empty on a re-read from storage (the durable shape carries the outcome vocabulary only).
+              updated_at:
+                type: string
+                format: date-time
+        idempotency_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        thread_depth:
+          type: integer
+          description: The thread tree's level — a deliberate branch adds one (ThreadDepth over parent_thread_id).
+        reply_depth:
+          type: integer
+          description: The parent_id chain length — reply attribution, never depth (D11).
+    SessionTranscript:
+      type: object
+      required: [session, messages, count]
+      properties:
+        session:
+          $ref: "#/components/schemas/Session"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptMessage"
+        count:
+          type: integer
+        findings:
+          type: array
+          description: What the reconstruction had to DECIDE about a thread key (§4.3) — a derived or broken thread, reported rather than hidden.
+          items:
+            type: object
+            properties:
+              message_id:
+                type: string
+              kind:
+                type: string
+                enum: [derived-thread-id, broken-thread]
+              thread_id:
+                type: string
+              parent_id:
+                type: string
+              detail:
+                type: string
+    PostSessionMessageRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+          description: The message body (required; a JSON object).
+        sender:
+          type: string
+          description: The authoring agent id.
+        principal_id:
+          type: string
+          description: A human principal acting as the author (with optional `as_agent`).
+        as_agent:
+          type: string
+        message_kind:
+          type: string
+          enum: [plain, addressed, task]
+        parent_id:
+          type: string
+          description: The message being replied to; the reply stays in that message's thread.
+        thread_id:
+          type: string
+          description: Optional assertion of the thread; a reply that names a DIFFERENT thread than its parent's is refused (THREAD_MISMATCH).
+        targets:
+          type: array
+          description: An explicit audience. Absent = every active participant except the author.
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [agent, group, capability, principal]
+              id:
+                type: string
+        idempotency_key:
+          type: string
+        request_id:
+          type: string

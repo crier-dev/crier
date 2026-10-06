@@ -115,6 +115,16 @@ var SchemaStatements = []string{
 		set_at              TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (session_id, member_type, member_id)
 	)`,
+	// The query view's seq allocator (CR-CHAT-019): the highest record seq
+	// projected for a session, maintained on every Append. The transcript
+	// table carries seq only for message rows, so without this the next
+	// message would be handed a seq that collides with the session's
+	// create/join records. A new table, so CREATE TABLE IF NOT EXISTS reaches
+	// an existing database without an ALTER.
+	`CREATE TABLE IF NOT EXISTS chat_seq (
+		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+		last_seq   BIGINT NOT NULL DEFAULT 0
+	)`,
 }
 
 // NewPostgresStore opens a pool against connString, applies the §5.2 schema
@@ -182,6 +192,14 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
+	if err := s.project(ctx, rec); err != nil {
+		return err
+	}
+	return s.recordSeq(ctx, rec)
+}
+
+// project applies one record-version to the view tables.
+func (s *PostgresStore) project(ctx context.Context, rec *Record) error {
 	switch rec.Type {
 	case RecordSessionCreate:
 		return s.projectSessionCreate(ctx, rec)
@@ -208,6 +226,69 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}
+}
+
+// recordSeq advances the session's seq allocator (chat_seq) to at least this
+// record's seq — the one place this backend remembers how far a session's
+// record stream has run (CR-CHAT-019).
+func (s *PostgresStore) recordSeq(ctx context.Context, rec *Record) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO chat_seq (session_id, last_seq) VALUES ($1, $2)
+		ON CONFLICT (session_id) DO UPDATE SET last_seq =
+			CASE WHEN EXCLUDED.last_seq > chat_seq.last_seq THEN EXCLUDED.last_seq ELSE chat_seq.last_seq END`,
+		rec.SessionID, rec.Seq)
+	if err != nil {
+		return fmt.Errorf("project chat_seq: %w", err)
+	}
+	return nil
+}
+
+// NextSeq returns the seq the next record for a session should carry: one past
+// the highest seq projected for it, or 1 when the session has no records yet.
+// It reads the chat_seq allocator, so it agrees with the JSONL log's NextSeq
+// and with the shared SQLStore's. A session that is not in the view is
+// ErrSessionNotFound, matching Load.
+func (s *PostgresStore) NextSeq(ctx context.Context, sessionID string) (int64, error) {
+	if sessionID == "" {
+		return 0, fmt.Errorf("%w: session id is empty", ErrInvalidRecord)
+	}
+	var last int64
+	err := s.pool.QueryRow(ctx, `SELECT last_seq FROM chat_seq WHERE session_id = $1`, sessionID).Scan(&last)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No seq row: distinguish "the session exists but has no record
+		// stream" from "no such session" (the latter is reported, never a
+		// fresh seq 1 for a session nobody opened).
+		if _, err := s.loadSession(ctx, sessionID); err != nil {
+			return 0, err
+		}
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("session postgres store: next seq: %w", err)
+	}
+	return last + 1, nil
+}
+
+// Sessions lists the session ids in the view, sorted — the PostgreSQL half of
+// the enumeration GET /sessions is a view over (CR-CHAT-019).
+func (s *PostgresStore) Sessions(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM chat_sessions ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("session postgres store: list sessions: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("session postgres store: scan session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session postgres store: list sessions: %w", err)
+	}
+	return ids, nil
 }
 
 func (s *PostgresStore) projectSessionCreate(ctx context.Context, rec *Record) error {

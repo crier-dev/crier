@@ -393,6 +393,11 @@ func (st *State) apply(rec *Record) error {
 			CreatedAt:        rec.TS,
 			State:            SessionOpen,
 			RetentionSeconds: rec.RetentionSeconds,
+			// Group and Visibility are recorded on the create line and must
+			// survive the fold: a session's privacy (CR-CHAT-019, §4 row 13)
+			// is meaningless if replay drops it.
+			Group:      rec.Group,
+			Visibility: rec.Visibility,
 		}
 		if rec.Kind == "" {
 			s.Kind = DefaultKind

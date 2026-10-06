@@ -173,7 +173,11 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 			Payload:        msg.Payload,
 			Sender:         msg.Author.AgentID(),
 			IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, target),
-			CreatedAt:      time.Now().UTC(),
+			// The thread travels WITH the stored message (CR-CHAT-019): a
+			// thread must be reconstructable from storage alone, and the
+			// per-agent durable inbox is part of that storage.
+			ThreadID:  msg.ThreadID,
+			CreatedAt: time.Now().UTC(),
 		}
 		if err := deliverer.Deliver(target, entry); err != nil {
 			outcomes = append(outcomes, DeliveryOutcome{

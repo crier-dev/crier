@@ -1858,15 +1858,15 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **24 paths** and **28 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **27 paths** and **34 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 24 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 28 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 26 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 27 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 34 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 29 router paths
 ```
 
-The router registers **26 paths in `cmd/server/main.go`**: those 18 API paths plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030). The six opt-in dagger control routes (CR-CHAT-033) are registered from `cmd/server/daggerctl.go` and so are deliberately not part of that figure: they exist only when `CR_DAGGER_URL` is set, and that count's unit is this one file.
+The router registers **29 paths in `cmd/server/main.go`**: those 18 API paths plus the three session-API paths (CR-CHAT-019 — the session list and create, a session's ordered transcript, and its participants) plus the three spec-hosting routes (`/openapi.json`, `/openapi.yaml`, `/docs`) that are not part of the API document, plus the five optional detection routes (CR-FEAT-030) that exist only when `CR_DETECT_ENABLED` is on — see [Detection & containment](#detection--containment-cr-feat-030). The six opt-in dagger control routes (CR-CHAT-033) are registered from `cmd/server/daggerctl.go` and so are deliberately not part of that figure: they exist only when `CR_DAGGER_URL` is set, and that count's unit is this one file.
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
@@ -1966,7 +1966,7 @@ All core primitives are implemented and tested:
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
-- **API** — 26 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 21 always-on plus the 5 opt-in detection routes — documented as 24 paths / 28 operations in `docs/openapi.yaml` (the 6 further opt-in dagger control routes are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
+- **API** — 29 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 24 always-on (18 API + 3 spec-hosting + the 3 session-API paths of CR-CHAT-019) plus the 5 opt-in detection routes — documented as 27 paths / 34 operations in `docs/openapi.yaml` (the 6 further opt-in dagger control routes are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

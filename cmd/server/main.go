@@ -591,6 +591,31 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// must not be able to read it on a server that has auth on.
 	r.HandleFunc("/namespaces", registryHandler.HandleListNamespaces).Methods("GET")
 
+	// Session API (CR-CHAT-019) — the core object surfaces: the session list
+	// and create (CHAT-INTERFACE.md §4 rows 8-10), the session object (rows
+	// 11-13), the ordered cross-agent transcript (row 14), membership (rows
+	// 24, 37) and fan-out into a session (row 31). It is a CLIENT of the
+	// shipped primitives: the store is the CR-CHAT-002 data model selected by
+	// CR_SESSION_BACKEND, and every fan-out write goes through the SAME
+	// registry.Store.Deliver the inbox routes use — no second delivery path.
+	// Every surface is realm-scoped on arrival (row 38). A store that cannot
+	// open fails the boot rather than serving a deployment with no sessions.
+	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, nsReg, permsChecker)
+	if err != nil {
+		slog.Error("initialize session api", "error", err)
+		return 1
+	}
+	defer func() { _ = sessStore.Close() }()
+	r.HandleFunc("/sessions", sessHandler.HandleListSessions).Methods("GET")
+	r.HandleFunc("/sessions", sessHandler.HandleCreateSession).Methods("POST")
+	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandleTranscript).Methods("GET")
+	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
+	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleListParticipants).Methods("GET")
+	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleAddParticipant).Methods("POST")
+	slog.Info("session api enabled",
+		"backend", cfg.ResolvedSessionBackend(),
+		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants")
+
 	// Dagger control surface (CR-CHAT-033) — OPT-IN and additive. The six
 	// /dagger routes exist only when CR_DAGGER_URL names an executor: this is
 	// a CLIENT of a surface crier does not own (decision D18), never a second

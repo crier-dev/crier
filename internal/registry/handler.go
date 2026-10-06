@@ -1234,6 +1234,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		// Provenance for the same reason: a dead letter states which key
 		// produced the message it holds.
 		IdempotencyKey: req.IdempotencyKey,
+		// The thread this message belongs to (CR-CHAT-019), recorded WITH
+		// the stored message so the thread tree is reconstructable from
+		// storage alone (specs/CHAT-INTERFACE.md §4 row 15).
+		ThreadID: req.ThreadID,
 	}
 	observationID = entry.ID
 	kind := req.Kind

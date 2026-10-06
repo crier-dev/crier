@@ -802,17 +802,16 @@ func TestPostgresStoreUnit_Deliver_ExpiryBeforeCreated(t *testing.T) {
 
 func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	s, mock := newMockStore(t)
-	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1"}
+	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1", ThreadID: "thr-1"}
 
-	// Nine arguments since CR-FEAT-035: the INSERT names the priority column
-	// too, because a retrieval priority that only lived in memory would read
-	// back in arrival order on the durable backend. sender + idempotency_key
-	// ride with the message since CR-FEAT-025 (the receipt address and the
-	// dead-letter provenance), and the realm it was delivered into rides with
-	// it since CR-FEAT-029.
+	// Ten arguments since CR-CHAT-019: the INSERT names the thread_id column
+	// too, because a thread that only lived on the wire would not be
+	// reconstructable from storage. Nine before it since CR-FEAT-035 (the
+	// priority column), CR-FEAT-025 (sender + idempotency_key — the receipt
+	// address and the dead-letter provenance) and CR-FEAT-029 (the realm).
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
-			0, pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
+			0, "thr-1", pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -831,7 +830,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 	// representation in the database.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
-			0, pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
+			0, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -844,7 +843,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -857,7 +856,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -870,7 +869,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -935,12 +934,13 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"?"}).AddRow(1))
 	// Claiming select — locks a disjoint priority batch. Since CR-FEAT-025 the
 	// row also carries the delivery's sender and idempotency key (read back
-	// through COALESCE so a NULL provenance arrives as ""), and since
-	// CR-FEAT-035 its priority (the first ORDER BY key), and since CR-FEAT-029
-	// the realm it was delivered into (COALESCE'd like the provenance, so the
-	// default realm — the one implicit namespace — arrives as "").
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "created_at", "expires_at", "namespace"}).
-		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, now, now.Add(time.Hour), "")
+	// through COALESCE so a NULL provenance arrives as ""), since CR-FEAT-035
+	// its priority (the first ORDER BY key), since CR-FEAT-029 the realm it
+	// was delivered into (COALESCE'd like the provenance), and since
+	// CR-CHAT-019 its thread (COALESCE'd the same way, so a thread-less
+	// delivery arrives as "").
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "created_at", "expires_at", "namespace"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", now, now.Add(time.Hour), "")
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)
@@ -958,6 +958,7 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	require.Equal(t, leaseID, msgs[0].LeaseID, "returned entries must carry the minted lease")
 	require.Equal(t, 30*time.Second, msgs[0].LeaseDuration)
 	require.Equal(t, "foreman", msgs[0].Sender, "the stored sender travels with the retrieved message")
+	require.Equal(t, "thr-1", msgs[0].ThreadID, "the stored thread travels with the retrieved message (CR-CHAT-019)")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

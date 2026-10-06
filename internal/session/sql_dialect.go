@@ -109,6 +109,19 @@ var sqliteSchemaStatements = []string{
 		set_at              TEXT NOT NULL,
 		PRIMARY KEY (session_id, member_type, member_id)
 	)`,
+	// chat_seq is the query view's seq ALLOCATOR (CR-CHAT-019): the highest
+	// record seq projected for a session, maintained on every Append. The
+	// transcript table carries seq only for MESSAGE records, so without this
+	// a session's create/join seqs would be invisible and the next message
+	// would be handed a seq that collides with them — which would make the
+	// SQL view disagree with the JSONL log it is a projection of. A new
+	// table (CREATE TABLE IF NOT EXISTS) reaches an existing database
+	// without an ALTER, so a deployment upgrading to this row needs no
+	// migration step.
+	`CREATE TABLE IF NOT EXISTS chat_seq (
+		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+		last_seq   INTEGER NOT NULL DEFAULT 0
+	)`,
 }
 
 // postgresDialect is the PostgreSQL adapter over the SHARED repository: the
@@ -226,5 +239,12 @@ var postgresSchemaStatements = []string{
 		set_by              TEXT NOT NULL DEFAULT '',
 		set_at              TEXT NOT NULL,
 		PRIMARY KEY (session_id, member_type, member_id)
+	)`,
+	// The seq allocator (CR-CHAT-019) — see the SQLite spelling above for
+	// why. BIGINT matches chat_transcript.seq on this engine. A new table,
+	// so CREATE TABLE IF NOT EXISTS reaches an existing database.
+	`CREATE TABLE IF NOT EXISTS chat_seq (
+		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+		last_seq   BIGINT NOT NULL DEFAULT 0
 	)`,
 }

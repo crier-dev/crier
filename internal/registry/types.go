@@ -149,6 +149,15 @@ type InboxEntry struct {
 	// `omitempty` keeps the entry byte-identical to a pre-CR-FEAT-029
 	// message.
 	Namespace string `json:"namespace,omitempty"`
+	// ThreadID is the thread the message belongs to (CR-CHAT-019). It is the
+	// deliver body's `thread_id` (CR-FEAT-004) recorded WITH the stored
+	// message, so a thread is reconstructable from storage ALONE — before
+	// this field a thread existed only as a wire tag and was lost the moment
+	// the delivery was stored. A thread root's thread_id is its own message
+	// id; a reply carries the thread it answers, never a new one
+	// (specs/CHAT-SESSIONS.md §4.3/§4.5, D11). `omitempty` keeps an entry
+	// from a client that names no thread byte-identical to before.
+	ThreadID string `json:"thread_id,omitempty"`
 }
 
 // MessageExpiry is the tri-state WIRE encoding of a message expiry

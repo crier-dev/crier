@@ -124,6 +124,18 @@ var excludedOperations = map[string]string{
 	// operator-facing policy reporting, and unreachable from the bridge's
 	// transport, so a tool would have nothing to call.
 	"listNamespaces": "GET /namespaces — \"List the namespace (realm) policies this server enforces\" (CR-FEAT-029, specs/NAMESPACES.md), with a live per-realm agent census: an operator posture surface like GET /status, not an agent-messaging verb — and the bridge runs on a RemoteStore, which exposes no realm call, so a tool could not execute it. Reclassify if the bridge ever grows one.",
+	// CR-CHAT-019 — the session API. Excluded because the bridge runs on a
+	// RemoteStore, which the session surface does not extend: there is no
+	// session call on the bridge's transport (the session store lives in
+	// internal/session, served by cmd/server's HTTP routes), so a tool would
+	// have nothing to call. Reclassify as a group when the bridge or
+	// RemoteStore grows session support.
+	"listSessions":            "GET /sessions — \"List chat sessions (a view over the session objects)\" (CR-CHAT-019): the session API is served by internal/session, which the crier-mcp bridge's RemoteStore does not extend, so no bridge tool could execute it. Reclassify when the bridge grows session support.",
+	"createSession":           "POST /sessions — \"Create a chat session (room)\" (CR-CHAT-019): same transport gap as listSessions — RemoteStore exposes no session call. Reclassify when the bridge grows session support.",
+	"readSessionTranscript":   "GET /sessions/{id}/messages — \"Read the ordered cross-agent transcript of a session\" (CR-CHAT-019): the bridge's per-agent inbox tools read one agent's durable inbox; the cross-agent transcript is served by internal/session, which RemoteStore does not extend. Reclassify when the bridge grows session support.",
+	"postSessionMessage":      "POST /sessions/{id}/messages — \"Send a message into a session (fan-out to its participants)\" (CR-CHAT-019): the fan-out resolves the membership and issues one durable-inbox delivery per participant; RemoteStore exposes no session call, so a bridge tool could not reproduce the route (a client-side loop would be a different, undocumented path). Reclassify when the bridge grows session support.",
+	"listSessionParticipants": "GET /sessions/{id}/participants — \"List a session's participants\" (CR-CHAT-019): membership of a session lives in internal/session, which RemoteStore does not extend. Reclassify when the bridge grows session support.",
+	"addSessionParticipant":   "POST /sessions/{id}/participants — \"Add a participant to a session\" (CR-CHAT-019): same transport gap as listSessionParticipants. Reclassify when the bridge grows session support.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

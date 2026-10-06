@@ -635,11 +635,11 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	// column existed.
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
-    id, agent_id, payload, sender, idempotency_key, priority, created_at, expires_at,
+    id, agent_id, payload, sender, idempotency_key, priority, thread_id, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked, namespace
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NULL, NULL, NULL, FALSE, $9);`,
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
-		entry.Priority, entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
+		entry.Priority, nullText(entry.ThreadID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 		nullText(namespace.Canonical(entry.Namespace)),
 	)
 	if err != nil {
@@ -711,7 +711,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// first one ties.
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
-       created_at, expires_at, COALESCE(namespace, '')
+       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, '')
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -734,7 +734,7 @@ LIMIT $3;`,
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.Priority, &entry.CreatedAt, &expiresAt, &entry.Namespace); err != nil {
+			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}

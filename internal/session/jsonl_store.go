@@ -153,8 +153,12 @@ func (s *JSONLStore) Load(ctx context.Context, sessionID string) (*State, error)
 }
 
 // Sessions lists the session ids present in the log root, sorted. It is what
-// makes a whole-realm bundle export enumerable without a side index.
-func (s *JSONLStore) Sessions() ([]string, error) {
+// makes a whole-realm bundle export enumerable without a side index, and the
+// enumeration GET /sessions is a view over (CR-CHAT-019). The context is
+// accepted so the signature is one across all three backends (the SQL stores
+// need it); this store's read is local and ignores it.
+func (s *JSONLStore) Sessions(ctx context.Context) ([]string, error) {
+	_ = ctx
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("session jsonl store: read root: %w", err)

@@ -39,10 +39,15 @@ type StoreOptions struct {
 // between a local SQLite view, a server-backed PostgreSQL view and the JSONL
 // log is a config value rather than a code branch at every call site.
 //
+// It returns a Repository — the full surface the session API needs (Store plus
+// enumeration, seq allocation and the record builders) — because every backend
+// implements that surface (CR-CHAT-019) and a caller that had to type-assert
+// for it would be able to fail at request time instead of at boot.
+//
 // backend must be a resolved engine — BackendSQLite, BackendPostgres or
 // BackendJSONL. BackendAuto is refused: "auto" is a config-layer policy, and a
 // store that guessed the engine would hide the resolution.
-func OpenStore(ctx context.Context, backend string, opts StoreOptions) (Store, error) {
+func OpenStore(ctx context.Context, backend string, opts StoreOptions) (Repository, error) {
 	switch strings.ToLower(strings.TrimSpace(backend)) {
 	case BackendSQLite:
 		return NewSQLiteStore(opts.SQLitePath)

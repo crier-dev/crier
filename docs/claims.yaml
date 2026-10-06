@@ -360,12 +360,14 @@ claims:
     # added GET /namespaces to the spec, so the merged pair was 18 paths /
     # 22 operations. CR-CHAT-033 added the six opt-in dagger control routes
     # (/dagger/runs, /dagger/runs/{id}, its cancel/resume/rewind siblings and
-    # /dagger/skills/{skill}/run), so the pair is 24 / 28 and both moved with
+    # /dagger/skills/{skill}/run), so the pair was 24 / 28 and both moved with
     # it. The routes are OPT-IN at runtime (CR_DAGGER_URL) but they are
     # declared operations in the document all the same, and this count's unit
-    # is the document.
+    # is the document. CR-CHAT-019 added the three session paths (/sessions,
+    # /sessions/{id}/messages, /sessions/{id}/participants), so the pair is
+    # 27 / 34.
     quote: "docs/openapi.yaml"
-    expect: 24
+    expect: 27
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -378,9 +380,11 @@ claims:
     # GET /agents/{id}/inbox/dead-letters (16 / 20); CR-FEAT-026 and
     # CR-FEAT-029 added POST /capabilities/{capability}/inbox and
     # GET /namespaces (18 / 22); CR-CHAT-033 added the six dagger control
-    # operations (24 / 28), one per route above.
-    quote: "28 operations"
-    expect: 28
+    # operations (24 / 28), one per route above; CR-CHAT-019 added six session
+    # operations — GET/POST /sessions, GET/POST /sessions/{id}/messages and
+    # GET/POST /sessions/{id}/participants (27 / 34).
+    quote: "34 operations"
+    expect: 34
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -412,12 +416,16 @@ claims:
     # POST /agents/{id}/inbox/transfer and GET /agents/{id}/inbox/dead-letters,
     # so the merged count was 16 API + 3 spec-hosting + 5 detection = 24.
     # CR-FEAT-026 registered POST /capabilities/{capability}/inbox and
-    # CR-FEAT-029 registered GET /namespaces, so the merged count is
-    # 18 API + 3 spec-hosting + 5 detection = 26. Note the README's "21
-    # always-on" line counts the 18 API + 3 spec-hosting routes; that line is
-    # prose the same number measures, and it moved with it.
-    quote: "26 router paths"
-    expect: 26
+    # CR-FEAT-029 registered GET /namespaces, so the merged count was
+    # 18 API + 3 spec-hosting + 5 detection = 26. CR-CHAT-019 registered the
+    # three session-API paths (/sessions, /sessions/{id}/messages,
+    # /sessions/{id}/participants), so the merged count is
+    # 18 API + 3 session + 3 spec-hosting + 5 detection = 29. Note the
+    # README's "21 always-on" line counts the 18 API + 3 spec-hosting routes;
+    # that line is prose the same number measures, and it moved with it —
+    # CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting).
+    quote: "29 router paths"
+    expect: 29
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

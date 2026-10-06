@@ -269,10 +269,12 @@ Rules that make it safe:
    resolves to **one** holder (rule 4). The two are different address kinds and are never conflated: a
    group's audience is knowable, a capability's holder is decided at delivery time and is recorded then.
 
-**NOT BUILT:** the one-call fan-out. A client can compose it today by issuing one
-`POST /agents/{id}/inbox` per participant with a shared `session_id` / `thread_id` — but there is no
-server route, no membership list to enumerate, and no record returned. Owed: `POST /sessions/{id}/messages`
-(and its thread variant) plus the transcript record, per CR-CHAT-002.
+**BUILT (CR-CHAT-019):** the one-call fan-out. `POST /sessions/{id}/messages` resolves the audience (the
+active participants, or an explicit target list), writes the transcript record FIRST as the intent, issues
+one delivery per participant through this same path (§3.2's ordering), and writes each outcome back onto
+that record. `GET /sessions/{id}/messages` serves the resulting ordered cross-agent transcript. A client
+may still compose a fan-out by hand with a shared `session_id` / `thread_id`; the route is the shipped
+one-call form of it.
 
 ### 3.5 Retention, per namespace
 
@@ -690,17 +692,18 @@ Added with the v2 detail pass — open, and deliberately not answered here:
 
 **Not built** — this document specifies objects and rules that no route implements:
 
-- **No session object, no session route.** No `POST /sessions`, no `GET /sessions`, no
-  `GET /sessions/{id}/messages`, no `POST /sessions/{id}/messages`, no membership routes. `session_id`
-  exists today as a **wire tag** on the deliver body (`POST /agents/{id}/inbox`, CR-FEAT-004), on the
-  webhook envelope (`crier.session_id`) and in the federation hold record, and as a **guard policy key**
-  (`session:<id>`) — and nowhere else.
-- **No stored `thread_id`.** It is a wire tag and a guard policy key; `registry.InboxEntry` carries
-  neither `session_id` nor `thread_id`, so no thread and no transcript are reconstructable from stored
-  messages today.
-- **No fan-out.** There is no one-call "send to the session": a client must issue one
-  `POST /agents/{id}/inbox` per participant, and there is no membership list to enumerate and no
-  transcript record returned.
+- **The session object and its routes ship (CR-CHAT-019).** `POST /sessions`, `GET /sessions`,
+  `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages` and the membership routes
+  (`GET`/`POST /sessions/{id}/participants`) exist. `session_id` remains a **wire tag** on the deliver body
+  (`POST /agents/{id}/inbox`, CR-FEAT-004), on the webhook envelope (`crier.session_id`) and in the
+  federation hold record, and a **guard policy key** (`session:<id>`) — and is now also the key of a stored
+  session object. Still owed: the close/reopen ROUTE (§1.3's state ships; the route is CR-CHAT-002's).
+- **`thread_id` IS stored (CR-CHAT-019).** `registry.InboxEntry` carries it and the deliver path records
+  it, so a thread is reconstructable from stored messages alone. `session_id` is still NOT stored on
+  `InboxEntry` (the session store carries the transcript record, which names the session).
+- **The fan-out ships (CR-CHAT-019).** `POST /sessions/{id}/messages` is the one-call "send to the
+  session": it enumerates the membership, issues one `POST`-equivalent delivery per participant through
+  the same path, and records the transcript record with each target's outcome.
 - **No append log and no session tables.** The JSONL record types and the four Postgres tables in §5 are
   target shapes; nothing writes them (CR-CHAT-006 owns the mechanism).
 - **No membership, no roles, no grants** (CR-CHAT-003) and **no address parser** for `@team:` / `@ns/*` /

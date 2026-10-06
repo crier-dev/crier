@@ -501,7 +501,7 @@ func TestJSONLStore_BundleExportImportRoundTrip(t *testing.T) {
 		require.NoError(t, store.Append(ctx, rec))
 	}
 
-	ids, err := store.Sessions()
+	ids, err := store.Sessions(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []string{fixSessionID}, ids)
 

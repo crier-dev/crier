@@ -124,6 +124,14 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
+	if err := s.project(ctx, rec); err != nil {
+		return err
+	}
+	return s.recordSeq(ctx, rec)
+}
+
+// project applies one record-version to the view tables — §2.3's second step.
+func (s *SQLStore) project(ctx context.Context, rec *Record) error {
 	switch rec.Type {
 	case RecordSessionCreate:
 		return s.projectSessionCreate(ctx, rec)
@@ -150,6 +158,73 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}
+}
+
+// recordSeq advances the session's seq allocator (chat_seq) to at least this
+// record's seq. It is the ONE place the SQL view remembers how far a session's
+// record stream has run, which is what makes NextSeq exact on an engine whose
+// projection tables carry seq only for message rows (CR-CHAT-019).
+func (s *SQLStore) recordSeq(ctx context.Context, rec *Record) error {
+	_, err := s.exec(ctx, `
+		INSERT INTO chat_seq (session_id, last_seq) VALUES (?, ?)
+		ON CONFLICT (session_id) DO UPDATE SET last_seq =
+			CASE WHEN excluded.last_seq > chat_seq.last_seq THEN excluded.last_seq ELSE chat_seq.last_seq END`,
+		rec.SessionID, rec.Seq)
+	if err != nil {
+		return fmt.Errorf("project chat_seq: %w", err)
+	}
+	return nil
+}
+
+// NextSeq returns the seq the next record for a session should carry: one past
+// the highest seq projected for it, or 1 when the session has no records yet.
+// It reads the chat_seq allocator, so it agrees with the JSONL log's NextSeq —
+// one ordering authority per backend, both derived from the record stream. A
+// session that is not in the view is ErrSessionNotFound, matching Load.
+func (s *SQLStore) NextSeq(ctx context.Context, sessionID string) (int64, error) {
+	if sessionID == "" {
+		return 0, fmt.Errorf("%w: session id is empty", ErrInvalidRecord)
+	}
+	var last int64
+	err := s.queryRow(ctx, `SELECT last_seq FROM chat_seq WHERE session_id = ?`, sessionID).Scan(&last)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No seq row yet. Distinguish "the session exists but has no record
+		// stream" (a session must have a create record to exist, §1.3) from
+		// "no such session": the latter is reported, never a fresh seq 1 for
+		// a session nobody opened.
+		if _, err := s.loadSession(ctx, sessionID); err != nil {
+			return 0, err
+		}
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("session %s store: next seq: %w", s.dialect.Name(), err)
+	}
+	return last + 1, nil
+}
+
+// Sessions lists the session ids in the view, sorted — the SQL half of the
+// enumeration GET /sessions is a view over (CR-CHAT-019). It reads the same
+// chat_sessions rows every other read serves from, so the list cannot disagree
+// with them.
+func (s *SQLStore) Sessions(ctx context.Context) ([]string, error) {
+	rows, err := s.query(ctx, `SELECT id FROM chat_sessions ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("session %s store: list sessions: %w", s.dialect.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("session %s store: scan session id: %w", s.dialect.Name(), err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session %s store: list sessions: %w", s.dialect.Name(), err)
+	}
+	return ids, nil
 }
 
 func (s *SQLStore) projectSessionCreate(ctx context.Context, rec *Record) error {

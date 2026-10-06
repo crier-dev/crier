@@ -291,6 +291,32 @@ type Store interface {
 	Close() error
 }
 
+// Repository is the store surface a caller needs beyond the read/write halves
+// of Store to drive the session API: enumerate the sessions a backend holds,
+// allocate the next seq, and append the specific record kinds a create / join /
+// send composes (CR-CHAT-019). All three backends implement it — JSONLStore,
+// and the SQLStore that backs BOTH the SQLite and PostgreSQL adapters — which
+// is what lets one HTTP handler serve every CR_SESSION_BACKEND selection.
+//
+// It is deliberately an interface the handler depends on rather than a widening
+// of Store: Store is the CR-CHAT-002 contract the round-trip tests pin, and a
+// new method on it would be a breaking change for every existing
+// implementation.
+type Repository interface {
+	Store
+	// Sessions lists the session ids the backend holds, sorted.
+	Sessions(ctx context.Context) ([]string, error)
+	// NextSeq returns the seq the next record for a session should carry.
+	NextSeq(ctx context.Context, sessionID string) (int64, error)
+	// CreateSession appends the session.create record (§1.3).
+	CreateSession(ctx context.Context, sess *Session, seq int64) error
+	// AddMember appends a session.member.add record, with its late-join
+	// context answer when there is one (§2.3, §4.6).
+	AddMember(ctx context.Context, m *Member, seq int64, share *ContextShare) error
+	// PostMessage appends a message record — a thread root or a reply (§5.1).
+	PostMessage(ctx context.Context, m *Message) error
+}
+
 // Record builders. One per log type, so a caller composes the §5.1 line
 // through the domain object instead of hand-assembling a union struct.
 

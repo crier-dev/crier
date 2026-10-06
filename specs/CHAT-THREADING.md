@@ -260,14 +260,14 @@ built on.
 | Depth = thread-tree walk, never a `parent_id` hop-count (D11) | **BUILT** (data model) | `CHAT-SESSIONS.md` §4.5 (D11), §4.7 rule 1 | `State.ThreadDepth` over `parent_thread_id` |
 | Deliberate branch creates a sub-thread (`parent_thread_id`, anchor) | **PARTIAL** — record + view only | `CHAT-SESSIONS.md` §4.5 rule 2 | `Thread` + `Thread.BranchRecord` exist; **no branch operation and no route** |
 | Thread tree read (`parent_thread_id`, `anchor_message_id`) on the view | **BUILT** (data model) | `CHAT-SESSIONS.md` §5.2 | `chat_threads` + `State.Thread`, `State.ThreadDepth` |
-| `thread_id` on the **delivery** record (`registry.InboxEntry`) | **NOT BUILT** | `CHAT-INTERFACE.md` §4 row 15; `CHAT-SESSIONS.md` §7 | owed: CR-CHAT-019 — the field on `inbox_entries` + the deliver-path write |
-| Cross-agent transcript read (`GET /sessions/{id}/messages`) | **NOT BUILT** | `CHAT-SESSIONS.md` §3.3, §7 | owed: CR-CHAT-019 |
-| Session routes (`POST`/`GET /sessions`, membership) | **NOT BUILT** | `CHAT-SESSIONS.md` §7 | owed: CR-CHAT-002 (route) / CR-CHAT-019 |
+| `thread_id` on the **delivery** record (`registry.InboxEntry`) | **BUILT** (CR-CHAT-019) | `CHAT-INTERFACE.md` §4 row 15; `CHAT-SESSIONS.md` §7 | the `inbox_entries.thread_id` column (migration 009) + the deliver-path write; the session fan-out sets it on every delivery |
+| Cross-agent transcript read (`GET /sessions/{id}/messages`) | **BUILT** (CR-CHAT-019) | `CHAT-SESSIONS.md` §3.3, §7 | `internal/session/http.go` — seq-ordered, parents resolvable, `thread_depth`/`reply_depth` |
+| Session routes (`POST`/`GET /sessions`, membership) | **BUILT** (CR-CHAT-019) | `CHAT-SESSIONS.md` §7 | `cmd/server/main.go` + `internal/session/http.go`; the close/reopen route is still owed (CR-CHAT-002) |
 | Branch operation / wire field / route (sub-thread spawn) | **NOT BUILT** | `CHAT-SESSIONS.md` §4.5, §7; `CHAT-INTERFACE.md` §3.8.2 | owed: CR-CHAT-017 |
 | `message_kind` on the wire and in the deliver body | **NOT BUILT** | `CHAT-SESSIONS.md` §4.4 | owed: CR-CHAT-018 |
 | Late-join context-share record + prompt | **NOT BUILT** | `CHAT-SESSIONS.md` §4.6 (D10) | owed: CR-CHAT-016 |
-| Navigability reads (depth/ancestry route, summaries, search-by-location) | **NOT BUILT** | `CHAT-SESSIONS.md` §4.7 | owed: CR-CHAT-017 / CR-CHAT-019 / CR-CHAT-020 |
-| Writer-side derivation of a reply's `thread_id` | **NOT BUILT (deliberate)** | this document §5.2 | a reply must state its thread; the store refuses a thread-less write. A wrapper that derives it from the parent is a read-then-write the API layer may add (CR-CHAT-019) — the data model does not read a transcript to write a record |
+| Navigability reads (depth/ancestry route, summaries, search-by-location) | **PARTIAL** (CR-CHAT-019) | `CHAT-SESSIONS.md` §4.7 | `GET /sessions/{id}/messages` serves ancestry (`thread_id`/`parent_id`/`root_id`/`thread_depth`/`reply_depth`); the generated summaries and the search-by-location read are still owed (CR-CHAT-017 / CR-CHAT-020) |
+| Writer-side derivation of a reply's `thread_id` | **BUILT in the API layer** (CR-CHAT-019) | this document §5.2 | `internal/session/http.go` resolves a reply's thread from its parent and refuses a contradiction (`THREAD_MISMATCH`); the data model still never reads a transcript to write a record |
 
 ---
 

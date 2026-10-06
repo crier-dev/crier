@@ -29,6 +29,17 @@ Thumbs.db
 node_modules/
 dist/
 
+# Crier session store — runtime state (CR-CHAT-019), never tracked. The JSONL
+# log root (CR_SESSION_LOG_ROOT, default crier-sessions/) holds one append log
+# per session and the SQLite view (CR_SQLITE_PATH, default
+# crier-sessions.sqlite) is a deployment's own database; a booted server
+# creates them, so a test run that uses the defaults must not dirty the tree.
+crier-sessions/
+crier-sessions.sqlite
+crier-sessions.sqlite-journal
+crier-sessions.sqlite-wal
+crier-sessions.sqlite-shm
+
 # Hilo — local cache files (rebuildable)
 .vfs/graph/graph.db
 .vfs/graph/graph.db.wal
