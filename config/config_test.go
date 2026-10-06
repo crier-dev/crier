@@ -37,6 +37,9 @@ func unsetAll(t *testing.T) {
 		"CR_ENABLE_METRICS",
 		"CR_PERMISSIONS_ENABLED",
 		"CR_PERMISSIONS_DIR",
+		"CR_SESSION_BACKEND",
+		"CR_SQLITE_PATH",
+		"CR_SESSION_LOG_ROOT",
 	} {
 		t.Setenv(k, "")
 	}

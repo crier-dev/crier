@@ -201,37 +201,12 @@ func (s *JSONLStore) Export(ctx context.Context, sessionID, dir string) (string,
 	return dst, nil
 }
 
-// Import reads a bundle file back into records, in file order. It refuses a
-// malformed or unknown-version line rather than skipping it: an unknown line
-// is unknown state, and unknown state must not be silently dropped from a log
-// of record (§6.3 rule 5).
+// Import reads a bundle file back into records, in file order. It delegates to
+// the shared ReadBundle (sync.go) so the log's importer and the SQL view's
+// bundle importer are ONE parser: an unknown line is unknown state and is
+// refused rather than skipped (§6.3 rule 5).
 func (s *JSONLStore) Import(path string) ([]*Record, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("session jsonl store: open bundle: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), maxRecordLineBytes)
-	var recs []*Record
-	lineNo := 0
-	for sc.Scan() {
-		lineNo++
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		rec, err := ParseRecord([]byte(line))
-		if err != nil {
-			return nil, fmt.Errorf("session jsonl store: %s line %d: %v", path, lineNo, err)
-		}
-		recs = append(recs, rec)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("session jsonl store: read bundle: %w", err)
-	}
-	return recs, nil
+	return ReadBundle(path)
 }
 
 // LoadBundle imports a bundle file and reduces it to the session State, so a

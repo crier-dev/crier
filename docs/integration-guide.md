@@ -1394,3 +1394,53 @@ runs the same comparison against two live servers — the pre-existing surface i
 probed with A2A disabled **and** with it enabled, status by status, shape by
 shape and byte by byte.
 
+## 12. Session storage backends — SQLite, PostgreSQL and JSONL (CR-CHAT-006)
+
+Chat sessions (rooms, membership, transcript, threads, context shares) run on
+one of three interchangeable storage backends, selected with
+`CR_SESSION_BACKEND`. Unset, the selection keeps a deployment's existing
+behaviour: `postgres` when `CR_DATABASE_URL` is configured, `jsonl` otherwise.
+
+| `CR_SESSION_BACKEND` | What it is | What it needs |
+|---|---|---|
+| `sqlite` | A local SQLite query view over the session records. | Nothing but the Go toolchain — the driver is pure Go, so no CGO and no server. `CR_SQLITE_PATH` names the database file and defaults to `crier-sessions.sqlite`. |
+| `postgres` | The server-backed PostgreSQL view, for multi-user and scale. | `CR_DATABASE_URL` pointing at a running PostgreSQL. |
+| `jsonl` | The ordered append log and the transport form. | `CR_SESSION_LOG_ROOT`, a directory (default `crier-sessions`). |
+
+Selecting `postgres` with no `CR_DATABASE_URL` fails the boot rather than
+falling back silently: a misconfiguration is named, not guessed.
+
+### A single-user deployment with no PostgreSQL service
+
+```bash
+export CR_SESSION_BACKEND=sqlite
+export CR_SQLITE_PATH=crier-sessions.sqlite   # optional; this is the default
+./bin/crier
+```
+
+That is the whole configuration. No `CR_DATABASE_URL`, no service to install,
+no CGO. The SQLite view is durable across a restart, and the JSONL log remains
+the ordered append log and the transport form, so a session can still be
+bundled to a file and shipped. A runnable walkthrough — create, post, reply,
+branch, reconcile, restart and read back identical state — lives in
+`examples/sqlite-quickstart/` (`go run ./examples/sqlite-quickstart`).
+
+### Rules that hold on every backend
+
+- **One write direction.** A record is appended to the JSONL log and then
+  projected into the view: `record → log line → view`. Nothing writes the view
+  and then back-fills a log from it. That is what makes a replay idempotent —
+  appending the same record-version twice is a no-op, and a later record at the
+  same `seq` wins (keep-LAST).
+- **One repository, two database engines.** SQLite and PostgreSQL share the
+  projection, the keep-LAST upsert, the idempotent replay and the `State`
+  assembly; each engine contributes only its placeholder syntax, its DDL and
+  its connection setup. Adding an engine is an adapter, not a second store.
+- **One portable bundle, equivalent reads.** A bundle is the log's lines,
+  copied verbatim (the transport form). Importing it into SQLite or into
+  PostgreSQL is a replay, and both engines reduce it to the same `State`; an
+  import is repeatable and a crashed projection is healed by re-running it.
+- **Mismatches are reported, never healed.** The reconciler compares the log
+  against the view and reports a divergence naming the session and both
+  digests. It is read-only: a finding is a finding, not a background sync.
+

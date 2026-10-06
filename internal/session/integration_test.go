@@ -435,3 +435,52 @@ func TestPostgres_CRUDSurfaceWritesTheView(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 }
+
+// ---------------------------------------------------------------------------
+// CR-CHAT-006 acceptance: ONE portable bundle, SQLite and PostgreSQL, equivalent
+// ---------------------------------------------------------------------------
+
+// TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually is the second
+// CR-CHAT-006 acceptance: the SAME portable bundle imports into SQLite and into
+// PostgreSQL with equivalent reads. The bundle is the transport form (the
+// JSONL log, filtered and copied verbatim), so importing it into either view is
+// a replay, and the two engines must agree on the State it produces.
+func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
+	ctx := context.Background()
+	recs := buildScenario()
+
+	// The portable bundle, written from an ordinary JSONL log.
+	logStore, err := NewJSONLStore(t.TempDir())
+	require.NoError(t, err)
+	for _, rec := range recs {
+		require.NoError(t, logStore.Append(ctx, rec))
+	}
+	bundlePath, err := logStore.Export(ctx, fixSessionID, t.TempDir())
+	require.NoError(t, err)
+
+	// Into SQLite — no PostgreSQL service in this leg at all.
+	sqliteStore, err := NewSQLiteStore(filepath.Join(t.TempDir(), "view.sqlite"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqliteStore.Close() })
+	applied, err := ImportBundle(ctx, sqliteStore, bundlePath)
+	require.NoError(t, err)
+	require.Equal(t, 13, applied)
+
+	// Into PostgreSQL — the shipped pgxpool view, same records, same order.
+	pgStore := newTestPostgresStore(t)
+	applied, err = ImportBundle(ctx, pgStore, bundlePath)
+	require.NoError(t, err)
+	require.Equal(t, 13, applied)
+
+	fromSQLite, err := sqliteStore.Load(ctx, fixSessionID)
+	require.NoError(t, err)
+	fromPostgres, err := pgStore.Load(ctx, fixSessionID)
+	require.NoError(t, err)
+	requireJSONEqual(t, fromPostgres, fromSQLite)
+
+	// ... and both equal what the log alone reduces to.
+	want, err := Replay(fixSessionID, recs)
+	require.NoError(t, err)
+	requireJSONEqual(t, want, fromSQLite)
+	requireJSONEqual(t, want, fromPostgres)
+}

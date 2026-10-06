@@ -50,6 +50,31 @@ Persistent per-agent inbox for offline delivery.
 - Lease-based delivery with acknowledgements
 - Queue statistics + message expiry
 
+### 5. Session Storage (CR-CHAT-006)
+Chat sessions (rooms, membership, transcript, threads, context shares) sit
+behind one `session.Store` contract with three interchangeable backends,
+selected by `CR_SESSION_BACKEND`:
+
+- **`sqlite`** — a local SQLite database (`CR_SQLITE_PATH`, default
+  `crier-sessions.sqlite`), driven by the pure-Go `modernc.org/sqlite` driver.
+  No CGO, no server, no PostgreSQL service: the single-user/local deployment.
+- **`postgres`** — the server-backed PostgreSQL view (`CR_DATABASE_URL`) for
+  multi-user and scale deployments.
+- **`jsonl`** — the ordered append log and the transport form
+  (`CR_SESSION_LOG_ROOT`), a first-class peer rather than an export.
+
+SQLite and PostgreSQL share **one repository**: the projection, the keep-LAST
+per `(session_id, seq)` upsert, the idempotent replay and the `State` assembly
+live in `internal/session/sql_store.go`, and each engine supplies only its
+placeholder syntax, its DDL and its connection setup — so adding an engine is
+an adapter, not a second store. JSONL stays the transport form: the only write
+direction is record → JSONL line → projection → view, which is what lets the
+same portable bundle import into either engine with equivalent reads.
+
+Unset, the selection resolves to `postgres` when a database URL is configured
+and to `jsonl` otherwise, so a deployment that predates this feature is
+unchanged.
+
 ## Delivery & Escalation Lanes
 Three lanes carry agent work (lane split, CR-FEAT-009):
 - **Dispatch** = the scheduler + per-repo JSONL boards. This is the only authority that dispatches fleet project work.
@@ -59,7 +84,7 @@ Three lanes carry agent work (lane split, CR-FEAT-009):
 ## Stack
 - **Language:** Go 1.26.6+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
-- **Storage:** In-memory by default; PostgreSQL backend (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts
+- **Storage:** In-memory by default for the registry; chat sessions run on the selected backend (CR-CHAT-006) — SQLite (`CR_SESSION_BACKEND=sqlite`, no service required) or PostgreSQL (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts when a durable backend is configured
 - **Auth:** Bearer shared token (`CR_AUTH_TOKEN`) on the bus, with `/health`,
   `/version`, `/openapi.json`, `/openapi.yaml` and `/docs` exempt; when
   `CR_REQUIRE_AGENT_SIG` is set, per-agent requests are additionally ed25519-signed

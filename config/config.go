@@ -21,11 +21,60 @@ type DatabaseConfig struct {
 	ConnectTimeout  time.Duration
 }
 
+// The CR_SESSION_BACKEND vocabulary (CR-CHAT-006). SessionBackendAuto is the
+// unset selection; it resolves to postgres when a database URL is configured
+// and to jsonl otherwise, which is exactly how a deployment behaves without
+// this feature — so nothing about an existing deployment changes.
+const (
+	SessionBackendAuto     = ""
+	SessionBackendSQLite   = "sqlite"
+	SessionBackendPostgres = "postgres"
+	SessionBackendJSONL    = "jsonl"
+	// DefaultSQLitePath is the SQLite database file used when the sqlite
+	// backend is selected and CR_SQLITE_PATH is unset, so a clean install can
+	// run with CR_SESSION_BACKEND=sqlite alone (a relative path resolves
+	// against the process working directory).
+	DefaultSQLitePath = "crier-sessions.sqlite"
+	// DefaultSessionLogRoot is the JSONL log root used when the jsonl backend
+	// is selected and CR_SESSION_LOG_ROOT is unset.
+	DefaultSessionLogRoot = "crier-sessions"
+)
+
+// SessionConfig selects the chat-session storage backend (CR-CHAT-006):
+// SQLite and JSONL for a single-user/local deployment with no PostgreSQL
+// service, PostgreSQL for a server-backed multi-user one.
+type SessionConfig struct {
+	// Backend is CR_SESSION_BACKEND: "sqlite", "postgres" or "jsonl". Empty
+	// means AUTO (resolved by ResolvedSessionBackend).
+	Backend string
+	// SQLitePath is CR_SQLITE_PATH: the SQLite database file. It defaults to
+	// DefaultSQLitePath when the sqlite backend is selected.
+	SQLitePath string
+	// LogRoot is CR_SESSION_LOG_ROOT: the JSONL log root, which is both the
+	// ordered append log and the transport form. It defaults to
+	// DefaultSessionLogRoot when the jsonl backend is selected.
+	LogRoot string
+}
+
+// ResolvedSessionBackend returns the effective backend: the explicit
+// CR_SESSION_BACKEND when set, otherwise postgres when a database URL is
+// configured and jsonl when not (the historical behaviour).
+func (c Config) ResolvedSessionBackend() string {
+	if b := strings.ToLower(strings.TrimSpace(c.Session.Backend)); b != "" {
+		return b
+	}
+	if strings.TrimSpace(c.Database.URL) != "" {
+		return SessionBackendPostgres
+	}
+	return SessionBackendJSONL
+}
+
 // Config holds all Crier configuration.
 type Config struct {
 	Port               int
 	AuthToken          string
 	Database           DatabaseConfig
+	Session            SessionConfig
 	LogLevel           string
 	LogFormat          string
 	RateLimitPerMinute int
@@ -437,6 +486,42 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_CONNECT_TIMEOUT: %q", v)
 		}
 		cfg.Database.ConnectTimeout = d
+	}
+
+	// Chat-session storage backend (CR-CHAT-006). Additive: an unset
+	// CR_SESSION_BACKEND leaves the selection on AUTO, which resolves exactly
+	// as a deployment behaved before this feature (postgres when
+	// CR_DATABASE_URL is set, jsonl otherwise) — so no existing deployment
+	// changes, and a single-user/local deployment can run on SQLite with no
+	// PostgreSQL service at all.
+	cfg.Session.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_SESSION_BACKEND")))
+	switch cfg.Session.Backend {
+	case SessionBackendAuto, SessionBackendSQLite, SessionBackendPostgres, SessionBackendJSONL:
+	default:
+		return cfg, fmt.Errorf("invalid CR_SESSION_BACKEND: %q (want %s, %s or %s)",
+			cfg.Session.Backend, SessionBackendSQLite, SessionBackendPostgres, SessionBackendJSONL)
+	}
+	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+	cfg.Session.LogRoot = strings.TrimSpace(os.Getenv("CR_SESSION_LOG_ROOT"))
+
+	// Per-backend defaults, so the one switch is enough to run: a deployment
+	// that selects sqlite needs no CR_SQLITE_PATH, and one that selects jsonl
+	// needs no CR_SESSION_LOG_ROOT.
+	switch cfg.ResolvedSessionBackend() {
+	case SessionBackendSQLite:
+		if cfg.Session.SQLitePath == "" {
+			cfg.Session.SQLitePath = DefaultSQLitePath
+		}
+	case SessionBackendJSONL:
+		if cfg.Session.LogRoot == "" {
+			cfg.Session.LogRoot = DefaultSessionLogRoot
+		}
+	case SessionBackendPostgres:
+		// An explicit postgres selection with no URL is a boot error rather
+		// than a silent fallback: "off" already has a spelling.
+		if strings.TrimSpace(cfg.Database.URL) == "" {
+			return cfg, fmt.Errorf("CR_SESSION_BACKEND=postgres requires a database URL (CR_DATABASE_URL)")
+		}
 	}
 
 	// Rate limit
