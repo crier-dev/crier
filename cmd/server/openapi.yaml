@@ -2173,6 +2173,16 @@ paths:
         refused (NAMESPACE_MISMATCH) — two realms must not share one room.
 
         A closed session admits no membership change (§1.3).
+
+        FEDERATED ROOMS (CR-CHAT-023, specs/CHAT-FEDERATION.md §3): a member of
+        a peer instance joins as a REMOTE participant by naming a
+        remote-qualified id `remote:<peer>:<subject>`. The join is admitted
+        only when the peer has a policy record (CR_FED_PEERS_FILE) AND that
+        policy admits the session's namespace (default deny). Refusals are
+        NAMED: FED_PEER_UNTRUSTED (unknown peer), FED_NAMESPACE_NOT_PERMITTED
+        (policy wall). A joined remote participant is marked `remote: true` in
+        the participant list and receives messages fanned out to the session
+        through the shipped federation path.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
@@ -3188,6 +3198,10 @@ components:
           enum: [agent, principal]
         member_id:
           type: string
+          description: |-
+            The member's identity. A REMOTE participant (CR-CHAT-023) carries a
+            remote-qualified id `remote:<peer id>:<external subject id>` naming
+            the peer instance it lives on and its id there.
         role:
           type: string
         added_at:
@@ -3198,6 +3212,13 @@ components:
           format: date-time
         active:
           type: boolean
+        remote:
+          type: boolean
+          description: |-
+            True when the participant lives on a federated PEER instance
+            (CR-CHAT-023): its member_id is remote-qualified, its permissions are
+            decided on THIS instance (peer policy + local ACL), and it is never
+            presented as a local participant. Absent (omitempty) for locals.
         context_share:
           type: object
           properties:

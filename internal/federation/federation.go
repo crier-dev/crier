@@ -143,10 +143,21 @@ func retryableStatus(status int) bool {
 // is write-protected: it is never logged, echoed, serialized, or included
 // in /fed/peers output. The zero value is not usable; construct with
 // NewClient.
+//
+// CR-CHAT-023: peerPolicy names the per-peer policy record for each link
+// (CR_FED_PEERS_FILE, specs/CHAT-FEDERATION.md §6). A link with a policy
+// admits fan-out only for namespaces the policy lists (default deny), and
+// every forward to that link announces this instance's identity with the
+// peer header (§8.4: an identity claim, never a credential). A link without
+// a policy behaves exactly as before this field existed — the shipped
+// outbound posture is unchanged when no peer records are configured (§1.3).
 type Client struct {
 	links []Link
 	token string
 	http  *http.Client
+	// peerPolicy, when non-nil, is consulted per link URL before a forward
+	// is sent. It is keyed by peer id internally; lookup here is by URL.
+	peerPolicy PeerPolicies
 	// selfPort is the TCP port this relay itself listens on (0 = identity
 	// unknown). It is the discriminator used by IsSelfLink to recognise a
 	// CR_FED_LINKS entry that addresses this relay instead of a remote one
@@ -178,6 +189,53 @@ func (c *Client) SetSelf(port int) {
 // manager a transient link outage is surfaced to the caller as an explicit
 // bounded failure rather than held (never as a 404).
 func (c *Client) SetHoldManager(m *HoldManager) { c.hold = m }
+
+// SetPeerPolicies attaches the per-peer policy set (CR-CHAT-023, spec §6).
+// A link whose URL names a policy's URL is thereafter governed by that
+// policy: its forward announces SelfAs via the peer header, and a fan-out
+// crossing to it is admitted only for namespaces the policy allows (default
+// deny). Nil (the default, nothing configured) leaves every link exactly as
+// it was — the shipped posture (§1.3).
+func (c *Client) SetPeerPolicies(pp PeerPolicies) {
+	if c == nil {
+		return
+	}
+	c.peerPolicy = pp
+}
+
+// policyForLink resolves the peer policy governing a link, matched by the
+// policy's URL. The first matching record wins; an unmatched link has no
+// policy (outbound behavior unchanged).
+func (c *Client) policyForLink(link Link) *PeerPolicy {
+	if c == nil || c.peerPolicy == nil || link.URL == "" {
+		return nil
+	}
+	for _, p := range c.peerPolicy {
+		if p != nil && p.URL != "" && p.URL == link.URL {
+			return p
+		}
+	}
+	return nil
+}
+
+// PolicyFor resolves the policy of a LOCAL peer id (CR-CHAT-023 §6): the
+// lookup the session fan-out's remote-participant path uses before anything
+// crosses to that peer. nil means the peer is unknown — a named refusal, not
+// a fall-through.
+func (c *Client) PolicyFor(peer string) *PeerPolicy {
+	if c == nil || c.peerPolicy == nil {
+		return nil
+	}
+	return c.peerPolicy.PolicyFor(peer)
+}
+
+// ForwardToURL is ForwardDeliver addressed by a policy record's URL rather
+// than a Link from the configured link list: it is how the session fan-out
+// reaches a REMOTE PARTICIPANT's home instance (§3.2) through the SHIPPED
+// forward transport — the same POST the link path makes, no second transport.
+func (c *Client) ForwardToURL(ctx context.Context, url, agentID string, body []byte) (int, []byte, error) {
+	return c.ForwardDeliver(ctx, Link{URL: url}, agentID, body)
+}
 
 // MaxHold returns the hold budget in force, or 0 when no hold queue is
 // attached.
@@ -343,6 +401,11 @@ func (c *Client) SelfLinks() []Link {
 // a blocking webhook reply — is semantically identical to a local delivery.
 // Returns the remote status and body verbatim; err is non-nil only for
 // transport-level failures (unreachable link, timeout).
+//
+// CR-CHAT-023: when the link has a peer policy with a SelfAs identity, the
+// forward carries X-Crier-Fed-Peer: <self-as> — the destination's per-peer
+// policy is keyed by that claim. An announcement is data, not authority
+// (§3.3): the destination still decides.
 func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, body []byte) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		link.URL+"/agents/"+url.PathEscape(agentID)+"/inbox", bytes.NewReader(body))
@@ -351,6 +414,9 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(HopHeader, "1")
+	if p := c.policyForLink(link); p != nil && p.SelfAs != "" {
+		req.Header.Set(PeerHeader, p.SelfAs)
+	}
 	c.authorize(req)
 
 	resp, err := c.http.Do(req)
@@ -371,13 +437,40 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 // error is either *TransientError (at least one link failed transiently) or
 // ErrNotFoundOnAnyLink (every link answered 404 / no links configured), so
 // the caller can hold-and-retry the former and answer 404 for the latter.
+//
+// CR-CHAT-023: a link governed by a peer policy whose NamespacesAllow does
+// not admit the delivery's namespace is SKIPPED, not tried — the policy is a
+// wall the source enforces before anything leaves (§6.3: authorization
+// before content inspection). A skipped link is not an outage and never
+// becomes a TransientError; when every link is policy-blocked the answer is
+// the definitive ErrNamespaceNotPermitted. The namespace is read from the
+// body's `namespace` member (the deliverRequest field); a body without one
+// carries the implicit default realm.
 func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (int, []byte, error) {
 	var (
-		lastErr      error
-		lastStatus   int
-		sawTransient bool
+		lastErr        error
+		lastStatus     int
+		sawTransient   bool
+		policyBlocked  bool
+		bodyNamespace  string
+		namespaceKnown bool
 	)
 	for _, link := range c.links {
+		if p := c.policyForLink(link); p != nil {
+			if !namespaceKnown {
+				var envelope struct {
+					Namespace string `json:"namespace"`
+				}
+				if json.Unmarshal(body, &envelope) == nil {
+					bodyNamespace = envelope.Namespace
+					namespaceKnown = true
+				}
+			}
+			if !p.AdmitsNamespace(bodyNamespace) {
+				policyBlocked = true
+				continue
+			}
+		}
 		status, respBody, err := c.ForwardDeliver(ctx, link, agentID, body)
 		if err != nil {
 			slog.Warn("federation: link unreachable, trying next", "link", link.URL, "error", err)
@@ -395,6 +488,9 @@ func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (
 			continue
 		}
 		return status, respBody, nil
+	}
+	if policyBlocked && !sawTransient {
+		return 0, nil, &NamespaceNotPermittedError{}
 	}
 	if sawTransient {
 		return 0, nil, &TransientError{Attempts: 1, LastStatus: lastStatus, LastErr: lastErr}

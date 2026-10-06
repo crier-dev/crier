@@ -477,7 +477,27 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	var (
 		fedClient *federation.Client
 		fedHold   *federation.HoldManager
+		fedPeers  federation.PeerPolicies
 	)
+	// Per-peer policy document (CR-CHAT-023, spec §4/§6): each record admits
+	// one peer — namespaces that may cross, agents it may reach inbound, the
+	// identity this instance announces on a forward. A file that cannot be
+	// read or parsed is a BOOT ERROR, never a silently policy-less relay:
+	// an operator who wrote a policy must not get a relay that ignores it.
+	if cfg.Federation.PeersFile != "" {
+		pp, perr := federation.LoadPeerPoliciesFile(cfg.Federation.PeersFile)
+		if perr != nil {
+			slog.Error("federation: load peers file", "file", cfg.Federation.PeersFile, "error", perr)
+			return 1
+		}
+		fedPeers = pp
+		registryHandler.SetPeerPolicies(pp)
+		names := make([]string, 0, len(pp))
+		for id := range pp {
+			names = append(names, id)
+		}
+		slog.Info("federation peer policies", "file", cfg.Federation.PeersFile, "peers", names)
+	}
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
 
@@ -606,6 +626,16 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		return 1
 	}
 	defer func() { _ = sessStore.Close() }()
+
+	// CR-CHAT-023: with peer policies configured, the session surface gains
+	// the remote-participant behavior — a remote-qualified member joins only
+	// through its peer's policy, and a message fanned out to it crosses to
+	// its home instance through the SHIPPED federation client (§3.2/§3.4).
+	// With no peers configured both setters are inert no-ops (§1.3).
+	sessHandler.SetPeerPolicies(fedPeers)
+	if fedClient != nil {
+		sessHandler.SetFedClient(fedClient)
+	}
 	r.HandleFunc("/sessions", sessHandler.HandleListSessions).Methods("GET")
 	r.HandleFunc("/sessions", sessHandler.HandleCreateSession).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandleTranscript).Methods("GET")
@@ -1223,6 +1253,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_FED_TOKEN                shared secret for link auth: sent as Bearer to linked relays; must equal the destination's CR_AUTH_TOKEN (empty = no link auth)")
 	fmt.Fprintln(out, "  CR_FED_MAX_HOLD_S           how long a delivery is held and retried when every link is down, before the sender is told FEDERATION_FAILED (default 300)")
 	fmt.Fprintln(out, "  CR_FED_QUEUE_FILE           durable hold-queue document path; unset = held deliveries are process-lifetime only (lost on restart)")
+	_, _ = fmt.Fprintln(out, "  CR_FED_PEERS_FILE           per-peer policy document path (CR-CHAT-023); unset = no peers, federation exactly as before")
 	fmt.Fprintln(out, "  CR_GUARD_ENABLED            LLM message guard master switch (default true)")
 	fmt.Fprintln(out, "  CR_GUARD_TIMEOUT_MS         per-message guard budget incl. retries (default 10000)")
 	fmt.Fprintln(out, "  CR_GUARD_MAX_CONCURRENT     concurrent guard LLM calls (default 8)")

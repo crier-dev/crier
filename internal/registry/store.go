@@ -152,6 +152,11 @@ type Handler struct {
 	// fed forwards deliveries for agents unknown on this relay to linked
 	// relays (CR-FEAT-006). Nil disables federation.
 	fed *federation.Client
+	// peerPolicies is the per-peer inbound admission policy (CR-CHAT-023,
+	// specs/CHAT-FEDERATION.md §6). Nil (nothing configured) means no peer
+	// gate exists: every request takes the shipped path unchanged — the
+	// degraded default posture, not a wide-open new one.
+	peerPolicies federation.PeerPolicies
 	// guard runs the LLM message-guard choke point on every delivery
 	// (CR-FEAT-010, spec §2). Nil disables the guard (tests,
 	// CR_GUARD_ENABLED=false).
@@ -285,6 +290,17 @@ func (h *Handler) SetWebhookDriver(d *webhook.Driver) {
 // linked relays. Nil disables federation (local 404 behavior unchanged).
 func (h *Handler) SetFederationClient(c *federation.Client) {
 	h.fed = c
+}
+
+// SetPeerPolicies arms the per-peer inbound admission gate (CR-CHAT-023,
+// specs/CHAT-FEDERATION.md §6). A request arriving with a peer announcement
+// (federation.PeerHeader) is then checked against the policy set before any
+// transport or store acts: an unknown peer, a namespace the policy does not
+// admit, or a denied agent is refused with a named 403 FED_* body. Nil (the
+// default) leaves every delivery on the shipped path — nothing is armed
+// until an operator configures peer policies.
+func (h *Handler) SetPeerPolicies(pp federation.PeerPolicies) {
+	h.peerPolicies = pp
 }
 
 // SetGuardFilter enables the LLM message guard (CR-FEAT-010): every

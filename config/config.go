@@ -352,6 +352,14 @@ type FederationConfig struct {
 	// memory only — held deliveries are lost on restart, the same contract
 	// the in-memory registry backend documents for inboxes.
 	QueueFile string
+	// PeersFile is the path of the per-peer policy document
+	// (CR_FED_PEERS_FILE, CR-CHAT-023, specs/CHAT-FEDERATION.md §4/§6).
+	// When set, each record admits ONE peer: which namespaces may cross the
+	// boundary with it (default deny), which local agents it may reach
+	// inbound, and the identity this instance announces to it on a forward.
+	// Empty (default) configures no peers: the instance federates exactly as
+	// it did before peer policies existed (§1.3 — extend, never replace).
+	PeersFile string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -585,6 +593,10 @@ func Load() (Config, error) {
 	// document. Unset (default) keeps held deliveries in process memory
 	// only, matching the in-memory registry backend contract.
 	cfg.Federation.QueueFile = os.Getenv("CR_FED_QUEUE_FILE")
+	// CR_FED_PEERS_FILE (CR-CHAT-023): path of the per-peer policy document.
+	// Unset (default) configures no peers — federation behaves exactly as
+	// before peer policies existed.
+	cfg.Federation.PeersFile = os.Getenv("CR_FED_PEERS_FILE")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.
