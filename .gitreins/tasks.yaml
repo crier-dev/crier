@@ -2563,3 +2563,23 @@ tasks:
   status: complete
   created_at: '2026-10-04T12:25:17.902262+00:00'
   completed_at: '2026-10-04T12:56:20.694967+00:00'
+- id: CR-GUARD-JEV-1
+  title: Jev provider class behind ProviderSpec seam
+  criteria:
+  - internal/guard accepts provider jev in a ProviderSpec, routes classification through
+    a decisions transport mapped to the allow|block verdict contract, participates
+    in chain failover, and tests prove benign->allow and injection->block plus choke-point
+    wiring; go test ./... green
+  status: complete
+  created_at: '2026-10-05T10:50:22.186268+00:00'
+  completed_at: '2026-10-05T11:05:27.385655+00:00'
+- id: QA-CRIER-37
+  title: port-guard selftest skips when ss missing
+  criteria:
+  - the selftest cell exercising scripts/lib/port-guard.sh prints an explicit SKIP
+    and exits 0 when ss (iproute2) is absent from PATH while the library's own exit-2
+    refusal without ss stays proven and a run with ss present exercises real cells;
+    shell gate and go test green
+  status: complete
+  created_at: '2026-10-05T10:50:28.061519+00:00'
+  completed_at: '2026-10-05T11:08:14.309696+00:00'
