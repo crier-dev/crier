@@ -294,8 +294,16 @@ def _json_schema(operation: dict):
     return schema
 
 
-def _header_params(operation: dict, doc: dict) -> list:
-    """Header parameter names declared by an operation, following `$ref`s."""
+def _header_params(operation: dict, doc: dict, required_only: bool = False) -> list:
+    """Header parameter names declared by an operation, following `$ref`s.
+
+    required_only=True drops OPTIONAL header parameters (required:false) —
+    e.g. the CR-CHAT-027 opt-in X-Agent-Body-SHA256, which is a body-binding
+    affordance, not part of the fixed signing contract (and is meaningless on
+    a bodyless GET). The retrieve/ack consistency check compares the REQUIRED
+    signing headers, so an operation that merely advertises the optional
+    opt-in header does not read as a contract disagreement.
+    """
     params = operation.get("parameters")
     if not isinstance(params, list):
         return []
@@ -313,6 +321,13 @@ def _header_params(operation: dict, doc: dict) -> list:
                 raise SpecError("unresolvable parameter $ref %r" % ref)
             param = target
         if param.get("in") != "header":
+            continue
+        # The bounded scalar reader returns booleans as strings ("true"/"false"),
+        # so a bare `not param.get("required")` would treat the string "false"
+        # as truthy and keep the optional header.
+        required = param.get("required")
+        is_required = required is True or (isinstance(required, str) and required.lower() == "true")
+        if required_only and not is_required:
             continue
         name = param.get("name")
         if not isinstance(name, str) or not name:
@@ -384,7 +399,7 @@ def derive(doc: dict, override_base_url: str) -> dict:
             entry["body_ids_key"] = ids[0]
 
         if role in ("retrieve", "ack"):
-            headers = _header_params(op, doc)
+            headers = _header_params(op, doc, required_only=True)
             if not headers:
                 raise SpecError(
                     "%s (%s %s) declares no signature header parameters — the signed "
