@@ -27,6 +27,8 @@ tags:
     description: Cross-relay federation peer list.
   - name: sessions
     description: "Chat sessions (CR-CHAT-019): the session object, the ordered cross-agent transcript, membership and fan-out into a session, per specs/CHAT-INTERFACE.md §4. Every surface is realm-scoped, and a message sent into a session is delivered through the SHIPPED inbox path — there is no second delivery path."
+  - name: groups
+    description: "Named agent groups (CR-CHAT-013, D8): a curated, editable roster of agents addressed as `@team:x`, that ONE message fans out to — every CURRENT member, through the same shipped fan-out path. Deliberately NOT a capability target (`@cap:y`), which stays the dynamic round-robin pool over live holders: a named group's audience is enumerable and recordable BEFORE the send, a capability's holder is decided at delivery time."
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
 paths:
@@ -2055,6 +2057,111 @@ paths:
         "409":
           description: A session with that id already exists (SESSION_EXISTS)
 
+  # ── Named groups (CR-CHAT-013, D8) ──
+  # A NAMED, CURATED set of agents addressed as `@team:x` — an address target
+  # with a roster, and nothing else: no participants, no transcript, no state.
+  # A send targeting a group (POST /sessions/{id}/messages with a
+  # `{"kind":"group"}` target) fans out ONE delivery per CURRENT member
+  # through the shipped inbox path; a roster edit routes the NEXT send to the
+  # current members. Inspectable: who is in it, who created it, who last
+  # edited it.
+  /groups:
+    post:
+      operationId: createGroup
+      tags: [groups]
+      summary: Create a named agent group (a curated roster addressable as @team:x)
+      description: |-
+        Opens a named group (specs/CHAT-ADDRESSING.md §1.4). The name must be
+        addressable as `@team:<name>` (the ident charset); the creator is
+        recorded (`created_by`, or the X-Agent-ID header) and never defaulted
+        to a service identity. A duplicate name is 409 GROUP_EXISTS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGroupRequest"
+      responses:
+        "201":
+          description: The created group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "400":
+          description: "A malformed request: an unaddressable name (INVALID_GROUP), an empty or non-ident member id, or an absent creator (CREATED_BY_REQUIRED)"
+        "401":
+          description: Missing or invalid credentials
+        "409":
+          description: A group with that name already exists (GROUP_EXISTS)
+    get:
+      operationId: listGroups
+      tags: [groups]
+      summary: List the named groups of the request's realm
+      parameters:
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: Every group in the realm, sorted by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Groups"
+        "401":
+          description: Missing or invalid credentials
+  /groups/{name}:
+    get:
+      operationId: getGroup
+      tags: [groups]
+      summary: Read one named group's CURRENT roster
+      description: |-
+        The roster is INSPECTABLE: the members, who created the group and who
+        last edited it (§1.4). A group of another realm reads as 404 — the
+        realm wall never confirms that a group it will not serve exists.
+      parameters:
+        - $ref: "#/components/parameters/GroupName"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The group's current roster.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "404":
+          description: No such group in this realm (GROUP_NOT_FOUND)
+  /groups/{name}/members:
+    patch:
+      operationId: updateGroupMembers
+      tags: [groups]
+      summary: Add and/or remove members (one edit event over the current roster)
+      description: |-
+        Applies `remove` first, then `add`, to the CURRENT roster and records
+        who made the edit (`actor`, or the X-Agent-ID header). The NEXT send
+        targeting `@team:<name>` resolves the edited set — membership changes
+        take effect for subsequent sends, never retroactively; a member's
+        existing deliveries are untouched (§2.4 rule 3).
+      parameters:
+        - $ref: "#/components/parameters/GroupName"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateGroupMembersRequest"
+      responses:
+        "200":
+          description: The roster after the edit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "400":
+          description: "A malformed request: the edit names nothing, or a member id is not an ident (INVALID_MEMBER)"
+        "404":
+          description: No such group in this realm (GROUP_NOT_FOUND)
+
   /sessions/{id}/messages:
     get:
       operationId: readSessionTranscript
@@ -2626,6 +2733,13 @@ components:
       description: The session's id (an opaque, URL-safe token). A session in another realm reads as 404 — the realm wall never confirms that a session it will not serve exists.
       schema:
         type: string
+    GroupName:
+      name: name
+      in: path
+      required: true
+      description: The named group's name — the same token `@team:<name>` addresses (the ident charset [A-Za-z0-9_][A-Za-z0-9_.-]*). A group of another realm reads as 404.
+      schema:
+        type: string
   securitySchemes:
     bearerAuth:
       type: http
@@ -2655,6 +2769,84 @@ components:
         is refused with 401 "body digest mismatch". Absent the header, the
         3-line contract above is unchanged.
   schemas:
+    Group:
+      type: object
+      required: [name, members, created_at, updated_at]
+      description: |-
+        ONE named, curated set of agents (CR-CHAT-013, §1.4) — an address
+        target with a roster, and nothing else: no participants, no
+        transcript, no state. Addressable as `@team:<name>`.
+      properties:
+        name:
+          type: string
+          description: The group's identity and its address token.
+        namespace:
+          type: string
+          description: The realm the group lives in. Omitted for the default realm.
+        members:
+          type: array
+          description: The CURRENT member agent ids, sorted and de-duplicated.
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          description: Who opened the roster. Never a service identity (§1.4).
+        updated_at:
+          type: string
+          format: date-time
+          description: The last membership edit.
+        updated_by:
+          type: string
+          description: Who made the last membership edit.
+    Groups:
+      type: object
+      required: [groups, count]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/Group"
+        count:
+          type: integer
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Must be addressable as `@team:<name>` (the ident charset).
+        namespace:
+          type: string
+          description: The realm to create the group in; must be one this server declares.
+        members:
+          type: array
+          description: Optional initial members (agent ids).
+          items:
+            type: string
+        created_by:
+          type: string
+          description: Who creates the roster; required (the X-Agent-ID header is accepted as an alternative).
+    UpdateGroupMembersRequest:
+      type: object
+      description: |-
+        One edit over the CURRENT roster: `remove` applies first, then `add`.
+        An id named in both lists is removed and then re-added (add wins).
+        The edit names nothing (`add` and `remove` both absent) is a 400.
+      properties:
+        add:
+          type: array
+          items:
+            type: string
+        remove:
+          type: array
+          items:
+            type: string
+        actor:
+          type: string
+          description: Who makes the edit; the X-Agent-ID header is accepted as an alternative.
     InboxEntry:
       type: object
       required: [id, agent_id, payload, created_at, expires_at, acked]

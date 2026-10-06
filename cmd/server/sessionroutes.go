@@ -48,11 +48,22 @@ func openSessionAPI(
 		return nil, nil, fmt.Errorf("session api: %w", err)
 	}
 
+	// Named groups (CR-CHAT-013, specs/CHAT-ADDRESSING.md §1.4): the roster
+	// log lives beside the session store regardless of CR_SESSION_BACKEND, so
+	// the curated rosters survive every backend selection. A store that
+	// cannot open is a boot error rather than a surface that silently serves
+	// no groups — the same rule openSessionAPI applies to the session store.
+	groupStore, err := session.NewJSONLGroupStore(cfg.Session.GroupRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("group api: %w", err)
+	}
+
 	h := session.NewHTTPHandler(sessStore, session.HTTPOptions{
 		Deliverer:   registryStore,
 		Agents:      registryStore,
 		Namespaces:  namespaces,
 		Permissions: perms,
+		Groups:      groupStore,
 	})
 	return sessStore, h, nil
 }

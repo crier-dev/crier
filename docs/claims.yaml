@@ -79,6 +79,11 @@ ignore_paths:
   # (the docs gate boots with CR_DAGGER_URL set) and are covered below.
   - /var/lib/crier/dagger
   - /runs.jsonl
+  # CR-CHAT-013: the README's CR_GROUP_ROOT env row documents the named-group
+  # roster log file. A filesystem path an operator writes, not an API route
+  # (the group routes themselves are /groups, /groups/{name},
+  # /groups/{name}/members — live and covered below).
+  - /groups.jsonl
   # integration-guide.md:
   - /intel                 # illustrative mesh REQUEST path (the target agent's own path — same class as /ping above)
   - /mesh/connect/         # prose URL form `ws://…/mesh/connect/<agentID>`; the scanner probes the literal with an EMPTY id (a real connect with an id IS a live route)
@@ -367,9 +372,12 @@ claims:
     # /sessions/{id}/messages, /sessions/{id}/participants), so the pair was
     # 27 / 34. CR-CHAT-028 added the compile/merge and per-part expand paths
     # (/sessions/{id}/compile and /sessions/{id}/messages/{mid}/expand, one and
-    # one operation), so the pair is 29 / 36.
+    # one operation), so the pair was 29 / 36. CR-CHAT-013 added the three
+    # named-group paths (/groups, /groups/{name} and /groups/{name}/members —
+    # four operations: POST+GET /groups, GET /groups/{name},
+    # PATCH /groups/{name}/members), so the pair is 32 / 40.
     quote: "docs/openapi.yaml"
-    expect: 29
+    expect: 32
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -385,9 +393,11 @@ claims:
     # operations (24 / 28), one per route above; CR-CHAT-019 added six session
     # operations — GET/POST /sessions, GET/POST /sessions/{id}/messages and
     # GET/POST /sessions/{id}/participants (27 / 34); CR-CHAT-028 added the
-    # compile operation and the per-part expand operation (29 / 36).
-    quote: "36 operations"
-    expect: 36
+    # compile operation and the per-part expand operation (29 / 36);
+    # CR-CHAT-013 added the four named-group operations — POST/GET /groups,
+    # GET /groups/{name} and PATCH /groups/{name}/members (32 / 40).
+    quote: "40 operations"
+    expect: 40
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -425,13 +435,17 @@ claims:
     # /sessions/{id}/participants), so the merged count was
     # 18 API + 3 session + 3 spec-hosting + 5 detection = 29. CR-CHAT-028
     # registered the compile route and the per-part expand route, so the
-    # merged count is 18 API + 5 session + 3 spec-hosting + 5 detection = 31.
+    # count was 18 API + 5 session + 3 spec-hosting + 5 detection = 31.
+    # CR-CHAT-013 registered the three named-group paths (/groups,
+    # /groups/{name}, /groups/{name}/members), so the merged count is
+    # 18 API + 5 session + 3 groups + 3 spec-hosting + 5 detection = 34.
     # Note the README's "always-on" line counts the 18 API + 3 spec-hosting
     # routes; that line is prose the same number measures, and it moved with it
     # — CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting),
-    # and CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting).
-    quote: "31 router paths"
-    expect: 31
+    # CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting), and
+    # CR-CHAT-013 made it 29 (18 API + 5 session + 3 groups + 3 spec-hosting).
+    quote: "34 router paths"
+    expect: 34
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

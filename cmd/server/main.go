@@ -618,9 +618,20 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// rides the SAME fan-out path (no second delivery path).
 	r.HandleFunc("/sessions/{id}/compile", sessHandler.HandleCompile).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", sessHandler.HandleExpandCompiledMessage).Methods("GET")
+	// Named groups (CR-CHAT-013, D8): a curated roster addressed as @team:x
+	// that ONE message fans out to — every current member, through the same
+	// shipped fan-out path (no second delivery path). Distinct from a
+	// capability target (@cap:y), which stays the dynamic round-robin pool.
+	r.HandleFunc("/groups", sessHandler.HandleCreateGroup).Methods("POST")
+	r.HandleFunc("/groups", sessHandler.HandleListGroups).Methods("GET")
+	r.HandleFunc("/groups/{name}", sessHandler.HandleGetGroup).Methods("GET")
+	r.HandleFunc("/groups/{name}/members", sessHandler.HandleUpdateGroupMembers).Methods("PATCH")
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
 		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
+	slog.Info("named group api enabled",
+		"store_dir", cfg.Session.GroupRoot,
+		"detail", "POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)")
 
 	// Dagger control surface (CR-CHAT-033) — OPT-IN and additive. The six
 	// /dagger routes exist only when CR_DAGGER_URL names an executor: this is
