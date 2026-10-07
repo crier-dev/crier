@@ -459,9 +459,15 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 
 ## 9. What is NOT built, with the owed thing named
 
-1. **The trust anchor store and record.** No anchor, no `accepted_by`, no route. Owed: §3.
+1. **The trust anchor store and record.** No anchor, no `accepted_by`, no route. Owed: §3. **PARTIALLY
+   BUILT (CR-CHAT-025):** the anchor RECORD and a local in-memory anchor store exist
+   (`internal/trust.Anchor`, `Store.AddAnchor` — `accepted_by` enforced non-system by the record's
+   documentation, key_id derived from the key bytes). Still owed: persistence and the route.
 2. **Delegation / voucher records and the chain walk.** No record, no scope evaluation, no `max_depth`,
-   no D16 enforcement. Owed: §4.
+   no D16 enforcement. Owed: §4. **BUILT (CR-CHAT-025):** `internal/trust.Delegation` (issuer signs the
+   canonical record; import verifies the signature), the bounded chain walk (`Store.Verify` with
+   `DefaultMaxChainDepth`), per-hop scope/window/depth checks, and D16 enforcement
+   (`scope.max_depth` as the subject's delegation budget).
 3. **A signed MESSAGE payload.** The shipped request signature covered `<METHOD>\n<path>\n<ts>` — NOT the
    body (`agentsig.go`; §2.1 limit 1). **REQUEST-LEVEL BODY BINDING: BUILT (OPT-IN), CR-CHAT-027.** A
    caller now opts in by sending `X-Agent-Body-SHA256` and signing
@@ -476,9 +482,22 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 4. **The eight `TRUST_*` verdicts.** `TRUST_MALFORMED`, `TRUST_NO_PATH_TO_ANCHOR`,
    `TRUST_DELEGATION_OUT_OF_SCOPE`, `TRUST_DELEGATION_EXPIRED`, `TRUST_KEY_REVOKED`,
    `TRUST_SIGNATURE_INVALID`, `TRUST_REPLAY_WINDOW`, `TRUST_REVOKED_AFTER_SIGNING`. None exists; there is
-   no `/trust/*` route and no trust verdict in any response. Owed: §5, §7.3.
-5. **Key rotation** — no certificate, no overlap window, no route. Owed: §6.
+   no `/trust/*` route and no trust verdict in any response. Owed: §5, §7.3. **PARTIALLY BUILT
+   (CR-CHAT-025):** the verdict vocabulary and the verification ENGINE now exist as a library
+   (`internal/trust`: sentinel errors + named outcome constants for all of the above except
+   `TRUST_MALFORMED`'s HTTP parsing and `TRUST_REPLAY_WINDOW`, which are surface concerns; rotation adds
+   `TRUST_ROTATION_UNSIGNED`). Still owed: a `/trust/*` HTTP surface that answers with these codes.
+5. **Key rotation** — no certificate, no overlap window, no route. Owed: §6. **BUILT (CR-CHAT-025):**
+   the rotation CERTIFICATE and its verification (`internal/trust.RotationCert`,
+   `Store.AddRotation` — signed by the OUTGOING key, refused `TRUST_ROTATION_UNSIGNED` otherwise).
+   Still owed: the overlap-window policy at an HTTP surface and a route.
 6. **Revocation** — no revocation record, no `revoked_at`, no tombstone, no trust class. Owed: §7.
+   **BUILT (CR-CHAT-025):** the tombstone record (`Revocation`, append-only), time-anchored
+   verification — signatures at/after `revoked_at` refused `TRUST_KEY_REVOKED`, pre-revocation
+   signatures still verify annotated `TRUST_REVOKED_AFTER_SIGNING` (`trust_class:
+   revoked-after-signing`) — per-verifier state, and the forward-authority cutoff (a revoked key
+   cannot vouch onward or sign a rotation accepted later). §7.5's meaning for old records is stated
+   in `TrustClassRevokedAfterSigning`'s documentation and pinned by tests.
 7. **Revocation publication / import.** No mechanism for a peer to publish its key state or for a holder
    to apply it. Owed: §7.4.
 8. **Trust annotations on the delivery log.** The log records `key_id`; nothing annotates its records with
@@ -518,7 +537,14 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 
 ## 11. Status line
 
-`DRAFT v1 · 2026-10-03 · CR-CHAT-024 + CR-CHAT-025 + CR-CHAT-027`
+`DRAFT v1 · 2026-10-03 · CR-CHAT-024 + CR-CHAT-025 + CR-CHAT-027` · 2026-10-07 (CR-CHAT-025): the trust
+PRIMITIVE landed as a library — `internal/trust` (anchors, signed delegations, bounded chain walk with
+the `TRUST_*` named outcomes, rotation certificates, tombstoned revocation with the
+`revoked-after-signing` trust class); §9 items 1/2/4/5/6 are updated in place. Still NOT built: the
+`/trust/*` HTTP surface (§9 item 4's routes), anchor/delegation persistence, revocation publication
+(item 7), delivery-log annotations (item 8), the peer seam (item 9) and the D14 shadow principal
+(item 10). Nothing here is added to `docs/claims.yaml` until the corresponding surface ships against a
+live server.
 
 Statements in this document that describe behaviour which does not exist are marked **NOT BUILT** in place
 (§3.2, §4.4, §5.3, §6.3, §7.5, §8.3) and enumerated in §9. Nothing here may be added to `docs/claims.yaml`
