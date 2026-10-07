@@ -2828,3 +2828,12 @@ tasks:
   status: complete
   created_at: '2026-10-07T21:33:35.119043+00:00'
   completed_at: '2026-10-07T21:38:11.223083+00:00'
+- id: INT-CRIER-006
+  title: 'bunker config-matrix E2E outage: diagnose bunker host/server reachability'
+  criteria:
+  - 'Diagnosis recorded: bunker host probed (ssh + bunker info/heartbeat), cross-project
+    CI pattern checked, failing CI job re-run once host reachable; verdict names shared-infra
+    vs crier-specific'
+  status: complete
+  created_at: '2026-10-07T21:49:21.396483+00:00'
+  completed_at: '2026-10-07T22:13:43.049274+00:00'
