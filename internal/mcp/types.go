@@ -214,6 +214,9 @@ type MeshRequestOutput struct {
 type CreateRunInput struct {
 	AgentID string `json:"agent_id"`
 	Prompt  string `json:"prompt"`
+	// Target optionally names the execution target (CR-CHAT-035): empty = the
+	// server's local dagger bridge, or a configured remote target name.
+	Target string `json:"target,omitempty"`
 }
 
 type RunStatusInput struct {
@@ -237,4 +240,6 @@ type RunSkillInput struct {
 	AgentID string         `json:"agent_id"`
 	Skill   string         `json:"skill"`
 	Args    map[string]any `json:"args,omitempty"`
+	// Target follows the same resolve-once rule as create_run (CR-CHAT-035).
+	Target string `json:"target,omitempty"`
 }

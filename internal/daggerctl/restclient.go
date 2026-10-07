@@ -44,11 +44,14 @@ func NewRESTClient(baseURL, token string) *RESTClient {
 	}
 }
 
-// CreateRun starts a prompt-driven DAG on the server.
+// CreateRun starts a prompt-driven DAG on the server. The optional target
+// names the execution target (CR-CHAT-035): absent = the server's local
+// dagger bridge, or a configured remote target name.
 func (c *RESTClient) CreateRun(ctx context.Context, req CreateRunRequest) (*RunRecord, error) {
 	return c.call(ctx, http.MethodPost, "/dagger/runs", map[string]any{
 		"agent_id": req.AgentID,
 		"prompt":   req.Prompt,
+		"target":   req.Target,
 	})
 }
 
@@ -76,7 +79,7 @@ func (c *RESTClient) Rewind(ctx context.Context, runID, nodeID string) (*RunReco
 
 // RunSkill runs a registered skill.
 func (c *RESTClient) RunSkill(ctx context.Context, req RunSkillRequest) (*RunRecord, error) {
-	body := map[string]any{"agent_id": req.AgentID}
+	body := map[string]any{"agent_id": req.AgentID, "target": req.Target}
 	if len(req.Args) > 0 {
 		body["args"] = req.Args
 	}

@@ -62,6 +62,18 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 	svc := daggerctl.NewService(bridge, runStore, daggerctl.InboxDeliverer(store))
 	svc.SetWatchInterval(cfg.PollInterval)
 
+	// Named remote execution targets (CR-CHAT-035): the local bridge above is
+	// the default target, and each CR_DAGGER_TARGET_<NAME>=<url> adds a named
+	// remote one. A create may name either; the resolved name is recorded on
+	// the run and every later observation goes to that recorded target. An
+	// entry whose URL is not an absolute http(s) URL fails the boot, exactly
+	// as a bad CR_DAGGER_URL does.
+	targets, err := daggerctl.NewTargetTable(cfg.URL, cfg.Targets)
+	if err != nil {
+		return nil, fmt.Errorf("dagger control: %w", err)
+	}
+	svc.SetTargetTable(targets)
+
 	h := daggerctl.NewHandler(svc)
 	r.HandleFunc("/dagger/runs", h.HandleCreateRun).Methods(http.MethodPost)
 	r.HandleFunc("/dagger/runs/{id}", h.HandleGetRun).Methods(http.MethodGet)

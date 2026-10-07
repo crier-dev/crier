@@ -67,6 +67,14 @@ const (
 	KindSkill  = "skill"  // a registered skill run
 )
 
+// TargetLocal is the canonical name of the execution target that sits beside
+// crier — the CR_DAGGER_URL bridge (CR-CHAT-035). A create without a target
+// records this name, and a named remote target records its own name verbatim.
+// The target is resolved ONCE, at create time, and never re-resolved: a later
+// status read talks to the target the record names, not to whatever the
+// config happens to name today.
+const TargetLocal = "local"
+
 // Notification codes delivered to a requesting agent's inbox when a run goes
 // terminal. They are machine-readable, in the same shape the inbox already
 // carries for MESSAGE_EXPIRED and WEBHOOK_FAILED.
@@ -124,6 +132,18 @@ type RunRecord struct {
 	// Evidence is the list of references the executor reported (checkpoint
 	// ids, artifact urls, …). crier treats them as opaque strings.
 	Evidence []string `json:"evidence,omitempty"`
+	// Target is WHERE the run executes: TargetLocal ("local") or the name of
+	// a configured remote target (CR-CHAT-035). It is resolved at create time
+	// and recorded verbatim; status reads go to this target, never to a
+	// re-resolved one. Evidence stays string references regardless of target.
+	Target string `json:"target"`
+	// LinkLost records that a poll to a REMOTE target failed while the run
+	// was non-terminal (CR-CHAT-035). It is never set for a local run. The
+	// run's state is left exactly as last reported — LinkLost is an explicit
+	// held/unknown indication, NOT an invented success or failure — and a
+	// later successful observation clears it (LinkLostAt returns to zero).
+	LinkLost   bool       `json:"link_lost,omitempty"`
+	LinkLostAt *time.Time `json:"link_lost_at,omitempty"`
 	// Nodes is the last reported node shape, when the bridge supplies one.
 	Nodes []Node `json:"nodes,omitempty"`
 	// Notified reports that the terminal outcome was delivered to the
@@ -170,17 +190,23 @@ func notificationCode(s RunState) string {
 
 // CreateRunRequest is a request to start a prompt-driven DAG. AgentID names the
 // agent the run was started for — the address its outcome is delivered to.
+// Target optionally names the execution target (CR-CHAT-035): empty resolves
+// to TargetLocal, and a non-empty value must name a target in the server's
+// target table (CR_DAGGER_URL for local, CR_DAGGER_TARGET_<NAME> for remote).
 type CreateRunRequest struct {
 	AgentID string `json:"agent_id"`
 	Prompt  string `json:"prompt"`
+	Target  string `json:"target,omitempty"`
 }
 
 // RunSkillRequest is a request to run a skill REGISTERED with the executor.
-// crier never loads or interprets a skill; it names it.
+// crier never loads or interprets a skill; it names it. Target follows the
+// same resolve-once rule as CreateRunRequest (CR-CHAT-035).
 type RunSkillRequest struct {
 	AgentID string         `json:"agent_id"`
 	Skill   string         `json:"skill"`
 	Args    map[string]any `json:"args,omitempty"`
+	Target  string         `json:"target,omitempty"`
 }
 
 // RunView is one status observation reported by the executor: the state plus

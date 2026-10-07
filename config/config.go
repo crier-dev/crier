@@ -213,6 +213,12 @@ type DaggerConfig struct {
 	// Timeout is CR_DAGGER_TIMEOUT_S: the per-request budget for a call to
 	// the dagger surface. Zero resolves to the bridge's own default.
 	Timeout time.Duration
+	// Targets is the named REMOTE execution-target table (CR-CHAT-035),
+	// parsed from CR_DAGGER_TARGET_<NAME>=<url> variables. A run created with
+	// target=<name> is sent to that URL; the name is recorded on the run and
+	// never re-resolved. The LOCAL target (CR_DAGGER_URL itself) is not in
+	// this map — it is the default and is always present when URL is set.
+	Targets map[string]string
 }
 
 // PermissionsConfig is the delivery-ACL deployment posture (CR-CHAT-003).
@@ -1001,7 +1007,50 @@ func Load() (Config, error) {
 		}
 	}
 
+	// Named remote execution targets (CR-CHAT-035). Every environment variable
+	// of the form CR_DAGGER_TARGET_<NAME>=<url> adds one: a run created with
+	// target=<name> runs there, the name is recorded at create time and never
+	// re-resolved. Names are case-insensitive (lowercased here) and must be
+	// non-empty; the URLs themselves are validated when the table is built
+	// into bridges, so a bad URL fails at the first use it could have.
+	for _, kv := range os.Environ() {
+		name, url, ok := parseDaggerTargetEnv(kv)
+		if !ok {
+			continue
+		}
+		if cfg.Dagger.Targets == nil {
+			cfg.Dagger.Targets = map[string]string{}
+		}
+		cfg.Dagger.Targets[name] = url
+	}
+
 	return cfg, nil
+}
+
+// daggerTargetEnvPrefix is the environment prefix of a named remote dagger
+// execution target (CR-CHAT-035).
+const daggerTargetEnvPrefix = "CR_DAGGER_TARGET_"
+
+// parseDaggerTargetEnv splits one CR_DAGGER_TARGET_<NAME>=<url> environment
+// entry. It reports ok=false for every variable that is not a target entry.
+// The name is lowercased (targets are case-insensitive) and must be non-empty.
+func parseDaggerTargetEnv(kv string) (name, url string, ok bool) {
+	rest, found := strings.CutPrefix(kv, daggerTargetEnvPrefix)
+	if !found {
+		return "", "", false
+	}
+	i := strings.Index(rest, "=")
+	if i <= 0 {
+		// No '=' at all, or an empty NAME ("CR_DAGGER_TARGET_=…"): neither
+		// names a target, so both are ignored rather than guessed at.
+		return "", "", false
+	}
+	name = strings.ToLower(strings.TrimSpace(rest[:i]))
+	url = strings.TrimSpace(rest[i+1:])
+	if name == "" {
+		return "", "", false
+	}
+	return name, url, true
 }
 
 // defaultDaggerStoreDir is the dagger run-record directory when

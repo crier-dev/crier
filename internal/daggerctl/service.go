@@ -22,6 +22,11 @@ type Service struct {
 	deliver Deliverer
 	now     func() time.Time
 
+	// targets is the execution-target table (CR-CHAT-035). Nil means the
+	// single-bridge deployment: every create resolves to the default bridge
+	// and records TargetLocal.
+	targets *TargetTable
+
 	// interval is the background watch period. Zero disables the watcher (the
 	// default), which is what tests and a status-poll-only deployment want.
 	interval time.Duration
@@ -47,6 +52,11 @@ func NewService(bridge DaggerBridge, store Store, deliver Deliverer) *Service {
 // asking. A non-positive duration disables it.
 func (s *Service) SetWatchInterval(d time.Duration) { s.interval = d }
 
+// SetTargetTable installs the execution-target table (CR-CHAT-035). A nil
+// table keeps the single-bridge behaviour: every create records TargetLocal
+// and talks to the default bridge.
+func (s *Service) SetTargetTable(t *TargetTable) { s.targets = t }
+
 // Store exposes the run store (used by wiring code that needs the raw records).
 func (s *Service) Store() Store { return s.store }
 
@@ -61,9 +71,37 @@ func (s *Service) available() error {
 	return nil
 }
 
+// resolveTarget maps a requested target name onto the bridge it runs on and
+// the name the record must carry (CR-CHAT-035). With no table installed every
+// request resolves to the default bridge under TargetLocal; with a table, a
+// non-empty name must resolve or the create is refused before the bridge is
+// touched. The name is resolved ONCE here — the record freezes it.
+func (s *Service) resolveTarget(req string) (DaggerBridge, string, error) {
+	if s.targets == nil {
+		return s.bridge, TargetLocal, nil
+	}
+	url, err := s.targets.Resolve(req)
+	if err != nil {
+		return nil, "", err
+	}
+	if !s.targets.remote(req) {
+		return s.bridge, TargetLocal, nil
+	}
+	bridge, err := NewHTTPBridge(url)
+	if err != nil {
+		return nil, "", err
+	}
+	return bridge, strings.ToLower(strings.TrimSpace(req)), nil
+}
+
 // CreateRun starts a prompt-driven DAG and records it. The run id comes from
 // the executor; crier never mints one, because a run id crier invented would
 // name nothing the executor could be asked about.
+//
+// The target is resolved at create time and recorded on the run (CR-CHAT-035):
+// absent resolves to TargetLocal, a named remote target is refused outright if
+// the table does not hold it. Every later status read of this run goes to the
+// recorded target, never to a re-resolved one.
 func (s *Service) CreateRun(ctx context.Context, req CreateRunRequest) (*RunRecord, error) {
 	if err := s.available(); err != nil {
 		return nil, err
@@ -78,15 +116,20 @@ func (s *Service) CreateRun(ctx context.Context, req CreateRunRequest) (*RunReco
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	view, err := s.bridge.CreateRun(ctx, req)
+	bridge, target, err := s.resolveTarget(req.Target)
 	if err != nil {
 		return nil, err
 	}
-	rec := s.newRecord(view, req.AgentID, KindPrompt, req.Prompt, "")
+	view, err := bridge.CreateRun(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	rec := s.newRecord(view, req.AgentID, KindPrompt, req.Prompt, "", target)
 	return s.commit(ctx, rec)
 }
 
-// RunSkill runs a skill registered with the executor and records it.
+// RunSkill runs a skill registered with the executor and records it. The
+// target follows the same resolve-once rule as CreateRun (CR-CHAT-035).
 func (s *Service) RunSkill(ctx context.Context, req RunSkillRequest) (*RunRecord, error) {
 	if err := s.available(); err != nil {
 		return nil, err
@@ -101,17 +144,29 @@ func (s *Service) RunSkill(ctx context.Context, req RunSkillRequest) (*RunRecord
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	view, err := s.bridge.RunSkill(ctx, req)
+	bridge, target, err := s.resolveTarget(req.Target)
 	if err != nil {
 		return nil, err
 	}
-	rec := s.newRecord(view, req.AgentID, KindSkill, "", req.Skill)
+	view, err := bridge.RunSkill(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	rec := s.newRecord(view, req.AgentID, KindSkill, "", req.Skill, target)
 	return s.commit(ctx, rec)
 }
 
 // RunStatus observes a run and returns its record. The bridge's answer wins;
 // the stored record is what carries the requesting agent and the notification
 // state forward.
+//
+// The observation goes to the run's RECORDED target (CR-CHAT-035), never to a
+// re-resolved one. When the target is remote and the bridge cannot be reached
+// while the run is non-terminal, the record is marked link_lost (with a
+// timestamp) and returned — an explicit held/unknown indication, never an
+// invented success or failure. A later successful observation clears it. A
+// LOCAL bridge failure stays a returned error: nothing in the record is
+// fabricated either way.
 func (s *Service) RunStatus(ctx context.Context, runID string) (*RunRecord, error) {
 	if err := s.available(); err != nil {
 		return nil, err
@@ -127,12 +182,61 @@ func (s *Service) RunStatus(ctx context.Context, runID string) (*RunRecord, erro
 	if err != nil {
 		return nil, err
 	}
-	view, err := s.bridge.RunStatus(ctx, runID)
+	bridge, err := s.targetBridge(rec.Target)
 	if err != nil {
 		return nil, err
 	}
+	view, err := bridge.RunStatus(ctx, runID)
+	if err != nil {
+		return nil, s.markLinkLost(ctx, rec, err)
+	}
+	s.clearLinkLost(rec)
 	s.applyView(rec, view)
 	return s.commit(ctx, rec)
+}
+
+// markLinkLost records a lost link on a REMOTE, non-terminal run and returns
+// the error unchanged (CR-CHAT-035). The record persists with link_lost set
+// and its state EXACTLY as last reported — a lost link is never allowed to
+// read as a terminal outcome. A local run's failure and a terminal run's
+// failure are returned without touching the record.
+func (s *Service) markLinkLost(ctx context.Context, rec *RunRecord, bridgeErr error) error {
+	if bridgeErr == nil || rec == nil || rec.State.Terminal() {
+		return bridgeErr
+	}
+	if s.targets == nil || !s.targets.remote(rec.Target) {
+		return bridgeErr
+	}
+	now := s.now()
+	rec.LinkLost = true
+	rec.LinkLostAt = &now
+	rec.UpdatedAt = now
+	if err := s.store.Append(ctx, rec); err != nil {
+		return bridgeErr
+	}
+	return fmt.Errorf("%w: (run %s on target %q is held — link lost, state stays %q)", bridgeErr, rec.RunID, rec.Target, rec.State)
+}
+
+// clearLinkLost resets the link-lost indication once an observation succeeded
+// (CR-CHAT-035). It must precede applyView so the same observation that proves
+// the link also carries the fresh state.
+func (s *Service) clearLinkLost(rec *RunRecord) {
+	if rec == nil {
+		return
+	}
+	rec.LinkLost = false
+	rec.LinkLostAt = nil
+}
+
+// targetBridge returns the bridge that speaks to a RECORDED target name. The
+// recorded name is authoritative: a target removed from the table after the
+// run was created still resolves from the record's name, or refuses loudly —
+// it is never silently re-routed to the local bridge (CR-CHAT-035).
+func (s *Service) targetBridge(recorded string) (DaggerBridge, error) {
+	if s.targets == nil {
+		return s.bridge, nil
+	}
+	return s.targets.BridgeFor(recorded, s.bridge)
 }
 
 // Cancel cancels a running DAG. A bridge answer naming the resulting state
@@ -196,8 +300,10 @@ func (s *Service) operate(ctx context.Context, runID string, fallback RunState, 
 	return s.commit(ctx, rec)
 }
 
-// newRecord builds the first version of a run's record.
-func (s *Service) newRecord(view *RunView, agentID, kind, prompt, skill string) *RunRecord {
+// newRecord builds the first version of a run's record. target is the
+// execution target resolved at create time (CR-CHAT-035) — recorded verbatim
+// and never re-resolved.
+func (s *Service) newRecord(view *RunView, agentID, kind, prompt, skill, target string) *RunRecord {
 	state := view.State
 	if state == "" {
 		// The bridge confirmed the create, so the run exists and has not
@@ -205,6 +311,9 @@ func (s *Service) newRecord(view *RunView, agentID, kind, prompt, skill string) 
 		// "not finished" is exactly the vocabulary's non-terminal value. An
 		// unrecognised WORD still lands on StateUnknown via normalizeState.
 		state = StateRunning
+	}
+	if strings.TrimSpace(target) == "" {
+		target = TargetLocal
 	}
 	now := s.now()
 	return &RunRecord{
@@ -214,6 +323,7 @@ func (s *Service) newRecord(view *RunView, agentID, kind, prompt, skill string) 
 		Kind:            kind,
 		Prompt:          prompt,
 		Skill:           skill,
+		Target:          target,
 		Evidence:        view.Evidence,
 		Nodes:           view.Nodes,
 		CreatedAt:       now,

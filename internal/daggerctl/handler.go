@@ -36,6 +36,7 @@ type rewindBody struct {
 type runSkillBody struct {
 	AgentID string         `json:"agent_id"`
 	Args    map[string]any `json:"args,omitempty"`
+	Target  string         `json:"target,omitempty"`
 }
 
 // HandleCreateRun is POST /dagger/runs — start a prompt-driven DAG. The body is
@@ -111,6 +112,7 @@ func (h *Handler) HandleRunSkill(w http.ResponseWriter, r *http.Request) {
 		AgentID: body.AgentID,
 		Skill:   mux.Vars(r)["skill"],
 		Args:    body.Args,
+		Target:  body.Target,
 	})
 	if err != nil {
 		writeControlError(w, err)
@@ -159,6 +161,8 @@ func writeControlError(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, ErrBridge):
 		httperr.WriteJSONError(w, http.StatusBadGateway, err.Error())
+	case errors.Is(err, ErrUnknownTarget):
+		httperr.WriteJSONError(w, http.StatusBadRequest, err.Error())
 	default:
 		httperr.WriteJSONError(w, http.StatusInternalServerError, "dagger run store unavailable")
 	}

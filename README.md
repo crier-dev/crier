@@ -1741,6 +1741,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_DAGGER_STORE_DIR` | `/var/lib/crier/dagger` when `CR_DAGGER_URL` is set, otherwise unset | Directory of the dagger run-record log (`<dir>/runs.jsonl`), an append-only JSONL file reduced keep-LAST per run id. A directory the process cannot create **fails the boot** rather than silently losing run records on the next restart. |
 | `CR_DAGGER_POLL_S` | `5` when `CR_DAGGER_URL` is set | Seconds between the watcher's re-observations of a live run. The watcher is how a DAG that finishes on its own still reaches its requester without the requester polling; it only ever READS the executor. An explicit `0` disables it (the run is then observed only when someone asks). A negative or non-integer value is a startup error. |
 | `CR_DAGGER_TIMEOUT_S` | `30` (the client's own default) | Per-request budget, in seconds, for one call to the dagger surface. An explicit `0` selects that built-in default. |
+| `CR_DAGGER_TARGET_<NAME>` | _(unset — no named remote targets)_ | Named **remote execution targets** (CR-CHAT-035): each variable of the form `CR_DAGGER_TARGET_<NAME>=<url>` adds one — e.g. `CR_DAGGER_TARGET_BUNKER_1=http://bunker.local:8765`. A run created with `"target":"<name>"` (case-insensitive) is sent to that URL, and the resolved name is **recorded on the run at create time and never re-resolved**. Absent/empty target on a create = the local target (`CR_DAGGER_URL` itself, recorded as `local`). A create naming a target the table does not hold is refused (`unknown dagger execution target`) before any bridge is touched. Evidence stays opaque string references regardless of target — no bytes ever cross the bus. |
 
 ### Delivery ACL — principals, roles and grants (CR-CHAT-003)
 
@@ -1792,10 +1793,35 @@ and no run is scheduled inside crier: a bridge that refuses a create leaves
 **no local record at all**, because there is no fallback engine that could have
 produced one.
 
+**Where a run executes — local or named remote (CR-CHAT-035).** A DAG may run
+on the LOCAL box beside crier or on a REMOTE box (a bunker agent, a fleet
+node); the interface from crier is the SAME, only the execution target
+differs. A create accepts an optional `target` (also on skill runs): absent or
+empty resolves to the local bridge and the record says `"target":"local"`; a
+name resolved from the `CR_DAGGER_TARGET_<NAME>` table sends the run to that
+box's dagger surface and records the name verbatim. Resolution happens ONCE,
+at create time — every later status read goes to the RECORDED target, never to
+a re-resolved one, so renaming or re-pointing a target never re-routes an
+existing run.
+
+**A remote run that loses its link is held, never "complete".** When an
+observation to a remote target's recorded address fails while the run is
+non-terminal, the record is persisted with `"link_lost":true` and a
+`link_lost_at` timestamp, and the poll returns an error — the run's `state`
+stays EXACTLY what the executor last reported. It is never silently rewritten
+to `succeeded`, never delivered as a completion, never invented: a lost link
+is an explicit held/unknown indication, and only a later SUCCESSFUL observation
+clears it. A local run's bridge failure is not marked `link_lost` — the caller
+sees the error directly, and the record stays untouched.
+
+**Evidence stays references.** Whatever the target, evidence comes back as
+opaque string references on the run record — no artifact bytes ever travel the
+control bus.
+
 | Route | What it does |
 |-------|--------------|
-| `POST /dagger/runs` | Create a prompt-driven run. Body: `{"agent_id":"…","prompt":"…"}` → `201` with the run record. The executor's run id is the id; crier never mints one. |
-| `GET /dagger/runs/{id}` | Observe a run: crier asks the executor for its state and answers the record (`run_id`, `state`, `evidence`, `nodes`, `requesting_agent`, `notified`). `404` when crier holds no such run. |
+| `POST /dagger/runs` | Create a prompt-driven run. Body: `{"agent_id":"…","prompt":"…","target":"…"}` (target optional — absent = local, or a named remote target from `CR_DAGGER_TARGET_<NAME>`) → `201` with the run record. The executor's run id is the id; crier never mints one. The resolved target is recorded at create time and never re-resolved. |
+| `GET /dagger/runs/{id}` | Observe a run: crier asks the run's RECORDED target for its state and answers the record (`run_id`, `state`, `target`, `link_lost`, `evidence`, `nodes`, `requesting_agent`, `notified`). A failed remote observation marks `link_lost` (held — never success). `404` when crier holds no such run. |
 | `POST /dagger/runs/{id}/cancel` | Cancel a running run → the updated record (terminal `cancelled`). |
 | `POST /dagger/runs/{id}/resume` | Resume from the last checkpoint → the updated record. |
 | `POST /dagger/runs/{id}/rewind` | Body `{"node_id":"…"}` — discard checkpoints from that node onward. The node id is forwarded to the executor verbatim: crier holds no graph to validate it against. |

@@ -64,7 +64,7 @@ func (s *MCPServer) handleCreateRun(args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("prompt is required")
 	}
 	return withDagger(func(ctx context.Context) (*daggerctl.RunRecord, error) {
-		return ctrl.CreateRun(ctx, daggerctl.CreateRunRequest{AgentID: in.AgentID, Prompt: in.Prompt})
+		return ctrl.CreateRun(ctx, daggerctl.CreateRunRequest{AgentID: in.AgentID, Prompt: in.Prompt, Target: in.Target})
 	})
 }
 
@@ -160,6 +160,6 @@ func (s *MCPServer) handleRunSkill(args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("skill is required")
 	}
 	return withDagger(func(ctx context.Context) (*daggerctl.RunRecord, error) {
-		return ctrl.RunSkill(ctx, daggerctl.RunSkillRequest{AgentID: in.AgentID, Skill: in.Skill, Args: in.Args})
+		return ctrl.RunSkill(ctx, daggerctl.RunSkillRequest{AgentID: in.AgentID, Skill: in.Skill, Args: in.Args, Target: in.Target})
 	})
 }

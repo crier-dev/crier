@@ -3071,13 +3071,18 @@ paths:
       tags: [dagger]
       summary: Create a Dagger run
       description: |-
-        Start a prompt-driven DAG on the dagger surface this server is
-        configured with (CR_DAGGER_URL) and record it. The run id comes from
+        Start a prompt-driven DAG and record it. The run id comes from
         the executor; crier never mints one, because an id it invented would
         name nothing the executor could be asked about.
 
         The create records the REQUESTING agent: when the run reaches a
         terminal state, the outcome is delivered to that agent's durable inbox.
+
+        The optional `target` names WHERE the run executes (CR-CHAT-035):
+        absent or empty = the local dagger surface (CR_DAGGER_URL, recorded as
+        `local`), or a named remote target from the CR_DAGGER_TARGET_<NAME>
+        table. The resolved target is recorded at create time and NEVER
+        re-resolved — later observations always go to the recorded target.
       requestBody:
         required: true
         content:
@@ -3092,6 +3097,13 @@ paths:
                 prompt:
                   type: string
                   description: The prompt describing the DAG to run.
+                target:
+                  type: string
+                  description: |-
+                    Optional execution target (CR-CHAT-035): empty = local, or a
+                    named remote target configured via CR_DAGGER_TARGET_<NAME>.
+                    Recorded at create time and never re-resolved. An unknown
+                    name is refused with 400 before any bridge is touched.
       responses:
         "201":
           description: The run was created and recorded.
@@ -3899,7 +3911,28 @@ components:
           type: array
           items:
             type: string
-          description: Opaque references the executor reported (checkpoint ids, artifact urls, …). crier never interprets them.
+          description: Opaque references the executor reported (checkpoint ids, artifact urls, …). crier never interprets them — and no bytes ever cross the bus, whatever the target.
+        target:
+          type: string
+          description: |-
+            WHERE the run executes (CR-CHAT-035): `local` (the default, the
+            CR_DAGGER_URL surface) or the name of a configured remote target
+            (CR_DAGGER_TARGET_<NAME>). Resolved at create time and recorded
+            verbatim; every later observation goes to THIS target, never a
+            re-resolved one.
+        link_lost:
+          type: boolean
+          description: |-
+            True when an observation to a REMOTE target failed while the run
+            was non-terminal (CR-CHAT-035): an explicit held/unknown
+            indication, never an invented outcome. The `state` stays exactly
+            what the executor last reported and is never silently rewritten to
+            a terminal word. Cleared by the next successful observation.
+            Never set for a local run.
+        link_lost_at:
+          type: string
+          format: date-time
+          description: When the failed remote observation marked the link lost. Zero once cleared.
         nodes:
           type: array
           description: The last reported node shape, when the executor supplied one.
