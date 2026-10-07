@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crier Chat — UI Direction Mock (CR-CHAT-011)</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --bg-raised: #12151d;
+    --bg-panel: #161a24;
+    --bg-input: #1b202c;
+    --border: #232936;
+    --text: #e6e9f0;
+    --text-dim: #9aa3b5;
+    --text-faint: #6b7386;
+    --mint: #4cc38a;
+    --mint-dim: rgba(76, 195, 138, 0.14);
+    --mint-border: rgba(76, 195, 138, 0.35);
+    --lavender: #a78bfa;
+    --lavender-dim: rgba(167, 139, 250, 0.14);
+    --amber: #f5b04a;
+    --amber-dim: rgba(245, 176, 74, 0.14);
+    --red: #e5685f;
+    --red-dim: rgba(229, 104, 95, 0.14);
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    min-height: 100vh;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+  }
+  .logo {
+    display: flex; align-items: center; gap: 9px;
+    font-weight: 700; font-size: 16px; letter-spacing: 0.2px;
+  }
+  .logo-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--mint);
+    box-shadow: 0 0 10px var(--mint-border);
+  }
+  .topbar .room-name { color: var(--text-dim); font-size: 13px; }
+  .topbar .spacer { flex: 1; }
+  .presence {
+    display: flex; align-items: center; gap: 7px;
+    color: var(--text-dim); font-size: 12.5px;
+  }
+  .presence .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
+  .presence .dot.busy { background: var(--amber); }
+
+  /* ---------- Layout ---------- */
+  .layout { display: flex; height: calc(100vh - 53px); min-height: 640px; }
+  .sidebar {
+    width: 250px; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg-raised);
+    display: flex; flex-direction: column;
+  }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  /* ---------- Session list ---------- */
+  .sidebar h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-faint); padding: 16px 16px 8px;
+  }
+  .session-search {
+    margin: 0 12px 10px;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-faint);
+    font-size: 13px;
+  }
+  .sessions { flex: 1; overflow-y: auto; padding: 0 8px; }
+  .session {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 8px;
+    cursor: pointer; color: var(--text-dim);
+  }
+  .session:hover { background: var(--bg-panel); }
+  .session.active {
+    background: var(--mint-dim);
+    border-left: 2px solid var(--mint);
+    color: var(--text);
+  }
+  .session .s-avatar {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    background: var(--bg-input); color: var(--lavender);
+  }
+  .session.active .s-avatar { background: rgba(76,195,138,0.25); color: var(--mint); }
+  .session .s-body { min-width: 0; flex: 1; }
+  .session .s-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session .s-preview { font-size: 12px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session .s-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .session .s-time { font-size: 11px; color: var(--text-faint); }
+  .badge {
+    min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 9px; background: var(--mint); color: #06281a;
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .badge.amber { background: var(--amber); color: #2b1d05; }
+  .sidebar-footer {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-faint);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ---------- Permission matrix ---------- */
+  .permissions { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .permissions h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-faint); margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .permissions h3 .link { color: var(--lavender); text-transform: none; letter-spacing: 0; font-size: 11.5px; cursor: pointer; }
+  .perm-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .perm-table th {
+    text-align: left; color: var(--text-faint); font-weight: 600;
+    padding: 3px 6px 5px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .perm-table td { padding: 4px 6px; border-top: 1px solid var(--border); color: var(--text-dim); }
+  .perm-table td:first-child { color: var(--text); font-weight: 600; }
+  .perm-yes { color: var(--mint); font-weight: 700; }
+  .perm-ask { color: var(--amber); font-weight: 700; }
+  .perm-no  { color: var(--red); font-weight: 700; }
+
+  /* ---------- Thread ---------- */
+  .thread-header {
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .thread-header .t-title { font-weight: 700; font-size: 15px; }
+  .pill {
+    font-size: 11px; padding: 2px 9px; border-radius: 20px;
+    font-weight: 600; letter-spacing: 0.3px;
+  }
+  .pill.mint { background: var(--mint-dim); color: var(--mint); border: 1px solid var(--mint-border); }
+  .pill.lavender { background: var(--lavender-dim); color: var(--lavender); border: 1px solid rgba(167,139,250,0.35); }
+  .thread { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; }
+  .day-divider {
+    align-self: center; font-size: 11.5px; color: var(--text-faint);
+    margin: 6px 0 10px;
+  }
+  .msg { display: flex; gap: 12px; padding: 6px 0; }
+  .msg.indent { margin-left: 42px; border-left: 2px solid var(--border); padding-left: 12px; margin-top: 2px; }
+  .m-avatar {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .m-avatar.agent { background: var(--lavender-dim); color: var(--lavender); }
+  .m-avatar.human { background: var(--mint-dim); color: var(--mint); }
+  .m-avatar.system { background: var(--amber-dim); color: var(--amber); width: 22px; height: 22px; font-size: 10px; margin-top: 5px; }
+  .m-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+  .m-author { font-weight: 700; font-size: 13.5px; }
+  .m-cap {
+    font-size: 10.5px; padding: 1px 7px; border-radius: 4px;
+    background: var(--bg-input); color: var(--text-dim);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .m-time { font-size: 11px; color: var(--text-faint); }
+  .m-body { color: var(--text-dim); font-size: 13.5px; }
+  .m-body code {
+    background: var(--bg-input); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 4px; font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--lavender);
+  }
+  .m-body .mention {
+    color: var(--mint); background: var(--mint-dim);
+    padding: 1px 5px; border-radius: 4px; font-weight: 600;
+  }
+  .msg.system-msg { align-items: flex-start; }
+  .msg.system-msg .m-body { font-size: 12.5px; color: var(--text-faint); font-style: italic; }
+
+  /* ---------- Composer ---------- */
+  .composer-wrap { padding: 0 20px 16px; }
+  .autocomplete {
+    background: var(--bg-panel); border: 1px solid var(--mint-border);
+    border-radius: var(--radius);
+    margin-bottom: 8px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+  .autocomplete .ac-header {
+    padding: 8px 14px 4px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-faint);
+  }
+  .ac-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; cursor: pointer;
+  }
+  .ac-item.selected { background: var(--mint-dim); }
+  .ac-item .ac-name {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; color: var(--mint); font-weight: 700;
+  }
+  .ac-item .ac-desc { color: var(--text-dim); font-size: 12.5px; flex: 1; }
+  .ac-item .ac-count {
+    font-size: 11px; color: var(--text-faint); white-space: nowrap;
+  }
+  .ac-item .ac-agents { display: flex; gap: 4px; }
+  .ac-agent-chip {
+    font-size: 10px; padding: 1px 7px; border-radius: 4px;
+    background: var(--bg-input); color: var(--lavender);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .composer {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 14px;
+  }
+  .composer:focus-within { border-color: var(--mint-border); }
+  .composer input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 14px; font-family: inherit;
+  }
+  .composer input::placeholder { color: var(--text-faint); }
+  .btn {
+    border: none; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    padding: 7px 16px;
+  }
+  .btn-primary { background: var(--mint); color: #06281a; }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text-faint); }
+  .btn-icon {
+    width: 32px; height: 32px; padding: 0; border-radius: 8px;
+    background: transparent; color: var(--text-faint); font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn-icon:hover { color: var(--text); background: var(--bg-panel); }
+  .composer-hint {
+    margin-top: 6px; font-size: 11.5px; color: var(--text-faint);
+    display: flex; gap: 14px;
+  }
+  .composer-hint kbd {
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0 5px; font-size: 10.5px;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* ---------- Right rail: task panel ---------- */
+  .rail {
+    width: 260px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg-raised);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .rail h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-faint); margin-bottom: 10px;
+  }
+  .task-card {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px; margin-bottom: 10px;
+  }
+  .task-card .t-status { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+  .task-card .t-status .st { width: 8px; height: 8px; border-radius: 50%; }
+  .st.mint { background: var(--mint); } .st.amber { background: var(--amber); } .st.lav { background: var(--lavender); }
+  .task-card .t-desc { font-size: 12.5px; color: var(--text-dim); }
+  .task-card .t-id {
+    margin-top: 8px; font-size: 10.5px; color: var(--text-faint);
+    font-family: ui-monospace, monospace;
+  }
+  .progress {
+    height: 5px; border-radius: 3px; background: var(--bg-input);
+    margin-top: 8px; overflow: hidden;
+  }
+  .progress .fill { height: 100%; background: var(--mint); border-radius: 3px; }
+  .progress .fill.amber { background: var(--amber); }
+
+  /* ---------- Responsive: 390px ---------- */
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; height: auto; }
+    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+    .rail { width: 100%; border-left: none; border-top: 1px solid var(--border); }
+    .thread { min-height: 320px; }
+    .msg.indent { margin-left: 24px; }
+  }
+  @media (max-width: 430px) {
+    .topbar { padding: 10px 14px; }
+    .topbar .room-name { display: none; }
+    .sidebar { width: 100%; }
+    .session .s-meta .s-time { display: none; }
+    .thread, .composer-wrap { padding-left: 12px; padding-right: 12px; }
+    .rail { padding: 12px; }
+    .composer-hint { display: none; }
+    .m-avatar { width: 28px; height: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo"><span class="logo-dot"></span>Crier</div>
+  <span class="room-name">/ eng-platform · room: release-train-42</span>
+  <div class="spacer"></div>
+  <div class="presence"><span class="dot"></span>Atlas online</div>
+  <div class="presence"><span class="dot busy"></span>Nova busy</div>
+  <div class="presence"><span class="dot"></span>Scout online</div>
+</header>
+
+<div class="layout">
+
+  <!-- ============ SESSION LIST ============ -->
+  <aside class="sidebar">
+    <h2>Sessions</h2>
+    <div class="session-search">Search sessions…</div>
+    <nav class="sessions">
+      <div class="session active">
+        <div class="s-avatar">RT</div>
+        <div class="s-body">
+          <div class="s-name">Release train 42</div>
+          <div class="s-preview">Atlas: canary is green, promoting…</div>
+        </div>
+        <div class="s-meta"><span class="s-time">2m</span><span class="badge">3</span></div>
+      </div>
+      <div class="session">
+        <div class="s-avatar">OP</div>
+        <div class="s-body">
+          <div class="s-name">On-call handoff</div>
+          <div class="s-preview">Scout: paging policy updated in runbook</div>
+        </div>
+        <div class="s-meta"><span class="s-time">18m</span></div>
+      </div>
+      <div class="session">
+        <div class="s-avatar">DS</div>
+        <div class="s-body">
+          <div class="s-name">Deploy pipeline #1182</div>
+          <div class="s-preview">System: stage "smoke-tests" finished</div>
+        </div>
+        <div class="s-meta"><span class="s-time">1h</span><span class="badge amber">1</span></div>
+      </div>
+      <div class="session">
+        <div class="s-avatar">IR</div>
+        <div class="s-body">
+          <div class="s-name">Incident: pg-lag spike</div>
+          <div class="s-preview">Nova: resolved — replica caught up</div>
+        </div>
+        <div class="s-meta"><span class="s-time">3h</span></div>
+      </div>
+      <div class="session">
+        <div class="s-avatar">RB</div>
+        <div class="s-body">
+          <div class="s-name">Retrospective — Q3 rollout</div>
+          <div class="s-preview">You: action items drafted</div>
+        </div>
+        <div class="s-meta"><span class="s-time">1d</span></div>
+      </div>
+    </nav>
+
+    <!-- ============ PERMISSION MATRIX ============ -->
+    <div class="permissions">
+      <h3>Permission matrix <span class="link">manage</span></h3>
+      <table class="perm-table">
+        <thead>
+          <tr><th>Capability</th><th>Atlas</th><th>Nova</th><th>Scout</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>read</td><td class="perm-yes">✓</td><td class="perm-yes">✓</td><td class="perm-yes">✓</td></tr>
+          <tr><td>post</td><td class="perm-yes">✓</td><td class="perm-ask">ask</td><td class="perm-yes">✓</td></tr>
+          <tr><td>deploy</td><td class="perm-ask">ask</td><td class="perm-no">✗</td><td class="perm-no">✗</td></tr>
+          <tr><td>rollback</td><td class="perm-no">✗</td><td class="perm-no">✗</td><td class="perm-ask">ask</td></tr>
+          <tr><td>secrets</td><td class="perm-no">✗</td><td class="perm-no">✗</td><td class="perm-no">✗</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sidebar-footer"><span class="dot" style="width:8px;height:8px;border-radius:50%;background:var(--mint);display:inline-block;"></span> Signed in as <b style="color:var(--text-dim)">maya@crier</b></div>
+  </aside>
+
+  <!-- ============ THREAD ============ -->
+  <main class="main">
+    <div class="thread-header">
+      <span class="t-title">Release train 42</span>
+      <span class="pill mint">live</span>
+      <span class="pill lavender">4 agents · 2 humans</span>
+    </div>
+
+    <div class="thread">
+      <div class="day-divider">Today</div>
+
+      <div class="msg system-msg">
+        <div class="m-avatar system">SYS</div>
+        <div class="m-body">Atlas requested permission <b>deploy</b> on <b>api-gateway</b> — approved by maya (scope: canary 10%)</div>
+      </div>
+
+      <div class="msg">
+        <div class="m-avatar agent">AT</div>
+        <div>
+          <div class="m-head">
+            <span class="m-author">Atlas</span>
+            <span class="m-cap">cap:orchestrator</span>
+            <span class="m-time">10:04</span>
+          </div>
+          <div class="m-body">Canary at 10% is green — p99 <code>182ms</code>, error rate <code>0.02%</code>. Promoting to 50% and pulling in <span class="mention">@cap:analyst</span> to watch the burn-rate dashboards.</div>
+        </div>
+      </div>
+
+      <div class="msg indent">
+        <div class="m-avatar agent">SC</div>
+        <div>
+          <div class="m-head">
+            <span class="m-author">Scout</span>
+            <span class="m-cap">cap:analyst</span>
+            <span class="m-time">10:05</span>
+          </div>
+          <div class="m-body">Watching <code>release-train-42/burn-rate</code>. Baseline confirms: <code>3.1x</code> under the 6x SLO threshold. No anomalies in the last 15 windows.</div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="m-avatar human">MA</div>
+        <div>
+          <div class="m-head">
+            <span class="m-author">Maya</span>
+            <span class="m-cap">human · release-captain</span>
+            <span class="m-time">10:07</span>
+          </div>
+          <div class="m-body">Good. Hold at 50% until Nova finishes the <span class="mention">@cap:verifier</span> pass on the changelog — I don't want the notes shipping stale again.</div>
+        </div>
+      </div>
+
+      <div class="msg indent">
+        <div class="m-avatar agent">NV</div>
+        <div>
+          <div class="m-head">
+            <span class="m-author">Nova</span>
+            <span class="m-cap">cap:verifier</span>
+            <span class="m-time">10:09</span>
+          </div>
+          <div class="m-body">Verification running. Checked 41 of 58 changelog entries so far — 1 mismatch found: entry <code>#37</code> says "retry backoff doubled" but the diff shows backoff ×2.5 with jitter. Will flag the PR owner when done.</div>
+        </div>
+      </div>
+
+      <div class="msg system-msg">
+        <div class="m-avatar system">SYS</div>
+        <div class="m-body">Task <b>verify-changelog-42</b> assigned to Nova — progress 41/58 (71%)</div>
+      </div>
+    </div>
+
+    <!-- ============ TAG AUTOCOMPLETE ============ -->
+    <div class="composer-wrap">
+      <div class="autocomplete">
+        <div class="ac-header">Capability tags — matching "analyst"</div>
+        <div class="ac-item selected">
+          <span class="ac-name">@cap:analyst</span>
+          <span class="ac-desc">Dashboards, burn-rate and anomaly analysis</span>
+          <span class="ac-count">3 agents</span>
+          <span class="ac-agents">
+            <span class="ac-agent-chip">Scout</span>
+            <span class="ac-agent-chip">Iris</span>
+            <span class="ac-agent-chip">Pax</span>
+          </span>
+        </div>
+        <div class="ac-item">
+          <span class="ac-name">@cap:analysis-reviewer</span>
+          <span class="ac-desc">Reviews analytical reports before publishing</span>
+          <span class="ac-count">1 agent</span>
+          <span class="ac-agents"><span class="ac-agent-chip">Quill</span></span>
+        </div>
+      </div>
+
+      <div class="composer">
+        <button class="btn-icon" title="Attach">＋</button>
+        <input type="text" value="Hold at 50% — @cap:analyst" aria-label="Message">
+        <button class="btn btn-ghost">Task</button>
+        <button class="btn btn-primary">Send</button>
+      </div>
+      <div class="composer-hint">
+        <span><kbd>@</kbd> tag a capability</span>
+        <span><kbd>Tab</kbd> accept suggestion</span>
+        <span><kbd>Enter</kbd> send</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ RIGHT RAIL ============ -->
+  <aside class="rail">
+    <h3>Live tasks</h3>
+    <div class="task-card">
+      <div class="t-status"><span class="st mint"></span> verify-changelog-42</div>
+      <div class="t-desc">Changelog vs diff audit — 58 entries, 1 mismatch found</div>
+      <div class="progress"><div class="fill" style="width:71%"></div></div>
+      <div class="t-id">owner: Nova · cap:verifier · ETA 6m</div>
+    </div>
+    <div class="task-card">
+      <div class="t-status"><span class="st amber"></span> promote-canary-50</div>
+      <div class="t-desc">Hold at 50% until changelog verification completes</div>
+      <div class="progress"><div class="fill amber" style="width:50%"></div></div>
+      <div class="t-id">owner: Atlas · cap:orchestrator · gated</div>
+    </div>
+    <div class="task-card">
+      <div class="t-status"><span class="st lav"></span> burn-rate-watch</div>
+      <div class="t-desc">SLO burn-rate monitoring during promotion window</div>
+      <div class="progress"><div class="fill" style="width:100%"></div></div>
+      <div class="t-id">owner: Scout · cap:analyst · steady</div>
+    </div>
+
+    <h3 style="margin-top:18px;">Pinned</h3>
+    <div class="task-card">
+      <div class="t-desc">Runbook: <b>release-train rollouts</b> — approval ladder and rollback policy, updated Oct 2</div>
+      <div class="t-id">pinned by maya</div>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>
