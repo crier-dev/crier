@@ -2778,3 +2778,23 @@ tasks:
   status: complete
   created_at: '2026-10-07T11:39:37.354235+00:00'
   completed_at: '2026-10-07T13:19:35.427692+00:00'
+- id: CR-CHAT-009
+  title: 'Web client MVP: chat surface as a client of the public API'
+  criteria:
+  - A minimal web client (static UI) performs a full round-trip against a stock crier
+    server using ONLY documented public endpoints; a flagged message's guard decision
+    is visible in the UI; pages/landing untouched; go build/vet/tests green
+  status: complete
+  created_at: '2026-10-07T14:01:50.896071+00:00'
+  completed_at: '2026-10-07T14:29:03.586590+00:00'
+- id: CR-CHAT-031
+  title: 'Dual output mode: full TRACE with timings vs LAST SUMMARY'
+  criteria:
+  - 'GET /sessions/{id}/output?mode=trace|summary serves both views: trace = full
+    ordered transcript with timestamps; summary = the most recent GENERATED summary
+    card, visibly marked generated, naming what it covers, with a link to the trace
+    underneath; missing summary returns an honest SUMMARY_UNAVAILABLE error (no empty
+    or synthesised summary). go build/vet/test green, both openapi copies regenerated.'
+  status: complete
+  created_at: '2026-10-07T14:53:23.621919+00:00'
+  completed_at: '2026-10-07T15:15:08.011933+00:00'
