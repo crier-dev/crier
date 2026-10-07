@@ -384,9 +384,11 @@ claims:
     # fetch path (GET /sessions/{id}/threads/{thread_id}/messages), so the
     # pair is 41 / 50. CR-CHAT-030 added the three task paths (POST
     # /sessions/{id}/tasks and its claim/complete siblings — three
-    # operations), so the pair is 44 / 53.
+    # operations), so the pair is 44 / 53. CR-CHAT-031 added the dual-output
+    # read path (GET /sessions/{id}/output — one operation), so the pair is
+    # 45 / 54.
     quote: "docs/openapi.yaml"
-    expect: 44
+    expect: 45
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -410,9 +412,10 @@ claims:
     # GET /sessions/{id}/permissions, GET /sessions/{id}/roles — and
     # CR-CHAT-029 added the location-addressed fetch operation (41 / 50).
     # CR-CHAT-030 added the three task operations (create, claim, complete),
-    # so the count is 53.
-    quote: "53 operations"
-    expect: 53
+    # so the count is 53. CR-CHAT-031 added the dual-output read operation
+    # (GET /sessions/{id}/output), so the count is 54.
+    quote: "54 operations"
+    expect: 54
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -464,8 +467,8 @@ claims:
     # CR-CHAT-030 registered the three task routes (create + claim + complete),
     # so the count is 43. CR-CHAT-009 registered the web chat client page
     # (GET /chat, served the way /docs is), so the count is 44.
-    quote: "44 router paths"
-    expect: 44
+    quote: "45 router paths"
+    expect: 45
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

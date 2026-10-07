@@ -155,6 +155,7 @@ var excludedOperations = map[string]string{
 	"claimSessionTask":      "POST /sessions/{id}/tasks/{task_id}/claim — \"Claim a task\" (CR-CHAT-030): same transport gap as createSessionTask. Reclassify when the bridge grows session support.",
 	"completeSessionTask":   "POST /sessions/{id}/tasks/{task_id}/complete — \"Complete a task\" (CR-CHAT-030): same transport gap as createSessionTask. Reclassify when the bridge grows session support.",
 	"searchSessionMessages": "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"readSessionOutput":     "GET /sessions/{id}/output — \"Read a session's output in trace or summary mode (dual output)\" (CR-CHAT-031): both modes delegate to the session surface's transcript read path, which RemoteStore does not extend — the trace mode re-serves the same transcript this set already excludes via readSessionTranscript. Reclassify when the bridge grows session support.",
 	// CR-CHAT-016 — the late-join context-share surface. Both routes read and
 	// write internal/session share state (chat_context_shares) that RemoteStore
 	// does not expose, so the bridge has no tool for them yet.

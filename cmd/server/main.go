@@ -698,6 +698,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/messages", sessHandler.HandleThreadMessages).Methods("GET")
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/timeline", sessHandler.HandleThreadTimeline).Methods("GET")
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/summary", sessHandler.HandleThreadSummary).Methods("GET")
+	// Dual output mode (CR-CHAT-031): one session-level read that toggles
+	// between the ordered trace (the record, delegating to HandleTranscript)
+	// and the generated summary (an index, never the record).
+	r.HandleFunc("/sessions/{id}/output", sessHandler.HandleSessionOutput).Methods("GET")
 	r.HandleFunc("/sessions/{id}/search", sessHandler.HandleSessionSearch).Methods("GET")
 	// Named groups (CR-CHAT-013, D8): a curated roster addressed as @team:x
 	// that ONE message fans out to — every current member, through the same

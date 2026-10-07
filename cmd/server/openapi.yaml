@@ -2882,6 +2882,48 @@ paths:
         "404":
           description: No such session (SESSION_NOT_FOUND) or thread (THREAD_NOT_FOUND) in this realm
 
+  /sessions/{id}/output:
+    get:
+      operationId: readSessionOutput
+      tags: [sessions]
+      summary: Read a session's output in trace or summary mode (dual output)
+      description: |-
+        ONE session-level read with a mode toggle (CR-CHAT-031). `mode=trace`
+        (the default) serves exactly the ordered, timestamped transcript
+        payload `GET /sessions/{id}/messages` serves — the same read path,
+        never a fork of it: the trace IS the record. `mode=summary` serves a
+        GENERATED index of the session's threads: visibly marked `generated`,
+        a `covers` field naming what it covers (session id, thread ids,
+        message count) and a `trace` link to the record one read underneath
+        (§4.7 rule 2). Switching views hides or deletes nothing. A session
+        with no threads has no summary: 404 SUMMARY_UNAVAILABLE, never an
+        empty or synthesised summary.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [trace, summary]
+            default: trace
+      responses:
+        "200":
+          description: The ordered transcript (trace) or the generated summary index (summary).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SessionTranscript"
+                  - $ref: "#/components/schemas/SessionSummaryResponse"
+        "400":
+          description: "A mode other than trace|summary (OUTPUT_MODE_INVALID)"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session (SESSION_NOT_FOUND) in this realm; or mode=summary with no threads to summarise (SUMMARY_UNAVAILABLE)
+
   /sessions/{id}/search:
     get:
       operationId: searchSessionMessages
@@ -4513,6 +4555,36 @@ components:
               children:
                 type: array
                 items: { type: object }
+    SessionSummaryResponse:
+      type: object
+      required: [session_id, generated, covers, trace, threads]
+      properties:
+        session_id:
+          type: string
+        generated:
+          type: boolean
+          description: Always true — this body is a generated index, never the record (§4.7 rule 2).
+        covers:
+          type: object
+          required: [session_id, thread_ids, message_count]
+          properties:
+            session_id:
+              type: string
+            thread_ids:
+              type: array
+              items:
+                type: string
+            message_count:
+              type: integer
+              description: Total messages across the covered threads.
+          description: What the summary covers — the session, its thread ids and the message count across them.
+        trace:
+          type: string
+          description: The link to the ordered transcript ("/sessions/{id}/output?mode=trace") — the record one read underneath, never replaced.
+        threads:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThreadSummaryCard"
     ThreadSummaryResponse:
       type: object
       required: [thread_id, summary, raw_messages, generated]
