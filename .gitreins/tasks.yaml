@@ -2662,3 +2662,29 @@ tasks:
   status: complete
   created_at: '2026-10-06T21:09:42.362820+00:00'
   completed_at: '2026-10-06T21:23:44.246168+00:00'
+- id: cr-chat-013-slack-surfaces
+  title: 'Slack surfaces: channels, DMs, named agent groups'
+  criteria:
+  - send ONE message to a named group of 5 agents and see it land in each participant
+    inbox; group inspectable; membership change routes to CURRENT members; full suite
+    green
+  status: complete
+  created_at: '2026-10-06T21:57:00.170898+00:00'
+  completed_at: '2026-10-07T00:17:42.978008+00:00'
+- id: cr-chat-016-late-join
+  title: Late-join context share modes recorded on thread
+  criteria:
+  - adding an agent to a thread produces a recorded system event naming share mode
+    and boundary; default summary; mode changes recorded; full suite green
+  status: complete
+  created_at: '2026-10-06T21:57:06.450772+00:00'
+  completed_at: '2026-10-07T00:17:50.404645+00:00'
+- id: cr-chat-023-federated-rooms
+  title: 'Federated rooms: remote participants + per-peer policy'
+  criteria:
+  - member of federated B participates in A session; message lands in B member inbox
+    via shipped federation path; per-peer policy refuses wholesale and per-namespace;
+    participant named remote; full suite green
+  status: complete
+  created_at: '2026-10-06T21:57:07.047669+00:00'
+  completed_at: '2026-10-07T00:17:58.324005+00:00'
