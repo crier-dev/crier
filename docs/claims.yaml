@@ -375,9 +375,11 @@ claims:
     # one operation), so the pair was 29 / 36. CR-CHAT-013 added the three
     # named-group paths (/groups, /groups/{name} and /groups/{name}/members —
     # four operations: POST+GET /groups, GET /groups/{name},
-    # PATCH /groups/{name}/members), so the pair is 33 / 42.
+    # PATCH /groups/{name}/members), so the pair was 33 / 42. CR-CHAT-017
+    # added the four sub-thread paths (branch, branch-by-message, sub-thread
+    # messages, sub-thread timeline — four operations), so the pair is 37 / 46.
     quote: "docs/openapi.yaml"
-    expect: 33
+    expect: 37
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -396,8 +398,9 @@ claims:
     # compile operation and the per-part expand operation (29 / 36);
     # CR-CHAT-013 added the four named-group operations — POST/GET /groups,
     # GET /groups/{name} and PATCH /groups/{name}/members (33 / 42).
-    quote: "42 operations"
-    expect: 42
+    # CR-CHAT-017 added the four sub-thread operations (37 / 46).
+    quote: "46 operations"
+    expect: 46
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -444,8 +447,8 @@ claims:
     # — CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting),
     # CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting), and
     # CR-CHAT-013/016 made it 30 (18 API + 7 session + 2 groups + 3 spec-hosting).
-    quote: "35 router paths"
-    expect: 35
+    quote: "39 router paths"
+    expect: 39
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

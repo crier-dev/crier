@@ -189,6 +189,9 @@ type transcriptMessage struct {
 	// depth — D11).
 	ThreadDepth int `json:"thread_depth"`
 	ReplyDepth  int `json:"reply_depth"`
+	// SpawnedThread is present only on the send that SPAWNED a sub-thread
+	// (CR-CHAT-017): the child thread's ids and the reason it was created.
+	SpawnedThread *spawnedThreadView `json:"spawned_thread,omitempty"`
 }
 
 // outcomeView is one DeliveryOutcome as this API renders it. It carries the
@@ -706,6 +709,19 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		msg.ThreadID = msgID
 	}
 
+	// Sub-thread spawn (CR-CHAT-017, §4.5 rule 2, D11): addressing an agent
+	// that is NOT a participant deliberately pulls a stranger into the
+	// conversation, so the message branches into a child thread
+	// (parent_thread_id + anchor_message_id). Replies to existing
+	// participants stay in this thread — spawnSubThreads writes nothing when
+	// every addressee is a member. The branch record is appended BEFORE the
+	// message record (one handler pass, contiguous seqs — the atomic write).
+	spawn, err := h.spawnSubThreads(r.Context(), sess, msg, messageAddressees(&req))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+		return
+	}
+
 	// Resolved audience (§4.2): the caller's explicit targets, else every
 	// active participant except the author.
 	aud, err := h.resolveAudience(r.Context(), sess, &req, author.AgentID())
@@ -724,6 +740,9 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// explanation, and §3.2 requires a refused outcome to be shown, never
 	// swallowed.
 	view.Outcomes = outcomeViews(msg.Outcomes)
+	if spawn != nil {
+		view.SpawnedThread = spawn
+	}
 	writeJSON(w, http.StatusCreated, view)
 }
 
