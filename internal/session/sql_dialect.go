@@ -129,6 +129,20 @@ var sqliteSchemaStatements = []string{
 		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		last_seq   INTEGER NOT NULL DEFAULT 0
 	)`,
+	// chat_tasks is the task lifecycle projection (CR-CHAT-030, §3.7): one
+	// row per task, keep-LAST per (session_id, message_id) — every state
+	// transition is a NEW record-version and the view holds the latest. A new
+	// table (CREATE TABLE IF NOT EXISTS) reaches an existing database without
+	// an ALTER, so a deployment upgrading to this row needs no migration step.
+	`CREATE TABLE IF NOT EXISTS chat_tasks (
+		session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+		message_id TEXT NOT NULL,
+		task_id    TEXT NOT NULL,
+		state      TEXT NOT NULL CHECK (state IN ('open','claimed','running','done','failed')),
+		owner      TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (session_id, message_id)
+	)`,
 }
 
 // postgresDialect is the PostgreSQL adapter over the SHARED repository: the

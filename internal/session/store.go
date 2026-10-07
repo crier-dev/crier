@@ -85,10 +85,13 @@ type Record struct {
 	ContextShare *ContextShare `json:"context_share,omitempty"`
 
 	// --- session.message / session.thread.reply ---
-	MessageID      string            `json:"message_id,omitempty"`
-	ThreadID       string            `json:"thread_id,omitempty"`
-	ParentID       string            `json:"parent_id,omitempty"`
-	MessageKind    MessageKind       `json:"message_kind,omitempty"`
+	MessageID   string      `json:"message_id,omitempty"`
+	ThreadID    string      `json:"thread_id,omitempty"`
+	ParentID    string      `json:"parent_id,omitempty"`
+	MessageKind MessageKind `json:"message_kind,omitempty"`
+	// Task is the task lifecycle payload (CR-CHAT-030, §3.7) — present on
+	// `task`-kind message records only, and required there (§3.7 coherence).
+	Task           *Task             `json:"task,omitempty"`
 	Author         *AuthorRef        `json:"author,omitempty"`
 	Payload        json.RawMessage   `json:"payload,omitempty"`
 	Audience       *Audience         `json:"audience,omitempty"`
@@ -179,6 +182,9 @@ func (r *Record) validate(requireThreadID bool) error {
 		}
 		if r.Audience == nil {
 			return fmt.Errorf("%w: %s without audience", ErrInvalidRecord, r.Type)
+		}
+		if err := checkTaskKindCoherence(r.MessageKind, r.Task); err != nil {
+			return err
 		}
 		if r.Type == RecordMessage {
 			if r.ParentID != "" {
@@ -414,6 +420,11 @@ func (m *Message) Record() *Record {
 	}
 	author := m.Author
 	aud := m.Audience
+	var task *Task
+	if m.Task.ID != "" {
+		ct := m.Task
+		task = &ct
+	}
 	return &Record{
 		V:              RecordFormatVersion,
 		Type:           typ,
@@ -424,6 +435,7 @@ func (m *Message) Record() *Record {
 		ThreadID:       threadID,
 		ParentID:       m.ParentID,
 		MessageKind:    m.Kind,
+		Task:           task,
 		Author:         &author,
 		Payload:        m.Payload,
 		Audience:       &aud,

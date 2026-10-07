@@ -125,6 +125,18 @@ var SchemaStatements = []string{
 		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		last_seq   BIGINT NOT NULL DEFAULT 0
 	)`,
+	// The task lifecycle projection (CR-CHAT-030, §3.7): the same keep-LAST
+	// per (session_id, message_id) the §5.2 view fixes, in this engine's own
+	// types. CREATE TABLE IF NOT EXISTS needs no migration step.
+	`CREATE TABLE IF NOT EXISTS chat_tasks (
+		session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+		message_id TEXT NOT NULL,
+		task_id    TEXT NOT NULL,
+		state      TEXT NOT NULL CHECK (state IN ('open','claimed','running','done','failed')),
+		owner      TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (session_id, message_id)
+	)`,
 	// Named groups (CR-CHAT-022): the roster the @team:x grammar resolves
 	// against. CREATE TABLE IF NOT EXISTS reaches an existing database
 	// without an ALTER, so a deployment upgrading to this row needs no
@@ -433,6 +445,23 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 		return fmt.Errorf("project message: %w", err)
 	}
 
+	// The task lifecycle (CR-CHAT-030, §3.7): the view holds the LATEST
+	// version per (session, message) — every state transition is a new
+	// record-version over the same message id (keep-LAST on projection).
+	if rec.Task != nil {
+		if _, err := s.pool.Exec(ctx, `
+			INSERT INTO chat_tasks (session_id, message_id, task_id, state, owner, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (session_id, message_id) DO UPDATE SET
+				task_id    = EXCLUDED.task_id,
+				state      = EXCLUDED.state,
+				owner      = EXCLUDED.owner,
+				updated_at = EXCLUDED.updated_at`,
+			rec.SessionID, rec.MessageID, rec.Task.ID, string(rec.Task.State), rec.Task.Owner, rec.TS.UTC()); err != nil {
+			return fmt.Errorf("project task: %w", err)
+		}
+	}
+
 	// A thread ROOT defines its thread (§4.3: a root's thread_id is its own
 	// message id), so the §5.2 view gets the root row here. DO NOTHING keeps a
 	// branch row that already named a parent — the branch record is
@@ -675,6 +704,42 @@ func (s *PostgresStore) loadMessages(ctx context.Context, sessionID string) ([]*
 			return nil, err
 		}
 		m.Outcomes = outs
+	}
+	// The task payloads (CR-CHAT-030): one read, keyed by message id. A
+	// message with no task row is a plain/addressed message — no payload.
+	tasks, err := s.loadTasks(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if t, ok := tasks[out[i].ID]; ok {
+			out[i].Task = *t
+		}
+	}
+	return out, nil
+}
+
+// loadTasks reads the chat_tasks projection keyed by message id.
+func (s *PostgresStore) loadTasks(ctx context.Context, sessionID string) (map[string]*Task, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT message_id, task_id, state, owner, updated_at
+		FROM chat_tasks WHERE session_id = $1`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load tasks: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]*Task{}
+	for rows.Next() {
+		var messageID string
+		t := &Task{}
+		if err := rows.Scan(&messageID, &t.ID, &t.State, &t.Owner, &t.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		t.UpdatedAt = t.UpdatedAt.UTC()
+		out[messageID] = t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

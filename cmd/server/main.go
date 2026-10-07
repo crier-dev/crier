@@ -641,6 +641,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/sessions", sessHandler.HandleCreateSession).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandleTranscript).Methods("GET")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
+	// CR-CHAT-030: the TASK kind and its lifecycle (CHAT-ADDRESSING §2.5).
+	r.HandleFunc("/sessions/{id}/tasks", sessHandler.HandleCreateTask).Methods("POST")
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}/claim", sessHandler.HandleClaimTask).Methods("POST")
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}/complete", sessHandler.HandleCompleteTask).Methods("POST")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleListParticipants).Methods("GET")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleAddParticipant).Methods("POST")
 	// Late-join context share (CR-CHAT-016, §4.6 D10): the materialized view
@@ -678,7 +682,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	session.RegisterAuditRoutes(r, sessHandler)
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
-		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
+		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, POST /sessions/{id}/tasks, POST /sessions/{id}/tasks/{task_id}/claim|complete, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
 	slog.Info("named group api enabled",
 		"store_dir", cfg.Session.GroupRoot,
 		"detail", "POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)")

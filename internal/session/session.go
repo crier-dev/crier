@@ -270,11 +270,15 @@ type Message struct {
 	ThreadID string `json:"thread_id"`
 	// ParentID is the immediate parent's message id — reply ATTRIBUTION, not
 	// depth (§4.2, D11). Present on a reply, absent on a thread root.
-	ParentID       string            `json:"parent_id,omitempty"`
-	SessionID      string            `json:"session_id"`
-	Kind           MessageKind       `json:"kind"`
-	Author         AuthorRef         `json:"author"`
-	Payload        json.RawMessage   `json:"payload,omitempty"`
+	ParentID  string          `json:"parent_id,omitempty"`
+	SessionID string          `json:"session_id"`
+	Kind      MessageKind     `json:"kind"`
+	Author    AuthorRef       `json:"author"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	// Task is the task lifecycle payload (CR-CHAT-030). Non-nil on `task`
+	// records; the kinds are structurally distinguishable in storage — a
+	// reader never guesses from the text (CHAT-SESSIONS.md §4.4 rule 3).
+	Task           Task              `json:"task,omitempty"`
 	Audience       Audience          `json:"audience"`
 	Outcomes       []DeliveryOutcome `json:"outcomes,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
@@ -513,6 +517,10 @@ func (st *State) upsertMessage(rec *Record) {
 		IdempotencyKey: rec.IdempotencyKey,
 		Seq:            rec.Seq,
 		CreatedAt:      rec.TS,
+	}
+	if rec.Task != nil {
+		ct := *rec.Task
+		m.Task = ct
 	}
 	if rec.Author != nil {
 		m.Author = *rec.Author

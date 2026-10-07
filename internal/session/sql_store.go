@@ -354,6 +354,24 @@ func (s *SQLStore) projectMessage(ctx context.Context, rec *Record) error {
 		return fmt.Errorf("project message: %w", err)
 	}
 
+	// The task lifecycle (CR-CHAT-030, §3.7): a task-kind record carries its
+	// payload, and the view holds the LATEST version per (session, message) —
+	// every state transition is a new record-version over the same message id
+	// (keep-LAST on projection, exactly the deliveries' replace semantics).
+	if rec.Task != nil {
+		if _, err := s.exec(ctx, `
+			INSERT INTO chat_tasks (session_id, message_id, task_id, state, owner, updated_at)
+			VALUES (?,?,?,?,?,?)
+			ON CONFLICT (session_id, message_id) DO UPDATE SET
+				task_id    = excluded.task_id,
+				state      = excluded.state,
+				owner      = excluded.owner,
+				updated_at = excluded.updated_at`,
+			rec.SessionID, rec.MessageID, rec.Task.ID, string(rec.Task.State), rec.Task.Owner, encTime(rec.TS)); err != nil {
+			return fmt.Errorf("project task: %w", err)
+		}
+	}
+
 	// A thread ROOT defines its thread (§4.3: a root's thread_id is its own
 	// message id), so the view gets the root row here. DO NOTHING keeps a
 	// branch row that already named a parent — the branch record is
@@ -606,7 +624,44 @@ func (s *SQLStore) loadMessages(ctx context.Context, sessionID string) ([]*Messa
 		}
 		m.Outcomes = outs
 	}
+	// The task payloads (CR-CHAT-030): one read, keyed by message id.
+	tasks, err := s.loadTasks(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if t, ok := tasks[out[i].ID]; ok {
+			out[i].Task = *t
+		}
+	}
 	return out, nil
+}
+
+// loadTasks reads the chat_tasks projection keyed by message id. A message
+// with no task row is a plain/addressed message — no payload, no inference.
+func (s *SQLStore) loadTasks(ctx context.Context, sessionID string) (map[string]*Task, error) {
+	rows, err := s.query(ctx, `
+		SELECT message_id, task_id, state, owner, updated_at
+		FROM chat_tasks WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]*Task{}
+	for rows.Next() {
+		var messageID string
+		t := &Task{}
+		var state, updatedAt string
+		if err := rows.Scan(&messageID, &t.ID, &state, &t.Owner, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		t.State = TaskState(state)
+		if t.UpdatedAt, err = decTime(updatedAt); err != nil {
+			return nil, err
+		}
+		out[messageID] = t
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLStore) loadDeliveries(ctx context.Context, sessionID, messageID string) ([]DeliveryOutcome, error) {

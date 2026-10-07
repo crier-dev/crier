@@ -204,6 +204,10 @@ type transcriptMessage struct {
 	// SpawnedThread is present only on the send that SPAWNED a sub-thread
 	// (CR-CHAT-017): the child thread's ids and the reason it was created.
 	SpawnedThread *spawnedThreadView `json:"spawned_thread,omitempty"`
+	// Task is the task lifecycle payload (CR-CHAT-030, §3.7) — present on
+	// `task`-kind records only, so the kinds stay structurally
+	// distinguishable on the wire: a reader never guesses from the text.
+	Task map[string]any `json:"task,omitempty"`
 }
 
 // outcomeView is one DeliveryOutcome as this API renders it. It carries the
@@ -1058,6 +1062,14 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 	}
 	if chain, _ := st.ReplyChain(m.ID); len(chain) > 0 {
 		v.ReplyDepth = len(chain) - 1
+	}
+	if m.Task.ID != "" {
+		v.Task = map[string]any{
+			"task_id":    m.Task.ID,
+			"state":      string(m.Task.State),
+			"owner":      m.Task.Owner,
+			"updated_at": m.Task.UpdatedAt,
+		}
 	}
 	return v
 }

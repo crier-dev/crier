@@ -285,9 +285,18 @@ Consequences:
   grammar (§1) and the check order (§4) are identical; only the CONSEQUENCE differs, and the consequence is
   decided by the kind and the authority, never by the presence of a tag.
 
-**NOT BUILT:** the task kind and its route. Owed: `POST /tasks` (create a TASK) and
-`POST /tasks/{id}/claim` / `POST /tasks/{id}/complete` (its lifecycle), plus the `task` message kind on the
-session append route. The `addressed` kind itself is carried on the message record (CHAT-STORAGE.md §3.7).
+**BUILT (CR-CHAT-030):** the task kind, its route and its lifecycle now exist.
+`POST /sessions/{id}/tasks` creates a TASK addressed to an explicit target set (there is no
+"everyone" default for work); `POST /sessions/{id}/tasks/{task_id}/claim` and
+`POST /sessions/{id}/tasks/{task_id}/complete` move it through its claim/running/done lifecycle,
+every transition a NEW record-version over the same task id (`specs/CHAT-STORAGE.md` §3.7
+`body.kind:"task"`, `task:{id, state, owner}`). The `addressed` kind itself is carried on the
+message record (§3.7). Authority is §6.11's TASK authority: `invoke` on the target plus `send`
+on the session — an unauthorized creation is refused `403 TASK_FORBIDDEN`
+`reason=NO_TASK_AUTHORITY`, never silently delivered as a message. Transition records (and the
+agents' outputs) are replies in the SAME thread, so the human sees the work there. A bare
+`addressed` tag from the same agent still produces NO task record and NO execution — this is
+proven by test (`TestBareAddressedTagCreatesNoTask`, internal/session/task_test.go).
 
 ### 2.6 A reply STAYS IN THREAD — depth is earned, never implied by an address (D11, corrected)
 

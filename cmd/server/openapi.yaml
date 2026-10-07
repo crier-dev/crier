@@ -2268,6 +2268,142 @@ paths:
         "502":
           description: The transcript record is durable but the fan-out did not complete (FANOUT_INCOMPLETE)
 
+  /sessions/{id}/tasks:
+    post:
+      operationId: createSessionTask
+      tags: [sessions]
+      summary: Create a TASK addressed to explicit targets (the agent-driven call-out)
+      description: |-
+        The explicit "do this" kind (specs/CHAT-ADDRESSING.md §2.5, D12;
+        specs/CHAT-PERMISSIONS.md §6.11). A tag is ADDRESSING, never an
+        action: only this route creates work. The task rides a `task`-kind
+        message record carrying `task:{task_id, state, owner}` (§3.7), fans
+        out to its targets through the SHIPPED inbox path (no second
+        delivery path), and opens (or joins, via `parent_id`) the thread the
+        human reads the agents' outputs in.
+
+        AUTHORITY — different from sending a message: the sender needs
+        `invoke` on EACH target plus `send` on the session (§6.11). An
+        unauthorized creation is refused `403 TASK_FORBIDDEN`
+        `reason=NO_TASK_AUTHORITY` and is NEVER delivered as an ordinary
+        message. With the ACL unarmed the shipped trust-by-reach posture
+        applies to every kind alike.
+
+        There is no "everyone" default for work: a task names an explicit
+        target set. The task's lifecycle is moved by
+        `POST /sessions/{id}/tasks/{task_id}/claim` and `/complete`; every
+        transition is a NEW record-version in the SAME thread.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostSessionTaskRequest"
+      responses:
+        "201":
+          description: The recorded task message (kind `task`, with its task payload and per-target outcomes).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptMessage"
+        "400":
+          description: A malformed request (an absent author or payload, an empty target set, or a thread mismatch)
+        "403":
+          description: The sender lacks the task authority (TASK_FORBIDDEN, reason NO_TASK_AUTHORITY) or the realm refuses the credential (NAMESPACE_UNAUTHORIZED)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+        "409":
+          description: The session is closed and admits no new message (SESSION_CLOSED)
+        "502":
+          description: The transcript record is durable but the fan-out did not complete (FANOUT_INCOMPLETE)
+
+  /sessions/{id}/tasks/{task_id}/claim:
+    post:
+      operationId: claimSessionTask
+      tags: [sessions]
+      summary: Claim a task (open -> claimed, naming its owner)
+      description: |-
+        The §2.5 lifecycle, step one: an addressee claims the open task, and
+        the transition is a NEW `task`-kind record-version in the SAME thread
+        (a reply anchored to the task's message), so the human sees who took
+        the work. A task that is not `open` is refused `409
+        INVALID_TASK_TRANSITION`. The actor needs `send` on the session
+        (§6.11); a refusal is `403 TASK_FORBIDDEN reason NO_TASK_AUTHORITY`.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskTransitionRequest"
+      responses:
+        "201":
+          description: The transition record (state `claimed`, owner = the actor).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskTransitionResponse"
+        "400":
+          description: The body names no actor (AUTHOR_REQUIRED)
+        "403":
+          description: The actor lacks the send authority (TASK_FORBIDDEN, reason NO_TASK_AUTHORITY)
+        "404":
+          description: No such task in this session (TASK_NOT_FOUND)
+        "409":
+          description: The task is not open (INVALID_TASK_TRANSITION)
+
+  /sessions/{id}/tasks/{task_id}/complete:
+    post:
+      operationId: completeSessionTask
+      tags: [sessions]
+      summary: Complete a task (claimed/running -> done, or failed via new_state)
+      description: |-
+        The §2.5 lifecycle, step two: the owner (or any actor with `send` on
+        the session) completes the task. The transition is a NEW
+        `task`-kind record-version in the SAME thread — the completion output
+        (`payload`) is what the human reads there. A task that is not
+        `claimed` or `running` is refused `409 INVALID_TASK_TRANSITION`; a
+        failure closes with `new_state: "failed"`.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskTransitionRequest"
+      responses:
+        "201":
+          description: The transition record (state `done`, or `failed` when new_state names it).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskTransitionResponse"
+        "400":
+          description: The body names no actor (AUTHOR_REQUIRED) or an unknown new_state
+        "403":
+          description: The actor lacks the send authority (TASK_FORBIDDEN, reason NO_TASK_AUTHORITY)
+        "404":
+          description: No such task in this session (TASK_NOT_FOUND)
+        "409":
+          description: The task is neither claimed nor running (INVALID_TASK_TRANSITION)
+
   /sessions/{id}/participants:
     get:
       operationId: listSessionParticipants
@@ -4002,6 +4138,24 @@ components:
         created_at:
           type: string
           format: date-time
+        task:
+          type: object
+          description: |-
+            The task lifecycle payload (CR-CHAT-030, specs/CHAT-STORAGE.md
+            §3.7). Present on `task`-kind records only — a reader never
+            guesses a kind from the text (D12).
+          properties:
+            task_id:
+              type: string
+            state:
+              type: string
+              enum: [open, claimed, running, done, failed]
+            owner:
+              type: string
+              description: Who holds the claimed task; absent while open.
+            updated_at:
+              type: string
+              format: date-time
         thread_depth:
           type: integer
           description: The thread tree's level — a deliberate branch adds one (ThreadDepth over parent_thread_id).
@@ -4510,6 +4664,79 @@ components:
           type: string
         request_id:
           type: string
+    PostSessionTaskRequest:
+      type: object
+      required: [payload, targets]
+      description: |-
+        The POST /sessions/{id}/tasks body. The route IS the task kind —
+        there is no message_kind field to upgrade (D12). Targets are the
+        agents (or groups/capabilities for execution, §6.11) the task is
+        addressed to.
+      properties:
+        payload:
+          type: object
+          description: The instruction body (required; a JSON object). The existing convention reads `payload.text`.
+        sender:
+          type: string
+          description: The authoring agent id.
+        principal_id:
+          type: string
+          description: A human principal acting as the author (with optional `as_agent`).
+        as_agent:
+          type: string
+        parent_id:
+          type: string
+          description: The message to anchor the task to; the task joins that message's thread (D11).
+        thread_id:
+          type: string
+          description: Optional assertion of the thread; a mismatch with the parent's is refused (THREAD_MISMATCH).
+        targets:
+          type: array
+          description: The explicit target set. Required — there is no "everyone" default for work (§6.11).
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [agent, group, capability]
+              id:
+                type: string
+        idempotency_key:
+          type: string
+    TaskTransitionRequest:
+      type: object
+      required: [actor]
+      description: The claim/complete body — who moves the task, and the output that lands in the thread with the transition.
+      properties:
+        actor:
+          type: string
+          description: The acting agent id (or principal id with actor_kind=principal).
+        actor_kind:
+          type: string
+          enum: [agent, principal]
+          default: agent
+        as_agent:
+          type: string
+        payload:
+          type: object
+          description: The transition's output (the claim note, or the completion report the human reads in the thread).
+        new_state:
+          type: string
+          enum: [done, failed]
+          description: complete only — a failure closes with `failed` (default `done`).
+    TaskTransitionResponse:
+      type: object
+      required: [task_id, state, message]
+      properties:
+        task_id:
+          type: string
+        state:
+          type: string
+          enum: [open, claimed, running, done, failed]
+        owner:
+          type: string
+        message:
+          $ref: "#/components/schemas/TranscriptMessage"
     CompileSessionRequest:
       type: object
       description: |-

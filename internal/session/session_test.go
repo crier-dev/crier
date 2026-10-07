@@ -139,6 +139,8 @@ func buildScenario() []*Record {
 		Audience:  Audience{Rule: AudienceSession, Targets: []AudienceTarget{{Kind: TargetAgent, ID: "nimbus"}}},
 		Seq:       11,
 		CreatedAt: at(10),
+		// §3.7 coherence: a task-kind message carries its task payload.
+		Task: Task{ID: "task_fixture", State: TaskOpen, UpdatedAt: at(10)},
 	}
 	recs = append(recs, task.Record()) // the intent: no outcomes yet
 	task.Outcomes = []DeliveryOutcome{{
@@ -760,7 +762,8 @@ func TestConflicts(t *testing.T) {
 
 	// Two DIFFERENT records at the same seq ARE reported as a finding.
 	other := &Message{ID: "m2", SessionID: "s1", ThreadID: "m2", Kind: MessageTask,
-		Author: AuthorRef{Agent: "b"}, Audience: Audience{Rule: AudienceSession}, Seq: 2, CreatedAt: at(1)}
+		Author: AuthorRef{Agent: "b"}, Audience: Audience{Rule: AudienceSession}, Seq: 2, CreatedAt: at(1),
+		Task: Task{ID: "task_m2", State: TaskOpen, UpdatedAt: at(1)}}
 	got := Conflicts([]*Record{sess, intent, other.Record()})
 	require.Len(t, got, 1)
 	require.Equal(t, int64(2), got[0].Seq)

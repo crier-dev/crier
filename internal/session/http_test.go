@@ -120,6 +120,10 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions", h.HandleCreateSession).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages", h.HandleTranscript).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)
+	// CR-CHAT-030: the TASK kind and its lifecycle (§2.5, §6.11, §3.7).
+	r.HandleFunc("/sessions/{id}/tasks", h.HandleCreateTask).Methods(http.MethodPost)
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}/claim", h.HandleClaimTask).Methods(http.MethodPost)
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}/complete", h.HandleCompleteTask).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleListParticipants).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleAddParticipant).Methods(http.MethodPost)
 	// CR-CHAT-016: the late-join context share surface (§4.6, D10).

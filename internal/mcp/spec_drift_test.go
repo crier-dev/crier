@@ -148,7 +148,13 @@ var excludedOperations = map[string]string{
 	// transcript state (st.ThreadMessages + authorizeReadAs) that RemoteStore
 	// does not expose, exactly like its CR-CHAT-017 siblings.
 	"readThreadMessagesByLocation": "GET /sessions/{id}/threads/{thread_id}/messages — \"Fetch the messages of a location\" (CR-CHAT-029): same transport gap as readThreadWithDepth — the location fetch runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
-	"searchSessionMessages":        "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	// CR-CHAT-030 — the task lifecycle surface. All three writes live in
+	// internal/session (task authority checks + transcript records) which
+	// RemoteStore does not expose, so the bridge has no tool for them.
+	"createSessionTask":     "POST /sessions/{id}/tasks — \"Create a TASK addressed to explicit targets\" (CR-CHAT-030): task creation runs the §6.11 authority check and appends to a session transcript, internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"claimSessionTask":      "POST /sessions/{id}/tasks/{task_id}/claim — \"Claim a task\" (CR-CHAT-030): same transport gap as createSessionTask. Reclassify when the bridge grows session support.",
+	"completeSessionTask":   "POST /sessions/{id}/tasks/{task_id}/complete — \"Complete a task\" (CR-CHAT-030): same transport gap as createSessionTask. Reclassify when the bridge grows session support.",
+	"searchSessionMessages": "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	// CR-CHAT-016 — the late-join context-share surface. Both routes read and
 	// write internal/session share state (chat_context_shares) that RemoteStore
 	// does not expose, so the bridge has no tool for them yet.
