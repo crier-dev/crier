@@ -1043,6 +1043,46 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		return
 	}
 
+	// ▼ PER-PEER INBOUND POLICY (CR-CHAT-023, specs/CHAT-FEDERATION.md §6.3):
+	// a request that arrived OVER A LINK announcing a peer identity is
+	// checked against THIS instance's policy for that peer BEFORE anything
+	// else acts on it — authorization before content inspection (§6.3), and
+	// the same order the containment and idempotency gates already use. The
+	// announced peer id is a CLAIM (§3.3): it selects which local policy
+	// record is consulted, it never grants anything by itself. An unknown
+	// peer id, or a known one delivering into a namespace its policy does
+	// not list, is refused with a NAMED 403 — never silently admitted, never
+	// re-spelled as a 404 (§6.4: a policy decline is not "agent does not
+	// exist"). A request with no peer announcement (no header) takes the
+	// shipped path unchanged — the degraded default posture (§5.3 item 1).
+	if h.peerPolicies != nil {
+		if announced := strings.TrimSpace(r.Header.Get(federation.PeerHeader)); announced != "" {
+			policy := h.peerPolicies.PolicyFor(announced)
+			if policy == nil {
+				verdictOverride = VerdictFedPeerUntrusted
+				writeJSON(w, http.StatusForbidden, fedPeerRefusal("FED_PEER_UNTRUSTED", announced, id,
+					fmt.Sprintf("peer %q is not known to this instance (no policy record)", announced)))
+				return
+			}
+			// The delivery targets the realm the AGENT is registered in.
+			// On an unknown target the claim in the body is checked instead:
+			// the request's namespace member names the realm it believes it
+			// is addressing, and believing is not being admitted.
+			if !policy.AdmitsNamespace(req.Namespace) {
+				verdictOverride = VerdictFedNamespaceRefused
+				writeJSON(w, http.StatusForbidden, fedPeerRefusal("FED_NAMESPACE_NOT_PERMITTED", announced, id,
+					fmt.Sprintf("peer %q is not permitted to reach namespace %q (namespaces_allow)", announced, namespace.Display(req.Namespace))))
+				return
+			}
+			if !policy.AdmitsAgent(id) {
+				verdictOverride = VerdictFedAgentRefused
+				writeJSON(w, http.StatusForbidden, fedPeerRefusal("FED_AGENT_NOT_PERMITTED", announced, id,
+					fmt.Sprintf("peer %q is not permitted to reach agent %q (agents.allow/agents.deny)", announced, id)))
+				return
+			}
+		}
+	}
+
 	// DETECTION CHOKE POINT (CR-FEAT-030): a contained agent may neither send
 	// nor receive. This runs before the message id is minted, before the
 	// federation fallback and before the guard, so a contained agent reaches
@@ -1365,6 +1405,17 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 			// transiently): the agent is nowhere in the federation — the
 			// caller sees the same 404 a single relay would answer.
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": ErrAgentNotFound.Error()})
+		case errors.Is(ferr, &federation.NamespaceNotPermittedError{}):
+			// CR-CHAT-023 §6.4, outbound: every link that could carry the
+			// delivery is governed by a peer policy that does not admit the
+			// message's namespace. A NAMED definitive refusal — nothing was
+			// forwarded, nothing held, never a 404 and never a hold.
+			verdictOverride = VerdictFedNamespaceRefused
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":  "FED_NAMESPACE_NOT_PERMITTED",
+				"peer":   "",
+				"detail": "no peer policy admits this message's namespace: the delivery was not forwarded",
+			})
 		default:
 			// Transient failure that cannot be held: no queue to hold it,
 			// a queue that refused it, or a request that names no sender

@@ -23,6 +23,17 @@ const (
 	// VerdictFederationFailed — no link could take the delivery and it could
 	// not be held (502).
 	VerdictFederationFailed = "federation_failed"
+	// VerdictFedPeerUntrusted — a request arriving over a link announced a
+	// peer identity this instance has no policy record for (403,
+	// CR-CHAT-023 §6.4 FED_PEER_UNTRUSTED).
+	VerdictFedPeerUntrusted = "fed_peer_untrusted"
+	// VerdictFedNamespaceRefused — the announced peer's policy does not admit
+	// the namespace the delivery targets (403, CR-CHAT-023 §6.4
+	// FED_NAMESPACE_NOT_PERMITTED).
+	VerdictFedNamespaceRefused = "fed_namespace_refused"
+	// VerdictFedAgentRefused — the announced peer's policy does not admit the
+	// target agent (403, CR-CHAT-023 §6.4 FED_AGENT_NOT_PERMITTED).
+	VerdictFedAgentRefused = "fed_agent_refused"
 	// VerdictGuardBlocked — the message guard refused the message (403
 	// GUARD_BLOCKED).
 	VerdictGuardBlocked = "guard_blocked"
@@ -147,7 +158,8 @@ func transportForVerdict(v string) string {
 		return "inbox"
 	case VerdictWebhookAccepted, VerdictWebhookFailed:
 		return "webhook"
-	case VerdictFederationHeld, VerdictFederationFailed:
+	case VerdictFederationHeld, VerdictFederationFailed,
+		VerdictFedPeerUntrusted, VerdictFedNamespaceRefused, VerdictFedAgentRefused:
 		return "federation"
 	default:
 		return ""

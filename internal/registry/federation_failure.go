@@ -7,6 +7,37 @@ import (
 	"github.com/crier-dev/crier/internal/federation"
 )
 
+// fedPeerRefusalBody is the machine-readable 403 body of a per-peer policy
+// refusal (CR-CHAT-023, spec §6.4): it names the decision inputs so an
+// operator can explain a refusal without parsing prose.
+type fedPeerRefusalBody struct {
+	Error string `json:"error"`
+	Peer  string `json:"peer"`
+	// Direction is always inbound on this surface: the refusal was decided
+	// by THIS instance's policy on a request that arrived over a link.
+	Direction string            `json:"direction"`
+	Target    fedPeerRefusalTgt `json:"target"`
+	Detail    string            `json:"detail"`
+}
+
+type fedPeerRefusalTgt struct {
+	Type string `json:"type"`
+	Ref  string `json:"ref"`
+}
+
+// fedPeerRefusal builds the §6.4 refusal body for an inbound delivery the
+// peer policy declined. code is one of the FED_* refusal codes; peer is the
+// announced peer id; target is the (possibly unresolved) recipient id.
+func fedPeerRefusal(code, peer, target, detail string) fedPeerRefusalBody {
+	return fedPeerRefusalBody{
+		Error:     code,
+		Peer:      peer,
+		Direction: "inbound",
+		Target:    fedPeerRefusalTgt{Type: "agent", Ref: target},
+		Detail:    detail,
+	}
+}
+
 // federationFailurePayload is the machine-readable entry written into the
 // sender's inbox when a held federated delivery exhausts its hold budget
 // (DF-CRIER-7). Shape mirrors the webhook-failure payload (DF-CRIER-8):

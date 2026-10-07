@@ -39,10 +39,19 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/registry"
 )
+
+// SetPeerPolicies arms the per-peer admission policy set (CR-CHAT-023) after
+// construction, the same setter pattern the registry handler uses.
+func (h *Handler) SetPeerPolicies(pp federation.PeerPolicies) { h.opts.PeerPolicies = pp }
+
+// SetFedClient wires the shipped federation client for the remote-participant
+// delivery leg (CR-CHAT-023 §3.4).
+func (h *Handler) SetFedClient(c *federation.Client) { h.opts.Fed = c }
 
 // AgentLookup is the one registry read this surface needs beyond delivery: the
 // stored row of a member agent, whose namespace is the authority for whether a
@@ -75,6 +84,19 @@ type HTTPOptions struct {
 	// GROUPS_UNCONFIGURED and a `group` audience target on a send is a
 	// RECORDED skip (FanoutRecipients), never a guessed delivery.
 	Groups GroupStore
+	// PeerPolicies is the per-peer admission policy set (CR-CHAT-023,
+	// specs/CHAT-FEDERATION.md §6). Nil (the default, nothing configured)
+	// means no remote participant can join a session and no fan-out can
+	// cross to a peer: every remote-shaped member id is refused with
+	// FED_PEER_UNTRUSTED, and every local member behaves exactly as before.
+	PeerPolicies federation.PeerPolicies
+	// Fed is the shipped federation client (CR-FEAT-006). When both Fed and
+	// PeerPolicies are set, a message fanned out to a remote participant is
+	// delivered to its home instance through the SHIPPED forward transport
+	// (ForwardToURL) after the peer policy admits the session's namespace —
+	// no second delivery path (§3.4). Nil skips the remote leg entirely and
+	// the fan-out records the remote target as refused.
+	Fed *federation.Client
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
@@ -214,6 +236,11 @@ type transcriptResponse struct {
 // participantView is one membership row (row 24). Removed members are returned
 // with Active false rather than erased: membership is a recorded event, not a
 // mutable set (§2.3, §2.4).
+//
+// CR-CHAT-023: a member whose id is a remote-qualified identity
+// (`remote:<peer>:<subject>`, spec §8.3) carries Remote true — the reader of
+// the list can always tell a participant from a peer instance. The marker is
+// derived from the RECORDED id, so it is reconstructable from storage alone.
 type participantView struct {
 	MemberType   string        `json:"member_type"`
 	MemberID     string        `json:"member_id"`
@@ -221,6 +248,7 @@ type participantView struct {
 	AddedAt      time.Time     `json:"added_at"`
 	RemovedAt    *time.Time    `json:"removed_at,omitempty"`
 	Active       bool          `json:"active"`
+	Remote       bool          `json:"remote,omitempty"`
 	ContextShare *ContextShare `json:"context_share,omitempty"`
 }
 
@@ -519,6 +547,9 @@ func (h *Handler) HandleListParticipants(w http.ResponseWriter, r *http.Request)
 			AddedAt:    m.AddedAt,
 			RemovedAt:  m.RemovedAt,
 			Active:     m.ActiveAt(now),
+			// CR-CHAT-023 §8.3: a remote participant is named REMOTE, in
+			// its remote-qualified recorded id, never as a local one.
+			Remote: IsRemoteMember(m.MemberID),
 		}
 		if mc := contextShareFor(st, m.MemberType, m.MemberID); mc != nil {
 			view.ContextShare = &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
@@ -572,6 +603,7 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 				Role:       string(m.Role),
 				AddedAt:    m.AddedAt,
 				Active:     true,
+				Remote:     IsRemoteMember(m.MemberID),
 			}
 			if mc := contextShareFor(st, m.MemberType, m.MemberID); mc != nil {
 				view.ContextShare = &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
@@ -729,7 +761,27 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 		return transcriptMessage{}, false
 	}
 
-	// 2. One delivery per participant through the shipped inbox path.
+	// 2. One delivery per participant through the shipped inbox path — and,
+	// for a REMOTE participant (CR-CHAT-023 §3.2/§3.4), one forward to its
+	// home instance through the shipped federation transport. Remote leg
+	// first: its outcome is an outcome like any other and lands on the same
+	// record. Policy gates before anything leaves (§6.3).
+	memState, err := h.store.Load(r.Context(), sess.ID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+		return transcriptMessage{}, false
+	}
+	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg)
+	if err != nil {
+		// A remote fan-out that cannot complete is the same visible,
+		// repairable state §3.2 already names: the record is durable,
+		// outcomes are incomplete, the caller retries the same message id.
+		writeAPIError(w, http.StatusBadGateway, "FANOUT_INCOMPLETE",
+			fmt.Sprintf("the transcript record is durable (message %q) but the remote fan-out did not complete: %v", msg.ID, err))
+		return transcriptMessage{}, false
+	}
+	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
+
 	outcomes, err := Fanout(r.Context(), h.opts.Deliverer, msg, deliverable)
 	if err != nil {
 		// The intent is durable and the outcomes are incomplete — §3.2's
@@ -757,6 +809,144 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 		recorded = msg
 	}
 	return h.messageViewOf(st, recorded), true
+}
+
+// deliverRemote fans a message out to the session's REMOTE participants
+// (CR-CHAT-023 §3.2, §3.4): one forward per remote member to its home peer,
+// through the SHIPPED federation transport — no second delivery path. The
+// policy gates run before anything leaves (§6.3): a remote member whose peer
+// policy does not admit the session's namespace, or whose peer has no
+// policy, is recorded as a REFUSED outcome with the named reason, and the
+// message is never forwarded to it. A transport failure on an admitted peer
+// is an error (the caller's FANOUT_INCOMPLETE), matching the local leg's
+// contract. Remote members are resolved from the membership passed in — the
+// caller loads the session state, so the join-time admission already
+// guarantees every remote member's peer policy admitted the namespace; the
+// re-check here is the wall applied per SEND, not per JOIN (a policy can be
+// tightened between the two).
+func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, msg *Message) ([]DeliveryOutcome, error) {
+	outcomes := []DeliveryOutcome{}
+	now := h.now()
+	if h.opts.Fed == nil {
+		// No federation client wired: a remote member is recorded as
+		// refused with the named reason rather than silently skipped —
+		// a refused outcome is shown, never swallowed (§3.2).
+		for _, m := range st.Members {
+			if !m.ActiveAt(now) || m.MemberType != MemberAgent || !IsRemoteMember(m.MemberID) {
+				continue
+			}
+			if !inAudience(audienceOf(msg), m.MemberID) {
+				continue
+			}
+			outcomes = append(outcomes, DeliveryOutcome{
+				Target:    m.MemberID,
+				Outcome:   OutcomeRefused,
+				Reason:    "remote participant: no federation client is wired (FEDERATION_UNCONFIGURED)",
+				UpdatedAt: now,
+			})
+		}
+		return outcomes, nil
+	}
+	for _, m := range st.Members {
+		if !m.ActiveAt(now) || m.MemberType != MemberAgent || !IsRemoteMember(m.MemberID) {
+			continue
+		}
+		if !inAudience(audienceOf(msg), m.MemberID) {
+			continue
+		}
+		peer, subject, ok := ParseRemoteMemberID(m.MemberID)
+		if !ok {
+			continue // unreachable: IsRemoteMember passed
+		}
+		policy := h.opts.Fed.PolicyFor(peer)
+		if policy == nil {
+			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+				fmt.Sprintf("peer %q is not known to this instance (no policy record)", peer), now))
+			continue
+		}
+		if !policy.AdmitsNamespace(sess.Namespace) {
+			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+				fmt.Sprintf("peer %q is not permitted to reach namespace %q (namespaces_allow)", peer, namespace.Display(sess.Namespace)), now))
+			continue
+		}
+		if policy.URL == "" {
+			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+				fmt.Sprintf("peer %q is inbound-only (no url): the message cannot cross to it", peer), now))
+			continue
+		}
+		envelope, err := json.Marshal(remoteDeliveryEnvelope{
+			SessionID:      sess.ID,
+			ThreadID:       msg.ThreadID,
+			MessageID:      msg.ID,
+			Sender:         msg.Author.AgentID(),
+			Namespace:      sess.Namespace,
+			Kind:           string(msg.Kind),
+			IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, m.MemberID),
+			Payload:        msg.Payload,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marshal remote delivery for %q: %w", m.MemberID, err)
+		}
+		status, _, ferr := h.opts.Fed.ForwardToURL(ctx, policy.URL, subject, envelope)
+		if ferr != nil {
+			// Transport-level failure: the message was NOT delivered. A
+			// transient outage is the caller's FANOUT_INCOMPLETE (the
+			// record is durable, the sender retries); a policy refusal on
+			// the DESTINATION side (§6.4's inbound FED_* codes) is a
+			// definitive refused outcome carrying the remote's own answer.
+			var nsnp *federation.NamespaceNotPermittedError
+			if errors.As(ferr, &nsnp) {
+				outcomes = append(outcomes, refusedOutcome(m.MemberID,
+					"the destination's peer policy refused the namespace (FED_NAMESPACE_NOT_PERMITTED)", now))
+				continue
+			}
+			return nil, fmt.Errorf("forward to peer %q for %q: %w", peer, m.MemberID, ferr)
+		}
+		if status >= 200 && status < 300 {
+			outcomes = append(outcomes, DeliveryOutcome{
+				Target:    m.MemberID,
+				Outcome:   OutcomeDelivered,
+				UpdatedAt: now,
+			})
+			continue
+		}
+		if status == http.StatusForbidden || status == http.StatusUnauthorized {
+			// The destination refused the crossing (its own per-peer
+			// policy or its auth): a definitive, named refusal — never a
+			// silent drop, never a retryable outage.
+			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+				fmt.Sprintf("the destination refused the delivery (status %d)", status), now))
+			continue
+		}
+		// Any other non-2xx answer from the home instance: also definitive
+		// for this send, recorded with the status.
+		outcomes = append(outcomes, refusedOutcome(m.MemberID,
+			fmt.Sprintf("the destination answered %d for the delivery", status), now))
+	}
+	return outcomes, nil
+}
+
+// refusedOutcome is the named refusal shape of §3.2: a refused outcome
+// carries the real reason, never a swallowed error.
+func refusedOutcome(target, reason string, at time.Time) DeliveryOutcome {
+	return DeliveryOutcome{Target: target, Outcome: OutcomeRefused, Reason: reason, UpdatedAt: at}
+}
+
+// audienceOf returns the message's recorded audience; a message always
+// carries one by the time fan-out runs (resolveAudience precedes it).
+func audienceOf(msg *Message) Audience { return msg.Audience }
+
+// inAudience reports whether the member id appears as an agent target of the
+// audience. The local fan-out (Fanout) consumes FanoutRecipients' agent list;
+// the remote leg re-derives membership from the SAME audience so the two legs
+// can never disagree about who was addressed.
+func inAudience(aud Audience, memberID string) bool {
+	for _, t := range aud.Targets {
+		if t.Kind == TargetAgent && t.ID == memberID {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +1126,18 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 					msg: fmt.Sprintf("agent %q is in namespace %q, but session %q is in %q",
 						id, namespace.Display(ag.Namespace), sess.ID, namespace.Display(sess.Namespace))}
 			}
+		}
+	}
+
+	// CR-CHAT-023 (§3.2, §3.3, §6.2): a remote-qualified member id names a
+	// participant of a peer instance. It is admitted only when the peer has
+	// a policy record AND that policy admits the session's namespace (the
+	// policy is a wall; default deny). A remote-shaped id with no parseable
+	// peer or subject is refused rather than guessed at — no silent
+	// reinterpretation of identity.
+	if IsRemoteMember(id) {
+		if err := validateRemoteMember(h.opts.PeerPolicies, id, sess.Namespace); err != nil {
+			return err
 		}
 	}
 
