@@ -125,6 +125,26 @@ var SchemaStatements = []string{
 		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		last_seq   BIGINT NOT NULL DEFAULT 0
 	)`,
+	// Named groups (CR-CHAT-022): the roster the @team:x grammar resolves
+	// against. CREATE TABLE IF NOT EXISTS reaches an existing database
+	// without an ALTER, so a deployment upgrading to this row needs no
+	// migration step.
+	`CREATE TABLE IF NOT EXISTS chat_groups (
+		name       TEXT PRIMARY KEY,
+		namespace  TEXT NOT NULL DEFAULT '',
+		created_by TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_by TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS chat_group_members (
+		group_name TEXT NOT NULL REFERENCES chat_groups(name) ON DELETE CASCADE,
+		member_id  TEXT NOT NULL,
+		position   INTEGER NOT NULL,
+		PRIMARY KEY (group_name, member_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS chat_group_members_name_idx
+		ON chat_group_members (group_name, position)`,
 }
 
 // NewPostgresStore opens a pool against connString, applies the §5.2 schema

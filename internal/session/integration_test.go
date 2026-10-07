@@ -18,6 +18,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -483,4 +484,51 @@ func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
 	require.NoError(t, err)
 	requireJSONEqual(t, want, fromSQLite)
 	requireJSONEqual(t, want, fromPostgres)
+}
+
+// ---------------------------------------------------------------------------
+// CR-CHAT-022 — the named-group roster in the PostgreSQL view
+// ---------------------------------------------------------------------------
+
+// TestPostgres_GroupStoreRoundTripsTheRoster: the pgxpool-backed group store
+// drives the same chat_groups/chat_group_members tables the dialect DDL
+// creates — create, duplicate refusal, edit preserving creation facts, list
+// ordering — against a REAL PostgreSQL.
+func TestPostgres_GroupStoreRoundTripsTheRoster(t *testing.T) {
+	ctx := context.Background()
+	store := newTestPostgresStore(t)
+	gs := store.Groups()
+
+	require.NoError(t, gs.Create(ctx, &Group{
+		Name: "infra", Namespace: "acme", Members: []string{"atlas", "nimbus"},
+		CreatedAt: at(0), CreatedBy: "kara", UpdatedAt: at(0), UpdatedBy: "kara",
+	}))
+	require.True(t, errors.Is(gs.Create(ctx, &Group{Name: "infra"}), ErrGroupExists))
+
+	g, err := gs.Get(ctx, "infra")
+	require.NoError(t, err)
+	require.Equal(t, []string{"atlas", "nimbus"}, g.Members)
+	require.Equal(t, "acme", g.Namespace)
+
+	require.NoError(t, gs.Update(ctx, &Group{
+		Name: "infra", Members: []string{"orion"},
+		CreatedAt: at(1), CreatedBy: "WRONG", UpdatedAt: at(1), UpdatedBy: "sam",
+	}))
+	g, err = gs.Get(ctx, "infra")
+	require.NoError(t, err)
+	require.Equal(t, []string{"orion"}, g.Members, "the roster is replaced in full")
+	require.Equal(t, "kara", g.CreatedBy, "the creation facts survive the edit")
+	require.Equal(t, "sam", g.UpdatedBy)
+
+	require.NoError(t, gs.Create(ctx, &Group{
+		Name: "a-team", Members: []string{"atlas"},
+		CreatedAt: at(2), UpdatedAt: at(2),
+	}))
+	all, err := gs.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	require.Equal(t, "a-team", all[0].Name, "the list is name-sorted")
+
+	_, err = gs.Get(ctx, "nope")
+	require.True(t, errors.Is(err, ErrGroupNotFound))
 }

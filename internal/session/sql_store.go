@@ -74,6 +74,14 @@ func newSQLStore(db *sql.DB, d Dialect, owned bool) *SQLStore {
 // Backend names the engine this store runs on ("sqlite" or "postgres").
 func (s *SQLStore) Backend() string { return s.dialect.Name() }
 
+// Groups exposes the named-group roster store (CR-CHAT-022) over the SAME
+// handle the session view runs on — one database, one schema, one open. The
+// group DDL is part of the dialect's SchemaStatements, so the tables exist by
+// the time this is called.
+func (s *SQLStore) Groups() *SQLGroupStore {
+	return NewSQLGroupStore(s.db, s.dialect.Rebind)
+}
+
 // DB exposes the underlying handle. It exists so an engine-specific read (a
 // schema probe, a backup, a bundle export) needs no engine branch in this
 // store; nothing in the projection path uses it.

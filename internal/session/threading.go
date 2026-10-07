@@ -77,6 +77,42 @@ func messageAddressees(req *postMessageRequest) []string {
 	return out
 }
 
+// messageGroupMentions derives the `@team:<name>` tokens a message body
+// carries (CR-CHAT-022): the NAMED-group form of the addressing grammar. The
+// capability form is deliberately not returned here — `@cap:y` is a selector
+// (one live holder, round-robin), not a fan-out, and never becomes a group
+// target (D8).
+func messageGroupMentions(req *postMessageRequest) []string {
+	var out []string
+	for _, m := range chat.ParseMentions(payloadText(req.Payload)) {
+		if m.Kind == chat.MentionTeam {
+			out = append(out, m.Ref)
+		}
+	}
+	return out
+}
+
+// groupMentionTargets renders group names as `group` audience targets. The
+// roster itself is NOT resolved here — resolveGroupRoster does that fresh at
+// fan-out time, so a roster edit between this call and the delivery still
+// routes to the CURRENT members (§1.4 consequence 1).
+func (h *Handler) groupMentionTargets(ctx context.Context, names []string) ([]AudienceTarget, error) {
+	targets := make([]AudienceTarget, 0, len(names))
+	seen := map[string]bool{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		if !ValidGroupName(name) {
+			return nil, fmt.Errorf("group name %q is not addressable as @team:<name>", name)
+		}
+		seen[name] = true
+		targets = append(targets, AudienceTarget{Kind: TargetGroup, ID: name})
+	}
+	return targets, nil
+}
+
 // payloadText reads the payload's `text` field — the convention the existing
 // transcript surfaces read (`payload.text`). A payload without one addresses
 // nobody by tag.
