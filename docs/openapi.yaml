@@ -1865,6 +1865,9 @@ paths:
                   idempotent_replay:
                     type: boolean
                     description: "Present and true when this accept was answered from the recorded accept of an earlier delivery under the same idempotency_key — the `target` then names the holder the FIRST attempt chose."
+                  location:
+                    $ref: "#/components/schemas/MessageLocation"
+                    description: The machine-readable WHERE of the delivered message (CR-CHAT-029) — mirrors the location stored with the inbox entry.
         "200":
           description: "Blocking webhook delivery (the resolved holder has a webhook endpoint and `delivery_mode: blocking`): the endpoint's reply, with the same `capability` / `target` fields."
         "202":
@@ -2546,6 +2549,51 @@ paths:
         "404":
           description: No such session (SESSION_NOT_FOUND) or thread (THREAD_NOT_FOUND) in this realm
 
+  /sessions/{id}/threads/{thread_id}/messages:
+    get:
+      operationId: readThreadMessagesByLocation
+      tags: [sessions]
+      summary: Fetch the messages of a location (the location-addressed read)
+      description: |-
+        The LOCATION-ADDRESSED fetch (CR-CHAT-029 part b): an agent takes the
+        machine-readable location its delivery carried (instance, namespace,
+        channel, thread, sub_thread — the InboxEntry `location` field) and
+        issues THIS fetch; the answer is EXACTLY the messages of that location
+        it is permitted to read.
+
+        The permission rule is the shipped one: the session realm wall and the
+        `private` visibility rule hold first. A caller the rules refuse gets
+        403 PERMISSION_FORBIDDEN — a NAMED refusal, NEVER an empty list (an
+        empty list would read as "the thread is quiet" and hide the permission
+        problem). An unknown thread is 404 THREAD_NOT_FOUND, a DIFFERENT
+        answer, so a caller can tell a typo from a permission wall.
+
+        `?sub_thread_id=` narrows the fetch to a sub-thread of the named
+        thread: the two-level location a spawned delivery carries (its
+        `thread` is the parent, its `sub_thread` the child).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sub_thread_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Fetch this sub-thread's messages instead of the named thread's own. Must be a child of the named thread, else 404.
+      responses:
+        "200":
+          description: Exactly the permitted messages of the location, with the location echoed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadMessagesResponse"
+        "403":
+          description: The caller is not permitted to read this location (PERMISSION_FORBIDDEN) — a named refusal, never an empty list
+        "404":
+          description: No such session (SESSION_NOT_FOUND) in this realm, or no such thread / sub-thread-of-this-thread (THREAD_NOT_FOUND)
   /sessions/{id}/threads/{thread_id}/timeline:
     get:
       operationId: readThreadTimeline
@@ -3212,6 +3260,34 @@ components:
         namespace:
           type: string
           description: "The namespace (realm) this message was delivered INTO (CR-FEAT-029, specs/NAMESPACES.md). Derived from the TARGET agent's registered namespace, never from the sender's claim — a delivery that names a different realm is refused with 403 NAMESPACE_MISMATCH. Recorded WITH the message so a retrieved message states its realm even after the agent's row is gone; ABSENT means the default namespace, which is what every pre-CR-FEAT-029 message is."
+        location:
+          $ref: "#/components/schemas/MessageLocation"
+    MessageLocation:
+      type: object
+      description: |-
+        The machine-readable WHERE of a delivered message (CR-CHAT-029): the
+        agent can SAY where it is — instance, namespace, channel, thread and
+        sub-thread — populated by the delivery path itself, never inferred from
+        prose. An agent takes this location and issues the location-addressed
+        fetch GET /sessions/{channel}/threads/{thread}/messages to read the
+        context of the place it is in. Absent on entries written before
+        CR-CHAT-029 and on deliveries with no location context at all.
+      properties:
+        instance:
+          type: string
+          description: The serving relay's name (CR_FED_NAME / host:port — the same name /fed/peers announces). Absent when the deployment names no instance.
+        namespace:
+          type: string
+          description: The realm the message was delivered into. ABSENT means the default namespace.
+        channel:
+          type: string
+          description: The session id the message was delivered into (the deliver body's session_id).
+        thread:
+          type: string
+          description: The thread's root message id (specs/CHAT-SESSIONS.md §4.3).
+        sub_thread:
+          type: string
+          description: The sub-thread's id when the send spawned a deliberately branched child thread (§4.5); `thread` then names the PARENT thread the child branched from. Absent on a plain in-thread delivery.
     DeadLetter:
       type: object
       required: [message_id, agent_id, payload, created_at, expires_at, dead_lettered_at, reason]
@@ -4083,6 +4159,31 @@ components:
           description: The child branches folded into summary cards.
           items:
             $ref: "#/components/schemas/CollapsedBranch"
+    ThreadMessagesResponse:
+      type: object
+      required: [session_id, thread_id, location, messages, count]
+      description: |-
+        The body of the location-addressed fetch (CR-CHAT-029 part b): the
+        location echoed, plus EXACTLY the messages of that location the caller
+        is permitted to read.
+      properties:
+        session_id:
+          type: string
+        thread_id:
+          type: string
+          description: The thread the fetch was addressed to.
+        sub_thread:
+          type: string
+          description: Present when the fetch named ?sub_thread_id=.
+        location:
+          $ref: "#/components/schemas/MessageLocation"
+        messages:
+          type: array
+          description: The permitted messages of the location, in seq order.
+          items:
+            $ref: "#/components/schemas/TranscriptMessage"
+        count:
+          type: integer
     Thread:
       type: object
       required: [id, session_id, root_message_id, created_by, created_at]

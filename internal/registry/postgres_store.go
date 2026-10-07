@@ -544,6 +544,40 @@ func nullText(s string) any {
 	return s
 }
 
+// nullJSONB renders an optional JSONB column value. A nil location is SQL
+// NULL — "not recorded" has exactly one representation — and a present one
+// marshals through encoding/json so the stored shape is the wire shape.
+// A marshal failure cannot happen for this type (string fields only), and
+// is reported as nil rather than inventing a location.
+func nullJSONB(loc *Location) any {
+	if loc == nil {
+		return nil
+	}
+	raw, err := json.Marshal(loc)
+	if err != nil {
+		return nil
+	}
+	return string(raw)
+}
+
+// locationFromJSONB decodes the stored location column into the wire type.
+// NULL and an unparseable body both read back as nil: the location is
+// metadata, and a corrupt one must not fail the retrieve that carries the
+// message.
+func locationFromJSONB(raw []byte) *Location {
+	if len(raw) == 0 {
+		return nil
+	}
+	var loc Location
+	if err := json.Unmarshal(raw, &loc); err != nil {
+		return nil
+	}
+	if loc == (Location{}) {
+		return nil
+	}
+	return &loc
+}
+
 // pgTimestamptz renders a message expiry for the inbox_entries.expires_at
 // column. The zero time means "never expires" (ttl_seconds=0, DF-CRIER-37):
 // Postgres has no zero time.Time, and the column is NOT NULL with a
@@ -636,11 +670,11 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, thread_id, created_at, expires_at,
-    leased_at, lease_id, lease_expires_at, acked, namespace
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10);`,
+    leased_at, lease_id, lease_expires_at, acked, namespace, location
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10, $11::jsonb);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
 		entry.Priority, nullText(entry.ThreadID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
-		nullText(namespace.Canonical(entry.Namespace)),
+		nullText(namespace.Canonical(entry.Namespace)), nullJSONB(entry.Location),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -711,7 +745,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// first one ties.
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
-       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, '')
+       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, ''), location
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -733,11 +767,13 @@ LIMIT $3;`,
 		// `infinity` (ttl_seconds=0 → never expires, DF-CRIER-37) decodes
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
+		var location []byte
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace); err != nil {
+			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
+		entry.Location = locationFromJSONB(location)
 		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
 		result = append(result, &entry)
 	}

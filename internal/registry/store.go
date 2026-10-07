@@ -219,6 +219,38 @@ type Handler struct {
 	// whose effective sender holds no live grant, ownership rule or scope
 	// reach, with 403 DELIVERY_FORBIDDEN and a machine-readable reason.
 	permissions *permissions.Checker
+	// instanceName is this relay's name for the delivery LOCATION (CR-CHAT-029).
+	// Set from main (CR_FED_NAME / host:port, the same name /fed/peers
+	// announces); the zero value leaves the instance field absent on entries
+	// whose deployments name no instance — "not configured", one spelling.
+	instanceName string
+}
+
+// SetInstanceName records this relay's name for the delivery LOCATION
+// (CR-CHAT-029). Same setter shape as SetPeerPolicies, so the public
+// constructor stays positional.
+func (h *Handler) SetInstanceName(name string) { h.instanceName = name }
+
+// locationOf builds the machine-readable location of a delivery from the
+// request's session context, the target's resolved realm (already recorded
+// on the entry) and the thread context. It is the ONE place the location is
+// derived, so the accept response and the stored entry cannot disagree about
+// where a message landed. sessionID is the deliver request's session_id
+// (CR-FEAT-004) — the wire identity of the channel.
+func (h *Handler) locationOf(entry *InboxEntry, sessionID string) *Location {
+	if entry == nil {
+		return nil
+	}
+	loc := &Location{
+		Instance:  h.instanceName,
+		Namespace: namespace.Canonical(entry.Namespace),
+		Channel:   sessionID,
+		ThreadID:  entry.ThreadID,
+	}
+	if *loc == (Location{}) {
+		return nil
+	}
+	return loc
 }
 
 // NewHandler creates a Handler that delegates store operations to the

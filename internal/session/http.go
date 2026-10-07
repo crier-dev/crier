@@ -105,6 +105,10 @@ type HTTPOptions struct {
 	// only. It writes nothing — the same opt-in-posture answer the delivery
 	// log precedent sets, applied to a read-only surface.
 	GrantEvents func(ctx context.Context, sessionID string) ([]PermissionsGrantView, error)
+	// InstanceName is this relay's name for the delivery LOCATION and the
+	// location the fetch surfaces (CR-CHAT-029). Empty leaves the instance
+	// field absent — "not configured", one spelling.
+	InstanceName string
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
@@ -738,7 +742,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, ok := h.sendMessage(w, r, sess, msg, aud)
+	view, ok := h.sendMessage(w, r, sess, msg, aud, spawn)
 	if !ok {
 		return
 	}
@@ -763,7 +767,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 //
 // It answers false having already written the error, and returns the read-back
 // view of the recorded message with the outcome vocabulary attached.
-func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Session, msg *Message, aud Audience) (transcriptMessage, bool) {
+func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Session, msg *Message, aud Audience, spawn *spawnedThreadView) (transcriptMessage, bool) {
 	msg.Audience = aud
 
 	seq, err := h.store.NextSeq(r.Context(), sess.ID)
@@ -809,7 +813,7 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
-	outcomes, err := Fanout(r.Context(), h.opts.Deliverer, msg, deliverable)
+	outcomes, err := Fanout(r.Context(), h.opts.Deliverer, msg, deliverable, spawn)
 	if err != nil {
 		// The intent is durable and the outcomes are incomplete — §3.2's
 		// visible, repairable state, not a lost message. Report it as a 502

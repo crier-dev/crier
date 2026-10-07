@@ -380,9 +380,11 @@ claims:
     # messages, sub-thread timeline — four operations), so the pair was
     # 37 / 46. CR-CHAT-021 added the three audit/permission read paths
     # (/sessions/{id}/audit, /sessions/{id}/permissions, /sessions/{id}/roles
-    # — one operation each), so the pair is 40 / 49.
+    # — one operation each) and CR-CHAT-029 added the location-addressed
+    # fetch path (GET /sessions/{id}/threads/{thread_id}/messages), so the
+    # pair is 41 / 50.
     quote: "docs/openapi.yaml"
-    expect: 40
+    expect: 41
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -403,9 +405,10 @@ claims:
     # GET /groups/{name} and PATCH /groups/{name}/members (33 / 42).
     # CR-CHAT-017 added the four sub-thread operations (37 / 46). CR-CHAT-021
     # added the three audit/permission read operations — GET /sessions/{id}/audit,
-    # GET /sessions/{id}/permissions, GET /sessions/{id}/roles (40 / 49).
-    quote: "49 operations"
-    expect: 49
+    # GET /sessions/{id}/permissions, GET /sessions/{id}/roles — and
+    # CR-CHAT-029 added the location-addressed fetch operation (41 / 50).
+    quote: "50 operations"
+    expect: 50
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -452,8 +455,10 @@ claims:
     # — CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting),
     # CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting), and
     # CR-CHAT-013/016 made it 30 (18 API + 7 session + 2 groups + 3 spec-hosting).
-    quote: "39 router paths"
-    expect: 39
+    # CR-CHAT-017 made it 34 (18 API + 11 session + 2 groups + 3 spec-hosting)
+    # and CR-CHAT-029 made it 35 (18 API + 12 session + 2 groups + 3 spec-hosting).
+    quote: "40 router paths"
+    expect: 40
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

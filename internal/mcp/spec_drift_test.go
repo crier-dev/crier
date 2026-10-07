@@ -141,10 +141,14 @@ var excludedOperations = map[string]string{
 	// CR-CHAT-017 — the thread navigability surface. All four reads live in
 	// internal/session (thread tree, timeline, summary, search) which
 	// RemoteStore does not expose, so the bridge has no tool for them.
-	"readThreadWithDepth":   "GET /sessions/{id}/threads/{thread_id} — \"Read a thread with depth collapse\" (CR-CHAT-017): the thread tree is internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
-	"readThreadTimeline":    "GET /sessions/{id}/threads/{thread_id}/timeline — \"Read a thread's branch timeline\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
-	"readThreadSummary":     "GET /sessions/{id}/threads/{thread_id}/summary — \"Read a thread's generated summary\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
-	"searchSessionMessages": "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"readThreadWithDepth": "GET /sessions/{id}/threads/{thread_id} — \"Read a thread with depth collapse\" (CR-CHAT-017): the thread tree is internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"readThreadTimeline":  "GET /sessions/{id}/threads/{thread_id}/timeline — \"Read a thread's branch timeline\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
+	"readThreadSummary":   "GET /sessions/{id}/threads/{thread_id}/summary — \"Read a thread's generated summary\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
+	// CR-CHAT-029 — the location-addressed fetch reads internal/session
+	// transcript state (st.ThreadMessages + authorizeReadAs) that RemoteStore
+	// does not expose, exactly like its CR-CHAT-017 siblings.
+	"readThreadMessagesByLocation": "GET /sessions/{id}/threads/{thread_id}/messages — \"Fetch the messages of a location\" (CR-CHAT-029): same transport gap as readThreadWithDepth — the location fetch runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"searchSessionMessages":        "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	// CR-CHAT-016 — the late-join context-share surface. Both routes read and
 	// write internal/session share state (chat_context_shares) that RemoteStore
 	// does not expose, so the bridge has no tool for them yet.
