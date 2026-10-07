@@ -2697,3 +2697,28 @@ tasks:
   status: complete
   created_at: '2026-10-07T02:01:38.602387+00:00'
   completed_at: '2026-10-07T02:01:39.356908+00:00'
+- id: CR-CHAT-021
+  title: Session+principal audit and permission read surfaces
+  criteria:
+  - Audit read returns a closed event vocabulary; permission matrix readable per session;
+    roles per principal; go test green; openapi byte-identical via make generate
+  status: complete
+  created_at: '2026-10-07T04:48:37.014570+00:00'
+  completed_at: '2026-10-07T04:48:49.026952+00:00'
+- id: CR-CHAT-029
+  title: Delivery LOCATION + location-addressed context fetch
+  criteria:
+  - Delivery carries machine-readable location (instance/namespace/channel/thread/sub-thread);
+    fetch returns exactly permitted messages; unpermitted fetch is a named refusal;
+    go test green
+  status: complete
+  created_at: '2026-10-07T04:48:37.582558+00:00'
+  completed_at: '2026-10-07T04:48:56.396195+00:00'
+- id: CR-CHAT-022
+  title: 'Named groups: create/list/membership/count, @team:x addressing'
+  criteria:
+  - Group of 5 addressed => 5 deliveries; membership edit changes routing; group vs
+    capability distinguishable; go test green
+  status: complete
+  created_at: '2026-10-07T04:48:38.129950+00:00'
+  completed_at: '2026-10-07T04:49:05.544997+00:00'
