@@ -64,6 +64,10 @@ func openSessionAPI(
 		Namespaces:  namespaces,
 		Permissions: perms,
 		Groups:      groupStore,
+		// The delivery LOCATION (CR-CHAT-029): the same name /fed/peers
+		// announces, so an agent reading its location and an operator
+		// reading the peers listing see the same identity.
+		InstanceName: federationName(cfg),
 	})
 	return sessStore, h, nil
 }

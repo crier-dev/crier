@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/chat"
+	"github.com/crier-dev/crier/internal/namespace"
 )
 
 // ---------------------------------------------------------------------------
@@ -483,6 +484,120 @@ func (h *Handler) HandleThreadSummary(w http.ResponseWriter, r *http.Request) {
 		RawMessages: fmt.Sprintf("/sessions/%s/messages?thread_id=%s", sess.ID, tid),
 		Generated:   true,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// GET /sessions/{id}/threads/{thread_id}/messages — the location-addressed
+// fetch (CR-CHAT-029, part b).
+// ---------------------------------------------------------------------------
+
+// threadMessagesResponse is the body of the location-addressed fetch: the
+// location the caller asked for, plus EXACTLY the messages of that location
+// the caller is permitted to read.
+type threadMessagesResponse struct {
+	SessionID string              `json:"session_id"`
+	ThreadID  string              `json:"thread_id"`
+	SubThread string              `json:"sub_thread,omitempty"`
+	Location  locationView        `json:"location"`
+	Messages  []transcriptMessage `json:"messages"`
+	Count     int                 `json:"count"`
+}
+
+// locationView renders the location a fetch answers for (CR-CHAT-029): the
+// same fields a delivery carries, so an agent can round-trip "where am I" —
+// say the location — and fetch exactly that place.
+type locationView struct {
+	Instance  string `json:"instance,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Thread    string `json:"thread,omitempty"`
+	SubThread string `json:"sub_thread,omitempty"`
+}
+
+// locationViewOf renders a session's location for the named thread and
+// sub-thread. The channel is the session id, the thread the named thread's
+// id; a sub-thread fetch names both.
+func locationViewOf(instance, realm, sessionID, threadID, subThread string) locationView {
+	return locationView{
+		Instance:  instance,
+		Namespace: namespace.Canonical(realm),
+		Channel:   sessionID,
+		Thread:    threadID,
+		SubThread: subThread,
+	}
+}
+
+// HandleThreadMessages serves GET /sessions/{id}/threads/{thread_id}/messages
+// (and, with ?sub_thread_id=, the sub-thread's messages): the
+// location-addressed fetch of CR-CHAT-029 part b. An agent takes the location
+// its delivery carried and issues THIS fetch; the answer is EXACTLY the
+// messages of that location it is permitted to read.
+//
+// The permission rule is the shipped one, applied per location:
+//
+//   - the session realm wall and the `private` visibility rule
+//     (authorizeReadAs) hold first — a caller that cannot read the session
+//     cannot read any thread in it;
+//   - a caller that can read the session can read its threads: membership is
+//     session-scoped in the shipped model (§2), so no second, per-thread ACL
+//     is invented here. When the CR-CHAT-003 ACL is armed, the session-level
+//     read permission the checker grants is the same one authorizeReadAs
+//     consults, so a granted agent keeps its reach.
+//
+// A caller the session rules refuse gets 403 PERMISSION_FORBIDDEN — a NAMED
+// refusal (CR-CHAT-029 acceptance 3), never an empty list: an empty 200 would
+// read as "the thread is quiet" and hide the permission problem. An unknown
+// thread stays 404 (the thread genuinely does not exist), which is a different
+// answer and deliberately not collapsed into the refusal.
+func (h *Handler) HandleThreadMessages(w http.ResponseWriter, r *http.Request) {
+	st, sess, ok := h.loadScoped(w, r)
+	if !ok {
+		return
+	}
+	who := callerIdentity(r)
+	if err := h.authorizeReadAs(r.Context(), who, sess, st); err != nil {
+		writeAPIError(w, http.StatusForbidden, "PERMISSION_FORBIDDEN",
+			fmt.Sprintf("the caller is not permitted to read session %q: %v", sess.ID, err))
+		return
+	}
+
+	tid := muxVar(r, "thread_id")
+	if st.Thread(tid) == nil {
+		// A thread id that is not a recorded thread key is a miss on the
+		// transcript alone — reported as 404, not as a permission failure
+		// (§4.3: a broken thread key is a finding, not a secret).
+		writeAPIError(w, http.StatusNotFound, "THREAD_NOT_FOUND",
+			fmt.Sprintf("thread %q does not exist in session %q", tid, sess.ID))
+		return
+	}
+
+	subThread := strings.TrimSpace(r.URL.Query().Get("sub_thread_id"))
+	messages := st.ThreadMessages(tid)
+	if subThread != "" {
+		t := st.Thread(subThread)
+		if t == nil || t.ParentThreadID != tid {
+			// Not a child of the named thread: the location as addressed does
+			// not exist — the same 404 the thread itself would get, for the
+			// same reason (a malformed location is not a permission problem).
+			writeAPIError(w, http.StatusNotFound, "THREAD_NOT_FOUND",
+				fmt.Sprintf("sub-thread %q is not a child of thread %q in session %q", subThread, tid, sess.ID))
+			return
+		}
+		messages = st.ThreadMessages(subThread)
+	}
+
+	out := threadMessagesResponse{
+		SessionID: sess.ID,
+		ThreadID:  tid,
+		SubThread: subThread,
+		Location:  locationViewOf(h.opts.InstanceName, sess.Namespace, sess.ID, tid, subThread),
+		Messages:  make([]transcriptMessage, 0, len(messages)),
+	}
+	for _, m := range messages {
+		out.Messages = append(out.Messages, h.messageViewOf(st, m))
+	}
+	out.Count = len(out.Messages)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---------------------------------------------------------------------------

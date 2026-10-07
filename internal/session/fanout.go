@@ -53,6 +53,24 @@ func InboxEntryID(messageID, targetAgentID string) string {
 	return messageID + "." + targetAgentID
 }
 
+// locationOf derives the machine-readable location of ONE message's fan-out
+// (CR-CHAT-029). Without a spawn the thread is the message's own thread id;
+// with a spawn (the message branched into a deliberately created child
+// thread, §4.5) the location's thread is the PARENT thread the child
+// branched from and the sub-thread is the child — so the pair a fetch later
+// resolves (thread + sub_thread_id) matches what the delivery said.
+func locationOf(msg *Message, spawn *spawnedThreadView) *registry.Location {
+	loc := &registry.Location{
+		Channel:  msg.SessionID,
+		ThreadID: msg.ThreadID,
+	}
+	if spawn != nil {
+		loc.ThreadID = spawn.ParentThreadID
+		loc.SubThread = spawn.ThreadID
+	}
+	return loc
+}
+
 // AudienceSkip names an audience target that is deliberately NOT fanned out,
 // with the rule that says so. It is data, not a silent drop: the caller can
 // record it on the message's audience.
@@ -135,12 +153,20 @@ func FanoutRecipients(aud Audience, roster map[string][]string) (agents []string
 //     reason, never a swallowed error — an unknown agent reads as
 //     `refused: agent not found`, exactly the vocabulary §3.2 fixes;
 //   - each delivery carries its own deterministic idempotency key and its own
-//     inbox entry id, and its payload is the message's payload.
+//     inbox entry id, and its payload is the message's payload;
+//   - each delivery names its LOCATION (CR-CHAT-029): the session is the
+//     channel; for a message that spawned a deliberately branched child
+//     thread (§4.5), the location's thread is the PARENT thread the child
+//     branched from and its sub-thread is the child's id — the exact
+//     two-level location the location-addressed fetch
+//     (GET /sessions/{id}/threads/{thread}/messages?sub_thread_id=…)
+//     resolves. Without a spawn the location's thread is the message's own
+//     thread and there is no sub-thread.
 //
 // The caller owns the ordering: the transcript record is written FIRST as the
 // intent, and the outcomes are written back onto that same record afterwards
 // (§3.2, D1). Fanout performs the middle step only.
-func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string) ([]DeliveryOutcome, error) {
+func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView) ([]DeliveryOutcome, error) {
 	if msg == nil {
 		return nil, fmt.Errorf("%w: nil message", ErrInvalidRecord)
 	}
@@ -178,6 +204,13 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 			// per-agent durable inbox is part of that storage.
 			ThreadID:  msg.ThreadID,
 			CreatedAt: time.Now().UTC(),
+			// The machine-readable location (CR-CHAT-029): the agent can SAY
+			// where it is — instance, realm, session (channel), thread and,
+			// when this send spawned a deliberately branched child thread
+			// (§4.5), the sub-thread — instead of inferring it from prose.
+			// The namespace is left to the deliver path, which resolves the
+			// target's realm from its own row (the authority).
+			Location: locationOf(msg, spawn),
 		}
 		if err := deliverer.Deliver(target, entry); err != nil {
 			outcomes = append(outcomes, DeliveryOutcome{

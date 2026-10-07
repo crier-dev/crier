@@ -362,6 +362,14 @@ type deliverResponse struct {
 	// telling a sender the id it just wrote in the path would be noise.
 	Capability string `json:"capability,omitempty"`
 	Target     string `json:"target,omitempty"`
+	// Location is the machine-readable WHERE of the delivered message
+	// (CR-CHAT-029): the instance, namespace, channel (session), thread and
+	// sub-thread the TARGET agent can say it is in. It mirrors the location
+	// stored with the inbox entry, so a sender's accept and the agent's
+	// later retrieve name the same place. Absent on the webhook-accept paths
+	// before the realms block resolved a target, and on entries with no
+	// location context at all (pre-CR-CHAT-029 shape).
+	Location *Location `json:"location,omitempty"`
 }
 
 // guardBlockedResponse is the uniform 403 body for blocked deliveries
@@ -1279,6 +1287,14 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		// storage alone (specs/CHAT-INTERFACE.md §4 row 15).
 		ThreadID: req.ThreadID,
 	}
+	// The machine-readable location (CR-CHAT-029) is attached to the entry
+	// AFTER the realms block above (which resolved and recorded the target's
+	// namespace) and BEFORE every dispatch branch, so the webhook envelope,
+	// the stored inbox entry and the accept response all name the SAME
+	// place. A sub-thread, when one exists, is resolved by the session
+	// fan-out, which owns the thread tree; a plain deliver names the thread
+	// the request carried.
+	entry.Location = h.locationOf(entry, req.SessionID)
 	observationID = entry.ID
 	kind := req.Kind
 	if kind == "" {
@@ -1675,6 +1691,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		Guard:      guardInDeliverResponse(guardMeta),
 		Capability: capability,
 		Target:     routedTarget(capability, id),
+		Location:   entry.Location,
 	})
 	deliveriesTotal.Inc()
 }

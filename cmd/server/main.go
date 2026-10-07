@@ -656,6 +656,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// timeline rail and the per-thread generated summary, plus search that
 	// returns a full LOCATION path per hit.
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}", sessHandler.HandleThreadRead).Methods("GET")
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}/messages", sessHandler.HandleThreadMessages).Methods("GET")
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/timeline", sessHandler.HandleThreadTimeline).Methods("GET")
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/summary", sessHandler.HandleThreadSummary).Methods("GET")
 	r.HandleFunc("/sessions/{id}/search", sessHandler.HandleSessionSearch).Methods("GET")

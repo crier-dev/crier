@@ -303,7 +303,7 @@ func (h *Handler) HandleCompile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, ok := h.sendMessage(w, r, sess, msg, aud)
+	view, ok := h.sendMessage(w, r, sess, msg, aud, nil) // a compile never spawns a sub-thread (§4.8 rule 7)
 	if !ok {
 		return
 	}

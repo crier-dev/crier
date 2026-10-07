@@ -158,6 +158,35 @@ type InboxEntry struct {
 	// (specs/CHAT-SESSIONS.md §4.3/§4.5, D11). `omitempty` keeps an entry
 	// from a client that names no thread byte-identical to before.
 	ThreadID string `json:"thread_id,omitempty"`
+	// Location is the machine-readable WHERE of this delivery (CR-CHAT-029):
+	// instance, namespace, channel (the session), thread and sub-thread the
+	// agent can SAY it is in, derived from the delivery context — never
+	// inferred by the agent from prose. It is populated by the delivery path
+	// itself (the registry deliver handler, and the session fan-out, which
+	// owns the thread tree and therefore also resolves a sub-thread); a
+	// REMOTE proxy deliberately does NOT forward it — the downstream relay
+	// re-derives every field from its own row and context, exactly as it
+	// already re-derives the namespace. Absent (nil, omitempty) on entries
+	// written before this field existed.
+	Location *Location `json:"location,omitempty"`
+}
+
+// Location states WHERE a delivery sits, so an agent can name its place
+// instead of inferring it (CR-CHAT-029). Every field is the wire identity,
+// not a display label: `channel` is the session id (the same value the
+// deliver body carries as session_id), `thread` is the thread's root message
+// id and `sub_thread` the sub-thread's id when the delivery was fanned out
+// into a deliberately branched child thread (specs/CHAT-SESSIONS.md §4.5).
+// `instance` names the serving relay (CR_FED_NAME / host:port); `namespace`
+// is the realm the message was delivered into — the same canonical spelling
+// as InboxEntry.Namespace. A delivery with no session context still carries
+// instance + namespace: "where am I" is answerable for every delivery.
+type Location struct {
+	Instance  string `json:"instance,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	ThreadID  string `json:"thread,omitempty"`
+	SubThread string `json:"sub_thread,omitempty"`
 }
 
 // MessageExpiry is the tri-state WIRE encoding of a message expiry
