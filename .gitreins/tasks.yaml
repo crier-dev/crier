@@ -2818,3 +2818,13 @@ tasks:
   status: complete
   created_at: '2026-10-07T19:40:40.522060+00:00'
   completed_at: '2026-10-07T21:02:00.821253+00:00'
+- id: QA-CRIER-39
+  title: 'chaos-errorpath: drive a real config premise instead of a bare entrypoint'
+  criteria:
+  - The chaos-errorpath cell invokes crier with a genuinely broken/missing config
+    premise (e.g. invalid port or unwritable DB URL) and asserts a real documented
+    failure outcome (nonzero exit or explicit error), not the vacuous rc=0 of a bare
+    entrypoint; scripts/e2e-battery.sh battery still passes with the new cell.
+  status: complete
+  created_at: '2026-10-07T21:33:35.119043+00:00'
+  completed_at: '2026-10-07T21:38:11.223083+00:00'
