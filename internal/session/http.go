@@ -557,7 +557,8 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the member just recorded, read back from the store so the
-	// response is the recorded fact, not the request echoed.
+	// response is the recorded fact, not the request echoed — including the
+	// late-join context answer (its default included, §4.6 D10).
 	st, err := h.store.Load(r.Context(), sess.ID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
@@ -565,13 +566,17 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range st.Members {
 		if m.MemberType == MemberType(req.MemberType) && m.MemberID == req.MemberID && m.ActiveAt(h.now()) {
-			writeJSON(w, http.StatusCreated, participantView{
+			view := participantView{
 				MemberType: string(m.MemberType),
 				MemberID:   m.MemberID,
 				Role:       string(m.Role),
 				AddedAt:    m.AddedAt,
 				Active:     true,
-			})
+			}
+			if mc := contextShareFor(st, m.MemberType, m.MemberID); mc != nil {
+				view.ContextShare = &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
+			}
+			writeJSON(w, http.StatusCreated, view)
 			return
 		}
 	}
@@ -915,7 +920,11 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 		// surprising default rather than inventing a new one.
 		role = RoleMember
 	}
-	if req.ContextShare != nil {
+	if req.ContextShare == nil {
+		// D10: a joiner that does not choose receives `summary` — and the
+		// default answer is RECORDED, never left undecided (§4.6 rule 1).
+		req.ContextShare = &ContextShare{Mode: DefaultContextShareMode}
+	} else {
 		if err := validateContextShare(req.ContextShare); err != nil {
 			return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
 		}

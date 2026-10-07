@@ -375,9 +375,9 @@ claims:
     # one operation), so the pair was 29 / 36. CR-CHAT-013 added the three
     # named-group paths (/groups, /groups/{name} and /groups/{name}/members —
     # four operations: POST+GET /groups, GET /groups/{name},
-    # PATCH /groups/{name}/members), so the pair is 32 / 40.
+    # PATCH /groups/{name}/members), so the pair is 33 / 42.
     quote: "docs/openapi.yaml"
-    expect: 32
+    expect: 33
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -395,9 +395,9 @@ claims:
     # GET/POST /sessions/{id}/participants (27 / 34); CR-CHAT-028 added the
     # compile operation and the per-part expand operation (29 / 36);
     # CR-CHAT-013 added the four named-group operations — POST/GET /groups,
-    # GET /groups/{name} and PATCH /groups/{name}/members (32 / 40).
-    quote: "40 operations"
-    expect: 40
+    # GET /groups/{name} and PATCH /groups/{name}/members (33 / 42).
+    quote: "42 operations"
+    expect: 42
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -438,14 +438,14 @@ claims:
     # count was 18 API + 5 session + 3 spec-hosting + 5 detection = 31.
     # CR-CHAT-013 registered the three named-group paths (/groups,
     # /groups/{name}, /groups/{name}/members), so the merged count is
-    # 18 API + 5 session + 3 groups + 3 spec-hosting + 5 detection = 34.
+    # 18 API + 7 session + 2 groups + 3 spec-hosting + 5 detection = 35.
     # Note the README's "always-on" line counts the 18 API + 3 spec-hosting
     # routes; that line is prose the same number measures, and it moved with it
     # — CR-CHAT-019 made it 24 always-on (18 API + 3 session + 3 spec-hosting),
     # CR-CHAT-028 made it 26 (18 API + 5 session + 3 spec-hosting), and
-    # CR-CHAT-013 made it 29 (18 API + 5 session + 3 groups + 3 spec-hosting).
-    quote: "34 router paths"
-    expect: 34
+    # CR-CHAT-013/016 made it 30 (18 API + 7 session + 2 groups + 3 spec-hosting).
+    quote: "35 router paths"
+    expect: 35
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

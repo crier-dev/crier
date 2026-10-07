@@ -612,6 +612,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleListParticipants).Methods("GET")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleAddParticipant).Methods("POST")
+	// Late-join context share (CR-CHAT-016, §4.6 D10): the materialized view
+	// (GET) and a later recorded mode change (PUT) per participant.
+	r.HandleFunc("/sessions/{id}/participants/{member_type}/{member_id}/context", sessHandler.HandleMemberContextView).Methods("GET")
+	r.HandleFunc("/sessions/{id}/participants/{member_type}/{member_id}/context", sessHandler.HandleSetMemberContext).Methods("PUT")
 	// Compile / merge (CR-CHAT-028): gather N cited sources into ONE new
 	// message (POST) and resolve a part's citation back to its original (GET).
 	// Additive to CR-CHAT-019, over the same store, and the compiled message
@@ -628,7 +632,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/groups/{name}/members", sessHandler.HandleUpdateGroupMembers).Methods("PATCH")
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
-		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
+		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
 	slog.Info("named group api enabled",
 		"store_dir", cfg.Session.GroupRoot,
 		"detail", "POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)")

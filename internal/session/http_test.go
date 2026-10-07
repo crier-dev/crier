@@ -100,6 +100,9 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleListParticipants).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleAddParticipant).Methods(http.MethodPost)
+	// CR-CHAT-016: the late-join context share surface (§4.6, D10).
+	r.HandleFunc("/sessions/{id}/participants/{member_type}/{member_id}/context", h.HandleMemberContextView).Methods(http.MethodGet)
+	r.HandleFunc("/sessions/{id}/participants/{member_type}/{member_id}/context", h.HandleSetMemberContext).Methods(http.MethodPut)
 	// CR-CHAT-028: compile (merge) and the per-part expand.
 	r.HandleFunc("/sessions/{id}/compile", h.HandleCompile).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", h.HandleExpandCompiledMessage).Methods(http.MethodGet)
