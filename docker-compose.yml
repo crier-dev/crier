@@ -21,5 +21,23 @@ services:
       retries: 5
       start_period: 10s
 
+  # The crier server itself (QA-CRIER-38): without this service the stack was
+  # postgres-only and the containerized deploy path (image build + boot + HTTP
+  # probe) was never exercised. The server is env-driven (config/config.go) —
+  # CRIER_PORT sets the listen port and CR_DATABASE_URL the store URL.
+  crier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${CRIER_HOST_PORT:-8767}:8767"
+    environment:
+      CRIER_PORT: "8767"
+      CR_DATABASE_URL: postgres://crier:crier@postgres:5432/crier?sslmode=disable
+
 volumes:
   pgdata:
