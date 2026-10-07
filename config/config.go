@@ -366,6 +366,27 @@ type FederationConfig struct {
 	// Empty (default) configures no peers: the instance federates exactly as
 	// it did before peer policies existed (§1.3 — extend, never replace).
 	PeersFile string
+
+	// AuthFile is the path of the federation peer-identity + revocation
+	// document (CR_FED_AUTH_FILE, CR-CHAT-024,
+	// specs/FEDERATION-AUTH.md). When set, a federation request that
+	// announces a peer identity (X-Crier-Fed-Peer) must ALSO carry a valid
+	// X-Fed-Ts/X-Fed-Sig ed25519 signature over the request transcript,
+	// verifiable against the announced peer's registered public key; a peer
+	// on the document's `revoked` list is refused with 403 FED_PEER_REVOKED.
+	// The document is re-read when its mtime/size changes, so revocation
+	// takes effect without a restart or code change. Empty (default) arms
+	// no gate: federation auth is exactly the shipped shared-secret posture
+	// (CR_AUTH_TOKEN / CR_FED_TOKEN Bearer, DF-CRIER-6).
+	AuthFile string
+
+	// SelfKeyFile is the path of this relay's own hex ed25519 private key
+	// (seed) file (CR_FED_SELF_KEY_FILE, CR-CHAT-024). When set, every
+	// outbound forward is signed with X-Fed-Ts/X-Fed-Sig so a destination
+	// running the peer-auth gate can prove this relay's identity (mutual
+	// auth). The key is loaded from the file at startup — no secret
+	// material is ever hardcoded. Empty (default) signs nothing.
+	SelfKeyFile string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -607,6 +628,14 @@ func Load() (Config, error) {
 	// Unset (default) configures no peers — federation behaves exactly as
 	// before peer policies existed.
 	cfg.Federation.PeersFile = os.Getenv("CR_FED_PEERS_FILE")
+	// CR_FED_AUTH_FILE (CR-CHAT-024): path of the peer-identity +
+	// revocation document. Empty keeps federation auth on the shipped
+	// shared-secret posture; set, it arms the signature gate on requests
+	// announcing a peer identity.
+	cfg.Federation.AuthFile = os.Getenv("CR_FED_AUTH_FILE")
+	// CR_FED_SELF_KEY_FILE (CR-CHAT-024): path of this relay's own hex
+	// ed25519 seed, used to sign outbound forwards (mutual auth).
+	cfg.Federation.SelfKeyFile = os.Getenv("CR_FED_SELF_KEY_FILE")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

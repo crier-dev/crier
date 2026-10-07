@@ -196,6 +196,24 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// request context for the handler log lines (DF-CRIER-141).
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Auth(cfg.AuthToken))
+	// Federation peer authentication (CR-CHAT-024): when CR_FED_AUTH_FILE is
+	// set, requests that announce a peer identity (X-Crier-Fed-Peer) must
+	// prove it with a valid X-Fed-Ts/X-Fed-Sig signature over the request
+	// transcript; a revoked peer is refused 403 before its signature is
+	// even checked. Requests without the announcement — all local agent
+	// traffic, and every deployment without the env var — pass untouched.
+	var fedPeerAuth *federation.PeerAuth
+	if cfg.Federation.AuthFile != "" {
+		pa, err := federation.LoadPeerAuthFile(cfg.Federation.AuthFile)
+		if err != nil {
+			slog.Error("load federation peer auth file", "error", err)
+			return 1
+		}
+		fedPeerAuth = pa
+		r.Use(pa.Middleware)
+		slog.Info("federation peer auth", "file", cfg.Federation.AuthFile)
+	}
+	_ = fedPeerAuth
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 
@@ -501,6 +519,19 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	}
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
+		// Mutual auth (CR-CHAT-024): sign every outbound forward when
+		// CR_FED_SELF_KEY_FILE is set, so a destination running the peer
+		// auth gate proves this relay's identity. A missing/invalid key
+		// file is a startup failure, not a silent unsigned mode.
+		if cfg.Federation.SelfKeyFile != "" {
+			key, err := registry.LoadEd25519PrivateKeyFile(cfg.Federation.SelfKeyFile)
+			if err != nil {
+				slog.Error("load federation self key", "error", err)
+				return 1
+			}
+			fedClient.SetSelfKey(key)
+			slog.Info("federation outbound signing", "key_file", cfg.Federation.SelfKeyFile)
+		}
 
 		queueMode := "memory (process-lifetime)"
 		var holdQueue federation.HoldQueue

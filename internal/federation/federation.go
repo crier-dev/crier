@@ -3,6 +3,7 @@ package federation
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,10 +169,20 @@ type Client struct {
 	// reported to the caller synchronously (HTTP 502 FEDERATION_FAILED)
 	// instead of being held.
 	hold *HoldManager
+	// selfKey, when non-nil, is this relay's ed25519 private key
+	// (CR_FED_SELF_KEY_FILE, CR-CHAT-024): every forward is signed with the
+	// X-Fed-Ts/X-Fed-Sig headers over FedAuthPayload so the destination can
+	// PROVE this relay's identity instead of trusting the PeerHeader claim.
+	// Nil signs nothing — the shipped unsigned posture.
+	selfKey ed25519.PrivateKey
+	// now, when non-nil, overrides the clock for outbound signature
+	// timestamps (tests). Nil uses time.Now.
+	now func() time.Time
 }
 
 // SetSelf declares this relay's own TCP port so the client can recognise a
-// configured link that addresses the relay itself (DF-CRIER-12). The wire
+// CR_FED_LINKS entry that addresses this relay itself (DF-CRIER-12) and
+// omit it from GET /fed/peers. The wire
 // shape of GET /fed/peers is unchanged; the identity is used only to drop a
 // self-referencing link from the listing (see isSelfLink). A port <= 0
 // leaves the identity unknown, and no link is then classified as self —
@@ -189,6 +200,12 @@ func (c *Client) SetSelf(port int) {
 // manager a transient link outage is surfaced to the caller as an explicit
 // bounded failure rather than held (never as a 404).
 func (c *Client) SetHoldManager(m *HoldManager) { c.hold = m }
+
+// SetSelfKey arms outbound federation request signing (CR-CHAT-024):
+// CR_FED_SELF_KEY_FILE. Every forward then carries X-Fed-Ts/X-Fed-Sig over
+// FedAuthPayload, proving this relay's identity to the destination (mutual
+// auth). Nil (the default) signs nothing — the shipped unsigned posture.
+func (c *Client) SetSelfKey(key ed25519.PrivateKey) { c.selfKey = key }
 
 // SetPeerPolicies attaches the per-peer policy set (CR-CHAT-023, spec §6).
 // A link whose URL names a policy's URL is thereafter governed by that
@@ -416,6 +433,17 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	req.Header.Set(HopHeader, "1")
 	if p := c.policyForLink(link); p != nil && p.SelfAs != "" {
 		req.Header.Set(PeerHeader, p.SelfAs)
+	}
+	// CR-CHAT-024: when this relay holds a self identity key, EVERY forward
+	// is signed over FedAuthPayload — mutual auth. A destination running
+	// the peer-auth gate proves the announced identity instead of trusting
+	// the claim; a destination without the gate ignores the extra headers.
+	if c.selfKey != nil {
+		clock := c.now
+		if clock == nil {
+			clock = time.Now
+		}
+		SignFedRequest(req, c.selfKey, clock())
 	}
 	c.authorize(req)
 
