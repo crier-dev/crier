@@ -106,6 +106,12 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	// CR-CHAT-028: compile (merge) and the per-part expand.
 	r.HandleFunc("/sessions/{id}/compile", h.HandleCompile).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", h.HandleExpandCompiledMessage).Methods(http.MethodGet)
+	// CR-CHAT-017: thread navigability — depth collapse, timeline, summary,
+	// and search that returns a location path.
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}", h.HandleThreadRead).Methods(http.MethodGet)
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}/timeline", h.HandleThreadTimeline).Methods(http.MethodGet)
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}/summary", h.HandleThreadSummary).Methods(http.MethodGet)
+	r.HandleFunc("/sessions/{id}/search", h.HandleSessionSearch).Methods(http.MethodGet)
 }
 
 func (h *apiHarness) do(t *testing.T, method, path string, body any, out any, headers map[string]string) int {

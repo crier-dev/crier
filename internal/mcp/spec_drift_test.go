@@ -138,6 +138,13 @@ var excludedOperations = map[string]string{
 	"addSessionParticipant":   "POST /sessions/{id}/participants — \"Add a participant to a session\" (CR-CHAT-019): same transport gap as listSessionParticipants. Reclassify when the bridge grows session support.",
 	"compileSessionMessages":  "POST /sessions/{id}/compile — \"Compile (merge) messages into ONE cited context bundle\" (CR-CHAT-028): the merge resolves sources across sessions and fans the result out through the session membership, all of it served by internal/session, which the crier-mcp bridge's RemoteStore does not extend, so no bridge tool could execute it. Reclassify when the bridge grows session support.",
 	"expandCompiledMessage":   "GET /sessions/{id}/messages/{mid}/expand — \"Resolve a compiled message's citations back to their originals\" (CR-CHAT-028): the resolution reads a compiled message out of a session transcript and re-resolves each part against its source session, again internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	// CR-CHAT-017 — the thread navigability surface. All four reads live in
+	// internal/session (thread tree, timeline, summary, search) which
+	// RemoteStore does not expose, so the bridge has no tool for them.
+	"readThreadWithDepth":   "GET /sessions/{id}/threads/{thread_id} — \"Read a thread with depth collapse\" (CR-CHAT-017): the thread tree is internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"readThreadTimeline":    "GET /sessions/{id}/threads/{thread_id}/timeline — \"Read a thread's branch timeline\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
+	"readThreadSummary":     "GET /sessions/{id}/threads/{thread_id}/summary — \"Read a thread's generated summary\" (CR-CHAT-017): same transport gap as readThreadWithDepth. Reclassify when the bridge grows session support.",
+	"searchSessionMessages": "GET /sessions/{id}/search — \"Search a session's transcript (hits carry their location)\" (CR-CHAT-017): the transcript search runs over internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	// CR-CHAT-016 — the late-join context-share surface. Both routes read and
 	// write internal/session share state (chat_context_shares) that RemoteStore
 	// does not expose, so the bridge has no tool for them yet.

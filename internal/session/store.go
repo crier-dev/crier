@@ -315,6 +315,11 @@ type Repository interface {
 	AddMember(ctx context.Context, m *Member, seq int64, share *ContextShare) error
 	// PostMessage appends a message record — a thread root or a reply (§5.1).
 	PostMessage(ctx context.Context, m *Message) error
+	// Branch appends a session.thread.branch record — the ONE record that
+	// creates a new thread_id (§4.5 rule 2, §5.1). CR-CHAT-017's sub-thread
+	// spawn composes it; the parent thread is left untouched apart from the
+	// anchor the record names.
+	Branch(ctx context.Context, t *Thread, seq int64, reason string) error
 }
 
 // Record builders. One per log type, so a caller composes the §5.1 line

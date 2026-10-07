@@ -652,6 +652,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// rides the SAME fan-out path (no second delivery path).
 	r.HandleFunc("/sessions/{id}/compile", sessHandler.HandleCompile).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages/{mid}/expand", sessHandler.HandleExpandCompiledMessage).Methods("GET")
+	// Thread navigability (CR-CHAT-017): the depth-collapse thread read, the
+	// timeline rail and the per-thread generated summary, plus search that
+	// returns a full LOCATION path per hit.
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}", sessHandler.HandleThreadRead).Methods("GET")
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}/timeline", sessHandler.HandleThreadTimeline).Methods("GET")
+	r.HandleFunc("/sessions/{id}/threads/{thread_id}/summary", sessHandler.HandleThreadSummary).Methods("GET")
+	r.HandleFunc("/sessions/{id}/search", sessHandler.HandleSessionSearch).Methods("GET")
 	// Named groups (CR-CHAT-013, D8): a curated roster addressed as @team:x
 	// that ONE message fans out to — every current member, through the same
 	// shipped fan-out path (no second delivery path). Distinct from a

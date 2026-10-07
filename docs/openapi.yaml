@@ -2497,6 +2497,145 @@ paths:
         "404":
           description: "No such session in this realm (SESSION_NOT_FOUND), or no such message (MESSAGE_NOT_FOUND)"
 
+  # ── Thread navigability (CR-CHAT-017) ──
+  # Depth collapse, the timeline rail, the per-thread generated summary and
+  # search that returns a LOCATION (specs/CHAT-INTERFACE.md §3.8.2). The
+  # collapse is a READ shape over the thread tree — records are never
+  # truncated (D11 consequence 5).
+  /sessions/{id}/threads/{thread_id}:
+    get:
+      operationId: readThreadWithDepth
+      tags: [sessions]
+      summary: Read a thread with depth collapse
+      description: |-
+        One thread of a session with its messages and its sub-threads, down to
+        the requested depth. Children at or beyond the depth limit are returned
+        COLLAPSED (`collapsed: true`) as a generated summary card, never
+        dropped — the read folds a branch, it does not hide it.
+
+        `depth` defaults to 3 (CHAT-INTERFACE §3.8.2): the deepest a reader is
+        asked to follow before the interface offers to summarise instead. The
+        collapse is a read shape over the thread tree — the records themselves
+        are never truncated.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: depth
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 3
+          description: The depth limit. Children at or beyond it collapse into summary cards.
+      responses:
+        "200":
+          description: The thread with its on-screen tree and its collapsed branches.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadReadResponse"
+        "400":
+          description: An invalid depth (a negative or non-integer value)
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session (SESSION_NOT_FOUND) or thread (THREAD_NOT_FOUND) in this realm
+
+  /sessions/{id}/threads/{thread_id}/timeline:
+    get:
+      operationId: readThreadTimeline
+      tags: [sessions]
+      summary: Read a thread's branch timeline
+      description: |-
+        The branch structure of the thread AND where the reader currently is
+        (CHAT-INTERFACE §3.8.2): every sub-thread as a rail node carrying its
+        depth, parent and anchor, and the node holding the session's latest
+        message marked `current: true`.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The branch rail with the current position.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadTimelineResponse"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session (SESSION_NOT_FOUND) or thread (THREAD_NOT_FOUND) in this realm
+
+  /sessions/{id}/threads/{thread_id}/summary:
+    get:
+      operationId: readThreadSummary
+      tags: [sessions]
+      summary: Read a thread's generated summary
+      description: |-
+        A GENERATED digest of the thread (CHAT-INTERFACE §3.8.2, D10's index
+        rule): visibly marked `generated`, never a replacement for the record,
+        with the raw messages one read underneath (`raw_messages` names the
+        transcript read that returns them).
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The generated summary card and the link to the raw messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadSummaryResponse"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session (SESSION_NOT_FOUND) or thread (THREAD_NOT_FOUND) in this realm
+
+  /sessions/{id}/search:
+    get:
+      operationId: searchSessionMessages
+      tags: [sessions]
+      summary: Search a session's transcript (hits carry their location)
+      description: |-
+        Search that returns LOCATION, not a fragment (CHAT-INTERFACE §3.8.2):
+        every hit carries `full_path` — `[namespace, channel, thread_id,
+        parent_thread_id?, message_id]`, the parent thread id present only for
+        a sub-thread hit — so a reader can walk to where the hit lives.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+          description: Case-insensitive substring match over payload text, thread ids and message ids.
+      responses:
+        "200":
+          description: The hits, each with its full location path.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSearchResponse"
+        "400":
+          description: "An empty query (QUERY_REQUIRED)"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+
   # ── Dagger control (CR-CHAT-033) ──
   # The OPT-IN control surface over a Hermes-dagger pipeline. crier does NOT
   # embed a second executor (decision D18): every route here is a CLIENT call
@@ -3675,6 +3814,8 @@ components:
         reply_depth:
           type: integer
           description: The parent_id chain length — reply attribution, never depth (D11).
+        spawned_thread:
+          $ref: "#/components/schemas/SpawnedThread"
     SessionTranscript:
       type: object
       required: [session, messages, count]
@@ -3704,6 +3845,260 @@ components:
                 type: string
               detail:
                 type: string
+    SpawnedThread:
+      type: object
+      required: [thread_id, parent_thread_id, anchor_message_id, root_message_id, depth, reason, non_member_addressees]
+      description: |-
+        The sub-thread a send SPAWNED (CR-CHAT-017, §4.5 rule 2): the message
+        addressed a non-participant agent, so it branched into a child thread.
+        Present only on the send that did the spawning.
+      properties:
+        thread_id:
+          type: string
+          description: The child thread's id — the branching message's own id (§4.3).
+        parent_thread_id:
+          type: string
+          description: The thread the reply was headed for before it branched.
+        anchor_message_id:
+          type: string
+          description: The message the branch hangs from (the parent_id the branching message carried).
+        root_message_id:
+          type: string
+        depth:
+          type: integer
+          description: The child's level in the thread tree (parent depth + 1).
+        reason:
+          type: string
+        non_member_addressees:
+          type: array
+          description: The addressed agents that were not session participants.
+          items:
+            type: string
+    ThreadSummaryCard:
+      type: object
+      required: [thread_id, depth, message_count, participant_count, sub_thread_count, first_seq, last_seq, last_at, preview, generated]
+      description: A GENERATED index over one thread (§4.7 rule 2) — never a replacement for the record.
+      properties:
+        thread_id:
+          type: string
+        parent_thread_id:
+          type: string
+        anchor_message_id:
+          type: string
+        depth:
+          type: integer
+          description: The thread's level in the thread tree.
+        message_count:
+          type: integer
+        participant_count:
+          type: integer
+          description: Distinct agent authors in the thread.
+        sub_thread_count:
+          type: integer
+        first_seq:
+          type: integer
+          format: int64
+        last_seq:
+          type: integer
+          format: int64
+        last_at:
+          type: string
+          format: date-time
+        preview:
+          type: string
+          description: The last message's text, truncated for display.
+        generated:
+          type: boolean
+          description: Always true — the summary is generated, visibly marked as such.
+    CollapsedBranch:
+      type: object
+      required: [thread_id, depth, collapsed, summary]
+      description: A branch at or beyond the depth limit, folded into a summary card (§3.8.2) — never dropped, never rendered on-screen.
+      properties:
+        thread_id:
+          type: string
+        depth:
+          type: integer
+        collapsed:
+          type: boolean
+          description: Always true on a collapsed card.
+        summary:
+          $ref: "#/components/schemas/ThreadSummaryCard"
+    ThreadReadResponse:
+      type: object
+      required: [session_id, thread, depth, depth_limit, messages]
+      properties:
+        session_id:
+          type: string
+        thread:
+          $ref: "#/components/schemas/Thread"
+        depth:
+          type: integer
+          description: The thread's own level in the tree.
+        depth_limit:
+          type: integer
+          description: The effective depth limit (the requested depth, or the default 3).
+        messages:
+          type: array
+          description: The thread's own messages in seq order.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              thread_id:
+                type: string
+              parent_id:
+                type: string
+              seq:
+                type: integer
+                format: int64
+              message_kind:
+                type: string
+              author:
+                type: object
+              created_at:
+                type: string
+                format: date-time
+        branches:
+          type: array
+          description: Sub-threads ON-SCREEN (below the depth limit), recursively.
+          items:
+            type: object
+            properties:
+              thread:
+                $ref: "#/components/schemas/Thread"
+              depth:
+                type: integer
+              messages:
+                type: array
+                items:
+                  type: object
+              branches:
+                type: array
+                items: { type: object }
+              collapsed:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollapsedBranch"
+        collapsed:
+          type: array
+          description: The child branches folded into summary cards.
+          items:
+            $ref: "#/components/schemas/CollapsedBranch"
+    Thread:
+      type: object
+      required: [id, session_id, root_message_id, created_by, created_at]
+      properties:
+        id:
+          type: string
+          description: The thread key — the root message's id (§4.3).
+        session_id:
+          type: string
+        parent_thread_id:
+          type: string
+          description: Present on a sub-thread — the thread this one branched from.
+        root_message_id:
+          type: string
+        anchor_message_id:
+          type: string
+          description: Present on a sub-thread — the message the branch hangs from (§4.5).
+        created_by:
+          type: object
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+    ThreadTimelineResponse:
+      type: object
+      required: [session_id, thread_id, current, nodes]
+      properties:
+        session_id:
+          type: string
+        thread_id:
+          type: string
+        current:
+          type: string
+          description: The thread holding the session's latest message — the rail's marked position.
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              thread_id:
+                type: string
+              parent_thread_id:
+                type: string
+              anchor_message_id:
+                type: string
+              depth:
+                type: integer
+              root_message_id:
+                type: string
+              message_count:
+                type: integer
+              last_seq:
+                type: integer
+                format: int64
+              current:
+                type: boolean
+              children:
+                type: array
+                items: { type: object }
+    ThreadSummaryResponse:
+      type: object
+      required: [thread_id, summary, raw_messages, generated]
+      properties:
+        thread_id:
+          type: string
+        summary:
+          $ref: "#/components/schemas/ThreadSummaryCard"
+        raw_messages:
+          type: string
+          description: The transcript read that returns the raw messages this summary indexes (§4.7 rule 2).
+        generated:
+          type: boolean
+          description: Always true.
+    SessionSearchResponse:
+      type: object
+      required: [session_id, query, count, hits]
+      properties:
+        session_id:
+          type: string
+        query:
+          type: string
+        count:
+          type: integer
+        hits:
+          type: array
+          items:
+            type: object
+            required: [message_id, thread_id, seq, snippet, full_path]
+            properties:
+              message_id:
+                type: string
+              thread_id:
+                type: string
+              seq:
+                type: integer
+                format: int64
+              author:
+                type: string
+              snippet:
+                type: string
+              full_path:
+                type: array
+                description: "[namespace, channel, thread_id, parent_thread_id?, message_id] — the location of the hit (§3.8.2)."
+                items:
+                  type: string
     PostSessionMessageRequest:
       type: object
       required: [payload]
