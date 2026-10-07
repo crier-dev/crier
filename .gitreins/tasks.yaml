@@ -2688,3 +2688,12 @@ tasks:
   status: complete
   created_at: '2026-10-06T21:57:07.047669+00:00'
   completed_at: '2026-10-07T00:17:58.324005+00:00'
+- id: cr-chat-017-subthread-spawn
+  title: Sub-thread spawn decision + branch API (CR-CHAT-017)
+  criteria:
+  - internal/chat has NonMemberAddressees + BranchRecord/Validate per D11; internal/session
+    persists branch records and serves branch routes; 4 new paths in docs/openapi.yaml;
+    README+claims.yaml counts moved to 37/46/39; full guard PASS
+  status: complete
+  created_at: '2026-10-07T02:01:38.602387+00:00'
+  completed_at: '2026-10-07T02:01:39.356908+00:00'
