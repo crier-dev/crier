@@ -89,6 +89,28 @@ func newAPIHarness(t *testing.T, store Repository) *apiHarness {
 	return &apiHarness{srv: srv, reg: reg}
 }
 
+// newAPIHarnessWithGrants is newAPIHarness with the CR-CHAT-021 grant bridge
+// wired: the reads overlay the given grants on the session subject.
+func newAPIHarnessWithGrants(t *testing.T, store Repository, grants []PermissionsGrantView) *apiHarness {
+	t.Helper()
+	reg := registry.NewMemoryStore()
+	for _, id := range []string{"atlas", "nimbus"} {
+		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
+	}
+	h := NewHTTPHandler(store, HTTPOptions{
+		Deliverer: reg,
+		Agents:    reg,
+		GrantEvents: func(_ context.Context, sessionID string) ([]PermissionsGrantView, error) {
+			return grants, nil
+		},
+	})
+	r := mux.NewRouter()
+	registerSessionRoutes(r, h)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+	return &apiHarness{srv: srv, reg: reg}
+}
+
 // registerSessionRoutes wires the session API surface on r: every route the
 // handler serves, so a harness drives the REAL surface rather than a
 // hand-built subset (a route built but never registered fails in the wiring
@@ -112,6 +134,8 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/timeline", h.HandleThreadTimeline).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/threads/{thread_id}/summary", h.HandleThreadSummary).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/search", h.HandleSessionSearch).Methods(http.MethodGet)
+	// CR-CHAT-021: the audit trail, permission matrix and role badges.
+	RegisterAuditRoutes(r, h)
 }
 
 func (h *apiHarness) do(t *testing.T, method, path string, body any, out any, headers map[string]string) int {

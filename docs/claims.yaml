@@ -377,9 +377,12 @@ claims:
     # four operations: POST+GET /groups, GET /groups/{name},
     # PATCH /groups/{name}/members), so the pair was 33 / 42. CR-CHAT-017
     # added the four sub-thread paths (branch, branch-by-message, sub-thread
-    # messages, sub-thread timeline — four operations), so the pair is 37 / 46.
+    # messages, sub-thread timeline — four operations), so the pair was
+    # 37 / 46. CR-CHAT-021 added the three audit/permission read paths
+    # (/sessions/{id}/audit, /sessions/{id}/permissions, /sessions/{id}/roles
+    # — one operation each), so the pair is 40 / 49.
     quote: "docs/openapi.yaml"
-    expect: 37
+    expect: 40
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -398,9 +401,11 @@ claims:
     # compile operation and the per-part expand operation (29 / 36);
     # CR-CHAT-013 added the four named-group operations — POST/GET /groups,
     # GET /groups/{name} and PATCH /groups/{name}/members (33 / 42).
-    # CR-CHAT-017 added the four sub-thread operations (37 / 46).
-    quote: "46 operations"
-    expect: 46
+    # CR-CHAT-017 added the four sub-thread operations (37 / 46). CR-CHAT-021
+    # added the three audit/permission read operations — GET /sessions/{id}/audit,
+    # GET /sessions/{id}/permissions, GET /sessions/{id}/roles (40 / 49).
+    quote: "49 operations"
+    expect: 49
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count

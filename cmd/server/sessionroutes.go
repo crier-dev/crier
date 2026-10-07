@@ -38,6 +38,7 @@ func openSessionAPI(
 	registryStore registry.Store,
 	namespaces *namespace.Registry,
 	perms *permissions.Checker,
+	grantEvents func(context.Context, string) ([]session.PermissionsGrantView, error),
 ) (session.Store, *session.Handler, error) {
 	sessStore, err := session.OpenStore(context.Background(), cfg.ResolvedSessionBackend(), session.StoreOptions{
 		SQLitePath:  cfg.Session.SQLitePath,
@@ -64,6 +65,7 @@ func openSessionAPI(
 		Namespaces:  namespaces,
 		Permissions: perms,
 		Groups:      groupStore,
+		GrantEvents: grantEvents,
 	})
 	return sessStore, h, nil
 }
