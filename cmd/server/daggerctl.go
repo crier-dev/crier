@@ -23,7 +23,7 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 )
 
-// registerDaggerRoutes builds the control service and registers its six routes.
+// registerDaggerRoutes builds the control service and registers its routes.
 // It returns (nil, nil) when the surface is switched off — no bridge, no store,
 // no routes — and never a half-wired surface: a bad CR_DAGGER_URL or an
 // unusable store directory is an error the caller turns into a boot failure.
@@ -36,13 +36,16 @@ import (
 //	POST /dagger/runs/{id}/resume       resume a run from its checkpoint
 //	POST /dagger/runs/{id}/rewind       rewind a run to a node
 //	POST /dagger/skills/{skill}/run     run a registered skill
+//	POST /dagger/wait                   deliver to an agent and wait (CR-CHAT-034)
+//	POST /dagger/waits/{key}/resolve    record a reply on a wait (CR-CHAT-034)
+//	GET  /dagger/waits/{key}            read a wait's state (CR-CHAT-034)
 //
 // Everything is additive: no existing route, body or auth requirement moves,
 // and the terminal outcome travels the SHIPPED inbox path (registry Deliver)
 // rather than a side channel.
-func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry.Store) (*daggerctl.Service, error) {
+func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry.Store) (*daggerctl.Service, *registry.Handler, error) {
 	if cfg.URL == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	opts := []daggerctl.HTTPBridgeOption{daggerctl.WithBearerToken(cfg.Token)}
@@ -51,16 +54,29 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 	}
 	bridge, err := daggerctl.NewHTTPBridge(cfg.URL, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("dagger control: %w", err)
+		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	runStore, err := daggerctl.NewJSONLStore(cfg.StoreDir)
 	if err != nil {
-		return nil, fmt.Errorf("dagger control: %w", err)
+		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	svc := daggerctl.NewService(bridge, runStore, daggerctl.InboxDeliverer(store))
 	svc.SetWatchInterval(cfg.PollInterval)
+
+	// Delivery waits (CR-CHAT-034): the waiter registry journals beside the
+	// run records so an idempotency key recorded before a crash still refuses
+	// a second delivery after a restart. The waits deliver through the SAME
+	// store the notifications use. A registry that cannot open fails the boot
+	// — a wait surface that silently lost its journal would be a second
+	// delivery waiting to happen.
+	waits, err := daggerctl.NewWaiterRegistry(cfg.StoreDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dagger control: %w", err)
+	}
+	svc.SetWaitRegistry(waits)
+	svc.SetInboxStore(store)
 
 	// Named remote execution targets (CR-CHAT-035): the local bridge above is
 	// the default target, and each CR_DAGGER_TARGET_<NAME>=<url> adds a named
@@ -70,7 +86,7 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 	// as a bad CR_DAGGER_URL does.
 	targets, err := daggerctl.NewTargetTable(cfg.URL, cfg.Targets)
 	if err != nil {
-		return nil, fmt.Errorf("dagger control: %w", err)
+		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 	svc.SetTargetTable(targets)
 
@@ -81,5 +97,9 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 	r.HandleFunc("/dagger/runs/{id}/resume", h.HandleResume).Methods(http.MethodPost)
 	r.HandleFunc("/dagger/runs/{id}/rewind", h.HandleRewind).Methods(http.MethodPost)
 	r.HandleFunc("/dagger/skills/{skill}/run", h.HandleRunSkill).Methods(http.MethodPost)
-	return svc, nil
+	// Delivery waits (CR-CHAT-034): deliver-and-wait, resolve, and status.
+	r.HandleFunc("/dagger/wait", h.HandleDeliverAndWait).Methods(http.MethodPost)
+	r.HandleFunc("/dagger/waits/{key}/resolve", h.HandleResolveWait).Methods(http.MethodPost)
+	r.HandleFunc("/dagger/waits/{key}", h.HandleWaitStatus).Methods(http.MethodGet)
+	return svc, nil, nil
 }

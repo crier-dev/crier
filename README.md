@@ -1736,12 +1736,14 @@ All configuration is via environment variables (defaults shown):
 | `CR_GROUP_ROOT` | `crier-groups` | Directory of the **named-group roster log** (CR-CHAT-013): `<dir>/groups.jsonl`, an append-only JSONL log reduced keep-LAST per group name — the curated rosters addressed as `@team:<name>`. A directory the process cannot create **fails the boot** rather than silently serving a surface with no groups. |
 | `CR_PERMISSIONS_ENABLED` | `false` | Opt-in: the **delivery ACL** (CR-CHAT-003, [`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6). Default off — with the flag unset no checker is wired and every delivery is authorized exactly as it shipped: the bus is trust-by-reach and a delivery carries only the deployment token. When ON, a delivery to a **classed** agent target is **default-deny**: an effective sender holding no live grant, no ownership rule (§3.2) and no scope reach is refused `403 DELIVERY_FORBIDDEN` with a machine-readable `reason` (`NO_GRANT`, `NO_BINDING`, or `principal: anonymous`). The refusal covers both surfaces §6.4 names — `POST /agents/{id}/inbox` (action `send`) and `POST /capabilities/{capability}/inbox` (action `invoke`), the pool address being checked **before** holder selection so a refused pool delivery consumes no rotation turn. An **unclassed** agent row is unchanged either way (§8.1), so arming the ACL against an existing fleet is a no-op. |
 | `CR_PERMISSIONS_DIR` | `/var/lib/crier/permissions` when enabled, otherwise unset | Directory of the delivery ACL's append-only JSONL store (`<dir>/permissions.jsonl`): principals, bindings, grants and agent-class records, folded keep-LAST per id (§6.6 tombstones are retained). An enabled ACL whose directory cannot be created **fails the boot** rather than silently serving the trust-by-reach posture while claiming the ACL is armed. See [Delivery ACL](#delivery-acl--principals-roles-and-grants-cr-chat-003). |
-| `CR_DAGGER_URL` | _(unset — no dagger route)_ | Opt-in: base URL of the **dagger HTTP/JSON surface** a DAG runs on (CR-CHAT-033). With it unset the six dagger control routes are **not registered at all** and answer the router's JSON 404, so a deployment that does not control DAGs serves exactly the surface it served before this feature existed. crier is a **client** of that surface, never a second executor (decision D18): it creates the run, records the run id the executor returns, and holds references to the run's evidence — nothing else. See [Dagger control](#dagger-control--create-observe-cancel-resume-rewind-cr-chat-033). |
+| `CR_DAGGER_URL` | _(unset — no dagger route)_ | Opt-in: base URL of the **dagger HTTP/JSON surface** a DAG runs on (CR-CHAT-033). With it unset the nine dagger control routes (six control + three delivery-wait) are **not registered at all** and answer the router's JSON 404, so a deployment that does not control DAGs serves exactly the surface it served before this feature existed. crier is a **client** of that surface, never a second executor (decision D18): it creates the run, records the run id the executor returns, and holds references to the run's evidence — nothing else. See [Dagger control](#dagger-control--create-observe-cancel-resume-rewind-cr-chat-033). |
 | `CR_DAGGER_TOKEN` | _(unset — no Authorization header)_ | Optional bearer token presented to the dagger surface. Never logged. |
 | `CR_DAGGER_STORE_DIR` | `/var/lib/crier/dagger` when `CR_DAGGER_URL` is set, otherwise unset | Directory of the dagger run-record log (`<dir>/runs.jsonl`), an append-only JSONL file reduced keep-LAST per run id. A directory the process cannot create **fails the boot** rather than silently losing run records on the next restart. |
 | `CR_DAGGER_POLL_S` | `5` when `CR_DAGGER_URL` is set | Seconds between the watcher's re-observations of a live run. The watcher is how a DAG that finishes on its own still reaches its requester without the requester polling; it only ever READS the executor. An explicit `0` disables it (the run is then observed only when someone asks). A negative or non-integer value is a startup error. |
 | `CR_DAGGER_TIMEOUT_S` | `30` (the client's own default) | Per-request budget, in seconds, for one call to the dagger surface. An explicit `0` selects that built-in default. |
 | `CR_DAGGER_TARGET_<NAME>` | _(unset — no named remote targets)_ | Named **remote execution targets** (CR-CHAT-035): each variable of the form `CR_DAGGER_TARGET_<NAME>=<url>` adds one — e.g. `CR_DAGGER_TARGET_BUNKER_1=http://bunker.local:8765`. A run created with `"target":"<name>"` (case-insensitive) is sent to that URL, and the resolved name is **recorded on the run at create time and never re-resolved**. Absent/empty target on a create = the local target (`CR_DAGGER_URL` itself, recorded as `local`). A create naming a target the table does not hold is refused (`unknown dagger execution target`) before any bridge is touched. Evidence stays opaque string references regardless of target — no bytes ever cross the bus. |
+| `CR_DAGGER_TRIGGER_ON_TASK` | _(unset — no task trigger)_ | Opt-in **task-created DAG trigger** (CR-CHAT-034): the DAG **prompt** fired once through the bridge every time a crier TASK is created — the task's payload is appended to it as data (the prompt names WHAT the pipeline does; the payload is what it works on). Requires `CR_DAGGER_URL`. Every fire — and every named failure — is recorded in `<CR_DAGGER_STORE_DIR>/triggers.jsonl`, and a firing failure **never fails the task creation**. |
+| `CR_DAGGER_TRIGGER_AGENT` | _(unset — the task's author)_ | Optional agent whose inbox a triggered run's terminal outcome is delivered to (CR-CHAT-034). Only read when `CR_DAGGER_TRIGGER_ON_TASK` is set. |
 
 ### Delivery ACL — principals, roles and grants (CR-CHAT-003)
 
@@ -1866,6 +1868,39 @@ record as `notify_error`.
   `run_skill` (see [MCP tools](#mcp-tools)); each drives the run records on the
   server, so a run started inside a thread is visible in that thread.
 
+**Deliver-and-wait for DAG nodes (CR-CHAT-034).** A DAG node on the executor
+often needs an agent's answer before the next node can run. Crier owns the
+inbox that work arrives in, so it is the component that can honestly hold the
+node's request and resolve it:
+
+- `POST /dagger/wait` delivers a payload to an agent's durable inbox — through
+  the SAME store write every delivery uses, never a second path — and blocks,
+  bounded (1–120 s, refused outside that range, never clamped), until the agent
+  **acks** the delivered message through the ordinary inbox ack, or **replies**
+  through `POST /dagger/waits/{key}/resolve`. The resolution carries the
+  message id and the agent's verbatim reply, so the next node can consume it.
+- **Idempotency is durable.** The idempotency key is recorded BEFORE the first
+  delivery, in an append-only journal (`<CR_DAGGER_STORE_DIR>/waits.jsonl`)
+  replayed on boot. A retried or resumed call with the SAME key — including
+  one made after a crash and restart — joins the SAME wait and delivers
+  NOTHING new: an agent is never asked to do the same work twice.
+- **Named outcomes, never silences.** An expired budget answers `504
+  DELIVERY_WAIT_TIMEOUT` (the delivered work REMAINS in the agent's inbox); a
+  run cancelled while its waits are parked releases them with `409
+  WAIT_CANCELLED` — an agent is not left working on a node nobody awaits.
+  `GET /dagger/waits/{key}` reads a wait's state (`pending`, `resolved`,
+  `cancelled`, `abandoned`) without blocking.
+
+**Task-created DAG triggers (CR-CHAT-034, outbound).** With
+`CR_DAGGER_TRIGGER_ON_TASK=<prompt>` set (and the dagger surface on), every
+created crier TASK fires **one** `CreateRun` through the existing bridge — the
+configured prompt plus the task's payload as data. The run is recorded like any
+other and its terminal outcome lands in the requesting agent's inbox. Every
+fire, and every named failure (`bridge` / `unconfigured`), is recorded in
+`<CR_DAGGER_STORE_DIR>/triggers.jsonl` — and a firing failure **never fails the
+task creation**: the task is the user's intent and already succeeded; the
+trigger is automation layered on it.
+
 ### Durable backend (PostgreSQL)
 
 This is the backend [Run](#run) documents: its two commands are the
@@ -1903,11 +1938,11 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **45 paths** and **54 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **48 paths** and **57 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 45 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 54 operations
+grep -c '^  /' docs/openapi.yaml                                    # 48 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 57 operations
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 45 router paths
 ```
 
@@ -1927,7 +1962,7 @@ The router registers **35 paths in `cmd/server/main.go`**: those 18 API paths pl
 | **Ownership** | `POST /agents/{id}/inbox/transfer`, `GET /agents/{id}/inbox/dead-letters` | Rebalance a stuck lease; read the messages that expired unacknowledged (CR-FEAT-025) |
 | **Capability delivery** | `POST /capabilities/{capability}/inbox` | Deliver to a capability — round-robin over its live holders (CR-FEAT-026) |
 | **Namespaces** | `GET /namespaces` | The realm policies this server enforces, with a live per-realm agent census (CR-FEAT-029) |
-| **Dagger control** (opt-in) | `POST /dagger/runs`, `GET /dagger/runs/{id}`, `POST /dagger/runs/{id}/cancel`, `POST /dagger/runs/{id}/resume`, `POST /dagger/runs/{id}/rewind`, `POST /dagger/skills/{skill}/run` | Create, observe, cancel, resume, rewind and run a registered skill on a Dagger pipeline (CR-CHAT-033, `CR_DAGGER_URL`) — crier is a CLIENT of the dagger surface, never a second executor |
+| **Dagger control** (opt-in) | `POST /dagger/runs`, `GET /dagger/runs/{id}`, `POST /dagger/runs/{id}/cancel`, `POST /dagger/runs/{id}/resume`, `POST /dagger/runs/{id}/rewind`, `POST /dagger/skills/{skill}/run`, `POST /dagger/wait`, `POST /dagger/waits/{key}/resolve`, `GET /dagger/waits/{key}` | Create, observe, cancel, resume, rewind and run a registered skill on a Dagger pipeline (CR-CHAT-033, `CR_DAGGER_URL`) — crier is a CLIENT of the dagger surface, never a second executor — plus deliver-and-wait for DAG nodes with journaled idempotent waits (CR-CHAT-034) |
 
 ### Runtime posture — `GET /status`
 
@@ -2011,7 +2046,7 @@ All core primitives are implemented and tested:
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
-- **API** — 45 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 40 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the dual-output read of CR-CHAT-031) plus the 5 opt-in detection routes — documented as 45 paths / 54 operations in `docs/openapi.yaml` (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 6 further opt-in dagger control routes are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
+- **API** — 45 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 40 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the dual-output read of CR-CHAT-031) plus the 5 opt-in detection routes — documented as 48 paths / 57 operations in `docs/openapi.yaml` (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

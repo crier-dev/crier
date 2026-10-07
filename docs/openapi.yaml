@@ -3298,6 +3298,141 @@ paths:
           description: The dagger surface refused the skill run.
         "503":
           description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/wait:
+    post:
+      operationId: daggerDeliverAndWait
+      tags: [dagger]
+      summary: Deliver to an agent and wait, bounded
+      description: |-
+        Deliver a payload to an agent's durable inbox — through the SHIPPED
+        delivery path, the same store write every delivery uses — and BLOCK,
+        bounded, until the agent acks the delivered message (the ordinary
+        inbox ack) or posts a reply to the wait's resolve endpoint. The next
+        DAG node can then consume the resolution.
+
+        The idempotency key is recorded BEFORE the first delivery and is
+        journaled: a retried or resumed call with the SAME key — including
+        one made after a server restart, recovered by replaying the journal
+        — joins the SAME wait WITHOUT re-delivering, so an agent is never
+        asked to do the same work twice.
+
+        The budget is bounded on both ends: an absent, zero, negative or
+        absurd `timeout_seconds` is refused, never clamped. A budget that
+        expires is the NAMED error `DELIVERY_WAIT_TIMEOUT` (504), never a
+        silent 200. A run cancelled while its waits are parked releases them
+        with the named error `WAIT_CANCELLED` (409).
+
+        The three wait routes exist ONLY while CR_DAGGER_URL is set, with the
+        rest of the control surface.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id, payload, idempotency_key, timeout_seconds]
+              properties:
+                agent_id:
+                  type: string
+                  description: The agent whose durable inbox the payload is delivered to.
+                payload:
+                  description: The work the DAG node hands the agent, delivered verbatim.
+                idempotency_key:
+                  type: string
+                  maxLength: 128
+                  description: The wait's identity. One key = at most one delivery, across retries and restarts.
+                timeout_seconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 120
+                  description: How long the request may block, in seconds. Unbounded waits are refused, never clamped.
+                run_id:
+                  type: string
+                  description: Optional run the wait belongs to; cancelling that run releases the wait with WAIT_CANCELLED.
+      responses:
+        "200":
+          description: The wait resolved — the agent acked or replied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerWaitResult"
+        "400":
+          description: "`invalid dagger request` — a missing field, or an unbounded/absurd `timeout_seconds` (refused, never clamped)."
+        "404":
+          description: The target agent does not exist.
+        "409":
+          description: "`WAIT_CANCELLED` — the run the wait belongs to was cancelled and the wait was released."
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+        "504":
+          description: "`DELIVERY_WAIT_TIMEOUT` — the budget expired with neither an ack nor a reply. The delivered work REMAINS in the agent's inbox."
+  /dagger/waits/{key}/resolve:
+    post:
+      operationId: daggerResolveWait
+      tags: [dagger]
+      summary: Record a reply on a wait
+      description: |-
+        The replying agent's endpoint: record the node's output on the wait
+        named by the idempotency key. The wait resolves, every joined caller
+        returns, and the resolution is journaled. Resolving an already-
+        resolved wait returns its recorded state unchanged (a duplicate
+        resolve is a no-op, never an unwinding).
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The idempotency key the wait was created under.
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message_id:
+                  type: string
+                  description: Optional message id the reply answers.
+                reply:
+                  description: The agent's output for the node, stored verbatim.
+      responses:
+        "200":
+          description: The wait's recorded (possibly pre-existing) resolution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerWaitResult"
+        "404":
+          description: No wait is recorded under this key.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /dagger/waits/{key}:
+    get:
+      operationId: daggerWaitStatus
+      tags: [dagger]
+      summary: Read a wait's state without joining it
+      description: |-
+        Read the wait's current state — `pending`, `resolved`, `cancelled` or
+        `abandoned` (a delivery that failed and freed its key) — without
+        blocking.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The idempotency key the wait was created under.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The wait's current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaggerWaitResult"
+        "404":
+          description: No wait is recorded under this key.
+        "503":
+          description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
 
 components:
   parameters:
@@ -3957,6 +4092,30 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    DaggerWaitResult:
+      type: object
+      required: [state]
+      description: |-
+        A delivery wait's state (CR-CHAT-034): what the agent did with the
+        work a DAG node handed it. The same shape is the POST /dagger/wait
+        resolution body and the GET /dagger/waits/{key} read-back.
+      properties:
+        state:
+          type: string
+          enum: [pending, resolved, cancelled, abandoned]
+          description: |-
+            `pending` = the work is delivered and nobody has answered yet;
+            `resolved` = the agent acked or replied; `cancelled` = the run was
+            cancelled and the wait was released; `abandoned` = the delivery
+            itself failed and the idempotency key was freed for a retry. A
+            TIMEOUT is NOT a state — it is the named DELIVERY_WAIT_TIMEOUT
+            error.
+        message_id:
+          type: string
+          description: The delivered message the resolution names. Absent while pending.
+        reply:
+          description: The replying agent's output, verbatim. Absent on an ack resolution and while pending.
 
     # ── Sessions (CR-CHAT-019, specs/CHAT-INTERFACE.md §4) ──
     Session:

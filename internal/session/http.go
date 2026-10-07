@@ -45,6 +45,15 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 )
 
+// SetTaskTrigger installs the optional task-created hook (CR-CHAT-034). Nil
+// (the default) leaves the task path unchanged.
+func (h *Handler) SetTaskTrigger(fn TaskTriggerHook) {
+	h.taskTrigger = fn
+	if fn != nil && h.opts.TaskTrigger == nil {
+		h.opts.TaskTrigger = fn
+	}
+}
+
 // SetPeerPolicies arms the per-peer admission policy set (CR-CHAT-023) after
 // construction, the same setter pattern the registry handler uses.
 func (h *Handler) SetPeerPolicies(pp federation.PeerPolicies) { h.opts.PeerPolicies = pp }
@@ -109,6 +118,11 @@ type HTTPOptions struct {
 	// location the fetch surfaces (CR-CHAT-029). Empty leaves the instance
 	// field absent — "not configured", one spelling.
 	InstanceName string
+	// TaskTrigger is the optional task-created DAG trigger hook
+	// (CR-CHAT-034). Nil (the default) leaves task creation exactly what it
+	// was. It is set by the server wiring (SetTaskTrigger) after the handler
+	// is built, so the session package never imports daggerctl.
+	TaskTrigger TaskTriggerHook
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
@@ -118,6 +132,9 @@ type Handler struct {
 	opts  HTTPOptions
 	now   func() time.Time
 	newID func() (string, error)
+	// taskTrigger is the optional task-created hook (CR-CHAT-034), set by
+	// SetTaskTrigger after construction. Nil fires nothing.
+	taskTrigger TaskTriggerHook
 }
 
 // NewHTTPHandler builds a session API handler over a Repository.

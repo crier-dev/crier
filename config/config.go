@@ -219,6 +219,18 @@ type DaggerConfig struct {
 	// never re-resolved. The LOCAL target (CR_DAGGER_URL itself) is not in
 	// this map — it is the default and is always present when URL is set.
 	Targets map[string]string
+	// TriggerOnTask is CR_DAGGER_TRIGGER_ON_TASK (CR-CHAT-034): the DAG
+	// prompt fired ONCE through the bridge every time a crier TASK is
+	// created — the task's payload is appended to it as data. Empty (the
+	// default) arms no trigger: task creation behaves exactly as before.
+	// The trigger records every fire (and every named failure) beside the
+	// run records and NEVER fails the task creation itself.
+	TriggerOnTask string
+	// TriggerAgent optionally names the agent whose inbox a triggered run's
+	// terminal outcome is delivered to (CR_DAGGER_TRIGGER_AGENT). Empty
+	// delivers to the task's author when the trigger can resolve one, and
+	// otherwise starts a run with no requester.
+	TriggerAgent string
 }
 
 // PermissionsConfig is the delivery-ACL deployment posture (CR-CHAT-003).
@@ -992,6 +1004,11 @@ func Load() (Config, error) {
 	cfg.Dagger.URL = strings.TrimSpace(os.Getenv("CR_DAGGER_URL"))
 	cfg.Dagger.Token = os.Getenv("CR_DAGGER_TOKEN")
 	cfg.Dagger.StoreDir = strings.TrimSpace(os.Getenv("CR_DAGGER_STORE_DIR"))
+	// Task-created DAG trigger (CR-CHAT-034). Opt-in like the surface itself:
+	// an empty value arms nothing, and the trigger only exists when the dagger
+	// surface is configured at all (it fires THROUGH the bridge).
+	cfg.Dagger.TriggerOnTask = strings.TrimSpace(os.Getenv("CR_DAGGER_TRIGGER_ON_TASK"))
+	cfg.Dagger.TriggerAgent = strings.TrimSpace(os.Getenv("CR_DAGGER_TRIGGER_AGENT"))
 	if cfg.Dagger.URL != "" {
 		if cfg.Dagger.StoreDir == "" {
 			cfg.Dagger.StoreDir = defaultDaggerStoreDir

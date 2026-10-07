@@ -178,6 +178,14 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The task is durable and fanned out: the optional dagger DAG trigger
+	// (CR-CHAT-034) fires ONCE, fire-and-forget. The hook owns its own
+	// failure handling — it records and logs, and it NEVER fails the task
+	// the user asked for. A trigger-unarmed deployment (the default, nil)
+	// runs nothing here.
+	if h.taskTrigger != nil {
+		go h.taskTrigger(taskID, sess.ID, string(req.Payload))
+	}
 	writeJSON(w, http.StatusCreated, view)
 }
 

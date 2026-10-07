@@ -19,6 +19,7 @@ import (
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/detect"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
@@ -671,6 +672,9 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	if fedClient != nil {
 		sessHandler.SetFedClient(fedClient)
 	}
+	// The task-created DAG trigger (CR-CHAT-034). It is armed AFTER the
+	// dagger surface itself is built further below (registerDaggerRoutes);
+	// see the SetTaskTriggerArming there.
 	r.HandleFunc("/sessions", sessHandler.HandleListSessions).Methods("GET")
 	r.HandleFunc("/sessions", sessHandler.HandleCreateSession).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandleTranscript).Methods("GET")
@@ -732,12 +736,26 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// shipped inbox path (see cmd/server/daggerctl.go). With the variable
 	// unset registerDaggerRoutes returns (nil, nil) and registers nothing, so
 	// the served surface is unchanged.
-	daggerSvc, err := registerDaggerRoutes(r, cfg.Dagger, regStore)
+	daggerSvc, _, err := registerDaggerRoutes(r, cfg.Dagger, regStore)
 	if err != nil {
 		slog.Error("initialize dagger control", "error", err)
 		return 1
 	}
 	if daggerSvc != nil {
+		// Delivery waits resolve on ack (CR-CHAT-034): a successful inbox ack
+		// of a message a wait delivered resolves that wait. Opt-in like the
+		// rest of the surface — the hook exists only while CR_DAGGER_URL is
+		// set, and the ack path is unchanged without it.
+		registryHandler.SetAckHook(daggerSvc.NotifyAcked)
+		// The task-created DAG trigger (CR-CHAT-034): armed only when
+		// CR_DAGGER_TRIGGER_ON_TASK names a prompt. The hook fires once per
+		// created task, records its own failures beside the run records, and
+		// never fails the task creation.
+		if trigger := daggerctl.NewTaskTrigger(daggerSvc, cfg.Dagger.TriggerOnTask,
+			cfg.Dagger.TriggerAgent, cfg.Dagger.StoreDir); trigger != nil {
+			sessHandler.SetTaskTrigger(trigger.OnTaskCreated)
+			slog.Info("dagger task trigger armed", "agent", cfg.Dagger.TriggerAgent, "store_dir", cfg.Dagger.StoreDir)
+		}
 		// The watcher STOPS when this invocation returns (serve ends,
 		// shutdown completes), so a test server or a restart never leaves a
 		// poller behind. A zero CR_DAGGER_POLL_S disables it entirely; the

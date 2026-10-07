@@ -557,6 +557,34 @@ func seedDaggerProbeRun(t *testing.T, client *http.Client, baseURL string) {
 	}
 }
 
+// seedDaggerWaitProbe seeds one delivery wait under the probe key so the
+// README's documented GET /dagger/waits/{key} token resolves to a live record
+// when the scanned-path pass substitutes the probe id (CR-CHAT-034). The wait
+// is created in PENDING state (no resolution is recorded) with a short budget
+// that has already expired server-side — the record outlives the request.
+func seedDaggerWaitProbe(t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"agent_id":%q,"payload":{"probe":true},"idempotency_key":%q,"timeout_seconds":1}`, docsClaimsProbeAgent, docsClaimsProbeAgent)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/dagger/wait", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("seed dagger wait: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("seed dagger wait: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// 504 DELIVERY_WAIT_TIMEOUT is the expected answer: the wait record is
+	// journaled either way, and the status read-back resolves to a live
+	// pending record.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusGatewayTimeout && resp.StatusCode != http.StatusOK {
+		t.Fatalf("seed dagger wait: status %d, want 504 (or 200 if resolved)", resp.StatusCode)
+	}
+}
+
 // seedProbeChatSession creates one chat session with id docsClaimsProbeAgent
 // (the scanner's {id} placeholder substitution), so README tokens that name
 // session-template paths probe a live record instead of a 404.
@@ -615,6 +643,11 @@ func TestDocsClaims(t *testing.T) {
 	// scanned-path pass probes the template with the probe agent substituted.
 	// The stub executor answers exactly this run id (bootDocsClaimsServer).
 	seedDaggerProbeRun(t, client, baseURL)
+	// CR-CHAT-034: seed one delivery wait under the probe key, so the README's
+	// documented GET /dagger/waits/{key} resolves to a live record (not 404)
+	// when the scanned-path pass probes the template. The key IS the probe
+	// agent id, so the same substitution works.
+	seedDaggerWaitProbe(t, client, baseURL)
 	// CR-CHAT-009: seed one chat session under the probe id, so the README's
 	// documented /sessions/{id}/messages and /sessions/{id}/permissions
 	// resolve to a live record (not 404) when the scanned-path pass probes

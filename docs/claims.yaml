@@ -79,6 +79,12 @@ ignore_paths:
   # (the docs gate boots with CR_DAGGER_URL set) and are covered below.
   - /var/lib/crier/dagger
   - /runs.jsonl
+  # CR-CHAT-034: the README's delivery-wait and task-trigger sections name the
+  # wait journal and the trigger log. Filesystem files, not API routes — the
+  # /dagger/wait* routes they sit beside ARE live routes (the docs gate boots
+  # with CR_DAGGER_URL set).
+  - /waits.jsonl
+  - /triggers.jsonl
   # CR-CHAT-013: the README's CR_GROUP_ROOT env row documents the named-group
   # roster log file. A filesystem path an operator writes, not an API route
   # (the group routes themselves are /groups, /groups/{name},
@@ -386,9 +392,11 @@ claims:
     # /sessions/{id}/tasks and its claim/complete siblings — three
     # operations), so the pair is 44 / 53. CR-CHAT-031 added the dual-output
     # read path (GET /sessions/{id}/output — one operation), so the pair is
-    # 45 / 54.
+    # 45 / 54. CR-CHAT-034 added the three delivery-wait paths (POST
+    # /dagger/wait, POST /dagger/waits/{key}/resolve, GET /dagger/waits/{key}
+    # — three operations), so the pair is 48 / 57.
     quote: "docs/openapi.yaml"
-    expect: 45
+    expect: 48
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -412,10 +420,12 @@ claims:
     # GET /sessions/{id}/permissions, GET /sessions/{id}/roles — and
     # CR-CHAT-029 added the location-addressed fetch operation (41 / 50).
     # CR-CHAT-030 added the three task operations (create, claim, complete),
-    # so the count is 53. CR-CHAT-031 added the dual-output read operation
-    # (GET /sessions/{id}/output), so the count is 54.
-    quote: "54 operations"
-    expect: 54
+    # CR-CHAT-031 added the dual-output read operation
+    # (GET /sessions/{id}/output), so the count is 54. CR-CHAT-034 added the
+    # three delivery-wait operations (deliver-and-wait, resolve, status), so
+    # the count is 57.
+    quote: "57 operations"
+    expect: 57
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count

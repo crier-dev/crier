@@ -1894,6 +1894,13 @@ func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A successful ack is a real fact about delivered messages: any dagger
+	// delivery-and-wait (CR-CHAT-034) parked on one of them resolves now.
+	// Nil (no wait surface wired) is the common no-op.
+	if h.daggerWaits != nil {
+		h.daggerWaits(id, req.MessageIDs)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

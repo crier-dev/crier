@@ -27,6 +27,16 @@ type Service struct {
 	// and records TargetLocal.
 	targets *TargetTable
 
+	// waits is the deliver-and-wait registry (CR-CHAT-034). Nil (the default)
+	// leaves the wait verbs answering the named unconfigured 503.
+	waits *WaiterRegistry
+
+	// inbox is the durable-inbox write a wait delivers through (CR-CHAT-034)
+	// — the same registry.Store.Deliver every delivery uses, adapted by
+	// InboxDeliverer. Nil leaves the wait verbs refusing loudly rather than
+	// inventing a second delivery path.
+	inbox InboxStore
+
 	// interval is the background watch period. Zero disables the watcher (the
 	// default), which is what tests and a status-poll-only deployment want.
 	interval time.Duration
@@ -351,9 +361,16 @@ func (s *Service) applyView(rec *RunRecord, view *RunView) {
 }
 
 // commit notifies on a first terminal observation and persists the version.
+// A run that reaches `cancelled` also releases its delivery waits
+// (CR-CHAT-034): whether the cancellation arrived through the cancel verb or
+// was observed on a status poll, an agent handed work by a cancelled node
+// must not be awaited by a waiter nobody will ever release.
 func (s *Service) commit(ctx context.Context, rec *RunRecord) (*RunRecord, error) {
 	if rec != nil && rec.State.Terminal() && !rec.Notified {
 		s.notify(rec)
+	}
+	if rec != nil && rec.State == StateCancelled {
+		s.releaseCancelledRunWaits(rec.RunID)
 	}
 	if err := s.store.Append(ctx, rec); err != nil {
 		return nil, err

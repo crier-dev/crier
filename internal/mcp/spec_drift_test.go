@@ -102,6 +102,18 @@ var excludedOperations = map[string]string{
 	"relayListTopics":     "GET /relay/topics — \"List active topics\" with subscriber counts; relay operational census, not an agent-messaging verb.",
 	"fedListPeers":        "GET /fed/peers — \"List federation peers (local relay first, then linked relays with their agents)\" (CR-FEAT-006); cross-relay topology for operators, and each link is fetched live from that relay's own GET /agents.",
 	"registryUpdateAgent": "PATCH /agents/{id} — \"Partially update an agent's registration (self-configuration directive, spec §7)\", requiring the per-agent ed25519 signature headers; the crier-mcp bridge has no tool for it yet, so it is uncovered — not an agent-messaging verb; reclassify when the bridge grows a tool for it.",
+	// CR-CHAT-034 — the delivery-wait surface. The deliver-and-wait verb
+	// BLOCKS an HTTP request for up to 120 s and the wait state is held in
+	// the server's own registry; the bridge's stdio tool call has no
+	// long-poll budget of its own and RemoteStore exposes no wait lookup, so
+	// a client-side imitation (deliver, then poll /dagger/waits/{key}) would
+	// be a second, undocumented delivery path — the exact thing the wait's
+	// journaled idempotency exists to prevent. Excluded, not mapped:
+	// reclassify when the bridge grows a long-poll transport.
+	"daggerDeliverAndWait": "POST /dagger/wait — \"Deliver to an agent and wait, bounded\" (CR-CHAT-034): the call parks up to timeout_seconds until the agent acks or replies, and its idempotency is journaled server-side; a stdio tool call cannot hold the budget and a client-side deliver+poll imitation would bypass the journal. Reclassify when the bridge grows a long-poll transport.",
+	"daggerResolveWait":    "POST /dagger/waits/{key}/resolve — \"Record a reply on a wait\" (CR-CHAT-034): the replying AGENT's endpoint over the server's own wait registry; the bridge's RemoteStore exposes no wait surface, so a tool would have nothing to call. Reclassify with the wait tools.",
+	"daggerWaitStatus":     "GET /dagger/waits/{key} — \"Read a wait's state without joining it\" (CR-CHAT-034): reads the server's in-process wait registry, which the bridge's transport does not expose. Reclassify with the wait tools.",
+
 	// CR-FEAT-025 — the ownership surfaces. Both are operator/holder verbs on a
 	// specific inbox, and neither is reachable through the bridge's store today:
 	// crier-mcp runs on a RemoteStore, which implements neither the Transferrer

@@ -174,6 +174,11 @@ type Transferrer interface {
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store
+	// daggerWaits is the optional ack→wait resolution hook (CR-CHAT-034):
+	// after a successful inbox ack, every dagger delivery-and-wait parked on
+	// one of the acked message ids resolves. Nil (the default) keeps the ack
+	// path exactly what it was.
+	daggerWaits AckHook
 	// requireAgentSig enforces per-agent ed25519 request signing on the
 	// agent-owned routes (retrieve/ack/stats/unregister). When false, only
 	// the shared Bearer token is required (legacy behavior).
@@ -287,6 +292,17 @@ func (h *Handler) locationOf(entry *InboxEntry, sessionID string) *Location {
 	}
 	return loc
 }
+
+// AckHook is the optional ack callback a delivery-and-wait surface
+// (CR-CHAT-034) installs: after a successful inbox ack, every dagger wait
+// parked on one of the acked message ids resolves. The registry package
+// defines the type so neither package imports the other; the daggerctl
+// wiring adapts its NotifyAcked onto it.
+type AckHook func(agentID string, messageIDs []string)
+
+// SetAckHook installs the optional ack callback (CR-CHAT-034). Nil (the
+// default) leaves the ack path unchanged.
+func (h *Handler) SetAckHook(fn AckHook) { h.daggerWaits = fn }
 
 // NewHandler creates a Handler that delegates store operations to the
 // provided Store implementation. The handler is safe for concurrent callers
