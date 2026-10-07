@@ -27,6 +27,7 @@ import (
 	"github.com/crier-dev/crier/internal/pidfile"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
+	"github.com/crier-dev/crier/internal/session"
 	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/gorilla/mux"
 )
@@ -333,7 +334,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// holds no live grant, ownership rule or scope reach is refused with 403
 	// DELIVERY_FORBIDDEN and a machine-readable reason. An unclassed target is
 	// unchanged either way (§8.1).
-	permsChecker, err := buildPermissions(cfg)
+	permsChecker, permsGrantEvents, err := buildPermissions(cfg)
 	if err != nil {
 		slog.Error("initialize delivery acl", "error", err)
 		return 1
@@ -620,7 +621,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// registry.Store.Deliver the inbox routes use — no second delivery path.
 	// Every surface is realm-scoped on arrival (row 38). A store that cannot
 	// open fails the boot rather than serving a deployment with no sessions.
-	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, nsReg, permsChecker)
+	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, nsReg, permsChecker, permsGrantEvents)
 	if err != nil {
 		slog.Error("initialize session api", "error", err)
 		return 1
@@ -667,6 +668,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/groups", sessHandler.HandleListGroups).Methods("GET")
 	r.HandleFunc("/groups/{name}", sessHandler.HandleGetGroup).Methods("GET")
 	r.HandleFunc("/groups/{name}/members", sessHandler.HandleUpdateGroupMembers).Methods("PATCH")
+	// Audit + permission READS (CR-CHAT-021, CHAT-INTERFACE.md §4 rows 21-23):
+	// the closed-vocabulary session/principal audit trail, the permission
+	// matrix and the per-principal role badges. All three are READ-ONLY over
+	// events already recorded (the session log and, when the ACL is armed,
+	// its grant records) — the delivery-log opt-in precedent is answered by
+	// not writing anything, not by gating a read behind a flag.
+	session.RegisterAuditRoutes(r, sessHandler)
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
 		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")

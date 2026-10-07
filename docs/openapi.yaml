@@ -2636,6 +2636,103 @@ paths:
         "404":
           description: No such session in this realm (SESSION_NOT_FOUND)
 
+  # ── Audit + permission READS (CR-CHAT-021, §4 rows 21-23) ──
+  # Three READ-ONLY surfaces over events the bus ALREADY records: the session
+  # log's membership/lifecycle records and, when the CR-CHAT-003 ACL is armed,
+  # its grant records. Nothing is written by a GET here — the delivery-log
+  # (row 20/21) opt-in precedent is answered by not writing anything, not by
+  # gating a read behind a flag; GET /delivery-log remains the OPT-IN
+  # dead-letter/moderation surface it is and is NOT a session audit.
+  /sessions/{id}/audit:
+    get:
+      operationId: getSessionAudit
+      tags: [sessions]
+      summary: The session+principal audit trail (a CLOSED event vocabulary)
+      description: |-
+        The audit panel (CHAT-INTERFACE §4 row 21): Time / Principal / Event /
+        Details. The event vocabulary is CLOSED — the response carries it —
+        and an event kind outside it is REFUSED at the write boundary, never
+        skipped and never guessed. Message records are deliberately NOT audit
+        events (they are the transcript, row 14).
+
+        Sources, stated honestly per backend: the JSONL log renders its full
+        record stream (session.start/close/reopen, member.added/removed,
+        member.context, thread.branched — the full event history, §2.3); the
+        SQL view renders its projected LATEST-STATE facts (session.start,
+        member.added/removed, session.close when closed — a re-join reads as
+        one add and a close+reopen pair as neither). When the CR-CHAT-003 ACL
+        is armed, grants on the session's subject overlay as
+        permission.grant / permission.revoke events from the permission log,
+        including tombstones.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The audit trail with its closed vocabulary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionAuditTrail"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+
+  /sessions/{id}/permissions:
+    get:
+      operationId: getSessionPermissions
+      tags: [sessions]
+      summary: The permission matrix for a session
+      description: |-
+        The matrix (CHAT-INTERFACE §4 row 23): the send / read / invite /
+        admin columns against every ACTIVE participant, one row per
+        participant with its role (row 22's badge) and one cell per column.
+        A cell's `source` names where it came from — `role` (the role bundle)
+        or `grant` (a live CR-CHAT-003 grant on the session subject). False is
+        a dash, never an error: the matrix is a read of what IS.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The permission matrix.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionPermissionMatrix"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+
+  /sessions/{id}/roles:
+    get:
+      operationId: getSessionRoles
+      tags: [sessions]
+      summary: The per-principal role badges
+      description: |-
+        The role pill per participant (CHAT-INTERFACE §4 row 22): the role
+        RECORDED on the membership event. Every member has exactly one role
+        (§2.1); a join that names none has `member` applied and RECORDED at
+        join time, so a badge is always the durable event's role, never a
+        client-side guess. A removed member keeps its badge with
+        `active: false`.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The role badges.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRoleBadges"
+        "403":
+          description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+
   # ── Dagger control (CR-CHAT-033) ──
   # The OPT-IN control surface over a Hermes-dagger pipeline. crier does NOT
   # embed a second executor (decision D18): every route here is a CLIENT call
@@ -4099,6 +4196,159 @@ components:
                 description: "[namespace, channel, thread_id, parent_thread_id?, message_id] — the location of the hit (§3.8.2)."
                 items:
                   type: string
+    SessionAuditTrail:
+      type: object
+      required: [session_id, vocabulary, events, count]
+      description: |-
+        The session+principal audit trail (row 21). `vocabulary` is the CLOSED
+        event set; an event kind outside it cannot be appended and the read
+        refuses to render one.
+      properties:
+        session_id:
+          type: string
+        vocabulary:
+          type: array
+          items:
+            type: string
+            enum: [session.start, session.close, session.reopen, member.added, member.removed, member.context, thread.branched, permission.grant, permission.revoke]
+          description: The closed event vocabulary.
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionAuditEvent"
+        count:
+          type: integer
+    SessionAuditEvent:
+      type: object
+      required: [kind, ts]
+      properties:
+        kind:
+          type: string
+          enum: [session.start, session.close, session.reopen, member.added, member.removed, member.context, thread.branched, permission.grant, permission.revoke]
+        seq:
+          type: integer
+          format: int64
+          description: The session record's seq when the event came from the session log; 0 for a permission event.
+        ts:
+          type: string
+          format: date-time
+        actor:
+          type: object
+          description: Who acted (creator for session.start; the record's actor otherwise; the granting/revoking principal for permission events).
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        role:
+          type: string
+        reason:
+          type: string
+        context_share:
+          type: object
+          properties:
+            mode:
+              type: string
+            boundary_message_id:
+              type: string
+        thread_id:
+          type: string
+        parent_thread_id:
+          type: string
+        grant_principal:
+          type: string
+          description: The principal a permission.grant / permission.revoke event is about.
+        grant_id:
+          type: string
+        granted_by:
+          type: string
+        granted_at:
+          type: string
+          format: date-time
+        revoked_by:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+        grant_actions:
+          type: array
+          items:
+            type: string
+          description: The action set the grant carries, copied verbatim.
+    SessionPermissionMatrix:
+      type: object
+      required: [session_id, actions, rows, count]
+      description: The permission matrix (row 23) — the columns against every ACTIVE participant.
+      properties:
+        session_id:
+          type: string
+        actions:
+          type: array
+          items:
+            type: string
+          description: The column labels, in order.
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionPermissionRow"
+        count:
+          type: integer
+    SessionPermissionRow:
+      type: object
+      required: [member_type, member_id, role, allowed]
+      properties:
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        role:
+          type: string
+          description: The role recorded on the membership event (row 22's badge).
+        allowed:
+          type: object
+          description: One cell per column; true is a tick, false a dash.
+          additionalProperties:
+            type: boolean
+        source:
+          type: object
+          description: Where each granted cell came from — `role` (the role bundle) or `grant` (a live CR-CHAT-003 grant on the session subject).
+          additionalProperties:
+            type: string
+            enum: [role, grant]
+    SessionRoleBadges:
+      type: object
+      required: [session_id, roles]
+      description: The per-principal role badges (row 22).
+      properties:
+        session_id:
+          type: string
+        roles:
+          type: array
+          items:
+            type: object
+            required: [member_type, member_id, role, active]
+            properties:
+              member_type:
+                type: string
+                enum: [agent, principal]
+              member_id:
+                type: string
+              role:
+                type: string
+                description: The role recorded on the membership event; the `member` default is applied and RECORDED at join time when a join names none.
+              active:
+                type: boolean
+                description: A removed member keeps its badge with active false.
     PostSessionMessageRequest:
       type: object
       required: [payload]

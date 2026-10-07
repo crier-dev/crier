@@ -150,6 +150,13 @@ var excludedOperations = map[string]string{
 	// does not expose, so the bridge has no tool for them yet.
 	"getMemberContext": "GET /sessions/{id}/participants/{member_type}/{member_id}/context — \"What a member was given when it joined\" (CR-CHAT-016, §4.6 D10): the joiner's materialized context view, read from internal/session share state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	"setMemberContext": "PUT /sessions/{id}/participants/{member_type}/{member_id}/context — \"Change a member's context share\" (CR-CHAT-016, §4.6 rule 3): appends a session.member.context event in internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	// CR-CHAT-021 — the audit + permission READ surface. Same transport gap:
+	// the trail, the matrix and the role badges are internal/session reads
+	// (and, for the grant overlay, permissions-log reads) that RemoteStore
+	// does not expose, so the bridge has no tool for them.
+	"getSessionAudit":       "GET /sessions/{id}/audit — \"The session+principal audit trail (a CLOSED event vocabulary)\" (CR-CHAT-021): rendered from internal/session record/view state (plus the permissions log overlay) RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"getSessionPermissions": "GET /sessions/{id}/permissions — \"The permission matrix for a session\" (CR-CHAT-021): derived from internal/session membership plus the permissions-log grant overlay RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"getSessionRoles":       "GET /sessions/{id}/roles — \"The per-principal role badges\" (CR-CHAT-021): the roles recorded on internal/session membership events RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	// CR-CHAT-013 — the named-group surface. Same transport gap as the session
 	// operations: the roster store lives in internal/session (served by
 	// cmd/server's HTTP routes), and the crier-mcp bridge's RemoteStore does

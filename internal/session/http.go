@@ -97,6 +97,14 @@ type HTTPOptions struct {
 	// no second delivery path (§3.4). Nil skips the remote leg entirely and
 	// the fan-out records the remote target as refused.
 	Fed *federation.Client
+	// GrantEvents (CR-CHAT-021) is the READ-ONLY bridge to the CR-CHAT-003
+	// permission log: every grant recorded on a session subject, live AND
+	// tombstoned, so the audit trail and the permission matrix can overlay
+	// permission.grant / permission.revoke events. Nil (the default, no ACL
+	// deployed) means the reads answer with session events and role bundles
+	// only. It writes nothing — the same opt-in-posture answer the delivery
+	// log precedent sets, applied to a read-only surface.
+	GrantEvents func(ctx context.Context, sessionID string) ([]PermissionsGrantView, error)
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
