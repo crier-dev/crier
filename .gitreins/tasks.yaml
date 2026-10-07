@@ -2730,3 +2730,13 @@ tasks:
   status: complete
   created_at: '2026-10-07T07:15:36.945174+00:00'
   completed_at: '2026-10-07T07:15:44.574925+00:00'
+- id: cr-chat-011-html-mock
+  title: Legible HTML click-through mock of the chosen UI direction
+  criteria:
+  - "Single self-contained HTML file with REAL labels, renders at 1280 and 390, shows\
+    \ sessions/permissions/threading on one screen. Brand: charcoal #0b0d12, mint\
+    \ #4cc38a, lavender/amber accents. Tag autocomplete (@cap:analyst \u2014 3 agents),\
+    \ permission matrix, real thread. No external calls."
+  status: complete
+  created_at: '2026-10-07T07:53:35.835433+00:00'
+  completed_at: '2026-10-07T07:59:05.771073+00:00'
