@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
@@ -47,6 +49,27 @@ import (
 //     A store that cannot report (a remote proxy) reports null rather than a
 //     fabricated zero.
 //
+// CR-CHAT-020 adds the read surfaces the chat UI draws and the bus could not
+// justify — each one a DERIVATION over signals the bus already holds, never a
+// parallel truth (CHAT-INTERFACE.md §5.1):
+//
+//   - "queue_depth_history" — a timestamped ring of recent queue measurements
+//     (the sparkline the UI draws). It is sampled on each /status read; the
+//     ring is process-lifetime, and null (not an empty array) when the serving
+//     store cannot report a depth, so "no history yet" and "unavailable" are
+//     never the same reading.
+//   - "health" — a three-word grade derived from the ONE real condition the
+//     bus can measure: whether the serving registry backend answers. "ok" is
+//     the process up and the backend answering; "degraded" is the process up
+//     but the backend not answering; "down" is reserved for the process not
+//     answering at all — which is exactly what GET /health reports, so the
+//     grade never claims a condition (federation peer loss, guard errors) the
+//     bus does not measure as such.
+//   - "agents_online" / "agents_total" — the fleet presence aggregate,
+//     counted with the SAME Presence derivation GET /agents reports with, so
+//     the "N/M agents online" figure cannot disagree with the roster it
+//     summarizes.
+//
 // Auth: /status is NOT on the exempt list in internal/middleware/auth.go, so
 // with CR_AUTH_TOKEN set it requires the Bearer header like every other
 // authenticated route; with auth disabled it is open. That asymmetry is
@@ -55,11 +78,42 @@ import (
 // public half of that question ("is this thing up, and which build?") is what
 // /health and /version already answer.
 
+// queueDepthReader reads the serving store's live queue depth. ok=false means
+// "this store cannot report" (or the read failed), which the surfaces render as
+// an absence — null in GET /status, NaN on the metric — rather than as a zero.
+type queueDepthReader func() (registry.QueueDepth, bool)
+
+// newQueueDepthReader adapts a store to the reader above. A store that does not
+// implement registry.DepthReporter (the remote proxy) yields nil: no reader at
+// all, so nothing anywhere reports a depth it cannot measure.
+func newQueueDepthReader(store registry.Store) queueDepthReader {
+	reporter, ok := store.(registry.DepthReporter)
+	if !ok {
+		return nil
+	}
+	return func() (registry.QueueDepth, bool) {
+		depth, err := reporter.QueueDepth()
+		if err != nil {
+			slog.Warn("queue depth unavailable", "error", err)
+			return registry.QueueDepth{}, false
+		}
+		return depth, true
+	}
+}
+
 // Registry backend names as they appear in the GET /status body. They are the
 // schema's enum values, so a rename is a wire change.
 const (
 	registryBackendMemory   = "memory"
 	registryBackendPostgres = "postgres"
+)
+
+// Health grades as they appear in the GET /status body (CR-CHAT-020). The
+// enum is the schema's, so a rename is a wire change.
+const (
+	statusHealthOK       = "ok"
+	statusHealthDegraded = "degraded"
+	statusHealthDown     = "down"
 )
 
 // registryBackendForURL is the SINGLE decision point for which registry
@@ -113,44 +167,107 @@ type statusQueueDepth struct {
 	OldestAgeS int `json:"oldest_age_s"`
 }
 
-// queueDepthReader reads the serving store's live queue depth. ok=false means
-// "this store cannot report" (or the read failed), which the surfaces render as
-// an absence — null in GET /status, NaN on the metric — rather than as a zero.
-type queueDepthReader func() (registry.QueueDepth, bool)
-
-// newQueueDepthReader adapts a store to the reader above. A store that does not
-// implement registry.DepthReporter (the remote proxy) yields nil: no reader at
-// all, so nothing anywhere reports a depth it cannot measure.
-func newQueueDepthReader(store registry.Store) queueDepthReader {
-	reporter, ok := store.(registry.DepthReporter)
-	if !ok {
-		return nil
-	}
-	return func() (registry.QueueDepth, bool) {
-		depth, err := reporter.QueueDepth()
-		if err != nil {
-			slog.Warn("queue depth unavailable", "error", err)
-			return registry.QueueDepth{}, false
-		}
-		return depth, true
-	}
+// statusQueueSample is one entry of the queue-depth history ring (CR-CHAT-020):
+// a measurement and the instant it was taken. The counts are the same shape
+// queue_depth carries; the trend glyph the UI draws is a client projection of
+// the sequence, not a server-computed slope.
+type statusQueueSample struct {
+	At         time.Time `json:"at"`
+	Pending    int       `json:"pending"`
+	Leased     int       `json:"leased"`
+	OldestAgeS int       `json:"oldest_age_s"`
 }
 
-// statusQueueDepthFrom renders a live measurement as the wire object, or nil
-// when the store cannot report.
-func statusQueueDepthFrom(read queueDepthReader) *statusQueueDepth {
-	if read == nil {
-		return nil
+// queueHistoryCapacity is how many samples the ring keeps (CR-CHAT-020). A
+// status read that samples more often than an operator can draw simply wraps
+// the ring; capacity bounds memory, not the client's window.
+const queueHistoryCapacity = 60
+
+// queueHistory is the process-lifetime ring of recent queue measurements
+// (CR-CHAT-020), sampled on each GET /status. It is a measurement sink, not a
+// cache: the same request still reports the LIVE queue_depth, and the history
+// is the trail of prior snapshots. Nil-capable: the zero value is usable and
+// reports an empty history, so a server wired without a depth reader degrades
+// honestly.
+type queueHistory struct {
+	mu      sync.Mutex
+	samples []statusQueueSample
+}
+
+// record appends one snapshot, dropping the oldest beyond capacity.
+func (h *queueHistory) record(at time.Time, depth registry.QueueDepth) {
+	if h == nil {
+		return
 	}
-	depth, ok := read()
-	if !ok {
-		return nil
-	}
-	return &statusQueueDepth{
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.samples = append(h.samples, statusQueueSample{
+		At:         at.UTC(),
 		Pending:    depth.Pending,
 		Leased:     depth.Leased,
 		OldestAgeS: int(depth.OldestAge.Seconds()),
+	})
+	if len(h.samples) > queueHistoryCapacity {
+		h.samples = h.samples[len(h.samples)-queueHistoryCapacity:]
 	}
+}
+
+// snapshot returns the samples oldest-first, or nil when none were taken (a
+// server with no depth reader has no history to draw — the field stays null
+// rather than lying with an empty array).
+func (h *queueHistory) snapshot() []statusQueueSample {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.samples) == 0 {
+		return nil
+	}
+	out := make([]statusQueueSample, len(h.samples))
+	copy(out, h.samples)
+	return out
+}
+
+// statusHealth grades deriveHealth from the store probe: the process answering
+// this request is up by construction (it is answering), so "ok" and
+// "degraded" are the reachable grades here, and "down" exists only so the
+// enum is the one GET /health would justify if this endpoint were ever
+// unreachable — a word the process cannot honestly say about itself.
+func deriveHealth(storeHealthy, probeKnown bool) string {
+	if !probeKnown {
+		// No backend that can be probed (a remote proxy, a test double): the
+		// process is up and nothing is known to be wrong, so the honest word
+		// is "ok" — not an invented "unknown" the schema does not carry.
+		return statusHealthOK
+	}
+	if storeHealthy {
+		return statusHealthOK
+	}
+	return statusHealthDegraded
+}
+
+// healthProbe is the seam the graded health word reads through: a boolean
+// answer plus whether the answer is KNOWN (false, false when no HealthReporter
+// is wired — the documented degradation to "ok"). The real probe is the
+// serving store's HealthReporter capability.
+type healthProbe func() (healthy, known bool)
+
+// statusQueueDepthFrom renders a live measurement as the wire object, or nil
+// when the store cannot report. Kept as the value-level seam the CR-FEAT-035
+// tests pin; the handler itself goes through statusQueueDepthValue so the
+// ok-channel drives the history sampling too.
+func statusQueueDepthFrom(read queueDepthReader) *statusQueueDepth {
+	d, _ := statusQueueDepthValue(read)
+	return d
+}
+
+// statusAggregator is the seam the presence aggregate is counted through: the
+// real implementation is the registry Handler, which owns the roster and the
+// Presence rule; tests stand in a fixed roster. Counted PER REQUEST against
+// ONE instant, exactly like GET /agents.
+type statusAggregator interface {
+	CountAgentsForStatus(now time.Time) registry.AgentsOnlineCount
 }
 
 // statusResponse is the wire contract of GET /status. Every field is an
@@ -207,6 +324,23 @@ type statusResponse struct {
 	// one is. Null when the serving store cannot report it (a remote proxy).
 	// It is a measurement, not posture — see the file comment.
 	QueueDepth *statusQueueDepth `json:"queue_depth"`
+	// QueueDepthHistory is the recent trail of queue_depth snapshots
+	// (CR-CHAT-020), oldest-first, at most queueHistoryCapacity samples. Null
+	// until at least one sample exists, so "no history yet" is not the same
+	// reading as "measured, flat". The trend glyph the UI draws is a client
+	// projection of this sequence.
+	QueueDepthHistory []statusQueueSample `json:"queue_depth_history"`
+	// Health is the graded severity word (CR-CHAT-020): "ok" while the
+	// serving registry backend answers its probe, "degraded" when it does
+	// not, "down" reserved for the process itself failing to answer (GET
+	// /health's word). Never a grade the bus cannot derive.
+	Health string `json:"health"`
+	// AgentsOnline / AgentsTotal is the fleet presence aggregate
+	// (CR-CHAT-020), counted with the same Presence rule GET /agents derives
+	// every row's status with. THE count the "N/M agents online" figure
+	// renders — no client-side recount.
+	AgentsOnline int `json:"agents_online"`
+	AgentsTotal  int `json:"agents_total"`
 	// LogLevel and LogFormat are the effective logger settings, so an
 	// operator can tell a debug server from an info one without the log.
 	LogLevel  string `json:"log_level"`
@@ -281,15 +415,79 @@ func newStatusHandler(cfg config.Config, registryBackend string) http.HandlerFun
 // the field is that it changes while the posture does not — and a nil reader
 // (or a store that cannot report) serializes as `"queue_depth": null`.
 //
+// CR-CHAT-020: the same read also (a) feeds the queue-depth history ring, so
+// the sparkline the UI draws accumulates from the live measurement rather
+// than a second timer racing it, (b) derives the graded health word from the
+// store's own probe, and (c) counts the fleet presence aggregate from the
+// same roster GET /agents serves, so the figure cannot be computed two ways.
+//
 // Encoding a fixed-shape struct of booleans, small ints, short strings, a small
 // nested measurement and a nested identity cannot fail; a write error here
 // means the client went away, which the connection layer already reports (see
 // handleVersion).
 func newStatusHandlerWithQueue(cfg config.Config, registryBackend string, read queueDepthReader) http.HandlerFunc {
+	return newStatusHandlerFull(cfg, registryBackend, read, newQueueHistory(), nil, nil)
+}
+
+// newQueueHistory returns a fresh history ring (CR-CHAT-020). One ring per
+// mounted endpoint; the server mounts exactly one /status, so one ring serves
+// every reader of the trail.
+func newQueueHistory() *queueHistory { return &queueHistory{} }
+
+// newStatusHandlerFull is the complete wiring behind both forms above: the
+// queue-depth reader, the history ring (shared by every request that samples
+// it), the health probe and the presence-aggregate source. The nil-able
+// pieces are the documented degradations: no reader → null queue_depth and
+// null history; no probe → "ok" (nothing known to be wrong); no aggregator →
+// agents_online 0 / agents_total 0 (a server that mounts no registry Handler
+// has no fleet to count — the zero figure is the true one, never a guess).
+func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := buildStatusResponse(cfg, registryBackend)
-		resp.QueueDepth = statusQueueDepthFrom(read)
+		if depth, ok := statusQueueDepthValue(read); ok {
+			resp.QueueDepth = depth
+			// Sample the history from the SAME measurement this response
+			// reports — the sparkline can never disagree with the figure it
+			// trails.
+			history.record(time.Now(), registry.QueueDepth{
+				Pending:   depth.Pending,
+				Leased:    depth.Leased,
+				OldestAge: time.Duration(depth.OldestAgeS) * time.Second,
+			})
+			resp.QueueDepthHistory = history.snapshot()
+		}
+		if probe != nil {
+			healthy, known := probe()
+			resp.Health = deriveHealth(healthy, known)
+		} else {
+			resp.Health = deriveHealth(false, false)
+		}
+		// The fleet presence aggregate: counted from the same derivation
+		// GET /agents reports with (one instant, one rule), so "N/M online"
+		// cannot disagree with the roster it summarizes.
+		if aggregator != nil {
+			counts := aggregator.CountAgentsForStatus(time.Now())
+			resp.AgentsOnline = counts.Online
+			resp.AgentsTotal = counts.Total
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// statusQueueDepthValue renders a live measurement as the wire object; ok is
+// false when there is no reader or the store cannot report.
+func statusQueueDepthValue(read queueDepthReader) (*statusQueueDepth, bool) {
+	if read == nil {
+		return nil, false
+	}
+	depth, ok := read()
+	if !ok {
+		return nil, false
+	}
+	return &statusQueueDepth{
+		Pending:    depth.Pending,
+		Leased:     depth.Leased,
+		OldestAgeS: int(depth.OldestAge.Seconds()),
+	}, true
 }

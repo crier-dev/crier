@@ -952,6 +952,14 @@ func (h *Handler) rejectOversizedBody(w http.ResponseWriter, r *http.Request) bo
 }
 
 func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
+	// CR-CHAT-020: the per-message delivery latency is measured from the top
+	// of the shared deliver path, so the figure covers everything this POST
+	// did to produce the message — decode, guard verdict, durable write. It
+	// is stamped onto the entry here (the store records it on the deliver
+	// branch); entries written by other paths (hold releases, receipts) carry
+	// no timing, which the wire spells as an absent field, never a zero.
+	deliverStart := time.Now()
+
 	if h.rejectOversizedBody(w, r) {
 		return
 	}
@@ -1643,6 +1651,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	// payload and the guard metadata (spec §2.2/§9.3).
 	entry.Payload = payload
 	entry.Guard = guardMeta
+	// CR-CHAT-020: stamp the measured delivery latency. time.Since uses a
+	// monotonic clock, so a sub-millisecond figure is a real measurement;
+	// whole milliseconds (>=1) survive the omitempty encoding.
+	entry.DeliveryMs = time.Since(deliverStart).Milliseconds()
 	if err := h.store.Deliver(id, entry); err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})

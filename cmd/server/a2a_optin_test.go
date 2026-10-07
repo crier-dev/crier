@@ -261,6 +261,65 @@ func agentsEntryKeys(t *testing.T, body string) []string {
 // TestA2AOption_ExistingSurfaceUnchanged is the gate. Each posture group boots
 // the server once per switch position, pins the pre-A2A contract on each boot,
 // and then asserts the two positions are byte-for-byte indistinguishable.
+
+// sameJSONShape reports whether a and b decode to the same JSON structure
+// after dropping the named fields from every nested object (used where a
+// response legitimately embeds a wall-clock value two independent boots can
+// never share).
+func sameJSONShape(a, b string, drop []string) bool {
+	dropped := map[string]bool{}
+	for _, k := range drop {
+		dropped[k] = true
+	}
+	strip := func(s string) string {
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			return "unparseable:" + s
+		}
+		return string(mustStripKeys(v, dropped))
+	}
+	return strip(a) == strip(b)
+}
+
+func mustStripKeys(v any, drop map[string]bool) []byte {
+	switch t := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, sub := range t {
+			if drop[k] {
+				continue
+			}
+			out[k] = sub
+		}
+		b, err := json.Marshal(sortedNormalize(out))
+		if err != nil {
+			return nil
+		}
+		return b
+	default:
+		return []byte(fmt.Sprintf("%v", v))
+	}
+}
+
+func sortedNormalize(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, sub := range t {
+			out[k] = sortedNormalize(sub)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, sub := range t {
+			out[i] = sortedNormalize(sub)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 	groups := []struct {
 		name        string
@@ -311,6 +370,15 @@ func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 			if !reflect.DeepEqual(off.body, on.body) {
 				for route, body := range off.body {
 					if on.body[route] != body {
+						// CR-CHAT-020: /status now carries a timestamped
+						// queue_depth_history sampled at read time. Two
+						// INDEPENDENT server boots can never share a
+						// wall-clock sample instant, so compare the
+						// timestamp-free shapes for this route before
+						// declaring a difference.
+						if route == "GET /status" && sameJSONShape(body, on.body[route], []string{"queue_depth_history"}) {
+							continue
+						}
 						t.Errorf("route %s answered differently with the A2A switch on:\noff = %s\n on = %s", route, body, on.body[route])
 					}
 				}

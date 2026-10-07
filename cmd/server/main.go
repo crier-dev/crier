@@ -754,7 +754,23 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// changes: it is still authenticated, still not on the auth-exempt list
 	// (internal/middleware/auth.go), and still reports booleans and modes for
 	// every configuration fact.
-	r.HandleFunc("/status", newStatusHandlerWithQueue(cfg, regBackend, newQueueDepthReader(regStore))).Methods("GET")
+	//
+	// CR-CHAT-020: the same handler also derives the three read surfaces the
+	// chat UI draws — the queue-depth history ring (sampled on each read,
+	// from the SAME measurement the response reports), the graded health word
+	// (a LIVE probe of the serving store's HealthReporter capability; nil
+	// when the store cannot be probed, which degrades to "ok"), and the
+	// fleet presence aggregate (counted through the registry Handler's
+	// CountAgentsForStatus, the SAME Presence rule GET /agents reports
+	// with).
+	statusHealthProbe := func() (healthy, known bool) {
+		if hp, ok := regStore.(registry.HealthReporter); ok {
+			return hp.Healthy(), true
+		}
+		return false, false
+	}
+	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
+		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler)).Methods("GET")
 
 	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
 	// OPT-IN extra, and the only A2A surface any row of this series has

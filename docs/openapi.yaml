@@ -128,7 +128,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
@@ -226,6 +226,79 @@ paths:
                         type: integer
                         description: How long the oldest pending message has been waiting, in seconds (0 when nothing is queued)
                         example: 12
+                  queue_depth_history:
+                    type: array
+                    nullable: true
+                    description: >-
+                      The recent trail of queue_depth snapshots (CR-CHAT-020),
+                      OLDEST-FIRST, at most 60 samples — the data the status
+                      strip's trend/sparkline glyph is a client projection of.
+                      Sampled once per GET /status read, from the SAME
+                      measurement the response's queue_depth reports, so the
+                      trail can never disagree with the figure it trails.
+                      Null until at least one sample exists (a fresh process,
+                      or a store that cannot report a depth), so "no history
+                      yet" and "unavailable" are never the same reading as
+                      "measured, flat". Process-lifetime: a restart empties
+                      the ring.
+                    items:
+                      type: object
+                      required: [at, pending, leased, oldest_age_s]
+                      properties:
+                        at:
+                          type: string
+                          format: date-time
+                          description: When this sample was taken (RFC 3339, UTC)
+                          example: "2026-10-07T14:02:11Z"
+                        pending:
+                          type: integer
+                          description: The queue_depth.pending value at that instant
+                          example: 41
+                        leased:
+                          type: integer
+                          description: The queue_depth.leased value at that instant
+                          example: 3
+                        oldest_age_s:
+                          type: integer
+                          description: The queue_depth.oldest_age_s value at that instant
+                          example: 12
+                  health:
+                    type: string
+                    enum: [ok, degraded, down]
+                    description: >-
+                      Graded severity (CR-CHAT-020), derived per read — never
+                      configured. "ok" while the serving registry backend
+                      answers its probe (a bounded pool ping; a memory backend
+                      is the process itself, so it is ok while this endpoint
+                      answers); "degraded" when the backend does NOT answer;
+                      "down" is the process itself failing to answer, which is
+                      what GET /health reports — a word this endpoint cannot
+                      honestly say about itself, carried in the enum only so
+                      the vocabulary is one system. The grade deliberately
+                      does NOT cover federation peer loss or guard errors:
+                      those have their own surfaces (GET /fed/peers, the guard
+                      verdict metadata), and a grade that aggregated signals
+                      the bus does not measure as health would over-claim.
+                    example: ok
+                  agents_online:
+                    type: integer
+                    description: >-
+                      How many registered agents derive `online` right now
+                      (CR-CHAT-020) — THE count behind the UI's "N/M agents
+                      online" figure. Counted with the SAME Presence
+                      derivation GET /agents reports every row's status with
+                      (last_seen vs presence_stale_after_s), against one
+                      instant, so this aggregate cannot disagree with the
+                      roster it summarizes; a client must not recount GET
+                      /agents and present a second number.
+                    example: 6
+                  agents_total:
+                    type: integer
+                    description: >-
+                      How many agents are registered (CR-CHAT-020) — the M of
+                      the "N/M agents online" figure, from the same read as
+                      agents_online.
+                    example: 6
                   log_level:
                     type: string
                     enum: [debug, info, warn, error]
@@ -3414,6 +3487,20 @@ components:
         idempotency_key:
           type: string
           description: "The sender-supplied deduplication key this message was delivered under (CR-FEAT-025), or absent when the delivery carried none. Provenance only — the deduplication itself happens at deliver time, before the message is stored. It is what lets a dead letter state which key produced the message."
+        delivery_ms:
+          type: integer
+          format: int64
+          description: >-
+            The wall-clock latency, in whole milliseconds, of the deliver
+            request that stored this message (CR-CHAT-020): decode → guard →
+            durable write, measured around the whole POST. This is the
+            per-message figure the chat meta line draws ("⚡ 86ms"). ABSENT
+            when the entry was not written by a timed deliver — a federation
+            hold release, a webhook-failure notice, an expiry receipt — which
+            is "not measured", never a zero: a sub-millisecond delivery is a
+            real measurement and must not share a representation with "no
+            delivery produced this entry". The latency of YOUR retrieve is
+            not this field; it is the delivery's.
         namespace:
           type: string
           description: "The namespace (realm) this message was delivered INTO (CR-FEAT-029, specs/NAMESPACES.md). Derived from the TARGET agent's registered namespace, never from the sender's claim — a delivery that names a different realm is refused with 403 NAMESPACE_MISMATCH. Recorded WITH the message so a retrieved message states its realm even after the agent's row is gone; ABSENT means the default namespace, which is what every pre-CR-FEAT-029 message is."

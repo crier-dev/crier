@@ -77,6 +77,11 @@ var statusTopLevelKeys = []string{
 	// there (or vice versa) is what this exact comparison exists to catch.
 	"global_rate_limit_per_minute",
 	"guard_enabled",
+	// CR-CHAT-020: the graded health word, and the fleet presence aggregate
+	// counted with the same Presence rule GET /agents reports with.
+	"health",
+	"agents_online",
+	"agents_total",
 	"log_format",
 	"log_level",
 	"mesh_auth_required",
@@ -88,6 +93,9 @@ var statusTopLevelKeys = []string{
 	// CR-FEAT-035: {pending, leased, oldest_age_s} from the serving store, or
 	// null for a store that cannot report a depth.
 	"queue_depth",
+	// CR-CHAT-020: the recent trail of queue_depth snapshots, oldest-first —
+	// the sparkline data. Null until at least one sample exists.
+	"queue_depth_history",
 	"rate_limit_per_minute",
 	"registry_backend",
 	"require_agent_signature",

@@ -71,6 +71,21 @@ var _ Store = (*PostgresStore)(nil)
 // ListErrorReporter Store capability (store.go, DF-CRIER-199/200).
 var _ ListErrorReporter = (*PostgresStore)(nil)
 
+// Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020): the
+// serving database answers a pool ping right now. This is a LIVE probe — the
+// one real condition "degraded" is derived from — not a cached verdict, so a
+// status read is the moment of truth, not the last time something happened to
+// look.
+func (s *PostgresStore) Healthy() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), healthProbeBudget)
+	defer cancel()
+	return s.pool.Ping(ctx) == nil
+}
+
+// healthProbeBudget bounds the GET /status health probe: a slow database must
+// degrade the health word, not stall the status read.
+const healthProbeBudget = 2 * time.Second
+
 // Compile-time capability assertion: PostgresStore records liveness evidence
 // (the mesh heartbeat path, presence.go, CR-FEAT-024). HeartbeatSink depends on
 // this interface, so a rename here must fail the build rather than silently
@@ -544,6 +559,17 @@ func nullText(s string) any {
 	return s
 }
 
+// nullInt64 maps an absent integer to SQL NULL (CR-CHAT-020): a delivery whose
+// latency was never measured stores NULL — "not measured" has exactly one
+// representation — and reads back as zero, which the entry's omitempty
+// encoding then renders as an absent field.
+func nullInt64(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
 // nullJSONB renders an optional JSONB column value. A nil location is SQL
 // NULL — "not recorded" has exactly one representation — and a present one
 // marshals through encoding/json so the stored shape is the wire shape.
@@ -670,11 +696,14 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, thread_id, created_at, expires_at,
-    leased_at, lease_id, lease_expires_at, acked, namespace, location
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10, $11::jsonb);`,
+    leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10, $11::jsonb, $12);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
 		entry.Priority, nullText(entry.ThreadID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 		nullText(namespace.Canonical(entry.Namespace)), nullJSONB(entry.Location),
+		// CR-CHAT-020: a timed deliver records its whole milliseconds; an
+		// untimed one (zero) stores SQL NULL — "not measured", never zero.
+		nullInt64(entry.DeliveryMs),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -745,7 +774,8 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// first one ties.
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
-       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, ''), location
+       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, ''), location,
+       COALESCE(delivery_ms, 0)
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -768,13 +798,21 @@ LIMIT $3;`,
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
 		var location []byte
+		var deliveryMs pgtype.Int8
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location); err != nil {
+			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location,
+			&deliveryMs); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
 		entry.Location = locationFromJSONB(location)
 		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
+		// CR-CHAT-020: the stored per-message delivery latency, read
+		// through pgtype.Int8 so a NULL (an untimed entry) scans cleanly
+		// as 0 — which omitempty renders absent on the wire.
+		if deliveryMs.Valid {
+			entry.DeliveryMs = deliveryMs.Int64
+		}
 		result = append(result, &entry)
 	}
 	rows.Close()

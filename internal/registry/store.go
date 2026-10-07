@@ -66,6 +66,41 @@ type ListErrorReporter interface {
 	ListError() error
 }
 
+// HealthReporter is an optional Store capability: whether the serving backend
+// can answer right now (CR-CHAT-020). GET /status's graded health word is
+// honest only if it is DERIVED: a backend that cannot be probed (the remote
+// proxy behind the MCP bridge, a test double) leaves it unimplemented, and
+// the surfaces that read it degrade exactly as every other depth-shaped
+// signal already does — never to a reassuring grade they cannot justify.
+type HealthReporter interface {
+	Healthy() bool
+}
+
+// AgentsOnlineCount is the fleet presence aggregate (CR-CHAT-020): how many
+// registered rows derive `online` right now, and how many rows exist at all.
+// It is the "N/M agents online" figure the chat UI draws, counted with the
+// SAME Presence rule the GET /agents listing reports with — one derivation,
+// so the aggregate cannot disagree with the roster it summarizes.
+type AgentsOnlineCount struct {
+	Online int
+	Total  int
+}
+
+// CountAgentsForStatus applies the ONE presence derivation (DeriveAll) to the
+// roster at instant now and counts the result. Exported on Handler (not on
+// Presence) so the caller cannot bring its own rule: whatever this returns is
+// by construction what GET /agents would have rendered.
+func (h *Handler) CountAgentsForStatus(now time.Time) AgentsOnlineCount {
+	agents := h.store.List()
+	counts := AgentsOnlineCount{Total: len(agents)}
+	for _, a := range h.presence.DeriveAll(agents, now) {
+		if a.Status == StatusOnline {
+			counts.Online++
+		}
+	}
+	return counts
+}
+
 // PurgeReporter is an optional Store capability for a purge that reports what
 // it removed (CR-FEAT-025). PurgeExpired's `int` return is the whole contract
 // for a store that cannot report — the count is all a caller can act on — but a
@@ -445,7 +480,27 @@ type MemoryStore struct {
 	// deadLetters is the process-lifetime dead-letter destination
 	// (CR-FEAT-025), guarded by mu.
 	deadLetters *memoryDeadLetters
+	// deliveryMs is the per-message delivery latency (CR-CHAT-020): the
+	// whole milliseconds the deliver path measured, keyed by message id and
+	// consulted when an entry is READ. Kept beside the entries rather than
+	// on them because Retrieve hands out live pointers from inboxes —
+	// writing a per-entry field at deliver time is safe (the write is
+	// pre-lease), but stamping through a copy would not reach the stored
+	// row, and a map keyed by id survives an entry being leased, acked or
+	// replaced without racing a concurrent reader of the entry struct.
+	deliveryMs map[string]int64
 }
+
+// Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020) for
+// the in-memory backend: the store is the process, so it is healthy exactly
+// while the process serving it is — which GET /health already states. The
+// method exists so the /status health word has the same shape on every
+// backend rather than one backend's word silently meaning something else.
+func (s *MemoryStore) Healthy() bool { return true }
+
+// Compile-time capability assertion: MemoryStore answers the health probe
+// (CR-CHAT-020).
+var _ HealthReporter = (*MemoryStore)(nil)
 
 // NewMemoryStore returns an in-memory agent registry with process-lifetime
 // inbox persistence (ephemeral across restarts).
@@ -455,6 +510,7 @@ func NewMemoryStore() *MemoryStore {
 		agents:      make(map[string]*Agent),
 		inboxes:     make(map[string][]*InboxEntry),
 		deadLetters: newMemoryDeadLetters(DefaultDeadLetterCapacity),
+		deliveryMs:  make(map[string]int64),
 	}
 }
 

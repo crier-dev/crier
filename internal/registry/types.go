@@ -119,6 +119,16 @@ type InboxEntry struct {
 	// letter state which key produced the message. Deduplication itself
 	// happens at deliver time, before anything is stored.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// DeliveryMs is the wall-clock latency, in whole milliseconds, of the
+	// deliver request that stored this message (CR-CHAT-020): decode → guard
+	// → durable write, measured around the whole POST and stamped by the
+	// store on the deliver path. It is the per-message figure the chat UI's
+	// meta line draws. Absent (omitempty) when the entry was not written by
+	// a timed deliver — a federation hold release, a webhook-failure notice,
+	// an expiry receipt — which is "not measured", never a zero: a
+	// sub-millisecond delivery is a real measurement and must not share a
+	// representation with "no delivery produced this entry".
+	DeliveryMs int64 `json:"delivery_ms,omitempty"`
 	// Priority is the sender-supplied retrieval priority (CR-FEAT-035),
 	// bounded by MinMessagePriority..MaxMessagePriority (0..9). Retrieve hands
 	// back the HIGHEST priority messages first; messages of equal priority keep

@@ -136,6 +136,13 @@ func (s *MemoryStore) Touch(id string, at time.Time) error {
 // Deliver appends a message to an agent's FIFO inbox. Returns an error if the
 // agent is not found.
 func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
+	// CR-CHAT-020: stamp the per-message delivery latency where the deliver
+	// path recorded one. The handler measures its whole POST into
+	// entry.DeliveryMs; the store stamps it at write time (zero → nil, so an
+	// untimed write stays absent rather than reporting a fabricated zero).
+	// The stamp is keyed by entry.ID and happens AFTER auto-generation below
+	// — a delivery with a blank ID would otherwise stamp under "" and the
+	// generated id would read back untimed.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -159,6 +166,11 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 			return fmt.Errorf("generate message id: %w", err)
 		}
 		entry.ID = id
+	}
+	if entry.DeliveryMs > 0 {
+		s.deliveryMs[entry.ID] = entry.DeliveryMs
+	} else {
+		delete(s.deliveryMs, entry.ID)
 	}
 	// A delivery never arrives pre-leased: the lease is minted by Retrieve and
 	// by nothing else (CR-FEAT-025 keeps the re-delivery below honest — an
@@ -272,6 +284,11 @@ func (s *MemoryStore) Retrieve(agentID string, leaseDuration time.Duration, maxM
 		entry.LeasedAt = &leasedAt
 		entry.LeaseID = leaseID
 		entry.LeaseDuration = leaseDuration
+		// CR-CHAT-020: the stored per-message delivery latency rides the
+		// read. A message that entered the inbox untimed (a hold release, a
+		// receipt, a second relay process sharing the map) reads back with
+		// the field absent — never a fabricated zero.
+		entry.DeliveryMs = s.deliveryMs[entry.ID]
 	}
 
 	return batch, leaseID, nil
@@ -334,6 +351,10 @@ func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 	filtered := make([]*InboxEntry, 0, len(queue))
 	for _, entry := range queue {
 		if idSet[entry.ID] {
+			// The latency record dies with the message (CR-CHAT-020): a
+			// re-delivery under the same id is a new delivery with its own
+			// measurement, not a resurrection of the old one.
+			delete(s.deliveryMs, entry.ID)
 			continue
 		}
 		filtered = append(filtered, entry)
