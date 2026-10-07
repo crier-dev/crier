@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 10, version, "should reflect the ten embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority, 008 = CR-FEAT-029 namespaces, 009 = CR-CHAT-019 stored thread id, 010 = CR-CHAT-029 stored delivery location)")
+	assert.Equal(t, 11, version, "should reflect the eleven embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority, 008 = CR-FEAT-029 namespaces, 009 = CR-CHAT-019 stored thread id, 010 = CR-CHAT-029 stored delivery location, 011 = CR-CHAT-020 per-message delivery_ms)")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
