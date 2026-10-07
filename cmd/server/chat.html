@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crier — Chat (CR-CHAT-009 MVP)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; color: #1a1a1a; }
+  code { font-family: ui-monospace, Menlo, monospace; }
+  #sidebar { width: 20rem; border-right: 1px solid #e5e7eb; overflow-y: auto; padding: 1rem; box-sizing: border-box; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #transcript { flex: 1; overflow-y: auto; padding: 1rem; }
+  .session { padding: 0.5rem; cursor: pointer; border-radius: 6px; margin-bottom: 0.25rem; }
+  .session:hover { background: #f3f4f6; }
+  .session.active { background: #dbeafe; }
+  .session .meta { font-size: 0.75rem; color: #6b7280; }
+  .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
+  .msg.reply { margin-left: 2rem; border-left: 3px solid #93c5fd; }
+  .msg .hdr { font-size: 0.75rem; color: #6b7280; }
+  .msg .guard { font-size: 0.75rem; color: #92400e; background: #fef3c7; border-radius: 4px; padding: 0.1rem 0.4rem; display: inline-block; margin-top: 0.25rem; }
+  .badge { font-size: 0.7rem; border-radius: 999px; padding: 0.1rem 0.5rem; background: #e5e7eb; display: inline-block; margin-left: 0.25rem; }
+  .badge.grant { background: #d1fae5; color: #065f46; }
+  .badge.role { background: #dbeafe; color: #1e40af; }
+  .badge.flag { background: #fee2e2; color: #991b1b; }
+  .badge.ok { background: #d1fae5; color: #065f46; }
+  button, input { font: inherit; padding: 0.35rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; }
+  button { background: #1a56db; color: white; border: none; cursor: pointer; }
+  button.ghost { background: #f3f4f6; color: #1a1a1a; }
+  #composer { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid #e5e7eb; }
+  #composer input[type=text] { flex: 1; }
+  h2 { font-size: 1rem; margin: 0.25rem 0; }
+  .note { font-size: 0.75rem; color: #6b7280; }
+  #replying { background: #fef3c7; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.75rem; display: none; }
+</style>
+</head>
+<body data-openapi-client="CR-CHAT-009">
+<nav id="sidebar">
+  <h2>Sessions <span class="note">(GET /sessions)</span></h2>
+  <div class="note">
+    <label>Agent ID: <input id="agent" placeholder="X-Agent-ID (optional)" style="width:100%"></label>
+    <button class="ghost" onclick="newSession()">+ new session (POST /sessions)</button>
+  </div>
+  <div id="sessions" class="note">loading…</div>
+</nav>
+<main id="main">
+  <div id="transcript"><p class="note">Select a session.</p></div>
+  <div id="replying"></div>
+  <div id="composer">
+    <input type="text" id="text" placeholder='Message text → POST /sessions/{id}/messages {"payload":{"text":…},"sender":…,"parent_id":…}'>
+    <button onclick="send()">Send</button>
+    <button class="ghost" onclick="reload()">Reload (GET transcript)</button>
+  </div>
+</main>
+<script>
+"use strict";
+// CR-CHAT-009 dogfood rule: every fetch below targets an endpoint declared in
+// docs/openapi.yaml:
+//   GET  /sessions                        — listSessions
+//   POST /sessions                        — createSession
+//   GET  /sessions/{id}/messages          — readSessionTranscript
+//   POST /sessions/{id}/messages          — postSessionMessage
+//   GET  /sessions/{id}/permissions       — getSessionPermissions
+const API = {
+  sessions:     (q) => "/sessions" + (q || ""),
+  createSession: () => "/sessions",
+  transcript:   (id) => "/sessions/" + encodeURIComponent(id) + "/messages",
+  sendMessage:  (id) => "/sessions/" + encodeURIComponent(id) + "/messages",
+  permissions:  (id) => "/sessions/" + encodeURIComponent(id) + "/permissions",
+};
+let current = null, replyTo = null;
+
+async function call(url, opts) {
+  const agent = document.getElementById("agent").value.trim();
+  opts = opts || {};
+  opts.headers = Object.assign({"Accept": "application/json"}, opts.headers || {});
+  if (agent && !opts.headers["X-Agent-ID"]) opts.headers["X-Agent-ID"] = agent;
+  const r = await fetch(url, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("HTTP " + r.status + " " + (body.error && body.error.code || JSON.stringify(body)).slice(0, 200));
+  return body;
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s == null ? "" : s); return d.innerHTML; }
+function author(a) { return a && (a.agent || a.principal || a.as_agent || a.system) || "?"; }
+function text(m) { return (m.payload && (m.payload.text || JSON.stringify(m.payload))) || ""; }
+
+async function loadSessions() {
+  const el = document.getElementById("sessions");
+  try {
+    const body = await call(API.sessions(""));
+    el.innerHTML = "";
+    (body.sessions || []).forEach(s => {
+      const d = document.createElement("div");
+      d.className = "session" + (current === s.id ? " active" : "");
+      d.innerHTML = '<strong>' + esc(s.title || s.id) + '</strong>' +
+        ' <span class="badge ' + (s.state === "open" ? "ok" : "") + '">' + esc(s.state) + '</span>' +
+        (s.visibility === "private" ? ' <span class="badge flag">private</span>' : "") +
+        '<div class="meta">' + esc(s.id) + " · " + esc(s.kind || "") + " · " + (s.message_count || 0) + " msgs · " + (s.audience_count || 0) + " agents</div>" +
+        (s.preview ? '<div class="meta">' + esc(s.preview) + "</div>" : "");
+      d.onclick = () => openSession(s.id);
+      el.appendChild(d);
+    });
+    if (!(body.sessions || []).length) el.innerHTML = '<span class="note">No sessions (POST /sessions to create one).</span>';
+  } catch (e) { el.innerHTML = '<span class="note">Error: ' + esc(e.message) + "</span>"; }
+}
+
+async function newSession() {
+  const agent = document.getElementById("agent").value.trim() || "web-client";
+  try {
+    const s = await call(API.createSession(), {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({title: "Web client room", kind: "channel", created_by: {agent: agent}, members: [{member_type: "agent", member_id: agent}]}),
+    });
+    current = s.id;
+    await loadSessions();
+    await openSession(s.id);
+  } catch (e) { alert("createSession failed: " + e.message); }
+}
+
+async function openSession(id) {
+  current = id;
+  replyTo = null;
+  renderReplyBanner();
+  document.querySelectorAll(".session").forEach(n => n.classList.remove("active"));
+  const t = document.getElementById("transcript");
+  t.innerHTML = '<p class="note">loading transcript…</p>';
+  await loadSessions();
+  await reload();
+  try {
+    const perms = await call(API.permissions(id));
+    renderPermissions(perms);
+  } catch (e) { renderPermissions(null); }
+}
+
+function renderPermissions(perms) {
+  document.querySelectorAll("#permbar").forEach(n => n.remove());
+  const bar = document.createElement("div");
+  bar.id = "permbar";
+  bar.style.cssText = "padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb";
+  if (!perms) { bar.innerHTML = '<span class="note">GET /sessions/{id}/permissions: unavailable.</span>'; }
+  else {
+    let html = '<strong>Permissions (GET /sessions/{id}/permissions):</strong> ';
+    (perms.rows || []).forEach(r => {
+      const granted = Object.entries(r.allowed || {}).filter(([, v]) => v).map(([k]) => k);
+      const srcs = Object.entries(r.source || {}).filter(([, v]) => v === "grant").map(([k]) => k);
+      html += '<span class="badge">' + esc(r.member_type + ":" + r.member_id) + " = " + esc(r.role) + " [" + esc(granted.join("+")) + "]</span>";
+      srcs.forEach(k => { html += ' <span class="badge grant">grant:' + esc(k) + "</span>"; });
+    });
+    bar.innerHTML = html;
+  }
+  document.getElementById("transcript").before(bar);
+}
+
+async function reload() {
+  if (!current) return;
+  const t = document.getElementById("transcript");
+  try {
+    const body = await call(API.transcript(current));
+    const msgs = body.messages || [];
+    let html = "<h2>" + esc((body.session && body.session.title) || current) + ' <span class="note">GET /sessions/{id}/messages · ' + msgs.length + ' messages (seq-ordered)</span></h2>';
+    (body.findings || []).forEach(f => {
+      html += '<div class="msg"><span class="badge flag">transcript finding: ' + esc(f.kind) + '</span> <span class="note">' + esc(f.detail) + "</span></div>";
+    });
+    msgs.forEach(m => {
+      const isReply = !!m.parent_id;
+      let badge = "";
+      if (m.outcomes && m.outcomes.some(o => o.outcome === "refused")) badge = ' <span class="badge flag">delivery refused</span>';
+      html += '<div class="msg' + (isReply ? " reply" : "") + '">' +
+        '<div class="hdr">#' + esc(m.seq) + " · " + esc(author(m.author)) +
+        (isReply ? " ↩ reply to " + esc(m.parent_id) + (m.parent_resolvable === false ? " <span class='badge flag'>unresolvable parent</span>" : "") : " · thread root") +
+        " · " + esc(m.message_kind) + badge + "</div>" +
+        "<div>" + esc(text(m)) + "</div>" +
+        // Guard verdicts: the public API (docs/openapi.yaml TranscriptMessage)
+        // does not expose any guard/flag field, so the surface says so instead
+        // of faking one (CR-CHAT-009).
+        '<div><span class="guard">guard verdict: not exposed by API</span></div>' +
+        '<div><button class="ghost" style="font-size:0.7rem" onclick="startReply(\'' + esc(m.id) + '\')">reply</button></div>' +
+        "</div>";
+    });
+    t.innerHTML = html;
+    t.scrollTop = t.scrollHeight;
+  } catch (e) { t.innerHTML = '<p class="note">Error: ' + esc(e.message) + "</p>"; }
+}
+
+function startReply(id) {
+  replyTo = id;
+  renderReplyBanner();
+  document.getElementById("text").focus();
+}
+function renderReplyBanner() {
+  const b = document.getElementById("replying");
+  b.style.display = replyTo ? "block" : "none";
+  b.innerHTML = replyTo ? "Replying to <code>" + esc(replyTo) + '</code> — <button class="ghost" onclick="replyTo=null;renderReplyBanner()">cancel</button>' : "";
+}
+
+async function send() {
+  if (!current) return alert("Select a session first.");
+  const v = document.getElementById("text").value.trim();
+  if (!v) return;
+  const agent = document.getElementById("agent").value.trim() || "web-client";
+  const body = {payload: {text: v}, sender: agent, message_kind: "plain"};
+  if (replyTo) body.parent_id = replyTo;
+  try {
+    await call(API.sendMessage(current), {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    document.getElementById("text").value = "";
+    replyTo = null;
+    renderReplyBanner();
+    await reload();
+  } catch (e) { alert("postSessionMessage failed: " + e.message); }
+}
+
+loadSessions();
+</script>
+</body>
+</html>

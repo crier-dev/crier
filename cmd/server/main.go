@@ -263,6 +263,9 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/openapi.json", handleOpenAPIJSON).Methods("GET")
 	r.HandleFunc("/openapi.yaml", handleOpenAPIYAML).Methods("GET")
 	r.HandleFunc("/docs", handleOpenAPIDocs).Methods("GET")
+	// CR-CHAT-009: the web chat client MVP — a client of the public API,
+	// served the same way /docs is (embedded, self-contained HTML).
+	r.HandleFunc("/chat", handleChatClient).Methods("GET")
 
 	// Relay pub/sub
 	relaySvc := relay.New(cfg.RateLimitPerMinute)

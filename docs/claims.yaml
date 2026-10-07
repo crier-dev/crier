@@ -462,9 +462,10 @@ claims:
     # CR-CHAT-017 made it 34 (18 API + 11 session + 2 groups + 3 spec-hosting)
     # and CR-CHAT-029 made it 35 (18 API + 12 session + 2 groups + 3 spec-hosting).
     # CR-CHAT-030 registered the three task routes (create + claim + complete),
-    # so the count is 43.
-    quote: "43 router paths"
-    expect: 43
+    # so the count is 43. CR-CHAT-009 registered the web chat client page
+    # (GET /chat, served the way /docs is), so the count is 44.
+    quote: "44 router paths"
+    expect: 44
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

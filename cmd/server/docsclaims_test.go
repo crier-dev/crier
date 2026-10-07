@@ -557,6 +557,29 @@ func seedDaggerProbeRun(t *testing.T, client *http.Client, baseURL string) {
 	}
 }
 
+// seedProbeChatSession creates one chat session with id docsClaimsProbeAgent
+// (the scanner's {id} placeholder substitution), so README tokens that name
+// session-template paths probe a live record instead of a 404.
+func seedProbeChatSession(t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+	body := `{"id":"docsclaims-probe","title":"docs-claims probe room","kind":"channel","created_by":{"agent":"docsclaims-probe"},"members":[{"member_type":"agent","member_id":"docsclaims-probe"}]}`
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/sessions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("seed probe chat session: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("seed probe chat session: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
+		t.Fatalf("seed probe chat session: status %d, want 201 (or 409 if already seeded)", resp.StatusCode)
+	}
+}
+
 // normalizeRoutePath substitutes "{...}" placeholders and concrete agent ids in
 // agent-scoped paths with a registered probe agent, so probing exercises the ROUTE
 // rather than the resource.
@@ -592,6 +615,12 @@ func TestDocsClaims(t *testing.T) {
 	// scanned-path pass probes the template with the probe agent substituted.
 	// The stub executor answers exactly this run id (bootDocsClaimsServer).
 	seedDaggerProbeRun(t, client, baseURL)
+	// CR-CHAT-009: seed one chat session under the probe id, so the README's
+	// documented /sessions/{id}/messages and /sessions/{id}/permissions
+	// resolve to a live record (not 404) when the scanned-path pass probes
+	// the template with the probe agent substituted — the same pattern
+	// seedDaggerProbeRun uses for the dagger run records above.
+	seedProbeChatSession(t, client, baseURL)
 	// Identity the CR-GAP-062 ttl_seconds xfail probe drives. The webhook
 	// default-mode probe registers its OWN identity with the webhook attached
 	// (an update would need a signed request; the default is only observable
