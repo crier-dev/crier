@@ -332,3 +332,23 @@ jobs:
 
       - name: Validate docs/openapi.yaml and served /openapi.json
         run: go test -short -count=1 -run 'TestOpenAPI|TestDocsClaims' ./cmd/server
+
+  acceptance-matrix:
+    name: Release acceptance matrix (built artifacts)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.6"
+
+      # CR-CHAT-037: exercise the BUILT binary and the BUILT Docker image —
+      # not unit tests against source — for the comms/federation flows a
+      # release ships. The runner itself builds the artifacts (make build
+      # build-mcp + docker build) and records one PASS/FAIL/SKIP per cell.
+      - name: Run acceptance matrix
+        run: scripts/acceptance-matrix.sh
