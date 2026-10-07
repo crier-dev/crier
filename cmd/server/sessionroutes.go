@@ -48,14 +48,23 @@ func openSessionAPI(
 		return nil, nil, fmt.Errorf("session api: %w", err)
 	}
 
-	// Named groups (CR-CHAT-013, specs/CHAT-ADDRESSING.md §1.4): the roster
-	// log lives beside the session store regardless of CR_SESSION_BACKEND, so
-	// the curated rosters survive every backend selection. A store that
-	// cannot open is a boot error rather than a surface that silently serves
-	// no groups — the same rule openSessionAPI applies to the session store.
-	groupStore, err := session.NewJSONLGroupStore(cfg.Session.GroupRoot)
-	if err != nil {
-		return nil, nil, fmt.Errorf("group api: %w", err)
+	// Named groups (CR-CHAT-022): the roster persists in the SELECTED session
+	// backend — the SQL group store over the same database when the backend is
+	// SQLite or PostgreSQL, the JSONL roster log otherwise. The tables are
+	// part of the session schema, so an existing database reaches them with no
+	// migration step. A store that cannot open is a boot error rather than a
+	// surface that silently serves no groups — the same rule openSessionAPI
+	// applies to the session store.
+	var groupStore session.GroupStore
+	switch st := sessStore.(type) {
+	case *session.SQLStore:
+		groupStore = st.Groups()
+	default:
+		gs, err := session.NewJSONLGroupStore(cfg.Session.GroupRoot)
+		if err != nil {
+			return nil, nil, fmt.Errorf("group api: %w", err)
+		}
+		groupStore = gs
 	}
 
 	h := session.NewHTTPHandler(sessStore, session.HTTPOptions{

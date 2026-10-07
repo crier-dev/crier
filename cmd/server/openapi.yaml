@@ -2057,14 +2057,23 @@ paths:
         "409":
           description: A session with that id already exists (SESSION_EXISTS)
 
-  # ── Named groups (CR-CHAT-013, D8) ──
+  # ── Named groups (CR-CHAT-013, CR-CHAT-022, D8) ──
   # A NAMED, CURATED set of agents addressed as `@team:x` — an address target
   # with a roster, and nothing else: no participants, no transcript, no state.
   # A send targeting a group (POST /sessions/{id}/messages with a
-  # `{"kind":"group"}` target) fans out ONE delivery per CURRENT member
-  # through the shipped inbox path; a roster edit routes the NEXT send to the
-  # current members. Inspectable: who is in it, who created it, who last
-  # edited it.
+  # `{"kind":"group"}` target, or a body mention `@team:<name>`) fans out ONE
+  # delivery per CURRENT member through the shipped inbox path; a roster edit
+  # routes the NEXT send to the current members. Inspectable: who is in it,
+  # who created it, who last edited it.
+  #
+  # Storage (CR-CHAT-022): the roster persists in the SELECTED session backend
+  # — the `chat_groups`/`chat_group_members` tables in the session SQLite or
+  # PostgreSQL database (reached by the schema with no migration step), or the
+  # JSONL roster log otherwise. This is a GROUP, not a capability: `@cap:y`
+  # stays the dynamic round-robin pool over live holders
+  # (POST /capabilities/{capability}/inbox) — different endpoint, different
+  # object, different delivery semantics (fan-out vs one-holder selector), and
+  # neither may silently become the other (D8, specs/CHAT-ADDRESSING.md §1.4).
   /groups:
     post:
       operationId: createGroup
@@ -2217,6 +2226,18 @@ paths:
         Threading (§4.5, D11): name `parent_id` to reply — the reply STAYS in its
         parent's thread. Omit it and the message opens a new thread whose id is
         the message's own id. A reply never carries a new thread_id.
+
+        Mention addressing (CR-CHAT-022, D8): a body tag `@team:<name>` resolves
+        to the NAMED group of that name and adds it to the audience as a
+        `group` target — ONE message fans out to EVERY CURRENT member through
+        the shipped inbox path, and a roster edit routes the NEXT send to the
+        current members. The capability form `@cap:y` is NOT a group: it is a
+        SELECTOR (one live holder, round-robin — `POST
+        /capabilities/{capability}/inbox`) and is never expanded into a fan-out
+        here. A named group and a capability target are different address
+        kinds and neither may silently become the other (D8,
+        specs/CHAT-ADDRESSING.md §1.4). A mention of a group with no roster is
+        a recorded skip, never a guessed delivery.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"

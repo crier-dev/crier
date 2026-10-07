@@ -28,7 +28,14 @@ func (sqliteDialect) InitStatements() []string {
 	}
 }
 
-func (sqliteDialect) SchemaStatements() []string { return sqliteSchemaStatements }
+func (sqliteDialect) SchemaStatements() []string {
+	stmts := make([]string, 0, len(sqliteSchemaStatements)+len(sqlGroupSchemaStatements))
+	stmts = append(stmts, sqliteSchemaStatements...)
+	// Named groups (CR-CHAT-022): the same dialect-pair as the session view,
+	// so an existing SQLite database reaches the tables with no migration.
+	stmts = append(stmts, sqlGroupSchemaStatements...)
+	return stmts
+}
 
 // sqliteSchemaStatements is the §5.2 view in SQLite's spelling. Table and
 // column NAMES are the spec's, unchanged — only the types differ
@@ -160,7 +167,14 @@ func (postgresDialect) Rebind(query string) string {
 // and any session setting belongs to the DSN.
 func (postgresDialect) InitStatements() []string { return nil }
 
-func (postgresDialect) SchemaStatements() []string { return postgresSchemaStatements }
+func (postgresDialect) SchemaStatements() []string {
+	stmts := make([]string, 0, len(postgresSchemaStatements)+len(sqlGroupSchemaStatements))
+	stmts = append(stmts, postgresSchemaStatements...)
+	// Named groups (CR-CHAT-022): the same dialect-pair as the session view,
+	// so an existing PostgreSQL database reaches the tables with no migration.
+	stmts = append(stmts, sqlGroupSchemaStatements...)
+	return stmts
+}
 
 // postgresSchemaStatements is the same §5.2 view declared with PostgreSQL's
 // own types (BIGINT for the sequence, INTEGER for the retention counter). The

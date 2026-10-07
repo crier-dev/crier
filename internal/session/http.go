@@ -722,6 +722,23 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// @team:x mention resolution (CR-CHAT-022, D8): a body tag `@team:<name>`
+	// in the addressing grammar adds the group to the audience as a `group`
+	// target — resolved to its CURRENT members at fan-out time by
+	// resolveGroupRoster. A name with no roster is a RECORDED skip (§3.2's
+	// named-error rule), never a guessed delivery; the capability form
+	// `@cap:y` is NOT expanded here (a capability is a selector, not a
+	// fan-out — D8) and rides the shipped capability route instead.
+	groupMentions := messageGroupMentions(&req)
+	if len(groupMentions) > 0 {
+		extra, err := h.groupMentionTargets(r.Context(), groupMentions)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_ADDRESS", err.Error())
+			return
+		}
+		req.Targets = append(req.Targets, extra...)
+	}
+
 	// Resolved audience (§4.2): the caller's explicit targets, else every
 	// active participant except the author.
 	aud, err := h.resolveAudience(r.Context(), sess, &req, author.AgentID())
