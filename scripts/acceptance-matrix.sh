@@ -313,6 +313,24 @@ if docker_available; then
     if [ "$PG_UP" != "1" ]; then
       record SKIP "2b-postgres" "postgres:16-alpine did not become ready within 30s"
     else
+      # pg_isready only proves the server answers INSIDE the container. The
+      # docker-proxy on the published host port can still be behind it: a TCP
+      # connect in that window is accepted by the proxy and then RST by the
+      # not-yet-ready backend, which killed crier's very first migration ping
+      # ("connection reset by peer", INT-CI-009). Poll the HOST port until it
+      # completes a real TCP handshake before starting crier.
+      PG_TCP=0
+      for _ in $(seq 1 30); do
+        if (exec 3<>"/dev/tcp/127.0.0.1/$PG_PORT") 2>/dev/null; then
+          exec 3>&- 3<&- 2>/dev/null || true
+          PG_TCP=1
+          break
+        fi
+        sleep 0.5
+      done
+      if [ "$PG_TCP" != "1" ]; then
+        record SKIP "2b-postgres" "postgres host port 127.0.0.1:$PG_PORT never accepted TCP within 15s"
+      else
       PORT_PG=$(free_port 19350 "postgres-server-cell")
       PG_PID=$(start_server "$SERVER_BIN" "$PORT_PG" "$WORKDIR/pg-server.log" \
         CR_DATABASE_URL="postgres://postgres:acc@127.0.0.1:$PG_PORT/crier?sslmode=disable" \
@@ -329,6 +347,7 @@ if docker_available; then
         record PASS "2b-postgres" "postgres-backed register→deliver→retrieve OK on :$PORT_PG (registry + session stores on CR_DATABASE_URL)"
       else
         record FAIL "2b-postgres" "register=$REG_PG deliver=$DEL_PG retrieve=$RET_PG (want 201/201/200)"
+      fi
       fi
     fi
   else
