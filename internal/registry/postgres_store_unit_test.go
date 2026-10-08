@@ -803,18 +803,18 @@ func TestPostgresStoreUnit_Deliver_ExpiryBeforeCreated(t *testing.T) {
 func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	s, mock := newMockStore(t)
 	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1", ThreadID: "thr-1",
-		Location: &Location{Channel: "sess-1", ThreadID: "thr-1"}}
+		PrincipalID: "prin_01", Location: &Location{Channel: "sess-1", ThreadID: "thr-1"}}
 
-	// Eleven arguments since CR-CHAT-029: the INSERT names the location column
-	// too (the JSONB of the machine-readable WHERE — CR-CHAT-029), after the
-	// thread_id column added in CR-CHAT-019 (a thread that only lived on the
-	// wire would not be reconstructable from storage). Nine before it since
-	// CR-FEAT-035 (the priority column), CR-FEAT-025 (sender + idempotency_key
-	// — the receipt address and the dead-letter provenance) and CR-FEAT-029
-	// (the realm). This entry carries a location, so the 11th arg is its JSON.
+	// Twelve arguments since CR-CHAT-007: the INSERT names the principal_id
+	// column too (the HUMAN the delivery was made by — CR-CHAT-007, the audit
+	// answer to "which human spoke as which agent"), after the thread_id
+	// column added in CR-CHAT-019. Eleven before it since CR-CHAT-029 (the
+	// location column), nine since CR-FEAT-035 (priority), CR-FEAT-025
+	// (sender + idempotency_key) and CR-FEAT-029 (the realm). This entry
+	// carries a location, so the 12th arg is its JSON.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
-			0, "thr-1", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil).
+			0, "thr-1", "prin_01", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -834,7 +834,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 	// both optional columns are SQL NULL.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
-			0, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -847,7 +847,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -860,7 +860,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -873,7 +873,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -940,11 +940,12 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	// row also carries the delivery's sender and idempotency key (read back
 	// through COALESCE so a NULL provenance arrives as ""), since CR-FEAT-035
 	// its priority (the first ORDER BY key), since CR-FEAT-029 the realm it
-	// was delivered into (COALESCE'd like the provenance), and since
+	// was delivered into (COALESCE'd like the provenance), since
 	// CR-CHAT-019 its thread (COALESCE'd the same way, so a thread-less
-	// delivery arrives as "").
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "created_at", "expires_at", "namespace", "location", "delivery_ms"}).
-		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil)
+	// delivery arrives as ""), and since CR-CHAT-007 the HUMAN the delivery
+	// was made by (COALESCE'd the same way — the T3 audit provenance).
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "principal_id", "created_at", "expires_at", "namespace", "location", "delivery_ms"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", "prin_01", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil)
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)
@@ -1184,10 +1185,10 @@ func TestPostgresStoreUnit_PurgeExpired_RemovesTTLExpired(t *testing.T) {
 	// (CR-FEAT-025), so the report describes what was actually deleted.
 	expired := now.Add(-time.Hour)
 	mock.ExpectBegin()
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
-		AddRow("m1", "agent", []byte(`{"n":1}`), "foreman", "k-1", now.Add(-2*time.Hour), expired).
-		AddRow("m2", "agent", []byte(`{"n":2}`), "", "", now.Add(-2*time.Hour), expired).
-		AddRow("m3", "other", []byte(`{"n":3}`), "", "", now.Add(-2*time.Hour), expired)
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "principal_id", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{"n":1}`), "foreman", "k-1", "prin_01", now.Add(-2*time.Hour), expired).
+		AddRow("m2", "agent", []byte(`{"n":2}`), "", "", "", now.Add(-2*time.Hour), expired).
+		AddRow("m3", "other", []byte(`{"n":3}`), "", "", "", now.Add(-2*time.Hour), expired)
 	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnRows(rows)
@@ -1214,8 +1215,8 @@ func TestPostgresStoreUnit_PurgeExpired_ReportsAfterCommit(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectBegin()
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
-		AddRow("m1", "agent", []byte(`{}`), "foreman", "", now.Add(-time.Hour), now.Add(-time.Minute))
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "principal_id", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{}`), "foreman", "", "", now.Add(-time.Hour), now.Add(-time.Minute))
 	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnRows(rows)
@@ -1270,8 +1271,8 @@ func TestPostgresStoreUnit_PurgeExpired_UpdateError(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectBegin()
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "created_at", "expires_at"}).
-		AddRow("m1", "agent", []byte(`{}`), "", "", now.Add(-time.Hour), now.Add(-time.Minute))
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "principal_id", "created_at", "expires_at"}).
+		AddRow("m1", "agent", []byte(`{}`), "", "", "", now.Add(-time.Hour), now.Add(-time.Minute))
 	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnRows(rows)

@@ -1294,6 +1294,11 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		// the stored message so the thread tree is reconstructable from
 		// storage alone (specs/CHAT-INTERFACE.md §4 row 15).
 		ThreadID: req.ThreadID,
+		// The HUMAN behind the send (CR-CHAT-007, §6.3), recorded WITH the
+		// message: the ACL has already resolved the live binding, so this is
+		// the audit answer to "which human spoke as which agent" (T3). Empty
+		// for anonymous and agent-initiated deliveries.
+		PrincipalID: req.PrincipalID,
 	}
 	// The machine-readable location (CR-CHAT-029) is attached to the entry
 	// AFTER the realms block above (which resolved and recorded the target's
@@ -1555,6 +1560,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 				// target's own, resolved above from its registry row. Omitted
 				// entirely for the default namespace.
 				Namespace: entry.Namespace,
+				// The HUMAN behind the send (CR-CHAT-007, §6.3), riding
+				// alongside the sender exactly as the stored entry carries
+				// it. Omitted for anonymous and agent-initiated deliveries.
+				PrincipalID: entry.PrincipalID,
 			},
 			Payload: payload,
 		}

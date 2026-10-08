@@ -257,6 +257,13 @@ type PermissionsConfig struct {
 	// it cannot, startup fails naming the directory rather than silently
 	// arming an ACL over an unwritable store.
 	StoreDir string
+	// AdminToken is CR_PERMISSIONS_ADMIN_TOKEN — the management surface's
+	// admin gate (CR-CHAT-007 phase 1). Every POST to /principals, /bindings
+	// and /grants must present it as Bearer, constant-time compared; it is
+	// deliberately distinct from CR_AUTH_TOKEN so a leaked message token
+	// cannot mint permissions. Empty (the default) keeps the gate closed:
+	// the routes answer every write 403 MANAGEMENT_FORBIDDEN.
+	AdminToken string
 }
 
 // NamespaceConfig carries the realm policy document as RAW input. Like
@@ -987,6 +994,7 @@ func Load() (Config, error) {
 	if cfg.Permissions.Enabled && strings.TrimSpace(cfg.Permissions.StoreDir) == "" {
 		cfg.Permissions.StoreDir = defaultPermissionsDir
 	}
+	cfg.Permissions.AdminToken = os.Getenv("CR_PERMISSIONS_ADMIN_TOKEN")
 
 	// Dagger control surface (CR-CHAT-033). OPT-IN and additive: with
 	// CR_DAGGER_URL unset nothing below takes effect and main.go registers no

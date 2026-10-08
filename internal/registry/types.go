@@ -168,6 +168,15 @@ type InboxEntry struct {
 	// (specs/CHAT-SESSIONS.md §4.3/§4.5, D11). `omitempty` keeps an entry
 	// from a client that names no thread byte-identical to before.
 	ThreadID string `json:"thread_id,omitempty"`
+	// PrincipalID is the HUMAN principal the delivery was made by
+	// (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §6.3/§2.1): the request's
+	// principal_id, resolved through its live binding, recorded WITH the
+	// message so the transcript can always answer "which human spoke as
+	// which agent" (T3). The bus never sees a principal as an identity — the
+	// sender stays the agent — this rides alongside as provenance. Empty
+	// (omitempty) for every delivery that named no principal: anonymous and
+	// agent-initiated sends are byte-identical to before this field existed.
+	PrincipalID string `json:"principal_id,omitempty"`
 	// Location is the machine-readable WHERE of this delivery (CR-CHAT-029):
 	// instance, namespace, channel (the session), thread and sub-thread the
 	// agent can SAY it is in, derived from the delivery context — never

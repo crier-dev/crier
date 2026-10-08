@@ -259,6 +259,16 @@ type Handler struct {
 	// whose effective sender holds no live grant, ownership rule or scope
 	// reach, with 403 DELIVERY_FORBIDDEN and a machine-readable reason.
 	permissions *permissions.Checker
+	// permissionsStore is the WRITE half of the delivery ACL (CR-CHAT-007
+	// phase 1, principals_api.go): the store the management surface appends
+	// principal/binding/grant records to — the same store the checker reads,
+	// so a record is in force for the very next delivery (§6.6). Nil (the
+	// default) leaves the management surface refused 403 MANAGEMENT_FORBIDDEN.
+	permissionsStore permissions.Store
+	// permissionsAdminToken is the management surface's admin gate
+	// (CR_PERMISSIONS_ADMIN_TOKEN): every write must present it as Bearer,
+	// constant-time compared. Empty keeps the gate closed even with a store.
+	permissionsAdminToken string
 	// instanceName is this relay's name for the delivery LOCATION (CR-CHAT-029).
 	// Set from main (CR_FED_NAME / host:port, the same name /fed/peers
 	// announces); the zero value leaves the instance field absent on entries

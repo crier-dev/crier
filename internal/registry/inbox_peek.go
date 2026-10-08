@@ -101,11 +101,13 @@ func (s *PostgresStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 	)
 	err := s.pool.QueryRow(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
+       COALESCE(principal_id, ''),
        created_at, expires_at, leased_at, lease_id, acked
 FROM inbox_entries
 WHERE agent_id = $1 AND id = $2;`,
 		agentID, messageID,
 	).Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender, &entry.IdempotencyKey,
+		&entry.PrincipalID,
 		&entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

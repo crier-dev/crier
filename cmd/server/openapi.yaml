@@ -2022,6 +2022,167 @@ paths:
         "401":
           description: Missing or invalid bearer token (when CR_AUTH_TOKEN is set — this route is NOT auth-exempt)
 
+  # ── Permission management (CR-CHAT-007 phase 1) ──
+  # The WRITE half of the delivery ACL (specs/CHAT-PERMISSIONS.md §2.1/§2.3/
+  # §6.1): mint a principal, create a binding, create a grant, revoke a grant.
+  # Every write requires the admin token CR_PERMISSIONS_ADMIN_TOKEN as Bearer —
+  # a SECOND constant-time secret, deliberately distinct from CR_AUTH_TOKEN, so
+  # a leaked message token cannot mint permissions. A deployment with no ACL
+  # (CR_PERMISSIONS_ENABLED unset) has no store and refuses every write 403
+  # MANAGEMENT_FORBIDDEN; so does an armed deployment whose admin token is not
+  # presented. granted_by is recorded as "admin" — phase 1 has no login (§2.4),
+  # so the operator's token is the granter of record.
+  /principals:
+    post:
+      operationId: mintPrincipal
+      tags: [registry]
+      summary: Mint a principal (a HUMAN user, §2.1)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name:
+                  type: string
+                namespace:
+                  type: string
+                  description: The realm the principal belongs to; absent = the default realm.
+                role:
+                  type: string
+                  enum: [owner, admin, member, viewer]
+                  description: The namespace role bundle (§5.2); absent = no role.
+                status:
+                  type: string
+                  enum: [invited, active, suspended, revoked]
+                  description: "Defaults to `active` — phase 1 has no login (§2.4) to move invited→active."
+      responses:
+        "201":
+          description: Minted. The response body is the principal record with its minted `prin_`-prefixed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrincipalRecord"
+        "400":
+          description: Invalid JSON body
+        "403":
+          description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
+  /bindings:
+    post:
+      operationId: createBinding
+      tags: [registry]
+      summary: Record a binding — a principal's speech right onto an agent (§2.3)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal, agent]
+              properties:
+                principal:
+                  type: string
+                  description: The principal id (a `prin_` id, never an agent id).
+                agent:
+                  type: string
+                as_agent:
+                  type: boolean
+                  description: "Defaults to true — the only value this version defines (§2.3)."
+      responses:
+        "201":
+          description: Recorded. The response body is the binding record with its minted `bind_`-prefixed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BindingRecord"
+        "400":
+          description: Invalid JSON, or principal/agent missing
+        "403":
+          description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
+  /grants:
+    post:
+      operationId: createGrant
+      tags: [registry]
+      summary: Create a grant — an ACL entry binding a principal to a subject (§6.1)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal, subject, actions]
+              properties:
+                principal:
+                  type: string
+                  description: The principal id, NEVER an agent id (§6.1).
+                subject:
+                  type: object
+                  required: [type, ref]
+                  properties:
+                    type:
+                      type: string
+                      enum: [agent, group, capability, session, namespace]
+                    ref:
+                      type: string
+                actions:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: [send, read, invite, admin, mint, invoke]
+                expires_at:
+                  type: string
+                  format: date-time
+                  description: "Absent/null = no expiry; a timestamp = the grant is inert after it (§6.1)."
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Created. The response body is the grant record with its minted `grant_`-prefixed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantRecord"
+        "400":
+          description: Invalid JSON, or an unknown action / subject type — the error names the accepted set (§6.1)
+        "403":
+          description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
+  /grants/{grantid}/revoke:
+    post:
+      operationId: revokeGrant
+      tags: [registry]
+      summary: Tombstone a grant (§6.6) — the record stays, the grant is inert
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: grantid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tombstoned. Takes effect on the NEXT delivery (§6.6 per-request evaluation).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: string
+                    description: The revoked grant id.
+        "403":
+          description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
+        "404":
+          description: No grant with that id
+
   # ── Sessions (CR-CHAT-019) ──
   # The core session object surfaces of specs/CHAT-INTERFACE.md §4 (rows 8-15,
   # 24, 31, 37). A session is an AGGREGATE over the durable inbox deliveries
@@ -3693,8 +3854,107 @@ components:
         namespace:
           type: string
           description: "The namespace (realm) this message was delivered INTO (CR-FEAT-029, specs/NAMESPACES.md). Derived from the TARGET agent's registered namespace, never from the sender's claim — a delivery that names a different realm is refused with 403 NAMESPACE_MISMATCH. Recorded WITH the message so a retrieved message states its realm even after the agent's row is gone; ABSENT means the default namespace, which is what every pre-CR-FEAT-029 message is."
+        principal_id:
+          type: string
+          description: "The HUMAN principal this message was delivered by (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §6.3/§2.1), or absent when the delivery named no principal. The request's `principal_id`, resolved through its live binding by the delivery ACL before anything is stored: it is the audit answer to \"which human spoke as which agent\" (T3). It is provenance, never routing — the sender stays the agent; the bus never sees a principal as an identity."
         location:
           $ref: "#/components/schemas/MessageLocation"
+    PrincipalRecord:
+      type: object
+      description: |-
+        A HUMAN user (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §2.1) — a
+        different kind of thing from an agent: a principal never appears as a
+        bus identity, it is the ANSWER to "which human spoke as which agent".
+        `kind` is part of the record so an id is never guessed as "agent or
+        human" by its shape.
+      properties:
+        id:
+          type: string
+          description: The minted principal id (`prin_…`).
+        kind:
+          type: string
+          description: Always `principal`.
+        display_name:
+          type: string
+        namespace:
+          type: string
+          description: The realm the principal belongs to; absent = the default realm.
+        role:
+          type: string
+          description: The namespace role bundle (§5.2); absent = no role.
+        status:
+          type: string
+          enum: [invited, active, suspended, revoked]
+          description: The lifecycle state (§2.2).
+        created_at:
+          type: string
+          format: date-time
+    BindingRecord:
+      type: object
+      description: |-
+        A principal's speech right onto an agent (CR-CHAT-007, §2.3): "this
+        human may speak AS this agent". It does NOT say "may read its inbox"
+        and it does not by itself admit a send (§6.5).
+      properties:
+        id:
+          type: string
+          description: The minted binding id (`bind_…`).
+        kind:
+          type: string
+          description: Always `binding`.
+        principal:
+          type: string
+        agent:
+          type: string
+        as_agent:
+          type: boolean
+          description: "True is the only value this version defines (§2.3)."
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          description: "`admin` in phase 1 — no login exists yet (§2.4)."
+    GrantRecord:
+      type: object
+      description: |-
+        An ACL entry binding a principal to a subject with an action set
+        (CR-CHAT-007, §6.1).
+      properties:
+        id:
+          type: string
+          description: The minted grant id (`grant_…`).
+        kind:
+          type: string
+          description: Always `grant`.
+        principal:
+          type: string
+          description: A principal id, NEVER an agent id (§6.1).
+        subject:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [agent, group, capability, session, namespace]
+            ref:
+              type: string
+        actions:
+          type: array
+          items:
+            type: string
+            enum: [send, read, invite, admin, mint, invoke]
+        granted_by:
+          type: string
+          description: "`admin` in phase 1 — no login exists yet (§2.4)."
+        granted_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: "null = no expiry; a timestamp = the grant is inert after it (§6.1)."
+        note:
+          type: string
     MessageLocation:
       type: object
       description: |-
@@ -3759,6 +4019,9 @@ components:
         namespace:
           type: string
           description: "The namespace (realm) the message belonged to when it expired (CR-FEAT-029). Copied from the inbox entry at sweep time because a dead letter outlives its agent's row (the destination is deliberately not foreign-keyed) — without it, the realm whose retention policy expired the message would be unrecoverable. ABSENT = the default namespace."
+        principal_id:
+          type: string
+          description: "The HUMAN principal the delivery was made by (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §6.3), copied from the inbox entry at sweep time. A dead letter is the surviving copy of the message, so the audit answer to \"which human spoke as which agent\" (T3) survives the expiry that removed the inbox row. ABSENT when the delivery named no principal."
     NamespacePolicy:
       type: object
       required: [name, auth]

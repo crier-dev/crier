@@ -394,9 +394,12 @@ claims:
     # read path (GET /sessions/{id}/output — one operation), so the pair is
     # 45 / 54. CR-CHAT-034 added the three delivery-wait paths (POST
     # /dagger/wait, POST /dagger/waits/{key}/resolve, GET /dagger/waits/{key}
-    # — three operations), so the pair is 48 / 57.
-    quote: "docs/openapi.yaml"
-    expect: 48
+    # three operations), so the pair is 48 / 57. CR-CHAT-007 added the four
+    # permission-management paths (POST /principals, POST /bindings,
+    # POST /grants, POST /grants/{grantid}/revoke — one operation each), so
+    # the pair is 52 / 61.
+    quote: "52 paths"
+    expect: 52
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -423,9 +426,11 @@ claims:
     # CR-CHAT-031 added the dual-output read operation
     # (GET /sessions/{id}/output), so the count is 54. CR-CHAT-034 added the
     # three delivery-wait operations (deliver-and-wait, resolve, status), so
-    # the count is 57.
-    quote: "57 operations"
-    expect: 57
+    # the count is 57. CR-CHAT-007 added the four permission-management
+    # operations (mint principal, create binding, create grant, revoke grant),
+    # so the count is 61.
+    quote: "61 operations"
+    expect: 61
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -477,8 +482,13 @@ claims:
     # CR-CHAT-030 registered the three task routes (create + claim + complete),
     # so the count is 43. CR-CHAT-009 registered the web chat client page
     # (GET /chat, served the way /docs is), so the count is 44.
-    quote: "45 router paths"
-    expect: 45
+    # CR-CHAT-007 registered the four permission-management routes
+    # (POST /principals, /bindings, /grants, /grants/{grantid}/revoke), so the
+    # count was 49 (the +1 is the revoke path naming a sub-resource the openapi
+    # path count does not merge); the tick-451 phase-1 salvage added the agent
+    # classing route (POST /agents/{agentid}/class), so the count is 50.
+    quote: "50 router paths"
+    expect: 50
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

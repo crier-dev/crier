@@ -94,6 +94,17 @@ var toolCoverage = map[string][]string{
 // Each justification is grounded in the repo (the operation's own summary/tag
 // description in docs/openapi.yaml, or the bridge's own comments), never invented.
 var excludedOperations = map[string]string{
+	// CR-CHAT-007 phase 1 — the permission MANAGEMENT surfaces. Every write is
+	// gated on the deployment's CR_PERMISSIONS_ADMIN_TOKEN (a second,
+	// constant-time-checked secret distinct from CR_AUTH_TOKEN) precisely
+	// because these verbs decide who may reach whom; an MCP bridge identity
+	// holding the shared message token must never be able to mint principals,
+	// bindings or grants. Operator-only; reclassify if the bridge ever grows
+	// an admin-credential surface.
+	"mintPrincipal":       "POST /principals — \"Mint a principal\" (CR-CHAT-007): admin-token-gated; a bridge identity holds the message token, not the admin token, so a tool would always be refused 403 MANAGEMENT_FORBIDDEN.",
+	"createBinding":       "POST /bindings — \"Record a binding\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"createGrant":         "POST /grants — \"Create a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"revokeGrant":         "POST /grants/{grantid}/revoke — \"Tombstone a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
 	"healthCheck":         "GET /health — server liveness probe (spec tag \"health\": \"Server liveness, build identity and effective runtime posture\"); an operator/load-balancer surface, not an agent-messaging verb.",
 	"buildVersion":        "GET /version — \"Build identity of the running server\" (same identity `crier -version` prints and the startup log carries); an operator/CLI concern, not an agent-messaging verb.",
 	"runtimeStatus":       "GET /status — \"Effective runtime posture (auth, guard, registry backend, build identity)\"; operator-only and deliberately NOT auth-exempt, so it is not something a bridge identity should fetch on a tool call.",

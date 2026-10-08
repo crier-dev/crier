@@ -695,11 +695,11 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	// column existed.
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
-    id, agent_id, payload, sender, idempotency_key, priority, thread_id, created_at, expires_at,
+    id, agent_id, payload, sender, idempotency_key, priority, thread_id, principal_id, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, FALSE, $10, $11::jsonb, $12);`,
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
-		entry.Priority, nullText(entry.ThreadID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
+		entry.Priority, nullText(entry.ThreadID), nullText(entry.PrincipalID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 		nullText(namespace.Canonical(entry.Namespace)), nullJSONB(entry.Location),
 		// CR-CHAT-020: a timed deliver records its whole milliseconds; an
 		// untimed one (zero) stores SQL NULL — "not measured", never zero.
@@ -774,7 +774,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	// first one ties.
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
-       COALESCE(thread_id, ''), created_at, expires_at, COALESCE(namespace, ''), location,
+       COALESCE(thread_id, ''), COALESCE(principal_id, ''), created_at, expires_at, COALESCE(namespace, ''), location,
        COALESCE(delivery_ms, 0)
 FROM inbox_entries
 WHERE agent_id = $1
@@ -800,7 +800,7 @@ LIMIT $3;`,
 		var location []byte
 		var deliveryMs pgtype.Int8
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location,
+			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.PrincipalID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location,
 			&deliveryMs); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)

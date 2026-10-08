@@ -356,13 +356,21 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// holds no live grant, ownership rule or scope reach is refused with 403
 	// DELIVERY_FORBIDDEN and a machine-readable reason. An unclassed target is
 	// unchanged either way (§8.1).
-	permsChecker, permsGrantEvents, err := buildPermissions(cfg)
+	permsChecker, permsStore, permsGrantEvents, err := buildPermissions(cfg)
 	if err != nil {
 		slog.Error("initialize delivery acl", "error", err)
 		return 1
 	}
 	if permsChecker != nil {
 		registryHandler.SetPermissionsChecker(permsChecker)
+		// CR-CHAT-007 phase 1: the management surface writes the SAME store
+		// the checker reads (buildPermissions returns it as the fourth
+		// value). The admin gate is CR_PERMISSIONS_ADMIN_TOKEN — distinct
+		// from CR_AUTH_TOKEN so a leaked message token cannot mint
+		// permissions; with no token armed the routes exist and refuse every
+		// write 403 MANAGEMENT_FORBIDDEN (the gate closed is the default).
+		registryHandler.SetPermissionsStore(permsStore)
+		registryHandler.SetPermissionsAdminToken(cfg.Permissions.AdminToken)
 		slog.Info("delivery acl armed",
 			"store_dir", cfg.Permissions.StoreDir,
 			"detail", "classed targets are default-deny; unclassed targets keep the shipped posture (CR-CHAT-003)")
@@ -646,6 +654,19 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// NOT auth-exempt: like /status it reports posture, so a token-less caller
 	// must not be able to read it on a server that has auth on.
 	r.HandleFunc("/namespaces", registryHandler.HandleListNamespaces).Methods("GET")
+	// Permission management (CR-CHAT-007 phase 1, registry/principals_api.go):
+	// mint a principal, create/revoke bindings and grants. The admin gate is
+	// the handler's (SetPermissionsAdminToken) — these routes are registered
+	// unconditionally so an unarmed deployment answers a NAMED 403
+	// MANAGEMENT_FORBIDDEN rather than a 404 that reads as a missing route.
+	r.HandleFunc("/principals", registryHandler.HandleMintPrincipal).Methods("POST")
+	r.HandleFunc("/bindings", registryHandler.HandleCreateBinding).Methods("POST")
+	r.HandleFunc("/grants", registryHandler.HandleCreateGrant).Methods("POST")
+	r.HandleFunc("/grants/{grantid}/revoke", registryHandler.HandleRevokeGrant).Methods("POST")
+	// Agent classing (CR-CHAT-007 phase 1): the record that ARMS the delivery
+	// ACL for one agent (§3.1/§6.4 rule 2). An agent with no class record
+	// keeps the shipped legacy posture.
+	r.HandleFunc("/agents/{agentid}/class", registryHandler.HandleSetAgentClass).Methods("POST")
 
 	// Session API (CR-CHAT-019) — the core object surfaces: the session list
 	// and create (CHAT-INTERFACE.md §4 rows 8-10), the session object (rows

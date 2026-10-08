@@ -86,6 +86,13 @@ type DeadLetter struct {
 	// Empty = the default namespace, and `omitempty` keeps every
 	// pre-CR-FEAT-029 record byte-identical.
 	Namespace string `json:"namespace,omitempty"`
+	// PrincipalID is the HUMAN principal the delivery was made by
+	// (CR-CHAT-007, §6.3), copied from the inbox entry at sweep time. A dead
+	// letter outlives its inbox row, so the audit answer to "which human
+	// spoke as which agent" (T3) has to travel with the record. Empty when
+	// the delivery named no principal; `omitempty` keeps every
+	// pre-CR-CHAT-007 record byte-identical.
+	PrincipalID string `json:"principal_id,omitempty"`
 }
 
 // expiryReceiptPayload is the durable, machine-readable inbox payload of an
@@ -161,5 +168,10 @@ func newDeadLetter(agentID string, entry *InboxEntry, now time.Time) *DeadLetter
 		// outlives the agent row, so this is the only place the realm of the
 		// retention policy that expired it can be read from afterwards.
 		Namespace: entry.Namespace,
+		// The HUMAN travels with the record too (CR-CHAT-007, §6.3): the
+		// dead letter is the surviving copy of the message, so the audit
+		// answer to "which human spoke as which agent" (T3) survives the
+		// expiry that removed the inbox row.
+		PrincipalID: entry.PrincipalID,
 	}
 }

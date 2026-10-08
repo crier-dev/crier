@@ -2,6 +2,8 @@ package permissions
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -394,3 +396,20 @@ func RevokeGrant(ctx context.Context, s Store, grantID, revokedBy string, ts tim
 
 // ErrGrantNotFound is returned by RevokeGrant for an unknown id.
 var ErrGrantNotFound = errors.New("grant not found")
+
+// NewRecordID mints a record id with the spec's prefix shape
+// (`prin_01J9Z6V0Q7`, §2.1): the named prefix plus 12 random bytes, hex —
+// the same id discipline the registry's lease ids use. A record id is never
+// guessable as "agent or human" by its shape (§2.1: kind is part of the
+// record), and the prefix is what keeps the two vocabularies visibly apart.
+func NewRecordID(prefix string) string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		// A crypto/rand failure cannot be retried into a weaker id: the
+		// callers append records keyed by this id, so a fallback value
+		// would risk collision. Panic, as the id-minting the registry
+		// itself does on the same failure.
+		panic("permissions: id generation failed: " + err.Error())
+	}
+	return prefix + hex.EncodeToString(b)
+}

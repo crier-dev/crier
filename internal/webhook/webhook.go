@@ -149,6 +149,12 @@ type EnvelopeMeta struct {
 	// from the request body. Empty = the default namespace, and `omitempty`
 	// keeps every pre-CR-FEAT-029 envelope byte-identical.
 	Namespace string `json:"namespace,omitempty"`
+	// PrincipalID is the HUMAN principal the delivery was made by
+	// (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §6.3). It rides alongside the
+	// Sender exactly as the stored inbox entry carries it: the bus identity
+	// stays the agent, the human is provenance for the transcript (T3).
+	// Omitted for anonymous and agent-initiated deliveries.
+	PrincipalID string `json:"principal_id,omitempty"`
 }
 
 // Client performs webhook POSTs with timeout and optional HMAC signing.

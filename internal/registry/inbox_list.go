@@ -79,6 +79,7 @@ func (s *PostgresStore) PeekInbox(agentID string) ([]*InboxEntry, error) {
 
 	rows, err := s.pool.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
+       COALESCE(principal_id, ''),
        created_at, expires_at, leased_at, lease_id, acked, priority
 FROM inbox_entries
 WHERE agent_id = $1
@@ -99,7 +100,7 @@ ORDER BY delivery_sequence;`, agentID)
 			priority  int
 		)
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender, &entry.IdempotencyKey,
-			&entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked, &priority); err != nil {
+			&entry.PrincipalID, &entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked, &priority); err != nil {
 			return nil, fmt.Errorf("peek inbox scan: %w", err)
 		}
 		// expires_at travels through pgtype.Timestamptz for the same reason

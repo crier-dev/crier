@@ -23,7 +23,7 @@ import (
 // order the scan below expects.
 const deadLetterColumns = `message_id, agent_id, COALESCE(sender, ''), payload,
        created_at, expires_at, dead_lettered_at, reason, COALESCE(idempotency_key, ''),
-       COALESCE(namespace, '')`
+       COALESCE(namespace, ''), COALESCE(principal_id, '')`
 
 // scanDeadLetter reads one dead-letter row into a record.
 func scanDeadLetter(scan func(dest ...any) error) (*DeadLetter, error) {
@@ -33,7 +33,7 @@ func scanDeadLetter(scan func(dest ...any) error) (*DeadLetter, error) {
 	)
 	if err := scan(&dl.MessageID, &dl.AgentID, &dl.Sender, &dl.Payload,
 		&dl.CreatedAt, &expiresAt, &dl.DeadLetteredAt, &dl.Reason, &dl.IdempotencyKey,
-		&dl.Namespace); err != nil {
+		&dl.Namespace, &dl.PrincipalID); err != nil {
 		return nil, err
 	}
 	dl.ExpiredAt = expiryFromTimestamptz(expiresAt)
@@ -78,7 +78,7 @@ func (s *PostgresStore) PurgeExpiredReport(report func(agentID string, entry *In
 DELETE FROM inbox_entries
 WHERE expires_at <= $1
 RETURNING id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
-          created_at, expires_at;`, now)
+          COALESCE(principal_id, ''), created_at, expires_at;`, now)
 	if err != nil {
 		slog.Error("postgres purge expired", "error", err)
 		return 0
@@ -89,7 +89,7 @@ RETURNING id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key,
 		var entry InboxEntry
 		var expiresAt pgtype.Timestamptz
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
-			&entry.IdempotencyKey, &entry.CreatedAt, &expiresAt); err != nil {
+			&entry.IdempotencyKey, &entry.PrincipalID, &entry.CreatedAt, &expiresAt); err != nil {
 			rows.Close()
 			slog.Error("postgres purge expired: scan removed row", "error", err)
 			return 0
@@ -161,13 +161,14 @@ func (s *PostgresStore) AppendDeadLetter(dl *DeadLetter) (bool, error) {
 	err := s.pool.QueryRow(ctx, `
 INSERT INTO dead_letters (
     message_id, agent_id, sender, payload, created_at, expires_at,
-    dead_lettered_at, reason, idempotency_key, namespace
-) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)
+    dead_lettered_at, reason, idempotency_key, namespace, principal_id
+) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (message_id) DO NOTHING
 RETURNING message_id;`,
 		dl.MessageID, dl.AgentID, nullText(dl.Sender), dl.Payload,
 		dl.CreatedAt, pgTimestamptz(dl.ExpiredAt), dl.DeadLetteredAt,
 		dl.Reason, nullText(dl.IdempotencyKey), nullText(namespace.Canonical(dl.Namespace)),
+		nullText(dl.PrincipalID),
 	).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Already recorded: the original expiry owns the record and its

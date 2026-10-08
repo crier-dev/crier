@@ -32,15 +32,15 @@ import (
 // the session audit trail and permission matrix overlay. It is nil exactly
 // when the checker is — a deployment with no ACL has no permission events to
 // show, and the audit read answers with session events only. It never writes.
-func buildPermissions(cfg config.Config) (*permissions.Checker, func(context.Context, string) ([]session.PermissionsGrantView, error), error) {
+func buildPermissions(cfg config.Config) (*permissions.Checker, permissions.Store, func(context.Context, string) ([]session.PermissionsGrantView, error), error) {
 	if !cfg.Permissions.Enabled {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	store, err := permissions.NewJSONLStore(cfg.Permissions.StoreDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("delivery ACL store %q: %w", cfg.Permissions.StoreDir, err)
+		return nil, nil, nil, fmt.Errorf("delivery ACL store %q: %w", cfg.Permissions.StoreDir, err)
 	}
-	return permissions.NewChecker(store), grantEventsReader(store), nil
+	return permissions.NewChecker(store), store, grantEventsReader(store), nil
 }
 
 // grantEventsReader adapts a permissions JSONL store to the session audit
