@@ -201,6 +201,50 @@ redeliveries pause instead of POSTing and resume when a probe
 (`CR_WEBHOOK_PROBE_S`) succeeds, so a poisoned endpoint can take much longer
 than the default cadence to reach exhaustion.
 
+### 6. Named groups (`@team:<name>`)
+
+A named group is a curated, editable roster of agents addressed as
+`@team:<name>` (CR-CHAT-013/022). `POST /groups` creates one — `created_by`, or
+the `X-Agent-ID` header, is required — and `PATCH /groups/{name}/members` edits
+its roster. Addressing the name in a message body resolves it to the roster's
+CURRENT members, so a membership edit routes the NEXT send to the new set and
+never a cached one. A group is a target with a roster, not a room: it has no
+participants, no transcript and no state. The roster log lives under
+`CR_GROUP_ROOT`.
+
+**Every member must be a REGISTERED agent to receive.** A roster may name an
+agent that has not registered yet — the roster is curated data, so `POST /groups`
+accepts it — but that member has no inbox and cannot be delivered to until it
+registers with `POST /agents`. This is the one prerequisite of a group send, and
+a group whose roster is all-placeholder delivers to nobody.
+
+The send is nevertheless **not all-or-nothing** (§3.2's named-outcome rule): the
+message is recorded and delivered to every member the registry DOES hold, and
+each member it does NOT hold is **skipped**, never fatal. A send to a
+three-member roster with one unregistered agent answers `201` and carries the
+partial-success summary beside the per-target `outcomes`:
+
+```json
+{"delivered":2,"skipped":1,"skipped_agents":["ghost"]}
+```
+
+The skipped target keeps its own reason instead of being hidden behind the
+count, so an unregistered agent reads differently from a namespace mismatch:
+
+```json
+{"target":"ghost","outcome":"refused","detail":"agent not found: \"ghost\""}
+```
+
+Each skip is also logged on the server, naming the group the target was
+addressed through, so an operator sees an unregistered roster member without
+having to read a sender's response (DF-CRIER-305). A group name with no roster
+at all delivers to nobody and is reported the same way — a skip, never a silent
+drop:
+
+```
+WARN fan-out: skipping target (delivery refused) — the message was still delivered to every other target target=ghost reason="agent not found: \"ghost\"" group=ops
+```
+
 ## Quick Start
 
 ### Install prebuilt binaries (only when release assets are published)
