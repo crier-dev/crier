@@ -358,3 +358,30 @@ build/behavior trail.
 # agent.key: PKCS#8 ed25519, mode 0600 — feed to crier-mcp via CRIER_AGENT_PRIVATE_KEY_FILE
 ```
 `keygen -force` overwrites (refuses by default — a keypair is not regenerable).
+
+## Delivery ACL — principals, bindings, grants (CR-CHAT-003/007, live-verified 2026-10-09)
+
+Arm: `CR_PERMISSIONS_ENABLED=true` + `CR_PERMISSIONS_DIR=<dir>` +
+`CR_PERMISSIONS_ADMIN_TOKEN=<secret>`. The management surface is
+`POST /principals` (mint a HUMAN), `POST /bindings` {principal, agent},
+`POST /grants` {principal, subject:{type,ref}, actions},
+`POST /grants/{id}/revoke`, and `POST /agents/{id}/class`
+{class: personal|service, owner} — the class record is what ARMS the ACL
+for that agent; unclassed agents keep the legacy trust-by-reach posture.
+Every management write needs the admin token as Bearer. **Pitfall**
+(DF-CRIER-297, open): with `CR_AUTH_TOKEN` ALSO set the surface is
+unreachable — the middleware demands the message token while the handler
+demands the admin token; until fixed, run ACL tests without `CR_AUTH_TOKEN`.
+
+Refusal contract (§6.7, machine-readable): `403 DELIVERY_FORBIDDEN` with
+`reason` = ANONYMOUS (no principal_id on a classed target), NO_BINDING
+(principal_id without a live binding or without as_agent), NO_GRANT
+(default-deny cross-owner); a viewer's send is NO_GRANT by construction.
+Grants are per-request: revoke (tombstone) or an expired `expires_at` bites
+on the very next delivery. Capability pools (`POST /capabilities/{cap}/inbox`)
+resolve the holder first, then ACL-check the RESOLVED agent — fan-out cannot
+bypass per-agent checks. Class/bindings/grants survive restart via the JSONL
+store; the registry itself does not without `CR_DATABASE_URL`. Deliver body
+member is `payload` (not `body`); retrieves/acks are ed25519-signed
+(`examples/demo.sh` is the template). Re-register with a new public_key is
+409 and keys are immutable (DF-CRIER-302) — use a fresh agent id.
