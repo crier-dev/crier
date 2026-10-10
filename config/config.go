@@ -258,11 +258,13 @@ type PermissionsConfig struct {
 	// arming an ACL over an unwritable store.
 	StoreDir string
 	// AdminToken is CR_PERMISSIONS_ADMIN_TOKEN — the management surface's
-	// admin gate (CR-CHAT-007 phase 1). Every POST to /principals, /bindings
-	// and /grants must present it as Bearer, constant-time compared; it is
-	// deliberately distinct from CR_AUTH_TOKEN so a leaked message token
-	// cannot mint permissions. Empty (the default) keeps the gate closed:
-	// the routes answer every write 403 MANAGEMENT_FORBIDDEN.
+	// admin gate (CR-CHAT-007 phase 1). Every management write (POST
+	// /principals, /bindings, /grants, /grants/{grantid}/revoke and
+	// /agents/{agentid}/class) must present it as Bearer, constant-time
+	// compared; it is deliberately distinct from CR_AUTH_TOKEN so a leaked
+	// message token cannot mint permissions, and Load REFUSES a boot that sets
+	// the two to the same secret (DF-CRIER-297). Empty (the default) keeps the
+	// gate closed: the routes answer every write 403 MANAGEMENT_FORBIDDEN.
 	AdminToken string
 }
 
@@ -995,6 +997,19 @@ func Load() (Config, error) {
 		cfg.Permissions.StoreDir = defaultPermissionsDir
 	}
 	cfg.Permissions.AdminToken = os.Getenv("CR_PERMISSIONS_ADMIN_TOKEN")
+	// DF-CRIER-297: CR_PERMISSIONS_ADMIN_TOKEN is a SECOND secret, deliberately
+	// distinct from CR_AUTH_TOKEN (see PermissionsConfig.AdminToken). Set to the
+	// same value the two roles collapse into one credential — the message token
+	// becomes an admin token, so the surface's "a leaked message token cannot
+	// mint permissions" property is lost and the middleware's per-surface split
+	// (management routes accept either secret) stops meaning anything. Refuse
+	// the boot naming both variables rather than serving a deployment whose
+	// admin gate is the shared token. Only checked when the ACL is enabled:
+	// with CR_PERMISSIONS_ENABLED unset the admin token arms nothing.
+	if cfg.Permissions.Enabled && cfg.AuthToken != "" && cfg.Permissions.AdminToken != "" &&
+		cfg.AuthToken == cfg.Permissions.AdminToken {
+		return cfg, fmt.Errorf("CR_PERMISSIONS_ADMIN_TOKEN and CR_AUTH_TOKEN are set to the same secret — the permissions management surface's admin gate must be distinct from the message token (DF-CRIER-297); give them different values, or unset the one this deployment does not need")
+	}
 
 	// Dagger control surface (CR-CHAT-033). OPT-IN and additive: with
 	// CR_DAGGER_URL unset nothing below takes effect and main.go registers no

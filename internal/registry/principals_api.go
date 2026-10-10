@@ -28,10 +28,15 @@ import (
 // unauthenticated principal/bind/grant mint would be a self-service hole
 // through §6 (the spec's granted_by rule — "you cannot grant admin without
 // admin" — has no principal-side enforcement yet, phase 1 has no login, so the
-// deployment token is the granter of record). The Bearer the shared auth
-// middleware already checks is the reach gate; this second constant-time
-// secret is the ADMIN gate, distinct from CR_AUTH_TOKEN so a leaked message
-// token cannot mint permissions.
+// deployment token is the granter of record).
+//
+// The shared auth middleware accepts EITHER the message token or the admin
+// token on these paths (middleware.AuthTokens, DF-CRIER-297): a message-token
+// holder is let through precisely so the named 403 below is what answers it,
+// and the admin token reaches the handler here. This constant-time secret is
+// therefore the SOLE authority for every write on this surface — distinct from
+// CR_AUTH_TOKEN so a leaked message token cannot mint permissions, and refused
+// at boot when the two are configured to the same value (config.Load).
 //
 // granted_by is recorded as "admin" for every record this surface writes: the
 // caller is the operator, not a principal, and §6.1's field names WHO granted —

@@ -293,3 +293,199 @@ func TestAuthConstantTimeComparisonPreservesTokenSemantics(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DF-CRIER-297 — the permissions management surface carries a SECOND secret.
+// ---------------------------------------------------------------------------
+
+// TestIsManagementPathPinsTheExemptSet pins the path predicate the dual-token
+// rule keys on, including the near-miss shapes a sloppy prefix/suffix test
+// would exempt by accident.
+func TestIsManagementPathPinsTheExemptSet(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/principals", true},
+		{"/bindings", true},
+		{"/grants", true},
+		{"/grants/grant_abc123/revoke", true},
+		{"/agents/atlas/class", true},
+
+		// Near misses: a longer path, a missing id, a trailing slash and the
+		// four ordinary routes that must keep the message-token rule.
+		{"/principals/", false},
+		{"/principals/xyz", false},
+		{"/grants/grant_abc123", false},
+		{"/grants//revoke", false},
+		{"/grants/g/revoke/extra", false},
+		{"/agents/atlas", false},
+		{"/agents/atlas/class/extra", false},
+		{"/agents//class", false},
+		{"/agents", false},
+		{"/agents/atlas/inbox", false},
+		{"/relay/publish", false},
+		{"/relay/subscribe/t", false},
+		{"/mesh/peers", false},
+		{"/health", false},
+		{"/v1/principals", false},
+	}
+
+	for _, tc := range cases {
+		if got := isManagementPath(tc.path); got != tc.want {
+			t.Errorf("isManagementPath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// TestAuthTokensDualSecretPerSurface pins the DF-CRIER-297 rule end to end at
+// the middleware seam: the admin token reaches the management paths and nowhere
+// else, the message token reaches every path, and neither token is a
+// substitute for the other outside its surface.
+func TestAuthTokensDualSecretPerSurface(t *testing.T) {
+	const (
+		messageToken = "message-secret"
+		adminToken   = "admin-secret"
+	)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		bearer     string
+		wantStatus int
+		wantCalled bool
+	}{
+		{
+			name:       "admin token reaches mint a principal",
+			method:     http.MethodPost,
+			path:       "/principals",
+			bearer:     adminToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin token reaches the parameterised revoke path",
+			method:     http.MethodPost,
+			path:       "/grants/grant_1/revoke",
+			bearer:     adminToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin token reaches the parameterised class path",
+			method:     http.MethodPost,
+			path:       "/agents/atlas/class",
+			bearer:     adminToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "message token is handed to the handler on a management path (its named 403 is the handler's)",
+			method:     http.MethodPost,
+			path:       "/principals",
+			bearer:     messageToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "message token reaches the relay",
+			method:     http.MethodPost,
+			path:       "/relay/publish",
+			bearer:     messageToken,
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "admin token is refused on the relay with 403, not 401",
+			method:     http.MethodPost,
+			path:       "/relay/publish",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "admin token is refused on the mesh",
+			method:     http.MethodGet,
+			path:       "/mesh/peers",
+			bearer:     adminToken,
+			wantStatus: http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "an unknown token is a 401 on a management path too",
+			method:     http.MethodPost,
+			path:       "/principals",
+			bearer:     "not-the-token",
+			wantStatus: http.StatusUnauthorized,
+			wantCalled: false,
+		},
+		{
+			name:       "an unknown token is a 401 elsewhere",
+			method:     http.MethodGet,
+			path:       "/agents",
+			bearer:     "not-the-token",
+			wantStatus: http.StatusUnauthorized,
+			wantCalled: false,
+		},
+		{
+			name:       "no credential is a 401 on a management path",
+			method:     http.MethodPost,
+			path:       "/principals",
+			bearer:     "",
+			wantStatus: http.StatusUnauthorized,
+			wantCalled: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			handler := AuthTokens(messageToken, adminToken)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("authenticated"))
+			}))
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.bearer != "" {
+				request.Header.Set("Authorization", "Bearer "+tc.bearer)
+			}
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("handler called = %v, want %v", called, tc.wantCalled)
+			}
+		})
+	}
+}
+
+// TestAuthTokensWithoutManagementTokenIsTheSingleSecretMiddleware is the
+// byte-compat guard: an unconfigured deployment (no admin token) must behave
+// exactly as it did before DF-CRIER-297 — a management path with any credential
+// other than the message token is a plain 401.
+func TestAuthTokensWithoutManagementTokenIsTheSingleSecretMiddleware(t *testing.T) {
+	handler := AuthTokens("message-secret", "")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler should not be called")
+	}))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/principals", nil)
+	request.Header.Set("Authorization", "Bearer admin-secret")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d (no admin token is configured, so the admin credential is simply unknown)", recorder.Code, http.StatusUnauthorized)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if body["error"] != "invalid token" {
+		t.Fatalf("error = %q, want %q", body["error"], "invalid token")
+	}
+}

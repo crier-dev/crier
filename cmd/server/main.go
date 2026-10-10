@@ -196,7 +196,15 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// gets a correlation id, echoed as X-Request-Id and carried in the
 	// request context for the handler log lines (DF-CRIER-141).
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Auth(cfg.AuthToken))
+	// AuthTokens, not Auth (DF-CRIER-297): the permissions management routes
+	// carry a SECOND secret (CR_PERMISSIONS_ADMIN_TOKEN) whose gate lives in
+	// the handlers (registry/principals_api.go), so with both tokens configured
+	// the middleware must accept either one ON THOSE PATHS — requiring
+	// CR_AUTH_TOKEN there made the whole surface unreachable, because one
+	// Authorization header cannot equal two secrets. Everywhere else the message
+	// token is still the only credential, and the admin token is refused with
+	// 403. middleware.AuthTokens' own predicate names the exempt routes.
+	r.Use(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken))
 	// Federation peer authentication (CR-CHAT-024): when CR_FED_AUTH_FILE is
 	// set, requests that announce a peer identity (X-Crier-Fed-Peer) must
 	// prove it with a valid X-Fed-Ts/X-Fed-Sig signature over the request
@@ -659,6 +667,9 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// the handler's (SetPermissionsAdminToken) — these routes are registered
 	// unconditionally so an unarmed deployment answers a NAMED 403
 	// MANAGEMENT_FORBIDDEN rather than a 404 that reads as a missing route.
+	// The shared auth middleware accepts either the message token or the admin
+	// token on exactly these paths (middleware.AuthTokens'
+	// isManagementPath, DF-CRIER-297) — keep the two lists in step.
 	r.HandleFunc("/principals", registryHandler.HandleMintPrincipal).Methods("POST")
 	r.HandleFunc("/bindings", registryHandler.HandleCreateBinding).Methods("POST")
 	r.HandleFunc("/grants", registryHandler.HandleCreateGrant).Methods("POST")
