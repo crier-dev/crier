@@ -426,5 +426,8 @@ unacked message VANISHES from retrieve for ~60s (lease) — check
 
 Dagger control: CR_DAGGER_URL registers /dagger/runs (502 honest transport
 errors, 404 unknown run). ⚠️ ALWAYS also set CR_DAGGER_STORE_DIR when
-CR_DAGGER_URL is set: the default /var/lib/crier is unwritable for non-root
-and the server REFUSES TO BOOT (DF-CRIER-303, P1, reproduced fresh-box).
+CR_DAGGER_URL is set: the default /var/lib/crier/dagger is unwritable for
+non-root and the server REFUSES TO BOOT, with a startup error that names
+CR_DAGGER_STORE_DIR, the resolved path and the uid (DF-CRIER-303, P1,
+reproduced fresh-box). A store directory that exists but is read-only is
+refused the same way at boot, instead of failing later on the first run write.
