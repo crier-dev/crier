@@ -13,7 +13,7 @@ package mcp
 // the one-line justification per entry is the reason a future reader needs.
 //
 // The relationship is MANY-TO-MANY, not one tool per operation: 19 tools
-// exercise 16 covered spec operations, 12 operations are explicitly excluded,
+// exercise 16 covered spec operations, 47 operations are explicitly excluded,
 // and several tools share an operation (deliver_message and send_message both
 // deliver to the durable inbox; retrieve_inbox and get_messages both retrieve it;
 // get_messages and ack_messages both ack it). This guard therefore checks the
@@ -200,6 +200,12 @@ var excludedOperations = map[string]string{
 	"listGroups":         "GET /groups — \"List the named groups of the request's realm\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
 	"getGroup":           "GET /groups/{name} — \"Read one named group's CURRENT roster\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
 	"updateGroupMembers": "PATCH /groups/{name}/members — \"Add and/or remove members (one edit event over the current roster)\" (CR-CHAT-013): same transport gap as createGroup. Reclassify when the bridge grows group support.",
+	// DF-CRIER-304 — the task READ surface. Same transport gap as its
+	// CR-CHAT-030 write siblings: the current state is reduced from the
+	// session transcript (internal/session), which RemoteStore does not
+	// expose, so the bridge has no tool for them.
+	"listSessionTasks": "GET /sessions/{id}/tasks — \"List a session's tasks at their CURRENT state\" (DF-CRIER-304): the task read reduces the session transcript, internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
+	"getSessionTask":   "GET /sessions/{id}/tasks/{task_id} — \"Read ONE task's current state\" (DF-CRIER-304): same transport gap as listSessionTasks. Reclassify when the bridge grows session support.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

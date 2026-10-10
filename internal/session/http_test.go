@@ -122,6 +122,9 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)
 	// CR-CHAT-030: the TASK kind and its lifecycle (§2.5, §6.11, §3.7).
 	r.HandleFunc("/sessions/{id}/tasks", h.HandleCreateTask).Methods(http.MethodPost)
+	// DF-CRIER-304: the task READ surface — the lifecycle is observable.
+	r.HandleFunc("/sessions/{id}/tasks", h.HandleListTasks).Methods(http.MethodGet)
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}", h.HandleGetTask).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/tasks/{task_id}/claim", h.HandleClaimTask).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/tasks/{task_id}/complete", h.HandleCompleteTask).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/participants", h.HandleListParticipants).Methods(http.MethodGet)
