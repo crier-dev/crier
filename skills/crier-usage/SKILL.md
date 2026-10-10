@@ -385,3 +385,46 @@ store; the registry itself does not without `CR_DATABASE_URL`. Deliver body
 member is `payload` (not `body`); retrieves/acks are ed25519-signed
 (`examples/demo.sh` is the template). Re-register with a new public_key is
 409 and keys are immutable (DF-CRIER-302) — use a fresh agent id.
+
+## Chat sessions on the SQLite backend (CR-CHAT wave, live-verified 2026-10-10 @ 8c316e3)
+
+Boot with NO database service: `CR_SESSION_BACKEND=sqlite
+CR_SQLITE_PATH=crier.sqlite CR_SESSION_LOG_ROOT=crier-log ./bin/crier` —
+pure-Go modernc sqlite, no CGO, no postgres. Durability proven: sessions,
+messages, tasks and groups all survive a kill+restart.
+
+Request shapes (strict decode — unknown fields are 400s, and the 400 names
+the Go type, read openapi.yaml instead):
+- POST /sessions: `created_by` is an OBJECT `{"agent":"id"}` (or
+  `principal_id`), never a string. Creator is NOT auto-added as participant.
+- POST /sessions/{id}/messages: `{"payload":{...},"sender":"id"}` (+ optional
+  `parent_id` for replies, `message_kind` plain|addressed|task, `targets`).
+  NOT `from`.
+- POST /sessions/{id}/tasks: `payload` + `targets` REQUIRED. ⚠️ As of
+  2026-10-10 the task lifecycle past creation is UNUSABLE (no task read
+  route; claim/complete 404 on a just-created task) — DF-CRIER-304, recheck
+  before relying on it.
+- CompileSessionRequest does NOT take `from` — see openapi
+  `CompileSessionRequest`.
+
+Named groups: POST /groups name is BARE (`dogfood`; `team:dogfood` refused).
+Needs `X-Agent-ID` header or created_by. Address in bodies as `@team:dogfood`.
+EVERY member must be a registered agent (POST /agents requires public_key)
+or the message outcome reads `refused: agent not found` (DF-CRIER-305).
+
+Signed retrieve without demo.sh (openssl 3 oneshot needs a FILE, stdin
+fails with 'unable to determine file size'):
+```bash
+TS=$(date +%s); printf 'GET\n/agents/X/inbox\n%s' "$TS" > m
+openssl pkeyutl -sign -inkey X.key -rawin -in m -out s
+SIG=$(xxd -p s | tr -d '\n')
+curl -H "X-Agent-ID: X" -H "X-Agent-Ts: $TS" -H "X-Agent-Sig: $SIG" $URL/agents/X/inbox
+```
+Ack needs BOTH lease_id and message_ids (400 otherwise). A retrieved but
+unacked message VANISHES from retrieve for ~60s (lease) — check
+/inbox/stats (leased_count) before believing an empty inbox.
+
+Dagger control: CR_DAGGER_URL registers /dagger/runs (502 honest transport
+errors, 404 unknown run). ⚠️ ALWAYS also set CR_DAGGER_STORE_DIR when
+CR_DAGGER_URL is set: the default /var/lib/crier is unwritable for non-root
+and the server REFUSES TO BOOT (DF-CRIER-303, P1, reproduced fresh-box).
