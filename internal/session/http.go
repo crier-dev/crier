@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -213,6 +214,22 @@ type transcriptMessage struct {
 	Outcomes         []outcomeView   `json:"outcomes,omitempty"`
 	IdempotencyKey   string          `json:"idempotency_key,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
+	// Delivered / Skipped / SkippedAgents are the PARTIAL-SUCCESS summary of a
+	// SEND (DF-CRIER-305): a send is delivered to every target the registry
+	// holds and a target whose delivery is REFUSED (an unregistered agent, a
+	// namespace mismatch, an unwired remote transport, ...) is SKIPPED — the
+	// message is still recorded and the other members still receive it, so a
+	// group whose roster names an unregistered agent succeeds for the rest
+	// instead of failing whole. SkippedAgents names each skipped target, so
+	// the caller does not have to scan `outcomes` to learn who was missed; the
+	// per-target `refused` outcome still carries that target's own reason
+	// (both, never one INSTEAD of the other — a skip is explained, never
+	// swallowed). These are a projection of ONE send, so a transcript re-read
+	// leaves them empty (they are not persisted; the durable facts stay
+	// `outcomes`).
+	Delivered     int      `json:"delivered,omitempty"`
+	Skipped       int      `json:"skipped,omitempty"`
+	SkippedAgents []string `json:"skipped_agents,omitempty"`
 	// ThreadDepth is the thread tree's level (a deliberate branch adds one);
 	// ReplyDepth is the parent_id chain length (reply attribution, never
 	// depth — D11).
@@ -819,8 +836,22 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	// time (CR-CHAT-013, §1.4 consequence 1): a roster edit routes the NEXT
 	// send to the CURRENT members, never a cached set. A nil store leaves
 	// every group target a recorded skip.
-	recipients, skipped := FanoutRecipients(aud, h.resolveGroupRoster(r.Context(), aud))
-	_ = skipped // deliberately-not-fanned-out targets are recorded in the audience
+	roster := h.resolveGroupRoster(r.Context(), aud)
+	recipients, skipped := FanoutRecipients(aud, roster)
+	// A target that is deliberately NOT fanned out is never a silent drop
+	// (§3.2's named-error rule): a group with no roster is a delivery miss
+	// and is said out loud, while the by-design skips (a capability is a
+	// selector, a principal has no inbox) stay visible at debug level.
+	for _, s := range skipped {
+		if s.Target.Kind == TargetGroup {
+			slog.Warn("fan-out: skipping group with no known roster",
+				"group", s.Target.ID, "message_id", msg.ID, "reason", s.Reason)
+			continue
+		}
+		slog.Debug("fan-out: audience target is not fanned out",
+			"target_kind", string(s.Target.Kind), "target", s.Target.ID,
+			"message_id", msg.ID, "reason", s.Reason)
+	}
 	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm
 
@@ -863,6 +894,15 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 
 	// 3. Write the outcomes back onto the same record (same seq, keep-LAST).
 	msg.Outcomes = append(crossRealm, outcomes...)
+
+	// A refused target is a SKIP, never fatal: the message is durable and
+	// every other target still received it. Say the skip out loud
+	// (DF-CRIER-305) — an unregistered roster member must be visible in the
+	// SERVER LOG, not only in the per-target outcomes a caller has to read
+	// (and may never see). The warning names the group the target was
+	// addressed through when it came from one.
+	warnSkippedTargets(msg.ID, msg.Outcomes, groupOfTarget(roster))
+
 	if err := h.store.PostMessage(r.Context(), msg); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return transcriptMessage{}, false
@@ -877,7 +917,79 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	if recorded == nil {
 		recorded = msg
 	}
-	return h.messageViewOf(st, recorded), true
+	view := h.messageViewOf(st, recorded)
+	// The partial-success counts of THIS send (DF-CRIER-305), read from the
+	// SAME outcomes the response carries so the summary can never disagree
+	// with the per-target detail.
+	summarizeFanout(&view, msg.Outcomes)
+	return view, true
+}
+
+// summarizeFanout records a send's partial-success counts on its response:
+// how many targets were delivered and which targets were SKIPPED (refused).
+// It is a projection of the outcomes the response already carries, so the
+// summary is derived, never a second source of truth — and a skipped target
+// keeps its own `refused` reason beside the count.
+func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
+	seen := make(map[string]bool, len(outcomes))
+	for _, o := range outcomes {
+		// A SKIP is exactly a REFUSED outcome. Every other state — delivered,
+		// plus the leased/acked/expired delivery lifecycle a retried send can
+		// carry forward from its prior outcomes — means the target RECEIVED
+		// the message, so it counts as delivered, never as skipped.
+		if o.Outcome != OutcomeRefused {
+			v.Delivered++
+			continue
+		}
+		v.Skipped++
+		if o.Target != "" && !seen[o.Target] {
+			seen[o.Target] = true
+			v.SkippedAgents = append(v.SkippedAgents, o.Target)
+		}
+	}
+	sort.Strings(v.SkippedAgents)
+}
+
+// warnSkippedTargets logs one WARNING per target a send could not deliver to
+// (DF-CRIER-305): the message is delivered to every other target, so this is
+// a SKIP, not a failure — but an unregistered (or unreachable) target must be
+// visible in the log, never only in a response the caller may not read. When
+// the target was addressed through a named group, the warning names it.
+func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf map[string]string) {
+	for _, o := range outcomes {
+		if o.Outcome == OutcomeDelivered {
+			continue
+		}
+		attrs := []any{"target", o.Target, "message_id", messageID, "reason", o.Reason}
+		if g := groupOf[o.Target]; g != "" {
+			attrs = append(attrs, "group", g)
+		}
+		slog.Warn("fan-out: skipping target (delivery refused) — the message was still delivered to every other target", attrs...)
+	}
+}
+
+// groupOfTarget indexes which named group a fan-out recipient came from, so a
+// skipped target's warning can name the group it was addressed through
+// (DF-CRIER-305). A member of several groups is attributed to the
+// lexicographically first, so the attribution is deterministic.
+func groupOfTarget(roster map[string][]string) map[string]string {
+	if len(roster) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(roster))
+	for name := range roster {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		for _, m := range roster[name] {
+			if _, ok := out[m]; !ok {
+				out[m] = name
+			}
+		}
+	}
+	return out
 }
 
 // deliverRemote fans a message out to the session's REMOTE participants

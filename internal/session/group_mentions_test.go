@@ -112,6 +112,82 @@ func TestGroupAPI_TeamMentionUnknownGroupIsASkip(t *testing.T) {
 	require.Empty(t, entries, "an unknown group mention must not deliver to anybody")
 }
 
+// TestGroupFanOut_UnregisteredTargets: a send to a named group whose roster
+// names an agent with no registry entry SUCCEEDS for every member the registry
+// does hold and SKIPS the unregistered one — the message is not lost and the
+// other members still receive it. The response carries the partial-success
+// summary (`delivered` / `skipped` / `skipped_agents`) BESIDE the per-target
+// `refused` outcome that still names the reason, so the skip is reported,
+// never swallowed and never hidden behind the count (DF-CRIER-305).
+func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
+	// Two of the three roster members are registered; "ghost" is not.
+	h := newGroupHarness(t, "atlas", "nimbus")
+
+	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/groups", createGroupRequest{
+		Name: "ops", CreatedBy: "kara", Members: []string{"atlas", "nimbus", "ghost"},
+	}, new(groupView), nil), "a roster may name an agent that is not registered yet")
+
+	room := h.createRoom(t)
+
+	var msg transcriptMessage
+	code := h.do(t, http.MethodPost, "/sessions/"+room+"/messages", postMessageRequest{
+		Payload: json.RawMessage(`{"text":"rollout starts @team:ops"}`),
+		Sender:  "kara-agent",
+	}, &msg, nil)
+	require.Equal(t, http.StatusCreated, code,
+		"a group send with an unregistered member is a PARTIAL success, not a failure")
+
+	// Every REGISTERED member holds the message: the send degrades per target,
+	// never wholesale, and never drops a deliverable member to punish the
+	// unregistered one.
+	for _, id := range []string{"atlas", "nimbus"} {
+		entries, _, err := h.reg.Retrieve(id, time.Minute, 10)
+		require.NoError(t, err, "agent %s", id)
+		require.Len(t, entries, 1, "agent %s must still hold the group message", id)
+	}
+
+	// The unregistered member has no inbox at all.
+	_, _, err := h.reg.Retrieve("ghost", time.Minute, 10)
+	require.Error(t, err, "an unregistered member has no inbox")
+
+	// The response states the partial success: 2 delivered, 1 skipped, named.
+	require.Equal(t, 2, msg.Delivered)
+	require.Equal(t, 1, msg.Skipped)
+	require.Equal(t, []string{"ghost"}, msg.SkippedAgents)
+
+	// The summary does NOT replace the per-target detail: the skipped target
+	// still carries its own `refused` outcome with the real reason, so a
+	// caller can tell an unregistered agent from a namespace mismatch.
+	byTarget := map[string]outcomeView{}
+	for _, o := range msg.Outcomes {
+		byTarget[o.Target] = o
+	}
+	require.Equal(t, string(OutcomeDelivered), byTarget["atlas"].Outcome)
+	require.Equal(t, string(OutcomeDelivered), byTarget["nimbus"].Outcome)
+	require.Equal(t, string(OutcomeRefused), byTarget["ghost"].Outcome)
+	require.Contains(t, byTarget["ghost"].Detail, "agent not found",
+		"a skipped target is SHOWN with its reason, never swallowed")
+}
+
+// TestSummarizeFanout_OnlyRefusalIsASkip: the partial-success summary counts a
+// REFUSED target as skipped and every OTHER delivery state — including the
+// leased/acked/expired lifecycle a retried send carries forward from its own
+// prior outcomes — as DELIVERED. A re-send therefore never misreports an
+// already-received target as skipped (DF-CRIER-305).
+func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
+	var v transcriptMessage
+	summarizeFanout(&v, []DeliveryOutcome{
+		{Target: "atlas", Outcome: OutcomeDelivered},
+		{Target: "nimbus", Outcome: OutcomeLeased},
+		{Target: "orion", Outcome: OutcomeAcked},
+		{Target: "vega", Outcome: OutcomeExpired},
+		{Target: "ghost", Outcome: OutcomeRefused, Reason: `agent not found: "ghost"`},
+	})
+	require.Equal(t, 4, v.Delivered, "delivered + leased + acked + expired are all received")
+	require.Equal(t, 1, v.Skipped, "only a refused delivery is a skip")
+	require.Equal(t, []string{"ghost"}, v.SkippedAgents)
+}
+
 // TestGroupAPI_MentionOfAgentLiteralNameIsNotAGroup: the parser's reserved
 // prefix order means an agent literally named "team" (bare form) is still an
 // agent addressee and is NOT expanded as a group (D8 / §2.1.1).
