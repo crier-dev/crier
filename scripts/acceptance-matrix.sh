@@ -385,6 +385,59 @@ if docker_available; then
       if [ "$PG_TCP" != "1" ]; then
         record SKIP "2b-postgres" "postgres host port 127.0.0.1:$PG_PORT never accepted TCP within 15s"
       else
+      # INT-CI-011 — postgres:16-alpine's entrypoint initializes, then RESTARTS
+      # the server: it runs a TEMPORARY initdb server (listen_addresses='' — unix
+      # socket only) to create the database and run init scripts, stops it, and
+      # execs the real one. Both probes above can pass inside that window, and so
+      # can this psql query, because it reaches the same unix socket the temp
+      # server answers (measured on this host with the window stretched by an
+      # init script: `psql … -d crier -c 'SELECT 1'` exits 0 for the whole
+      # window). What it does buy: a probe that lands AFTER the temp server
+      # stops — the restart gap — fails here and is retried until a server is
+      # really serving the `crier` database. What the temp server cannot fake is
+      # TCP, asserted immediately below, before crier opens its first migration
+      # connection through the published port.
+      PG_QUERY=0
+      step 2b "waiting for a real psql query (psql -U postgres -d crier -c 'SELECT 1') to succeed in $PG_CONTAINER (bounded 30s)"
+      for _ in $(seq 1 60); do
+        if docker exec "$PG_CONTAINER" psql -U postgres -d crier -c 'SELECT 1' >/dev/null 2>&1; then
+          PG_QUERY=1
+          break
+        fi
+        sleep 0.5
+      done
+      if [ "$PG_QUERY" != "1" ]; then
+        record SKIP "2b-postgres" "postgres query probe (psql SELECT 1) never succeeded within 30s"
+      else
+      # INT-CI-011 (measured, not assumed) — the probe above talks to the
+      # container's UNIX SOCKET, and postgres:16-alpine's OWN temporary initdb
+      # server answers that socket: the entrypoint starts it with
+      # listen_addresses='' to run db setup + init scripts, then stops it and
+      # execs the real server. Measured on this host with a `SELECT pg_sleep(8)`
+      # init script stretching the window: for the WHOLE temp-server window
+      # `psql -U postgres -d crier -c 'SELECT 1'` exits 0 (sampled t+2.0 → t+9.9)
+      # while the published host port still completes a TCP handshake and the
+      # connection is then RESET on use — `ConnectionResetError: [Errno 104]
+      # Connection reset by peer`, crier's exact CI error (run 38011779401), the
+      # real server only listening at t+10.7. So the socket probes (pg_isready
+      # and this psql query alike) cannot see the restart. Only the container's
+      # own TCP 5432 can: the temp server binds no TCP, so `pg_isready -h
+      # 127.0.0.1` inside the container reads `no` for the entire window and
+      # `ok` only once the real server is listening. Gate on that too,
+      # immediately before crier opens its first migration connection through
+      # the published port.
+      PG_TCPQUERY=0
+      step 2b "waiting for the container's own TCP 5432 (pg_isready -h 127.0.0.1 — the only signal the temporary initdb server cannot fake) (bounded 30s)"
+      for _ in $(seq 1 60); do
+        if docker exec "$PG_CONTAINER" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then
+          PG_TCPQUERY=1
+          break
+        fi
+        sleep 0.5
+      done
+      if [ "$PG_TCPQUERY" != "1" ]; then
+        record SKIP "2b-postgres" "container TCP 5432 (pg_isready -h 127.0.0.1) never became ready within 30s"
+      else
       step 2b "starting the built crier against CR_DATABASE_URL (server log $WORKDIR/pg-server.log)"
       PORT_PG=$(free_port 19350 "postgres-server-cell")
       PG_PID=$(start_server "$SERVER_BIN" "$PORT_PG" "$WORKDIR/pg-server.log" \
@@ -404,6 +457,8 @@ if docker_available; then
         record PASS "2b-postgres" "postgres-backed register→deliver→retrieve OK on :$PORT_PG (registry + session stores on CR_DATABASE_URL)"
       else
         record FAIL "2b-postgres" "register=$REG_PG deliver=$DEL_PG retrieve=$RET_PG (want 201/201/200)"
+      fi
+      fi
       fi
       fi
     fi
