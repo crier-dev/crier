@@ -2845,3 +2845,65 @@ tasks:
   status: complete
   created_at: '2026-10-07T22:45:45.790757+00:00'
   completed_at: '2026-10-08T00:23:59.526474+00:00'
+- id: INT-CI-009
+  title: 'CI acceptance-matrix postgres cell: crier exits before /health with ''connection
+    reset by peer'' on migration ping'
+  criteria:
+  - "Cell 2b-postgres-relaunch PASS in CI. Diagnose why pg cell's crier gets connection\
+    \ reset during migration ping \u2014 likely pg not ready when crier starts, or\
+    \ pg crashes under crier's migration load. Reproduce: scripts/acceptance-matrix.sh\
+    \ locally."
+  status: complete
+  created_at: '2026-10-08T01:38:52.756972+00:00'
+  completed_at: '2026-10-08T01:52:05.502653+00:00'
+- id: DF-CRIER-297
+  title: 'P0 auth deadlock: CR_PERMISSIONS_ENABLED+ADMIN_TOKEN+AUTH_TOKEN unreachable'
+  criteria:
+  - Exempt management routes from shared-token middleware OR accept either token;
+    config.Load error when secrets equal; live probe with all three set returns 200/201/204
+    on /principals, /bindings, /agents/{id}/class
+  status: complete
+  created_at: '2026-10-10T00:36:31.358319+00:00'
+  completed_at: '2026-10-10T00:59:25.381903+00:00'
+- id: DF-CRIER-303
+  title: P1 dagger store unwritable = hard startup failure
+  criteria:
+  - Detect unwritable CR_DAGGER_URL store at startup; fail with clear error OR fall
+    back to writable temp dir; non-root boot with CR_DAGGER_URL set succeeds
+  status: complete
+  created_at: '2026-10-10T00:36:31.780850+00:00'
+  completed_at: '2026-10-10T01:00:05.491600+00:00'
+- id: INT-CI-010
+  title: P1 CI postgres cell 2b silent exit 1 on runner
+  criteria:
+  - Add bash -x trace OR per-step echo to cell 2b; runner log shows which step failed;
+    do NOT patch blind
+  status: complete
+  created_at: '2026-10-10T00:36:32.201253+00:00'
+  completed_at: '2026-10-10T01:00:07.991212+00:00'
+- id: DF-CRIER-304
+  title: P2 session task lifecycle unverifiable
+  criteria:
+  - POST /tasks response includes task state; GET /tasks/{id} exists and returns current
+    state; caller can verify claim/complete
+  status: complete
+  created_at: '2026-10-10T00:36:32.637540+00:00'
+  completed_at: '2026-10-10T01:00:06.295882+00:00'
+- id: DF-CRIER-305
+  title: P2 group fan-out agent not found undocumented
+  criteria:
+  - README/docs note that @group sends require registry entries; OR fan-out gracefully
+    skips unregistered targets with warning
+  status: complete
+  created_at: '2026-10-10T00:36:33.064554+00:00'
+  completed_at: '2026-10-10T01:00:07.119758+00:00'
+- id: INT-CI-011
+  title: Fix cell 2b-postgres initdb restart race (psql SELECT 1 probe before server
+    start)
+  criteria:
+  - 'scripts/acceptance-matrix.sh cell 2b: bounded psql SELECT 1 probe after TCP handshake
+    before crier start; SKIP on timeout; bash -n + shell-yaml-check clean; 3 local
+    2b runs pass; diff limited to cell 2b'
+  status: complete
+  created_at: '2026-10-10T10:33:31.770169+00:00'
+  completed_at: '2026-10-10T10:44:20.805903+00:00'

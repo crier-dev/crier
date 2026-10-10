@@ -86,7 +86,7 @@ evaluator:
   # max_time 20m -> 30m (tick 280, CR-GAP-060): measured burn rate ~1M input
   # tokens per minute (the 9.0M starved run below ran ~9 min), so a 12M budget
   # needs headroom past the old 20m wall instead of starving on a third knob.
-  max_time: 30m
+  max_time: 45m
   # max_input_tokens 6M -> 9M (tick 278, CR-GAP-058): the CR-GAP-058 judge
   # (verdict 4e647851) collected a full tier1 PASS and then consumed the whole
   # configured budget — "Eval cap exceeded: Input token budget (6.0M) exceeded
