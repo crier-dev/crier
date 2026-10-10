@@ -713,6 +713,11 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
 	// CR-CHAT-030: the TASK kind and its lifecycle (CHAT-ADDRESSING §2.5).
 	r.HandleFunc("/sessions/{id}/tasks", sessHandler.HandleCreateTask).Methods("POST")
+	// DF-CRIER-304: the task READ surface — the current state of ONE task and
+	// of every task in the session, so a caller can verify the claim/complete
+	// it just made instead of firing and forgetting.
+	r.HandleFunc("/sessions/{id}/tasks", sessHandler.HandleListTasks).Methods("GET")
+	r.HandleFunc("/sessions/{id}/tasks/{task_id}", sessHandler.HandleGetTask).Methods("GET")
 	r.HandleFunc("/sessions/{id}/tasks/{task_id}/claim", sessHandler.HandleClaimTask).Methods("POST")
 	r.HandleFunc("/sessions/{id}/tasks/{task_id}/complete", sessHandler.HandleCompleteTask).Methods("POST")
 	r.HandleFunc("/sessions/{id}/participants", sessHandler.HandleListParticipants).Methods("GET")

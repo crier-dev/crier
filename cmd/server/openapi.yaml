@@ -2538,11 +2538,17 @@ paths:
               $ref: "#/components/schemas/PostSessionTaskRequest"
       responses:
         "201":
-          description: The recorded task message (kind `task`, with its task payload and per-target outcomes).
+          description: |-
+            The recorded task message (kind `task`, with its task payload and
+            per-target outcomes), PLUS the task's OWN id and current state
+            (`task_id`, `state`) at the TOP level (DF-CRIER-304): the message
+            view's `id` is the message id, so the task id the claim/complete/GET
+            routes take and the state a caller checks are named here rather than
+            only under `task`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TranscriptMessage"
+                $ref: "#/components/schemas/SessionTaskCreated"
         "400":
           description: A malformed request (an absent author or payload, an empty target set, or a thread mismatch)
         "403":
@@ -2553,6 +2559,71 @@ paths:
           description: The session is closed and admits no new message (SESSION_CLOSED)
         "502":
           description: The transcript record is durable but the fan-out did not complete (FANOUT_INCOMPLETE)
+
+    get:
+      operationId: listSessionTasks
+      tags: [sessions]
+      summary: List a session's tasks at their CURRENT state
+      description: |-
+        The READ half of the task lifecycle (specs/CHAT-ADDRESSING.md §2.5,
+        DF-CRIER-304). Every task in the session, one entry per task id, each
+        at the state of its LATEST record-version (§3.7 keep-LAST: every claim
+        or complete appends a NEW `task`-kind message carrying the same task
+        id, so the newest record for that id is the current state). A caller
+        that created or moved a task can verify where it stands instead of
+        firing and forgetting.
+
+        Each entry names the task id the claim/complete routes take, the
+        current `state`, the `owner` (once claimed), the message
+        record-version carrying that state and the thread it lives in. `tasks`
+        is always an array — empty, never null, when the session has no tasks.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: The session's tasks at their current state (newest record-version per task id).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTaskList"
+        "403":
+          description: The session is private and the caller may not read it (VISIBILITY_FORBIDDEN) or the realm refuses the credential (NAMESPACE_UNAUTHORIZED)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND)
+
+  /sessions/{id}/tasks/{task_id}:
+    get:
+      operationId: getSessionTask
+      tags: [sessions]
+      summary: Read ONE task's current state
+      description: |-
+        The read the lifecycle owes a caller (specs/CHAT-ADDRESSING.md §2.5,
+        DF-CRIER-304): the CURRENT state of one task, the owner once it is
+        claimed, and the message record-version and thread the state lives in.
+        The task id is the `task_id` the create response names — NOT the
+        message `id`, which names the record that CARRIES the state; an id that
+        is not a task in this session is refused `404 TASK_NOT_FOUND`, the same
+        named refusal the claim and complete routes give.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The task's current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTask"
+        "403":
+          description: The session is private and the caller may not read it (VISIBILITY_FORBIDDEN) or the realm refuses the credential (NAMESPACE_UNAUTHORIZED)
+        "404":
+          description: No such session in this realm (SESSION_NOT_FOUND), or no such task in the session (TASK_NOT_FOUND)
 
   /sessions/{id}/tasks/{task_id}/claim:
     post:
@@ -5351,6 +5422,69 @@ components:
           type: string
         message:
           $ref: "#/components/schemas/TranscriptMessage"
+    SessionTask:
+      type: object
+      required: [session_id, task_id, state, updated_at, message_id, thread_id, versions]
+      description: |-
+        One task at its CURRENT state (DF-CRIER-304) — the state of the LATEST
+        record-version over the task id (§3.7 keep-LAST).
+      properties:
+        session_id:
+          type: string
+        task_id:
+          type: string
+          description: The task's own id — the id the claim/complete routes and the task GET take (NOT the id of the message carrying the state).
+        state:
+          type: string
+          enum: [open, claimed, running, done, failed]
+        owner:
+          type: string
+          description: Who holds the claimed task; absent while open.
+        updated_at:
+          type: string
+          format: date-time
+          description: The ts of the record-version that last moved the state.
+        message_id:
+          type: string
+          description: The message record-version carrying this state.
+        thread_id:
+          type: string
+          description: The thread the task and its transitions live in.
+        versions:
+          type: integer
+          description: How many record-versions the transcript holds for this task — 1 at creation, one more per transition.
+    SessionTaskList:
+      type: object
+      required: [session_id, tasks, count]
+      description: The GET /sessions/{id}/tasks body (DF-CRIER-304).
+      properties:
+        session_id:
+          type: string
+        tasks:
+          type: array
+          description: One entry per task in the session, at its current state. Always an array — empty, never null.
+          items:
+            $ref: "#/components/schemas/SessionTask"
+        count:
+          type: integer
+    SessionTaskCreated:
+      description: |-
+        The POST /sessions/{id}/tasks 201 body (DF-CRIER-304): the recorded
+        task message (TranscriptMessage) with the task's OWN id and current
+        state lifted to the top level, so a caller reads them where it looks
+        rather than only under the nested `task` object.
+      allOf:
+        - $ref: "#/components/schemas/TranscriptMessage"
+        - type: object
+          required: [task_id, state]
+          properties:
+            task_id:
+              type: string
+              description: The task's own id — the id the claim/complete and task GET routes take (the promoted `id` remains the message id).
+            state:
+              type: string
+              enum: [open, claimed, running, done, failed]
+              description: The task's current lifecycle state; `open` at creation.
     CompileSessionRequest:
       type: object
       description: |-

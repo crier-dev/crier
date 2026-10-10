@@ -8,6 +8,11 @@
 //     claim/running/done lifecycle (§2.5); each transition is a NEW
 //     record-version over the same message id, and outputs (replies/updates)
 //     land in the SAME thread so the human sees the agents' work there.
+//   - GET /sessions/{id}/tasks and GET /sessions/{id}/tasks/{task_id} — the
+//     READ half of that lifecycle (DF-CRIER-304): a caller can observe the
+//     state it just created or moved instead of firing and forgetting. The
+//     create response also names the task id and its state at the TOP level,
+//     because the message view's `id` is the MESSAGE id.
 //
 // Authority (specs/CHAT-PERMISSIONS.md §6.11): creating a TASK requires
 // `invoke` on the TARGET plus `send` on the SESSION it is raised in — a
@@ -26,6 +31,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -57,6 +63,26 @@ type taskTransitionRequest struct {
 	Reason    string          `json:"reason,omitempty"`
 	NewState  string          `json:"new_state,omitempty"` // complete: done | failed
 	AsAgent   string          `json:"as_agent,omitempty"`
+}
+
+// taskCreateResponse is the POST /sessions/{id}/tasks 201 body (DF-CRIER-304).
+//
+// It IS the recorded task message's transcript view — the message id, the
+// thread, the resolved audience, the per-target outcomes — with the TASK's own
+// id and CURRENT state lifted to the top level IN ADDITION. Why both: the
+// promoted `id` is the MESSAGE id, and the task id used to live only at
+// `task.task_id`, so a caller reading the obvious top-level `state` saw null
+// and a caller that claimed the top-level `id` was refused TASK_NOT_FOUND on a
+// task it had created moments earlier. Nothing was removed — the nested `task`
+// object and every message field stay — so an existing reader is unaffected.
+type taskCreateResponse struct {
+	transcriptMessage
+	// TaskID is the TASK's own id — the id the claim / complete / GET routes
+	// take. (The promoted `id` remains the message id.)
+	TaskID string `json:"task_id"`
+	// State is the task's current lifecycle state (§2.5 vocabulary:
+	// open | claimed | running | done | failed); `open` at creation.
+	State string `json:"state"`
 }
 
 // HandleCreateTask serves POST /sessions/{id}/tasks.
@@ -186,7 +212,15 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if h.taskTrigger != nil {
 		go h.taskTrigger(taskID, sess.ID, string(req.Payload))
 	}
-	writeJSON(w, http.StatusCreated, view)
+	// The 201 names the task's OWN id and state at the top level (DF-CRIER-304).
+	// The state is taken from the READ-BACK view when it carries one: the body
+	// must report what the store recorded, not a value assembled before the
+	// write.
+	resp := taskCreateResponse{transcriptMessage: view, TaskID: taskID, State: string(msg.Task.State)}
+	if s, ok := view.Task["state"].(string); ok && s != "" {
+		resp.State = s
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // authorizeTask runs §6.11's authority check: invoke on EACH target plus send
@@ -462,4 +496,116 @@ func (h *Handler) HandleClaimTask(w http.ResponseWriter, r *http.Request) {
 // HandleCompleteTask serves POST /sessions/{id}/tasks/{task_id}/complete.
 func (h *Handler) HandleCompleteTask(w http.ResponseWriter, r *http.Request) {
 	h.transitionTask(w, r, TaskDone, true)
+}
+
+// ---------------------------------------------------------------------------
+// GET /sessions/{id}/tasks[/{task_id}] — the task READ surface (DF-CRIER-304).
+// ---------------------------------------------------------------------------
+
+// taskView is ONE task at its CURRENT state — the read shape the lifecycle owes
+// a caller who just created, claimed or completed a task and wants to see that
+// it moved. `state` is the LATEST record-version's state (§3.7 keep-LAST: every
+// transition is a NEW message carrying the same task id, so the newest record
+// for that id is the task's current state).
+type taskView struct {
+	SessionID string `json:"session_id"`
+	// TaskID is the id the claim / complete / GET routes take — NOT the id of
+	// the message that carries the state.
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+	// Owner names who holds the claimed task; absent while open.
+	Owner string `json:"owner,omitempty"`
+	// UpdatedAt is the ts of the record-version that last moved the state.
+	UpdatedAt time.Time `json:"updated_at"`
+	// MessageID is the message record-version carrying this state.
+	MessageID string `json:"message_id"`
+	// ThreadID is the thread the task and its transitions live in.
+	ThreadID string `json:"thread_id"`
+	// Versions counts the record-versions the transcript holds for this task:
+	// 1 at creation, one more per transition (§3.7).
+	Versions int `json:"versions"`
+}
+
+// tasksResponse is the GET /sessions/{id}/tasks body. `tasks` is always a
+// non-nil array (empty when the session has no tasks), so a reader is never
+// handed a null where a list is claimed.
+type tasksResponse struct {
+	SessionID string     `json:"session_id"`
+	Tasks     []taskView `json:"tasks"`
+	Count     int        `json:"count"`
+}
+
+// tasksInState reduces a session's transcript to one taskView per task id, at
+// that task's LATEST record-version (§3.7 keep-LAST). The transcript is
+// seq-ordered, so the last task record seen for an id wins; entries are
+// returned in first-creation order so the list stays stable as tasks move.
+func tasksInState(st *State) []taskView {
+	var order []string
+	byID := map[string]*taskView{}
+	for _, m := range st.Messages {
+		if m.Kind != MessageTask || m.Task.ID == "" {
+			continue
+		}
+		v, ok := byID[m.Task.ID]
+		if !ok {
+			v = &taskView{SessionID: m.SessionID, TaskID: m.Task.ID}
+			byID[m.Task.ID] = v
+			order = append(order, m.Task.ID)
+		}
+		v.State = string(m.Task.State)
+		v.Owner = m.Task.Owner
+		v.UpdatedAt = m.Task.UpdatedAt
+		v.MessageID = m.ID
+		v.ThreadID = m.ThreadID
+		v.Versions++
+	}
+	out := make([]taskView, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out
+}
+
+// HandleListTasks serves GET /sessions/{id}/tasks: every task in the session,
+// each at its CURRENT state. It is the read half of the lifecycle the create
+// route opens (DF-CRIER-304) — a caller can see what it created and how far it
+// has moved instead of firing and forgetting. Reads use the same visibility
+// rule as the transcript (authorizeRead), never the write-side open-session
+// check: a closed session is still readable.
+func (h *Handler) HandleListTasks(w http.ResponseWriter, r *http.Request) {
+	st, sess, ok := h.loadScoped(w, r)
+	if !ok {
+		return
+	}
+	if err := h.authorizeRead(r.Context(), r, sess, st); err != nil {
+		writeAPIError(w, http.StatusForbidden, "VISIBILITY_FORBIDDEN", err.Error())
+		return
+	}
+	tasks := tasksInState(st)
+	writeJSON(w, http.StatusOK, tasksResponse{SessionID: sess.ID, Tasks: tasks, Count: len(tasks)})
+}
+
+// HandleGetTask serves GET /sessions/{id}/tasks/{task_id}: ONE task's current
+// state plus the record-version and thread it was last moved in. An id that is
+// not a task in the session is 404 TASK_NOT_FOUND — the same named refusal the
+// claim and complete routes give, so a caller learns an id is wrong HERE rather
+// than halfway through a transition.
+func (h *Handler) HandleGetTask(w http.ResponseWriter, r *http.Request) {
+	st, sess, ok := h.loadScoped(w, r)
+	if !ok {
+		return
+	}
+	if err := h.authorizeRead(r.Context(), r, sess, st); err != nil {
+		writeAPIError(w, http.StatusForbidden, "VISIBILITY_FORBIDDEN", err.Error())
+		return
+	}
+	taskID := muxVar(r, "task_id")
+	for _, t := range tasksInState(st) {
+		if t.TaskID == taskID {
+			writeJSON(w, http.StatusOK, t)
+			return
+		}
+	}
+	writeAPIError(w, http.StatusNotFound, "TASK_NOT_FOUND",
+		fmt.Sprintf("task %q is not in session %q", taskID, sess.ID))
 }

@@ -488,3 +488,137 @@ func TestTaskLifecycleSQLStoreRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// taskCreateView is the POST /sessions/{id}/tasks 201 body as a caller reads
+// it: the top-level task id + state DF-CRIER-304 added, plus the message fields
+// and the nested task payload that must survive the change.
+type taskCreateView struct {
+	ID       string         `json:"id"`
+	ThreadID string         `json:"thread_id"`
+	TaskID   string         `json:"task_id"`
+	State    string         `json:"state"`
+	Task     map[string]any `json:"task"`
+}
+
+// taskReadView is one task as GET /sessions/{id}/tasks/{task_id} renders it.
+type taskReadView struct {
+	SessionID string    `json:"session_id"`
+	TaskID    string    `json:"task_id"`
+	State     string    `json:"state"`
+	Owner     string    `json:"owner"`
+	UpdatedAt time.Time `json:"updated_at"`
+	MessageID string    `json:"message_id"`
+	ThreadID  string    `json:"thread_id"`
+	Versions  int       `json:"versions"`
+}
+
+// taskListView is the GET /sessions/{id}/tasks body.
+type taskListView struct {
+	SessionID string         `json:"session_id"`
+	Tasks     []taskReadView `json:"tasks"`
+	Count     int            `json:"count"`
+}
+
+// DF-CRIER-304: the task lifecycle is OBSERVABLE, end to end, over the real
+// router. Before this row the create response buried the task id at
+// `task.task_id` (a caller reading the obvious top-level `state` saw null, and
+// claiming the top-level `id` — the MESSAGE id — was refused TASK_NOT_FOUND on
+// a task created moments earlier), and there was no read route at all (GET
+// /tasks was 405, GET /tasks/{id} 404). This drives create → read → claim →
+// read → complete → read, on the JSONL log always and the SQLite view when the
+// suite is not -short (the dogfood ran on the SQL view, so it is the backend
+// that matters most).
+func TestTaskLifecycle_Verifiable(t *testing.T) {
+	backends := localBackends()
+	t.Run(backends[0].name, func(t *testing.T) { runTaskLifecycleVerifiable(t, backends[0]) })
+	t.Run(backends[1].name, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("SQL view skipped in -short")
+		}
+		runTaskLifecycleVerifiable(t, backends[1])
+	})
+}
+
+func runTaskLifecycleVerifiable(t *testing.T, b localBackend) {
+	t.Helper()
+	s := b.open(t, b.pathFn(t))
+	if c, ok := s.(interface{ Close() error }); ok {
+		t.Cleanup(func() { _ = c.Close() })
+	}
+	h := newTaskHarness(t, s)
+	room := h.createRoomAs(t)
+
+	// AC1 — the 201 names the task's OWN id and state at the TOP level, and
+	// keeps the nested task payload and every message field (additive).
+	var created taskCreateView
+	code := h.do(t, http.MethodPost, "/sessions/"+room+"/tasks", map[string]any{
+		"principal_id": "prin_owner", "as_agent": "atlas",
+		"payload": map[string]string{"text": "Sweep the data."},
+		"targets": []map[string]string{{"kind": "agent", "id": fixAgentA}},
+	}, &created, nil)
+	require.Equal(t, http.StatusCreated, code)
+	require.NotEmpty(t, created.TaskID, "the 201 carries the task's own id at the top level")
+	require.Equal(t, "open", created.State, "the 201 carries the created task's state at the top level")
+	require.NotEqual(t, created.ID, created.TaskID, "the message id and the task id are distinct")
+	require.NotNil(t, created.Task, "the nested task payload is still present (additive change)")
+	require.Equal(t, created.TaskID, created.Task["task_id"])
+	require.Equal(t, "open", created.Task["state"])
+
+	// AC2/AC3 — GET the task: 200, current state open, its own record and thread.
+	var got taskReadView
+	code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks/"+created.TaskID, nil, &got, nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, created.TaskID, got.TaskID)
+	require.Equal(t, "open", got.State)
+	require.Equal(t, 1, got.Versions)
+	require.Equal(t, created.ID, got.MessageID)
+	require.Equal(t, created.ThreadID, got.ThreadID)
+	require.Empty(t, got.Owner)
+
+	// The session-level list shows the same task (the route that used to 405).
+	var list taskListView
+	code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks", nil, &list, nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, 1, list.Count)
+	require.Len(t, list.Tasks, 1)
+	require.Equal(t, "open", list.Tasks[0].State)
+
+	// After claim, GET reads "claimed" and names the owner.
+	code = h.do(t, http.MethodPost, "/sessions/"+room+"/tasks/"+created.TaskID+"/claim",
+		map[string]any{"actor": fixAgentA}, nil, nil)
+	require.Equal(t, http.StatusCreated, code)
+	code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks/"+created.TaskID, nil, &got, nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "claimed", got.State)
+	require.Equal(t, fixAgentA, got.Owner)
+	require.Equal(t, 2, got.Versions)
+
+	// After complete, GET reads "done" over three record-versions.
+	code = h.do(t, http.MethodPost, "/sessions/"+room+"/tasks/"+created.TaskID+"/complete",
+		map[string]any{"actor": fixAgentA}, nil, nil)
+	require.Equal(t, http.StatusCreated, code)
+	code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks/"+created.TaskID, nil, &got, nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "done", got.State)
+	require.Equal(t, 3, got.Versions)
+
+	// An id that is not a task in this session is the SAME named 404 the
+	// transition routes give — and the MESSAGE id is not a task id.
+	for _, bad := range []string{"nope", created.ID} {
+		var body struct {
+			Error string `json:"error"`
+		}
+		code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks/"+bad, nil, &body, nil)
+		require.Equal(t, http.StatusNotFound, code, "GET task %q", bad)
+		require.Equal(t, "TASK_NOT_FOUND", body.Error)
+	}
+
+	// A session with no tasks lists an EMPTY array, never a null.
+	empty := h.createRoomAs(t)
+	var emptyList taskListView
+	code = h.do(t, http.MethodGet, "/sessions/"+empty+"/tasks", nil, &emptyList, nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, 0, emptyList.Count)
+	require.NotNil(t, emptyList.Tasks, "an empty task list is [], not null")
+	require.Empty(t, emptyList.Tasks)
+}

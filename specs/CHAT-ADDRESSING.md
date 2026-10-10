@@ -298,6 +298,19 @@ agents' outputs) are replies in the SAME thread, so the human sees the work ther
 `addressed` tag from the same agent still produces NO task record and NO execution — this is
 proven by test (`TestBareAddressedTagCreatesNoTask`, internal/session/task_test.go).
 
+**BUILT (DF-CRIER-304):** the lifecycle is READABLE, not fire-and-forget. `GET
+/sessions/{id}/tasks` lists every task in the session at its CURRENT state (one entry per task id) and
+`GET /sessions/{id}/tasks/{task_id}` reads one — its state, its owner once claimed, and the message
+record-version and thread the state lives in. The current state is the LATEST record-version over
+the task id (§3.7 keep-LAST): a claim or a complete appends a NEW `task`-kind message carrying the
+same id, so the newest record for that id is the truth. A task id that is not in the session is
+`404 TASK_NOT_FOUND`, the same named refusal the transitions give. The create response additionally
+names the task's OWN id and state at the TOP level (`task_id`, `state`): the message view's `id` is
+the MESSAGE id, so without them a caller reading the obvious top-level `state` saw nothing and a
+caller claiming the top-level `id` was refused `TASK_NOT_FOUND` on a task it had created moments
+earlier. Proven by `TestTaskLifecycle_Verifiable` (internal/session/task_test.go), on both the JSONL
+log and the SQLite view.
+
 ### 2.6 A reply STAYS IN THREAD — depth is earned, never implied by an address (D11, corrected)
 
 > **A reply STAYS IN THREAD. Depth is never a function of who replied or how many replied. A sub-thread is

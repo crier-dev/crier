@@ -15,6 +15,22 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **The session task lifecycle is now READABLE, not fire-and-forget**
+  (DF-CRIER-304, `specs/CHAT-ADDRESSING.md` §2.5). Two read routes:
+  `GET /sessions/{id}/tasks` lists every task in a session at its CURRENT state
+  (one entry per task id, each with the task id the transitions take, the state,
+  the owner once claimed, and the message record-version and thread the state
+  lives in), and `GET /sessions/{id}/tasks/{task_id}` reads one — `404
+  TASK_NOT_FOUND` for an id that is not a task in the session. The `POST
+  /sessions/{id}/tasks` 201 response also names the task's OWN id and state at
+  the TOP level (`task_id`, `state`) in addition to the existing nested `task`
+  object: the message view's `id` is the MESSAGE id, so before this a caller
+  reading the obvious top-level `state` saw null and a caller that claimed the
+  top-level `id` was refused `TASK_NOT_FOUND` on a task it had created moments
+  earlier. The current state is the latest record-version over the task id
+  (§3.7 keep-LAST). Covered by `TestTaskLifecycle_Verifiable`, on both the JSONL
+  log and the SQLite view.
+
 - **A2A push-notification configuration as a view over crier's webhook config**
   (INT-A2A-005, `specs/A2A-OPTION.md` §5.5). The four `TaskPushNotificationConfig`
   operations of the A2A specification (`CreateTaskPushNotificationConfig`,
