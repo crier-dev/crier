@@ -15,6 +15,8 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 
@@ -22,6 +24,77 @@ import (
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/registry"
 )
+
+// The two variables the startup store check's error message points at
+// (DF-CRIER-303): the one that selects the directory, and the one whose being
+// set is why a directory is required at all.
+const (
+	daggerStoreEnv = "CR_DAGGER_STORE_DIR"
+	daggerURLEnv   = "CR_DAGGER_URL"
+)
+
+// ensureDaggerStoreDir proves the dagger run-record directory is USABLE before
+// any store is opened on it (DF-CRIER-303).
+//
+// Why this is a check of its own, and not just the store's own MkdirAll: a
+// creatability test is not a writability test. os.MkdirAll returns nil for any
+// path that already IS a directory, whatever that directory's mode is — it only
+// consults permission bits on the components it has to create. So the shipped
+// boot failed in two different, both unhelpful, ways on a non-root box:
+//
+//   - a missing store under an unwritable parent failed with
+//     `mkdir /var/lib/crier: permission denied` — the first ANCESTOR that could
+//     not be created, not the configured directory, and the variable that
+//     selects it was nowhere in the message;
+//   - a store directory that already existed but was read-only booted clean and
+//     only failed at the first Append, long after the process reported success.
+//
+// Every failure here names the variable, the resolved path and the uid, and
+// says what to change, so a deploy can be fixed without reading this source.
+//
+// There is deliberately NO fallback to a temporary directory: a deployment that
+// armed the dagger surface and silently recorded its runs somewhere else would
+// lose every run record on the next restart while reporting success — the same
+// reasoning the delivery ACL's store carries (cmd/server/permissions.go). The
+// fix belongs in the configuration, and the error says which knob to turn.
+func ensureDaggerStoreDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		// Unreachable from the boot path (config.go defaults the value
+		// whenever CR_DAGGER_URL is set); kept so the check is total.
+		return fmt.Errorf("%s is empty", daggerStoreEnv)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return daggerStoreUnusable(dir, "cannot create the directory", err)
+	}
+	// The directory exists. Prove the process can actually write in it: this is
+	// exactly the case MkdirAll cannot see (an existing read-only directory).
+	probe, err := os.CreateTemp(dir, ".crier-dagger-writable-*")
+	if err != nil {
+		return daggerStoreUnusable(dir, "cannot create a file in the directory", err)
+	}
+	name := probe.Name()
+	if cerr := probe.Close(); cerr != nil {
+		_ = os.Remove(name)
+		return daggerStoreUnusable(dir, "cannot write a file in the directory", cerr)
+	}
+	if err := os.Remove(name); err != nil {
+		// The write landed but the cleanup did not: say so rather than leaving
+		// an unexplained file in an operator's store directory.
+		return fmt.Errorf("%s %q is writable, but the write probe %q could not be removed: %w",
+			daggerStoreEnv, dir, name, err)
+	}
+	return nil
+}
+
+// daggerStoreUnusable renders the one boot error an operator must be able to act
+// on: what was tried, why it failed, and the ways out. The OS cause stays
+// attached (via %w) so a caller can classify the failure —
+// errors.Is(err, fs.ErrPermission), syscall.ENOTDIR, … — without parsing the
+// prose.
+func daggerStoreUnusable(dir, what string, cause error) error {
+	return fmt.Errorf("%s %q is not writable by uid %d: %s: %w; the dagger surface is armed (%s is set) so a run-record store is required; set %s to a directory this user can write, or run as a user that can",
+		daggerStoreEnv, dir, os.Geteuid(), what, cause, daggerURLEnv, daggerStoreEnv)
+}
 
 // registerDaggerRoutes builds the control service and registers its routes.
 // It returns (nil, nil) when the surface is switched off — no bridge, no store,
@@ -46,6 +119,15 @@ import (
 func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry.Store) (*daggerctl.Service, *registry.Handler, error) {
 	if cfg.URL == "" {
 		return nil, nil, nil
+	}
+
+	// DF-CRIER-303: the run-record store is settled FIRST — before the bridge,
+	// before any store is opened — so an unusable directory reports itself
+	// (variable, resolved path, uid) instead of surfacing as a bare
+	// `mkdir <first-failing-ancestor>: permission denied` that names neither
+	// the configured path nor the variable that selects it.
+	if err := ensureDaggerStoreDir(cfg.StoreDir); err != nil {
+		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	opts := []daggerctl.HTTPBridgeOption{daggerctl.WithBearerToken(cfg.Token)}
