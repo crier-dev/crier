@@ -299,12 +299,56 @@ fi
 # Cell 2b — PostgreSQL registry + sessions (docker; SKIP when no daemon)
 # ============================================================================
 echo "==> cell 2b: persistence — PostgreSQL"
+# ── INT-CI-010 — make cell 2b's failure visible on a runner ──────────────────
+# On the GitHub runner this cell died with exit 1 and a log that stops DEAD at
+# the :19340 port-guard line: no PASS/FAIL/SKIP and no ERROR, 13.1s later (runs
+# 37763860613 + its rerun on 7677578, and 37972077335 on 8c316e3b) while a green
+# runner run completes this same cell in ~12.5s. The cell is green on this host,
+# so the failing STEP is made OBSERVABLE instead of guessed. All three additions
+# are scoped to this cell and released at its end:
+#   1. a STEP line on STDOUT — the channel the runner provably keeps (it carries
+#      the PASS/FAIL/SKIP lines) — before every phase, with wall-clock time and
+#      elapsed seconds, so even a truncated log shows how far the cell got;
+#   2. an ERR trap that names the failing line, the failing command and its exit
+#      status on STDOUT and then dumps the scratch logs this cell was working
+#      with (pg-cid, pg-server.log). The port guards already report exactly that,
+#      but only on STDERR — the channel the defect fixed just below had killed;
+#   3. `set -x` with a line-numbered PS4, so every command of the cell (docker
+#      run, the crier env, every curl) is in the step log verbatim.
+# Nothing here changes a verdict: the same commands run, the same cells are
+# recorded, and a failing cell still exits nonzero.
+CELL2B_PS4_SAVED="$PS4"
+CELL2B_T0="$SECONDS"
+CELL2B_TRACE_WAS_OFF=1
+case $- in *x*) CELL2B_TRACE_WAS_OFF=0 ;; esac
+step() { # step <tag> <what> — phase marker: STDOUT, wall-clock + elapsed seconds
+  printf 'STEP %s: %s (%s UTC, t+%ss)\n' \
+    "${1:-?}" "${2:-?}" "$(date -u +%H:%M:%S)" "$((SECONDS - ${CELL2B_T0:-SECONDS}))"
+}
+cell2b_failure_report() { # <rc> <line> <command> — abort report, on STDOUT
+  local rc="${1:-?}" line="${2:-?}" cmd="${3:-?}" scratch
+  printf 'ERROR 2b-postgres: cell 2b ABORTED — exit %s at scripts/acceptance-matrix.sh:%s\n' "$rc" "$line"
+  printf 'ERROR 2b-postgres:   failing command: %s\n' "$cmd"
+  for scratch in pg-cid pg-server.log; do
+    [ -s "$WORKDIR/$scratch" ] || continue
+    printf 'ERROR 2b-postgres:   last 20 lines of %s:\n' "$scratch"
+    tail -n 20 "$WORKDIR/$scratch" 2>/dev/null | sed 's/^/ERROR 2b-postgres:     /' || true
+  done
+  return 0
+}
+trap 'cell2b_failure_report "$?" "$LINENO" "$BASH_COMMAND"' ERR
+PS4='+ 2b:${LINENO}: '
+set -x
+step 2b "docker daemon check"
 if docker_available; then
+  step 2b "selecting the postgres scratch port"
   PG_PORT=$(free_port 19340 "postgres-cell")
   PG_CONTAINER="crier-acc-pg-$$"
+  step 2b "docker run postgres:16-alpine (published on 127.0.0.1:$PG_PORT as $PG_CONTAINER)"
   if docker run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=acc -e POSTGRES_DB=crier \
     -p "127.0.0.1:$PG_PORT:5432" postgres:16-alpine >"$WORKDIR/pg-cid" 2>&1 \
     && CONTAINERS+=("$PG_CONTAINER"); then
+    step 2b "waiting for pg_isready inside $PG_CONTAINER (bounded 30s)"
     PG_UP=0
     for _ in $(seq 1 60); do
       if docker exec "$PG_CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then PG_UP=1; break; fi
@@ -320,9 +364,19 @@ if docker_available; then
       # ("connection reset by peer", INT-CI-009). Poll the HOST port until it
       # completes a real TCP handshake before starting crier.
       PG_TCP=0
+      step 2b "waiting for the published host port 127.0.0.1:$PG_PORT to accept TCP (bounded 15s)"
       for _ in $(seq 1 30); do
         if (exec 3<>"/dev/tcp/127.0.0.1/$PG_PORT") 2>/dev/null; then
-          exec 3>&- 3<&- 2>/dev/null || true
+          # INT-CI-010: this close must not be able to silence the shell. A bare
+          # `exec` with only redirections applies them to THIS SHELL permanently,
+          # so the original `exec 3>&- 3<&- 2>/dev/null || true` sent every later
+          # stderr write of the whole run to /dev/null — measured: the port-guard
+          # lines of cells 2b-5 are absent from GREEN runner logs for exactly that
+          # reason, and a port guard's own ERROR report (it exits 1) could not
+          # appear at all, which is how a failing cell ended up as `exit 1` with
+          # no output. Braces scope the silencing to the close, which is all this
+          # line ever meant to do.
+          { exec 3>&- 3<&-; } 2>/dev/null || true
           PG_TCP=1
           break
         fi
@@ -331,10 +385,12 @@ if docker_available; then
       if [ "$PG_TCP" != "1" ]; then
         record SKIP "2b-postgres" "postgres host port 127.0.0.1:$PG_PORT never accepted TCP within 15s"
       else
+      step 2b "starting the built crier against CR_DATABASE_URL (server log $WORKDIR/pg-server.log)"
       PORT_PG=$(free_port 19350 "postgres-server-cell")
       PG_PID=$(start_server "$SERVER_BIN" "$PORT_PG" "$WORKDIR/pg-server.log" \
         CR_DATABASE_URL="postgres://postgres:acc@127.0.0.1:$PG_PORT/crier?sslmode=disable" \
         CR_REQUIRE_AGENT_SIG=false)
+      step 2b "register → deliver → retrieve through the built binary on :$PORT_PG"
       AGENT_ID_PG="accpg-$(date +%s)"
       REG_PG=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT_PG/agents" \
         -H 'Content-Type: application/json' \
@@ -343,6 +399,7 @@ if docker_available; then
         -H 'Content-Type: application/json' -d '{"payload":{"pg":"acceptance"}}')
       RET_PG=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT_PG/agents/$AGENT_ID_PG/inbox" \
         -H "X-Agent-ID: $AGENT_ID_PG")
+      step 2b "verdict: register/deliver/retrieve codes are $REG_PG/$DEL_PG/$RET_PG"
       if [ "$REG_PG" = "201" ] && [ "$DEL_PG" = "201" ] && [ "$RET_PG" = "200" ]; then
         record PASS "2b-postgres" "postgres-backed register→deliver→retrieve OK on :$PORT_PG (registry + session stores on CR_DATABASE_URL)"
       else
@@ -360,6 +417,14 @@ else
     record SKIP "2b-postgres" "docker daemon unavailable"
   fi
 fi
+
+# ── INT-CI-010 — release the cell-2b instrumentation ─────────────────────────
+# The x-trace, the ERR trap and PS4 belong to cell 2b alone; put them back so the
+# rest of the matrix keeps its normal output (a caller who ran us with `bash -x`
+# keeps their own trace — this cell only releases what it turned on itself).
+if [ "$CELL2B_TRACE_WAS_OFF" = "1" ]; then set +x; fi
+trap - ERR
+PS4="$CELL2B_PS4_SAVED"
 
 # ============================================================================
 # Cell 3 — session-thread flow (GET /chat, create, dual output mode)
