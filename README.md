@@ -1819,6 +1819,17 @@ namespace membership is deliberately **not** blanket permission.
   nothing; and the owner rule means a `personal` agent is never orphaned from
   its owner. There is no window in which arming the switch locks a running
   deployment out.
+- **The management writes.** `POST /principals`, `POST /bindings`,
+  `POST /grants` and `POST /grants/{grantid}/revoke` are the write half of the
+  ACL and require the ADMIN token (`CR_PERMISSIONS_ADMIN_TOKEN`), never the
+  message token. Every closed vocabulary and reference is validated **before**
+  the append, so a bad field is a `400` naming the contract and the store is
+  left untouched: an unknown `role` (`INVALID_ROLE`, want
+  `owner, admin, member, viewer`) or `status` (`INVALID_STATUS`), a binding
+  `principal` that is not a `prin_` id — an agent id is never a principal
+  (`INVALID_PRINCIPAL`) — or one this deployment does not know
+  (`UNKNOWN_PRINCIPAL`). A refusal is never a `500`: a caller's input error is
+  reported as one.
 
 ### Dagger control — create, observe, cancel, resume, rewind (CR-CHAT-033)
 

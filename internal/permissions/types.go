@@ -33,6 +33,7 @@ import (
 
 	"strings"
 	"time"
+	"unicode"
 )
 
 // RecordFormatVersion is the envelope version this package writes and the only
@@ -91,6 +92,16 @@ const (
 
 // Roles is the closed role vocabulary in descending privilege order.
 var Roles = []Role{RoleOwner, RoleAdmin, RoleMember, RoleViewer}
+
+// RoleSet is the accepted-set string every unknown-role refusal names, built
+// from Roles so the two can never drift.
+func RoleSet() string {
+	parts := make([]string, len(Roles))
+	for i, r := range Roles {
+		parts[i] = string(r)
+	}
+	return strings.Join(parts, ", ")
+}
 
 // ValidRole reports whether r is one of the four roles. The empty role is NOT
 // a valid role: it is handled separately (a principal may hold no role).
@@ -167,6 +178,44 @@ func ValidPrincipalStatus(s PrincipalStatus) bool {
 		return true
 	}
 	return false
+}
+
+// Statuses is the closed lifecycle vocabulary in a stable order: the list an
+// unknown-status refusal names.
+var Statuses = []PrincipalStatus{PrincipalInvited, PrincipalActive, PrincipalSuspended, PrincipalRevoked}
+
+// PrincipalStatusSet is the accepted-set string every unknown-status refusal
+// names, built from Statuses so the two can never drift.
+func PrincipalStatusSet() string {
+	parts := make([]string, len(Statuses))
+	for i, s := range Statuses {
+		parts[i] = string(s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// PrincipalIDPrefix is the one prefix a principal id carries (§2.1:
+// `prin_01J9Z6V0Q7`). It is what keeps the two id vocabularies visibly apart —
+// everything else the bus addresses is an AGENT id — so the management surface
+// can refuse an agent id offered where a principal id is required (§2.3,
+// §6.1) instead of storing a record the ACL could never resolve.
+const PrincipalIDPrefix = "prin_"
+
+// ValidPrincipalID reports whether id carries the principal-id GRAMMAR: the
+// prin_ prefix and a non-empty, whitespace-free remainder.
+//
+// It is deliberately a shape check and not an existence check: a well-formed id
+// this deployment has never minted is a DIFFERENT refusal from a token that is
+// not a principal id at all, and callers need to tell them apart (see the
+// management surface, DF-CRIER-301).
+func ValidPrincipalID(id string) bool {
+	if !strings.HasPrefix(id, PrincipalIDPrefix) || len(id) == len(PrincipalIDPrefix) {
+		return false
+	}
+	// Whitespace is refused anywhere in the id, and by the UNICODE rule: an
+	// ASCII-only check lets a non-breaking space through, which is a paste
+	// artefact no id may carry.
+	return strings.IndexFunc(id, unicode.IsSpace) < 0
 }
 
 // Principal is a HUMAN user (§2.1). It is a different kind of thing from an
