@@ -138,7 +138,12 @@ func (h *Handler) HandleMintPrincipal(w http.ResponseWriter, r *http.Request) {
 		p.Role = permissions.Role(req.Role)
 	}
 	p.ID = permissions.NewRecordID("prin_")
-	if err := h.permissionsStore.Append(r.Context(), p.Record(time.Now().UTC())); err != nil {
+	// One timestamp serves both halves: the struct's CreatedAt (the JSON the
+	// caller reads back, DF-CRIER-300 — it was left zero while only the
+	// envelope ts carried the instant) and the persisted record's ts.
+	created := time.Now().UTC()
+	p.CreatedAt = created
+	if err := h.permissionsStore.Append(r.Context(), p.Record(created)); err != nil {
 		slog.Error("mint principal", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store failure"})
 		return
@@ -174,7 +179,11 @@ func (h *Handler) HandleCreateBinding(w http.ResponseWriter, r *http.Request) {
 		CreatedBy: "admin",
 	}
 	b.ID = permissions.NewRecordID("bind_")
-	if err := h.permissionsStore.Append(r.Context(), b.Record(time.Now().UTC())); err != nil {
+	// Same shape as HandleMintPrincipal: the response struct's CreatedAt and
+	// the persisted record's ts share one instant (DF-CRIER-300).
+	created := time.Now().UTC()
+	b.CreatedAt = created
+	if err := h.permissionsStore.Append(r.Context(), b.Record(created)); err != nil {
 		slog.Error("create binding", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store failure"})
 		return

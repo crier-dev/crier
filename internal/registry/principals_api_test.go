@@ -135,6 +135,19 @@ func TestMintBindGrantDeliverRecordsPrincipal(t *testing.T) {
 	m := newMgmtTest(t)
 	capabilityHolder(t, m.store, "atlas")
 
+	// DF-CRIER-300: the minted/bound JSON body must carry a REAL created_at,
+	// and it must be the same instant the persisted record carries.
+	createdAtOf := func(t *testing.T, body map[string]any, what string) time.Time {
+		t.Helper()
+		raw, _ := body["created_at"].(string)
+		require.NotEmpty(t, raw, "%s response carries a created_at (DF-CRIER-300)", what)
+		ts, err := time.Parse(time.RFC3339Nano, raw)
+		require.NoError(t, err, "%s created_at parses as RFC3339Nano", what)
+		require.False(t, ts.IsZero(), "%s created_at is not the zero time", what)
+		return ts
+	}
+	beforeMint := time.Now().UTC()
+
 	// Mint.
 	rec, principal := m.post(t, "/principals", m.token, `{"display_name":"Bane","namespace":"acme","role":"owner"}`)
 	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
@@ -142,12 +155,29 @@ func TestMintBindGrantDeliverRecordsPrincipal(t *testing.T) {
 	require.True(t, len(prinID) > len("prin_"), "minted id carries the principal prefix")
 	require.Equal(t, "principal", principal["kind"])
 	require.Equal(t, "active", principal["status"])
+	principalCreatedAt := createdAtOf(t, principal, "principal")
+	require.False(t, principalCreatedAt.Before(beforeMint), "created_at is at/after the request")
+	require.False(t, principalCreatedAt.After(time.Now().UTC().Add(5*time.Second)), "created_at is near the request time")
 
 	// Bind.
+	beforeBind := time.Now().UTC()
 	rec, binding := m.post(t, "/bindings", m.token,
 		`{"principal":"`+prinID+`","agent":"atlas"}`)
 	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, true, binding["as_agent"], "as_agent defaults to true (§2.3: the only value this version defines)")
+	bindingCreatedAt := createdAtOf(t, binding, "binding")
+	require.False(t, bindingCreatedAt.Before(beforeBind), "created_at is at/after the request")
+	require.False(t, bindingCreatedAt.After(time.Now().UTC().Add(5*time.Second)), "created_at is near the request time")
+
+	// The response created_at IS the persisted record's instant (DF-CRIER-300).
+	snap, err := m.perms.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, snap.Principal(prinID))
+	require.True(t, principalCreatedAt.Equal(snap.Principal(prinID).CreatedAt),
+		"response created_at %v matches the stored principal's %v", principalCreatedAt, snap.Principal(prinID).CreatedAt)
+	require.NotNil(t, snap.Binding(prinID, "atlas"))
+	require.True(t, bindingCreatedAt.Equal(snap.Binding(prinID, "atlas").CreatedAt),
+		"response created_at %v matches the stored binding's %v", bindingCreatedAt, snap.Binding(prinID, "atlas").CreatedAt)
 
 	// The delivery is still REFUSED — a binding is a speech right, not a send
 	// (§6.5): the target is classed personal with another owner and no grant.
