@@ -39,9 +39,11 @@
 # 32` + xxd + a hand-written sig() helper) is gone, so an arm that fell back to it
 # would prove nothing: every key here comes from `crier keygen` and every
 # signature from the client library. (The clients' own unit-test arms additionally
-# CROSS-CHECK that a keygen key is the same key openssl's DER recipe derives, and
-# those two checks SKIP LOUDLY when openssl is absent — they never produce the
-# material under test.)
+# CROSS-CHECK openssl: that a keygen key is the same key openssl's DER recipe
+# derives, that the documented `pkeyutl -sign -rawin -in <file>` recipe signs such
+# a key, and that the piped form signs NOTHING — DF-CRIER-306. Those checks SKIP
+# LOUDLY when openssl is absent or older than OpenSSL 3, and none of them produces
+# the key or the signature any round-trip arm uses.)
 #
 # Requirements: go (toolchain), curl, ss (iproute2, for the port guards), python3
 # (stdlib only — the client needs no packages), and node >= 22.6 for the

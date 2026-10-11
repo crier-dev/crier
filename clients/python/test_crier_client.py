@@ -16,10 +16,13 @@ surface around it:
     PUBLIC KEY block, a non-ed25519 PKCS#8 key).
 
 `openssl` is used by the interop cross-checks here — that a `crier keygen` key is
-the same key openssl's DER recipe derives, the non-ed25519 PKCS#8 rejection (which
-needs an RSA key to reject), and the key-source fallback — and every one of them
-SKIPS LOUDLY when openssl is not on PATH (measured: with `CRIER_BIN` set and no
-openssl, this suite still runs 21 tests, 3 of them skipped). Nothing else in the
+the same key openssl's DER recipe derives, that the documented `pkeyutl -sign
+-rawin -in <file>` recipe signs that key while the PIPED form signs nothing at all
+(DF-CRIER-306, the zero-byte signature the docs warn about), the non-ed25519
+PKCS#8 rejection (which needs an RSA key to reject), and the key-source fallback —
+and every one of them SKIPS LOUDLY when openssl is not on PATH, or is older than
+OpenSSL 3 and has no `-rawin` (measured: with `CRIER_BIN` set and no openssl, this
+suite still runs 23 tests, 5 of them skipped). Nothing else in the
 client needs it, and neither round-trip driver uses it to produce a key or a
 signature: the point of `crier keygen` is that the crypto tooling is gone.
 
@@ -204,6 +207,23 @@ class TestKeyLoading(unittest.TestCase):
             )
         return path
 
+    @staticmethod
+    def _require_rawin(case: unittest.TestCase, openssl: str) -> None:
+        """Skip LOUDLY when this openssl has no `pkeyutl -sign -rawin`.
+
+        The documented signing recipes are OpenSSL 3+ (`-rawin`); on an older
+        openssl they are undefined, so these arms skip naming the version found
+        rather than fail as if the recipe were wrong. Mirrors the runtime probe
+        the shipped helpers use (`openssl pkeyutl -help | grep -- -rawin`).
+        """
+        probed = subprocess.run([openssl, "pkeyutl", "-help"], capture_output=True, text=True)
+        if "-rawin" not in probed.stdout + probed.stderr:
+            version = subprocess.run([openssl, "version"], capture_output=True, text=True).stdout.strip()
+            case.skipTest(
+                "this signing recipe requires OpenSSL >= 3 (`pkeyutl -sign -rawin`); found %s"
+                % (version or "an unidentified openssl")
+            )
+
     def _write_real_key(self) -> None:
         """Prefer `crier keygen` (the documented path); fall back to openssl."""
         if self.binary and os.path.exists(self.binary):
@@ -241,6 +261,93 @@ class TestKeyLoading(unittest.TestCase):
             capture_output=True,
         ).stdout
         self.assertEqual(key.public_key.hex(), der[-32:].hex())
+
+    def test_documented_file_recipe_signs_a_keygen_key(self) -> None:
+        """DF-CRIER-306: the supported `-in <file>` recipe signs a `crier keygen` key.
+
+        This is the recipe the docs ship — README quickstart `sig()`, TESTERS.md,
+        docs/integration-guide.md — and the one a `crier keygen -out <file>` key is
+        meant to work with: the payload is written to a SEEKABLE file and openssl
+        signs it with `-in`. Ed25519 is deterministic, so openssl's signature must be
+        BYTE-IDENTICAL to the one this client library produces over the same bytes —
+        the cross-implementation proof the server's verifier relies on.
+        """
+        openssl = self._require(self, "openssl")
+        self._require_rawin(self, openssl)
+        message = b"GET\n/agents/alice/inbox\n1700000000\n"
+        payload = os.path.join(self.tmp.name, "payload.txt")
+        with open(payload, "wb") as handle:
+            handle.write(message)
+        signed = subprocess.run(
+            [openssl, "pkeyutl", "-sign", "-rawin", "-inkey", self.key_path, "-in", payload],
+            capture_output=True,
+        )
+        self.assertEqual(signed.returncode, 0, signed.stderr.decode(errors="replace"))
+        self.assertEqual(
+            len(signed.stdout), 64, "pkeyutl did not emit a 64-byte ed25519 signature"
+        )
+        key = SigningKey.from_pem_file(self.key_path)
+        self.assertTrue(key.verify(signed.stdout, message), "openssl's signature does not verify")
+        self.assertEqual(
+            signed.stdout,
+            key.sign(message),
+            "openssl's file-recipe signature differs from the client's over the same bytes",
+        )
+        # openssl's own verify accepts it against the public half it derives — the
+        # same public key `crier keygen` prints (asserted in the sibling test).
+        public_pem = os.path.join(self.tmp.name, "alice.pub")
+        with open(public_pem, "wb") as handle:
+            handle.write(
+                subprocess.run(
+                    [openssl, "pkey", "-in", self.key_path, "-pubout"],
+                    check=True,
+                    capture_output=True,
+                ).stdout
+            )
+        signature = os.path.join(self.tmp.name, "sig.bin")
+        with open(signature, "wb") as handle:
+            handle.write(signed.stdout)
+        verified = subprocess.run(
+            [
+                openssl, "pkeyutl", "-verify", "-rawin", "-pubin",
+                "-inkey", public_pem, "-sigfile", signature, "-in", payload,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+
+    def test_oneshot_over_a_pipe_produces_no_signature(self) -> None:
+        """DF-CRIER-306: the prior failure — a piped payload signs NOTHING (zero bytes).
+
+        `pkeyutl -sign -rawin` is a ONE-SHOT operation that needs a seekable input.
+        Fed from a pipe it exits nonzero with an EMPTY stdout — a zero-byte
+        signature, not an error the caller notices unless it checks stdout. That is
+        the trap that produced a 401 blaming the signature headers. This arm PINS the
+        failure (both the no-`-in` pipe and the non-seekable `-in /dev/stdin` form),
+        so an openssl that starts signing over a pipe is visible, and it is the
+        measured reason the shipped helper writes the payload to a file.
+        """
+        openssl = self._require(self, "openssl")
+        self._require_rawin(self, openssl)
+        message = b"GET\n/agents/alice/inbox\n1700000000\n"
+        for label, argv in (
+            ("no -in at all", [openssl, "pkeyutl", "-sign", "-rawin", "-inkey", self.key_path]),
+            ("-in /dev/stdin", [openssl, "pkeyutl", "-sign", "-rawin", "-inkey", self.key_path, "-in", "/dev/stdin"]),
+        ):
+            with self.subTest(form=label):
+                piped = subprocess.run(argv, input=message, capture_output=True)
+                self.assertNotEqual(
+                    piped.returncode, 0, "%s signed a piped payload; -rawin is documented one-shot" % label
+                )
+                self.assertEqual(
+                    piped.stdout,
+                    b"",
+                    "%s emitted bytes where the failure mode is a zero-byte signature" % label,
+                )
+                self.assertTrue(
+                    piped.stderr.strip(), "%s failed with no diagnostic on stderr" % label
+                )
 
     def test_missing_file_names_the_fix(self) -> None:
         with self.assertRaises(ValueError) as ctx:

@@ -704,16 +704,23 @@ A minimal register → deliver → retrieve round-trip with the default signed c
 ```bash
 AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")
 
-# 0. One-time setup: generate an ed25519 keypair for agent-1 (needs openssl 3.x + xxd)
+# 0. One-time setup: generate an ed25519 keypair for agent-1. EITHER source writes the
+#    PKCS#8 PEM the server reads — `crier keygen` needs no openssl and no xxd and prints
+#    the registration config:
+#      ./bin/crier keygen -out /tmp/crier-agent.key -id agent-1 -json   # -> use its "public_key"
+#    or, with openssl 3.x + xxd:
 openssl genpkey -algorithm ED25519 -out /tmp/crier-agent.key >/dev/null 2>&1
 PUBKEY_HEX=$(openssl pkey -in /tmp/crier-agent.key -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)
-# sig helper: hex(ed25519_sign("METHOD\nPATH\nTS", key)) — same wire format as examples/demo.sh.
+# sig helper: sig <key-file> <METHOD> <PATH> <TS> -> hex(ed25519_sign("METHOD\nPATH\nTS", key)) —
+# same wire format as examples/demo.sh. The KEY FILE IS THE FIRST ARGUMENT, so the key is never
+# baked in here: a `crier keygen -out <file>` key and an `openssl genpkey` key are the same
+# PKCS#8 PEM and either works (this is TESTERS.md's helper, lifted verbatim).
 # Requires OpenSSL >= 3 for pkeyutl -sign -rawin; on older OpenSSL it errors loudly
 # instead of producing an empty (silently-401-rejected) signature. That flag is also a
 # ONE-SHOT operation: the payload must be a seekable file passed with -in, so the helper
 # refuses a zero-byte signature rather than sending it (a piped payload fails with
 # "unable to determine file size for oneshot operation" and would 401 blaming the headers).
-sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$1" "$2" "$3" > /tmp/crier-payload.txt; _sig=$(openssl pkeyutl -sign -rawin -inkey /tmp/crier-agent.key -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
+sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR: this signing helper requires OpenSSL >= 3 (pkeyutl -sign -rawin); found $(openssl version)" >&2; return 1; fi; printf '%s\n%s\n%s' "$2" "$3" "$4" > /tmp/crier-payload.txt; _sig=$(openssl pkeyutl -sign -rawin -inkey "$1" -in /tmp/crier-payload.txt 2>/dev/null | xxd -p -c 128); if [ -z "$_sig" ]; then echo "ERROR: signing produced an EMPTY signature. pkeyutl -sign -rawin is a one-shot operation and needs a SEEKABLE payload passed with -in <file> — a piped or redirected payload fails with 'unable to determine file size for oneshot operation' and yields zero bytes, which the server rejects 401 naming the empty X-Agent-Sig header." >&2; return 1; fi; printf '%s\n' "$_sig"; }
 
 # 1. Register an agent (public_key = hex-encoded ed25519 public key; required
 #    whenever signature enforcement is on — the default. Only a server run
@@ -745,7 +752,7 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Typ
 TS=$(date +%s)
 curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "${AUTH[@]}" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: agent-1' \
-  -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig POST /relay/publish "$TS")" \
+  -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig /tmp/crier-agent.key POST /relay/publish "$TS")" \
   -d '{"topic":"demo-topic","event":{"hello":"subscribers"}}'
 # 202 — drop the trio and it is still 202; drop `X-Agent-ID` and it is 401.
 
@@ -773,7 +780,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "$
 #      GET /agents/ghost-agent-xyz/inbox -> 404 "agent not found"
 TS=$(date +%s)
 curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
-  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig GET /agents/agent-1/inbox "$TS")"
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig /tmp/crier-agent.key GET /agents/agent-1/inbox "$TS")"
 # 200 {"messages":[{"id":"...","payload":"eyJoZWxsbyI6IndvcmxkIn0=","lease_id":"..."}],"lease_id":"...","queue_depth":1,"leased_count":1}
 # queue_depth/leased_count disambiguate an empty batch: messages=[] with
 # leased_count>0 = everything queued is HELD under a lease (DF-CRIER-177)
@@ -784,7 +791,7 @@ curl -s localhost:8767/agents/agent-1/inbox "${AUTH[@]}" \
 #    redelivered after lease expiry). Sign "POST\n/agents/agent-1/inbox/ack\n<ts>".
 TS=$(date +%s)
 curl -s -X POST localhost:8767/agents/agent-1/inbox/ack "${AUTH[@]}" -H 'Content-Type: application/json' \
-  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig POST /agents/agent-1/inbox/ack "$TS")" \
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig /tmp/crier-agent.key POST /agents/agent-1/inbox/ack "$TS")" \
   -d '{"lease_id":"<lease_id from retrieve>","message_ids":["<id from retrieve>"]}'
 # 204 — message permanently removed (never redelivered after lease expiry)
 
@@ -806,7 +813,7 @@ curl -s localhost:8767/agents/agent-1/inbox
 #    signature (not just inbox endpoints). Sign "DELETE\n/agents/agent-1\n<ts>".
 TS=$(date +%s)
 curl -s -X DELETE localhost:8767/agents/agent-1 "${AUTH[@]}" \
-  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig DELETE /agents/agent-1 "$TS")"
+  -H 'X-Agent-ID: agent-1' -H "X-Agent-Ts: ${TS}" -H "X-Agent-Sig: $(sig /tmp/crier-agent.key DELETE /agents/agent-1 "$TS")"
 # 204 — agent removed (401 without the signature headers)
 ```
 
