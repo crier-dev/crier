@@ -13,6 +13,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,6 +89,17 @@ func (m *mgmtTest) seed(t *testing.T, recs ...*permissions.Record) {
 	for _, rec := range recs {
 		require.NoError(t, m.perms.Append(context.Background(), rec))
 	}
+}
+
+// appendCount is the number of record-versions the store holds. It is the
+// direct evidence a refused management write appended NOTHING — the assertion
+// is a before/after count on the store the ACL folds, not an inference from
+// the response body.
+func (m *mgmtTest) appendCount(t *testing.T) int {
+	t.Helper()
+	recs, err := m.perms.Records(context.Background())
+	require.NoError(t, err)
+	return len(recs)
 }
 
 // seedClassed classes an agent record: personal, owned by the named
@@ -296,4 +308,184 @@ func TestAnonymousDeliveryStoresNoPrincipalField(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(wire), "principal_id",
 		"a principal-less delivery stays byte-identical to pre-CR-CHAT-007 (omitempty)")
+}
+
+// ---------------------------------------------------------------------------
+// DF-CRIER-301 — input validation is UNEVEN across the management surface.
+//
+// The premise, measured live before the fix: POST /principals with an unknown
+// role answered 500 {"error":"store failure"} (the store's own record check
+// refused the record and the handler reported the caller's input error as an
+// internal failure), and POST /bindings accepted a principal that never
+// existed — and an AGENT id in the principal field — appending a record the
+// ACL could never resolve.
+//
+// The contract this fixes, stated once: an invalid field is the CALLER's
+// error, so it is a 400 written BEFORE the append, it names the accepted set
+// (the shape the sibling POST /grants and POST /agents/{agentid}/class
+// already follow), and it leaves the store untouched. Valid flows are
+// unchanged.
+// ---------------------------------------------------------------------------
+
+// TestMintPrincipalUnknownRoleRefused400 is the mint half of the premise: the
+// role is validated by the handler, so an unknown one is a 400 naming the four
+// roles — never a 500 produced by the store's record check.
+func TestMintPrincipalUnknownRoleRefused400(t *testing.T) {
+	m := newMgmtTest(t)
+	before := m.appendCount(t)
+
+	// Premise (holds before AND after the fix): the RECORD layer already
+	// refuses an unknown role — which is exactly why the unvalidated handler
+	// answered 500: the store's MarshalLine failed and the handler called that
+	// "store failure". Asserted so this test keeps meaning if the record check
+	// ever loosens.
+	require.Error(t,
+		(&permissions.Principal{ID: "prin_probe", Role: "superadmin", Status: permissions.PrincipalActive}).
+			Record(time.Now()).Validate(),
+		"premise: an unknown role is refused by the record layer")
+
+	rec, body := m.post(t, "/principals", m.token, `{"display_name":"Bane","role":"superadmin"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code,
+		"an unknown role is the caller's input error, not a store failure (body: %s)", rec.Body.String())
+	require.Equal(t, "INVALID_ROLE", body["error"])
+	detail, _ := body["detail"].(string)
+	require.NotEmpty(t, detail)
+	for _, role := range permissions.Roles {
+		require.Contains(t, detail, string(role), "the refusal names the accepted role set (§5.1)")
+	}
+	require.Equal(t, before, m.appendCount(t), "a refused mint appends no record")
+}
+
+// TestMintPrincipalUnknownStatusRefused400 is the same field class on the same
+// handler: status carried the identical 500.
+func TestMintPrincipalUnknownStatusRefused400(t *testing.T) {
+	m := newMgmtTest(t)
+	before := m.appendCount(t)
+
+	rec, body := m.post(t, "/principals", m.token, `{"display_name":"Bane","status":"pending"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code,
+		"an unknown lifecycle state is the caller's input error (body: %s)", rec.Body.String())
+	require.Equal(t, "INVALID_STATUS", body["error"])
+	detail, _ := body["detail"].(string)
+	for _, status := range permissions.Statuses {
+		require.Contains(t, detail, string(status), "the refusal names the accepted lifecycle set (§2.2)")
+	}
+	require.Equal(t, before, m.appendCount(t), "a refused mint appends no record")
+}
+
+// TestMintPrincipalAcceptsEveryDocumentedRole keeps the valid flows green: all
+// four roles still mint, the record carries the role, and the principal is in
+// the store the ACL reads.
+func TestMintPrincipalAcceptsEveryDocumentedRole(t *testing.T) {
+	m := newMgmtTest(t)
+	snapBefore, err := m.perms.Snapshot(context.Background())
+	require.NoError(t, err)
+
+	for _, role := range permissions.Roles {
+		rec, body := m.post(t, "/principals", m.token,
+			fmt.Sprintf(`{"display_name":%q,"namespace":"acme","role":%q}`, string(role), string(role)))
+		require.Equal(t, http.StatusCreated, rec.Code, "role %q must still mint (body: %s)", role, rec.Body.String())
+		require.Equal(t, string(role), body["role"])
+		require.Equal(t, "active", body["status"], "absent status still defaults to active")
+
+		id, _ := body["id"].(string)
+		require.True(t, permissions.ValidPrincipalID(id), "minted id %q carries the principal grammar (§2.1)", id)
+		snap, err := m.perms.Snapshot(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, snap.Principal(id), "the minted principal is in the store the ACL reads")
+		require.Nil(t, snapBefore.Principal(id))
+	}
+
+	// A documented lifecycle state other than the default is still accepted.
+	rec, body := m.post(t, "/principals", m.token, `{"display_name":"Invitee","status":"invited"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, "invited", body["status"])
+}
+
+// TestCreateBindingRejectsAgentIDInPrincipalField: §2.3/§6.1 — the principal
+// field is a principal id, and an agent id is not one.
+func TestCreateBindingRejectsAgentIDInPrincipalField(t *testing.T) {
+	m := newMgmtTest(t)
+	capabilityHolder(t, m.store, "atlas")
+	before := m.appendCount(t)
+
+	rec, body := m.post(t, "/bindings", m.token, `{"principal":"atlas","agent":"atlas"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code,
+		"an agent id in the principal field is refused (body: %s)", rec.Body.String())
+	require.Equal(t, "INVALID_PRINCIPAL", body["error"])
+	require.Contains(t, body["detail"], "atlas", "the refusal names the offending value")
+	require.Contains(t, body["detail"], permissions.PrincipalIDPrefix,
+		"the refusal names the principal-id grammar (§2.1)")
+	require.Equal(t, before, m.appendCount(t), "a refused binding appends no record")
+}
+
+// TestCreateBindingRejectsUnknownPrincipal: a well-formed `prin_` id nobody
+// minted is a binding the ACL could never resolve, so it is refused before the
+// append rather than stored as dead weight.
+func TestCreateBindingRejectsUnknownPrincipal(t *testing.T) {
+	m := newMgmtTest(t)
+	before := m.appendCount(t)
+	unknown := permissions.NewPrincipalID() // well-formed, never minted here
+
+	rec, body := m.post(t, "/bindings", m.token, `{"principal":"`+unknown+`","agent":"atlas"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code,
+		"an unknown principal is refused (body: %s)", rec.Body.String())
+	require.Equal(t, "UNKNOWN_PRINCIPAL", body["error"])
+	require.Contains(t, body["detail"], unknown, "the refusal names the unknown id")
+	require.Equal(t, before, m.appendCount(t), "a refused binding appends no record")
+
+	// Premise: the id really was well-formed — the refusal is about existence,
+	// not grammar (so a grammar fix alone would still store this binding).
+	require.True(t, permissions.ValidPrincipalID(unknown))
+	snap, err := m.perms.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, snap.Principal(unknown))
+}
+
+// TestCreateBindingRejectsPrincipalIDInAgentField is the reverse direction of
+// the same invariant: the two id vocabularies are not interchangeable in
+// either field.
+func TestCreateBindingRejectsPrincipalIDInAgentField(t *testing.T) {
+	m := newMgmtTest(t)
+	before := m.appendCount(t)
+
+	rec, principal := m.post(t, "/principals", m.token, `{"display_name":"Bane"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+	prinID, _ := principal["id"].(string)
+
+	rec, body := m.post(t, "/bindings", m.token, `{"principal":"`+prinID+`","agent":"`+prinID+`"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code,
+		"a principal id in the agent field is refused (body: %s)", rec.Body.String())
+	require.Equal(t, "INVALID_AGENT", body["error"])
+	require.Contains(t, body["detail"], prinID)
+	require.Equal(t, before+1, m.appendCount(t), "the mint appended one record; the refused binding appended none")
+}
+
+// TestCreateBindingValidFlowsRemainGreen pins what is deliberately NOT
+// validated, so the new refusals cannot quietly tighten a valid flow: a
+// registered principal may be bound to an agent that has no registry row yet
+// (§2.3 requires the binding target, not the agent's existence), and the empty
+// field case keeps its shipped 400.
+func TestCreateBindingValidFlowsRemainGreen(t *testing.T) {
+	m := newMgmtTest(t)
+
+	rec, principal := m.post(t, "/principals", m.token, `{"display_name":"Bane","namespace":"acme","role":"member"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+	prinID, _ := principal["id"].(string)
+
+	// No agent row exists for "unregistered-agent" — still a 201.
+	rec, binding := m.post(t, "/bindings", m.token, `{"principal":"`+prinID+`","agent":"unregistered-agent"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+	require.Equal(t, prinID, binding["principal"])
+	require.Equal(t, "unregistered-agent", binding["agent"])
+	require.Equal(t, true, binding["as_agent"])
+
+	snap, err := m.perms.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, snap.Binding(prinID, "unregistered-agent"))
+
+	// The pre-existing empty-field refusal is untouched.
+	rec, body := m.post(t, "/bindings", m.token, `{"principal":"","agent":"atlas"}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "principal and agent are required", body["error"])
 }

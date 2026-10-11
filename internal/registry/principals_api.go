@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -115,6 +116,14 @@ func refuseManagement(w http.ResponseWriter, armed bool) {
 // HandleMintPrincipal mints a principal record (POST /principals). §2.1's
 // shape: kind=principal, a status (default active — phase 1 has no login to
 // move invited→active), an optional namespace and role.
+//
+// `role` and `status` are closed vocabularies (§5.1 and §2.2), so both are
+// validated HERE, before any record is built (DF-CRIER-301). They are the
+// caller's input: an unknown one is a 400 that names the accepted set, exactly
+// as the sibling POST /grants and POST /agents/{agentid}/class answer their own
+// closed vocabularies. Left unvalidated, the store's own record check refused
+// the field instead and the caller got a 500 "store failure" — the same input
+// error reported as an internal one.
 func (h *Handler) HandleMintPrincipal(w http.ResponseWriter, r *http.Request) {
 	if !h.managementAuthorized(r) {
 		refuseManagement(w, h.permissionsStore != nil)
@@ -123,6 +132,22 @@ func (h *Handler) HandleMintPrincipal(w http.ResponseWriter, r *http.Request) {
 	var req principalMintRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if req.Role != "" && !permissions.ValidRole(permissions.Role(req.Role)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "INVALID_ROLE",
+			"detail": fmt.Sprintf("role %q is not a namespace role (§5.1); want one of %s — absent means the principal holds no role bundle and may still hold explicit grants (§5.2)",
+				req.Role, permissions.RoleSet()),
+		})
+		return
+	}
+	if req.Status != "" && !permissions.ValidPrincipalStatus(permissions.PrincipalStatus(req.Status)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "INVALID_STATUS",
+			"detail": fmt.Sprintf("status %q is not a principal lifecycle state (§2.2); want one of %s — absent means active",
+				req.Status, permissions.PrincipalStatusSet()),
+		})
 		return
 	}
 	p := &permissions.Principal{
@@ -137,7 +162,7 @@ func (h *Handler) HandleMintPrincipal(w http.ResponseWriter, r *http.Request) {
 	if req.Role != "" {
 		p.Role = permissions.Role(req.Role)
 	}
-	p.ID = permissions.NewRecordID("prin_")
+	p.ID = permissions.NewPrincipalID()
 	// One timestamp serves both halves: the struct's CreatedAt (the JSON the
 	// caller reads back, DF-CRIER-300 — it was left zero while only the
 	// envelope ts carried the instant) and the persisted record's ts.
@@ -153,6 +178,13 @@ func (h *Handler) HandleMintPrincipal(w http.ResponseWriter, r *http.Request) {
 
 // HandleCreateBinding records a binding (POST /bindings): §2.3's speech right.
 // as_agent defaults to true — the only value this version defines.
+//
+// The `principal` field is a PRINCIPAL id (§2.3, §6.1): a `prin_` id, never an
+// agent id, and never an id this deployment does not know. Both are checked
+// before the append (DF-CRIER-301): the ACL folds bindings by (principal,
+// agent), so a binding whose principal is an agent — or a `prin_` id that was
+// never minted — is a record it could never resolve, and it used to be stored
+// without comment.
 func (h *Handler) HandleCreateBinding(w http.ResponseWriter, r *http.Request) {
 	if !h.managementAuthorized(r) {
 		refuseManagement(w, h.permissionsStore != nil)
@@ -165,6 +197,39 @@ func (h *Handler) HandleCreateBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Principal) == "" || strings.TrimSpace(req.Agent) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "principal and agent are required"})
+		return
+	}
+	// Shape first, existence second: a token that is not a principal id at all
+	// and a well-formed id nobody minted are different refusals, and a client
+	// needs to tell them apart.
+	if !permissions.ValidPrincipalID(req.Principal) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "INVALID_PRINCIPAL",
+			"detail": fmt.Sprintf("principal %q is not a principal id (§2.1: a %q id); an agent id is never a principal — an agent reaches things by being bound or by being owned, and a second reach path for machines would be a second truth (§2.3, §6.1)",
+				req.Principal, permissions.PrincipalIDPrefix),
+		})
+		return
+	}
+	if permissions.ValidPrincipalID(req.Agent) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "INVALID_AGENT",
+			"detail": fmt.Sprintf("agent %q is not an agent id: the agent field names the AGENT a human speaks AS (§2.3), and a %q id is a principal (§2.1) — the two vocabularies are not interchangeable",
+				req.Agent, permissions.PrincipalIDPrefix),
+		})
+		return
+	}
+	snap, err := h.permissionsStore.Snapshot(r.Context())
+	if err != nil {
+		slog.Error("create binding: read permission store", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store failure"})
+		return
+	}
+	if snap.Principal(req.Principal) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "UNKNOWN_PRINCIPAL",
+			"detail": fmt.Sprintf("principal %q is not known to this deployment; mint it with POST /principals before binding it (§2.3) — a binding to an unknown principal is one the ACL can never resolve",
+				req.Principal),
+		})
 		return
 	}
 	asAgent := true

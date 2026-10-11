@@ -413,3 +413,8 @@ func NewRecordID(prefix string) string {
 	}
 	return prefix + hex.EncodeToString(b)
 }
+
+// NewPrincipalID mints a principal id (§2.1). It is the one mint the
+// management surface uses, so every principal id is built from the same
+// PrincipalIDPrefix that ValidPrincipalID checks.
+func NewPrincipalID() string { return NewRecordID(PrincipalIDPrefix) }

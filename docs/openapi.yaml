@@ -2067,7 +2067,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PrincipalRecord"
         "400":
-          description: Invalid JSON body
+          description: "Invalid JSON body, an unknown `role` (INVALID_ROLE) or an unknown `status` (INVALID_STATUS) — each refusal names the accepted set (§5.1 / §2.2) and appends no record. A closed vocabulary is validated before the append, so an unknown value is the caller's input error rather than the 500 the store's own record check used to raise."
         "403":
           description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
   /bindings:
@@ -2101,7 +2101,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/BindingRecord"
         "400":
-          description: Invalid JSON, or principal/agent missing
+          description: "Invalid JSON; `principal` or `agent` missing; a `principal` that is not a principal id (INVALID_PRINCIPAL — an agent id is never a principal, §2.3/§6.1); a principal this deployment does not know (UNKNOWN_PRINCIPAL — mint it with POST /principals first); or an `agent` that carries a principal id (INVALID_AGENT). Every refusal names the contract and appends no record. The agent itself need not exist: a binding target may register later."
         "403":
           description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
   /grants:

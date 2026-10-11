@@ -198,3 +198,75 @@ func TestRefusalBodyShape(t *testing.T) {
 	// struct order), so a client reading raw bytes sees error first.
 	require.True(t, strings.HasPrefix(string(body), `{"error":"DELIVERY_FORBIDDEN"`), "body: %s", body)
 }
+
+// ---------------------------------------------------------------------------
+// DF-CRIER-301 — the closed vocabularies and the principal-id grammar the
+// management surface refuses against. The refusal STRINGS are derived from
+// these lists, so a refusal cannot name a set the validator no longer accepts
+// (or omit one it does).
+// ---------------------------------------------------------------------------
+
+// TestAcceptedSetStringsMatchTheirVocabularies is the drift guard for the two
+// accepted-set strings a mint refusal names.
+func TestAcceptedSetStringsMatchTheirVocabularies(t *testing.T) {
+	require.Len(t, Roles, 4, "§5.1 fixes four namespace roles")
+	roleSet := RoleSet()
+	for _, r := range Roles {
+		require.Truef(t, ValidRole(r), "%q must be a valid role (§5.1)", r)
+		require.Containsf(t, roleSet, string(r), "the role set names %q", r)
+	}
+	// No entry beyond the vocabulary: the separator count fixes the length.
+	require.Equal(t, len(Roles)-1, strings.Count(roleSet, ", "),
+		"role set %q carries exactly the four roles", roleSet)
+
+	require.Len(t, Statuses, 4, "§2.2 fixes four lifecycle states")
+	statusSet := PrincipalStatusSet()
+	for _, s := range Statuses {
+		require.Truef(t, ValidPrincipalStatus(s), "%q must be a valid lifecycle state (§2.2)", s)
+		require.Containsf(t, statusSet, string(s), "the status set names %q", s)
+	}
+	require.Equal(t, len(Statuses)-1, strings.Count(statusSet, ", "),
+		"status set %q carries exactly the four states", statusSet)
+
+	// The two values the live premise measured as accepted (and that ended in
+	// a 500 from the store's record check) are rejected by the vocabularies.
+	require.False(t, ValidRole(Role("superadmin")))
+	require.False(t, ValidPrincipalStatus(PrincipalStatus("pending")))
+}
+
+// TestPrincipalIDGrammar pins the §2.1 shape rule the binding surface refuses
+// against: the prefix and a non-empty, whitespace-free remainder — and NOT a
+// hex requirement, because the spec's own example (`prin_01J9Z6V0Q7`) is a
+// ULID-shaped id and §2.5's shadow principals are `prin_fed_peer_…`.
+func TestPrincipalIDGrammar(t *testing.T) {
+	for _, id := range []string{
+		"prin_01J9Z6V0Q7",
+		"prin_fed_peer_01J9Z",
+		"prin_a",
+		NewPrincipalID(),
+	} {
+		require.Truef(t, ValidPrincipalID(id), "%q carries the principal-id grammar (§2.1)", id)
+	}
+
+	// Every id the one mint produces passes the one check.
+	for i := 0; i < 16; i++ {
+		require.True(t, ValidPrincipalID(NewPrincipalID()))
+	}
+
+	for _, id := range []string{
+		"",
+		"prin_",         // prefix with no remainder
+		"atlas",         // an agent id
+		"prin",          // prefix without the underscore
+		"agent-prin_x",  // the prefix is not a substring match
+		"PRIN_x",        // the prefix is exact-case
+		"prin_ x",       // whitespace in the remainder
+		"prin_	x",       // any whitespace, not just spaces
+		"prin_x\n",      // trailing newline
+		" sessions",     // unrelated vocabulary
+		"bind_01234567", // another record prefix
+		"prin_\u00a0x",  // a non-ASCII space is not whitespace by ASCII rules — documented by this row
+	} {
+		require.Falsef(t, ValidPrincipalID(id), "%q must NOT pass the principal-id grammar", id)
+	}
+}
