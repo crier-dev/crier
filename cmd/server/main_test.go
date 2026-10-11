@@ -1410,6 +1410,131 @@ func TestOpenAPIDocsSpec(t *testing.T) {
 	}
 }
 
+// TestOpenAPIDocumentsAgentClassRoute pins the DF-CRIER-299 contract: the
+// ACL-arming route the router has served since the tick-451 phase-1 salvage
+// (POST /agents/{agentid}/class, registered in main.go, implemented by
+// registry.HandleSetAgentClass) must be DOCUMENTED, with the request schema and
+// the 201/400/403 contract the handler actually implements.
+//
+// Nothing else pinned that half, which is how the document drifted:
+// TestOpenAPIDocsSpec only checks the document parses and matches the embedded
+// copy, and internal/mcp's TestSpecToolDrift only requires each DECLARED
+// operation to be classified — neither notices an operation the document never
+// declares. Measured before this test existed: docs/openapi.yaml had 53 paths,
+// the router 51 registrations, and the classing route was in the second set
+// only.
+func TestOpenAPIDocumentsAgentClassRoute(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read docs/openapi.yaml: %v", err)
+	}
+	type schemaRef struct {
+		Ref string `yaml:"$ref"`
+	}
+	type mediaType struct {
+		Schema schemaRef `yaml:"schema"`
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			OperationID string   `yaml:"operationId"`
+			Tags        []string `yaml:"tags"`
+			RequestBody struct {
+				Required bool                 `yaml:"required"`
+				Content  map[string]mediaType `yaml:"content"`
+			} `yaml:"requestBody"`
+			Responses map[string]struct {
+				Content map[string]mediaType `yaml:"content"`
+			} `yaml:"responses"`
+		} `yaml:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string `yaml:"required"`
+				Properties map[string]struct {
+					Enum []string `yaml:"enum"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse docs/openapi.yaml: %v", err)
+	}
+
+	item, ok := doc.Paths["/agents/{agentid}/class"]
+	if !ok {
+		t.Fatal(`docs/openapi.yaml declares no "/agents/{agentid}/class" path — the route main.go registers is undocumented`)
+	}
+	op, ok := item["post"]
+	if !ok {
+		t.Fatalf("path item declares no POST operation: %v", item)
+	}
+	// main.go registers this path with .Methods("POST") and nothing else, so a
+	// second method in the document would describe a route nobody serves.
+	for _, m := range []string{"get", "put", "patch", "delete", "head", "options", "trace"} {
+		if _, ok := item[m]; ok {
+			t.Errorf("path item declares %s: the handler is registered POST-only (cmd/server/main.go)", strings.ToUpper(m))
+		}
+	}
+	if op.OperationID != "setAgentClass" {
+		t.Errorf("operationId = %q, want %q (the coverage guard classifies operations by this name)", op.OperationID, "setAgentClass")
+	}
+
+	// The documented contract is the handler's: 201 Created with the record
+	// (HandleSetAgentClass), 400 for a body it refuses (invalid JSON, an
+	// unknown/empty class INVALID_CLASS, or an incoherent class/owner pair) and
+	// 403 for the admin gate (refuseManagement -> MANAGEMENT_FORBIDDEN). A
+	// deliberate contract change updates this list with it.
+	for _, code := range []string{"201", "400", "403"} {
+		if _, ok := op.Responses[code]; !ok {
+			t.Errorf("documented responses lack %q — the handler's contract is 201/400/403", code)
+		}
+	}
+	if len(op.Responses) != 3 {
+		t.Errorf("documented responses = %d entries, want exactly 3 (201/400/403)", len(op.Responses))
+	}
+	if got, want := op.RequestBody.Content["application/json"].Schema.Ref, "#/components/schemas/AgentClassRequest"; got != want {
+		t.Errorf("request body schema $ref = %q, want %q", got, want)
+	}
+	if got, want := op.Responses["201"].Content["application/json"].Schema.Ref, "#/components/schemas/AgentClassRecord"; got != want {
+		t.Errorf("201 body schema $ref = %q, want %q", got, want)
+	}
+
+	req, ok := doc.Components.Schemas["AgentClassRequest"]
+	if !ok {
+		t.Fatal("components.schemas declares no AgentClassRequest — the request shape has no named schema")
+	}
+	if got, want := strings.Join(req.Required, ","), "class"; got != want {
+		t.Errorf("AgentClassRequest.required = [%s], want [%s]", got, want)
+	}
+	// permissions.ValidClass admits exactly these two; the empty class is the
+	// handler's 400 (INVALID_CLASS), never a third documented value.
+	if got, want := strings.Join(req.Properties["class"].Enum, ","), "personal,service"; got != want {
+		t.Errorf("AgentClassRequest.class enum = [%s], want [%s]", got, want)
+	}
+	if _, ok := doc.Components.Schemas["AgentClassRecord"]; !ok {
+		t.Error("components.schemas declares no AgentClassRecord — the 201 body has no named schema")
+	}
+
+	// The parity half: a document describing a route nobody serves is the
+	// mirror image of the drift this row closed.
+	mainSrc, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	registration := ""
+	for _, line := range strings.Split(string(mainSrc), "\n") {
+		if strings.Contains(line, `HandleFunc("/agents/{agentid}/class"`) {
+			registration = strings.TrimSpace(line)
+			break
+		}
+	}
+	if registration == "" {
+		t.Fatal("main.go registers no /agents/{agentid}/class route — the documented path has no router registration")
+	}
+	if !strings.Contains(registration, `.Methods("POST")`) {
+		t.Errorf("registration %q is not POST-only, but the document declares exactly one POST operation", registration)
+	}
+}
+
 // TestVersionEndpointServed is the DF-CRIER-101 end-to-end gate: on a running
 // server, GET /version returns the RESOLVED build identity as JSON (not a
 // hardcoded string), and it is reachable without a token while auth is

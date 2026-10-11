@@ -2183,6 +2183,66 @@ paths:
         "404":
           description: No grant with that id
 
+  # ── Agent classing (CR-CHAT-007 phase 1) ──
+  # The write that ARMS the delivery ACL for one agent (specs/CHAT-PERMISSIONS.md
+  # §3.1 / §6.4 rule 2; taxonomy in specs/CHAT-AGENT-CLASSES.md §2). An agent with
+  # NO class record keeps the shipped legacy posture (§8.1); a classed `personal`
+  # row admits its owner plus any principal holding a live grant on it, and a
+  # classed `service` row admits live grants, its declared scope reach sets and —
+  # within its own realm — admin/owner role holders (checker.go evaluateAgent, §3.2).
+  #
+  # Same admin gate as the four permission-management paths above: every write
+  # requires CR_PERMISSIONS_ADMIN_TOKEN as Bearer, a SECOND constant-time secret
+  # deliberately distinct from CR_AUTH_TOKEN. The route is registered
+  # unconditionally, so an unarmed deployment answers the named 403 below rather
+  # than a 404 that reads as a missing route. The shared auth middleware accepts
+  # either token on this path (middleware.AuthTokens' isManagementPath) and
+  # answers a missing or unknown bearer with 401, exactly as for the four above.
+  /agents/{agentid}/class:
+    post:
+      operationId: setAgentClass
+      tags: [registry]
+      summary: Class an agent — the write that arms its delivery ACL (§3.1)
+      description: |-
+        Records an agent-class row (specs/CHAT-PERMISSIONS.md §3.1): the class
+        of ONE agent plus the owner answer that class requires. It is stored as
+        a `permission.agent` record-version against the SAME permission store
+        the delivery ACL reads, so the record is in force for the very next
+        delivery (§6.6 per-request evaluation — no restart, no cache).
+
+        The record is VALIDATED before it is appended: `personal` must name an
+        owner and `service` must not, so a class that cannot answer "who is
+        accountable" is refused 400 rather than stored for the checker to guess
+        about (§3.1). Classing is the switch that arms the ACL for one agent, not
+        a deployment-wide mode: an agent with no class record keeps the shipped
+        legacy posture (§6.4 rule 2, §8.1).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent id to classify (§3.1 — the class is a property of the agent row, not of a principal).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentClassRequest"
+      responses:
+        "201":
+          description: Recorded. The body is the agent-class record, effective on the NEXT delivery (§6.6).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentClassRecord"
+        "400":
+          description: "Invalid JSON; or a `class` that is neither `personal` nor `service` (INVALID_CLASS, with a `detail` field naming the accepted set); or a class/owner pair that contradicts itself — a `personal` record without an owner, a `service` record carrying one"
+        "403":
+          description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
+
   # ── Sessions (CR-CHAT-019) ──
   # The core session object surfaces of specs/CHAT-INTERFACE.md §4 (rows 8-15,
   # 24, 31, 37). A session is an AGGREGATE over the durable inbox deliveries
@@ -4026,6 +4086,61 @@ components:
           description: "null = no expiry; a timestamp = the grant is inert after it (§6.1)."
         note:
           type: string
+    AgentClassRequest:
+      type: object
+      description: |-
+        POST /agents/{agentid}/class — the write shape of an agent-class record
+        (specs/CHAT-PERMISSIONS.md §3.1). `class` is required and is exactly one
+        of the two classes: the empty value is NOT a third state, it is a 400,
+        because a record that states no class would write nothing while reading
+        as if it had aimed the ACL somewhere.
+      required: [class]
+      properties:
+        class:
+          type: string
+          enum: [personal, service]
+          description: "`personal` — owned by exactly ONE principal (`owner` is then required); `service` — no single human owner (`owner` must then be absent), reachable through its scopes and grants (§3.2)."
+        owner:
+          type: string
+          description: "The owning principal id (`prin_…`). Required for `personal`, refused for `service` (§3.1) — a class/owner pair that contradicts itself is a 400, never a stored record."
+        reachable_by:
+          type: array
+          items:
+            type: string
+          description: "Principal ids that may reach this agent, recorded as ONE scope's reach set (§4.1). Absent = the record declares no scope. The scope is the service class's own reach mechanism, read by the ACL for a `service` agent (§3.2)."
+    AgentClassRecord:
+      type: object
+      description: |-
+        The agent-class record as POST /agents/{agentid}/class answers it
+        (§3.1). The response is built from the REQUEST — the id from the path,
+        the rest from the body — and persisted as a `permission.agent`
+        record-version, so it states what was recorded rather than projecting
+        unrelated rows.
+      properties:
+        id:
+          type: string
+          description: The agent id, taken from the path.
+        class:
+          type: string
+          enum: [personal, service]
+        owner:
+          type: string
+          description: Present for a `personal` record, absent for `service` (§3.1).
+        scopes:
+          type: array
+          description: "Present only when the request carried `reachable_by`: one scope whose reach set holds those principal ids. The full scope object (§4.1, CR-CHAT-012) is not built here, so the entry's `id` is empty."
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              reach:
+                type: object
+                properties:
+                  principals:
+                    type: array
+                    items:
+                      type: string
     MessageLocation:
       type: object
       description: |-

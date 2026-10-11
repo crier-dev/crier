@@ -206,6 +206,14 @@ var excludedOperations = map[string]string{
 	// expose, so the bridge has no tool for them.
 	"listSessionTasks": "GET /sessions/{id}/tasks — \"List a session's tasks at their CURRENT state\" (DF-CRIER-304): the task read reduces the session transcript, internal/session state RemoteStore does not expose. Reclassify when the bridge grows session support.",
 	"getSessionTask":   "GET /sessions/{id}/tasks/{task_id} — \"Read ONE task's current state\" (DF-CRIER-304): same transport gap as listSessionTasks. Reclassify when the bridge grows session support.",
+	// DF-CRIER-299 — the agent-classing switch, the fifth route on the
+	// CR-CHAT-007 admin gate. The record it writes ARMS a delivery ACL for one
+	// agent (§3.1 / §6.4 rule 2 of specs/CHAT-PERMISSIONS.md), so a bridge
+	// identity holding the shared MESSAGE token must never be able to aim it —
+	// HandleSetAgentClass refuses that token with 403 MANAGEMENT_FORBIDDEN by
+	// construction. Operator-only, same rationale as the four above; reclassify
+	// if the bridge ever grows an admin-credential surface.
+	"setAgentClass": "POST /agents/{agentid}/class — \"Class an agent\" (DF-CRIER-299): admin-token-gated; a bridge identity holds the message token, not the admin token, so a tool would always be refused 403 MANAGEMENT_FORBIDDEN.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.
