@@ -1787,6 +1787,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_GROUP_ROOT` | `crier-groups` | Directory of the **named-group roster log** (CR-CHAT-013): `<dir>/groups.jsonl`, an append-only JSONL log reduced keep-LAST per group name — the curated rosters addressed as `@team:<name>`. A directory the process cannot create **fails the boot** rather than silently serving a surface with no groups. |
 | `CR_PERMISSIONS_ENABLED` | `false` | Opt-in: the **delivery ACL** (CR-CHAT-003, [`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6). Default off — with the flag unset no checker is wired and every delivery is authorized exactly as it shipped: the bus is trust-by-reach and a delivery carries only the deployment token. When ON, a delivery to a **classed** agent target is **default-deny**: an effective sender holding no live grant, no ownership rule (§3.2) and no scope reach is refused `403 DELIVERY_FORBIDDEN` with a machine-readable `reason` (`NO_GRANT`, `NO_BINDING`, or `principal: anonymous`). The refusal covers both surfaces §6.4 names — `POST /agents/{id}/inbox` (action `send`) and `POST /capabilities/{capability}/inbox` (action `invoke`), the pool address being checked **before** holder selection so a refused pool delivery consumes no rotation turn. An **unclassed** agent row is unchanged either way (§8.1), so arming the ACL against an existing fleet is a no-op. |
 | `CR_PERMISSIONS_DIR` | `/var/lib/crier/permissions` when enabled, otherwise unset | Directory of the delivery ACL's append-only JSONL store (`<dir>/permissions.jsonl`): principals, bindings, grants and agent-class records, folded keep-LAST per id (§6.6 tombstones are retained). An enabled ACL whose directory cannot be created **fails the boot** rather than silently serving the trust-by-reach posture while claiming the ACL is armed. See [Delivery ACL](#delivery-acl--principals-roles-and-grants-cr-chat-003). |
+| `CR_PERMISSIONS_ADMIN_TOKEN` | _(unset — the admin gate is closed)_ | The **admin secret** of the permissions management surface (CR-CHAT-007), and a **second** credential deliberately distinct from `CR_AUTH_TOKEN`. The two answer different questions: the message token is the **reach gate** (who may put a message on the bus) and this one is the **admin gate** (who may change permissions). The five management writes — `POST /principals`, `POST /bindings`, `POST /grants`, `POST /grants/{grantid}/revoke` and `POST /agents/{agentid}/class` — accept it as `Authorization: Bearer <token>`, compared in constant time; the message token reaching them is refused `403 MANAGEMENT_FORBIDDEN`, because a reach credential is not an admin credential. Unset (the default) leaves the gate **closed**: every management write answers `403` whose `detail` states the surface is not armed. Setting it EQUAL to `CR_AUTH_TOKEN` while `CR_PERMISSIONS_ENABLED` is on **fails the boot**, naming both variables (DF-CRIER-297) rather than serving one credential in two roles. See [Delivery ACL](#delivery-acl--principals-roles-and-grants-cr-chat-003). |
 | `CR_DAGGER_URL` | _(unset — no dagger route)_ | Opt-in: base URL of the **dagger HTTP/JSON surface** a DAG runs on (CR-CHAT-033). With it unset the nine dagger control routes (six control + three delivery-wait) are **not registered at all** and answer the router's JSON 404, so a deployment that does not control DAGs serves exactly the surface it served before this feature existed. crier is a **client** of that surface, never a second executor (decision D18): it creates the run, records the run id the executor returns, and holds references to the run's evidence — nothing else. See [Dagger control](#dagger-control--create-observe-cancel-resume-rewind-cr-chat-033). |
 | `CR_DAGGER_TOKEN` | _(unset — no Authorization header)_ | Optional bearer token presented to the dagger surface. Never logged. |
 | `CR_DAGGER_STORE_DIR` | `/var/lib/crier/dagger` when `CR_DAGGER_URL` is set, otherwise unset | Directory of the dagger run-record log (`<dir>/runs.jsonl`), an append-only JSONL file reduced keep-LAST per run id. A directory the process cannot create **or cannot write** — including one that already exists but is read-only — **fails the boot**, and the error names `CR_DAGGER_STORE_DIR`, the resolved path and the uid that could not write it; the surface never silently degrades to a temporary store, which would lose every run record on the next restart. |
@@ -1826,6 +1827,27 @@ namespace membership is deliberately **not** blanket permission.
   nothing; and the owner rule means a `personal` agent is never orphaned from
   its owner. There is no window in which arming the switch locks a running
   deployment out.
+- **Two gates, two secrets.** The ACL is written through a **second**
+  credential, and the two are deliberately different values. The message token
+  (`CR_AUTH_TOKEN`) is the **reach gate** — who may put a message on the bus —
+  and it is the credential an ordinary delivery presents. The admin token
+  (`CR_PERMISSIONS_ADMIN_TOKEN`) is the **admin gate** — who may MANAGE
+  permissions — and it is the only credential the management writes accept. A
+  deployment sets BOTH: reach for the agents that talk, admin for the operator
+  who governs, so **a leaked message token cannot mint permissions**. A caller
+  holding only the reach credential can deliver all day and is still refused
+  `403 MANAGEMENT_FORBIDDEN` on every management write; a caller holding the
+  admin token is refused `403` on every non-management path, because the
+  credential is recognized and simply is not a credential for that surface.
+  Setting the two to the same secret with `CR_PERMISSIONS_ENABLED` on is
+  **refused at boot**, naming both variables — one `Authorization` header
+  cannot equal two secrets, so a deployment that collapses the two roles is
+  rejected rather than served (DF-CRIER-297; the middleware's per-surface rule
+  and that boot check are its fix). With `CR_PERMISSIONS_ADMIN_TOKEN` unset the
+  gate is **closed**: every management write answers the named
+  `403 MANAGEMENT_FORBIDDEN` whose `detail` says the surface is not armed — the
+  tokenless dev posture of this section therefore configures the ACL's *reads*
+  and deliveries, never its *writes*.
 - **The management writes.** `POST /principals`, `POST /bindings`,
   `POST /grants` and `POST /grants/{grantid}/revoke` are the write half of the
   ACL and require the ADMIN token (`CR_PERMISSIONS_ADMIN_TOKEN`), never the

@@ -88,6 +88,7 @@ Configuration is otherwise env-driven (full table in README):
 | `CRIER_PORT` | listen port | `8767` |
 | `CR_DATABASE_URL` | PostgreSQL URL (fallbacks: `DATABASE_URL`, `CRIER_DATABASE_URL`) — the backend §1 starts | unset: the demo-only in-memory backend |
 | `CR_AUTH_TOKEN` | bearer token required on all requests **except the five exempt paths** (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) | empty = auth disabled |
+| `CR_PERMISSIONS_ADMIN_TOKEN` | the **admin** secret of the permissions management surface — a **second** credential, deliberately distinct from `CR_AUTH_TOKEN`. The five management writes (`POST /principals`, `POST /bindings`, `POST /grants`, `POST /grants/{grantid}/revoke` and `POST /agents/{agentid}/class`) accept only this one as Bearer; every other route accepts only `CR_AUTH_TOKEN`. Setting the two to the same secret with `CR_PERMISSIONS_ENABLED` on refuses the boot (DF-CRIER-297). See *A fourth knob* below | empty = the admin gate is closed: every management write answers `403 MANAGEMENT_FORBIDDEN` |
 | `CR_REQUIRE_AGENT_SIG` | require per-agent ed25519 signatures on agent-scoped endpoints: inbox retrieve/ack/stats, `DELETE /agents/{id}`, and `PATCH /agents/{id}` | `true` |
 | `CR_LOG_LEVEL` / `CR_LOG_FORMAT` | logging (`debug\|info\|warn\|error`, `text\|json`) | `info` / `text` |
 | `CR_RATE_LIMIT_PER_MINUTE` | relay publish rate limit | `100` |
@@ -136,6 +137,25 @@ when in config B or C, and empty otherwise:
 AUTH=()
 [ -n "${CR_AUTH_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${CR_AUTH_TOKEN}")
 ```
+
+### A fourth knob — and a second secret: `CR_PERMISSIONS_ADMIN_TOKEN`
+
+The permissions management surface (the delivery ACL of the README's *Delivery
+ACL — principals, roles and grants* section) is gated by a credential
+**deliberately distinct** from `CR_AUTH_TOKEN`, because the two answer different
+questions: the message token is the **reach gate** (who may send) and the admin
+token is the **admin gate** (who may manage permissions), so **a leaked message
+token cannot mint permissions**. The five management writes — `POST /principals`,
+`POST /bindings`, `POST /grants`, `POST /grants/{grantid}/revoke` and
+`POST /agents/{agentid}/class` — accept the admin token as
+`Authorization: Bearer <token>` and refuse the message token with
+`403 MANAGEMENT_FORBIDDEN`. Unset, the gate is **closed** and every management
+write answers that same named `403` (its `detail` says the surface is not
+armed), which is why the tokenless dev posture never configures a management
+write. Set the two secrets to the SAME value with `CR_PERMISSIONS_ENABLED` on
+and the boot is **refused**, naming both variables (DF-CRIER-297). None of the
+three configurations above changes: the admin token gates the management writes
+only, so with it unset everything in this guide behaves exactly as it did.
 
 ---
 
