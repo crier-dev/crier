@@ -111,6 +111,41 @@ func TestRegisterAgent_Duplicate(t *testing.T) {
 	}
 }
 
+// TestRegisterAgent_DuplicateDifferentKey (DF-CRIER-302): a duplicate ID with a
+// DIFFERENT public_key is a conflict of its own class. The bridge must say so —
+// not answer the flat "already registered" the row records as unhelpful — and
+// the row's registered key must survive the refused attempt, since a key is
+// immutable server-side and an agent left signing with the rejected one would
+// fail every signed call.
+func TestRegisterAgent_DuplicateDifferentKey(t *testing.T) {
+	store := registry.NewMemoryStore()
+	s := New(store)
+
+	first := validTestKey(t)
+	second := validTestKey(t)
+	callTool(t, s, "register_agent", RegisterAgentInput{ID: "keyed-agent", PublicKey: first})
+
+	resp := callTool(t, s, "register_agent", RegisterAgentInput{ID: "keyed-agent", PublicKey: second})
+	text, isErr := parseToolResult(t, resp)
+	if !isErr {
+		t.Fatal("expected an error when re-registering an id under a different key")
+	}
+	if !strings.Contains(text, "different public key") {
+		t.Errorf("expected the key-conflict message, got: %s", text)
+	}
+	if !strings.Contains(text, "keyed-agent") {
+		t.Errorf("the message must name the agent, got: %s", text)
+	}
+
+	got, err := store.Get("keyed-agent")
+	if err != nil {
+		t.Fatalf("Get after a refused re-registration: %v", err)
+	}
+	if hex.EncodeToString([]byte(got.PublicKey)) != first {
+		t.Errorf("the registered key moved: %s (want %s)", hex.EncodeToString([]byte(got.PublicKey)), first)
+	}
+}
+
 func TestRegisterAgent_InvalidHexKey(t *testing.T) {
 	store := registry.NewMemoryStore()
 	s := New(store)

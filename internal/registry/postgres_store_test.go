@@ -253,7 +253,18 @@ func TestPostgresStore_Register_Duplicate(t *testing.T) {
 	store := newTestStore(t)
 	existing := newTestAgent(t, store, "dup")
 
-	// Second register with the same ID but a different key should fail with ErrAgentExists.
+	// A second register with the same ID and the SAME key is the plain
+	// duplicate class (DF-CRIER-302 kept this arm unchanged).
+	same := &Agent{ID: existing.ID, PublicKey: existing.PublicKey}
+	err := store.Register(same)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrAgentExists), "expected ErrAgentExists, got %v", err)
+	require.False(t, errors.Is(err, ErrPublicKeyMismatch), "expected the same-key duplicate class, got %v", err)
+
+	// A second register with the same ID but a DIFFERENT key is the KEY
+	// CONFLICT class (DF-CRIER-302): the durable backend reads the stored row
+	// back to tell the two apart, and it must report the mismatch rather than
+	// the plain duplicate — the operator's remedy differs.
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	dup := &Agent{
@@ -262,7 +273,15 @@ func TestPostgresStore_Register_Duplicate(t *testing.T) {
 	}
 	err = store.Register(dup)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrAgentExists), "expected ErrAgentExists, got %v", err)
+	require.True(t, errors.Is(err, ErrPublicKeyMismatch), "expected ErrPublicKeyMismatch, got %v", err)
+	require.False(t, errors.Is(err, ErrAgentExists), "a different key must not be the plain duplicate class, got %v", err)
+
+	// The failed attempts changed nothing: the stored key is still the first
+	// one, so an agent signing with it keeps authenticating.
+	stored, err := store.Get(existing.ID)
+	require.NoError(t, err)
+	require.Equal(t, []byte(existing.PublicKey), []byte(stored.PublicKey),
+		"a refused re-registration must leave the registered key untouched")
 }
 
 func TestPostgresStore_Register_BlankID(t *testing.T) {

@@ -59,6 +59,9 @@ func setupRouterWithHandler(store Store) (*Handler, *mux.Router) {
 	handler := NewHandler(store)
 	r := mux.NewRouter()
 	r.HandleFunc("/agents", handler.HandleRegister).Methods("POST")
+	// The id-in-path spelling of the same registration (DF-CRIER-302),
+	// registered here so the helper mirrors cmd/server/main.go's route table.
+	r.HandleFunc("/agents/{id}", handler.HandleRegisterByID).Methods("POST")
 	r.HandleFunc("/agents", handler.HandleListAgents).Methods("GET")
 	r.HandleFunc("/agents/{id}", handler.HandleGetAgent).Methods("GET")
 	r.HandleFunc("/agents/{id}", handler.HandleUnregister).Methods("DELETE")

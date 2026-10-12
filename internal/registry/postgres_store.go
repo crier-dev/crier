@@ -208,7 +208,10 @@ func unmarshalOptionalConfig[T any](raw []byte, dst **T) error {
 	return nil
 }
 
-// Register adds an agent. Maps duplicate PK to ErrAgentExists.
+// Register adds an agent. Maps duplicate PK to ErrAgentExists, or to
+// ErrPublicKeyMismatch when the row it collides with holds DIFFERENT key
+// material (DF-CRIER-302) — the INSERT never overwrites, so the stored key is
+// preserved either way and the caller is told which conflict it hit.
 func (s *PostgresStore) Register(agent *Agent) error {
 	if agent == nil || agent.ID == "" {
 		return fmt.Errorf("%w: nil agent or blank ID", ErrInvalidStoreInput)
@@ -277,6 +280,16 @@ INSERT INTO agents (
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			// A duplicate PRIMARY KEY covers BOTH conflict classes (the id
+			// is the only natural key), so the row is read to tell them
+			// apart (DF-CRIER-302). This runs only on the conflict path,
+			// and a read that fails — including the row being deleted
+			// between the INSERT and the read — falls back to the plain
+			// duplicate class rather than inventing a class it could not
+			// observe.
+			if s.storedKeyDiffers(ctx, agent.ID, pubKeyArg) {
+				return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, agent.ID)
+			}
 			return fmt.Errorf("%w: %q", ErrAgentExists, agent.ID)
 		}
 		return fmt.Errorf("register agent: %w", err)
@@ -288,6 +301,25 @@ INSERT INTO agents (
 	agent.Status = status
 	agent.Capabilities = caps
 	return nil
+}
+
+// storedKeyDiffers reports whether the row currently registered under id holds
+// key material DIFFERENT from incoming (DF-CRIER-302). It is consulted only
+// after a duplicate-key INSERT told us the row exists, and it answers on the
+// same rule the in-memory backend applies (registrationKeyDiffers, store.go)
+// so the two backends classify a conflict identically.
+//
+// Every way this can fail to observe the stored row — no row (it was deleted
+// between the INSERT and this read), NULL key material (a keyless agent) or a
+// read error — is reported as "no difference", i.e. the caller falls back to
+// ErrAgentExists. Only an OBSERVED different key earns the mismatch class: a
+// failed read must never be laundered into a claim about key rotation.
+func (s *PostgresStore) storedKeyDiffers(ctx context.Context, id string, incoming []byte) bool {
+	var stored []byte
+	if err := s.pool.QueryRow(ctx, `SELECT public_key FROM agents WHERE id = $1;`, id).Scan(&stored); err != nil {
+		return false
+	}
+	return !bytes.Equal(stored, incoming)
 }
 
 // Get returns an agent by ID, mapping ErrNoRows to ErrAgentNotFound.

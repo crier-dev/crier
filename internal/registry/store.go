@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -427,12 +428,51 @@ func (h *Handler) SetPermissionsChecker(c *permissions.Checker) {
 }
 
 var (
-	ErrAgentNotFound     = errors.New("agent not found")
-	ErrAgentExists       = errors.New("agent already registered")
+	ErrAgentNotFound = errors.New("agent not found")
+	ErrAgentExists   = errors.New("agent already registered")
+	// ErrPublicKeyMismatch is a registration conflict of its own class
+	// (DF-CRIER-302): the id is already registered under a DIFFERENT ed25519
+	// public key. A registered key is IMMUTABLE — no store ever overwrites a
+	// row on a re-registration — so a registration that supplies new key
+	// material is refused instead of silently rotating it (or, worse,
+	// silently keeping the old one while reporting success, which leaves the
+	// caller signing with a key the server will never accept).
+	//
+	// It is deliberately DISTINCT from ErrAgentExists even though both answer
+	// the same HTTP status (409): they name different situations and
+	// different remedies. "already registered" is a duplicate of the same
+	// identity; this one is a duplicate of the same ID with another
+	// identity's key, where the agent's signed requests would 401 forever
+	// unless the operator unregisters first or registers under a new id
+	// (the defect DF-CRIER-302 records: a live dogfood run pasted the wrong
+	// key once and had no way to learn that from the response).
+	ErrPublicKeyMismatch = errors.New("agent already registered with a different public key")
 	ErrLeaseConflict     = errors.New("message is not leased under the supplied lease")
 	ErrMessageNotFound   = errors.New("message not found")
 	ErrInvalidStoreInput = errors.New("invalid store input")
 )
+
+// registrationKeyDiffers reports whether an EXISTING registration's key
+// material differs from the key material a re-registration supplies
+// (DF-CRIER-302). Both stores consult this ONE rule, so the two backends
+// cannot disagree about which re-registrations are conflicts.
+//
+// The comparison is on the DECODED key bytes (Agent.PublicKey is a HexKey),
+// so a caller may present the same key in any hex case — the wire contract
+// already round-trips through hex, and comparing bytes keeps uppercase and
+// lowercase spellings of one key from reading as a rotation.
+//
+// Keyless is a key like any other for this purpose: an empty key re-registered
+// over a keyed row differs (it would strip the key the agent signs with), and
+// two keyless rows are the same registration. A nil agent on either side is
+// not a comparison this rule can make, so it reports "no difference" and the
+// caller falls back to the plain duplicate class.
+func registrationKeyDiffers(existing, incoming *Agent) bool {
+	if existing == nil || incoming == nil {
+		return false
+	}
+	return !bytes.Equal(existing.PublicKey, incoming.PublicKey)
+}
 
 // DefaultMessageTTL is the lifetime a stored message gets when the delivery
 // does not request one (`ttl_seconds` absent). It is the 24h default the

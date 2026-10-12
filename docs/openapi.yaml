@@ -718,9 +718,93 @@ paths:
         "401":
           description: "The named namespace requires its own credential (X-Crier-Namespace-Token) and it is missing or wrong (error NAMESPACE_UNAUTHORIZED)"
         "409":
-          description: Agent ID already registered
+          description: >-
+            Registration conflict: the id is already registered, and a
+            registration NEVER overwrites one — the existing row (key,
+            capabilities, webhook, guard, namespace) is left exactly as it was.
+            Two classes are distinguished by the machine-readable `error` code
+            in the body. `public_key_mismatch` (DF-CRIER-302): the id is
+            registered under a DIFFERENT `public_key`, and the body's `message`
+            names the consequence and the remedy — a registered key is
+            IMMUTABLE, so nothing was changed and an agent left signing with
+            the rejected key would fail every later signed request with 401;
+            delete the agent first (DELETE /agents/{id}) or register under a new
+            id. The historical duplicate: the SAME key material is
+            re-registered, answered with the body `agent already registered:
+            <id>` under `error`, as before.
 
   /agents/{id}:
+    post:
+      operationId: registryRegisterAgentByID
+      tags: [registry]
+      summary: Register an agent (id in the path)
+      description: |
+        The id-in-path spelling of POST /agents (DF-CRIER-302): the agent id is
+        the path segment — the same id GET, DELETE and PATCH /agents/{id} take —
+        and the body carries the key material and options. Both spellings are
+        ONE implementation, so the body contract, the validations, the response
+        and the 409 conflict semantics documented on POST /agents apply here
+        unchanged.
+
+        A body that also names an `id` must name the SAME agent as the path; a
+        body naming a different id is refused with 400 and registers nothing,
+        rather than silently registering one identity while the caller believes
+        it registered another.
+
+        Like POST /agents this endpoint is bearer-only in every configuration:
+        registration is how an agent obtains the identity the per-agent
+        signature contract then protects, so it never asks for agent signature
+        headers (CR_REQUIRE_AGENT_SIG gates the agent-owned routes, not this
+        one).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                  description: "Optional here: when present it MUST equal the {id} in the path (400 otherwise)"
+                public_key:
+                  type: string
+                  description: "Ed25519 public key (hex-encoded). Required when signature enforcement is enabled (CR_REQUIRE_AGENT_SIG=true, the default); optional when signing is disabled — omitting it then registers a keyless agent that cannot authenticate on any signed route."
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: Advertised capabilities
+                webhook:
+                  $ref: "#/components/schemas/WebhookConfig"
+                  description: "Optional webhook endpoint registered at creation time (same object and rules as POST /agents); validated on registration (400 on violation)"
+                guard:
+                  $ref: "#/components/schemas/GuardAgentConfig"
+                  description: "Optional LLM message-guard policy config (CR-FEAT-010); validated at registration (400 on violation)"
+                namespace:
+                  type: string
+                  description: "The namespace (realm) to register INTO (CR-FEAT-029). Absent — or `default` — is the implicit namespace; an undeclared name is 400 UNKNOWN_NAMESPACE, never a silent fallback."
+      responses:
+        "201":
+          description: "Agent registered. The response is the stored row, identical to POST /agents and to what GET /agents/{id} answers."
+        "400":
+          description: "Invalid request body, webhook config, guard config, an `id` in the body that does not match the path, or a namespace name this server does not declare (error UNKNOWN_NAMESPACE)"
+        "401":
+          description: "The named namespace requires its own credential (X-Crier-Namespace-Token) and it is missing or wrong (error NAMESPACE_UNAUTHORIZED)"
+        "409":
+          description: >-
+            Registration conflict — the same two classes POST /agents answers,
+            with the same structured body: `public_key_mismatch` (DF-CRIER-302)
+            when the id is registered under a DIFFERENT public_key (the message
+            names the remedy and states the existing registration was left
+            unchanged), and the historical duplicate when the same key material
+            is re-registered. A registration never overwrites the stored row.
     get:
       operationId: registryGetAgent
       tags: [registry]

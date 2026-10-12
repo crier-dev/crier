@@ -249,9 +249,67 @@ func TestPostgresStoreUnit_Register_AgentExists(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(&pgconn.PgError{Code: "23505"})
+	// DF-CRIER-302: a duplicate PRIMARY KEY is read back to tell the two
+	// conflict classes apart. Here the stored key is the SAME key material,
+	// so the class stays ErrAgentExists.
+	mock.ExpectQuery(`SELECT public_key FROM agents WHERE id = \$1`).
+		WithArgs(ag.ID).
+		WillReturnRows(pgxmock.NewRows([]string{"public_key"}).AddRow([]byte(ag.PublicKey)))
 
 	err := s.Register(ag)
 	require.True(t, errors.Is(err, ErrAgentExists))
+	require.False(t, errors.Is(err, ErrPublicKeyMismatch),
+		"the same key material is a plain duplicate, not a key conflict: %v", err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Register_PublicKeyMismatch is the DF-CRIER-302 store
+// contract on the durable backend: the id is taken by DIFFERENT key material,
+// so the conflict is reported as ErrPublicKeyMismatch (not the plain duplicate)
+// and the row is never overwritten (the INSERT is the only write attempted).
+func TestPostgresStoreUnit_Register_PublicKeyMismatch(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+
+	otherPub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	mock.ExpectExec(`INSERT INTO agents`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnError(&pgconn.PgError{Code: "23505"})
+	mock.ExpectQuery(`SELECT public_key FROM agents WHERE id = \$1`).
+		WithArgs(ag.ID).
+		WillReturnRows(pgxmock.NewRows([]string{"public_key"}).AddRow([]byte(otherPub)))
+
+	err = s.Register(ag)
+	require.True(t, errors.Is(err, ErrPublicKeyMismatch), "expected ErrPublicKeyMismatch, got %v", err)
+	require.False(t, errors.Is(err, ErrAgentExists),
+		"a different key must not be reported as the plain duplicate class: %v", err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestPostgresStoreUnit_Register_ConflictReadFailureStaysDuplicate pins the
+// fallback: the classification read is the ONLY thing that can upgrade a 23505
+// to ErrPublicKeyMismatch, so when that read cannot observe the row (here it
+// returns no rows — the row was deleted between the INSERT and the read) the
+// conflict falls back to the historical ErrAgentExists rather than claiming a
+// key rotation it never saw.
+func TestPostgresStoreUnit_Register_ConflictReadFailureStaysDuplicate(t *testing.T) {
+	s, mock := newMockStore(t)
+	ag := testAgent(t)
+
+	mock.ExpectExec(`INSERT INTO agents`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnError(&pgconn.PgError{Code: "23505"})
+	mock.ExpectQuery(`SELECT public_key FROM agents WHERE id = \$1`).
+		WithArgs(ag.ID).
+		WillReturnError(pgx.ErrNoRows)
+
+	err := s.Register(ag)
+	require.True(t, errors.Is(err, ErrAgentExists), "expected the fallback duplicate class, got %v", err)
+	require.False(t, errors.Is(err, ErrPublicKeyMismatch))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

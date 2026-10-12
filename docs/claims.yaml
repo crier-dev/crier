@@ -438,9 +438,12 @@ claims:
     # (listSessionTasks on the existing path, getSessionTask on the new
     # /sessions/{id}/tasks/{task_id}), so the count was 63. DF-CRIER-299
     # documented POST /agents/{agentid}/class (one operation, setAgentClass),
-    # so the count is 64.
-    quote: "64 operations"
-    expect: 64
+    # so the count was 64. DF-CRIER-302 added the id-in-path spelling of
+    # registration (registryRegisterAgentByID — a new METHOD on the
+    # already-declared /agents/{id} path, so the PATH count is unchanged at 54
+    # while this one moves), so the count is 65.
+    quote: "65 operations"
+    expect: 65
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count

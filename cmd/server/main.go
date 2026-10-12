@@ -637,6 +637,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	slog.Info("webhook delivery", "enabled", true, "timeout", cfg.Webhook.Timeout,
 		"retries", cfg.Webhook.MaxRetries, "signing", secret != nil)
 	r.HandleFunc("/agents", registryHandler.HandleRegister).Methods("POST")
+	// DF-CRIER-302: the id-in-path spelling of the same registration — POST
+	// /agents/{id} — for a caller that has the id in the path (the same id the
+	// endpoint's other methods take) and the key material in the body. It is one
+	// code path with POST /agents, so the two spellings cannot disagree about
+	// validation or about the 409 conflict contract. The path is already
+	// registered for GET/DELETE/PATCH; this adds the method, not a path.
+	r.HandleFunc("/agents/{id}", registryHandler.HandleRegisterByID).Methods("POST")
 	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")
 	r.HandleFunc("/agents/{id}", registryHandler.HandleUnregister).Methods("DELETE")

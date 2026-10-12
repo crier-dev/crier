@@ -640,7 +640,8 @@ type ListAgentsOutput struct {
 | Error Code | MCP Code | Message | Trigger |
 |-----------|----------|---------|---------|
 | `ERR_AGENT_NOT_FOUND` | -32602 | `agent not found` | GetAgent, UnregisterAgent, DeliverMessage, RetrieveInbox, AckMessages, InboxStats with unknown ID |
-| `ERR_AGENT_EXISTS` | -32602 | `agent already registered` | RegisterAgent with duplicate ID |
+| `ERR_AGENT_EXISTS` | -32602 | `agent already registered` | RegisterAgent with duplicate ID (the same key material) |
+| `ERR_PUBLIC_KEY_MISMATCH` (Store sentinel `registry.ErrPublicKeyMismatch`) | -32602 | `agent already registered with a different public key: "<id>"` | RegisterAgent re-using an ID that is registered under a **different** `public_key` (DF-CRIER-302) — the message is passed through from the Store sentinel, and a registered key is immutable: unregister first, or register the new identity under a new id |
 | `ERR_LEASE_CONFLICT` | -32602 | `message is not leased under the supplied lease` | AckMessages with wrong lease ID |
 | `ERR_INVALID_INPUT` | -32602 | (dynamic — describes what's invalid) | Missing required fields, invalid hex key, out-of-range values |
 | `ERR_STORE_UNAVAILABLE` | -32603 | `registry storage unavailable` | PostgreSQL connection lost, disk full, any unexpected Store error |
@@ -663,6 +664,7 @@ All tests use `registry.NewMemoryStore()` — no PostgreSQL dependency in unit t
 1. Register valid agent → 201, verify agent returned with correct fields
 2. Duplicate registration → error "agent already registered"
 3. Invalid hex key (wrong length) → error "must be 64 hex characters"
+4. Duplicate registration with a DIFFERENT public_key → error "agent already registered with a different public key" (DF-CRIER-302; the registered row keeps its original key)
 
 **list_agents:**
 1. Empty registry → returns `{"agents":[]}`

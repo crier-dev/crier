@@ -545,8 +545,39 @@ func topLevelMemberRaw(body []byte, name string) (json.RawMessage, bool) {
 	return raw, present
 }
 
-// HandleRegister handles POST /agents — registers a new agent.
+// HandleRegister handles POST /agents — registers a new agent. The agent id
+// travels in the request body.
 func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	h.register(w, r, "")
+}
+
+// HandleRegisterByID handles POST /agents/{id} — the id-in-path spelling of
+// the same registration (DF-CRIER-302): the agent id is the path segment and
+// the body carries the key material and options.
+//
+// It is the same endpoint in every other respect — same body contract, same
+// validations, same conflict semantics, same auth posture (registration is
+// bearer-only in every configuration and never asks for a per-agent
+// signature) — because both spellings call the ONE implementation below. A
+// body that names a DIFFERENT id than the path is refused with 400 rather
+// than silently registering one identity while the caller believes it
+// registered another.
+func (h *Handler) HandleRegisterByID(w http.ResponseWriter, r *http.Request) {
+	h.register(w, r, mux.Vars(r)["id"])
+}
+
+// CodePublicKeyMismatch is the machine-readable `error` code a registration
+// conflict carries in its 409 body when the id is already registered under a
+// DIFFERENT public key (DF-CRIER-302). It is declared here, beside the two
+// classification functions that use it (register, and RemoteStore's
+// classifyRegistrationConflict), so the emitter and the reader of the code
+// cannot drift apart.
+const CodePublicKeyMismatch = "public_key_mismatch"
+
+// register is the one registration implementation behind POST /agents and
+// POST /agents/{id}. pathID is the id from the route when the spelling carries
+// one, else "".
+func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -572,6 +603,21 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if present {
 		req.A2A = cfg
+	}
+	// ID resolution (DF-CRIER-302): whichever spelling supplied the id, it is
+	// resolved BEFORE anything is validated or registered, so both routes
+	// answer identically for the same request. A path id and a body id that
+	// disagree are a caller error, not a preference order: registering the
+	// path id while the body names another identity is exactly the wrong-key
+	// mistake this row exists to make visible.
+	if pathID != "" {
+		if req.ID != "" && req.ID != pathID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("id %q in the request body does not match id %q in the path", req.ID, pathID),
+			})
+			return
+		}
+		req.ID = pathID
 	}
 	if req.ID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
@@ -637,9 +683,29 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Register(agent); err != nil {
-		if errors.Is(err, ErrAgentExists) {
+		switch {
+		case errors.Is(err, ErrPublicKeyMismatch):
+			// DF-CRIER-302: the id is taken by a DIFFERENT key. This is not
+			// the plain duplicate case, and the caller needs to be told so
+			// explicitly — the remedy differs and it is not discoverable
+			// from "already registered". The body carries a machine-readable
+			// `error` code plus the human `message` that names the
+			// consequence: a registered key is immutable, so the failed
+			// attempt changed NOTHING, and an agent left signing with the
+			// key it just failed to register would 401 on every signed call
+			// forever. The existing row — key, capabilities, webhook, guard,
+			// namespace — is preserved by every backend: registration never
+			// overwrites.
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": CodePublicKeyMismatch,
+				"message": fmt.Sprintf("agent %q is already registered with a different public_key; "+
+					"a registered key is immutable and the existing registration was left unchanged — "+
+					"delete the agent first (DELETE /agents/%s) or register under a new id",
+					agent.ID, agent.ID),
+			})
+		case errors.Is(err, ErrAgentExists):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-		} else {
+		default:
 			writeStoreError(w, err)
 		}
 		return

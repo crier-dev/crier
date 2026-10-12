@@ -910,6 +910,7 @@ needs — this is the whole authorization surface of the pull path:
 | Step | Endpoint | Config A (open) | Config B (bearer) | Config C (bearer + signature) |
 |------|----------|-----------------|-------------------|-------------------------------|
 | Register the consumer | `POST /agents` | open | bearer | bearer — **no signature** |
+| Register the consumer (id in the path) | `POST /agents/{id}` | open | bearer | bearer — **no signature** |
 | Deliver into the inbox | `POST /agents/{id}/inbox` | open | bearer | bearer — **no signature** |
 | Retrieve (leases the batch) | `GET /agents/{id}/inbox` | open | bearer | bearer **+ signature** |
 | Ack the lease | `POST /agents/{id}/inbox/ack` | open | bearer | bearer **+ signature** |
@@ -1145,6 +1146,7 @@ relay, all with `Authorization: Bearer <token>` and no signature headers:
 | `GET /health`, `GET /version`, `GET /openapi.json`, `GET /openapi.yaml`, `GET /docs` | `security: []` | `200` — no token needed at all | — |
 | `GET /status` | bearerAuth | `200` (`401` without the token) | — |
 | `POST /agents` | bearerAuth | `201` (`400` without `public_key`) | — |
+| `POST /agents/{id}` (register, id in the path) | bearerAuth | `201` (`400` without `public_key`; `409` when the id is already registered under a different key) | — |
 | `GET /agents` | bearerAuth | `200` (`401` without the token) | — |
 | `GET /agents/{id}` | bearerAuth | `200` | — |
 | `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |

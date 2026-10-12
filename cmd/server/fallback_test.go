@@ -176,9 +176,12 @@ func TestWrongMethodAnswersJSON405(t *testing.T) {
 		{name: "GET /relay/publish", method: http.MethodGet, path: "/relay/publish", allow: "POST"},
 		// Two routes share /agents (GET + POST): both methods, probe order.
 		{name: "DELETE /agents", method: http.MethodDelete, path: "/agents", allow: "GET, POST"},
-		// Three routes share /agents/{id} (GET, PATCH, DELETE) and the
-		// request method is none of them.
-		{name: "PUT /agents/probe-213", method: http.MethodPut, path: "/agents/probe-213", allow: "GET, PATCH, DELETE"},
+		// Four routes share /agents/{id} (GET, POST, PATCH, DELETE) and the
+		// request method is none of them. DF-CRIER-302 added POST — the
+		// id-in-path spelling of registration — to this path, so the derived
+		// Allow list gained it: the header is a measurement of the router, and
+		// this is where an unregistered or unlisted method shows up.
+		{name: "PUT /agents/probe-213", method: http.MethodPut, path: "/agents/probe-213", allow: "GET, POST, PATCH, DELETE"},
 	}
 
 	for _, tc := range cases {
@@ -187,6 +190,21 @@ func TestWrongMethodAnswersJSON405(t *testing.T) {
 		if allow := got.header.Get("Allow"); allow != tc.allow {
 			t.Errorf("%s: Allow %q, want %q — derived from the router, not fabricated", tc.name, allow, tc.allow)
 		}
+	}
+
+	// DF-CRIER-302, the other half: the method this path GAINED must be matched
+	// by the route main.go registers, not merely listed. An empty body is then
+	// refused by the registration HANDLER (400 with its own JSON envelope), not
+	// by the router — which is what separates "registered" from "still 405".
+	post := probeWire(t, client, http.MethodPost, baseURL+"/agents/probe-213", nil)
+	if post.status != http.StatusBadRequest {
+		t.Errorf("POST /agents/probe-213 = %d, want 400 from the registration handler (body: %s)", post.status, post.body)
+	}
+	if trimmed := strings.TrimSpace(post.body); trimmed != `{"error":"invalid json"}` {
+		t.Errorf("POST /agents/probe-213 body = %q, want the handler's own %q", trimmed, `{"error":"invalid json"}`)
+	}
+	if post.header.Get("Allow") != "" {
+		t.Errorf("POST /agents/probe-213 (matched): Allow %q, want unset on a non-405", post.header.Get("Allow"))
 	}
 
 	// The Allow derivation must not leak onto a status where it has no

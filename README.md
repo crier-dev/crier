@@ -814,6 +814,17 @@ CR_REQUIRE_AGENT_SIG=false CR_DATABASE_URL='postgres://crier:crier@localhost:543
 # register with just an id:
 #   curl -s -X POST localhost:8767/agents -d '{"id":"agent-1"}'        # 201
 #   (a duplicate id answers 409 "agent already registered" — see step 1)
+# Re-registering an id that is already registered under a DIFFERENT public_key
+# is a conflict of its own class (DF-CRIER-302): 409 with
+#   {"error":"public_key_mismatch","message":"agent \"agent-1\" is already
+#    registered with a different public_key; a registered key is immutable and
+#    the existing registration was left unchanged — delete the agent first
+#    (DELETE /agents/agent-1) or register under a new id"}
+# A registered key is never overwritten, so an agent left signing with the key
+# it failed to register would 401 on every signed call: unregister first, or
+# register the new identity under a new id. The same registration is also
+# served with the id in the path — POST /agents/{id} with the key in the body —
+# and answers the same body.
 # A keyless agent registered this way is unusable on a server that enforces
 # signing (its agent-scoped calls answer 401 "no registered public key"), so
 # re-enabling CR_REQUIRE_AGENT_SIG later means re-registering with a key.
@@ -2033,11 +2044,11 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **54 paths** and **64 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **54 paths** and **65 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
 grep -c '^  /' docs/openapi.yaml                                    # 54 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 64 operations
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 65 operations
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 51 router paths
 ```
 
@@ -2051,7 +2062,7 @@ The router registers **35 paths in `cmd/server/main.go`**: those 18 API paths pl
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
-| **Registry** | `POST /agents`, `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
+| **Registry** | `POST /agents`, `POST /agents/{id}` (same registration, id in the path), `GET /agents` (capability filter), `GET /agents/{id}`, `PATCH /agents/{id}`, `DELETE /agents/{id}` | Agent identity + self-configuration |
 | **Inbox** | `POST /agents/{id}/inbox`, `GET /agents/{id}/inbox`, `POST /agents/{id}/inbox/ack`, `GET /agents/{id}/inbox/stats` | Message delivery |
 | **Detection** (opt-in) | `GET /delivery-log`, `GET /delivery-log/verify`, `GET /alerts`, `GET /canaries`, `POST /agents/{id}/kill-switch` | Signed delivery log, behaviour alerts, canary tokens and the single-call kill-switch (CR-FEAT-030, `CR_DETECT_ENABLED`) |
 | **Ownership** | `POST /agents/{id}/inbox/transfer`, `GET /agents/{id}/inbox/dead-letters` | Rebalance a stuck lease; read the messages that expired unacknowledged (CR-FEAT-025) |
@@ -2141,7 +2152,7 @@ All core primitives are implemented and tested:
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
-- **API** — 51 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 46 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007) plus the 5 opt-in detection routes — documented as 54 paths / 64 operations in `docs/openapi.yaml` (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
+- **API** — 51 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 46 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007) plus the 5 opt-in detection routes — documented as 54 paths / 65 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

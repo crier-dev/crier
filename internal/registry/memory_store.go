@@ -7,12 +7,19 @@ import (
 )
 
 // Register adds an agent to the registry. Returns an error if the agent ID
-// already exists (409-style conflict).
+// already exists (409-style conflict): ErrAgentExists when the id is already
+// registered under the SAME key material, ErrPublicKeyMismatch when it is
+// registered under a DIFFERENT one (DF-CRIER-302). Either way the existing
+// row — key included — is left exactly as it was: a re-registration never
+// overwrites a registration, so a key can never be rotated by accident.
 func (s *MemoryStore) Register(agent *Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.agents[agent.ID]; exists {
+	if existing, exists := s.agents[agent.ID]; exists {
+		if registrationKeyDiffers(existing, agent) {
+			return fmt.Errorf("%w: %q", ErrPublicKeyMismatch, agent.ID)
+		}
 		return fmt.Errorf("%w: %q", ErrAgentExists, agent.ID)
 	}
 

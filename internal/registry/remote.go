@@ -327,8 +327,59 @@ func (s *RemoteStore) Register(agent *Agent) error {
 	}
 	// POST /agents names no agent in its route: a 404 here is the endpoint
 	// missing, not an agent (the registered id is the body's, and the server
-	// answers 409 for an id it already holds).
-	return s.do(http.MethodPost, "/agents", "", body, nil)
+	// answers 409 for an id it already holds). Its 409 carries two classes, so
+	// it gets its own decoder rather than the shared do() mapping
+	// (DF-CRIER-302) — see doRegister.
+	return s.doRegister(body)
+}
+
+// doRegister is the registration path's error decoder. Its 409 carries two
+// classes and the body is what tells them apart (DF-CRIER-302), the same shape
+// doAck has for its endpoint:
+//
+//   - a body whose machine `error` code is CodePublicKeyMismatch means the id
+//     is already registered under a DIFFERENT key: reported as
+//     ErrPublicKeyMismatch so a bridge learns the key is immutable instead of
+//     being told only that the id is taken. The bridge reports the CLASS; the
+//     full remedy prose lives in the server's own `message`, which an HTTP
+//     caller reads directly;
+//   - every other 409 (including one from a relay that predates this code, or
+//     a response with no parseable body) keeps the historical ErrAgentExists
+//     mapping, so an older server is not misreported as a key conflict.
+func (s *RemoteStore) doRegister(body any) error {
+	status, raw, err := s.send(http.MethodPost, "/agents", body)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return classifyRegistrationConflict(raw)
+	case http.StatusBadRequest:
+		return fmt.Errorf("%w: %s", ErrInvalidStoreInput, string(raw))
+	default:
+		// No agent is named by this route, so a 404 here is the endpoint
+		// missing rather than an agent (subject "").
+		if status == http.StatusNotFound {
+			return mapNotFound(http.MethodPost, "/agents", "", raw)
+		}
+		return fmt.Errorf("remote %s %s: status %d: %s", http.MethodPost, "/agents", status, string(raw))
+	}
+}
+
+// classifyRegistrationConflict maps a registration 409 body onto its sentinel.
+// Only the OBSERVED machine code earns the mismatch class: anything else —
+// including a body this build cannot parse — is the historical duplicate, so a
+// relay older than CodePublicKeyMismatch keeps its meaning.
+func classifyRegistrationConflict(raw []byte) error {
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &body); err == nil && body.Error == CodePublicKeyMismatch {
+		return ErrPublicKeyMismatch
+	}
+	return ErrAgentExists
 }
 
 func (s *RemoteStore) Get(id string) (*Agent, error) {

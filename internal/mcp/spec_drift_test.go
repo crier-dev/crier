@@ -214,6 +214,17 @@ var excludedOperations = map[string]string{
 	// construction. Operator-only, same rationale as the four above; reclassify
 	// if the bridge ever grows an admin-credential surface.
 	"setAgentClass": "POST /agents/{agentid}/class — \"Class an agent\" (DF-CRIER-299): admin-token-gated; a bridge identity holds the message token, not the admin token, so a tool would always be refused 403 MANAGEMENT_FORBIDDEN.",
+
+	// DF-CRIER-302 — the id-in-path spelling of registration. Deliberately
+	// EXCLUDED rather than mapped: it is the SAME verb the register_agent tool
+	// already exercises through registryRegisterAgent (POST /agents), which is
+	// where the bridge's RemoteStore registers. The bridge addresses agents by
+	// id in a tool ARGUMENT, never in a route, so mapping this one as well
+	// would claim the bridge has two registration paths when it has exactly
+	// one — and the two spellings are one handler server-side, so a second
+	// mapping would add no coverage. Reclassify if the bridge ever derives its
+	// registration URL from the agent id.
+	"registryRegisterAgentByID": "POST /agents/{id} — \"Register an agent (id in the path)\" (DF-CRIER-302): the same registration registryRegisterAgent already covers, spelled with the id in the path for a caller that has it there; the bridge's RemoteStore registers at POST /agents and addresses agents by tool argument, not by route. Reclassify if the bridge ever builds its registration URL from the agent id.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.
