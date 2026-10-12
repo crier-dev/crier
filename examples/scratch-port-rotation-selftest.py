@@ -54,11 +54,26 @@ Usage:
 
 Exit status: 0 only when every check behaved; 1 when a check failed; 2 when a
 prerequisite tool is missing (the selftest never reports a green it did not earn).
+
+`ss` (iproute2) is NOT one of those prerequisites (QA-CRIER-40, mirroring the
+QA-CRIER-37 skip-guard in `scripts/lib/port-guard.sh`): it is an ambient tool a
+scratch runner may simply not ship (the act container catthehacker/ubuntu has no
+iproute2), and exiting 2 there would report a broken RUNNER as a broken PRODUCT.
+When it is missing the live cases that need it are SKIPPED BY NAME and the run
+still exits 0, while the `wiring` case — which only reads the runners' source —
+keeps running, so a skip never becomes a silent empty green.
+
+The live runners are also handed the go toolchain the ambient environment already
+resolved (see `go_cache_env()`), because the gateway case starts its runner with a
+throwaway HOME while Go's toolchain auto-switch resolves a go newer than the
+ambient one THROUGH HOME (`$HOME/sdk/go1.26.6`): on a box whose ambient go is older
+than go.mod's `go` directive every run died with `go1.26.6: not downloaded`.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import random
 import re
@@ -105,6 +120,15 @@ CASES = [
     "ws-mesh-exhaust",
     "ws-mesh-explicit",
 ]
+
+# Cases that need `ss` (iproute2): every live arm starts a shipped runner, and
+# scripts/lib/port-guard.sh refuses to run any of its consumers without it — `ss`
+# is how a guard finds the holder of an occupied port (the library's exit-2
+# refusal is pinned by the port-guard selftest's ARM H). The rotate and exhaust
+# arms also assert with it that a squatted candidate is really occupied. The
+# `wiring` case reads the runners' source and needs no ambient tool at all, so it
+# still runs when `ss` is missing (QA-CRIER-40).
+NEEDS_SS = frozenset(name for name in CASES if name != "wiring")
 
 
 # --------------------------------------------------------------- result plumbing
@@ -313,18 +337,159 @@ def squat_all(res: CaseResult, ports: list[int]) -> list[Squatter]:
     return squatters
 
 
-def go_cache_env() -> dict[str, str]:
-    """The real Go caches, so a runner started with a throwaway HOME still builds
-    from the warm module/build cache instead of re-downloading the module tree."""
-    extra = {}
-    for var in ("GOPATH", "GOMODCACHE", "GOCACHE"):
+# The `go` directive of go.mod: the version the build must run at, and the version
+# Go's toolchain switching will try to satisfy with a newer toolchain when the
+# ambient one is older.
+GOMOD_GO_RE = re.compile(r"(?m)^go\s+(\d+(?:\.\d+)*)")
+GO_VERSION_RE = re.compile(r"go(\d+(?:\.\d+)*)")
+GO_PROBE_TIMEOUT_S = 60
+
+
+def go_version_tuple(text: str) -> tuple[int, ...]:
+    """`go version go1.26.6 linux/amd64` / `go1.26.6` -> (1, 26, 6); () if none.
+
+    Read from `go version` output (the BINARY's own build version, which is what
+    decides whether a toolchain switch is needed) rather than `go env GOVERSION`:
+    an installed tree's GOROOT/VERSION file can disagree with its binary — measured
+    on the QA-CRIER-40 box, where `/usr/bin/go` is 1.26.6 while the same tree
+    answers `GOVERSION=go1.26.0`.
+    """
+    m = GO_VERSION_RE.search(text)
+    return tuple(int(part) for part in m.group(1).split(".")) if m else ()
+
+
+def go_probe(args: list[str], binary: str = "go", gotoolchain: str | None = None) -> str:
+    """One bounded `go` query (`env <var>` / `version`), run from the repo.
+
+    Returns stdout, or "" when that go cannot answer (missing binary, non-zero exit,
+    or the timeout). `gotoolchain` overrides GOTOOLCHAIN for the probe only: "local"
+    makes the query answer for the BINARY instead of a newer toolchain it would
+    switch to (a probe that switched would answer for the toolchain, not the
+    candidate).
+    """
+    env = dict(os.environ)
+    if gotoolchain:
+        env["GOTOOLCHAIN"] = gotoolchain
+    try:
+        proc = subprocess.run([binary, *args], cwd=str(REPO), capture_output=True,
+                              text=True, env=env, timeout=GO_PROBE_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def go_required() -> tuple[int, ...]:
+    """The version go.mod requires; () when there is no go.mod to read."""
+    try:
+        text = (REPO / "go.mod").read_text(encoding="utf-8")
+    except OSError:
+        return ()
+    m = GOMOD_GO_RE.search(text)
+    return tuple(int(part) for part in m.group(1).split(".")) if m else ()
+
+
+def _go_executables(candidates: list[str]) -> list[str]:
+    """The candidates that really are an executable file, in order, deduplicated."""
+    found: list[str] = []
+    for cand in candidates:
+        if cand and cand not in found and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            found.append(cand)
+    return found
+
+
+def go_binaries() -> list[str]:
+    """Every `go` this box offers: the ambient resolution, PATH, then sibling SDKs.
+
+    The ambient toolchain resolution comes first — `go env GOROOT`, run from the
+    repo, is where a box that toolchain-SWITCHED reports the SDK it switched to —
+    then PATH in its own order, then the SDKs installed BESIDE any of those binaries.
+    That last group is the golang.org/dl layout, which keeps every downloaded
+    toolchain in one `sdk/` directory (`~/sdk/go1.26.5/bin/go` next to
+    `~/sdk/go1.26.6/bin/go`), so a box whose `go` is 1.26.5 already HAS the 1.26.6
+    go.mod asks for — reachable without resolving (or downloading) anything through
+    $HOME, which is exactly what a throwaway HOME (or an exported GOTOOLCHAIN=local)
+    would otherwise prevent.
+    """
+    resolved = go_probe(["env", "GOROOT"])
+    candidates = [f"{resolved}/bin/go" if resolved else "", shutil.which("go") or ""]
+    candidates += [f"{entry}/go" for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
+    found = _go_executables(candidates)
+
+    siblings: list[str] = []
+    for binary in found:
+        real = Path(os.path.realpath(binary))
+        if real.name != "go" or real.parent.name != "bin":
+            continue  # e.g. a /snap/bin/go launcher resolves to the snap binary
+        sdk_root = real.parent.parent.parent
         try:
-            value = subprocess.run(["go", "env", var], capture_output=True, text=True).stdout.strip()
+            children = sorted(sdk_root.iterdir())
         except OSError:
-            value = ""
+            continue
+        siblings += [str(child / "bin" / "go") for child in children]
+    return found + [cand for cand in _go_executables(siblings) if cand not in found]
+
+
+def go_satisfying() -> str:
+    """A go that can build this module WITHOUT switching toolchains, or "".
+
+    Ranked, because "a go new enough" is not the same as "the right go": the ambient
+    resolution wins whenever it satisfies go.mod (the child then behaves exactly like
+    the ambient environment), otherwise a binary whose version IS the required one
+    wins over a merely newer one (the toolchain go.mod names, not whatever else is
+    installed — a 1.27.1 snap is not the 1.26.6 this repo asks for), and only then
+    does the earliest newer candidate count. "" means nothing on this box satisfies
+    go.mod, and the caller then pins nothing and leaves the ambient behaviour alone.
+    """
+    required = go_required()
+    if not required:
+        return ""
+    ambient = go_probe(["env", "GOROOT"])
+    ambient_bin = f"{ambient}/bin/go" if ambient else ""
+    best_bin, best_rank = "", (2, 2, 0)
+    for index, cand in enumerate(go_binaries()):
+        version = go_version_tuple(go_probe(["version"], cand, "local"))
+        if version < required:
+            continue
+        rank = (0 if cand == ambient_bin else 1, 0 if version == required else 1, index)
+        if rank < best_rank:
+            best_bin, best_rank = cand, rank
+    return best_bin
+
+
+@functools.lru_cache(maxsize=1)
+def go_cache_env() -> dict[str, str]:
+    """The real Go caches AND the go toolchain, for a runner under a throwaway HOME.
+
+    A runner is started with a throwaway HOME so it cannot pick up a real
+    `~/.hermes/.env`, and Go resolves a toolchain newer than the ambient one THROUGH
+    HOME: golang.org/dl's `go1.26.6` wrapper — the first `go1.26.6` on PATH — reads
+    `$HOME/sdk/go1.26.6`, so on a box whose ambient go is older than go.mod's `go`
+    directive the build dies with
+
+        go1.26.6: not downloaded. Run 'go1.26.6 download' to install to
+        <throwaway HOME>/sdk/go1.26.6
+
+    deterministically, on every run (QA-CRIER-40). Carry what the ambient
+    environment already resolved instead: a go that SATISFIES go.mod goes on the
+    child's PATH, and GOTOOLCHAIN=local stops the child resolving (or downloading)
+    anything for itself. GOTOOLCHAIN=local ALONE is not a fix — with ambient go
+    1.26.5 and `go 1.26.6` in go.mod it fails `go.mod requires go >= 1.26.6 (running
+    go 1.26.5; GOTOOLCHAIN=local)`, so the satisfying toolchain has to be SUPPLIED,
+    not merely pinned. GOROOT is deliberately not set: the binary put on PATH
+    carries its own. When no go on this box satisfies go.mod nothing is pinned and
+    the ambient behaviour is left exactly as it was, so this can only ever fix a
+    configuration, never break one that worked.
+    """
+    env: dict[str, str] = {}
+    toolchain = go_satisfying()
+    if toolchain:
+        env["PATH"] = os.pathsep.join([str(Path(toolchain).parent), os.environ.get("PATH", "")])
+        env["GOTOOLCHAIN"] = "local"
+    for var in ("GOPATH", "GOMODCACHE", "GOCACHE"):
+        value = go_probe(["env", var], toolchain or "go", "local" if toolchain else None)
         if value:
-            extra[var] = value
-    return extra
+            env[var] = value
+    return env
 
 
 # ------------------------------------------------------------------- wiring
@@ -541,11 +706,16 @@ def live_env_for(runner: LiveRunner, work: Path, extra: dict[str, str], tag: str
     work.mkdir(parents=True, exist_ok=True)
     env = dict(runner.live_env)
     env[runner.transcript_var] = str(work / f"{runner.name}-{tag}-transcript.md")
+    # Every runner builds the crier server with `go`, and two independent sandboxes
+    # are in play: the gateway case's throwaway HOME (so the demo cannot read a real
+    # ~/.hermes/.env), and whatever GOTOOLCHAIN the caller exported (CI legs pin
+    # `local`). Neither may decide whether a satisfying toolchain can be resolved, so
+    # the toolchain the ambient environment already resolved is carried explicitly.
+    env.update(go_cache_env())
     if runner.name == "hermes-gateway":
         home = work / "home"
         home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(home)
-        env.update(go_cache_env())
     env = clean_env(env)
     env.update(extra)
     return env
@@ -818,7 +988,7 @@ def main() -> int:
             print(name)
         return 0
 
-    required = ["bash", "go", "python3", "curl", "ss", "openssl", "sha256sum"]
+    required = ["bash", "go", "python3", "curl", "openssl", "sha256sum"]
     missing = [tool for tool in required if shutil.which(tool) is None]
     if missing:
         print(f"scratch-port-rotation-selftest: missing prerequisite tool(s): {', '.join(missing)}",
@@ -826,6 +996,32 @@ def main() -> int:
         return 2
 
     selected = args.case or CASES
+
+    # ── ambient-tool skip-guard (QA-CRIER-40) ───────────────────────────────────
+    # `ss` (iproute2) is deliberately NOT in that prerequisite list: this selftest is
+    # a self-check of the harness, a scratch runner may simply ship no iproute2 (the
+    # act container catthehacker/ubuntu has none), and exiting 2 there reports a
+    # broken RUNNER as a broken PRODUCT — it reds a pipeline on a commit that cannot
+    # affect the harness (the QA-CRIER-37 class, at this cell's own gate). So the
+    # cases that need `ss` are skipped BY NAME and the run still exits 0. The library
+    # is untouched: every consumer still refuses without `ss` (exit 2), pinned by the
+    # port-guard selftest's ARM H. The `wiring` case needs no ambient tool and keeps
+    # running, so a skip is never a silent empty green either.
+    skipped: list[str] = []
+    if shutil.which("ss") is None:
+        skipped = [name for name in selected if name in NEEDS_SS]
+        selected = [name for name in selected if name not in NEEDS_SS]
+        if skipped:
+            print(f"SKIP: scratch-port-rotation-selftest — 'ss' (iproute2) is not on PATH; the "
+                  f"{len(skipped)} live case(s) that need it cannot run (the runners find the port "
+                  f"holder with it and refuse without it): {', '.join(skipped)}. Install the "
+                  f"iproute2 package on this runner (Debian/Ubuntu: apt-get install -y iproute2) "
+                  f"to run them.")
+        if not selected:
+            print("scratch-port-rotation-selftest: no case left to run — SKIP, exit 0 (a missing "
+                  "ambient tool is not a product failure)")
+            return 0
+
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="scratch-port-rotation-") as tmp:
         work = Path(tmp)
@@ -855,10 +1051,12 @@ def main() -> int:
             results[-1].report()
 
     failed = [r for r in results if r.failed or not r.checks]
+    skip_note = (f", {len(skipped)} case(s) skipped for a missing 'ss' (iproute2)" if skipped else "")
     if failed:
-        print(f"scratch-port-rotation-selftest: {len(results) - len(failed)}/{len(results)} case(s) behaved — FAIL")
+        print(f"scratch-port-rotation-selftest: {len(results) - len(failed)}/{len(results)} case(s) "
+              f"behaved — FAIL{skip_note}")
         return 1
-    print(f"scratch-port-rotation-selftest: {len(results)}/{len(results)} case(s) behaved")
+    print(f"scratch-port-rotation-selftest: {len(results)}/{len(results)} case(s) behaved{skip_note}")
     return 0
 
 

@@ -46,7 +46,7 @@ help:
 	@echo "  coverage-selftest Prove that gate still refuses a failed suite / stale profile / empty or unparseable coverage data, incl. neuter proofs (QA-CRIER-34)"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
-	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10)"
+	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10); its live cases SKIP, exit 0, when 'ss'/iproute2 is missing (QA-CRIER-40)"
 	@echo "  client-roundtrip-check  CR-FEAT-027: `crier keygen` + the Python and TypeScript clients through a full signed round-trip on a scratch port (no openssl, no xxd, no packages)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
 	@echo "  load-repro-selftest  Prove the bounded load harness (caps, load gate, PDEATHSIG teardown, no survivors) — DF-CRIER-254"
@@ -194,6 +194,13 @@ port-guard-selftest:
 # the three runners that had no such test — no provider, no key, no network. The
 # ws-mesh runner's live arms also run in its Go suite (`go test ./examples/ws-mesh-demo/`),
 # which `make test` executes.
+#
+# QA-CRIER-40: the live arms are started with the go toolchain the ambient
+# environment already resolved, so a runner under a throwaway HOME (the gateway
+# case, which must not read a real ~/.hermes/.env) cannot make go's toolchain
+# auto-switch die with "go1.26.6: not downloaded" — and they SKIP, named, exit 0
+# when `ss`/iproute2 is absent (the act container class, QA-CRIER-37), while the
+# source-invariant `wiring` case keeps running.
 scratch-port-rotation-selftest:
 	python3 examples/scratch-port-rotation-selftest.py
 
