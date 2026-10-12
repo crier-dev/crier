@@ -250,11 +250,16 @@ WARN fan-out: skipping target (delivery refused) — the message was still deliv
 ### Install prebuilt binaries (only when release assets are published)
 
 The release workflow publishes 8 assets only after its build and upload steps
-complete: cross-compiled `crier` and `crier-mcp` archives for linux/amd64,
-linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS` manifest. The
-prebuilt installer requires that complete asset set. The existing `v0.1.0-rc2`
-tag has no uploaded assets, so the installer currently fails closed when it
-cannot fetch `SHA256SUMS`; use the from-source fallback below instead.
+complete: cross-compiled `crier` and `crier-mcp` executables for linux/amd64,
+linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS` manifest.
+They are bare static executables, not archives — nothing is tarred or zipped.
+The prebuilt installer requires that complete asset set. The existing
+`v0.1.0-rc2` tag has no uploaded assets, so the installer currently fails closed
+when it cannot fetch `SHA256SUMS`; use the from-source fallback below instead.
+
+> Installing onto a machine with none of the prerequisites — no Go, no `curl`,
+> no git? [INSTALL.md](INSTALL.md) is the step-by-step guide for that box, and it
+> records what was measured on one.
 
 Once a release has those assets, this command fetches the pair for the current
 machine, verifies each binary against the manifest, and installs both into
@@ -302,7 +307,13 @@ crier -port 8767      # the server; crier -help prints every flag
 ```
 
 Tester? [TESTERS.md](TESTERS.md) §1 covers the install path. The prerequisites
-and expanded build notes below explain how to install Go without root. Source
+and expanded build notes below explain how to install Go without root. An
+installing-onto-a-fresh-box walkthrough — with the prerequisite chain, the
+service units, and what was measured on a bare Debian 13 — is
+[INSTALL.md](INSTALL.md); note that this snippet's `--branch v0.1.0-rc2` pin
+gives you **that tag's code**, which predates configuration `main` documents
+(`CR_SESSION_BACKEND`, for one, does not exist in the `v0.1.0-rc2` tree) — drop
+the pin to build what `main` describes. Source
 builds carry the same identity as release assets: `scripts/release-artifacts.sh`
 stamps `internal/buildinfo` exactly as `make build` and `make build-mcp` do (a
 `make docs-check` claim fails if those paths diverge).

@@ -1,0 +1,89 @@
+[Unit]
+# crier — agent-to-agent message bus: pub/sub relay + WebSocket mesh +
+# agent registry + durable inboxes.
+#
+# This is the SYSTEM unit (one service for the whole box). See INSTALL.md §4
+# for the per-user variant that needs no root.
+Description=crier agent message bus (relay + mesh + registry)
+Documentation=https://github.com/crier-dev/crier/blob/main/INSTALL.md
+# network-online (not just network) so a boot does not race DNS/the listening
+# socket before the box has an address. Wants= keeps this unit from being
+# pinned offline by a slow link; the server itself binds immediately either way.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=crier
+Group=crier
+# WorkingDirectory is the state directory: a relative path given to any config
+# (CR_SQLITE_PATH, CR_FED_QUEUE_FILE, CR_SESSION_LOG_ROOT) lands beside the
+# state rather than in /, which is not writable under ProtectSystem=strict.
+# systemd creates /var/lib/crier owned by User= and it survives a restart.
+StateDirectory=crier
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/crier
+# systemd creates /run/crier for the pidfile and REMOVES THE WHOLE DIRECTORY on
+# stop. The pidfile lives inside it on purpose: a pidfile parked at the runtime
+# root can survive a SIGKILLed run as a stale record, while one inside the
+# managed directory cannot. The pidfile is what pairs the running server with
+# `crier -stop -pidfile …` and with `make stop`; without it there is no
+# supported way to signal the process.
+RuntimeDirectory=crier
+RuntimeDirectoryMode=0750
+EnvironmentFile=-/etc/crier/crier.env
+# NOTE: no -port here on purpose — CRIER_PORT from the environment file (or the
+# server's own default, 8767) is the same knob, and systemd's ${VAR} expansion
+# of an UNSET variable yields an empty argv word, which would turn `-port` into
+# a bare flag and fail startup. Keep the environment the single source of truth.
+ExecStart=/usr/local/bin/crier -pidfile /run/crier/crier.pid
+Restart=on-failure
+RestartSec=2s
+
+# Logs go to a FILE, not to the journal. MEASURED: a user journal is not
+# guaranteed to capture anything — on the host this unit was verified on,
+# `journalctl --user -u <unit>` printed "No entries" even for a trivial
+# transient unit, so a service that logs only to the journal logs into the void
+# there. /var/lib/crier is writable because StateDirectory=crier is set, and the
+# file survives a restart. This matches the shape of the fleet's own production
+# unit (~/.config/systemd/user/crier-fleet.service).
+StandardOutput=append:/var/lib/crier/crier.log
+StandardError=append:/var/lib/crier/crier.log
+SyslogIdentifier=crier
+
+# Graceful stop: crier drains open connections on SIGTERM (proved — the server
+# logs "shutdown signal received" and its `-stop` helper allows 10s for the
+# drain). 20s leaves headroom for a busy mesh.
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+# control-group (the default, stated explicitly): the manager SIGTERMs every
+# process in the unit's cgroup, so nothing the server spawns can reparent to
+# the user manager and outlive the unit. That failure mode is MEASURED in this
+# repo — ad-hoc background spawns were reparented to `systemd --user` and
+# outlived every caller (73 -> 278 processes, loadavg 220; see
+# docs/load-reproduction.md). A unit that owns its whole cgroup cannot repeat it.
+KillMode=control-group
+
+# ── Hardening ───────────────────────────────────────────────────────────────
+# The store is the only thing the server writes, and it lives in the state
+# directory (or in PostgreSQL over the network), so the rest of the filesystem
+# can be read-only to it.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# AF_UNIX is needed for the journal socket and for a unix-socket CR_DATABASE_URL;
+# AF_INET/AF_INET6 for the listen socket, PostgreSQL, and any linked relay.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# A WebSocket mesh plus long-poll inbox readers hold many descriptors.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

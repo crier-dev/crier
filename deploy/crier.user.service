@@ -1,0 +1,64 @@
+[Unit]
+# crier — agent-to-agent message bus, PER-USER variant.
+#
+# Use this when you installed the binaries with scripts/install.sh (which
+# writes to ~/.local/bin) and do not have root. A user unit is supervised by
+# YOUR systemd manager, so it needs `loginctl enable-linger <user>` to keep
+# running when you are not logged in (INSTALL.md §4).
+#
+# For the whole-box service with its own account and a system-wide state
+# directory, use deploy/crier.service instead.
+Description=crier agent message bus (per-user)
+Documentation=https://github.com/crier-dev/crier/blob/main/INSTALL.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+# %h expands to your home directory, so this unit works for any user that ran
+# the installer. EnvironmentFile is OPTIONAL (-): the server has defaults, and a
+# missing config must not stop it from booting on 8767.
+EnvironmentFile=-%h/.config/crier/crier.env
+ExecStart=%h/.local/bin/crier -pidfile %t/crier/crier.pid
+# %t is $XDG_RUNTIME_DIR: created and cleaned up by the manager, and distinct
+# per user, so two users on one box never share a pidfile. The pidfile lives
+# INSIDE the runtime directory on purpose — the manager deletes the whole
+# directory on stop, so a SIGKILLed run cannot leave a stale pidfile at the
+# runtime root for the next `crier -stop` to trip over.
+RuntimeDirectory=crier
+RuntimeDirectoryMode=0750
+# %S is $XDG_STATE_HOME (~/.local/state): the durable place for a store that
+# should survive a restart. A RELATIVE CR_SQLITE_PATH resolves against
+# WorkingDirectory below — VERIFIED, not assumed: with CR_SQLITE_PATH=crier.db
+# the server created the database at %S/crier/crier.db.
+StateDirectory=crier
+StateDirectoryMode=0750
+WorkingDirectory=%S/crier
+Restart=on-failure
+RestartSec=2s
+
+# Logs go to a FILE, not to the journal. MEASURED on the host this unit was
+# verified on: `journalctl --user -u <unit>` printed "No entries" even for a
+# trivial transient unit, so a service that logs only to the journal logs into
+# the void there. This matches the fleet's own production unit
+# (~/.config/systemd/user/crier-fleet.service).
+StandardOutput=append:%S/crier/crier.log
+StandardError=append:%S/crier/crier.log
+SyslogIdentifier=crier
+
+# Same stop contract as the system unit: crier drains on SIGTERM, and the
+# manager signals the whole cgroup so nothing the server started can outlive it.
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+KillMode=control-group
+
+# Hardening that a USER manager actually enforces. Deliberately shorter than
+# the system unit's list: ProtectHome= would hide the very directory this unit
+# runs from (%h/.local/bin, %S, %t), and the filesystem-protection properties
+# are not available to an unprivileged manager.
+NoNewPrivileges=yes
+PrivateTmp=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

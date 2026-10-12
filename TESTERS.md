@@ -14,10 +14,21 @@ you), and **§2.0b** builds the keypair by hand if you would rather see the wire
 
 ## 1. Get it running (5 minutes)
 
-**Fastest path — a prebuilt binary, no Go toolchain** (CR-FEAT-028). Every
-release carries cross-compiled `crier` and `crier-mcp` for linux/amd64,
-linux/arm64 and darwin/arm64, and the installer verifies each against the
-release's `SHA256SUMS` before anything is written:
+**Prebuilt binary, no Go toolchain** (CR-FEAT-028) — once a release has
+published its assets. Every release *targets* cross-compiled `crier` and
+`crier-mcp` for linux/amd64, linux/arm64 and darwin/arm64, and the installer
+verifies each against the release's `SHA256SUMS` before anything is written.
+Two things to know before you run it:
+
+- **The current release has no published assets.** `v0.1.0-rc2` carries an empty
+  asset list, and the installer refuses to install an unverified download, so on
+  that release this command fails closed naming the missing manifest and installs
+  nothing. The source path below is the one that works today.
+- **A fresh box has no fetch tool at all** — a bare Debian ships neither `curl`
+  nor `wget`, so install one first (`apt-get install -y curl ca-certificates`).
+
+[INSTALL.md](INSTALL.md) is the step-by-step guide for a box with none of these
+prerequisites; this section is the summary.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
