@@ -738,10 +738,14 @@ sig() { if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then echo "ERROR:
 #    with CR_REQUIRE_AGENT_SIG=false accepts registration without it.)
 curl -s -X POST localhost:8767/agents "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d "{\"id\":\"agent-1\",\"public_key\":\"${PUBKEY_HEX}\",\"capabilities\":[\"demo\"]}"
-# 201 — but a SECOND register with the same id answers 409 {"error":"agent already
-# registered: \"agent-1\""}: idempotency-refused, the existing agent and its key are
-# untouched (DF-CRIER-288). Re-running the quickstart is safe — skip the register
-# step, or DELETE /agents/agent-1 first to start over with a fresh key.
+# 201 — a SECOND registration never overwrites its existing row:
+#   * the SAME public_key answers the historical 409 {"error":"agent already
+#     registered: \"agent-1\""}.
+#   * a DIFFERENT public_key answers 409 {"error":"public_key_mismatch","message":"..."}.
+# The stored registration and key remain unchanged in either outcome. For a key
+# mismatch, DELETE /agents/agent-1 first, then register the fresh key, or register
+# that identity under a new id. Re-running the quickstart with the same key is safe:
+# skip the register step, or delete the agent first to start over (DF-CRIER-302).
 
 # 2. Deliver a message to its inbox. `ttl_seconds` is optional: absent keeps the
 #    24h default, 0 means the message never expires and is reported as
@@ -813,18 +817,12 @@ CR_REQUIRE_AGENT_SIG=false CR_DATABASE_URL='postgres://crier:crier@localhost:543
 # With signing disabled, POST /agents no longer needs a public_key either —
 # register with just an id:
 #   curl -s -X POST localhost:8767/agents -d '{"id":"agent-1"}'        # 201
-#   (a duplicate id answers 409 "agent already registered" — see step 1)
-# Re-registering an id that is already registered under a DIFFERENT public_key
-# is a conflict of its own class (DF-CRIER-302): 409 with
-#   {"error":"public_key_mismatch","message":"agent \"agent-1\" is already
-#    registered with a different public_key; a registered key is immutable and
-#    the existing registration was left unchanged — delete the agent first
-#    (DELETE /agents/agent-1) or register under a new id"}
-# A registered key is never overwritten, so an agent left signing with the key
-# it failed to register would 401 on every signed call: unregister first, or
-# register the new identity under a new id. The same registration is also
-# served with the id in the path — POST /agents/{id} with the key in the body —
-# and answers the same body.
+#   (a duplicate of this keyless call gets the historical 409 "agent already
+#    registered" response. For registrations that supply a public_key, step 1
+#    distinguishes SAME public_key from DIFFERENT public_key / 409 public_key_mismatch,
+#    including the delete/re-register remedy.)
+# The same keyed outcomes are also served with the id in the path —
+# POST /agents/{id} with the key in the body answers the same bodies.
 # A keyless agent registered this way is unusable on a server that enforces
 # signing (its agent-scoped calls answer 401 "no registered public key"), so
 # re-enabling CR_REQUIRE_AGENT_SIG later means re-registering with a key.
