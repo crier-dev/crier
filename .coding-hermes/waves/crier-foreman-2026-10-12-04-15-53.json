@@ -1,0 +1,73 @@
+{
+  "tick_id": "crier-foreman-2026-10-12-04-15-53",
+  "mode": "wave",
+  "created_at": "2026-10-12T04:15:53-05:00",
+  "base_sha": "d6a8e2a",
+  "workers": [
+    {
+      "task_id": "QA-CRIER-40",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-40",
+      "branch": "wt/QA-CRIER-40",
+      "status": "complete",
+      "commit": "42aba68",
+      "verdict": "fe713ac5 PASS",
+      "merge": "already in main"
+    },
+    {
+      "task_id": "DF-CRIER-298",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-298",
+      "branch": "wt/DF-CRIER-298",
+      "status": "complete",
+      "commit": "aa037be",
+      "verdict": "43801b19 PASS",
+      "merge": "already in main"
+    },
+    {
+      "task_id": "DF-CRIER-307",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-307",
+      "branch": "wt/DF-CRIER-307",
+      "status": "failed",
+      "commit": "5113b5f",
+      "verdict": "bacc759e INCOMPLETE/FAIL",
+      "merge": "already in main; task failed with unmet fresh-box acceptance"
+    },
+    {
+      "task_id": "DF-CRIER-302",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-302",
+      "branch": "wt/DF-CRIER-302",
+      "status": "complete",
+      "commit": "768cda6",
+      "verdict": "2cdbd82e PASS",
+      "merge": "already in main"
+    },
+    {
+      "task_id": "DF-CRIER-308",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-308",
+      "branch": "wt/DF-CRIER-308",
+      "status": "complete",
+      "commit": "a0d96db",
+      "verdict": "151d4b03 PASS",
+      "merge": "ff-merged after rebase onto current main"
+    }
+  ],
+  "finished_at": "2026-10-12T11:35:00Z",
+  "recovery": {
+    "status": "complete",
+    "merged_or_already_landed": [
+      "QA-CRIER-40",
+      "DF-CRIER-298",
+      "DF-CRIER-302"
+    ],
+    "failed_with_reason": [
+      "DF-CRIER-307"
+    ],
+    "newly_merged": [
+      "DF-CRIER-308"
+    ]
+  }
+}

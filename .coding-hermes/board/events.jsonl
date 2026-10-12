@@ -1403,3 +1403,13 @@
 {"id":1400,"timestamp":"2026-10-11 22:10:15.362016","event_type":"task_completed","task_id":"DF-CRIER-299","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1401,"timestamp":"2026-10-11 22:10:15.402347","event_type":"task_completed","task_id":"DF-CRIER-301","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1402,"timestamp":"2026-10-11 22:10:15.44126","event_type":"task_completed","task_id":"DF-CRIER-306","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"task_id": "DF-CRIER-298", "event": "closed", "commit": "aa037be", "verdict": "d23bd5f1", "ts": 1791779978}
+{"task_id": "QA-CRIER-40", "event": "closed", "commit": "42aba68", "verdict": "3b5d5a86", "ts": 1791779978}
+{"task_id": "DF-CRIER-302", "event": "closed", "commit": "c62cead", "verdict": "e190a5a8", "ts": 1791780474}
+{"task_id": "DF-CRIER-307", "event": "failed", "commit": "76dbd10", "verdict": "2b2722d1", "ts": 1791780474}
+{"id": 1403, "timestamp": "2026-10-12 05:00:37.897695", "event_type": "task_created", "task_id": "README-003", "actor": "foreman", "detail": "{\"id\":\"README-003\",\"status\":\"pending\"}", "tick_number": null}
+{"id":1404,"timestamp":"2026-10-12T11:00:00Z","event_type":"task_completed","task_id":"QA-CRIER-40","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"42aba68\",\"verdict\":\"PASS verdict fe713ac5\",\"recovery\":\"crier-foreman-2026-10-12-11-02-21\"}","tick_number":null}
+{"id":1405,"timestamp":"2026-10-12T11:00:00Z","event_type":"task_completed","task_id":"DF-CRIER-298","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"aa037be\",\"verdict\":\"PASS verdict 43801b19\",\"recovery\":\"crier-foreman-2026-10-12-11-02-21\"}","tick_number":null}
+{"id":1406,"timestamp":"2026-10-12T11:00:00Z","event_type":"task_completed","task_id":"DF-CRIER-302","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"768cda6\",\"verdict\":\"PASS verdict 2cdbd82e grades current main\",\"recovery\":\"crier-foreman-2026-10-12-11-02-21\"}","tick_number":null}
+{"id":1407,"timestamp":"2026-10-12T11:00:00Z","event_type":"task_updated","task_id":"DF-CRIER-307","actor":"foreman","detail":"{\"status\":\"failed\",\"commit\":\"5113b5f\",\"verdict\":\"verdict bacc759e is INCOMPLETE/FAIL\",\"recovery\":\"crier-foreman-2026-10-12-11-02-21\"}","tick_number":null}
+{"id":1408,"timestamp":"2026-10-12T11:35:00Z","event_type":"task_completed","task_id":"DF-CRIER-308","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"a0d96db\",\"verdict\":\"151d4b03\",\"recovery\":\"crier-foreman-2026-10-12-11-02-21\"}","tick_number":null}
