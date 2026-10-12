@@ -1,0 +1,144 @@
+# SQLite session API baseline — raw benchmark output (DF-CRIER-308)
+# recorded: 2026-10-12T05:19:20Z
+# host: Linux 7.0.0-31-generic x86_64
+# cpus: 16
+# loadavg: 10.15 15.21 17.00
+# pressure/io: some avg10=10.46 avg60=11.96 avg300=17.36 total=338223008974 full avg10=9.84 avg60=10.75 avg300=14.25 total=261647365933 
+# go: go version go1.26.6 linux/amd64
+# budget: 100ms p99 per endpoint (CR_SESSION_P99_BUDGET_MS)
+
+## sequential endpoints (2s)
+
+$ go test -run ^$ -bench=BenchmarkSession(Create|Retrieve|List)$ -benchtime=2s ./internal/session/
+
+goos: linux
+goarch: amd64
+pkg: github.com/crier-dev/crier/internal/session
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkSessionCreate-16      	      33	  87073562 ns/op	        77.26 p50_ms_create	       130.7 p95_ms_create	       130.9 p99_ms_all	       130.9 p99_ms_create
+--- BENCH: BenchmarkSessionCreate-16
+    bench_test.go:500: endpoint create    mode=seq     n=1       p50=70.72ms    p95=70.72ms    p99=70.72ms    max=70.72ms    verdict=PASS
+    bench_test.go:500: BASELINE create mode=seq n=1 p50_ms=70.719 p95_ms=70.719 p99_ms=70.719 max_ms=70.719 verdict=PASS budget_ms=100
+    bench_test.go:500: every endpoint pooled: n=1 p50=70.72ms p95=70.72ms p99=70.72ms
+    bench_test.go:500: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:500: endpoint create    mode=seq     n=33      p50=77.263ms   p95=130.738ms  p99=130.914ms  max=130.914ms  verdict=OVER
+    bench_test.go:500: BASELINE create mode=seq n=33 p50_ms=77.263 p95_ms=130.737 p99_ms=130.913 max_ms=130.913 verdict=OVER budget_ms=100
+    bench_test.go:500: every endpoint pooled: n=33 p50=77.263ms p95=130.738ms p99=130.914ms
+    bench_test.go:500: p99 budget 100ms (DF-CRIER-308 target): 1 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+BenchmarkSessionRetrieve-16    	    1764	   1686975 ns/op	         1.569 p50_ms_retrieve	         2.727 p95_ms_retrieve	         4.179 p99_ms_all	         4.179 p99_ms_retrieve
+--- BENCH: BenchmarkSessionRetrieve-16
+    bench_test.go:509: endpoint retrieve  mode=seq     n=1       p50=2.006ms    p95=2.006ms    p99=2.006ms    max=2.006ms    verdict=PASS
+    bench_test.go:509: BASELINE retrieve mode=seq n=1 p50_ms=2.005 p95_ms=2.005 p99_ms=2.005 max_ms=2.005 verdict=PASS budget_ms=100
+    bench_test.go:509: every endpoint pooled: n=1 p50=2.006ms p95=2.006ms p99=2.006ms
+    bench_test.go:509: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:509: endpoint retrieve  mode=seq     n=100     p50=1.616ms    p95=2.633ms    p99=3.041ms    max=4.892ms    verdict=PASS
+    bench_test.go:509: BASELINE retrieve mode=seq n=100 p50_ms=1.616 p95_ms=2.633 p99_ms=3.040 max_ms=4.892 verdict=PASS budget_ms=100
+    bench_test.go:509: every endpoint pooled: n=100 p50=1.616ms p95=2.633ms p99=3.041ms
+    bench_test.go:509: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:509: endpoint retrieve  mode=seq     n=1378    p50=1.285ms    p95=2.18ms     p99=3.267ms    max=5.579ms    verdict=PASS
+    bench_test.go:509: BASELINE retrieve mode=seq n=1378 p50_ms=1.285 p95_ms=2.179 p99_ms=3.267 max_ms=5.579 verdict=PASS budget_ms=100
+	... [output truncated]
+BenchmarkSessionList-16        	     160	  14282101 ns/op	        13.91 p50_ms_list	        17.65 p95_ms_list	        20.31 p99_ms_all	        20.31 p99_ms_list
+--- BENCH: BenchmarkSessionList-16
+    bench_test.go:516: endpoint list      mode=seq     n=1       p50=12.632ms   p95=12.632ms   p99=12.632ms   max=12.632ms   verdict=PASS
+    bench_test.go:516: BASELINE list mode=seq n=1 p50_ms=12.632 p95_ms=12.632 p99_ms=12.632 max_ms=12.632 verdict=PASS budget_ms=100
+    bench_test.go:516: every endpoint pooled: n=1 p50=12.632ms p95=12.632ms p99=12.632ms
+    bench_test.go:516: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:516: endpoint list      mode=seq     n=100     p50=13.773ms   p95=22.141ms   p99=25.268ms   max=26.385ms   verdict=PASS
+    bench_test.go:516: BASELINE list mode=seq n=100 p50_ms=13.772 p95_ms=22.140 p99_ms=25.268 max_ms=26.385 verdict=PASS budget_ms=100
+    bench_test.go:516: every endpoint pooled: n=100 p50=13.773ms p95=22.141ms p99=25.268ms
+    bench_test.go:516: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:516: endpoint list      mode=seq     n=160     p50=13.91ms    p95=17.649ms   p99=20.312ms   max=23.447ms   verdict=PASS
+    bench_test.go:516: BASELINE list mode=seq n=160 p50_ms=13.909 p95_ms=17.649 p99_ms=20.312 max_ms=23.446 verdict=PASS budget_ms=100
+	... [output truncated]
+PASS
+ok  	github.com/crier-dev/crier/internal/session	106.456s
+
+## 100-concurrent read endpoints (2000x)
+
+$ go test -run ^$ -bench=BenchmarkSessionReadP99$ -benchtime=2000x ./internal/session/
+
+goos: linux
+goarch: amd64
+pkg: github.com/crier-dev/crier/internal/session
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkSessionReadP99-16    	    2000	  11558967 ns/op	      2159 p50_ms_list	       112.4 p50_ms_retrieve	      2514 p95_ms_list	       168.2 p95_ms_retrieve	      2603 p99_ms_all	      2668 p99_ms_list	       190.2 p99_ms_retrieve
+--- BENCH: BenchmarkSessionReadP99-16
+    bench_test.go:525: endpoint retrieve  mode=conc100 n=1       p50=1.482ms    p95=1.482ms    p99=1.482ms    max=1.482ms    verdict=PASS
+    bench_test.go:525: BASELINE retrieve mode=conc100 n=1 p50_ms=1.482 p95_ms=1.482 p99_ms=1.482 max_ms=1.482 verdict=PASS budget_ms=100
+    bench_test.go:525: every endpoint pooled: n=1 p50=1.482ms p95=1.482ms p99=1.482ms
+    bench_test.go:525: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:525: endpoint list      mode=conc100 n=1000    p50=2.159451s  p95=2.514134s  p99=2.667696s  max=2.858185s  verdict=OVER
+    bench_test.go:525: BASELINE list mode=conc100 n=1000 p50_ms=2159.450 p95_ms=2514.133 p99_ms=2667.695 max_ms=2858.185 verdict=OVER budget_ms=100
+    bench_test.go:525: endpoint retrieve  mode=conc100 n=1000    p50=112.407ms  p95=168.188ms  p99=190.218ms  max=222.773ms  verdict=OVER
+    bench_test.go:525: BASELINE retrieve mode=conc100 n=1000 p50_ms=112.406 p95_ms=168.188 p99_ms=190.217 max_ms=222.772 verdict=OVER budget_ms=100
+    bench_test.go:525: every endpoint pooled: n=2000 p50=222.773ms p95=2.411755s p99=2.603262s
+    bench_test.go:525: p99 budget 100ms (DF-CRIER-308 target): 2 of 2 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+	... [output truncated]
+PASS
+ok  	github.com/crier-dev/crier/internal/session	55.616s
+
+## 100-concurrent write endpoint (300x)
+
+$ go test -run ^$ -bench=BenchmarkSessionCreateP99$ -benchtime=300x ./internal/session/
+
+goos: linux
+goarch: amd64
+pkg: github.com/crier-dev/crier/internal/session
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkSessionCreateP99-16    	     300	 123335877 ns/op	     11742 p50_ms_create	     18613 p95_ms_create	     22890 p99_ms_all	     22890 p99_ms_create
+--- BENCH: BenchmarkSessionCreateP99-16
+    bench_test.go:535: endpoint create    mode=conc100 n=1       p50=165.356ms  p95=165.356ms  p99=165.356ms  max=165.356ms  verdict=OVER
+    bench_test.go:535: BASELINE create mode=conc100 n=1 p50_ms=165.355 p95_ms=165.355 p99_ms=165.355 max_ms=165.355 verdict=OVER budget_ms=100
+    bench_test.go:535: every endpoint pooled: n=1 p50=165.356ms p95=165.356ms p99=165.356ms
+    bench_test.go:535: p99 budget 100ms (DF-CRIER-308 target): 1 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:535: endpoint create    mode=conc100 n=300     p50=11.742193s p95=18.613378s p99=22.890001s max=26.652126s verdict=OVER
+    bench_test.go:535: BASELINE create mode=conc100 n=300 p50_ms=11742.192 p95_ms=18613.378 p99_ms=22890.001 max_ms=26652.125 verdict=OVER budget_ms=100
+    bench_test.go:535: every endpoint pooled: n=300 p50=11.742193s p95=18.613378s p99=22.890001s
+    bench_test.go:535: p99 budget 100ms (DF-CRIER-308 target): 1 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+PASS
+ok  	github.com/crier-dev/crier/internal/session	64.258s
+
+## one durable store write (100x)
+
+$ go test -run ^$ -bench=BenchmarkSessionStoreCommitCost$ -benchtime=100x ./internal/session/
+
+goos: linux
+goarch: amd64
+pkg: github.com/crier-dev/crier/internal/session
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkSessionStoreCommitCost/rollback-16         	     100	  26363193 ns/op	        18.51 p50_ms_commit-rollback	        41.88 p95_ms_commit-rollback	        47.84 p99_ms_all	        47.84 p99_ms_commit-rollback
+--- BENCH: BenchmarkSessionStoreCommitCost/rollback-16
+    bench_test.go:586: endpoint commit-rollback mode=seq     n=1       p50=17.738ms   p95=17.738ms   p99=17.738ms   max=17.738ms   verdict=PASS
+    bench_test.go:586: BASELINE commit-rollback mode=seq n=1 p50_ms=17.738 p95_ms=17.738 p99_ms=17.738 max_ms=17.738 verdict=PASS budget_ms=100
+    bench_test.go:586: every endpoint pooled: n=1 p50=17.738ms p95=17.738ms p99=17.738ms
+    bench_test.go:586: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:586: endpoint commit-rollback mode=seq     n=100     p50=18.509ms   p95=41.883ms   p99=47.837ms   max=111.447ms  verdict=PASS
+    bench_test.go:586: BASELINE commit-rollback mode=seq n=100 p50_ms=18.508 p95_ms=41.883 p99_ms=47.836 max_ms=111.446 verdict=PASS budget_ms=100
+    bench_test.go:586: every endpoint pooled: n=100 p50=18.509ms p95=41.883ms p99=47.837ms
+    bench_test.go:586: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+BenchmarkSessionStoreCommitCost/wal-16              	     100	     43780 ns/op	         0.04000 p50_ms_commit-wal	         0.06800 p95_ms_commit-wal	         0.08500 p99_ms_all	         0.08500 p99_ms_commit-wal
+--- BENCH: BenchmarkSessionStoreCommitCost/wal-16
+    bench_test.go:586: endpoint commit-wal mode=seq     n=1       p50=69µs       p95=69µs       p99=69µs       max=69µs       verdict=PASS
+    bench_test.go:586: BASELINE commit-wal mode=seq n=1 p50_ms=0.069 p95_ms=0.069 p99_ms=0.069 max_ms=0.069 verdict=PASS budget_ms=100
+    bench_test.go:586: every endpoint pooled: n=1 p50=69µs p95=69µs p99=69µs
+    bench_test.go:586: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+    bench_test.go:586: endpoint commit-wal mode=seq     n=100     p50=40µs       p95=69µs       p99=85µs       max=86µs       verdict=PASS
+    bench_test.go:586: BASELINE commit-wal mode=seq n=100 p50_ms=0.040 p95_ms=0.068 p99_ms=0.085 max_ms=0.085 verdict=PASS budget_ms=100
+    bench_test.go:586: every endpoint pooled: n=100 p50=40µs p95=69µs p99=85µs
+    bench_test.go:586: p99 budget 100ms (DF-CRIER-308 target): 0 of 1 endpoints OVER — see docs/performance.md for the recorded baseline and its causes
+PASS
+ok  	github.com/crier-dev/crier/internal/session	2.766s
+
+## summary — last round per (endpoint, mode)
+
+  ENDPOINT  MODE    n      p50_ms     p95_ms     p99_ms     max_ms     VERDICT
+  --------- ------- ------ ---------- ---------- ---------- ---------- -------
+  commit-rollback seq     100    18.508     41.883     47.836     111.446    PASS
+  commit-wal seq     100    0.040      0.068      0.085      0.085      PASS
+  create    conc100 300    11742.192  18613.378  22890.001  26652.125  OVER
+  create    seq     33     77.263     130.737    130.913    130.913    OVER
+  list      conc100 1000   2159.450   2514.133   2667.695   2858.185   OVER
+  list      seq     160    13.909     17.649     20.312     23.446     PASS
+  retrieve  conc100 1000   112.406    168.188    190.217    222.772    OVER
+  retrieve  seq     1378   1.285      2.179      3.267      5.579      PASS
