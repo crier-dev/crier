@@ -366,9 +366,22 @@ for every agent in the deployment. Rejected — it collapses one identity into m
 per-agent revocation meaningless (revoking one agent would be revoking the instance), and destroys the
 one-key-per-agent property CR-CHAT-026 depends on.
 
-**NOT BUILT:** no instance key, no `CR_FED_INSTANCE_KEY`, no handshake route, no peer-signature header,
-no `CR_FED_REQUIRE_TOKEN`, and no peer auth of any kind. Today the only federation credential is the
-shared bearer of §2.2.
+**SUPERSEDED IN PART — CR-CHAT-024 shipped (2026-10-07), recorded in `specs/FEDERATION-AUTH.md`.**
+Peer auth exists, in an additive, config-gated form NARROWER than §5.1–§5.3 describe: this relay holds
+ONE ed25519 identity key in a file (`CR_FED_SELF_KEY_FILE`, a PKCS#8 key file — the shipped spelling,
+NOT the `CR_FED_INSTANCE_KEY` name proposed here) and signs every outbound forward with `X-Fed-Ts` /
+`X-Fed-Sig` over `federation.FedAuthPayload` (`<METHOD>\n<path>\n<unix-seconds>`, ±30 s window); the
+destination arms the gate with `CR_FED_AUTH_FILE` (a peer → `public_key` document carrying a `revoked`
+list, re-read on mtime/size change) and answers an unproven announcement `401` and a revoked peer
+`403 FED_PEER_REVOKED` before signature work. A request WITHOUT the peer announcement is untouched.
+
+**Still NOT BUILT:** the §5.2 handshake route with its two nonces and two-key-id transcript (signing
+rides each request instead — there is no link-setup exchange), the link record and its
+`proposed`/`active`/`revoked` states (§4.2/§4.4 — revocation here is the auth document's `revoked`
+list, not a link state), the §5.3 `CR_FED_REQUIRE_TOKEN` posture and its `FED_PEER_KEY_REQUIRED`, the
+§5.3 per-peer `auth` member on `GET /fed/peers`, and the §5.4 codes `FED_PEER_UNAUTHENTICATED` /
+`FED_PEER_SIGNATURE_INVALID`. The shared bearer of §2.2 remains the DEFAULT credential; the key path is
+opt-in and never replaces it — with `CR_FED_AUTH_FILE` unset, no request is ever asked for a signature.
 
 ---
 
@@ -655,10 +668,16 @@ principal, no `remote` marker, no minting and no session participation for a rem
 Everything in this document except §2's baseline table, §3.3's rule (stated, not enforced) and the
 shipped token path is unbuilt. Item by item:
 
-1. **Peer identity.** No peer record, no peer store, no instance key, no link route. Owed: §4, §5.1.
+1. **Peer identity.** No link record/state and no link route; the INSTANCE key itself shipped as
+   `CR_FED_SELF_KEY_FILE`, with each peer's `public_key` held in the `CR_FED_AUTH_FILE` document
+   (§5.5, CR-CHAT-024). Owed: §4.
 2. **The mutual key handshake.** Owed: §5.2.
-3. **Key-based auth on the federated ingress**, and the `CR_FED_REQUIRE_TOKEN` /
-   `CR_FED_INSTANCE_KEY` configuration. Owed: §5.3–§5.5.
+3. **Key-based auth on the federated ingress** — **shipped 2026-10-07** (CR-CHAT-024,
+   `specs/FEDERATION-AUTH.md`), in the additive subset of §5.3–§5.4: the `CR_FED_AUTH_FILE` gate (401
+   for an unproven announcement, `403 FED_PEER_REVOKED` for a revoked peer) plus `CR_FED_SELF_KEY_FILE`
+   outbound signing, leaving §2.2's bearer byte-for-byte when unset. Owed: the `CR_FED_REQUIRE_TOKEN` /
+   `CR_FED_INSTANCE_KEY` configuration, the per-peer `auth` member on `GET /fed/peers`, and the
+   `FED_PEER_KEY_REQUIRED` / `FED_PEER_UNAUTHENTICATED` / `FED_PEER_SIGNATURE_INVALID` codes.
 4. **Per-peer policy** (namespaces, agents, capabilities, sessions, direction) and its evaluation.
    Owed: §6.
 5. **Per-peer revocation**, and the hold-queue behavior on revocation. Owed: §7.
