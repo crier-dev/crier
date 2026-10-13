@@ -7,6 +7,14 @@ Two crier instances can share a room: a member of instance B appears as a
 out to that session reach B's member's inbox on B. Each side's members are real
 participants whose permissions are decided on the instance they are talking to.
 
+**Peer identity is provable, not just claimed (CR-CHAT-024).** A federation
+forward that announces a peer identity can be signed by that peer's ed25519 key
+over `<METHOD>\n<path>\n<unix-seconds>` (`X-Fed-Ts` / `X-Fed-Sig`), verified against
+the destination's `CR_FED_AUTH_FILE` before this policy layer consults the
+announcement — so the policy below decides what an identity PROVEN to be the peer
+may reach. Make the keys, sign a forward and read the refusal bodies:
+[`docs/federated-peer-auth.md`](federated-peer-auth.md).
+
 ## The remote participant
 
 A member of a peer joins a local session with a **remote-qualified id**:
@@ -67,7 +75,7 @@ variable unset, no peer exists and the instance federates exactly as before
 |---|---|
 | The message **body** (the deliver payload), as the shipped forward has always carried it | **Assets** (CR-CHAT-014, NOT BUILT): an S3 asset reference crosses as a pointer only; asset BYTES cross only when inline in the payload, and no credential to dereference an asset is ever handed across |
 | The addressing context: session id, thread id, message id, sender agent id, the session's namespace, the message kind, the deterministic session idempotency key | **Audit surfaces** (CR-CHAT-021, NOT BUILT): the local instance records the crossing in its own delivery log, but there is no shared or replicated audit trail between the two instances |
-| The peer's identity claim (`X-Crier-Fed-Peer`) — a claim by default, and **provable since CR-CHAT-024**: where the peer-auth gate is armed (`CR_FED_AUTH_FILE`) the announcement must carry `X-Fed-Ts` + `X-Fed-Sig` — a hex ed25519 signature over `<METHOD>\n<path>\n<unix-seconds>` (±30 s window) verified against the announced peer's registered public key BEFORE the per-peer policy runs, so the policy consults a proven identity instead of a string the caller chose; this instance signs its own outbound forwards the same way when `CR_FED_SELF_KEY_FILE` is set (`specs/FEDERATION-AUTH.md`) | **Proof on a deployment that has not armed the gate** (CR-CHAT-024 — shipped, but OPT-IN): with `CR_FED_AUTH_FILE` unset the middleware is never registered, so no request is ever asked for a signature and the announced `X-Crier-Fed-Peer` remains a claim — the crossing rides the shipped `CR_FED_TOKEN` / `CR_AUTH_TOKEN` (or unauthenticated links) posture byte-for-byte as before. There is also no key-distribution or link-handshake protocol: the peer document (`peers` + `revoked`) is provisioned out of band by the operator (§6 non-goals) |
+| The peer's identity claim (`X-Crier-Fed-Peer`) — a claim by default, and **provable since CR-CHAT-024**: where the peer-auth gate is armed (`CR_FED_AUTH_FILE`) the announcement must carry `X-Fed-Ts` + `X-Fed-Sig` — a hex ed25519 signature over `<METHOD>\n<path>\n<unix-seconds>` (±30 s window) verified against the announced peer's registered public key BEFORE the per-peer policy runs, so the policy consults a proven identity instead of a string the caller chose; this instance signs its own outbound forwards the same way when `CR_FED_SELF_KEY_FILE` is set (`specs/FEDERATION-AUTH.md`; hands-on recipe: [`docs/federated-peer-auth.md`](federated-peer-auth.md)) | **Proof on a deployment that has not armed the gate** (CR-CHAT-024 — shipped, but OPT-IN): with `CR_FED_AUTH_FILE` unset the middleware is never registered, so no request is ever asked for a signature and the announced `X-Crier-Fed-Peer` remains a claim — the crossing rides the shipped `CR_FED_TOKEN` / `CR_AUTH_TOKEN` (or unauthenticated links) posture byte-for-byte as before. There is also no key-distribution or link-handshake protocol: the peer document (`peers` + `revoked`) is provisioned out of band by the operator (§6 non-goals) |
 | The remote participant's membership event on the local instance | The remote instance's **permission decisions** — they are consulted on the peer's own side only; a role or namespace the peer asserts in a payload is data, never authority (§3.3) |
 
 `crossing: body | reference` (§8.1) is design, not shipped: the shipped forward
