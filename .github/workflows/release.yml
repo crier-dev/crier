@@ -67,10 +67,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go 1.26.6
+      - name: Set up Go 1.26.9
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.6"
+          go-version: "1.26.9"
 
       # One variable, validated once: everything downstream (make,
       # release-upload.sh, the final verification) consumes this VERSION, so
