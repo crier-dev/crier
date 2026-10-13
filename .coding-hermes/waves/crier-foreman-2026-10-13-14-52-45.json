@@ -1,0 +1,18 @@
+{
+  "tick": "crier-foreman-2026-10-13-14-52-45",
+  "mode": "wave",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-310",
+      "branch": "wt/DF-CRIER-310",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-310",
+      "base_sha": "2f9f302"
+    },
+    {
+      "task_id": "DF-CRIER-311",
+      "branch": "wt/DF-CRIER-311",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-311",
+      "base_sha": "2f9f302"
+    }
+  ]
+}

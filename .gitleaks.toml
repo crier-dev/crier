@@ -21,3 +21,11 @@ paths = [
   '''.env.example''',
 ]
 
+# DF-CRIER-314 (tick 458): the dogfood board row's fingerprint field is
+# "task-addressee-authority-docgap-2026-10-13"; its case-insensitive inner span
+# (starting at ta[sk-a]ddressee) matches the sk-api-key rule — it is a task id, not a key.
+# Allowlist regex matches the SECRET (the inner span), not the line.
+regexes = [
+  '''(?i)sk-addressee-authority-docgap''',
+]
+
