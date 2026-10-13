@@ -539,6 +539,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	}
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
+		fedClient.SetPeerPolicies(fedPeers)
 		// Mutual auth (CR-CHAT-024): sign every outbound forward when
 		// CR_FED_SELF_KEY_FILE is set, so a destination running the peer
 		// auth gate proves this relay's identity. A missing/invalid key
