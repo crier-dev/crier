@@ -267,7 +267,7 @@ func TestReleaseWorkflowContract(t *testing.T) {
 			if strings.HasPrefix(step.Uses, "actions/checkout@") && fmt.Sprint(step.With["fetch-depth"]) == "0" {
 				checkout = true
 			}
-			if strings.HasPrefix(step.Uses, "actions/setup-go@") && fmt.Sprint(step.With["go-version"]) == "1.26.6" {
+			if strings.HasPrefix(step.Uses, "actions/setup-go@") && fmt.Sprint(step.With["go-version"]) == "1.26.9" {
 				goSetup = true
 			}
 			if _, ok := step.Env["GH_TOKEN"]; ok {
@@ -281,7 +281,7 @@ func TestReleaseWorkflowContract(t *testing.T) {
 		t.Error("release workflow has no actions/checkout step with fetch-depth: 0 — the tag and the previous tag must both resolve locally (provenance check, compare link)")
 	}
 	if !goSetup {
-		t.Error("release workflow has no actions/setup-go step pinned to go-version 1.26.6 — the toolchain CI builds and tests with")
+		t.Error("release workflow has no actions/setup-go step pinned to go-version 1.26.9 — the toolchain CI builds and tests with")
 	}
 	if !ubuntuRun {
 		t.Error("release workflow runs on no ubuntu-latest job — the host target (linux/amd64) is a shipped release target and release-artifacts.sh executes the host artifact to prove the identity stamp landed")
