@@ -431,3 +431,28 @@ non-root and the server REFUSES TO BOOT, with a startup error that names
 CR_DAGGER_STORE_DIR, the resolved path and the uid (DF-CRIER-303, P1,
 reproduced fresh-box). A store directory that exists but is read-only is
 refused the same way at boot, instead of failing later on the first run write.
+
+## Federation peer auth (CR-CHAT-024, live-verified 2026-10-13 @ 7c48745)
+
+When CR_FED_AUTH_FILE is set, any request announcing `X-Crier-Fed-Peer` must
+prove it: `X-Fed-Ts` (unix seconds) + `X-Fed-Sig` (hex ed25519) over the
+transcript `<METHOD>\n<path>\n<unix-seconds>` (3 lines, no trailing newline).
+Refusals: 401 (no sig / unknown peer / bad sig / ts outside ±30s), 403
+FED_PEER_REVOKED (checked before the signature). The doc re-reads on
+mtime/size change; a bad INITIAL doc is a boot failure.
+
+- Keys: `openssl genpkey -algorithm ed25519` (PKCS#8, same family as
+  `crier keygen`); public hex = `openssl pkey -pubout -outform der | tail -c 32 | xxd -p -c 64`.
+- Destination doc: `{"peers":[{"peer":"beta","public_key":"<64hex>"}],"revoked":[]}`.
+- Source: `CR_FED_SELF_KEY_FILE` signs every outbound forward.
+- GOTCHA: `-db-url` is a PostgreSQL DSN only at HEAD — a bare path fails boot
+  with "failed to parse as keyword/value".
+- GOTCHA: session fan-out to a remote participant needs a NON-EMPTY
+  CR_FED_LINKS on the sending side even when a policy record with `url`
+  exists — without links it answers FEDERATION_UNCONFIGURED. Known defect:
+  the shipped binary currently refuses every crossing with "peer not known"
+  (DF-CRIER-309, client policy never armed in main.go) — the join works, the
+  fan-out does not, until that row lands.
+- Restart hygiene: a `nohup ./crier -port X &` over a live server exits with
+  "address already in use" and the OLD process keeps serving — always
+  `./crier -stop -pidfile` and grep the fresh log before probing.
