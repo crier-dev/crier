@@ -1880,6 +1880,146 @@ namespace membership is deliberately **not** blanket permission.
   (`UNKNOWN_PRINCIPAL`). A refusal is never a `500`: a caller's input error is
   reported as one.
 
+### Task Lifecycle — create, claim, complete (CR-CHAT-030, DF-CRIER-304)
+
+A tag is **addressing, never an action**
+([`specs/CHAT-ADDRESSING.md`](specs/CHAT-ADDRESSING.md) §2.5): the `task` kind
+is the only write that creates work. `POST /sessions/{id}/tasks` records a task
+addressed to an explicit target set (there is no "everyone" default for work)
+and gives it a state; `POST /sessions/{id}/tasks/{task_id}/claim` and
+`POST /sessions/{id}/tasks/{task_id}/complete` move it, and **every transition
+is a NEW record-version in the SAME thread** — so the work and its answer are
+read where they were raised. The read half (DF-CRIER-304) is
+`GET /sessions/{id}/tasks`, one entry per task at its CURRENT state (the newest
+record-version for that id), and the same path with the task id appended for a
+single task. The create response names the task's OWN `task_id` and `state` at
+the top level, because the message view's `id` is the MESSAGE id — claiming that
+id is `404 TASK_NOT_FOUND` on a task you created moments earlier. The state
+vocabulary is `open` / `claimed` / `running` / `done` / `failed`; the shipped
+transitions move `open → claimed` and `claimed → done` (or `failed`), with
+`running` carried in the vocabulary but set by no shipped route.
+
+**A task is a different authority than a message**
+([`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6.11): creating one
+needs `invoke` on EACH target plus `send` on the session, and an unauthorized
+creation is refused `403 TASK_FORBIDDEN` `reason=NO_TASK_AUTHORITY` — never
+silently delivered as an ordinary message. With the ACL armed, an agent has no
+principal identity of its own: it acts as **its owner**. So an agent that is not
+classed `personal` with a live owner principal can neither create a task **nor
+claim the one addressed to it**, and the refusal names the missing piece:
+
+```
+403 {"error":"TASK_FORBIDDEN","reason":"NO_TASK_AUTHORITY","action":"send",
+     "detail":"calling agent \"alice\" has no owner principal to act as (§6.3, §8.2 Q2)"}
+```
+
+The prerequisite is **three management writes** (admin token,
+`CR_PERMISSIONS_ADMIN_TOKEN`), and they are the same three for the sender and
+for the addressee: **mint a principal** → **bind it to the agent** → **class the
+agent `personal` with that owner**. An unclassed agent keeps the shipped
+trust-by-reach posture (§8.1), which is why the absence of this chain reads as
+"the lifecycle is broken" rather than "the ACL is armed". Nothing taught it
+before DF-CRIER-314.
+
+**The asymmetry, stated plainly: a plain message is not a task.** The task route
+authorizes the creator UP FRONT (invoke on each target, plus send on the
+session); a plain or addressed message is recorded and delivered through the
+ordinary path without that work gate. The same unclassed sender, in the same
+session, targeting the same agent, therefore gets `201` for a plain message and
+`403 TASK_FORBIDDEN` for a task — a tag never executes, so addressing never
+needs the work authority.
+
+**`complete` is the one transition with no owner check.** Any actor holding
+`send` on the session may complete — the claimer, the creator, or a third
+agent — and the transition is accepted `201` with the recorded `owner`
+unchanged. That is deliberate and spec-consistent (§6.11: the transition records
+that the output landed in the thread), and it is what makes a completion
+evidence of the WORK rather than of who may close it.
+
+**The 409 ladder.** A transition that does not fit the current state is refused
+`409 INVALID_TASK_TRANSITION`, naming the state and the legal move: `claim` on a
+task that is not `open` (`task "…" is "claimed"; only an open task can be
+claimed`), `complete` on a task that is neither `claimed` nor `running` (`task
+"…" is "done"; only a claimed or running task can be completed`). Because the
+state is the LATEST record-version over the task id, a second claim after a
+successful one is the 409 — never a silent second owner.
+
+```bash
+# Posture: CR_PERMISSIONS_ENABLED=true with CR_PERMISSIONS_ADMIN_TOKEN set (the ACL is
+# armed), and CR_REQUIRE_AGENT_SIG=false so agents register keyless (the dev shortcut
+# above). TS is a LIVE timestamp — the recipes are re-runnable, nothing is hardcoded.
+BASE=http://localhost:8767
+MSG=(-H "Authorization: Bearer ${CR_AUTH_TOKEN:-}")                  # the reach credential
+ADMIN=(-H "Authorization: Bearer ${CR_PERMISSIONS_ADMIN_TOKEN:-}")   # the admin credential
+JSON='Content-Type: application/json'
+TS=$(date +%s)
+
+# 0. Two agents and a session. The creator is REQUIRED: a session that cannot name one
+#    is 400 CREATED_BY_REQUIRED, never defaulted to a service identity.
+curl -s -X POST $BASE/agents "${MSG[@]}" -H "$JSON" -d '{"id":"alice"}'          # → 201
+curl -s -X POST $BASE/agents "${MSG[@]}" -H "$JSON" -d '{"id":"bob"}'            # → 201
+SID=$(curl -s -X POST $BASE/sessions "${MSG[@]}" -H "$JSON" \
+  -d "{\"title\":\"lifecycle $TS\",\"created_by\":{\"agent\":\"alice\"}}" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')              # → 201
+
+# 1. THE ASYMMETRY, while alice is unclassed — same sender, same session, same target:
+curl -s -X POST $BASE/sessions/$SID/messages "${MSG[@]}" -H "$JSON" \
+  -d "{\"payload\":{\"text\":\"plain hello $TS\"},\"sender\":\"alice\"}"         # → 201 (recorded, delivered)
+curl -s -X POST $BASE/sessions/$SID/tasks "${MSG[@]}" -H "$JSON" \
+  -d "{\"payload\":{\"text\":\"review the diff $TS\"},\"sender\":\"alice\",\"targets\":[{\"kind\":\"agent\",\"id\":\"bob\"}]}"
+# → 403 {"error":"TASK_FORBIDDEN","reason":"NO_TASK_AUTHORITY",
+#        "detail":"calling agent \"alice\" has no owner principal to act as (§6.3, §8.2 Q2)"}
+
+# 2. THE PREREQUISITE (admin token): mint an owner principal → bind it to alice → class
+#    alice `personal` with that owner. Until all three land, step 1 is the only answer.
+PRIN=$(curl -s -X POST $BASE/principals "${ADMIN[@]}" -H "$JSON" \
+  -d "{\"display_name\":\"Lifecycle owner $TS\",\"role\":\"owner\"}" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')              # → 201 prin_…
+curl -s -X POST $BASE/bindings "${ADMIN[@]}" -H "$JSON" \
+  -d "{\"principal\":\"$PRIN\",\"agent\":\"alice\"}"                             # → 201 bind_…
+curl -s -X POST $BASE/agents/alice/class "${ADMIN[@]}" -H "$JSON" \
+  -d "{\"class\":\"personal\",\"owner\":\"$PRIN\"}"                              # → 201 {"class":"personal","owner":"prin_…"}
+
+# 3. The task is created — 201, with the task's OWN id and state lifted to the top level
+#    (the message view's `id` is the MESSAGE id, so read `task_id`).
+TID=$(curl -s -X POST $BASE/sessions/$SID/tasks "${MSG[@]}" -H "$JSON" \
+  -d "{\"payload\":{\"text\":\"review the diff $TS\"},\"sender\":\"alice\",\"targets\":[{\"kind\":\"agent\",\"id\":\"bob\"}]}" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["task_id"])')         # → 201 … "task_id":"…","state":"open"
+curl -s $BASE/sessions/$SID/tasks/$TID "${MSG[@]}"          # → 200 {"state":"open","versions":1,…}
+
+# 4. THE ADDRESSEE HITS THE SAME WALL: bob is not classed, so he cannot claim the work
+#    addressed to him — 403 TASK_FORBIDDEN / NO_TASK_AUTHORITY, exactly as in step 1.
+curl -s -X POST $BASE/sessions/$SID/tasks/$TID/claim "${MSG[@]}" -H "$JSON" -d '{"actor":"bob"}'
+
+# 5. … so bob gets the same three writes (one owner principal may hold many agents),
+#    and THEN claims: 201, the owner is named, a new record-version in the same thread.
+curl -s -X POST $BASE/bindings "${ADMIN[@]}" -H "$JSON" \
+  -d "{\"principal\":\"$PRIN\",\"agent\":\"bob\"}"                               # → 201
+curl -s -X POST $BASE/agents/bob/class "${ADMIN[@]}" -H "$JSON" \
+  -d "{\"class\":\"personal\",\"owner\":\"$PRIN\"}"                              # → 201
+curl -s -X POST $BASE/sessions/$SID/tasks/$TID/claim "${MSG[@]}" -H "$JSON" -d '{"actor":"bob"}'
+# → 201 {"state":"claimed","owner":"bob","task_id":"…"}
+
+# 6. THE 409 LADDER: the task is no longer `open`, and the refusal says so.
+curl -s -X POST $BASE/sessions/$SID/tasks/$TID/claim "${MSG[@]}" -H "$JSON" -d '{"actor":"bob"}'
+# → 409 {"error":"INVALID_TASK_TRANSITION",
+#        "detail":"task \"…\" is \"claimed\"; only an open task can be claimed"}
+
+# 7. COMPLETE — accepted from ANY actor with `send` on the session (no owner check):
+#    alice closes bob's task, and the completion payload lands in the thread.
+curl -s -X POST $BASE/sessions/$SID/tasks/$TID/complete "${MSG[@]}" -H "$JSON" \
+  -d "{\"actor\":\"alice\",\"payload\":{\"text\":\"reviewed, looks good $TS\"}}"  # → 201 {"state":"done","owner":"bob"}
+curl -s -X POST $BASE/sessions/$SID/tasks/$TID/complete "${MSG[@]}" -H "$JSON" -d '{"actor":"alice"}'
+# → 409 {"error":"INVALID_TASK_TRANSITION",
+#        "detail":"task \"…\" is \"done\"; only a claimed or running task can be completed"}
+curl -s $BASE/sessions/$SID/tasks/$TID "${MSG[@]}"     # → 200 {"state":"done","owner":"bob","versions":3,…}
+```
+
+A failure close is the same call with `{"new_state":"failed"}` (`→ 201`,
+`state:"failed"`). The whole `open → claimed → done` story is the task's thread
+in the session transcript (`GET /sessions/{id}/messages`): three
+record-versions of one task id, each a reply to the one before it.
+
 ### Dagger control — create, observe, cancel, resume, rewind (CR-CHAT-033)
 
 `CR_DAGGER_URL` turns on crier's control surface over a **Hermes-dagger
