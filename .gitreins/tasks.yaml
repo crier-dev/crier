@@ -2916,3 +2916,10 @@ tasks:
   status: complete
   created_at: '2026-10-13T05:24:17.631110+00:00'
   completed_at: '2026-10-13T05:48:03.817804+00:00'
+- id: INT-CRIER-012
+  title: 'bunker-e2e CI red: bunkerd SpawnAgent dial :10001 i/o timeout'
+  criteria:
+  - bunker-e2e workflow green on main (or BUNKER_* repointed and one full run green)
+  status: complete
+  created_at: '2026-10-14T13:27:27.399424+00:00'
+  completed_at: '2026-10-14T13:58:47.225329+00:00'
