@@ -1164,6 +1164,48 @@ paths:
                     value; the body field wins when both are present. The list
                     is PARSED, never executed: a tag is addressing, not a task
                     (§2.5), so no fan-out and no work follow from it.
+                model:
+                  type: string
+                  description: |-
+                    OPTIONAL model hint for a lane dispatch (CR-FEAT-036).
+                    Crier TRANSPORTS this member and never chooses a value: an
+                    explicit string is stored and handed back byte-for-byte (no
+                    trimming, no validation against a catalogue of models), and
+                    a default is expressed by omitting the member, by sending
+                    JSON null (which resolves to the same canonical default —
+                    the member is absent on the stored message) or by sending a
+                    blank string (which is preserved as sent). For every one of
+                    those default spellings the bus fills in NO model, so the
+                    consumer can still choose: a task-router in a bunker polls
+                    its inbox and interprets the four selection cases
+                    (explicit/explicit, default/explicit, explicit/default,
+                    default/default) from the prompt. A non-string, non-null
+                    value is rejected with 400 (`{"error":"invalid json"}`) —
+                    the member is never silently dropped. See
+                    docs/router-dispatch.md.
+                provider:
+                  type: string
+                  description: |-
+                    OPTIONAL provider hint for a lane dispatch (CR-FEAT-036),
+                    independent of `model` and transported exactly like it: an
+                    explicit value survives delivery unchanged, every default
+                    spelling (absent / null / blank) leaves the choice open,
+                    and Crier never substitutes a provider of its own. A
+                    consumer that already knows the pair it wants can read this
+                    member directly and does not need a task-router in the path;
+                    see docs/router-dispatch.md.
+                reply_to:
+                  type: string
+                  description: |-
+                    OPTIONAL Crier correlation (CR-FEAT-036): the message id (or
+                    correlation id) this message ANSWERS. It is provenance, not
+                    routing and not authorization — a router returning the result
+                    of a dispatch sets it to the dispatch's message id so the
+                    scheduler can match the answer from its own inbox, and the
+                    delivery is still admitted or refused purely on the verified
+                    sender identity plus the configured delivery ACL. A value
+                    here (or an equivalent hint inside the payload) grants no
+                    reach. Absent changes nothing for existing senders.
                 ttl_seconds:
                   type: integer
                   minimum: 0
@@ -4074,6 +4116,34 @@ components:
           description: "The HUMAN principal this message was delivered by (CR-CHAT-007, specs/CHAT-PERMISSIONS.md §6.3/§2.1), or absent when the delivery named no principal. The request's `principal_id`, resolved through its live binding by the delivery ACL before anything is stored: it is the audit answer to \"which human spoke as which agent\" (T3). It is provenance, never routing — the sender stays the agent; the bus never sees a principal as an identity."
         location:
           $ref: "#/components/schemas/MessageLocation"
+        model:
+          type: string
+          description: >-
+            The optional model hint the dispatch carried (CR-FEAT-036), in the
+            form the caller sent it: an explicit value byte-for-byte, or an
+            empty string for a blank hint. ABSENT when the caller sent no model
+            (the canonical default — a JSON null on the deliver request
+            resolves to the same absent member, so a consumer has exactly one
+            default state to handle). Crier never fills in a concrete model: on
+            every default spelling the choice is left to the consumer (a
+            task-router polling this inbox, or a caller that already knows the
+            pair it wants). See docs/router-dispatch.md.
+        provider:
+          type: string
+          description: >-
+            The optional provider hint the dispatch carried (CR-FEAT-036),
+            independent of `model` and preserved the same way: an explicit value
+            byte-for-byte, an empty string for a blank hint, or absent for the
+            canonical default. Never filled in by Crier.
+        reply_to:
+          type: string
+          description: >-
+            The Crier correlation this message answers (CR-FEAT-036): the
+            message id of the dispatch a router's result belongs to. Provenance
+            only — recorded WITH the message so the sender of a dispatch can
+            match a response from its own inbox alone, and never an address or
+            an authorization. ABSENT when the message answers nothing, which is
+            what every pre-CR-FEAT-036 message is.
     PrincipalRecord:
       type: object
       description: |-

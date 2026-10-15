@@ -728,14 +728,18 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, thread_id, principal_id, created_at, expires_at,
-    leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13);`,
+    leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms, selection, reply_to
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13, $14::jsonb, $15);`,
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
 		entry.Priority, nullText(entry.ThreadID), nullText(entry.PrincipalID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 		nullText(namespace.Canonical(entry.Namespace)), nullJSONB(entry.Location),
 		// CR-CHAT-020: a timed deliver records its whole milliseconds; an
 		// untimed one (zero) stores SQL NULL — "not measured", never zero.
 		nullInt64(entry.DeliveryMs),
+		// CR-FEAT-036: the dispatch's optional selection hints travel in one
+		// JSONB body (NULL when the delivery named neither), and the Crier
+		// correlation the message answers is NULL when it answers nothing.
+		selectionJSONB(entry), nullText(entry.ReplyTo),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -807,7 +811,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
        COALESCE(thread_id, ''), COALESCE(principal_id, ''), created_at, expires_at, COALESCE(namespace, ''), location,
-       COALESCE(delivery_ms, 0)
+       COALESCE(delivery_ms, 0), selection, COALESCE(reply_to, '')
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -830,14 +834,20 @@ LIMIT $3;`,
 		// instead of erroring, then normalizes to the zero time.
 		var expiresAt pgtype.Timestamptz
 		var location []byte
+		var selection []byte
 		var deliveryMs pgtype.Int8
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
 			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.PrincipalID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location,
-			&deliveryMs); err != nil {
+			&deliveryMs, &selection, &entry.ReplyTo); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
 		entry.Location = locationFromJSONB(location)
+		// CR-FEAT-036: the dispatch's selection hints and the correlation it
+		// answers travel WITH the message, so a polling router sees them on
+		// the lease it takes — and a hint-less message reads back exactly as
+		// it was delivered (no member, no invented default).
+		applySelectionJSONB(&entry, selection)
 		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
 		// CR-CHAT-020: the stored per-message delivery latency, read
 		// through pgtype.Int8 so a NULL (an untimed entry) scans cleanly

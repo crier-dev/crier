@@ -98,17 +98,20 @@ func (s *PostgresStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 		leasedAt  *time.Time
 		leaseID   *string
 		acked     bool
+		selection []byte
 	)
 	err := s.pool.QueryRow(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
        COALESCE(principal_id, ''),
-       created_at, expires_at, leased_at, lease_id, acked
+       created_at, expires_at, leased_at, lease_id, acked,
+       selection, COALESCE(reply_to, '')
 FROM inbox_entries
 WHERE agent_id = $1 AND id = $2;`,
 		agentID, messageID,
 	).Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender, &entry.IdempotencyKey,
 		&entry.PrincipalID,
-		&entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked)
+		&entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked,
+		&selection, &entry.ReplyTo)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("%w: %q is not in agent %q's inbox", ErrMessageNotFound, messageID, agentID)
@@ -119,6 +122,10 @@ WHERE agent_id = $1 AND id = $2;`,
 	// Retrieve does: a stored `infinity` (ttl_seconds=0 → never expires,
 	// DF-CRIER-37) must decode instead of erroring.
 	entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
+	// CR-FEAT-036: a peek shows the same envelope the lease would hand back —
+	// the dispatch's selection hints and the correlation it answers — because a
+	// consumer that looks before it claims must see what it is looking at.
+	applySelectionJSONB(&entry, selection)
 	entry.LeasedAt = leasedAt
 	if leaseID != nil {
 		entry.LeaseID = *leaseID

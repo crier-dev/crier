@@ -1655,3 +1655,55 @@ claims:
     doc: docs/integration-guide.md
     quote: "### 11.4 What it is NOT"
     xfail: null
+
+  # --- CR-FEAT-036 (appended): docs/router-dispatch.md — the scheduler → Crier
+  # → bunker task-router dispatch contract. The page is scanned by the path pass
+  # because these claims name it, and its marked recipe block (§5: register the
+  # two identities, deliver the two hint arms, poll the router inbox, deliver the
+  # correlated result, poll the scheduler inbox) is replayed live by the same
+  # run. The anchors hold the prose that may not drift: what Crier transports and
+  # what it refuses to choose, the canonical default for a default/unset/null/
+  # blank hint, all four selection cases, the provenance-only reply_to, and the
+  # statement that authorization never reads the payload. The behaviour behind
+  # them — the four hint combinations across every supported spelling, the
+  # authorization matrix, the forged reply_to arms and the lease-expiry
+  # redelivery — is executed in internal/registry/crfeat036_test.go, and the
+  # stored representation in internal/registry/postgres_store_unit_test.go. It is
+  # not re-told here.
+  - id: ROUTE-ROUTER-DISPATCH-INBOX
+    kind: route
+    doc: docs/router-dispatch.md
+    quote: "POST /agents/{id}/inbox"
+    expect: "/agents/{id}/inbox"
+    xfail: null
+  - id: ROUTE-ROUTER-DISPATCH-ACK
+    kind: route
+    doc: docs/router-dispatch.md
+    quote: "POST /agents/{id}/inbox/ack"
+    expect: "/agents/{id}/inbox/ack"
+    xfail: null
+  - id: ANCHOR-ROUTER-DISPATCH-TRANSPORTS-NEVER-CHOOSES
+    kind: anchor
+    doc: docs/router-dispatch.md
+    quote: "Crier transports `model` and `provider`; it never chooses them."
+    xfail: null
+  - id: ANCHOR-ROUTER-DISPATCH-CANONICAL-DEFAULT
+    kind: anchor
+    doc: docs/router-dispatch.md
+    quote: "Absent is the **canonical default**"
+    xfail: null
+  - id: ANCHOR-ROUTER-DISPATCH-FOUR-CASES
+    kind: anchor
+    doc: docs/router-dispatch.md
+    quote: "| default | default | selects the pair from the prompt |"
+    xfail: null
+  - id: ANCHOR-ROUTER-DISPATCH-REPLYTO-PROVENANCE
+    kind: anchor
+    doc: docs/router-dispatch.md
+    quote: "`reply_to` is provenance, not authority."
+    xfail: null
+  - id: ANCHOR-ROUTER-DISPATCH-AUTHZ-NOT-PAYLOAD
+    kind: anchor
+    doc: docs/router-dispatch.md
+    quote: "never by anything inside the payload"
+    xfail: null

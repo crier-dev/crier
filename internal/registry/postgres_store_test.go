@@ -411,6 +411,59 @@ func TestPostgresStore_Deliver_Success(t *testing.T) {
 	require.False(t, entry.ExpiresAt.IsZero())
 }
 
+func TestPostgresStore_DispatchSelectionRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	agent := newTestAgent(t, store, "selection")
+
+	explicit := &InboxEntry{
+		Payload:  json.RawMessage(`{"lane":"crier-worker"}`),
+		Model:    NewHint("gpt-5.3"),
+		Provider: NewHint("zai-glm-default"),
+		ReplyTo:  "dispatch-7",
+	}
+	require.NoError(t, store.Deliver(agent.ID, explicit))
+
+	blank := &InboxEntry{
+		Payload: json.RawMessage(`{"lane":"crier-worker"}`),
+		Model:   &SelectionHint{Form: HintBlank, Value: ""},
+	}
+	require.NoError(t, store.Deliver(agent.ID, blank))
+
+	plain := &InboxEntry{Payload: json.RawMessage(`{"lane":"crier-worker"}`)}
+	require.NoError(t, store.Deliver(agent.ID, plain))
+
+	// Peek reads one row without claiming it — same three members.
+	peeked, err := store.Peek(agent.ID, explicit.ID)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.3", peeked.Model.String(), "the model hint must survive the JSONB column")
+	require.Equal(t, "zai-glm-default", peeked.Provider.String())
+	require.Equal(t, "dispatch-7", peeked.ReplyTo)
+
+	listed, err := store.PeekInbox(agent.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 3)
+	require.Equal(t, "gpt-5.3", listed[0].Model.String(), "the listing carries the same envelope the lease does")
+
+	msgs, _, err := store.Retrieve(agent.ID, 30*time.Second, 10)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+
+	// FIFO: the three deliveries come back in the order they were sent.
+	require.Equal(t, "gpt-5.3", msgs[0].Model.String())
+	require.Equal(t, "zai-glm-default", msgs[0].Provider.String())
+	require.Equal(t, "dispatch-7", msgs[0].ReplyTo)
+
+	require.NotNil(t, msgs[1].Model, "a blank hint must survive as a blank hint, not as an absent one")
+	require.Equal(t, HintBlank, msgs[1].Model.Form)
+	require.Empty(t, msgs[1].Model.Value)
+	require.Nil(t, msgs[1].Provider)
+	require.Empty(t, msgs[1].ReplyTo)
+
+	require.Nil(t, msgs[2].Model, "a delivery that named no hint reads back as the canonical default")
+	require.Nil(t, msgs[2].Provider)
+	require.Empty(t, msgs[2].ReplyTo)
+}
+
 func TestPostgresStore_Deliver_BlankAgentID(t *testing.T) {
 	// Cover the ErrInvalidStoreInput blank-agent-id guard on Deliver.
 	store := newTestStore(t)

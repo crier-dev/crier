@@ -188,6 +188,26 @@ type InboxEntry struct {
 	// already re-derives the namespace. Absent (nil, omitempty) on entries
 	// written before this field existed.
 	Location *Location `json:"location,omitempty"`
+	// Model and Provider are the optional selection hints the dispatch carried
+	// (CR-FEAT-036). They are PRESERVED, never chosen: the same wire form the
+	// caller sent (explicit value, JSON null, blank, or absent) is what this
+	// entry publishes to every reader of the message — the polling router that
+	// will select a pair from them, and the non-router consumer that already
+	// knows which pair it wants. Crier fills in no default; see selection.go
+	// for the four selection cases and the canonical default representation.
+	// Both are `omitempty` pointers, so a delivery that names no hint is
+	// byte-identical to a pre-CR-FEAT-036 message.
+	Model    *SelectionHint `json:"model,omitempty"`
+	Provider *SelectionHint `json:"provider,omitempty"`
+	// ReplyTo is the Crier correlation this message answers (CR-FEAT-036) —
+	// the id of the dispatch a router's result belongs to. It is PROVENANCE,
+	// like ThreadID: stored WITH the message so the sender of a dispatch can
+	// match a response to it from its own inbox alone, and never used for
+	// routing or authorization. Authorization comes from the verified sender
+	// identity and the configured delivery ACL; a reply_to (here or in the
+	// payload) confers nothing. `omitempty` keeps an un-correlated delivery
+	// byte-identical to before this field existed.
+	ReplyTo string `json:"reply_to,omitempty"`
 }
 
 // Location states WHERE a delivery sits, so an agent can name its place

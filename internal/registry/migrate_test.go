@@ -69,8 +69,49 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 12, version, "should reflect the twelve embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority, 008 = CR-FEAT-029 namespaces, 009 = CR-CHAT-019 stored thread id, 010 = CR-CHAT-029 stored delivery location, 011 = CR-CHAT-020 per-message delivery_ms, 012 = CR-CHAT-007 principal_id on inbox messages)")
+	assert.Equal(t, 13, version, "should reflect the thirteen embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority, 008 = CR-FEAT-029 namespaces, 009 = CR-CHAT-019 stored thread id, 010 = CR-CHAT-029 stored delivery location, 011 = CR-CHAT-020 per-message delivery_ms, 012 = CR-CHAT-007 principal_id on inbox messages, 013 = CR-FEAT-036 dispatch selection hints + reply_to)")
 	assert.False(t, dirty, "migrations should not be marked dirty")
+}
+
+// TestRunMigrations_InboxDispatchSelectionColumns verifies 013 (CR-FEAT-036):
+// the stored dispatch envelope gained the optional selection hints (one JSONB
+// body) and the Crier correlation a message answers. The COLUMNS are what this
+// asserts, not the file — a migration applied under a different name would be a
+// no-op on an existing database, and then a routed dispatch would silently lose
+// the hints the polling router selects a model/provider from.
+func TestRunMigrations_InboxDispatchSelectionColumns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	clearSchema(ctx, t, db)
+
+	require.NoError(t, RunMigrations(ctx, testConnString))
+
+	for col, wantType := range map[string]string{"selection": "jsonb", "reply_to": "text"} {
+		var (
+			exists   bool
+			dataType string
+			nullable string
+		)
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT FROM information_schema.columns
+				WHERE table_name = 'inbox_entries' AND column_name = $1
+			)`, col).Scan(&exists)
+		require.NoError(t, err)
+		require.True(t, exists, "inbox_entries.%s should exist after migration", col)
+
+		err = db.QueryRowContext(ctx, `
+			SELECT data_type, is_nullable FROM information_schema.columns
+			WHERE table_name = 'inbox_entries' AND column_name = $1`, col).
+			Scan(&dataType, &nullable)
+		require.NoError(t, err)
+		assert.Equal(t, wantType, dataType, "inbox_entries.%s must have the type the store writes", col)
+		assert.Equal(t, "YES", nullable,
+			"inbox_entries.%s must be NULLABLE: an absent hint / an uncorrelated message has exactly one representation (SQL NULL), and a pre-CR-FEAT-036 row must keep reading back as it did", col)
+	}
 }
 
 // TestRunMigrations_AgentConfigColumns verifies the nullable optional-config

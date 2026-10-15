@@ -472,6 +472,23 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	if entry.Priority != MinMessagePriority {
 		body["priority"] = entry.Priority
 	}
+	// Forward the optional selection hints and the correlation a message
+	// answers, verbatim (CR-FEAT-036). A proxy that dropped them would deliver
+	// a dispatch whose router cannot tell "the scheduler chose this model" from
+	// "the scheduler said nothing" — the very distinction the router exists to
+	// interpret — and would lose the id a result is matched on. An ABSENT hint
+	// stays absent (the canonical default: the key is not forwarded at all) and
+	// a present one rides the hint type's own JSON encoding, so a blank or an
+	// explicit value arrives downstream exactly as the caller wrote it.
+	if entry.Model != nil {
+		body["model"] = entry.Model
+	}
+	if entry.Provider != nil {
+		body["provider"] = entry.Provider
+	}
+	if entry.ReplyTo != "" {
+		body["reply_to"] = entry.ReplyTo
+	}
 	// A 404 on this endpoint means the TARGET agent has no inbox here; the
 	// subject is the target, so that is the identity the error names even when
 	// the store itself is a proxy for it (CR-GAP-072). When a downstream

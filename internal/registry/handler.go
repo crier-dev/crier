@@ -144,6 +144,28 @@ type deliverRequest struct {
 	// X-Crier-Addressing carries the same value; the body field wins when both
 	// are present.
 	Addressing string `json:"addressing,omitempty"`
+	// Model and Provider are the optional model/provider selection hints of a
+	// lane dispatch (CR-FEAT-036): the pair a consumer wants, or the members a
+	// polling task-router interprets when either is default.
+	//
+	// They are transparent to Crier. Both are OPTIONAL and independent; a
+	// hint that is absent, JSON null or a blank string is a DEFAULT hint and is
+	// preserved in the form it was sent, and an explicit value is passed
+	// through byte-for-byte — no trimming, no validation against a catalogue,
+	// and no defaulting, because choosing a pair is the router's work, not the
+	// bus's. Pointers, not strings, because "present and null" and "present and
+	// empty" are both supported spellings a router may distinguish (see
+	// selection.go).
+	Model    *SelectionHint `json:"model,omitempty"`
+	Provider *SelectionHint `json:"provider,omitempty"`
+	// ReplyTo is the Crier message id (or correlation id) this message answers
+	// (CR-FEAT-036). Provenance only: it is stored with the message and handed
+	// back on every read of it, so the sender of a dispatch can match a
+	// returned result to the dispatch from its own inbox alone. It is NEVER an
+	// address and NEVER an authorization: a value here — or an equivalent hint
+	// inside the payload — grants no reach the verified sender identity and the
+	// delivery ACL do not already grant.
+	ReplyTo string `json:"reply_to,omitempty"`
 }
 
 // HeaderAddressing is the request header spelling of deliverRequest.Addressing,
@@ -1365,6 +1387,14 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		// the audit answer to "which human spoke as which agent" (T3). Empty
 		// for anonymous and agent-initiated deliveries.
 		PrincipalID: req.PrincipalID,
+		// The optional selection hints and the correlation this message
+		// answers (CR-FEAT-036) ride the envelope unchanged: whatever form the
+		// caller sent — explicit, null, blank or absent — is what the stored
+		// message carries and what every reader of it sees. Nothing here fills
+		// in a default model or provider; the router interprets the default.
+		Model:    req.Model,
+		Provider: req.Provider,
+		ReplyTo:  req.ReplyTo,
 	}
 	// The machine-readable location (CR-CHAT-029) is attached to the entry
 	// AFTER the realms block above (which resolved and recorded the target's

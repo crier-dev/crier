@@ -80,7 +80,8 @@ func (s *PostgresStore) PeekInbox(agentID string) ([]*InboxEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
        COALESCE(principal_id, ''),
-       created_at, expires_at, leased_at, lease_id, acked, priority
+       created_at, expires_at, leased_at, lease_id, acked, priority,
+       selection, COALESCE(reply_to, '')
 FROM inbox_entries
 WHERE agent_id = $1
 ORDER BY delivery_sequence;`, agentID)
@@ -98,15 +99,22 @@ ORDER BY delivery_sequence;`, agentID)
 			leaseID   *string
 			acked     bool
 			priority  int
+			selection []byte
 		)
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender, &entry.IdempotencyKey,
-			&entry.PrincipalID, &entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked, &priority); err != nil {
+			&entry.PrincipalID, &entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked, &priority,
+			&selection, &entry.ReplyTo); err != nil {
 			return nil, fmt.Errorf("peek inbox scan: %w", err)
 		}
 		// expires_at travels through pgtype.Timestamptz for the same reason
 		// Peek reads it that way: a stored `infinity` (ttl_seconds=0 → never
 		// expires, DF-CRIER-37) must decode instead of erroring.
 		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
+		// CR-FEAT-036: a listing shows the selection hints and the correlation
+		// the message was delivered with, so an operator (or a router that
+		// would rather look before it claims) sees the same envelope the lease
+		// would hand it.
+		applySelectionJSONB(&entry, selection)
 		entry.LeasedAt = leasedAt
 		if leaseID != nil {
 			entry.LeaseID = *leaseID

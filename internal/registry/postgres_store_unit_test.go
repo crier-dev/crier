@@ -863,16 +863,20 @@ func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1", ThreadID: "thr-1",
 		PrincipalID: "prin_01", Location: &Location{Channel: "sess-1", ThreadID: "thr-1"}}
 
-	// Twelve arguments since CR-CHAT-007: the INSERT names the principal_id
-	// column too (the HUMAN the delivery was made by — CR-CHAT-007, the audit
-	// answer to "which human spoke as which agent"), after the thread_id
-	// column added in CR-CHAT-019. Eleven before it since CR-CHAT-029 (the
-	// location column), nine since CR-FEAT-035 (priority), CR-FEAT-025
-	// (sender + idempotency_key) and CR-FEAT-029 (the realm). This entry
-	// carries a location, so the 12th arg is its JSON.
+	// Fifteen arguments since CR-FEAT-036: the INSERT also names the
+	// selection column (the dispatch's optional model/provider hints as one
+	// JSONB object — CR-FEAT-036) and reply_to (the Crier correlation the
+	// message answers). Twelve before it since CR-CHAT-007 (the principal_id
+	// column — the HUMAN the delivery was made by, the audit answer to "which
+	// human spoke as which agent"), after the thread_id column added in
+	// CR-CHAT-019. Eleven before it since CR-CHAT-029 (the location column),
+	// nine since CR-FEAT-035 (priority), CR-FEAT-025 (sender +
+	// idempotency_key) and CR-FEAT-029 (the realm). This entry carries a
+	// location, so the 12th arg is its JSON; it carries no selection hint and
+	// answers nothing, so the last two args are SQL NULL.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
-			0, "thr-1", "prin_01", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil).
+			0, "thr-1", "prin_01", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil, nil, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -892,7 +896,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 	// both optional columns are SQL NULL.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
-			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -905,7 +909,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -918,7 +922,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -931,7 +935,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -1000,10 +1004,13 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	// its priority (the first ORDER BY key), since CR-FEAT-029 the realm it
 	// was delivered into (COALESCE'd like the provenance), since
 	// CR-CHAT-019 its thread (COALESCE'd the same way, so a thread-less
-	// delivery arrives as ""), and since CR-CHAT-007 the HUMAN the delivery
-	// was made by (COALESCE'd the same way — the T3 audit provenance).
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "principal_id", "created_at", "expires_at", "namespace", "location", "delivery_ms"}).
-		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", "prin_01", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil)
+	// delivery arrives as ""), since CR-CHAT-007 the HUMAN the delivery
+	// was made by (COALESCE'd the same way — the T3 audit provenance), and
+	// since CR-FEAT-036 its selection hints (one JSONB body, NULL when the
+	// delivery named neither) plus the Crier correlation it answers
+	// (COALESCE'd like the other optional text columns).
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "principal_id", "created_at", "expires_at", "namespace", "location", "delivery_ms", "selection", "reply_to"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", "prin_01", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil, []byte(`{"model":"gpt-5.3","provider":"zai-glm-default"}`), "dispatch-7")
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)
@@ -1025,6 +1032,16 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	require.NotNil(t, msgs[0].Location, "the stored location travels with the retrieved message (CR-CHAT-029)")
 	require.Equal(t, "sess-1", msgs[0].Location.Channel)
 	require.Equal(t, "thr-1", msgs[0].Location.ThreadID)
+	// CR-FEAT-036: the dispatch's selection hints and the correlation it
+	// answers travel with the retrieved message — the polling router reads
+	// them off the lease, and neither is a value the store invented.
+	require.NotNil(t, msgs[0].Model, "the stored selection hint travels with the retrieved message (CR-FEAT-036)")
+	require.Equal(t, HintExplicit, msgs[0].Model.Form)
+	require.Equal(t, "gpt-5.3", msgs[0].Model.Value)
+	require.True(t, msgs[0].Model.Selects())
+	require.NotNil(t, msgs[0].Provider)
+	require.Equal(t, "zai-glm-default", msgs[0].Provider.Value)
+	require.Equal(t, "dispatch-7", msgs[0].ReplyTo, "the stored correlation travels with the retrieved message (CR-FEAT-036)")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

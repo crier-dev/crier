@@ -15,6 +15,31 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Optional model/provider hints and a correlated reply on the dispatch
+  envelope** (CR-FEAT-036, `docs/router-dispatch.md`). A lane dispatch may carry
+  `model` and `provider` — the pair a consumer wants, or the members a bunker
+  task-router interprets when one or both are default — plus `reply_to`, the
+  Crier message id a returned result answers. Crier TRANSPORTS the two hints and
+  never chooses one: an explicit value survives delivery byte for byte (no
+  trimming, no validation against any catalogue of models), a blank string is
+  preserved as sent, and `absent`/`null`/blank are all DEFAULT hints that resolve
+  to ONE canonical representation — the omitted member — so a consumer has a
+  single default state to branch on and no concrete model or provider is ever
+  filled in for them. The members ride the deliver request, the stored message
+  (one JSONB column plus `reply_to`; migration 013) and every read of it —
+  retrieve/lease, peek, list — so the polling router sees exactly what the
+  scheduler wrote; a delivery that names none of them is byte-identical to
+  before, and the remote-proxy deliver path forwards them verbatim instead of
+  dropping them. Authorization is unchanged and stays out of the payload: the two
+  sends a router deployment needs are two deliberate `send` grants (scheduler →
+  the router's inbox, router → the scheduler's inbox), unrelated pairs are
+  refused with `403 DELIVERY_FORBIDDEN`, and a `reply_to` — in the envelope or
+  inside the payload — confers nothing. Covered by
+  `internal/registry/crfeat036_test.go`: all four selection combinations across
+  every supported spelling, over the real HTTP surface, plus the round trip
+  (lease → correlated reply → ack), the signed-identity read gate, and the
+  lease-expiry redelivery.
+
 - **The session task lifecycle is now READABLE, not fire-and-forget**
   (DF-CRIER-304, `specs/CHAT-ADDRESSING.md` §2.5). Two read routes:
   `GET /sessions/{id}/tasks` lists every task in a session at its CURRENT state
