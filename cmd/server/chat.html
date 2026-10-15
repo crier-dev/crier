@@ -3,214 +3,347 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Crier — Chat (CR-CHAT-009 MVP)</title>
+<meta name="color-scheme" content="dark">
+<title>Crier — Conversations</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; color: #1a1a1a; }
-  code { font-family: ui-monospace, Menlo, monospace; }
-  #sidebar { width: 20rem; border-right: 1px solid #e5e7eb; overflow-y: auto; padding: 1rem; box-sizing: border-box; }
-  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #transcript { flex: 1; overflow-y: auto; padding: 1rem; }
-  .session { padding: 0.5rem; cursor: pointer; border-radius: 6px; margin-bottom: 0.25rem; }
-  .session:hover { background: #f3f4f6; }
-  .session.active { background: #dbeafe; }
-  .session .meta { font-size: 0.75rem; color: #6b7280; }
-  .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
-  .msg.reply { margin-left: 2rem; border-left: 3px solid #93c5fd; }
-  .msg .hdr { font-size: 0.75rem; color: #6b7280; }
-  .msg .guard { font-size: 0.75rem; color: #92400e; background: #fef3c7; border-radius: 4px; padding: 0.1rem 0.4rem; display: inline-block; margin-top: 0.25rem; }
-  .badge { font-size: 0.7rem; border-radius: 999px; padding: 0.1rem 0.5rem; background: #e5e7eb; display: inline-block; margin-left: 0.25rem; }
-  .badge.grant { background: #d1fae5; color: #065f46; }
-  .badge.role { background: #dbeafe; color: #1e40af; }
-  .badge.flag { background: #fee2e2; color: #991b1b; }
-  .badge.ok { background: #d1fae5; color: #065f46; }
-  button, input { font: inherit; padding: 0.35rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; }
-  button { background: #1a56db; color: white; border: none; cursor: pointer; }
-  button.ghost { background: #f3f4f6; color: #1a1a1a; }
-  #composer { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid #e5e7eb; }
-  #composer input[type=text] { flex: 1; }
-  h2 { font-size: 1rem; margin: 0.25rem 0; }
-  .note { font-size: 0.75rem; color: #6b7280; }
-  #replying { background: #fef3c7; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.75rem; display: none; }
+:root { --bg:#0b0d12; --raised:#12151d; --panel:#161a24; --input:#1b202c; --border:#303747; --text:#e6e9f0; --dim:#a7b0c2; --mint:#4cc38a; --lav:#b8a2fb; --amber:#f5b04a; --red:#ff9188; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+button,input,select,textarea { font:inherit; color:inherit; }
+button,a,input,select,textarea,summary { -webkit-tap-highlight-color:transparent; }
+button { cursor:pointer; }
+button,input,select,textarea { border:1px solid var(--border); border-radius:8px; background:var(--input); padding:9px 11px; min-width:0; max-width:100%; }
+button { min-height:42px; font-weight:600; }
+button:hover:not(:disabled) { border-color:var(--mint); }
+button:disabled { opacity:.55; cursor:not-allowed; }
+:focus-visible { outline:2px solid var(--mint); outline-offset:3px; }
+a { color:var(--lav); }
+h1,h2,h3,p { margin:0; }
+h1 { font-size:18px; line-height:1.35; }
+h2 { font-size:14px; }
+h3 { font-size:13px; }
+small,.note { font-size:12px; color:var(--dim); }
+code { font-family:ui-monospace,monospace; font-size:12px; }
+[hidden] { display:none !important; }
+.topbar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--raised); }
+.logo { display:flex; align-items:center; gap:9px; font-size:18px; font-weight:750; text-decoration:none; color:var(--text); }
+.logo-dot { width:12px; height:12px; background:var(--mint); border-radius:50%; }
+.breadcrumb { flex:1; color:var(--dim); overflow-wrap:anywhere; min-width:0; }
+.top-status { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:12px; color:var(--dim); }
+.layout { display:grid; grid-template-columns:260px minmax(0,1fr) 280px; min-height:calc(100dvh - 70px); }
+.sidebar,.rail { background:var(--raised); min-width:0; padding:18px 14px; }
+.sidebar { border-right:1px solid var(--border); }
+.rail { border-left:1px solid var(--border); }
+.section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.stack { display:grid; gap:12px; }
+label { display:grid; gap:5px; font-size:12px; color:var(--dim); min-width:0; }
+input,textarea,select { width:100%; }
+.primary { background:var(--mint); color:#06281a; border-color:var(--mint); }
+.ghost { background:transparent; }
+.sessions { display:grid; align-content:start; gap:5px; margin:12px 0 20px; max-height:42dvh; overflow-y:auto; }
+.session { display:flex; gap:10px; width:100%; text-align:left; background:transparent; border-color:transparent; font-weight:400; }
+.session.active { background:rgba(76,195,138,.13); border-color:rgba(76,195,138,.4); }
+.avatar { display:grid; place-items:center; width:32px; height:32px; flex-shrink:0; background:rgba(167,139,250,.14); border-radius:9px; color:var(--lav); font-size:12px; font-weight:700; }
+.session.active .avatar { color:var(--mint); background:rgba(76,195,138,.18); }
+.s-body { flex:1; min-width:0; overflow-wrap:anywhere; }
+.s-name { font-weight:650; }
+.s-preview { display:block; color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.s-meta { display:block; font-size:11px; color:var(--dim); }
+.identity { border-top:1px solid var(--border); padding-top:16px; }
+.identity summary { cursor:pointer; margin-bottom:12px; font-weight:650; }
+main { min-width:0; display:flex; flex-direction:column; }
+.thread-header { padding:18px 20px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.thread-heading { flex:1; min-width:0; overflow-wrap:anywhere; }
+.pill { display:inline-block; padding:2px 8px; border:1px solid var(--border); border-radius:20px; font-size:11px; overflow-wrap:anywhere; }
+.mint { color:var(--mint); background:rgba(76,195,138,.1); }
+.lavender { color:var(--lav); background:rgba(167,139,250,.1); }
+.warning { color:var(--amber); }
+.error { color:var(--red); }
+.toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; padding:12px 20px; border-bottom:1px solid var(--border); }
+#transcript { flex:1; min-height:320px; max-height:64dvh; overflow-y:auto; padding:20px; overflow-wrap:anywhere; }
+.empty { padding:28px 8px; color:var(--dim); }
+.empty strong { display:block; color:var(--text); font-size:16px; margin-bottom:6px; }
+.msg { display:flex; align-items:flex-start; gap:12px; padding:15px 0; border-bottom:1px solid var(--border); }
+.msg.reply { margin-left:20px; padding-left:12px; border-left:2px solid var(--border); }
+.msg.task { border:1px solid rgba(245,176,74,.45); border-radius:10px; padding:14px; margin-top:10px; background:rgba(245,176,74,.05); }
+.msg.addressed .m-content { border-left:2px solid var(--lav); padding-left:12px; }
+.m-content { min-width:0; flex:1; }
+.m-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:7px; }
+.m-body { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text); }
+.m-meta { margin-top:8px; font-size:11px; color:var(--dim); overflow-wrap:anywhere; }
+.outcomes { display:grid; gap:4px; margin:10px 0; font-size:12px; }
+.reply-button { min-height:32px; font-size:12px; padding:4px 10px; margin-top:8px; background:transparent; }
+.composer-wrap { padding:16px 20px 20px; border-top:1px solid var(--border); }
+#replying { padding:8px 10px; margin-bottom:10px; border-left:2px solid var(--lav); background:var(--panel); overflow-wrap:anywhere; }
+#replying button { margin-left:8px; min-height:32px; padding:3px 8px; }
+.composer { background:var(--input); border:1px solid var(--border); border-radius:10px; padding:12px; }
+.composer textarea { border:0; padding:0; resize:vertical; min-height:86px; background:transparent; }
+.composer-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-top:10px; }
+.composer-controls label:first-child { flex:1 1 150px; }
+.composer-controls label:nth-child(2) { flex:0 1 135px; }
+.composer-hint { margin-top:8px; }
+#send-result { margin:10px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.panel { margin-bottom:22px; overflow-wrap:anywhere; }
+.panel h2 { margin-bottom:10px; }
+.card { padding:12px; border:1px solid var(--border); background:var(--panel); border-radius:10px; margin-bottom:8px; min-width:0; }
+.card p { margin-top:5px; }
+.person { display:flex; gap:9px; align-items:flex-start; }
+.person > div:last-child { min-width:0; }
+.dot { display:inline-block; width:7px; height:7px; margin-right:5px; border-radius:50%; background:var(--dim); }
+.dot.online { background:var(--mint); }
+.dot.stale { background:var(--amber); }
+.dot.offline { background:var(--red); }
+.cap { display:inline-block; padding:2px 6px; margin:5px 3px 0 0; border-radius:4px; color:var(--lav); background:var(--input); font-size:11px; }
+.task-link { text-align:left; width:100%; font-weight:400; }
+.actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; font-size:11px; }
+.create { padding:12px; background:var(--panel); border-radius:10px; margin-bottom:12px; }
+.create .stack { margin-top:10px; }
+#refresh-state { padding:0 20px 12px; }
+.skip { position:absolute; left:-9999px; }
+.skip:focus { left:12px; top:12px; z-index:2; background:var(--panel); padding:10px; }
+@media(min-width:901px) and (max-width:1100px) { .layout { grid-template-columns:220px minmax(0,1fr); } .rail { grid-column:1 / -1; border-left:0; border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; } }
+@media(max-width:900px) { .layout { grid-template-columns:minmax(0,1fr); } .sidebar { border-right:0; border-bottom:1px solid var(--border); } .sessions { max-height:230px; } .rail { border-left:0; border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; } #transcript { max-height:none; } }
+@media(max-width:480px) { .topbar { padding:12px 14px; gap:8px 12px; } .breadcrumb { flex-basis:65%; } .top-status { width:100%; } .thread-header,.toolbar,#transcript,.composer-wrap { padding-left:12px; padding-right:12px; } .rail { display:block; padding:16px 12px; } .msg { gap:8px; } .msg.reply { margin-left:8px; padding-left:8px; } .composer-controls label:nth-child(2) { flex:1 1 100px; } .composer-controls button { width:100%; } }
 </style>
 </head>
-<body data-openapi-client="CR-CHAT-009">
-<nav id="sidebar">
-  <h2>Sessions <span class="note">(GET /sessions)</span></h2>
-  <div class="note">
-    <label>Agent ID: <input id="agent" placeholder="X-Agent-ID (optional)" style="width:100%"></label>
-    <button class="ghost" onclick="newSession()">+ new session (POST /sessions)</button>
-  </div>
-  <div id="sessions" class="note">loading…</div>
-</nav>
-<main id="main">
-  <div id="transcript"><p class="note">Select a session.</p></div>
-  <div id="replying"></div>
-  <div id="composer">
-    <input type="text" id="text" placeholder='Message text → POST /sessions/{id}/messages {"payload":{"text":…},"sender":…,"parent_id":…}'>
-    <button onclick="send()">Send</button>
-    <button class="ghost" onclick="reload()">Reload (GET transcript)</button>
+<body data-openapi-client="CR-CHAT-009" data-ui-revision="CR-CHAT-038">
+<a class="skip" href="#main">Skip to conversation</a>
+<header class="topbar">
+  <a class="logo" href="/chat"><span class="logo-dot" aria-hidden="true"></span>Crier</a>
+  <span class="breadcrumb" id="breadcrumb">Conversations / no session selected</span>
+  <div class="top-status"><span id="health">Server status: loading…</span><a href="/docs">API docs</a></div>
+</header>
+<div class="layout">
+<aside class="sidebar" aria-label="Session navigation">
+  <div class="section-head"><h2>Conversations</h2><button id="new-session" class="ghost" aria-expanded="false" aria-controls="create-form">+ New</button></div>
+  <form id="create-form" class="create" hidden>
+    <h3>New channel</h3>
+    <div class="stack"><label>Channel title<input id="session-title" required maxlength="200" placeholder="Name this conversation"></label>
+    <button class="primary" id="create-button" type="submit">Create channel</button><p class="note">Creates a channel with your agent identity as its initial member. No agent is registered automatically.</p><p id="create-result" role="status"></p></div>
+  </form>
+  <label>Find a conversation<input id="session-search" type="search" placeholder="Filter loaded sessions"></label>
+  <nav id="sessions" class="sessions" aria-label="Sessions"><p class="note">Loading sessions…</p></nav>
+  <details class="identity" open>
+    <summary>Connection &amp; identity</summary>
+    <form id="identity-form" class="stack">
+      <label>Acting agent ID<input id="agent" placeholder="Your existing agent ID" autocomplete="off"></label>
+      <label>Namespace<input id="namespace" placeholder="Default realm" autocomplete="off"></label>
+      <button id="apply-identity" class="ghost">Apply &amp; refresh</button>
+    </form>
+    <p class="note" style="margin-top:10px">Agent ID is an attribution header, not a login. Nothing is saved in browser storage.</p>
+    <details style="margin-top:10px"><summary>Authentication boundary</summary><p class="note">This server uses Bearer headers when authentication is enabled. There is no browser login or cookie exchange in the current API; even GET /chat requires that header. A trusted deployment must supply access outside this page. Do not paste shared message or admin tokens here. A 401/403 is a real refusal, not an empty conversation.</p></details>
+  </details>
+</aside>
+<main id="main" tabindex="-1">
+  <header class="thread-header"><div class="thread-heading"><h1 id="conversation-title">Your agents. One conversation.</h1><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><span id="session-state" class="pill">No session</span></header>
+  <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button></div>
+  <p id="refresh-state" class="note" role="status">HTTP reads every 15 seconds while this page is visible. No session WebSocket feed is exposed.</p>
+  <div id="transcript" aria-label="Conversation transcript"><div class="empty"><strong>Choose where the conversation happens.</strong>Open an existing channel or create one using an existing agent identity.</div></div>
+  <div class="composer-wrap">
+    <div id="replying" hidden></div>
+    <form id="composer" class="composer">
+      <label for="text">Message</label><textarea id="text" placeholder="Write to the conversation…" aria-describedby="composer-hint" disabled></textarea>
+      <div class="composer-controls">
+        <label>Recipient<select id="recipient" disabled><option value="">Session audience</option></select></label>
+        <label>Intent<select id="intent" disabled><option value="message">Message</option><option value="task">Explicit task</option></select></label>
+        <button id="send-button" class="primary" disabled>Send message</button>
+      </div>
+    </form>
+    <p id="composer-hint" class="note composer-hint">A tag addresses; it never executes. Recipient selects delivery. Only “Explicit task” requests work. Replies stay in their recorded thread. Ctrl/⌘ + Enter sends.</p>
+    <p id="send-result" role="status" aria-live="polite"></p>
+    <p class="note">Guard verdict, lease/ack details, task progress percentages and attachments are unavailable in this transcript UI; no status is inferred from message text.</p>
   </div>
 </main>
+<aside class="rail" aria-label="Conversation context">
+  <section class="panel"><h2>Participants &amp; presence</h2><div id="participants" class="note">Select a session.</div></section>
+  <section class="panel"><h2>Tasks in this session</h2><div id="tasks" class="note">Select a session. Tasks are read from their recorded lifecycle, never inferred from tags.</div></section>
+  <section class="panel"><h2>Session permissions</h2><div id="permissions" class="note">Select a session.</div><p class="note">Read-only. Permission changes are unavailable here.</p></section>
+  <section class="panel"><h2>Capability directory</h2><div id="capabilities" class="note">Loading registry…</div><p class="note">Registry advertisements, not an execution grant. Capability delivery selects one holder per delivery; it is not a broadcast. Capability routing is unavailable in this session composer.</p></section>
+</aside>
+</div>
 <script>
 "use strict";
-// CR-CHAT-009 dogfood rule: every fetch below targets an endpoint declared in
-// docs/openapi.yaml:
-//   GET  /sessions                        — listSessions
-//   POST /sessions                        — createSession
-//   GET  /sessions/{id}/messages          — readSessionTranscript
-//   POST /sessions/{id}/messages          — postSessionMessage
-//   GET  /sessions/{id}/permissions       — getSessionPermissions
-const API = {
-  sessions:     (q) => "/sessions" + (q || ""),
-  createSession: () => "/sessions",
-  transcript:   (id) => "/sessions/" + encodeURIComponent(id) + "/messages",
-  sendMessage:  (id) => "/sessions/" + encodeURIComponent(id) + "/messages",
-  permissions:  (id) => "/sessions/" + encodeURIComponent(id) + "/permissions",
-};
-let current = null, replyTo = null;
-
-async function call(url, opts) {
-  const agent = document.getElementById("agent").value.trim();
-  opts = opts || {};
-  opts.headers = Object.assign({"Accept": "application/json"}, opts.headers || {});
-  if (agent && !opts.headers["X-Agent-ID"]) opts.headers["X-Agent-ID"] = agent;
-  const r = await fetch(url, opts);
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error("HTTP " + r.status + " " + (body.error && body.error.code || JSON.stringify(body)).slice(0, 200));
+// A client of the stock API. POST /sessions/{id}/messages is the message path;
+// explicit work alone uses POST /sessions/{id}/tasks. No private endpoints,
+// token-bearing URLs, browser-stored credentials or parallel delivery channel.
+const $ = id => document.getElementById(id);
+const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
+// Match internal/namespace.Canonical's documented default-realm alias.
+const canonicalRealm = name => name === "default" ? "" : name || "";
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", generation:0, busy:false, sending:false, agent:"", namespace:"" };
+function esc(value) { const el = document.createElement("span"); el.textContent = String(value ?? ""); return el.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function author(ref) { return ref && (ref.principal ? ref.principal + (ref.as_agent ? " as " + ref.as_agent : "") : ref.agent || ref.system) || "Unknown author"; }
+function messageText(m) { return typeof m.payload?.text === "string" ? m.payload.text : JSON.stringify(m.payload ?? null, null, 2); }
+function stamp(value) { if (!value) return "Time unavailable"; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
+function avatar(id) { return esc(Array.from(id || "?").slice(0,2).join("").toUpperCase()); }
+function errorText(body) { const e = body?.error; return (typeof e === "string" ? e : [e?.code,e?.message,e?.detail].filter(Boolean).join(": ")) || body?.detail || "Server returned an error"; }
+async function call(path, options = {}) {
+  const headers = { Accept:"application/json", ...options.headers };
+  if (state.agent) headers["X-Agent-ID"] = state.agent;
+  if (state.namespace) headers["X-Crier-Namespace"] = state.namespace;
+  const response = await fetch(path, { ...options, headers, credentials:"same-origin", signal:AbortSignal.timeout(12000) });
+  const raw = await response.text();
+  let body;
+  try { body = JSON.parse(raw); } catch { throw new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway."); }
+  if (!response.ok) throw new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
   return body;
 }
-
-function esc(s) { const d = document.createElement("div"); d.textContent = String(s == null ? "" : s); return d.innerHTML; }
-function author(a) { return a && (a.agent || a.principal || a.as_agent || a.system) || "?"; }
-function text(m) { return (m.payload && (m.payload.text || JSON.stringify(m.payload))) || ""; }
-
-async function loadSessions() {
-  const el = document.getElementById("sessions");
-  try {
-    const body = await call(API.sessions(""));
-    el.innerHTML = "";
-    (body.sessions || []).forEach(s => {
-      const d = document.createElement("div");
-      d.className = "session" + (current === s.id ? " active" : "");
-      d.innerHTML = '<strong>' + esc(s.title || s.id) + '</strong>' +
-        ' <span class="badge ' + (s.state === "open" ? "ok" : "") + '">' + esc(s.state) + '</span>' +
-        (s.visibility === "private" ? ' <span class="badge flag">private</span>' : "") +
-        '<div class="meta">' + esc(s.id) + " · " + esc(s.kind || "") + " · " + (s.message_count || 0) + " msgs · " + (s.audience_count || 0) + " agents</div>" +
-        (s.preview ? '<div class="meta">' + esc(s.preview) + "</div>" : "");
-      d.onclick = () => openSession(s.id);
-      el.appendChild(d);
-    });
-    if (!(body.sessions || []).length) el.innerHTML = '<span class="note">No sessions (POST /sessions to create one).</span>';
-  } catch (e) { el.innerHTML = '<span class="note">Error: ' + esc(e.message) + "</span>"; }
+function notice(id, text, error = false) { $(id).textContent = text; $(id).className = error ? "note error" : "note"; }
+function unavailable(id, error) { notice(id, "Unavailable — " + error.message, true); }
+function renderSessions() {
+  const q = $("session-search").value.trim().toLowerCase();
+  const sessions = state.sessions.filter(s => [s.title,s.id,s.preview].join(" ").toLowerCase().includes(q));
+  $("sessions").innerHTML = sessions.map(s => '<button type="button" class="session' + (state.current === s.id ? ' active' : '') + '" data-session="' + esc(s.id) + '" aria-current="' + (state.current === s.id ? 'page' : 'false') + '"><span class="avatar" aria-hidden="true">' + avatar(s.title || s.id) + '</span><span class="s-body"><span class="s-name">' + esc(s.title || s.id) + '</span><span class="s-preview">' + esc(s.preview || "No message preview") + '</span><span class="s-meta">' + esc(s.kind) + ' · ' + esc(s.state) + ' · ' + esc(s.message_count) + ' messages<br>' + esc(stamp(s.last_message_at || s.created_at)) + '</span></span></button>').join("") || '<p class="note">' + (q ? "No matching loaded sessions." : "No sessions returned. Create a channel to begin.") + '</p>';
 }
-
-async function newSession() {
-  const agent = document.getElementById("agent").value.trim() || "web-client";
-  try {
-    const s = await call(API.createSession(), {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({title: "Web client room", kind: "channel", created_by: {agent: agent}, members: [{member_type: "agent", member_id: agent}]}),
-    });
-    current = s.id;
-    await loadSessions();
-    await openSession(s.id);
-  } catch (e) { alert("createSession failed: " + e.message); }
+function updateComposer() {
+  const enabled = !!state.session && state.session.state === "open" && !!state.agent && !state.sending;
+  for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
+  $("thread-filter").disabled = !state.session || state.sending;
+  for (const id of ["new-session","apply-identity","create-button"]) $(id).disabled = state.sending;
+  $("send-button").textContent = state.sending ? "Recording…" : $("intent").value === "task" ? "Create task" : "Send message";
 }
-
-async function openSession(id) {
-  current = id;
-  replyTo = null;
-  renderReplyBanner();
-  document.querySelectorAll(".session").forEach(n => n.classList.remove("active"));
-  const t = document.getElementById("transcript");
-  t.innerHTML = '<p class="note">loading transcript…</p>';
-  await loadSessions();
-  await reload();
-  try {
-    const perms = await call(API.permissions(id));
-    renderPermissions(perms);
-  } catch (e) { renderPermissions(null); }
+function renderHeader() {
+  const s = state.session;
+  $("conversation-title").textContent = s ? s.title || s.id : "Choose a conversation";
+  $("conversation-meta").textContent = s ? s.id + " · " + s.kind + " · " + (s.visibility || "realm") + " · " + s.participant_count + " participants · " + s.audience_count + " agents" : "No readable session selected.";
+  $("session-state").textContent = s ? s.state : "Unavailable";
+  $("session-state").className = "pill" + (s?.state === "open" ? " mint" : "");
+  $("breadcrumb").textContent = (state.namespace || "Default realm") + " / " + (s ? s.title || s.id : "Conversations");
+  updateComposer();
 }
-
-function renderPermissions(perms) {
-  document.querySelectorAll("#permbar").forEach(n => n.remove());
-  const bar = document.createElement("div");
-  bar.id = "permbar";
-  bar.style.cssText = "padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb";
-  if (!perms) { bar.innerHTML = '<span class="note">GET /sessions/{id}/permissions: unavailable.</span>'; }
-  else {
-    let html = '<strong>Permissions (GET /sessions/{id}/permissions):</strong> ';
-    (perms.rows || []).forEach(r => {
-      const granted = Object.entries(r.allowed || {}).filter(([, v]) => v).map(([k]) => k);
-      const srcs = Object.entries(r.source || {}).filter(([, v]) => v === "grant").map(([k]) => k);
-      html += '<span class="badge">' + esc(r.member_type + ":" + r.member_id) + " = " + esc(r.role) + " [" + esc(granted.join("+")) + "]</span>";
-      srcs.forEach(k => { html += ' <span class="badge grant">grant:' + esc(k) + "</span>"; });
-    });
-    bar.innerHTML = html;
+function renderReply() {
+  $("replying").hidden = !state.reply;
+  $("replying").innerHTML = state.reply ? 'Reply to <code>' + esc(state.reply) + '</code><button type="button" id="cancel-reply">Cancel reply</button>' : "";
+}
+function renderThreadOptions() {
+  const threads = new Map();
+  for (const m of state.messages) if (!threads.has(m.thread_id)) threads.set(m.thread_id, m);
+  $("thread-filter").innerHTML = '<option value="">All threads</option>' + [...threads].map(([id,m]) => '<option value="' + esc(id) + '">' + esc(messageText(m).slice(0,65) || id) + '</option>').join("");
+  if (!threads.has(state.thread)) state.thread = "";
+  $("thread-filter").value = state.thread;
+}
+function renderMessages(findings = []) {
+  const el = $("transcript");
+  const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
+  let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
+  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "refused" ? "error" : "note") + '">' + esc(o.target) + ': ' + esc(o.outcome) + (o.detail ? ' — ' + esc(o.detail) : '') + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
+  // Avoid replacing a focused reply control on every background read.
+  if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
+}
+function renderParticipants(body) {
+  $("participants").innerHTML = (body.participants || []).map(p => {
+    const a = p.member_type === "agent" ? state.agents.find(a => a.id === p.member_id) : null;
+    const status = a && ["online","stale","offline"].includes(a.status) ? a.status : "presence unavailable";
+    return '<div class="card person"><span class="avatar" aria-hidden="true">' + avatar(p.member_id) + '</span><div><strong>' + esc(p.member_id) + '</strong><p class="note">' + esc(p.member_type) + ' · ' + esc(p.role) + ' · ' + (p.active ? "active member" : "removed member") + '</p><p class="note"><span class="dot ' + (a ? esc(a.status) : '') + '"></span>' + esc(status) + '</p>' + (a?.capabilities || []).map(c => '<span class="cap">' + esc(c) + '</span>').join("") + '</div></div>';
+  }).join("") || '<p class="note">No participants returned.</p>';
+}
+function renderPermissions(body) {
+  $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + (body.actions || Object.keys(r.allowed || {})).map(a => '<span class="pill ' + (r.allowed?.[a] === true ? 'mint' : '') + '">' + esc(a) + ': ' + (r.allowed?.[a] === true ? 'allowed' : r.allowed && typeof r.allowed === 'object' ? 'denied' : 'unknown') + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
+}
+function renderTasks(body) {
+  $("tasks").innerHTML = (body.tasks || []).map(t => '<button type="button" class="card task-link" data-thread="' + esc(t.thread_id) + '"><span class="pill warning">' + esc(t.state) + '</span><p><strong>' + esc(t.task_id) + '</strong></p><p class="note">Owner: ' + esc(t.owner || "unassigned") + '</p><p class="note">Updated ' + esc(stamp(t.updated_at)) + '</p><p class="note">Open task thread</p></button>').join("") || '<p class="note">No tasks recorded. Addressing an agent does not create a task.</p>';
+}
+function renderDirectory() {
+  const capabilities = new Map();
+  for (const a of state.agents) for (const cap of a.capabilities || []) capabilities.set(cap, [...(capabilities.get(cap) || []), a.id]);
+  $("capabilities").innerHTML = [...capabilities].map(([cap,ids]) => '<div class="card"><strong class="lavender">@cap:' + esc(cap) + '</strong><p class="note">Advertised by ' + esc(ids.join(", ")) + '</p></div>').join("") || '<p class="note">No capabilities advertised in this realm.</p>';
+  const selected = $("recipient").value;
+  $("recipient").innerHTML = '<option value="">Session audience</option>' + state.agents.map(a => '<option value="' + esc(a.id) + '">' + esc(a.id) + '</option>').join("");
+  // Preserve an explicit recipient if a registry read loses it; never silently broadcast.
+  if (selected && !state.agents.some(a => a.id === selected)) { const o = document.createElement("option"); o.value = selected; o.textContent = selected + " (not in current registry)"; $("recipient").append(o); }
+  $("recipient").value = selected;
+}
+async function refresh() {
+  if (state.sending) return;
+  const generation = ++state.generation, id = state.current;
+  state.busy = true;
+  notice("refresh-state", "Refreshing recorded state…");
+  const valid = () => generation === state.generation;
+  const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
+  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; unavailable("capabilities",e); });
+  const reads = [registry,
+    read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
+    read("/status", b => { notice("health", "Health: " + (b.health || "not exposed") + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown")); }, e => unavailable("health",e))];
+  if (id) {
+    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; renderHeader(); unavailable("transcript",e); }));
+    reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
+    reads.push(read(sessionPath(id,"permissions"), renderPermissions, e => unavailable("permissions",e)));
+    reads.push(read(sessionPath(id,"tasks"), renderTasks, e => unavailable("tasks",e)));
   }
-  document.getElementById("transcript").before(bar);
+  await Promise.all(reads);
+  if (valid()) { state.busy = false; notice("refresh-state", "Last HTTP refresh attempt: " + new Date().toLocaleTimeString() + ". Automatic refresh every 15 seconds; failures are shown in each panel. Not a WebSocket connection."); }
 }
-
-async function reload() {
-  if (!current) return;
-  const t = document.getElementById("transcript");
+function openSession(id) {
+  if (state.sending) return;
+  if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
+  state.current = id; state.session = null; state.messages = []; state.reply = null; state.thread = "";
+  $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
+  renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
+  for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Loading…");
+  refresh();
+}
+async function send(event) {
+  event.preventDefault();
+  if (state.sending || !state.session || !state.agent || !$("text").value.trim()) return;
+  const id = state.current, draft = $("text").value.trim(), recipient = $("recipient").value, task = $("intent").value === "task";
+  if (task && !recipient) { notice("send-result","Choose an explicit agent recipient before requesting work.",true); return; }
+  const payload = { payload:{text:draft}, sender:state.agent };
+  if (state.reply) payload.parent_id = state.reply;
+  if (recipient) payload.targets = [{ kind:"agent", id:recipient }];
+  if (!task) payload.message_kind = recipient || /(^|\s)[@#]\S+/.test(draft) ? "addressed" : "plain";
+  state.sending = true; ++state.generation; updateComposer();
+  notice("send-result", task ? "Requesting explicit task…" : "Recording message…");
   try {
-    const body = await call(API.transcript(current));
-    const msgs = body.messages || [];
-    let html = "<h2>" + esc((body.session && body.session.title) || current) + ' <span class="note">GET /sessions/{id}/messages · ' + msgs.length + ' messages (seq-ordered)</span></h2>';
-    (body.findings || []).forEach(f => {
-      html += '<div class="msg"><span class="badge flag">transcript finding: ' + esc(f.kind) + '</span> <span class="note">' + esc(f.detail) + "</span></div>";
-    });
-    msgs.forEach(m => {
-      const isReply = !!m.parent_id;
-      let badge = "";
-      if (m.outcomes && m.outcomes.some(o => o.outcome === "refused")) badge = ' <span class="badge flag">delivery refused</span>';
-      html += '<div class="msg' + (isReply ? " reply" : "") + '">' +
-        '<div class="hdr">#' + esc(m.seq) + " · " + esc(author(m.author)) +
-        (isReply ? " ↩ reply to " + esc(m.parent_id) + (m.parent_resolvable === false ? " <span class='badge flag'>unresolvable parent</span>" : "") : " · thread root") +
-        " · " + esc(m.message_kind) + badge + "</div>" +
-        "<div>" + esc(text(m)) + "</div>" +
-        // Guard verdicts: the public API (docs/openapi.yaml TranscriptMessage)
-        // does not expose any guard/flag field, so the surface says so instead
-        // of faking one (CR-CHAT-009).
-        '<div><span class="guard">guard verdict: not exposed by API</span></div>' +
-        '<div><button class="ghost" style="font-size:0.7rem" onclick="startReply(\'' + esc(m.id) + '\')">reply</button></div>' +
-        "</div>";
-    });
-    t.innerHTML = html;
-    t.scrollTop = t.scrollHeight;
-  } catch (e) { t.innerHTML = '<p class="note">Error: ' + esc(e.message) + "</p>"; }
+    const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    const outcomes = result.outcomes || [];
+    const refused = outcomes.some(o => o.outcome === "refused");
+    const details = outcomes.map(o => o.target + ": " + o.outcome + (o.detail ? " — " + o.detail : "")).join("\n");
+    notice("send-result", (task ? "Task recorded" : "Message recorded") + (refused ? "; delivery refused for one or more recipients." : ".") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed."), refused);
+    $("text").value = ""; state.reply = null; renderReply();
+  } catch(e) { notice("send-result", "Request failed — " + e.message + "\nDraft kept. If the response was lost, refresh the transcript before retrying to avoid duplicates.",true); }
+  finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
-
-function startReply(id) {
-  replyTo = id;
-  renderReplyBanner();
-  document.getElementById("text").focus();
-}
-function renderReplyBanner() {
-  const b = document.getElementById("replying");
-  b.style.display = replyTo ? "block" : "none";
-  b.innerHTML = replyTo ? "Replying to <code>" + esc(replyTo) + '</code> — <button class="ghost" onclick="replyTo=null;renderReplyBanner()">cancel</button>' : "";
-}
-
-async function send() {
-  if (!current) return alert("Select a session first.");
-  const v = document.getElementById("text").value.trim();
-  if (!v) return;
-  const agent = document.getElementById("agent").value.trim() || "web-client";
-  const body = {payload: {text: v}, sender: agent, message_kind: "plain"};
-  if (replyTo) body.parent_id = replyTo;
+$("sessions").addEventListener("click", e => { const row = e.target.closest("[data-session]"); if (row) openSession(row.dataset.session); });
+$("session-search").addEventListener("input",renderSessions);
+$("refresh").addEventListener("click",refresh);
+$("new-session").addEventListener("click", () => { $("create-form").hidden = !$("create-form").hidden; $("new-session").setAttribute("aria-expanded",String(!$("create-form").hidden)); if (!$("create-form").hidden) $("session-title").focus(); });
+$("create-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (state.sending) return;
+  if (!state.agent) { notice("create-result","Apply an existing agent ID first. This is attribution, not authentication.",true); return; }
+  state.sending = true; ++state.generation; updateComposer();
   try {
-    await call(API.sendMessage(current), {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-    document.getElementById("text").value = "";
-    replyTo = null;
-    renderReplyBanner();
-    await reload();
-  } catch (e) { alert("postSessionMessage failed: " + e.message); }
-}
-
-loadSessions();
+    const s = await call("/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title:$("session-title").value.trim(), kind:"channel", created_by:{agent:state.agent}, members:[{member_type:"agent",member_id:state.agent}]}) });
+    state.sending = false; $("create-form").hidden = true; $("new-session").setAttribute("aria-expanded","false"); $("session-title").value = "";
+    openSession(s.id);
+  } catch(e) { unavailable("create-result",e); }
+  finally { state.sending = false; state.busy = false; updateComposer(); }
+});
+$("identity-form").addEventListener("submit", event => {
+  event.preventDefault(); if (state.sending) return;
+  if ($("text").value && !window.confirm("Discard the unsent draft and change identity or realm?")) return;
+  state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
+  state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
+  $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
+  renderReply(); renderHeader(); renderSessions(); notice("send-result","");
+  $("thread-filter").innerHTML = '<option value="">All threads</option>';
+  for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Select a session in this realm.");
+  refresh();
+});
+$("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; renderReply(); renderMessages(); });
+$("transcript").addEventListener("click", e => {
+  const row = e.target.closest("[data-reply]"); if (!row || state.sending) return;
+  const m = state.messages.find(m => m.id === row.dataset.reply); if (!m) return;
+  state.reply = m.id; state.thread = m.thread_id; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("text").focus();
+});
+$("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; renderReply(); } });
+$("tasks").addEventListener("click", e => { const row = e.target.closest("[data-thread]"); if (row && !state.sending) { state.thread = row.dataset.thread; state.reply = null; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("transcript").scrollIntoView({block:"start"}); } });
+$("intent").addEventListener("change",updateComposer);
+$("composer").addEventListener("submit",send);
+$("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
+setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refresh(); },15000);
+refresh();
 </script>
 </body>
 </html>

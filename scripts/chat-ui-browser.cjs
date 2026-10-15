@@ -1,0 +1,189 @@
+#!/usr/bin/env node
+// CR-CHAT-038: real Chromium + stock embedded server. All seeded records are
+// confined to temporary test storage. No fixtures are shipped in chat.html.
+// Usage: NODE_PATH=/tmp/crier-browser/node_modules node scripts/chat-ui-browser.cjs
+// Install the harness dependency outside the repo: npm install --prefix /tmp/crier-browser playwright
+// Build first: go build -o /tmp/cr-chat-038-server ./cmd/server
+const {chromium} = require('playwright');
+const assert = require('node:assert/strict');
+const {spawn} = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const net = require('node:net');
+const {randomBytes} = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const evidence = process.env.CHAT_EVIDENCE || path.join(os.tmpdir(), 'cr-chat-038-evidence');
+fs.mkdirSync(evidence,{recursive:true});
+const processes = [], tempdirs = [];
+let browser;
+async function freePort() {
+  const server = net.createServer();
+  await new Promise((resolve,reject) => server.once('error',reject).listen(0,'127.0.0.1',resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  return port;
+}
+async function start(token = '') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-038-')); tempdirs.push(dir);
+  const port = await freePort();
+  // Keep only host/toolchain essentials. Ambient production CR_* config must
+  // never bind a test to a real database, permission log or peer.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CR_') && !k.startsWith('CRIER_')));
+  Object.assign(env,{CRIER_PORT:String(port),CR_SESSION_BACKEND:'jsonl',CR_SESSION_LOG_ROOT:path.join(dir,'sessions'),CR_GROUP_ROOT:path.join(dir,'groups'),CR_AUTH_TOKEN:token,CR_RATE_LIMIT_PER_MINUTE:'0'});
+  const log = fs.openSync(path.join(dir,'server.log'),'w');
+  const proc = spawn(process.env.CRIER_TEST_BINARY || '/tmp/cr-chat-038-server',[],{cwd:dir,env,stdio:['ignore',log,log]}); processes.push(proc); fs.closeSync(log);
+  const url = 'http://127.0.0.1:' + port;
+  for (let i=0;i<100;i++) {
+    if (proc.exitCode !== null) throw new Error('Scratch server exited: ' + fs.readFileSync(path.join(dir,'server.log'),'utf8'));
+    try { if ((await fetch(url+'/health')).ok) { assert.equal(proc.exitCode,null); return url; } } catch {}
+    await new Promise(r => setTimeout(r,100));
+  }
+  throw new Error('Scratch server readiness failed: ' + dir);
+}
+async function api(base, method, endpoint, body, headers = {}) {
+  const response = await fetch(base+endpoint,{method,headers:{'Content-Type':'application/json',...headers},body:body === undefined ? undefined : JSON.stringify(body)});
+  const raw = await response.text();
+  const json = raw ? JSON.parse(raw) : null;
+  assert.ok(response.ok, method+' '+endpoint+' '+response.status+' '+JSON.stringify(json));
+  return json;
+}
+async function waitIdle(page) { await page.waitForFunction(() => !state.sending && !state.busy && document.getElementById('refresh-state').textContent.startsWith('Last HTTP refresh')); }
+async function refresh(page) { await page.locator('#refresh').click(); await waitIdle(page); }
+async function run() {
+  const base = await start();
+  // These are deliberately identified as test records, not demo product data.
+  const operator = 'ui-test-operator', agent = 'ui-test-recipient';
+  const keypair = require('node:crypto').generateKeyPairSync('ed25519');
+  const public_key = keypair.publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('hex');
+  for (const id of [operator,agent]) await api(base,'POST','/agents',{id,public_key,capabilities:['ui-test-analysis']});
+  const session = await api(base,'POST','/sessions',{title:'Browser verification channel',kind:'channel',created_by:{agent:operator},members:[{member_type:'agent',member_id:operator},{member_type:'agent',member_id:agent}]});
+  const message = await api(base,'POST',`/sessions/${session.id}/messages`,{sender:operator,payload:{text:'Initial request for the browser test'},message_kind:'plain'});
+  const other = await api(base,'POST',`/sessions/${session.id}/messages`,{sender:operator,payload:{text:'Independent second thread'},message_kind:'plain'});
+  // A long unbroken body and malicious-looking markup must remain readable text.
+  const long = 'UNBROKEN_'+'x'.repeat(800)+'\n<img src=x onerror="window.__injected=true">';
+  await api(base,'POST',`/sessions/${session.id}/messages`,{sender:agent,parent_id:message.id,payload:{text:long},message_kind:'addressed'});
+  browser = await chromium.launch({executablePath:process.env.CHROME_BIN || '/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
+  const context = await browser.newContext({viewport:{width:1280,height:1000}});
+  const page = await context.newPage(); const errors = []; page.on('pageerror',e => errors.push(e.message));
+  await page.goto(base+'/chat'); await waitIdle(page);
+  assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038');
+  assert.equal(await page.locator('#send-button').isDisabled(),true);
+  await page.locator('#agent').fill(operator); await page.locator('#namespace').fill('default'); await page.locator('#apply-identity').click(); await waitIdle(page);
+  await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
+  assert.equal(await page.locator('.msg').count(),3);
+  assert.match(await page.locator('#participants').innerText(),/ui-test-recipient/);
+  assert.match(await page.locator('#participants').innerText(),/online/);
+  assert.match(await page.locator('#permissions').innerText(),/allowed/);
+  assert.match(await page.locator('#permissions').innerText(),/admin: denied/);
+  assert.match(await page.locator('#capabilities').innerText(),/ui-test-analysis/);
+  assert.equal(await page.locator('#transcript img').count(),0);
+  assert.equal(await page.evaluate(() => window.__injected),undefined);
+  await page.locator('#thread-filter').selectOption(message.thread_id);
+  assert.equal(await page.locator('.msg').count(),2);
+  assert.ok(!(await page.locator('#transcript').innerText()).includes('Independent second thread'));
+  await page.locator('[data-reply]').first().click();
+  await page.locator('#text').fill('Browser test reply stays in thread');
+  await page.locator('#send-button').click(); await waitIdle(page);
+  const transcript = await api(base,'GET',`/sessions/${session.id}/messages`);
+  const reply = transcript.messages.find(m => m.payload?.text === 'Browser test reply stays in thread');
+  assert.ok(reply); assert.equal(reply.parent_id,message.id); assert.equal(reply.thread_id,message.thread_id);
+  assert.equal(reply.message_kind,'plain');
+  await page.locator('#thread-filter').selectOption('');
+  // Addressing alone must never create a lifecycle.
+  await page.locator('#recipient').selectOption(agent);
+  await page.locator('#text').fill('@'+agent+' this addresses you, it is not work');
+  await page.locator('#send-button').click(); await waitIdle(page);
+  assert.equal((await api(base,'GET',`/sessions/${session.id}/tasks`)).count,0);
+  assert.match(await page.locator('#transcript').innerText(),/Addressed · no execution/);
+  // Tasks require a separate intent and an explicit recipient.
+  await page.locator('#intent').selectOption('task'); await page.locator('#recipient').selectOption('');
+  await page.locator('#text').fill('Explicit browser verification task'); await page.locator('#send-button').click();
+  assert.match(await page.locator('#send-result').innerText(),/Choose an explicit agent/);
+  assert.equal((await api(base,'GET',`/sessions/${session.id}/tasks`)).count,0);
+  await page.locator('#recipient').selectOption(agent); await page.locator('#send-button').click(); await waitIdle(page);
+  const tasks = await api(base,'GET',`/sessions/${session.id}/tasks`); assert.equal(tasks.count,1);
+  assert.match(await page.locator('#tasks').innerText(),new RegExp(tasks.tasks[0].task_id));
+  assert.match(await page.locator('.msg.task').innerText(),/Explicit task/);
+  await page.locator('#tasks [data-thread]').click(); assert.equal(await page.locator('#thread-filter').inputValue(),tasks.tasks[0].thread_id);
+  await page.locator('#thread-filter').selectOption('');
+  // Real per-target refusal: remove a previously selected registered recipient.
+  await page.locator('#intent').selectOption('message'); await page.locator('#recipient').selectOption(agent);
+  const deletePath = '/agents/'+agent, ts = String(Math.floor(Date.now()/1000));
+  const sig = require('node:crypto').sign(null,Buffer.from('DELETE\n'+deletePath+'\n'+ts),keypair.privateKey).toString('hex');
+  await api(base,'DELETE',deletePath,undefined,{'X-Agent-ID':agent,'X-Agent-Ts':ts,'X-Agent-Sig':sig});
+  await refresh(page);
+  assert.equal(await page.locator('#recipient').inputValue(),agent); // do not silently broadcast
+  await page.locator('#text').fill('This delivery must be refused'); await page.locator('#send-button').click(); await waitIdle(page);
+  assert.match(await page.locator('#send-result').innerText(),/refused/);
+  assert.match(await page.locator('#transcript').innerText(),/refused/);
+  const refusal = (await api(base,'GET',`/sessions/${session.id}/messages`)).messages.find(m => m.payload?.text === 'This delivery must be refused');
+  assert.equal(refusal.outcomes[0].outcome,'refused');
+  // Controlled transport faults exist only in this test browser, not product code.
+  for (const [code,body,expected] of [[401,{error:'missing Authorization header'},'HTTP 401'],[403,{error:{code:'TASK_FORBIDDEN',message:'Test refusal'}},'TASK_FORBIDDEN'],[500,{error:{code:'STORE_ERROR',message:'Test storage failure'}},'STORE_ERROR']]) {
+    await page.route('**/sessions/*/messages',route => route.request().method() === 'POST' ? route.fulfill({status:code,contentType:'application/json',body:JSON.stringify(body)}) : route.continue());
+    await page.locator('#text').fill('Keep this draft on failure '+code); await page.locator('#send-button').click(); await waitIdle(page);
+    assert.match(await page.locator('#send-result').innerText(),new RegExp(expected));
+    assert.equal(await page.locator('#text').inputValue(),'Keep this draft on failure '+code);
+    await page.unroute('**/sessions/*/messages');
+  }
+  await page.locator('#text').fill('');
+  await page.route('**/sessions/*/messages',route => route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:{code:'STORE_ERROR',message:'Read failure'}})}));
+  await refresh(page); assert.match(await page.locator('#transcript').innerText(),/STORE_ERROR/); assert.equal(await page.locator('#send-button').isDisabled(),true);
+  await page.unroute('**/sessions/*/messages'); await refresh(page);
+  // Delayed old-session reads must never overwrite the newly selected session.
+  const second = await api(base,'POST','/sessions',{title:'Second channel for race test',kind:'channel',created_by:{agent:operator},members:[{member_type:'agent',member_id:operator}]});
+  await refresh(page);
+  await page.route(`**/sessions/${session.id}/messages`,async route => { await new Promise(r => setTimeout(r,300)); await route.continue(); });
+  await page.locator('#refresh').click(); await page.locator(`[data-session="${second.id}"]`).click(); await waitIdle(page);
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('#conversation-title').innerText(),second.title);
+  assert.equal(await page.locator('.msg').count(),0);
+  await page.unroute(`**/sessions/${session.id}/messages`);
+  await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
+  const measurements = [];
+  for (const width of [390,768,1280]) {
+    await page.setViewportSize({width,height:1000});
+    const result = await page.evaluate(() => ({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth,overflows:[...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.scrollWidth > el.clientWidth+1 && !['SELECT','TEXTAREA'].includes(el.tagName) && getComputedStyle(el).overflowX !== 'hidden' && !el.classList.contains('skip')).map(el => ({id:el.id,tag:el.tagName,class:el.className,client:el.clientWidth,scroll:el.scrollWidth}))}));
+    assert.equal(result.viewport,width); assert.ok(result.scrollWidth<=width,JSON.stringify(result)); assert.ok(result.bodyWidth<=width,JSON.stringify(result)); assert.deepEqual(result.overflows,[]);
+    await page.locator('#text').scrollIntoViewIfNeeded();
+    for (const selector of ['#text','#recipient','#intent','#send-button']) { const b = await page.locator(selector).boundingBox(); assert.ok(b && b.x >= 0 && b.x+b.width <= width && b.width >= 42, selector+' clipped'); }
+    await page.evaluate(() => { const panel = document.getElementById('transcript'); panel.scrollTop = panel.scrollHeight; });
+    const lastMessage = await page.evaluate(() => { const el = document.getElementById('transcript'); const panel = el.getBoundingClientRect(); const message = document.querySelector('#transcript .msg:last-child').getBoundingClientRect(); return {scrollTop:el.scrollTop,visible:message.top >= panel.top - 1 && message.bottom <= panel.bottom + 1}; });
+    assert.equal(lastMessage.visible,true,'last message must be reachable at '+width);
+    result.lastMessage = lastMessage;
+    await page.screenshot({path:path.join(evidence,`chat-${width}.png`),fullPage:true});
+    measurements.push(result);
+  }
+  await page.setViewportSize({width:1280,height:1000});
+  await page.locator('#composer').screenshot({path:path.join(evidence,'chat-composer-detail.png')});
+  // Empty states and creation through the actual browser form.
+  await page.locator('#session-search').fill('no-such-session'); assert.match(await page.locator('#sessions').innerText(),/No matching/);
+  await page.locator('#session-search').fill(''); await page.locator('#new-session').click();
+  await page.locator('#session-title').fill('Created by browser form'); await page.locator('#create-button').click(); await waitIdle(page);
+  assert.equal(await page.locator('#conversation-title').innerText(),'Created by browser form');
+  assert.ok((await api(base,'GET','/sessions')).sessions.some(s => s.title === 'Created by browser form'));
+  // Attribute escaping: inject hostile-looking values into the read response
+  // only, then prove no extra element or event attribute reached the DOM.
+  await page.route('**/sessions',route => route.request().method() === 'GET' ? route.fulfill({contentType:'application/json',body:JSON.stringify({sessions:[{id:'\" onmouseover=\"window.__injected=true',title:'<img src=x onerror=window.__injected=true>',kind:'channel',state:'open',message_count:0}]})}) : route.continue());
+  await refresh(page); assert.equal(await page.locator('#sessions img, #sessions [onmouseover]').count(),0);
+  await page.unroute('**/sessions');
+  // Read errors remain visible, never masquerading as empty sessions.
+  await page.route('**/sessions',route => route.fulfill({status:401,contentType:'application/json',body:'{"error":"missing Authorization header"}'}));
+  await refresh(page); assert.match(await page.locator('#sessions').innerText(),/Unavailable — HTTP 401/);
+  await page.unroute('**/sessions');
+  const token = randomBytes(24).toString('hex'); const protectedBase = await start(token);
+  const locked = await fetch(protectedBase+'/chat'); assert.equal(locked.status,401);
+  const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
+  assert.match(await authorized.text(),/data-ui-revision="CR-CHAT-038"/);
+  assert.deepEqual(errors,[]);
+  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},checks:['rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
+  fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify(report,null,2));
+  console.log(JSON.stringify(report,null,2)); console.log('PASS: browser behavior and 3 viewport checks. Evidence: '+evidence);
+}
+run().catch(error => {console.error(error); process.exitCode=1;}).finally(async () => {
+  if (browser) await browser.close();
+  for (const proc of processes) { proc.kill('SIGTERM'); await Promise.race([new Promise(r => proc.once('exit',r)),new Promise(r => setTimeout(r,3000))]); if (proc.exitCode === null) proc.kill('SIGKILL'); }
+  // Keep scratch logs on failure for attribution; never clean shared paths.
+  if (process.exitCode) console.error('Scratch server logs: '+tempdirs.join(', '));
+});

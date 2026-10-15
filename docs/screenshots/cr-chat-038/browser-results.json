@@ -1,0 +1,55 @@
+{
+  "method": "Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.",
+  "base": "http://127.0.0.1:33965",
+  "measurements": [
+    {
+      "viewport": 390,
+      "scrollWidth": 390,
+      "bodyWidth": 390,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 0,
+        "visible": true
+      }
+    },
+    {
+      "viewport": 768,
+      "scrollWidth": 768,
+      "bodyWidth": 768,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 0,
+        "visible": true
+      }
+    },
+    {
+      "viewport": 1280,
+      "scrollWidth": 1280,
+      "bodyWidth": 1280,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 838,
+        "visible": true
+      }
+    }
+  ],
+  "pageErrors": [],
+  "authBoundary": {
+    "noHeader": 401,
+    "bearerHeader": 200
+  },
+  "checks": [
+    "rendered server data",
+    "thread isolation and reply API readback",
+    "addressing creates no task",
+    "explicit task API readback",
+    "real delivery refusal",
+    "401/403/500 retain draft",
+    "read failure disables send",
+    "stale request isolation",
+    "no DOM XSS",
+    "create form readback",
+    "empty search",
+    "controls fit all three widths"
+  ]
+}
