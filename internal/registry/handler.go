@@ -149,13 +149,10 @@ type deliverRequest struct {
 	// polling task-router interprets when either is default.
 	//
 	// They are transparent to Crier. Both are OPTIONAL and independent; a
-	// hint that is absent, JSON null or a blank string is a DEFAULT hint and is
-	// preserved in the form it was sent, and an explicit value is passed
-	// through byte-for-byte — no trimming, no validation against a catalogue,
-	// and no defaulting, because choosing a pair is the router's work, not the
-	// bus's. Pointers, not strings, because "present and null" and "present and
-	// empty" are both supported spellings a router may distinguish (see
-	// selection.go).
+	// hint that is absent or JSON null decodes to nil (omitted on reads).
+	// Blank strings remain present and unchanged, but also mean DEFAULT.
+	// Explicit strings survive unchanged; Crier chooses no concrete value.
+	// Pointers distinguish absent/null from a present blank (selection.go).
 	Model    *SelectionHint `json:"model,omitempty"`
 	Provider *SelectionHint `json:"provider,omitempty"`
 	// ReplyTo is the Crier message id (or correlation id) this message answers
@@ -1051,6 +1048,9 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	if h.rejectOversizedBody(w, r) {
 		return
 	}
+	if !h.authorizeServiceDelivery(w, r, id, capability) {
+		return
+	}
 
 	var req deliverRequest
 
@@ -1388,10 +1388,9 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		// for anonymous and agent-initiated deliveries.
 		PrincipalID: req.PrincipalID,
 		// The optional selection hints and the correlation this message
-		// answers (CR-FEAT-036) ride the envelope unchanged: whatever form the
-		// caller sent — explicit, null, blank or absent — is what the stored
-		// message carries and what every reader of it sees. Nothing here fills
-		// in a default model or provider; the router interprets the default.
+		// answers (CR-FEAT-036) ride the envelope: explicit and blank strings
+		// remain unchanged; absent/null hints are omitted. No concrete model
+		// or provider is filled in; the consumer interprets the default.
 		Model:    req.Model,
 		Provider: req.Provider,
 		ReplyTo:  req.ReplyTo,

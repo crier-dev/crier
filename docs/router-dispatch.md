@@ -38,8 +38,8 @@ Explicitly NOT in scope, and deliberately absent from this component:
 ## 1. The three optional members
 
 They ride the deliver request
-(`POST /agents/{id}/inbox`, and the same envelope on `POST /agents/{id}/inbox`
-for every target) and appear on every read of the stored message.
+(`POST /agents/{id}/inbox`, or `POST /capabilities/{capability}/inbox`)
+and appear on inbox reads of the stored message.
 
 | member | forms a caller may send | what Crier does |
 | --- | --- | --- |
@@ -57,9 +57,12 @@ Absent is the **canonical default**: a dispatch that names no model has no
 pre-CR-FEAT-036 delivery looked like (`omitempty`, so nothing new appears for a
 sender that does not use these members). A JSON `null` means the same thing — a
 member with no value is no value — so it resolves to that one canonical default
-instead of giving consumers a second default state to handle. A blank string is
-a value the caller wrote, so it is preserved as sent and is still a DEFAULT for
-selection purposes.
+instead of retaining a separate null form. A blank string (empty or entirely
+Unicode whitespace) is preserved exactly as sent and is still DEFAULT for
+selection purposes. Thus omission is the preferred canonical spelling, not a
+promise that every default input is rewritten to omission: consumers must
+recognize both omitted members and present blanks. This is identical in the
+HTTP poll, PostgreSQL JSONB storage, and RemoteStore forwarding paths.
 
 A member that is neither a string nor `null` (`"model": 5`, `"model": {}`) is
 refused with `400 {"error":"invalid json"}` before anything is dispatched or
@@ -94,7 +97,7 @@ consumer uses, and it is the reason an explicit value is never rewritten.
 When one or both members are default, the choice is still open on the message.
 A task-router in a bunker polls its own inbox (see §5), reads the two members,
 applies the table in §2 against the dispatch prompt, and runs the lane. Crier
-neither sees the prompt nor learns what was chosen — the router's result comes
+does not analyze the prompt or choose a pair — the router's result comes
 back as a normal correlated delivery (§6).
 
 ## 5. Delivery, poll, lease, acknowledgement
@@ -163,16 +166,35 @@ this architecture needs are exactly two grants:
 - the scheduler's identity holds `send` on the ROUTER's inbox (the dispatch);
 - the router's identity holds `send` on the SCHEDULER's inbox (the result).
 
-Everything else is denied with the named `403 DELIVERY_FORBIDDEN` refusal
+With the delivery ACL enabled and the scheduler, router and unrelated targets classed as `service`,
+the two principals active, each bound to its own service agent, and ONLY those
+two agent-scoped `send` grants, all other pairs are denied with the named
+`403 DELIVERY_FORBIDDEN` refusal
 (`reason: NO_GRANT`, `NO_BINDING` or `ANONYMOUS`) and stores nothing:
 
 - the router sending to its own inbox (no self-grant);
 - either identity reaching an unrelated agent;
 - an agent identity alone, or an anonymous body, on a classed target;
 - a delivery whose body or payload claims `reply_to`, `sender` or `as_agent`
-  naming the authorized party. The answer is byte-for-byte the same with and
+  naming the authorized party. The authorization decision is the same with and
   without those claims — a forged correlation changes nothing, which is the
   difference between provenance and authority.
+
+Concretely, a trusted delivery caller supplies `principal_id` plus `as_agent`.
+The permission store must contain that active principal, its live binding to
+the named agent, and its live `send` grant on the recipient. Setting `sender`,
+`as_agent`, or `reply_to` without those records grants nothing; revoking the
+stored grant refuses the next delivery of the same body. A service agent's
+`X-Agent-ID` alone does not map to a principal or confer send authority.
+
+Trust boundary: the existing delivery API accepts principal assertions from
+the deployment's trusted callers; it does not authenticate a human login or
+cryptographically bind `principal_id` to a delivery credential. The shared
+Bearer gate, when configured, authenticates the deployment caller, not a
+particular principal. Do not expose this assertion API to untrusted callers
+or describe it as per-service cryptographic authentication. Inbox poll/ack
+signatures separately prove the owning agent's key. This feature does not
+change either established identity mechanism.
 
 The grant contract itself (principals, bindings, grants, agent classes and how a
 delivery ACL is armed) is documented in `specs/CHAT-PERMISSIONS.md` and
@@ -190,6 +212,15 @@ deployment needs.
   INBOX envelope, which is the envelope a polling consumer reads. A
   push-configured target is a different transport with its own envelope, and a
   router polls.
+- MCP `retrieve_inbox` preserves hints and `reply_to` with the lease; use it
+  with `ack_messages` when work must finish before acknowledgement. The
+  convenience `get_messages` poll also exposes these members (including its
+  buffered path), but retains its existing automatic acknowledgement behavior
+  and is not a work-completion lease API. Existing payload-level
+  `crier_reply_to` correlation is unchanged.
+- ACL-disabled deployments and unclassed legacy targets keep their existing
+  trust-by-reach behavior. The least-privilege pattern above requires explicit
+  permission records; registering a bus agent alone does not configure them.
 
 ## 9. How this is verified
 
@@ -199,5 +230,28 @@ deployment needs.
   `reply_to` arms, and the lease-expiry/redelivery contract with hints present.
 - `internal/registry/postgres_store_unit_test.go` — the stored representation
   (the hints travel as one JSONB body; SQL NULL when nothing was sent).
+- `internal/registry/dispatch_audit_test.go` — the complete sender/recipient
+  permission matrix, missing/wrong bindings and revoked grants, signed
+  RemoteStore poll/ack with a correlated result and only completed work acked,
+  plus read-only snapshot mutation regressions.
+- `internal/registry/dispatch_postgres_audit_test.go` — a disposable local
+  PostgreSQL instance (Unix socket only, no existing database): real 12→13
+  migration with a legacy row, the serialized HTTP hint matrix, RemoteStore
+  delivery, Peek/PeekInbox, and a long-poll read. Explicitly skips when local
+  PostgreSQL binaries are unavailable or initdb cannot run as root.
+- `internal/mcp/dispatch_hints_test.go` — serialized HTTP deliveries read
+  through MCP `retrieve_inbox` and both `get_messages` paths.
+- `cmd/server/dispatch_hints_test.go` — the served OpenAPI schema accepts null
+  for both request hints; the generated YAML remains identical to its source.
 - `docs/claims.yaml` — the anchors of this page, and the recipe in §5, are
   executed by `make docs-check` against a booted in-process server.
+
+## Signed service-agent authorization (opt-in follow-up)
+
+For machine-to-machine scheduler → router and router → scheduler traffic, use
+`CR_SERVICE_DELIVERY_ALLOWLIST` and registered sender keys as described in
+[service-delivery-auth.md](service-delivery-auth.md). This is separate from the
+human-principal ACL above: `principal_id`/`as_agent` do not authorize a service
+delivery, and `reply_to` is never authority. Existing deployments with no
+configured service recipient keep the documented legacy behavior. The gate
+does not alter the hint/default/correlation contract on this page.

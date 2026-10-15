@@ -23,18 +23,19 @@ import (
 //   - prompt analysis, model/provider selection and the Hermes Gateway call are
 //     the task-router's work, not the bus's.
 //
-// A selection hint is DEFAULT in exactly three supported input spellings,
-// which resolve to ONE canonical representation:
+// A selection hint is DEFAULT in three supported input spellings. Omission is
+// the canonical spelling callers should prefer, not a rewrite of every input:
 //
 //	absent   — the member is not in the request body at all (Go: nil pointer,
 //	           wire: no key). This IS the canonical default.
 //	null     — the member is present and JSON null. It resolves to the
 //	           canonical default: a member with no value means "no value", so
 //	           the stored and retrieved message carries the member ABSENT, and
-//	           a consumer has exactly one default state to handle.
+//	           there is no separate null form in an inbox envelope.
 //	blank    — the member is present and a string that is empty or whitespace
 //	           only ("" is the canonical spelling of this arm). A blank string
-//	           IS a value the caller wrote, so it is preserved as sent.
+//	           IS a value the caller wrote, so it is preserved as sent. Consumers
+//	           must treat a present blank as default too (IsDefault).
 //
 // An explicit value is passed through byte-for-byte: no trimming, no case
 // folding, no validation against a catalogue of models or providers. The bus
@@ -148,7 +149,8 @@ func (h *SelectionHint) IsDefault() bool {
 // IsDefault, named for the reader who is asking "did the caller choose?".
 func (h *SelectionHint) Selects() bool { return !h.IsDefault() }
 
-// String renders the hint's value, or "" for a default/unset hint.
+// String renders the original value, or "" for an absent hint. In particular,
+// whitespace-only defaults retain their whitespace; use IsDefault to classify.
 func (h *SelectionHint) String() string {
 	if h == nil {
 		return ""
@@ -167,11 +169,9 @@ func NewHint(value string) *SelectionHint {
 	return h
 }
 
-// selectionState is the JSONB body stored in inbox_entries.selection: it exists
-// so BOTH hints travel in one column and so the two-value distinction (present
-// -and-null vs absent member) survives the database round trip. The struct is
-// unexported because it is a storage detail — the wire shape is the two
-// top-level members on the entry itself.
+// selectionState is the JSONB body stored in inbox_entries.selection. It holds
+// the two optional strings in one column. Absent/null decode to nil; blanks
+// survive unchanged. The wire exposes these as top-level entry members.
 type selectionState struct {
 	Model    *SelectionHint `json:"model,omitempty"`
 	Provider *SelectionHint `json:"provider,omitempty"`

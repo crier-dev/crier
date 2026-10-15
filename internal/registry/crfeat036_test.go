@@ -85,7 +85,11 @@ type cr36Harness struct {
 
 func newCR36Harness(t *testing.T, perms *permissions.JSONLStore) *cr36Harness {
 	t.Helper()
-	store := NewMemoryStore()
+	return newCR36HarnessWithStore(t, perms, NewMemoryStore())
+}
+
+func newCR36HarnessWithStore(t *testing.T, perms *permissions.JSONLStore, store Store) *cr36Harness {
+	t.Helper()
 	handler := NewHandler(store)
 	if perms != nil {
 		handler.SetPermissionsChecker(permissions.NewChecker(perms))
@@ -210,8 +214,8 @@ type hintSpelling struct {
 	selects bool   // true only for an explicit value
 }
 
-// The supported DEFAULT input spellings and the ONE canonical representation
-// they resolve to. `absent` is the canonical default — the member is simply not
+// The supported DEFAULT input spellings and their wire representation.
+// `absent` is the canonical default — the member is simply not
 // there, which is what every pre-CR-FEAT-036 delivery looked like. An explicit
 // JSON `null` means the same thing (a member with no value is no value), so it
 // canonicalises to it rather than inventing a second default state for the
@@ -234,6 +238,10 @@ const (
 // supported spelling of the default arm — the hint the scheduler sent is the
 // hint the polling router reads, and Crier has filled in nothing.
 func TestDispatchHintsSurviveDeliveryToAPollingRouter(t *testing.T) {
+	testDispatchHintsRoundTrip(t, func(t *testing.T) *cr36Harness { return newCR36Harness(t, nil) })
+}
+
+func testDispatchHintsRoundTrip(t *testing.T, harness func(*testing.T) *cr36Harness) {
 	type hintCase struct {
 		name                string
 		modelRaw            string
@@ -249,6 +257,11 @@ func TestDispatchHintsSurviveDeliveryToAPollingRouter(t *testing.T) {
 	cases = append(cases, hintCase{
 		name: "case1_explicit_model_explicit_provider", modelRaw: cr36ExplicitModel, providerRaw: cr36ExplicitProvider,
 		wantModel: cr36ExplicitModel, wantProvider: cr36ExplicitProvider,
+		wantModelSelects: true, wantProviderSelects: true,
+	})
+	cases = append(cases, hintCase{
+		name: "explicit_values_not_trimmed_or_catalogued", modelRaw: `" Unknown/Model-X "`, providerRaw: `" Provider-X "`,
+		wantModel: `" Unknown/Model-X "`, wantProvider: `" Provider-X "`,
 		wantModelSelects: true, wantProviderSelects: true,
 	})
 	// (2) default model + explicit provider: the router picks a model inside
@@ -282,7 +295,7 @@ func TestDispatchHintsSurviveDeliveryToAPollingRouter(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newCR36Harness(t, nil)
+			h := harness(t)
 			h.register(t, cr36Router)
 
 			body := dispatchBody(tc.modelRaw, tc.providerRaw, "")
@@ -635,6 +648,7 @@ func TestStubRouterLeaseExpiryAndRedelivery(t *testing.T) {
 // service identity, and an unrelated principal, each with its own binding.
 type cr36ACL struct {
 	*cr36Harness
+	perms *permissions.JSONLStore
 }
 
 func newCR36ACL(t *testing.T) *cr36ACL {
@@ -678,7 +692,7 @@ func newCR36ACL(t *testing.T) *cr36ACL {
 	for _, rec := range records {
 		require.NoError(t, pstore.Append(context.Background(), rec))
 	}
-	return &cr36ACL{cr36Harness: h}
+	return &cr36ACL{cr36Harness: h, perms: pstore}
 }
 
 // sendAs delivers body as the identity (principal, as_agent) — the §6.3
@@ -988,12 +1002,11 @@ func TestSelectionHintStorageRoundTrip(t *testing.T) {
 	require.Nil(t, entry.Model)
 }
 
-// TestDefaultHintSpellingsResolveToOneCanonicalDefault is the "one canonical
-// default representation" clause of the contract, asserted at the message
+// TestDefaultHintSpellingsLeaveSelectionOpen asserts default semantics at the message
 // edge: a dispatch whose hints are absent, null or blank — in any mix — reaches
 // the polling router in a state the router reads as "the choice is still
 // open", and the message carries no model or provider Crier invented.
-func TestDefaultHintSpellingsResolveToOneCanonicalDefault(t *testing.T) {
+func TestDefaultHintSpellingsLeaveSelectionOpen(t *testing.T) {
 	for _, tc := range cr36DefaultSpellings {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newCR36Harness(t, nil)

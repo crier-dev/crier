@@ -133,6 +133,13 @@ func (e *agentSigError) Error() string { return e.message }
 //
 // It writes the error response and returns a non-nil error when unauthorized.
 func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetID string) error {
+	return h.verifyAgentSignature(w, r, targetID, false)
+}
+
+// verifyAgentSignature binds proof to a registered key ID. The self-only wrapper
+// supplies the URL target; service delivery supplies the sender and mandates body
+// binding. Neither caller can disable freshness, key ownership, or verification.
+func (h *Handler) verifyAgentSignature(w http.ResponseWriter, r *http.Request, targetID string, requireBody bool) error {
 	callerID := r.Header.Get(HeaderAgentID)
 	tsRaw := r.Header.Get(HeaderAgentTS)
 	sigRaw := r.Header.Get(HeaderAgentSig)
@@ -159,6 +166,9 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 	agent, err := h.store.Get(targetID)
 	if err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
+			if requireBody {
+				return h.agentSigFail(w, http.StatusUnauthorized, "service sender has no registered public key")
+			}
 			return h.agentSigFail(w, http.StatusNotFound, "agent not found")
 		}
 		writeStoreError(w, err)
@@ -207,6 +217,9 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 				"(64-byte ed25519 signature), got %d character(s) (%q)", len(sigRaw), sigRaw))
 	}
 
+	if requireBody && r.Header.Get(HeaderAgentBodySHA256) == "" {
+		return h.agentSigFail(w, http.StatusUnauthorized, "service delivery requires X-Agent-Body-SHA256")
+	}
 	payload := agentSigPayload(r.Method, r.URL.Path, tsRaw, "")
 	if vals := r.Header.Values(HeaderAgentBodySHA256); len(vals) > 0 {
 		// OPT-IN body binding (CR-CHAT-027). The header is present, so the
@@ -226,7 +239,7 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 		// turn a correctly signed request into an empty-body one.
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		actual := sha256Hex(body)
-		if claimed != actual {
+		if claimed != actual || (requireBody && (len(vals) != 1 || vals[0] != actual)) {
 			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestMismatchError)
 		}
 		payload = agentSigPayload(r.Method, r.URL.Path, tsRaw, actual)

@@ -79,6 +79,11 @@ func (h *Handler) authorizeCapabilityAddress(w http.ResponseWriter, r *http.Requ
 // address, after the target row and its realm have been read. It returns true
 // when it has written a refusal.
 func (h *Handler) authorizeAgentTarget(w http.ResponseWriter, r *http.Request, req *deliverRequest, target *Agent) bool {
+	// A service recipient has already passed the independent exact-pair gate.
+	// Only the private, verified context authorizes it, never principal_id/as_agent.
+	if target != nil && r.Context().Value(serviceDeliveryContextKey{}) == target.ID {
+		return false
+	}
 	if h.permissions == nil || target == nil {
 		return false
 	}

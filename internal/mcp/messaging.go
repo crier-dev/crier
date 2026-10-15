@@ -141,10 +141,10 @@ func (s *MCPServer) handleGetMessages(args json.RawMessage) (any, error) {
 
 	messages := make([]MessageView, 0, len(buf)+len(entries))
 	for _, e := range buf {
-		messages = append(messages, MessageView{ID: e.ID, Payload: parseEntryPayload(e)})
+		messages = append(messages, MessageView{ID: e.ID, Payload: parseEntryPayload(e), Model: e.Model, Provider: e.Provider, ReplyTo: e.ReplyTo})
 	}
 	for _, e := range entries {
-		messages = append(messages, MessageView{ID: e.ID, Payload: parseEntryPayload(e)})
+		messages = append(messages, MessageView{ID: e.ID, Payload: parseEntryPayload(e), Model: e.Model, Provider: e.Provider, ReplyTo: e.ReplyTo})
 	}
 	return GetMessagesOutput{Messages: messages}, nil
 }

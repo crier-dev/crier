@@ -22,10 +22,10 @@ procedure, the gate requirements and the publish step are in
   Crier message id a returned result answers. Crier TRANSPORTS the two hints and
   never chooses one: an explicit value survives delivery byte for byte (no
   trimming, no validation against any catalogue of models), a blank string is
-  preserved as sent, and `absent`/`null`/blank are all DEFAULT hints that resolve
-  to ONE canonical representation — the omitted member — so a consumer has a
-  single default state to branch on and no concrete model or provider is ever
-  filled in for them. The members ride the deliver request, the stored message
+  preserved as sent, and `absent`/`null`/blank are all DEFAULT hints. Omission
+  is the canonical spelling: absent/null become omitted members, while blank
+  strings remain present and consumers must also treat them as default. No
+  concrete model or provider is filled in. The members ride the request, the stored message
   (one JSONB column plus `reply_to`; migration 013) and every read of it —
   retrieve/lease, peek, list — so the polling router sees exactly what the
   scheduler wrote; a delivery that names none of them is byte-identical to

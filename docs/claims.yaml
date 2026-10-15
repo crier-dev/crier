@@ -1662,8 +1662,8 @@ claims:
   # two identities, deliver the two hint arms, poll the router inbox, deliver the
   # correlated result, poll the scheduler inbox) is replayed live by the same
   # run. The anchors hold the prose that may not drift: what Crier transports and
-  # what it refuses to choose, the canonical default for a default/unset/null/
-  # blank hint, all four selection cases, the provenance-only reply_to, and the
+  # what it refuses to choose, omission for missing/null and preserved blank
+  # default hints, all four selection cases, the provenance-only reply_to, and the
   # statement that authorization never reads the payload. The behaviour behind
   # them — the four hint combinations across every supported spelling, the
   # authorization matrix, the forged reply_to arms and the lease-expiry

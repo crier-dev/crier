@@ -3,12 +3,9 @@
 --
 -- `selection` carries the dispatch's optional `model` and `provider` hints as
 -- one JSONB object (`{"model":…,"provider":…}`). It is stored as a whole object
--- rather than two TEXT columns because TWO of the contract's distinctions are
--- lost by text columns: an ABSENT hint and a JSON `null` hint are different
--- inputs (the router may distinguish "the caller said nothing" from "the caller
--- explicitly said the default"), and SQL NULL cannot hold both. The object also
--- keeps the "absent member" spelling, which the entry's `omitempty` encoding
--- already uses on the wire.
+-- rather than two TEXT columns. Absent and JSON null inputs both decode to
+-- omitted members; explicit and blank strings remain unchanged. JSONB retains
+-- the distinction between an omitted member and a present blank string.
 --
 -- The column is NULLABLE with no default: a delivery that names no hint stores
 -- SQL NULL — "not sent" has exactly one representation — and reads back exactly

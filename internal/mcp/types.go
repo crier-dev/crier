@@ -168,6 +168,11 @@ type GetMessagesInput struct {
 type MessageView struct {
 	ID      string         `json:"id"`
 	Payload map[string]any `json:"payload"`
+	// Preserve dispatch metadata on the convenience poll as well as on
+	// retrieve_inbox. Optional fields leave legacy message views unchanged.
+	Model    *registry.SelectionHint `json:"model,omitempty"`
+	Provider *registry.SelectionHint `json:"provider,omitempty"`
+	ReplyTo  string                  `json:"reply_to,omitempty"`
 }
 
 type GetMessagesOutput struct {

@@ -937,6 +937,20 @@ paths:
       tags: [inbox]
       summary: Deliver a message to an agent's inbox
       description: |
+        Opt-in signed service delivery: when this URL recipient is configured
+        by CR_SERVICE_DELIVERY_ALLOWLIST (exact directed sender>recipient pairs),
+        X-Agent-ID must equal body sender and name a registered Ed25519 key.
+        X-Agent-Ts must be within +/-30s. X-Agent-Body-SHA256 is MANDATORY and
+        is the lowercase hex SHA-256 of the exact raw body. X-Agent-Sig signs
+        "<METHOD>\n<path>\n<unix-seconds>\nsha256:<digest>" (no trailing newline;
+        path excludes query). Missing/invalid proof fails 401; an unlisted pair,
+        mismatched sender, or nonempty principal_id/as_agent fails 403 before
+        budgets, idempotency or delivery effects. reply_to is correlation only,
+        never authority. A protected recipient requires its explicit URL, not
+        capability routing. Unconfigured recipients keep legacy/human ACL
+        behavior. Self-only GET/ack signing is unchanged. See
+        docs/service-delivery-auth.md for provisioning and replay limitations.
+
         Delivers a message to the target agent. When the agent has a webhook
         endpoint registered, the message is POSTed there instead of the inbox
         (CR-FEAT-001; delivery_mode blocking|async|batch per WEBHOOK-DELIVERY.md).
@@ -1166,6 +1180,7 @@ paths:
                     (§2.5), so no fan-out and no work follow from it.
                 model:
                   type: string
+                  nullable: true
                   description: |-
                     OPTIONAL model hint for a lane dispatch (CR-FEAT-036).
                     Crier TRANSPORTS this member and never chooses a value: an
@@ -1185,6 +1200,7 @@ paths:
                     docs/router-dispatch.md.
                 provider:
                   type: string
+                  nullable: true
                   description: |-
                     OPTIONAL provider hint for a lane dispatch (CR-FEAT-036),
                     independent of `model` and transported exactly like it: an
@@ -4120,11 +4136,11 @@ components:
           type: string
           description: >-
             The optional model hint the dispatch carried (CR-FEAT-036), in the
-            form the caller sent it: an explicit value byte-for-byte, or an
-            empty string for a blank hint. ABSENT when the caller sent no model
+            form the caller sent it: an explicit value byte-for-byte, or the
+            original blank string (including whitespace). ABSENT when no model
             (the canonical default — a JSON null on the deliver request
-            resolves to the same absent member, so a consumer has exactly one
-            default state to handle). Crier never fills in a concrete model: on
+            resolves to the same absent member; present blanks are also default).
+            Crier never fills in a concrete model: on
             every default spelling the choice is left to the consumer (a
             task-router polling this inbox, or a caller that already knows the
             pair it wants). See docs/router-dispatch.md.
@@ -4133,7 +4149,7 @@ components:
           description: >-
             The optional provider hint the dispatch carried (CR-FEAT-036),
             independent of `model` and preserved the same way: an explicit value
-            byte-for-byte, an empty string for a blank hint, or absent for the
+            byte-for-byte, the original string for a blank hint, or absent for the
             canonical default. Never filled in by Crier.
         reply_to:
           type: string

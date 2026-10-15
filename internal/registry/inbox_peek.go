@@ -75,6 +75,14 @@ func (s *MemoryStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 func cloneInboxEntry(e *InboxEntry) *InboxEntry {
 	clone := *e
 	clone.Payload = append([]byte(nil), e.Payload...)
+	if e.Model != nil {
+		hint := *e.Model
+		clone.Model = &hint
+	}
+	if e.Provider != nil {
+		hint := *e.Provider
+		clone.Provider = &hint
+	}
 	if e.LeasedAt != nil {
 		at := *e.LeasedAt
 		clone.LeasedAt = &at

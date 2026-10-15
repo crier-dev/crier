@@ -175,6 +175,8 @@ type Transferrer interface {
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
 	store Store
+	// serviceDeliveries is immutable after startup; nil preserves legacy delivery.
+	serviceDeliveries ServiceDeliveryPolicy
 	// daggerWaits is the optional ack→wait resolution hook (CR-CHAT-034):
 	// after a successful inbox ack, every dagger delivery-and-wait parked on
 	// one of the acked message ids resolves. Nil (the default) keeps the ack

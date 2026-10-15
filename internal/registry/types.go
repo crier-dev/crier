@@ -189,9 +189,9 @@ type InboxEntry struct {
 	// written before this field existed.
 	Location *Location `json:"location,omitempty"`
 	// Model and Provider are the optional selection hints the dispatch carried
-	// (CR-FEAT-036). They are PRESERVED, never chosen: the same wire form the
-	// caller sent (explicit value, JSON null, blank, or absent) is what this
-	// entry publishes to every reader of the message — the polling router that
+	// (CR-FEAT-036). They are PRESERVED, never chosen: explicit and blank
+	// strings stay unchanged, while absent/null become omitted members. This
+	// entry publishes those hints to every reader — the polling router that
 	// will select a pair from them, and the non-router consumer that already
 	// knows which pair it wants. Crier fills in no default; see selection.go
 	// for the four selection cases and the canonical default representation.

@@ -4,7 +4,7 @@
 
     c = Crier("http://localhost:8767", agent_id="alice", key_path="alice.key")
     c.register()                                  # POST /agents with the public half
-    c.deliver("bob", {"hello": "world"})          # anyone may deliver to anyone
+    c.deliver("bob", {"hello": "world"}, sender="alice")  # body-signed as alice
     for m in c.retrieve():                        # signed retrieve
         print(m.payload)
         c.ack(m)                                  # signed ack
@@ -35,11 +35,17 @@ WHAT IT DOES ON THE WIRE (nothing is hidden)
         X-Agent-Ts   unix seconds, within +/-30s of the SERVER clock
         X-Agent-Sig  hex ed25519 signature over "<METHOD>\\n<path>\\n<ts>"
 
+    Signed requests with a body append "\\nsha256:<digest>" to that transcript
+    and send X-Agent-Body-SHA256, the lowercase SHA-256 of the exact body bytes.
+
     The <path> is the URL path only — the query string is NOT covered, so
     "GET /agents/alice/inbox?limit=5" is signed over "/agents/alice/inbox".
-*   Registration (POST /agents) and delivery (POST /agents/{id}/inbox) are NOT
-    per-agent signed: registration carries the public key in the body and
-    delivery is open to any sender.
+*   Registration (POST /agents) is NOT per-agent signed; it carries the public
+    key in the body. Delivery is body-signed only when its explicit sender
+    equals this client's agent_id. Missing/other sender remains unsigned for
+    legacy metadata compatibility and cannot pass a configured service gate.
+    CR_SERVICE_DELIVERY_ALLOWLIST mandates that proof for listed recipients;
+    see docs/service-delivery-auth.md (including bounded replay limitations).
 *   POST /relay/publish and GET /relay/subscribe/{topic} need the X-Agent-ID
     header (the relay's rate limiter keys on it); the signature trio is sent on
     publish because it is harmless and matches the README, but the relay does
@@ -821,7 +827,12 @@ class Crier:
             ts = str(int(time.time()))
             # The signature covers the PATH only (query string excluded) — the
             # same expression the server verifies (internal/registry/agentsig.go).
-            payload = "%s\n%s\n%s" % (method.upper(), path, ts)
+            signing_path = urllib.parse.unquote(urllib.parse.urlsplit(path).path)
+            payload = "%s\n%s\n%s" % (method.upper(), signing_path, ts)
+            if body:
+                digest = hashlib.sha256(body).hexdigest()
+                headers["X-Agent-Body-SHA256"] = digest
+                payload += "\nsha256:" + digest
             signature = self.key.sign(payload.encode("utf-8"))
             headers["X-Agent-ID"] = self.agent_id
             headers["X-Agent-Ts"] = ts
@@ -840,6 +851,13 @@ class Crier:
         extra_headers: Optional[Mapping[str, str]] = None,
     ) -> tuple:
         """Perform one request; return (status, parsed body or None)."""
+        # Even the generic request escape hatch must never sign a delivery
+        # whose envelope claims another sender (or has no explicit sender).
+        request_path = urllib.parse.unquote(urllib.parse.urlsplit(path).path)
+        if (signed and method.upper() == "POST"
+                and request_path.startswith("/agents/") and request_path.endswith("/inbox")):
+            if not isinstance(body, Mapping) or not self.agent_id or body.get("sender") != self.agent_id:
+                raise ValueError("signed delivery sender must equal this client's agent_id")
         encoded = b""
         if body is not None:
             encoded = json.dumps(body).encode("utf-8")
@@ -946,12 +964,13 @@ class Crier:
         ttl_seconds: Optional[int] = None,
         sender: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """POST /agents/{id}/inbox — deliver a message; the sender needs no key.
+        """POST /agents/{id}/inbox — body-sign only an explicit own sender.
 
         ttl_seconds: absent keeps the store default (24h), 0 means never expire
         (reported as "expires_at": null, not the zero time).
-        sender: the originating agent id, carried as envelope metadata (the
-        server does not require or verify it — anyone may deliver to anyone).
+        sender: when equal to this client's agent_id, signs the exact serialized
+        body with this client's key. Other/missing sender stays unsigned for
+        ordinary legacy recipients; configured service recipients reject it.
         """
         body: Dict[str, Any] = {"payload": payload}
         if ttl_seconds is not None:
@@ -959,7 +978,8 @@ class Crier:
         if sender is not None:
             body["sender"] = sender
         _, parsed = self._raw_request(
-            "POST", "/agents/%s/inbox" % urllib.parse.quote(agent_id, safe=""), body=body
+            "POST", "/agents/%s/inbox" % urllib.parse.quote(agent_id, safe=""), body=body,
+            signed=bool(self.agent_id and sender == self.agent_id),
         )
         return parsed or {}
 

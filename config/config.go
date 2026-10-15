@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/detect"
+	"github.com/crier-dev/crier/internal/registry"
 )
 
 // DatabaseConfig holds PostgreSQL connection and pool settings.
@@ -100,6 +101,9 @@ type Config struct {
 	// RequireAgentSig enforces per-agent ed25519 request signing on inbox
 	// read/ack/stats and agent deletion. Secure by default.
 	RequireAgentSig bool
+	// ServiceDeliveryAllowlist is the opt-in exact directed sender>recipient list.
+	// Every listed recipient mandates a body-bound sender signature on delivery.
+	ServiceDeliveryAllowlist string
 	// RequireMeshAuth enforces the ed25519 connect handshake on the mesh
 	// (CR_REQUIRE_MESH_AUTH, DF-CRIER-287). Default FALSE — the mesh is
 	// opt-in, because its lane is used by single-host deployments whose
@@ -663,6 +667,11 @@ func Load() (Config, error) {
 	// CR_FED_SELF_KEY_FILE (CR-CHAT-024): path of this relay's own hex
 	// ed25519 seed, used to sign outbound forwards (mutual auth).
 	cfg.Federation.SelfKeyFile = os.Getenv("CR_FED_SELF_KEY_FILE")
+
+	cfg.ServiceDeliveryAllowlist = os.Getenv("CR_SERVICE_DELIVERY_ALLOWLIST")
+	if _, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {
+		return cfg, err
+	}
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

@@ -174,6 +174,15 @@ func (h *Handler) capabilityHolders(capability string) []*Agent {
 // actually chosen — a refusal does not consume a turn in the rotation.
 func (h *Handler) selectCapabilityHolder(capability string, now time.Time) (holder *Agent, live bool, ok bool) {
 	holders := h.capabilityHolders(capability)
+	// Defense against a registration/capability update between the early service
+	// preflight and selection: a protected recipient is NEVER selected by a pool.
+	ordinary := make([]*Agent, 0, len(holders))
+	for _, a := range holders {
+		if _, protected := h.serviceDeliveries[a.ID]; !protected {
+			ordinary = append(ordinary, a)
+		}
+	}
+	holders = ordinary
 	if len(holders) == 0 {
 		return nil, false, false
 	}

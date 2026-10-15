@@ -337,6 +337,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	registryHandler := registry.NewHandler(regStore)
 	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+	if err := registryHandler.SetServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {
+		slog.Error("configure service delivery authorization", "error", err)
+		return 1
+	}
 	// Global ingest budget (CR-FEAT-035): a shed on the delivery path itself,
 	// so a runaway producer cannot push every inbox deeper without limit.
 	// 0 (the default) installs nothing — the delivery path is then exactly what
