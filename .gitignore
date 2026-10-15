@@ -88,3 +88,4 @@ dagger.db*
 # Python bytecode caches (examples)
 __pycache__/
 *.pyc
+.worktrees/

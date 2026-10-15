@@ -2916,10 +2916,24 @@ tasks:
   status: complete
   created_at: '2026-10-13T05:24:17.631110+00:00'
   completed_at: '2026-10-13T05:48:03.817804+00:00'
-- id: INT-CRIER-012
-  title: 'bunker-e2e CI red: bunkerd SpawnAgent dial :10001 i/o timeout'
+- id: CR-CHAT-038
+  title: Rebuild live Crier chat UI around the responsive mockup
   criteria:
-  - bunker-e2e workflow green on main (or BUNKER_* repointed and one full run green)
+  - chat.html delivers mockup layout (nav/session list, agent presence, conversation
+    thread, task area) against live Crier data; no fabricated success; no horizontal
+    clipping at 390/768/1280px verified in real browser with screenshots; existing
+    API/WS contracts kept, no embedded tokens; go build/vet/test green; lane pinned
+    gpt-6.1-sol via openai-codex
   status: complete
-  created_at: '2026-10-14T13:27:27.399424+00:00'
-  completed_at: '2026-10-14T13:58:47.225329+00:00'
+  created_at: '2026-10-15T08:36:23.112283+00:00'
+  completed_at: '2026-10-15T09:04:31.762164+00:00'
+- id: CR-FEAT-036
+  title: Preserve model/provider hints + authorized router inbox delivery
+  criteria:
+  - Go tests prove all four explicit/default model+provider hint combinations survive
+    delivery unchanged; authorization denies unrelated sender/recipient pairs and
+    reply_to alone cannot grant authority; stub router lease/reply/ack round-trip
+    carries correlation; go build/vet/test green
+  status: complete
+  created_at: '2026-10-15T10:02:54.885034+00:00'
+  completed_at: '2026-10-15T10:58:16.456049+00:00'
