@@ -308,7 +308,7 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		{
 			Name:        "deliver_message",
 			Description: "Deliver a message to an agent's persistent inbox.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Target agent identifier"},"payload":{"type":"object","description":"Message payload (arbitrary JSON)"}},"required":["agent_id","payload"]}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string"},"payload":{"type":"object"},"model":{},"provider":{},"reply_to":{"type":"string"},"idempotency_key":{"type":"string"}},"required":["agent_id","payload"]}`),
 		},
 		{
 			Name:        "retrieve_inbox",
@@ -328,7 +328,7 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		{
 			Name:        "send_message",
 			Description: "Send a message to an agent's durable inbox (bridge-level: no leases, no acks to manage). Optionally reply_to a message's correlation id to answer an ask_agent.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Target agent identifier"},"payload":{"type":"object","description":"Message payload (JSON object)"},"reply_to":{"type":"string","description":"Optional correlation id from a question you are answering; the bridge merges crier_reply_to into the payload"}},"required":["agent_id","payload"]}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string"},"payload":{"type":"object"},"model":{},"provider":{},"reply_to":{"type":"string","description":"Top-level envelope correlation id"},"idempotency_key":{"type":"string"}},"required":["agent_id","payload"]}`),
 		},
 		{
 			Name:        "get_messages",

@@ -16,6 +16,8 @@ package mcp
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -29,6 +31,48 @@ import (
 
 	"github.com/crier-dev/crier/internal/registry"
 )
+
+func TestRemoteMCPUsesConfiguredSignedServiceIdentityAndAudience(t *testing.T) {
+	base := registry.NewMemoryStore()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []*registry.Agent{{ID: "scheduler", PublicKey: registry.HexKey(pub)}, {ID: "router", PublicKey: registry.HexKey(make([]byte, ed25519.PublicKeySize))}} {
+		if err := base.Register(agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy, err := registry.ParseServiceDeliveryAllowlist("scheduler>router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := registry.NewHandler(registry.NewAuthorityStore(base, policy, "relay-a"))
+	if err := h.SetServiceDelivery("scheduler>router", "relay-a"); err != nil {
+		t.Fatal(err)
+	}
+	r := mux.NewRouter()
+	r.HandleFunc("/agents/{id}/inbox", h.HandleDeliver).Methods(http.MethodPost)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+	remote := registry.NewRemoteStore(srv.URL, "scheduler", "", registry.WithSigningKey(priv), registry.WithServiceAudience("relay-a"))
+	mcp := NewWithOptions(remote, Options{AgentID: "scheduler"})
+	for _, call := range []struct {
+		name string
+		args any
+	}{
+		{"deliver_message", DeliverMessageInput{AgentID: "router", Payload: json.RawMessage(`{"task":1}`), IdempotencyKey: "remote-deliver"}},
+		{"send_message", SendMessageInput{AgentID: "router", Payload: map[string]any{"task": 2}, IdempotencyKey: "remote-send"}},
+	} {
+		if text, isErr := parseToolResult(t, callTool(t, mcp, call.name, call.args)); isErr {
+			t.Fatalf("%s: %s", call.name, text)
+		}
+	}
+	depth, _, _, err := base.Stats("router")
+	if err != nil || depth != 2 {
+		t.Fatalf("protected remote MCP deliveries depth=%d err=%v", depth, err)
+	}
+}
 
 // deliverBodyRecorder captures the body of every POST .../inbox the test
 // server receives, so a test asserts the exact wire the RemoteStore produced

@@ -81,7 +81,7 @@ func (h *Handler) authorizeCapabilityAddress(w http.ResponseWriter, r *http.Requ
 func (h *Handler) authorizeAgentTarget(w http.ResponseWriter, r *http.Request, req *deliverRequest, target *Agent) bool {
 	// A service recipient has already passed the independent exact-pair gate.
 	// Only the private, verified context authorizes it, never principal_id/as_agent.
-	if target != nil && r.Context().Value(serviceDeliveryContextKey{}) == target.ID {
+	if a, ok := r.Context().Value(serviceDeliveryContextKey{}).(*ServiceAuthority); ok && target != nil && a.recipient == target.ID {
 		return false
 	}
 	if h.permissions == nil || target == nil {

@@ -1051,6 +1051,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	if !h.authorizeServiceDelivery(w, r, id, capability) {
 		return
 	}
+	serviceAuthority, _ := r.Context().Value(serviceDeliveryContextKey{}).(*ServiceAuthority)
 
 	var req deliverRequest
 
@@ -1251,7 +1252,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	// rotation, and what lets a replay answer even if the capability has since
 	// emptied.
 	var attempt *idempotencyAttempt
-	if key := req.IdempotencyKey; key != "" {
+	if key := req.IdempotencyKey; key != "" && serviceAuthority == nil {
 		if err := validateIdempotencyKey(key); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -1410,6 +1411,10 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	}
 
 	target, getErr := h.store.Get(id)
+	if serviceAuthority != nil && target != nil && target.Webhook != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "protected service delivery requires the durable inbox transport"})
+		return
+	}
 
 	// ▼ REALMS (CR-FEAT-029). The target's stored namespace is the AUTHORITY
 	// for this delivery: the request's own `namespace` is only ever checked
@@ -1759,8 +1764,39 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	// monotonic clock, so a sub-millisecond figure is a real measurement;
 	// whole milliseconds (>=1) survive the omitempty encoding.
 	entry.DeliveryMs = time.Since(deliverStart).Milliseconds()
-	if err := h.store.Deliver(id, entry); err != nil {
-		if errors.Is(err, ErrAgentNotFound) {
+	var storeErr error
+	var durableReceipt *ServiceDeliveryReceipt
+	if serviceAuthority != nil {
+		if secured, ok := h.store.(*AuthorityStore); ok {
+			if err := resolveMessageExpiry(entry); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			expiresAt := MessageExpiry(entry.ExpiresAt)
+			response, err := json.Marshal(deliverResponse{ID: entry.ID, Transport: "inbox", ExpiresAt: &expiresAt, Guard: guardInDeliverResponse(guardMeta), Location: entry.Location})
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			response = append(response, '\n')
+			var replayed bool
+			durableReceipt, replayed, storeErr = secured.deliverServiceAuthorized(id, entry, serviceAuthority, ServiceDeliveryReceipt{Status: http.StatusCreated, MessageID: entry.ID, Response: response})
+			if storeErr == nil && replayed {
+				writeServiceReceipt(w, durableReceipt)
+				return
+			}
+		} else {
+			// Compatibility-only handlers configured through the deprecated
+			// SetServiceDeliveryAllowlist setter predate store-wide authority.
+			storeErr = h.store.Deliver(id, entry)
+		}
+	} else {
+		storeErr = h.store.Deliver(id, entry)
+	}
+	if err := storeErr; err != nil {
+		if errors.Is(err, ErrServiceIdempotencyConflict) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		} else if errors.Is(err, ErrAgentNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		} else if errors.Is(err, ErrInvalidStoreInput) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1800,7 +1836,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		ExpiresAt: &expiresAt,
 		Guard:     guardInDeliverResponse(guardMeta),
 	})
-	writeJSON(w, http.StatusCreated, deliverResponse{
+	response := deliverResponse{
 		ID:         entry.ID,
 		Transport:  "inbox",
 		ExpiresAt:  &expiresAt,
@@ -1808,7 +1844,12 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		Capability: capability,
 		Target:     routedTarget(capability, id),
 		Location:   entry.Location,
-	})
+	}
+	if durableReceipt != nil {
+		writeServiceReceipt(w, durableReceipt)
+	} else {
+		writeJSON(w, http.StatusCreated, response)
+	}
 	deliveriesTotal.Inc()
 }
 

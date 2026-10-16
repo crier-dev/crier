@@ -30,6 +30,7 @@ const (
 	// signRequest — but a caller MAY bind an empty body by sending the sha256
 	// of the empty string.
 	HeaderAgentBodySHA256 = "X-Agent-Body-SHA256"
+	HeaderServiceAudience = "X-Crier-Audience"
 )
 
 // sigWindow is the maximum allowed skew between the client timestamp and
@@ -243,6 +244,9 @@ func (h *Handler) verifyAgentSignature(w http.ResponseWriter, r *http.Request, t
 			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestMismatchError)
 		}
 		payload = agentSigPayload(r.Method, r.URL.Path, tsRaw, actual)
+		if audience := r.Header.Get(HeaderServiceAudience); audience != "" {
+			payload = append(payload, []byte("\naudience:"+audience)...)
+		}
 	}
 	if !ed25519.Verify(rawKey, payload, sig) {
 		return h.agentSigFail(w, http.StatusUnauthorized, "signature verification failed")

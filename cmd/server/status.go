@@ -277,6 +277,11 @@ type statusAggregator interface {
 // build is answering (DF-CRIER-101/127); it is nested rather than flattened so
 // the build identity stays one object on both endpoints.
 type statusResponse struct {
+	ServiceDeliveryAuthEnabled             bool `json:"service_delivery_auth_enabled"`
+	ServiceDeliveryAudiencePresent         bool `json:"service_delivery_audience_present"`
+	ServiceDeliveryProtectedRecipients     int  `json:"service_delivery_protected_recipient_count"`
+	ServiceDeliveryDirectedPairs           int  `json:"service_delivery_directed_pair_count"`
+	ServiceDeliveryDurableIdempotencyReady bool `json:"service_delivery_durable_idempotency_ready"`
 	// AuthEnabled reports whether a Bearer token is enforced (CR_AUTH_TOKEN
 	// non-empty). False is the documented development posture.
 	AuthEnabled bool `json:"auth_enabled"`
@@ -370,12 +375,22 @@ type statusResponse struct {
 // the process is not using. The build identity is resolved per request, exactly
 // as handleVersion does, so the two endpoints read one source.
 func buildStatusResponse(cfg config.Config, registryBackend string) statusResponse {
+	policy, _ := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist)
+	pairs := 0
+	for _, senders := range policy {
+		pairs += len(senders)
+	}
 	return statusResponse{
-		AuthEnabled:           cfg.AuthToken != "",
-		RequireAgentSignature: cfg.RequireAgentSig,
-		MeshAuthRequired:      cfg.RequireMeshAuth,
-		MeshOriginPolicy:      config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
-		GuardEnabled:          cfg.Guard.Enabled,
+		ServiceDeliveryAuthEnabled:             len(policy) > 0,
+		ServiceDeliveryAudiencePresent:         cfg.ServiceDeliveryAudience != "",
+		ServiceDeliveryProtectedRecipients:     len(policy),
+		ServiceDeliveryDirectedPairs:           pairs,
+		ServiceDeliveryDurableIdempotencyReady: len(policy) == 0 || registryBackend == registryBackendPostgres,
+		AuthEnabled:                            cfg.AuthToken != "",
+		RequireAgentSignature:                  cfg.RequireAgentSig,
+		MeshAuthRequired:                       cfg.RequireMeshAuth,
+		MeshOriginPolicy:                       config.MeshOriginPolicy(cfg.MeshAllowedOrigins),
+		GuardEnabled:                           cfg.Guard.Enabled,
 		// The EFFECTIVE window, resolved exactly as the registry handler
 		// resolves it (registry.Presence.StaleAfter) — so an unset or
 		// malformed-shaped setting reports the window actually in force rather

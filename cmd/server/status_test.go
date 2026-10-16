@@ -68,6 +68,11 @@ var statusScrubbedEnv = []string{
 // as an undocumented key.
 var statusTopLevelKeys = []string{
 	"auth_enabled",
+	"service_delivery_auth_enabled",
+	"service_delivery_audience_present",
+	"service_delivery_protected_recipient_count",
+	"service_delivery_directed_pair_count",
+	"service_delivery_durable_idempotency_ready",
 	"build",
 	"federation_enabled",
 	"federation_hold_queue",

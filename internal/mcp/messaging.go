@@ -82,8 +82,15 @@ func (s *MCPServer) handleSendMessage(args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("payload must be a JSON object")
 	}
 	payload := in.Payload
+	// Keep the historical payload-level correlation marker for clients that
+	// have not yet learned the envelope field. The envelope ReplyTo below is
+	// authoritative; both representations intentionally carry the same value.
 	if in.ReplyTo != "" {
-		payload = mergeBridgeField(payload, "crier_reply_to", in.ReplyTo)
+		payload = make(map[string]any, len(in.Payload)+1)
+		for key, value := range in.Payload {
+			payload[key] = value
+		}
+		payload["crier_reply_to"] = in.ReplyTo
 	}
 	raw, err := payloadFromMap(payload)
 	if err != nil {
@@ -97,6 +104,7 @@ func (s *MCPServer) handleSendMessage(args json.RawMessage) (any, error) {
 		// convention, and CR-FEAT-025's terminal-outcome reporting has
 		// somewhere to send a MESSAGE_EXPIRED receipt.
 		Sender: s.bridgeSender(),
+		Model:  in.Model, Provider: in.Provider, ReplyTo: in.ReplyTo, IdempotencyKey: in.IdempotencyKey,
 	}
 	if err := s.store.Deliver(in.AgentID, entry); err != nil {
 		return nil, err

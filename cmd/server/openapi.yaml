@@ -128,12 +128,27 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
                     description: True when a Bearer token is enforced (CR_AUTH_TOKEN set); false is the documented development posture
                     example: true
+                  service_delivery_auth_enabled:
+                    type: boolean
+                    description: True when a nonempty directed service-delivery policy is active
+                  service_delivery_audience_present:
+                    type: boolean
+                    description: True when the non-secret relay audience is configured
+                  service_delivery_protected_recipient_count:
+                    type: integer
+                    description: Count only; protected identity names are never exposed
+                  service_delivery_directed_pair_count:
+                    type: integer
+                    description: Count only; directed sender/recipient names are never exposed
+                  service_delivery_durable_idempotency_ready:
+                    type: boolean
+                    description: True when protected delivery is off or its configured backend can persist receipts
                   require_agent_signature:
                     type: boolean
                     description: True when per-agent ed25519 signing is enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true)

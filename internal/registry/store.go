@@ -177,6 +177,7 @@ type Handler struct {
 	store Store
 	// serviceDeliveries is immutable after startup; nil preserves legacy delivery.
 	serviceDeliveries ServiceDeliveryPolicy
+	serviceAudience   string
 	// daggerWaits is the optional ack→wait resolution hook (CR-CHAT-034):
 	// after a successful inbox ack, every dagger delivery-and-wait parked on
 	// one of the acked message ids resolves. Nil (the default) keeps the ack
@@ -556,7 +557,8 @@ type MemoryStore struct {
 	// pre-lease), but stamping through a copy would not reach the stored
 	// row, and a map keyed by id survives an entry being leased, acked or
 	// replaced without racing a concurrent reader of the entry struct.
-	deliveryMs map[string]int64
+	deliveryMs      map[string]int64
+	serviceReceipts map[string]ServiceDeliveryReceipt
 }
 
 // Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020) for
@@ -575,10 +577,11 @@ var _ HealthReporter = (*MemoryStore)(nil)
 // Uses crypto/rand for lease IDs and sync.RWMutex for thread safety.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		agents:      make(map[string]*Agent),
-		inboxes:     make(map[string][]*InboxEntry),
-		deadLetters: newMemoryDeadLetters(DefaultDeadLetterCapacity),
-		deliveryMs:  make(map[string]int64),
+		agents:          make(map[string]*Agent),
+		inboxes:         make(map[string][]*InboxEntry),
+		deadLetters:     newMemoryDeadLetters(DefaultDeadLetterCapacity),
+		deliveryMs:      make(map[string]int64),
+		serviceReceipts: make(map[string]ServiceDeliveryReceipt),
 	}
 }
 

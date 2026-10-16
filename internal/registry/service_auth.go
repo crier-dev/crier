@@ -3,13 +3,37 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
 )
+
+// ValidateServiceIdentities prevents policy activation from turning ordinary
+// registration into service-identity provisioning.
+func ValidateServiceIdentities(store Store, policy ServiceDeliveryPolicy) error {
+	seen := map[string]struct{}{}
+	for recipient, senders := range policy {
+		seen[recipient] = struct{}{}
+		for sender := range senders {
+			seen[sender] = struct{}{}
+		}
+	}
+	for id := range seen {
+		agent, err := store.Get(id)
+		if err != nil {
+			return fmt.Errorf("service identity %q is not pre-provisioned: %w", id, err)
+		}
+		if len(agent.PublicKey) != ed25519.PublicKeySize {
+			return fmt.Errorf("service identity %q has no valid Ed25519 public key", id)
+		}
+	}
+	return nil
+}
 
 // ServiceDeliveryPolicy is an exact, directed recipient -> sender set. It is
 // immutable after startup; no wildcard or human-principal identity is admitted.
@@ -50,6 +74,28 @@ func (h *Handler) SetServiceDeliveryAllowlist(raw string) error {
 		return err
 	}
 	h.serviceDeliveries = policy
+	return nil
+}
+
+// SetServiceDelivery configures the complete protected-delivery posture.  A
+// non-empty policy requires a relay audience and a policy-enforcing store.
+func (h *Handler) SetServiceDelivery(raw, audience string) error {
+	policy, err := ParseServiceDeliveryAllowlist(raw)
+	if err != nil {
+		return err
+	}
+	if len(policy) > 0 && strings.TrimSpace(audience) == "" {
+		return fmt.Errorf("CR_SERVICE_DELIVERY_AUDIENCE is required when CR_SERVICE_DELIVERY_ALLOWLIST is nonempty")
+	}
+	h.serviceDeliveries = policy
+	h.serviceAudience = audience
+	if len(policy) > 0 {
+		if wrapped, ok := h.store.(*AuthorityStore); ok {
+			wrapped.policy, wrapped.audience = policy, audience
+		} else {
+			h.store = NewAuthorityStore(h.store, policy, audience)
+		}
+	}
 	return nil
 }
 
@@ -103,6 +149,15 @@ func (h *Handler) authorizeServiceDelivery(w http.ResponseWriter, r *http.Reques
 		_ = h.agentSigFail(w, http.StatusForbidden, "service delivery body sender must equal signed X-Agent-ID")
 		return false
 	}
+	if h.serviceAudience != "" && req.IdempotencyKey == "" {
+		_ = h.agentSigFail(w, http.StatusBadRequest, "protected service delivery requires nonempty idempotency_key")
+		return false
+	}
+	audience := r.Header.Get(HeaderServiceAudience)
+	if h.serviceAudience != "" && (audience == "" || audience != h.serviceAudience) {
+		_ = h.agentSigFail(w, http.StatusUnauthorized, "service delivery audience missing or mismatched")
+		return false
+	}
 	if req.PrincipalID != "" || req.AsAgent != "" {
 		_ = h.agentSigFail(w, http.StatusForbidden, "principal_id/as_agent are human identities, not service delivery authorization")
 		return false
@@ -111,6 +166,29 @@ func (h *Handler) authorizeServiceDelivery(w http.ResponseWriter, r *http.Reques
 		_ = h.agentSigFail(w, http.StatusForbidden, "service delivery sender>recipient pair is not allowlisted")
 		return false
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), serviceDeliveryContextKey{}, id))
+	a := &ServiceAuthority{sender: sender, recipient: id, idempotencyKey: req.IdempotencyKey,
+		bodyDigest: r.Header.Get(HeaderAgentBodySHA256), audience: audience, rawBody: append([]byte(nil), body...)}
+	if secured, ok := h.store.(*AuthorityStore); ok {
+		receipt, err := secured.lookupAuthorized(a)
+		if errors.Is(err, ErrServiceIdempotencyConflict) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return false
+		}
+		if err != nil {
+			writeStoreError(w, err)
+			return false
+		}
+		if receipt != nil {
+			writeServiceReceipt(w, receipt)
+			return false
+		}
+	}
+	*r = *r.WithContext(context.WithValue(r.Context(), serviceDeliveryContextKey{}, a))
 	return true
+}
+
+func writeServiceReceipt(w http.ResponseWriter, receipt *ServiceDeliveryReceipt) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(receipt.Status)
+	_, _ = w.Write(receipt.Response)
 }

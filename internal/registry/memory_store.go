@@ -152,6 +152,10 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 	// generated id would read back untimed.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.deliverLocked(agentID, entry)
+}
+
+func (s *MemoryStore) deliverLocked(agentID string, entry *InboxEntry) error {
 
 	if _, ok := s.agents[agentID]; !ok {
 		return fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
@@ -189,6 +193,48 @@ func (s *MemoryStore) Deliver(agentID string, entry *InboxEntry) error {
 
 	s.inboxes[agentID] = append(s.inboxes[agentID], entry)
 	return nil
+}
+
+func serviceReceiptKey(sender, recipient, key string) string {
+	return sender + "\x00" + recipient + "\x00" + key
+}
+
+func cloneServiceReceipt(rec ServiceDeliveryReceipt) *ServiceDeliveryReceipt {
+	rec.Response = append([]byte(nil), rec.Response...)
+	return &rec
+}
+
+func (s *MemoryStore) LookupServiceDelivery(sender, recipient, key, bodyDigest string) (*ServiceDeliveryReceipt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rec, ok := s.serviceReceipts[serviceReceiptKey(sender, recipient, key)]
+	if !ok {
+		return nil, nil
+	}
+	if rec.BodyDigest != bodyDigest {
+		return nil, ErrServiceIdempotencyConflict
+	}
+	return cloneServiceReceipt(rec), nil
+}
+
+func (s *MemoryStore) DeliverServiceIdempotent(sender, recipient, key, bodyDigest string, entry *InboxEntry, receipt ServiceDeliveryReceipt) (*ServiceDeliveryReceipt, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	namespace := serviceReceiptKey(sender, recipient, key)
+	if existing, ok := s.serviceReceipts[namespace]; ok {
+		if existing.BodyDigest != bodyDigest {
+			return nil, false, ErrServiceIdempotencyConflict
+		}
+		return cloneServiceReceipt(existing), true, nil
+	}
+	if err := s.deliverLocked(recipient, entry); err != nil {
+		return nil, false, err
+	}
+	receipt.BodyDigest = bodyDigest
+	receipt.MessageID = entry.ID
+	receipt.Response = append([]byte(nil), receipt.Response...)
+	s.serviceReceipts[namespace] = receipt
+	return cloneServiceReceipt(receipt), false, nil
 }
 
 // Retrieve fetches up to maxMessages un-ACKed, un-expired messages from an

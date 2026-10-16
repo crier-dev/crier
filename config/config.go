@@ -104,6 +104,8 @@ type Config struct {
 	// ServiceDeliveryAllowlist is the opt-in exact directed sender>recipient list.
 	// Every listed recipient mandates a body-bound sender signature on delivery.
 	ServiceDeliveryAllowlist string
+	// ServiceDeliveryAudience identifies this relay in protected signatures.
+	ServiceDeliveryAudience string
 	// RequireMeshAuth enforces the ed25519 connect handshake on the mesh
 	// (CR_REQUIRE_MESH_AUTH, DF-CRIER-287). Default FALSE — the mesh is
 	// opt-in, because its lane is used by single-host deployments whose
@@ -672,6 +674,7 @@ func Load() (Config, error) {
 	if _, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {
 		return cfg, err
 	}
+	cfg.ServiceDeliveryAudience = os.Getenv("CR_SERVICE_DELIVERY_AUDIENCE")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.

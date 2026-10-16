@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(__file__))
-from crier_client import Crier, SigningKey, ed25519_verify
+from crier_client import ABSENT, Crier, Message, SigningKey, ed25519_verify
 
 
 class ServiceDeliverySigning(unittest.TestCase):
@@ -20,10 +20,17 @@ class ServiceDeliverySigning(unittest.TestCase):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
                 seen.append((self.path, dict(self.headers), body))
-                self.send_response(201)
+                self.send_response(409 if self.path == "/agents" else 201)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{}')
+                self.wfile.write(b'{"error":"already registered"}' if self.path == "/agents" else b'{}')
+
+            def do_GET(self):
+                seen.append((self.path, dict(self.headers), b""))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"id":"scheduler","public_key":"' + b"00" * 32 + b'"}')
 
             def log_message(self, *_args):
                 pass
@@ -69,6 +76,31 @@ class ServiceDeliverySigning(unittest.TestCase):
         self.assertEqual(json.loads(body)["sender"], "outsider")
         self.assertFalse(any(k.lower().startswith("x-agent-") for k in headers))
 
+    def test_deliver_envelope_fields_preserve_four_wire_states(self):
+        self.client.deliver("ordinary", {}, model=None, provider="", reply_to="reply-1",
+                            idempotency_key="key-1")
+        body = json.loads(self.seen[-1][2])
+        self.assertIsNone(body["model"])
+        self.assertEqual(body["provider"], "")
+        self.assertEqual(body["reply_to"], "reply-1")
+        self.assertEqual(body["idempotency_key"], "key-1")
+        self.client.deliver("ordinary", {})
+        body = json.loads(self.seen[-1][2])
+        for field in ("model", "provider", "reply_to", "idempotency_key"):
+            self.assertNotIn(field, body)
+
+    def test_message_exposes_envelope_fields_without_collapsing_absence(self):
+        absent = Message({"id": "m1", "payload": {}})
+        for field in ("model", "provider", "reply_to", "idempotency_key"):
+            self.assertIs(getattr(absent, field), ABSENT)
+        explicit = Message({"id": "m2", "payload": {}, "model": None,
+                            "provider": "", "reply_to": "reply-1",
+                            "idempotency_key": "key-1"})
+        self.assertIsNone(explicit.model)
+        self.assertEqual(explicit.provider, "")
+        self.assertEqual(explicit.reply_to, "reply-1")
+        self.assertEqual(explicit.idempotency_key, "key-1")
+
     def test_missing_sender_remains_unsigned(self):
         self.client.deliver("ordinary", {})
         _, headers, body = self.seen[-1]
@@ -81,6 +113,13 @@ class ServiceDeliverySigning(unittest.TestCase):
                 self.client.request("POST", path,
                                     {"sender": "outsider", "payload": {}}, signed=True)
         self.assertEqual(self.seen, [])
+
+    def test_register_if_missing_wrong_key_conflict_is_hard_error(self):
+        from crier_client import CrierError
+        with self.assertRaises(CrierError) as raised:
+            self.client.register_if_missing()
+        self.assertEqual(raised.exception.status, 409)
+        self.assertIn("public_key_mismatch", str(raised.exception))
 
 
 if __name__ == "__main__":

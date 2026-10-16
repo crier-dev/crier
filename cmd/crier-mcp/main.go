@@ -230,6 +230,9 @@ func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error
 		}
 		identity := bridgeIdentity{Remote: true, AgentID: agentID}
 		var opts []registry.RemoteOption
+		if audience := os.Getenv("CR_SERVICE_DELIVERY_AUDIENCE"); audience != "" {
+			opts = append(opts, registry.WithServiceAudience(audience))
+		}
 		if keyFile := os.Getenv("CRIER_AGENT_PRIVATE_KEY_FILE"); keyFile != "" {
 			priv, err := registry.LoadEd25519PrivateKeyFile(keyFile)
 			if err != nil {
@@ -272,9 +275,26 @@ func initStore(cfg config.Config) (registry.Store, bridgeIdentity, func(), error
 		if err != nil {
 			return nil, bridgeIdentity{}, nil, fmt.Errorf("postgres: %w", err)
 		}
-		return pgStore, bridgeIdentity{}, func() { pgStore.Close() }, nil
+		var store registry.Store = pgStore
+		policy, parseErr := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist)
+		if parseErr != nil {
+			pgStore.Close()
+			return nil, bridgeIdentity{}, nil, parseErr
+		}
+		if len(policy) > 0 {
+			store = registry.NewAuthorityStore(store, policy, cfg.ServiceDeliveryAudience)
+		}
+		return store, bridgeIdentity{}, func() { pgStore.Close() }, nil
 	}
-	return registry.NewMemoryStore(), bridgeIdentity{}, func() {}, nil
+	var store registry.Store = registry.NewMemoryStore()
+	policy, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist)
+	if err != nil {
+		return nil, bridgeIdentity{}, nil, err
+	}
+	if len(policy) > 0 {
+		store = registry.NewAuthorityStore(store, policy, cfg.ServiceDeliveryAudience)
+	}
+	return store, bridgeIdentity{}, func() {}, nil
 }
 
 // ensureBridgeIdentity registers the bridge's own agent id on the remote

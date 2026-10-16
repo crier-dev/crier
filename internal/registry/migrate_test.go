@@ -69,8 +69,34 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 13, version, "should reflect the thirteen embedded migration files (006 = CR-FEAT-025 task ownership, 007 = CR-FEAT-035 message priority, 008 = CR-FEAT-029 namespaces, 009 = CR-CHAT-019 stored thread id, 010 = CR-CHAT-029 stored delivery location, 011 = CR-CHAT-020 per-message delivery_ms, 012 = CR-CHAT-007 principal_id on inbox messages, 013 = CR-FEAT-036 dispatch selection hints + reply_to)")
+	assert.Equal(t, 14, version, "should reflect migration 014 for durable protected-delivery receipts")
 	assert.False(t, dirty, "migrations should not be marked dirty")
+}
+
+func TestMigration014DownAndUpRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db := openTestDB(ctx, t)
+	defer db.Close()
+	clearSchema(ctx, t, db)
+	source, err := iofs.New(migrationFS, "migrations")
+	require.NoError(t, err)
+	driver, err := migratepostgres.WithInstance(db, &migratepostgres.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	require.NoError(t, err)
+	require.NoError(t, m.Up())
+	require.NoError(t, m.Steps(-1))
+	var exists bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('public.service_delivery_receipts') IS NOT NULL`).Scan(&exists))
+	require.False(t, exists)
+	require.NoError(t, m.Steps(1))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('public.service_delivery_receipts') IS NOT NULL`).Scan(&exists))
+	require.True(t, exists)
+	version, dirty, err := m.Version()
+	require.NoError(t, err)
+	require.Equal(t, uint(14), version)
+	require.False(t, dirty)
 }
 
 // TestRunMigrations_InboxDispatchSelectionColumns verifies 013 (CR-FEAT-036):
@@ -237,7 +263,7 @@ func openTestDB(ctx context.Context, t *testing.T) *sql.DB {
 func clearSchema(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.ExecContext(ctx, `
-		DROP TABLE IF EXISTS dead_letters, inbox_entries, agents, schema_migrations CASCADE;
+		DROP TABLE IF EXISTS service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;
 	`)
 	require.NoError(t, err)
 }

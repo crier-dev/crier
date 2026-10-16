@@ -38,11 +38,12 @@ import (
 // 4-line transcript "METHOD\n<path>\n<ts>\nsha256:<hex>", binding the body to
 // the signature (CR-CHAT-027); a bodyless request keeps the 3-line form.
 type RemoteStore struct {
-	baseURL string
-	agentID string
-	token   string
-	priv    ed25519.PrivateKey
-	client  *http.Client
+	baseURL  string
+	agentID  string
+	token    string
+	priv     ed25519.PrivateKey
+	audience string
+	client   *http.Client
 
 	// listMu guards listErr, the recorded failure of the LAST List call
 	// (nil when it succeeded), exposed via ListError so bridge callers
@@ -65,6 +66,10 @@ type RemoteOption func(*RemoteStore)
 // store unsigned — correct for servers running CR_REQUIRE_AGENT_SIG=false.
 func WithSigningKey(priv ed25519.PrivateKey) RemoteOption {
 	return func(s *RemoteStore) { s.priv = priv }
+}
+
+func WithServiceAudience(audience string) RemoteOption {
+	return func(s *RemoteStore) { s.audience = audience }
 }
 
 // NewRemoteStore creates a RemoteStore for the given server base URL.
@@ -111,7 +116,12 @@ func (s *RemoteStore) signRequest(req *http.Request) {
 	if digest != "" {
 		req.Header.Set(HeaderAgentBodySHA256, digest)
 	}
-	sig := ed25519.Sign(s.priv, agentSigPayload(req.Method, req.URL.Path, tsStr, digest))
+	payload := agentSigPayload(req.Method, req.URL.Path, tsStr, digest)
+	if s.audience != "" {
+		req.Header.Set(HeaderServiceAudience, s.audience)
+		payload = append(payload, []byte("\naudience:"+s.audience)...)
+	}
+	sig := ed25519.Sign(s.priv, payload)
 	req.Header.Set(HeaderAgentTS, tsStr)
 	req.Header.Set(HeaderAgentSig, hex.EncodeToString(sig))
 }
@@ -488,6 +498,9 @@ func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
 	}
 	if entry.ReplyTo != "" {
 		body["reply_to"] = entry.ReplyTo
+	}
+	if entry.IdempotencyKey != "" {
+		body["idempotency_key"] = entry.IdempotencyKey
 	}
 	// A 404 on this endpoint means the TARGET agent has no inbox here; the
 	// subject is the target, so that is the identity the error names even when

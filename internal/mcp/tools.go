@@ -155,6 +155,7 @@ func (s *MCPServer) handleDeliverMessage(args json.RawMessage) (any, error) {
 		// schema and behaviour are unchanged — sender was never an input
 		// field, and an in-process bridge with no identity still stores none.
 		Sender: s.bridgeSender(),
+		Model:  in.Model, Provider: in.Provider, ReplyTo: in.ReplyTo, IdempotencyKey: in.IdempotencyKey,
 	}
 	if err := s.store.Deliver(in.AgentID, entry); err != nil {
 		return nil, err

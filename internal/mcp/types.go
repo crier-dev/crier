@@ -92,8 +92,12 @@ type UnregisterAgentInput struct {
 }
 
 type DeliverMessageInput struct {
-	AgentID string          `json:"agent_id"`
-	Payload json.RawMessage `json:"payload"`
+	AgentID        string                  `json:"agent_id"`
+	Payload        json.RawMessage         `json:"payload"`
+	Model          *registry.SelectionHint `json:"model,omitempty"`
+	Provider       *registry.SelectionHint `json:"provider,omitempty"`
+	ReplyTo        string                  `json:"reply_to,omitempty"`
+	IdempotencyKey string                  `json:"idempotency_key,omitempty"`
 }
 
 type RetrieveInboxInput struct {
@@ -149,9 +153,12 @@ type ListAgentsOutput struct {
 // set, the bridge merges a crier_reply_to field into the payload so the
 // recipient's ask_agent can correlate the reply.
 type SendMessageInput struct {
-	AgentID string         `json:"agent_id"`
-	Payload map[string]any `json:"payload"`
-	ReplyTo string         `json:"reply_to,omitempty"`
+	AgentID        string                  `json:"agent_id"`
+	Payload        map[string]any          `json:"payload"`
+	ReplyTo        string                  `json:"reply_to,omitempty"`
+	Model          *registry.SelectionHint `json:"model,omitempty"`
+	Provider       *registry.SelectionHint `json:"provider,omitempty"`
+	IdempotencyKey string                  `json:"idempotency_key,omitempty"`
 }
 
 type SendMessageOutput struct {

@@ -672,6 +672,18 @@ func expiryFromTimestamptz(ts pgtype.Timestamptz) time.Time {
 
 // Deliver appends a message to an agent's FIFO inbox.
 func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
+	if err := prepareInboxDelivery(agentID, entry); err != nil {
+		return err
+	}
+
+	ctx, cancel := s.operationContext()
+	defer cancel()
+
+	_, err := s.pool.Exec(ctx, inboxInsertSQL, inboxInsertArgs(agentID, entry)...)
+	return mapDeliverError(err, agentID, entry.ID)
+}
+
+func prepareInboxDelivery(agentID string, entry *InboxEntry) error {
 	if agentID == "" {
 		return fmt.Errorf("%w: blank agent ID", ErrInvalidStoreInput)
 	}
@@ -714,22 +726,17 @@ func (s *PostgresStore) Deliver(agentID string, entry *InboxEntry) error {
 	entry.LeaseID = ""
 	entry.ACKed = false
 
-	ctx, cancel := s.operationContext()
-	defer cancel()
+	return nil
+}
 
-	// sender and idempotency_key are stored WITH the message (CR-FEAT-025): the
-	// first is the address a MESSAGE_EXPIRED receipt is sent to if this message
-	// expires unacknowledged, the second is the provenance a dead letter
-	// reports. An absent value is stored as SQL NULL — never as an empty string
-	// — so "not recorded" has exactly one representation. priority is stored
-	// for every message (CR-FEAT-035): a delivery that names none stores the
-	// documented default, which is the ordering every message had before the
-	// column existed.
-	_, err := s.pool.Exec(ctx, `
+const inboxInsertSQL = `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, thread_id, principal_id, created_at, expires_at,
     leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms, selection, reply_to
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13, $14::jsonb, $15);`,
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13, $14::jsonb, $15);`
+
+func inboxInsertArgs(agentID string, entry *InboxEntry) []any {
+	return []any{
 		entry.ID, agentID, entry.Payload, nullText(entry.Sender), nullText(entry.IdempotencyKey),
 		entry.Priority, nullText(entry.ThreadID), nullText(entry.PrincipalID), entry.CreatedAt, pgTimestamptz(entry.ExpiresAt),
 		nullText(namespace.Canonical(entry.Namespace)), nullJSONB(entry.Location),
@@ -740,7 +747,10 @@ INSERT INTO inbox_entries (
 		// JSONB body (NULL when the delivery named neither), and the Crier
 		// correlation the message answers is NULL when it answers nothing.
 		selectionJSONB(entry), nullText(entry.ReplyTo),
-	)
+	}
+}
+
+func mapDeliverError(err error, agentID, messageID string) error {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -748,12 +758,75 @@ INSERT INTO inbox_entries (
 			case "23503":
 				return fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 			case "23505":
-				return fmt.Errorf("%w: duplicate message ID %q", ErrInvalidStoreInput, entry.ID)
+				return fmt.Errorf("%w: duplicate message ID %q", ErrInvalidStoreInput, messageID)
 			}
 		}
 		return fmt.Errorf("deliver: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) LookupServiceDelivery(sender, recipient, key, bodyDigest string) (*ServiceDeliveryReceipt, error) {
+	ctx, cancel := s.operationContext()
+	defer cancel()
+	var rec ServiceDeliveryReceipt
+	err := s.pool.QueryRow(ctx, `SELECT body_digest, status_code, message_id, response_body
+FROM service_delivery_receipts WHERE sender = $1 AND recipient = $2 AND idempotency_key = $3`, sender, recipient, key).
+		Scan(&rec.BodyDigest, &rec.Status, &rec.MessageID, &rec.Response)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup service delivery receipt: %w", err)
+	}
+	if rec.BodyDigest != bodyDigest {
+		return nil, ErrServiceIdempotencyConflict
+	}
+	return &rec, nil
+}
+
+func (s *PostgresStore) DeliverServiceIdempotent(sender, recipient, key, bodyDigest string, entry *InboxEntry, receipt ServiceDeliveryReceipt) (*ServiceDeliveryReceipt, bool, error) {
+	if err := prepareInboxDelivery(recipient, entry); err != nil {
+		return nil, false, err
+	}
+	ctx, cancel := s.operationContext()
+	defer cancel()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin service delivery: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	receipt.BodyDigest = bodyDigest
+	receipt.MessageID = entry.ID
+	tag, err := tx.Exec(ctx, `INSERT INTO service_delivery_receipts
+    (sender, recipient, idempotency_key, body_digest, status_code, message_id, response_body)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (sender, recipient, idempotency_key) DO NOTHING`, sender, recipient, key, bodyDigest, receipt.Status, entry.ID, receipt.Response)
+	if err != nil {
+		return nil, false, fmt.Errorf("claim service delivery receipt: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		var existing ServiceDeliveryReceipt
+		if err := tx.QueryRow(ctx, `SELECT body_digest, status_code, message_id, response_body
+FROM service_delivery_receipts WHERE sender = $1 AND recipient = $2 AND idempotency_key = $3`, sender, recipient, key).
+			Scan(&existing.BodyDigest, &existing.Status, &existing.MessageID, &existing.Response); err != nil {
+			return nil, false, fmt.Errorf("read service delivery receipt: %w", err)
+		}
+		if existing.BodyDigest != bodyDigest {
+			return nil, false, ErrServiceIdempotencyConflict
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, false, fmt.Errorf("commit service delivery replay: %w", err)
+		}
+		return &existing, true, nil
+	}
+	if _, err := tx.Exec(ctx, inboxInsertSQL, inboxInsertArgs(recipient, entry)...); err != nil {
+		return nil, false, mapDeliverError(err, recipient, entry.ID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit service delivery: %w", err)
+	}
+	return &receipt, false, nil
 }
 
 // Retrieve atomically selects, locks, and leases a disjoint FIFO batch.

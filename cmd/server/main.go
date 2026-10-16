@@ -75,6 +75,47 @@ func armProcSignalGuard() {
 	})
 }
 
+// composeRegistryDelivery is the production composition seam used by run and
+// by its policy-wiring test. Service identities must already exist: enabling a
+// policy never turns the public registration API into a provisioning path.
+func composeRegistryDelivery(cfg config.Config, store registry.Store) (registry.Store, *registry.Handler, error) {
+	policy, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(policy) > 0 {
+		if cfg.ServiceDeliveryAudience == "" {
+			return nil, nil, fmt.Errorf("CR_SERVICE_DELIVERY_AUDIENCE is required when CR_SERVICE_DELIVERY_ALLOWLIST is nonempty")
+		}
+		if err := registry.ValidateServiceIdentities(store, policy); err != nil {
+			return nil, nil, err
+		}
+		store = registry.NewAuthorityStore(store, policy, cfg.ServiceDeliveryAudience)
+	}
+	h := registry.NewHandler(store)
+	if err := h.SetServiceDelivery(cfg.ServiceDeliveryAllowlist, cfg.ServiceDeliveryAudience); err != nil {
+		return nil, nil, err
+	}
+	return store, h, nil
+}
+
+func registerRegistryRoutes(r *mux.Router, h *registry.Handler) {
+	r.HandleFunc("/agents", h.HandleRegister).Methods("POST")
+	r.HandleFunc("/agents/{id}", h.HandleRegisterByID).Methods("POST")
+	r.HandleFunc("/agents", h.HandleListAgents).Methods("GET")
+	r.HandleFunc("/agents/{id}", h.HandleGetAgent).Methods("GET")
+	r.HandleFunc("/agents/{id}", h.HandleUnregister).Methods("DELETE")
+	r.HandleFunc("/agents/{id}", h.HandleUpdateAgent).Methods("PATCH")
+	r.HandleFunc("/agents/{id}/inbox", h.HandleDeliver).Methods("POST")
+	r.HandleFunc("/capabilities/{capability}/inbox", h.HandleDeliverByCapability).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox", h.HandleRetrieve).Methods("GET")
+	r.HandleFunc("/agents/{id}/inbox/ack", h.HandleAck).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/stats", h.HandleStats).Methods("GET")
+	r.HandleFunc("/agents/{id}/inbox/transfer", h.HandleTransfer).Methods("POST")
+	r.HandleFunc("/agents/{id}/inbox/dead-letters", h.HandleDeadLetters).Methods("GET")
+	r.HandleFunc("/namespaces", h.HandleListNamespaces).Methods("GET")
+}
+
 // run executes the server. It parses CLI flags first so --help/--version
 // return immediately instead of starting the server, then falls through to
 // the env-driven configuration and server startup. It returns a process
@@ -333,14 +374,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		regStore = registry.NewMemoryStore()
 		logMemoryBackendWarning()
 	}
-
-	registryHandler := registry.NewHandler(regStore)
-	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
-	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
-	if err := registryHandler.SetServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {
+	regStore, registryHandler, err := composeRegistryDelivery(cfg, regStore)
+	if err != nil {
 		slog.Error("configure service delivery authorization", "error", err)
 		return 1
 	}
+	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
+	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
 	// Global ingest budget (CR-FEAT-035): a shed on the delivery path itself,
 	// so a runaway producer cannot push every inbox deeper without limit.
 	// 0 (the default) installs nothing — the delivery path is then exactly what
@@ -641,39 +681,26 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	registryHandler.SetWebhookDriver(whDriver)
 	slog.Info("webhook delivery", "enabled", true, "timeout", cfg.Webhook.Timeout,
 		"retries", cfg.Webhook.MaxRetries, "signing", secret != nil)
-	r.HandleFunc("/agents", registryHandler.HandleRegister).Methods("POST")
+	registerRegistryRoutes(r, registryHandler)
 	// DF-CRIER-302: the id-in-path spelling of the same registration — POST
 	// /agents/{id} — for a caller that has the id in the path (the same id the
 	// endpoint's other methods take) and the key material in the body. It is one
 	// code path with POST /agents, so the two spellings cannot disagree about
 	// validation or about the 409 conflict contract. The path is already
 	// registered for GET/DELETE/PATCH; this adds the method, not a path.
-	r.HandleFunc("/agents/{id}", registryHandler.HandleRegisterByID).Methods("POST")
-	r.HandleFunc("/agents", registryHandler.HandleListAgents).Methods("GET")
-	r.HandleFunc("/agents/{id}", registryHandler.HandleGetAgent).Methods("GET")
-	r.HandleFunc("/agents/{id}", registryHandler.HandleUnregister).Methods("DELETE")
-	r.HandleFunc("/agents/{id}", registryHandler.HandleUpdateAgent).Methods("PATCH")
-	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleDeliver).Methods("POST")
 	// Capability-routed delivery (CR-FEAT-026): the registry's advertised
 	// capabilities become a dialable worker pool. The path names the CAPABILITY
 	// where the by-id route names an agent, and the holder is chosen from the
 	// live holders by round-robin (registry/capability.go); everything after
 	// that choice is the deliver path above, unchanged. A capability nobody
 	// holds is refused with 404 NO_CAPABLE_AGENT, never dropped.
-	r.HandleFunc("/capabilities/{capability}/inbox", registryHandler.HandleDeliverByCapability).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox", registryHandler.HandleRetrieve).Methods("GET")
-	r.HandleFunc("/agents/{id}/inbox/ack", registryHandler.HandleAck).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox/stats", registryHandler.HandleStats).Methods("GET")
 	// Task ownership (CR-FEAT-025): the transfer/reassign surface for a stuck
 	// lease, and the dead-letter destination a TTL expiry feeds.
-	r.HandleFunc("/agents/{id}/inbox/transfer", registryHandler.HandleTransfer).Methods("POST")
-	r.HandleFunc("/agents/{id}/inbox/dead-letters", registryHandler.HandleDeadLetters).Methods("GET")
 	// Realms (CR-FEAT-029): the policy set this server is actually enforcing,
 	// with a live per-namespace agent census. Registered unconditionally — an
 	// unconfigured deployment answers with the one implicit namespace — and
 	// NOT auth-exempt: like /status it reports posture, so a token-less caller
 	// must not be able to read it on a server that has auth on.
-	r.HandleFunc("/namespaces", registryHandler.HandleListNamespaces).Methods("GET")
 	// Permission management (CR-CHAT-007 phase 1, registry/principals_api.go):
 	// mint a principal, create/revoke bindings and grants. The admin gate is
 	// the handler's (SetPermissionsAdminToken) — these routes are registered

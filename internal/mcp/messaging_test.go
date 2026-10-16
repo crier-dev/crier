@@ -39,6 +39,8 @@ func TestSendMessage_MergesReplyTo(t *testing.T) {
 		AgentID: "bob",
 		Payload: map[string]any{"text": "hi"},
 		ReplyTo: "corr-123",
+		Model:   registry.NewHint("model-x"), Provider: registry.NewHint("provider-y"),
+		IdempotencyKey: "mcp-key",
 	})
 	_, isErr := parseToolResult(t, resp)
 	if isErr {
@@ -61,6 +63,77 @@ func TestSendMessage_MergesReplyTo(t *testing.T) {
 	}
 	if payload["text"] != "hi" {
 		t.Fatalf("payload lost original field: %v", payload)
+	}
+	if entries[0].ReplyTo != "corr-123" || entries[0].IdempotencyKey != "mcp-key" || entries[0].Model.String() != "model-x" || entries[0].Provider.String() != "provider-y" {
+		t.Fatalf("top-level envelope metadata lost: %+v", entries[0])
+	}
+
+	definitions := s.toolDefinitions()
+	for _, tool := range []string{"deliver_message", "send_message"} {
+		var schema map[string]any
+		for _, def := range definitions {
+			if def.Name == tool {
+				if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		props, _ := schema["properties"].(map[string]any)
+		for _, field := range []string{"model", "provider", "reply_to", "idempotency_key"} {
+			if _, ok := props[field]; !ok {
+				t.Errorf("%s schema omits envelope field %s", tool, field)
+			}
+		}
+	}
+	resp = callTool(t, s, "deliver_message", DeliverMessageInput{AgentID: "bob", Payload: json.RawMessage(`{"text":"direct"}`), Model: registry.NewHint("model-d"), Provider: registry.NewHint("provider-d"), ReplyTo: "direct-reply", IdempotencyKey: "direct-key"})
+	if _, isErr := parseToolResult(t, resp); isErr {
+		t.Fatalf("deliver_message metadata call failed")
+	}
+	direct, _, err := store.Retrieve("bob", 30*time.Second, 10)
+	if err != nil || len(direct) != 1 {
+		t.Fatalf("retrieve direct metadata: %v (%d)", err, len(direct))
+	}
+	if direct[0].ReplyTo != "direct-reply" || direct[0].IdempotencyKey != "direct-key" || direct[0].Model.String() != "model-d" || direct[0].Provider.String() != "provider-d" {
+		t.Fatalf("deliver_message envelope metadata lost: %+v", direct[0])
+	}
+}
+
+func TestProtectedRecipientRejectsInProcessAndDirectStoreMCPBypass(t *testing.T) {
+	base := registry.NewMemoryStore()
+	if err := base.Register(&registry.Agent{ID: "router", PublicKey: registry.HexKey(make([]byte, 32))}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := registry.ParseServiceDeliveryAllowlist("scheduler>router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secured := registry.NewAuthorityStore(base, policy, "relay-a")
+	s := NewWithOptions(secured, Options{AgentID: "scheduler"})
+
+	for _, tc := range []struct {
+		name string
+		call func() *jsonRPCResponse
+	}{
+		{"in_process_send", func() *jsonRPCResponse {
+			return callTool(t, s, "send_message", SendMessageInput{AgentID: "router", Payload: map[string]any{"x": 1}, IdempotencyKey: "k1"})
+		}},
+		{"direct_store_tool", func() *jsonRPCResponse {
+			return callTool(t, s, "deliver_message", DeliverMessageInput{AgentID: "router", Payload: json.RawMessage(`{"x":1}`), IdempotencyKey: "k2"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := tc.call()
+			if _, isErr := parseToolResult(t, resp); !isErr {
+				t.Fatalf("protected delivery unexpectedly succeeded: %+v", resp)
+			}
+		})
+	}
+	depth, leased, _, err := base.Stats("router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if depth+leased != 0 {
+		t.Fatalf("protected inbox contains %d message(s)", depth+leased)
 	}
 }
 

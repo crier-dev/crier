@@ -90,12 +90,15 @@ __all__ = [
     "CrierError",
     "CrierTimeout",
     "Message",
+	"ABSENT",
     "SigningKey",
     "ed25519_public_key",
     "ed25519_sign",
     "ed25519_verify",
     "signing_backend",
 ]
+
+ABSENT = object()
 
 # --------------------------------------------------------------------------
 # Ed25519 — RFC 8032 (bundled fallback; no third-party dependency)
@@ -455,6 +458,11 @@ class Message:
         self.lease_id: str = str(entry.get("lease_id") or lease_id or "")
         self.payload: Any = _decode_payload(entry.get("payload"))
         self.guard = entry.get("guard")
+        # A sentinel preserves all four wire states: absent, null, blank and value.
+        self.model = entry["model"] if "model" in entry else ABSENT
+        self.provider = entry["provider"] if "provider" in entry else ABSENT
+        self.reply_to = entry["reply_to"] if "reply_to" in entry else ABSENT
+        self.idempotency_key = entry["idempotency_key"] if "idempotency_key" in entry else ABSENT
 
     def __repr__(self) -> str:
         return "Message(id=%r, payload=%r, lease_id=%r)" % (
@@ -757,6 +765,7 @@ class Crier:
         token: Optional[str] = None,
         key: Union[SigningKey, str, bytes, None] = None,
         timeout: float = 30.0,
+        audience: Optional[str] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         parsed = urllib.parse.urlsplit(self.base_url)
@@ -767,6 +776,7 @@ class Crier:
         self.agent_id = agent_id
         self.timeout = timeout
         self.token = token if token is not None else os.environ.get("CR_AUTH_TOKEN") or None
+        self.audience = audience if audience is not None else os.environ.get("CR_SERVICE_DELIVERY_AUDIENCE") or None
 
         if key is None:
             if not key_path:
@@ -833,6 +843,9 @@ class Crier:
                 digest = hashlib.sha256(body).hexdigest()
                 headers["X-Agent-Body-SHA256"] = digest
                 payload += "\nsha256:" + digest
+            if self.audience:
+                headers["X-Crier-Audience"] = self.audience
+                payload += "\naudience:" + self.audience
             signature = self.key.sign(payload.encode("utf-8"))
             headers["X-Agent-ID"] = self.agent_id
             headers["X-Agent-Ts"] = ts
@@ -946,6 +959,9 @@ class Crier:
             return True
         except CrierError as exc:
             if exc.status == 409:
+                existing = self.request("GET", "/agents/%s" % urllib.parse.quote(self.agent_id or "", safe=""))
+                if not isinstance(existing, Mapping) or str(existing.get("public_key", "")).lower() != self.key.public_key_hex.lower():
+                    raise CrierError(409, "public_key_mismatch: existing service identity uses another key", exc.body, exc.path)
                 return False
             raise
 
@@ -963,6 +979,10 @@ class Crier:
         *,
         ttl_seconds: Optional[int] = None,
         sender: Optional[str] = None,
+        model: Any = ABSENT,
+        provider: Any = ABSENT,
+        reply_to: Any = ABSENT,
+        idempotency_key: Any = ABSENT,
     ) -> Dict[str, Any]:
         """POST /agents/{id}/inbox — body-sign only an explicit own sender.
 
@@ -977,6 +997,9 @@ class Crier:
             body["ttl_seconds"] = ttl_seconds
         if sender is not None:
             body["sender"] = sender
+        for name, value in (("model", model), ("provider", provider), ("reply_to", reply_to), ("idempotency_key", idempotency_key)):
+            if value is not ABSENT:
+                body[name] = value
         _, parsed = self._raw_request(
             "POST", "/agents/%s/inbox" % urllib.parse.quote(agent_id, safe=""), body=body,
             signed=bool(self.agent_id and sender == self.agent_id),

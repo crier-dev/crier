@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,7 +47,11 @@ func TestDispatchPostgresSerializedRoundTripsAndLegacyMigration(t *testing.T) {
 		require.NoError(t, err, "%s: %s", name, out)
 	}
 	run(initdb, "-D", data, "-A", "trust", "-U", "cr36", "--no-locale", "--encoding=UTF8")
+	postgresRunning := true
 	t.Cleanup(func() {
+		if !postgresRunning {
+			return
+		}
 		stopCtx, stop := context.WithTimeout(context.Background(), 15*time.Second)
 		defer stop()
 		out, err := exec.CommandContext(stopCtx, pgctl, "-D", data, "-m", "immediate", "-w", "stop").CombinedOutput()
@@ -126,5 +131,103 @@ INSERT INTO inbox_entries (id,agent_id,payload,created_at,expires_at) VALUES ('l
 		require.JSONEq(t, `" Model-X "`, string(got.Messages[0]["model"]))
 		require.JSONEq(t, `"  "`, string(got.Messages[0]["provider"]))
 		require.JSONEq(t, `"original-id"`, string(got.Messages[0]["reply_to"]))
+	})
+
+	t.Run("concurrent_service_idempotency_and_body_conflict", func(t *testing.T) {
+		_, err := store.pool.Exec(ctx, "TRUNCATE agents CASCADE")
+		require.NoError(t, err)
+		for _, id := range []string{"scheduler", "router"} {
+			require.NoError(t, store.Register(&Agent{ID: id, PublicKey: HexKey(make([]byte, 32))}))
+		}
+		const callers = 12
+		results := make(chan *ServiceDeliveryReceipt, callers)
+		errs := make(chan error, callers)
+		var wg sync.WaitGroup
+		for i := 0; i < callers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				entry := &InboxEntry{Payload: json.RawMessage(`{"task":1}`), Sender: "scheduler", IdempotencyKey: "concurrent"}
+				receipt := ServiceDeliveryReceipt{Status: http.StatusCreated, Response: []byte(`{"transport":"inbox"}`)}
+				got, _, err := store.DeliverServiceIdempotent("scheduler", "router", "concurrent", sha256Hex([]byte("same-body")), entry, receipt)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results <- got
+			}()
+		}
+		wg.Wait()
+		close(results)
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
+		var messageID string
+		for got := range results {
+			require.NotEmpty(t, got.MessageID)
+			if messageID == "" {
+				messageID = got.MessageID
+			}
+			require.Equal(t, messageID, got.MessageID)
+		}
+		var rows int
+		require.NoError(t, store.pool.QueryRow(ctx, "SELECT count(*) FROM inbox_entries WHERE agent_id='router'").Scan(&rows))
+		require.Equal(t, 1, rows)
+		_, _, err = store.DeliverServiceIdempotent("scheduler", "router", "concurrent", sha256Hex([]byte("changed-body")), &InboxEntry{Payload: json.RawMessage(`{"task":2}`), Sender: "scheduler", IdempotencyKey: "concurrent"}, ServiceDeliveryReceipt{Status: http.StatusCreated, Response: []byte(`{"transport":"inbox"}`)})
+		require.ErrorIs(t, err, ErrServiceIdempotencyConflict)
+	})
+
+	t.Run("service_receipt_survives_database_and_handler_restart", func(t *testing.T) {
+		_, err := store.pool.Exec(ctx, "TRUNCATE agents CASCADE")
+		require.NoError(t, err)
+		for _, id := range []string{"scheduler", "router"} {
+			require.NoError(t, store.Register(&Agent{ID: id, PublicKey: HexKey(make([]byte, 32))}))
+		}
+		entry := &InboxEntry{ID: "service-message", Payload: json.RawMessage(`{"task":1}`), Sender: "scheduler", IdempotencyKey: "durable-key"}
+		receipt := ServiceDeliveryReceipt{Status: http.StatusCreated, Response: []byte("{\"id\":\"service-message\",\"transport\":\"inbox\"}\n")}
+		got, replayed, err := store.DeliverServiceIdempotent("scheduler", "router", "durable-key", sha256Hex([]byte("signed-body")), entry, receipt)
+		require.NoError(t, err)
+		require.False(t, replayed)
+		require.Equal(t, receipt.Response, got.Response)
+
+		// The durable replay receipt must outlive normal transport completion.
+		// A foreign key from the receipt back to the queue row would make Ack
+		// fail here or would delete the receipt that an after-ack retry needs.
+		messages, leaseID, err := store.Retrieve("router", time.Minute, 1)
+		require.NoError(t, err)
+		require.Len(t, messages, 1)
+		require.Equal(t, "service-message", messages[0].ID)
+		require.NoError(t, store.Ack("router", leaseID, []string{"service-message"}))
+		persistedBeforeRestart, err := store.LookupServiceDelivery("scheduler", "router", "durable-key", sha256Hex([]byte("signed-body")))
+		require.NoError(t, err)
+		require.Equal(t, "service-message", persistedBeforeRestart.MessageID)
+
+		store.Close()
+		run(pgctl, "-D", data, "-m", "fast", "-w", "stop")
+		postgresRunning = false
+		run(pgctl, "-D", data, "-l", filepath.Join(root, "postgres-restart.log"), "-o", "-F -c listen_addresses='' -k "+root, "-w", "start")
+		postgresRunning = true
+
+		fresh, err := NewPostgresStore(ctx, dsn)
+		require.NoError(t, err)
+		t.Cleanup(fresh.Close)
+		policy, err := ParseServiceDeliveryAllowlist("scheduler>router")
+		require.NoError(t, err)
+		secured := NewAuthorityStore(fresh, policy, "relay-a")
+		freshHandler := NewHandler(secured)
+		require.NoError(t, freshHandler.SetServiceDelivery("scheduler>router", "relay-a"))
+		authority := &ServiceAuthority{sender: "scheduler", recipient: "router", idempotencyKey: "durable-key", bodyDigest: sha256Hex([]byte("signed-body"))}
+		persisted, err := secured.lookupAuthorized(authority)
+		require.NoError(t, err)
+		require.Equal(t, receipt.Response, persisted.Response)
+		retry := &InboxEntry{ID: "must-not-be-stored", Payload: json.RawMessage(`{"task":1}`), Sender: "scheduler", IdempotencyKey: "durable-key"}
+		replayedReceipt, replayed, err := fresh.DeliverServiceIdempotent("scheduler", "router", "durable-key", sha256Hex([]byte("signed-body")), retry, receipt)
+		require.NoError(t, err)
+		require.True(t, replayed)
+		require.Equal(t, "service-message", replayedReceipt.MessageID)
+		var rows int
+		require.NoError(t, fresh.pool.QueryRow(ctx, "SELECT count(*) FROM inbox_entries WHERE agent_id='router'").Scan(&rows))
+		require.Zero(t, rows, "ack removed the transport row and replay did not recreate it")
 	})
 }
