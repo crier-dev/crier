@@ -672,9 +672,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		return agent.Webhook, nil
 	})
 	// DF-CRIER-8: when an async delivery exhausts its bounded retries, the
-	// originating sender gets exactly one durable WEBHOOK_FAILED
-	// notification in its own inbox. The sink is the Store's direct inbox
-	// Deliver path — it bypasses webhook routing, so it cannot recurse.
+	// sender gets exactly one durable WEBHOOK_FAILED notification in its own
+	// inbox. DF-CRIER-320: when the envelope carried NO sender (the
+	// documented default for fire-and-forget callers), that same
+	// notification goes to the TARGET agent's own inbox — the operator whose
+	// endpoint failed — marked no_sender, instead of being dropped silently.
+	// The sink is the Store's direct inbox Deliver path — it bypasses
+	// webhook routing, so it cannot recurse.
 	whDriver.SetFailureNotifier(registry.WebhookFailureSink(regStore))
 	whDriver.Start()
 	defer whDriver.Stop()

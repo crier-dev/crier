@@ -140,7 +140,7 @@ only that class can still land on a later attempt. (Timeout and budget exhaustio
 | Mode | Semantics | Sender sees | Failure |
 |---|---|---|---|
 | blocking | POST + wait, reply from body | `200 {"id","transport":"webhook","reply",…}` | permanent endpoint rejection → 502; retries exhausted / timeout → 504 |
-| async | POST, don't wait | `202 {"id","transport":"webhook","delivery_mode":"async"}` accept | queue + retry + backoff; retries exhausted → durable `WEBHOOK_FAILED` inbox notification to the sender |
+| async | POST, don't wait | `202 {"id","transport":"webhook","delivery_mode":"async"}` accept | queue + retry + backoff; retries exhausted → durable `WEBHOOK_FAILED` inbox notification to the sender, else to the target agent (`no_sender`, DF-CRIER-320) |
 | batch | coalesce N/T → one batch POST | `202 {"id","transport":"webhook","delivery_mode":"batch"}` accept | queue flush retry (exhaustion notifies like async) |
 
 - **Transport signaling (DF-CRIER-157):** every accept names where the message actually went, so a sender
@@ -158,8 +158,11 @@ only that class can still land on a later attempt. (Timeout and budget exhaustio
   a webhook-configured agent). Payload:
   `{"kind":"error","code":"WEBHOOK_FAILED","message_id":"<original>","target":"<agent>","retries":N,"status_code":S,"error":"…"}`
   (`status_code` omitted on transport failure; `error` carries the transport error string). A missing sender
-  or a failed notification write is logged best-effort: the delivery is not requeued and the notification is
-  not retried or duplicated.
+  is NOT a silent drop (DF-CRIER-320): the notification is written into the TARGET agent's own inbox — the
+  operator whose endpoint failed is the one who must learn about it — carrying the additive marker
+  `"no_sender":true`, which a sender notification never sets, so the two are distinguishable. Only a FAILED
+  notification write remains best-effort logged: the delivery is not requeued and the notification is
+  not retried or duplicated. An unregistered sender or target is exactly that failed-write case.
   Timing: one attempt per `CR_WEBHOOK_REDELIVER_S` tick (default 30s) and the item is dropped once
   `item.Retries > budget` for that endpoint (§2 `retries`, capped by `CR_WEBHOOK_MAX_RETRIES`), so with the
   defaults (5 / 30s) the notification arrives roughly

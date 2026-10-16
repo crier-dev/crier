@@ -131,14 +131,18 @@ func TestDriver_AsyncRetryExhaustion_TransportError(t *testing.T) {
 	}
 }
 
-// TestDriver_AsyncRetryExhaustion_NoSenderIsBestEffort: an exhausted item
-// without a sender is logged and dropped — no notification, no requeue, no
-// panic (DF-CRIER-8 negative path).
-func TestDriver_AsyncRetryExhaustion_NoSenderIsBestEffort(t *testing.T) {
+// TestDriver_AsyncRetryExhaustion_NoSenderNotifiesTarget_DFCRIER320: an
+// exhausted item whose envelope carried NO sender is no longer a silent
+// drop. The driver emits exactly one notification carrying an EMPTY Sender
+// and TargetAgent = the agent whose endpoint failed; addressing is the
+// sink's job (registry.WebhookFailureSink writes it into that target's own
+// inbox under the no_sender marker, DF-CRIER-320). Exhaustion accounting and
+// the no-requeue drop are unchanged.
+func TestDriver_AsyncRetryExhaustion_NoSenderNotifiesTarget_DFCRIER320(t *testing.T) {
 	cs := newCaptureServer(t, 500)
 	d := NewDriver(NewClient(2*time.Second, nil), NewMemoryQueue(), DriverConfig{
 		MaxRetries: 1, RedeliverEvery: 30 * time.Millisecond, ProbeEvery: time.Hour,
-		CircuitThreshold: 100,
+		CircuitThreshold: 100, // keep the circuit closed so retries exhaust instead
 	})
 	d.Start()
 	defer d.Stop()
@@ -147,17 +151,72 @@ func TestDriver_AsyncRetryExhaustion_NoSenderIsBestEffort(t *testing.T) {
 	d.SetFailureNotifier(rec.notify)
 
 	_, err := d.Deliver("agent-b", testConfig(cs.server.URL), &Envelope{Crier: EnvelopeMeta{
-		Version: 1, MessageID: "msg-nosender-1", Kind: "message", // Sender empty
+		Version: 1, MessageID: "msg-nosender-320", Kind: "message", // Sender deliberately absent
 	}})
 	if err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
+
+	waitFor(t, "failure notification for a sender-less exhaustion", func() bool { return rec.count() >= 1 })
+	waitFor(t, "queue drained (dropped, not requeued)", func() bool { return d.queue.Len() == 0 })
+	n := rec.first()
+	if n.Sender != "" {
+		t.Errorf("Sender = %q, want empty (the envelope carried none)", n.Sender)
+	}
+	if n.TargetAgent != "agent-b" {
+		t.Errorf("TargetAgent = %q, want agent-b (the inbox the sink falls back to)", n.TargetAgent)
+	}
+	if n.MessageID != "msg-nosender-320" {
+		t.Errorf("MessageID = %q, want msg-nosender-320 (the original message id)", n.MessageID)
+	}
+	if n.Retries != 2 { // MaxRetries=1 → dropped on the 2nd failed attempt
+		t.Errorf("Retries = %d, want 2 (MaxRetries+1)", n.Retries)
+	}
+	if n.StatusCode != 500 {
+		t.Errorf("StatusCode = %d, want 500", n.StatusCode)
+	}
+
+	// Settle: the dropped item must never produce a duplicate notification.
+	time.Sleep(200 * time.Millisecond)
+	if got := rec.count(); got != 1 {
+		t.Fatalf("notifications = %d, want exactly 1", got)
+	}
+}
+
+// TestDriver_AsyncRetryExhaustion_NilNotifierIsNoOp_DFCRIER320: the
+// driver-side nil check is the real "nothing to write" case. With no sink
+// installed a sender-less exhaustion stays a log-only no-op — no panic, no
+// requeue, and nothing arrives late for a sink installed afterwards.
+func TestDriver_AsyncRetryExhaustion_NilNotifierIsNoOp_DFCRIER320(t *testing.T) {
+	cs := newCaptureServer(t, 500)
+	d := NewDriver(NewClient(2*time.Second, nil), NewMemoryQueue(), DriverConfig{
+		MaxRetries: 1, RedeliverEvery: 30 * time.Millisecond, ProbeEvery: time.Hour,
+		CircuitThreshold: 100,
+	})
+	d.Start()
+	defer d.Stop()
+	d.SetConfigResolver(func(id string) (*Config, error) { return testConfig(cs.server.URL), nil })
+	// No SetFailureNotifier call at all: notifyExhausted returns early.
+
+	_, err := d.Deliver("agent-b", testConfig(cs.server.URL), &Envelope{Crier: EnvelopeMeta{
+		Version: 1, MessageID: "msg-nilnotifier-320", Kind: "message", // Sender absent too
+	}})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	// Exhaustion still runs to completion (2 POSTs for MaxRetries=1) and the
+	// item is dropped, not requeued.
 	waitFor(t, "queue drained (dropped)", func() bool {
 		return d.queue.Len() == 0 && cs.messageCount() >= 2
 	})
-	time.Sleep(100 * time.Millisecond)
+
+	// A sink installed after the drop must never be called for it: the nil
+	// branch ran, so no notification was buffered anywhere.
+	rec := &notifyRecorder{}
+	d.SetFailureNotifier(rec.notify)
+	time.Sleep(200 * time.Millisecond)
 	if got := rec.count(); got != 0 {
-		t.Fatalf("notifications = %d, want 0 for sender-less item", got)
+		t.Fatalf("notifications = %d, want 0 with no sink installed at exhaustion time", got)
 	}
 }
 

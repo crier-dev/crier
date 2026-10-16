@@ -41,6 +41,12 @@ var ErrPermanent = errors.New("webhook: permanent failure")
 // item, after exhaustion only, via the notifier installed with
 // SetFailureNotifier. StatusCode is 0 on transport-level failure; Err then
 // carries the error string.
+//
+// Sender is empty when the exhausted envelope carried no Crier.Sender (the
+// documented default for fire-and-forget callers). That is not a reason to
+// skip: the sink addresses the notification to TargetAgent's own inbox and
+// marks the payload no_sender, so the operator whose endpoint failed still
+// gets a durable trace (DF-CRIER-320).
 type FailureNotification struct {
 	MessageID   string `json:"message_id"`
 	Sender      string `json:"sender"`
@@ -510,9 +516,17 @@ func (d *Driver) drainQueue() {
 
 // notifyExhausted emits the DF-CRIER-8 failure notification for a dropped
 // (retry-exhausted) queue item. Exactly-once per item: drainQueue pops the
-// item and does not requeue it, so this runs at most once. Best-effort:
-// a missing sender or a failing sink is logged, never requeued, never
-// panics, and never routes back through webhook delivery.
+// item and does not requeue it, so this runs at most once.
+//
+// DF-CRIER-320: a missing sender is NOT a silent drop. The notification is
+// always emitted and the SINK owns addressing — with Sender set it lands in
+// the sender's durable inbox (unchanged); with Sender empty it lands in the
+// TARGET agent's own inbox (item.AgentID — the operator whose endpoint
+// failed) carrying the additive no_sender marker, so the two are
+// distinguishable. Only a FAILED notification write stays best-effort: it is
+// logged, never requeued, never retried, never duplicated, never routed back
+// through webhook delivery, and never panics. A nil sink is the real
+// "nothing to write" case (log-only, the pre-DF-CRIER-8 behavior).
 func (d *Driver) notifyExhausted(item *QueueItem, res Result) {
 	if d.notifyFailure == nil {
 		return
@@ -529,9 +543,13 @@ func (d *Driver) notifyExhausted(item *QueueItem, res Result) {
 		msgID = env.Crier.MessageID
 	}
 	if sender == "" {
-		logf("webhook: failure notification skipped (no sender on exhausted item)",
+		// No sender to attribute the failure to. Rather than dropping the
+		// trace, the same single sink call goes out with Sender empty and
+		// TargetAgent = the endpoint that failed; the sink writes it into
+		// that agent's own inbox under the no_sender marker. Only a failed
+		// write on that path is best-effort (logged below).
+		logf("webhook: failure notification routed to target inbox (no sender on exhausted item)",
 			"agent", item.AgentID, "message_id", msgID, "retries", item.Retries)
-		return
 	}
 	n := FailureNotification{
 		MessageID:   msgID,
@@ -629,8 +647,10 @@ func (d *Driver) SetConfigResolver(fn func(agentID string) (*Config, error)) {
 // delivery exhausts its bounded retries (DF-CRIER-8). Wire it to the
 // registry Store's direct inbox Deliver path (registry.WebhookFailureSink)
 // so the notification is durable and bypasses webhook routing (no
-// recursion). Nil disables notifications (dropped items are log-only, the
-// pre-DF-CRIER-8 behavior).
+// recursion). The sink owns addressing: a notification with an empty Sender
+// is written to the TARGET agent's inbox with the no_sender marker instead
+// of being dropped (DF-CRIER-320). Nil disables notifications (dropped items
+// are log-only, the pre-DF-CRIER-8 behavior).
 func (d *Driver) SetFailureNotifier(fn func(FailureNotification) error) {
 	d.notifyFailure = fn
 }
