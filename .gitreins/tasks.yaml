@@ -2937,3 +2937,15 @@ tasks:
   status: complete
   created_at: '2026-10-15T10:02:54.885034+00:00'
   completed_at: '2026-10-15T10:58:16.456049+00:00'
+- id: DF-CRIER-320
+  title: Async webhook exhaustion with no sender must produce a durable user-visible
+    trace
+  criteria:
+  - Tier-1 guard green; go build/vet/test pass; tests prove empty-sender exhaustion
+    writes a durable WEBHOOK_FAILED notification into the TARGET agent's inbox (additive
+    no_sender payload marker) with non-empty-sender behavior unchanged; specs/WEBHOOK-DELIVERY.md
+    section 4 documents the target-inbox fallback; worker ch:trace resolves row=DF-CRIER-320
+    spec=test=commit=evidence
+  status: complete
+  created_at: '2026-10-16T18:34:29.835876+00:00'
+  completed_at: '2026-10-16T18:51:01.495501+00:00'
