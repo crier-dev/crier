@@ -456,3 +456,36 @@ mtime/size change; a bad INITIAL doc is a boot failure.
 - Restart hygiene: a `nohup ./crier -port X &` over a live server exits with
   "address already in use" and the OLD process keeps serving — always
   `./crier -stop -pidfile` and grep the fresh log before probing.
+
+## Router dispatch: model/provider hints + correlated replies (CR-FEAT-036, live-verified 2026-10-16 @ 839b4f2)
+
+Crier transports `model`/`provider`/`reply_to` on the INBOX envelope; it never
+chooses a pair. Contract verified live end-to-end:
+
+- Send: `POST /agents/{id}/inbox` with `payload` + optional `model`, `provider`,
+  `reply_to`. Explicit strings survive byte-for-byte; JSON null and ABSENT are
+  the same canonical default on every read; a blank string is preserved as sent;
+  a non-string is 400 `invalid json`.
+- Poll: `GET /agents/{id}/inbox` SIGNED (`X-Agent-ID/X-Agent-Ts/X-Agent-Sig`
+  over `GET\n<path>\n<ts>`) — unsigned is 401. Returns messages with
+  `lease_id`, `queue_depth`, `leased_count`; hints are top-level message fields.
+- Ack: `POST /agents/{id}/inbox/ack` signed, body `{lease_id, message_ids}` → 204.
+- Correlated result: deliver to the SENDER's inbox with `reply_to` = the
+  dispatch's `id` (capture it from the deliver 201 body — it is not echoed
+  elsewhere); the scheduler joins from its own inbox on exactly that value.
+- Keys: `crier keygen -id <agent> -out <file.key> -force` (script: add `-json`).
+  The printed human report includes the hex public key; `-json` carries it too.
+- See docs/router-dispatch.md (the doccheck recipe there is replayed by
+  `make docs-check`) and docs/dogfood/2026-10-16-router-hints-chat-ui.md for
+  the worked probe.
+
+## Chat UI (CR-CHAT-038 rebuild, live-verified 2026-10-16 @ 839b4f2)
+
+`GET /chat` is a self-contained operator client of the public API (no private
+endpoints). Two-operator walkthrough verified: identity apply → channel create
+→ plain/addressed/task sends with per-recipient outcomes → reply-in-thread →
+task panel jump → 15s auto-refresh. It is ATTRIBUTION, not authentication:
+register the agents first or the panels show nobody. Task state is live only
+in the side Tasks panel; the message bubble's "task state" is send-time text.
+No failed fetches observed across the whole walkthrough; zero horizontal
+overflow at 390px.
