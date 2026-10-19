@@ -47,10 +47,31 @@ try {
     assert.equal(clean.status,0,'clean harness failed: '+clean.stderr);
     assert.match(clean.stdout,/PASS: full browser suite/);
     const report = JSON.parse(fs.readFileSync(path.join(root,'clean-evidence','browser-results.json'),'utf8'));
+    const gates = JSON.parse(fs.readFileSync(path.join(root,'clean-evidence','task-action-gates.json'),'utf8'));
+    assert.equal(gates.length,6,'both actions must run every precondition');
+    assert.deepEqual(gates.map(g => g.action+':'+g.precondition).sort(),['claim:closed','claim:identity','claim:session','complete:closed','complete:identity','complete:session']);
+    for (const gate of gates) { assert.equal(gate.title,gate.reason); assert.ok(gate.reasonVisible && gate.reason.trim()); }
     assert.deepEqual(report.completion.transitions.map(t => t.state),['open','claimed','done']);
     assert.equal(report.completion.transitions[1].owner,'ui-test-recipient');
     assert.equal(report.completion.transitions[2].owner,'ui-test-recipient');
     assert.ok(fs.existsSync(new URL(report.completion.evidenceArtifact)),'completion evidence artifact exists');
+    // DF-CRIER-386: corrupt only the observed title, once per gate/action.
+    // The visible reason and real embedded HTML are untouched. Each child must
+    // reject that disagreement at the contract assertion, not at a later step.
+    const buttonAnchor = `          const button = document.querySelector('[data-task-action="'+action+'"]');`;
+    for (const action of ['claim','complete']) {
+      for (const precondition of ['identity','session','closed']) {
+        const name = 'wrong-title-'+action+'-'+precondition;
+        const mismatch = run(name,mutated(name,buttonAnchor,buttonAnchor+`\n          if (action === '${action}' && precondition === '${precondition}') button.title = 'TEST-ONLY mismatched task reason';`));
+        assert.equal(mismatch.status,1,name+' must reject a title/reason disagreement');
+        assert.ok(mismatch.stderr.includes(action+' '+precondition+' task-action title must equal visible composer reason'),mismatch.stderr);
+        assert.match(mismatch.stderr,/TEST-ONLY mismatched task reason/);
+        console.log('REJECTION VERIFIED: '+name+' (independent DOM title mismatch, harness rc 1)');
+      }
+    }
+    const empty = run('empty-title-and-reason',mutated('empty-title-and-reason',buttonAnchor,buttonAnchor+`\n          button.title = ''; document.getElementById('composer-reason').textContent = '';`));
+    assert.equal(empty.status,1,'equal-but-empty title/reason must FAIL');
+    assert.match(empty.stderr,/claim identity must show a nonempty composer reason/);
     const evidence = run('missing-evidence',mutated('missing-evidence',"await page.locator('[data-task-evidence]').fill(taskEvidence.text);","await page.locator('[data-task-evidence]').fill(''); taskEvidence.text = '';"));
     assert.equal(evidence.status,1,'empty evidence regression must FAIL, not skip or pass');
     assert.match(evidence.stderr,/UI Complete POST .*\/complete: .*TASK_EVIDENCE_REQUIRED/);
@@ -64,7 +85,7 @@ try {
     assert.match(skip.stderr,/SKIP: Chromium executable unavailable.*exit code 77/);
     assert.doesNotMatch(skip.stdout,/VERIFIED|PASS:/,'skip ran no browser/API assertions');
     console.log('SKIP VERIFIED: missing Chromium; harness rc 77; no browser assertions ran');
-    console.log('PASS: clean browser suite + two seeded regression rejections + explicit browser skip. Temporary mutations only; worktree unchanged. Evidence: '+root);
+    console.log('PASS: clean browser suite + all six title/reason mismatch rejections + equal-but-empty reason rejection + evidence/revision rejections + explicit browser skip. Temporary mutations only; worktree unchanged. Evidence: '+root);
   }
 } catch (error) {
   console.error('FAIL: browser harness selftest; exit code 1');

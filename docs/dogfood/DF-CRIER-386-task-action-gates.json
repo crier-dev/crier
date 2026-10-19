@@ -1,0 +1,48 @@
+{
+  "baseline": "91c6e8a0c9f261c38aa2277cce9565841f42f614",
+  "method": "Real Chromium against the untouched baseline embedded HTML/binary. A temporary copy of the historical harness logged instead of asserting the six title/panel comparisons. No product state logic was modified. That diagnostic run later failed at the stale signature-required fill and is not a full-suite PASS. JSON escapes preserve the exact observed newlines.",
+  "pairs": [
+    {
+      "action": "claim",
+      "precondition": "identity",
+      "title": "Set an acting agent ID (Connection & identity, left) to enable sending.",
+      "panel": "Set an acting agent ID (Connection & identity, left) to enable sending.\nSet acting ID",
+      "reason": "Set an acting agent ID (Connection & identity, left) to enable sending."
+    },
+    {
+      "action": "claim",
+      "precondition": "session",
+      "title": "No channel open — pick or create one.",
+      "panel": "No channel open — pick or create one.\nPick a channel\nCreate channel",
+      "reason": "No channel open — pick or create one."
+    },
+    {
+      "action": "claim",
+      "precondition": "closed",
+      "title": "This conversation is closed; sending is unavailable. Pick or create an open channel.",
+      "panel": "This conversation is closed; sending is unavailable. Pick or create an open channel.\nPick a channel\nCreate channel",
+      "reason": "This conversation is closed; sending is unavailable. Pick or create an open channel."
+    },
+    {
+      "action": "complete",
+      "precondition": "identity",
+      "title": "Set an acting agent ID (Connection & identity, left) to enable sending.",
+      "panel": "Set an acting agent ID (Connection & identity, left) to enable sending.\nSet acting ID",
+      "reason": "Set an acting agent ID (Connection & identity, left) to enable sending."
+    },
+    {
+      "action": "complete",
+      "precondition": "session",
+      "title": "No channel open — pick or create one.",
+      "panel": "No channel open — pick or create one.\nPick a channel\nCreate channel",
+      "reason": "No channel open — pick or create one."
+    },
+    {
+      "action": "complete",
+      "precondition": "closed",
+      "title": "This conversation is closed; sending is unavailable. Pick or create an open channel.",
+      "panel": "This conversation is closed; sending is unavailable. Pick or create an open channel.\nPick a channel\nCreate channel",
+      "reason": "This conversation is closed; sending is unavailable. Pick or create an open channel."
+    }
+  ]
+}

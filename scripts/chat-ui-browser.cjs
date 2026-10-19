@@ -200,18 +200,33 @@ async function run() {
   assert.equal(transitions[0].state,'open');
   // Test-only UI-state changes exercise the SAME reason gate, without changing
   // the server's session lifecycle or inventing a close route.
+  const actionGates = [];
   const assertActionGates = async action => {
     for (const precondition of ['identity','session','closed']) {
-      await page.evaluate(precondition => {
-        window.__gateSaved = {agent:state.agent,session:state.session};
-        if (precondition === 'identity') state.agent = '';
-        if (precondition === 'session') state.session = null;
-        if (precondition === 'closed') state.session = {...state.session,state:'closed'};
-        updateComposer();
-      },precondition);
-      assert.equal(await page.locator('[data-task-action="'+action+'"]').isDisabled(),true);
-      assert.equal(await page.locator('[data-task-action="'+action+'"]').getAttribute('title'),await page.locator('#composer-why').innerText());
-      await page.evaluate(() => { Object.assign(state,window.__gateSaved); delete window.__gateSaved; updateComposer(); });
+      try {
+        const observed = await page.evaluate(({precondition,action}) => {
+          window.__gateSaved = {agent:state.agent,session:state.session};
+          if (precondition === 'identity') state.agent = '';
+          if (precondition === 'session') state.session = null;
+          if (precondition === 'closed') state.session = {...state.session,state:'closed'};
+          updateComposer();
+          const button = document.querySelector('[data-task-action="'+action+'"]');
+          const reason = document.getElementById('composer-reason');
+          return {action,precondition,disabled:button.disabled,title:button.getAttribute('title'),reason:reason.innerText,
+            reasonVisible:reason.getClientRects().length > 0 && getComputedStyle(reason).visibility !== 'hidden',
+            panel:document.getElementById('composer-why').innerText};
+        },{precondition,action});
+        actionGates.push(observed);
+        fs.writeFileSync(path.join(evidence,'task-action-gates.json'),JSON.stringify(actionGates,null,2));
+        const label = action+' '+precondition;
+        assert.equal(observed.disabled,true,label+' task action must be disabled');
+        assert.ok(observed.reasonVisible && observed.reason.trim(),label+' must show a nonempty composer reason');
+        // The panel also contains recovery buttons; their labels are NOT the reason.
+        // Compare independent DOM surfaces, not composerState() against itself.
+        assert.equal(observed.title,observed.reason,label+' task-action title must equal visible composer reason');
+      } finally {
+        await page.evaluate(() => { Object.assign(state,window.__gateSaved); delete window.__gateSaved; updateComposer(); });
+      }
     }
   };
   // Act as the recipient for BOTH transitions, never spoof ownership in storage.
@@ -416,14 +431,22 @@ async function run() {
   assert.match(await signedPage.locator('#sender-authority').innerText(),/signatures REQUIRED/);
   await signedPage.locator('#agent').fill(operator); await signedPage.locator('#apply-identity').click(); await waitIdle(signedPage);
   await signedPage.locator(`[data-session="${signedRoom.id}"]`).click(); await waitIdle(signedPage);
-  await signedPage.locator('#text').fill('Unsigned enforced browser send');
-  await signedPage.locator('#send-button').click(); await waitIdle(signedPage);
-  assert.match(await signedPage.locator('#send-result').innerText(),/HTTP 401: SESSION_SENDER_SIGNATURE_REQUIRED/);
+  assert.equal(await signedPage.locator('#text').isDisabled(),true);
+  assert.equal(await signedPage.locator('#send-button').isDisabled(),true);
+  assert.equal(await signedPage.locator('#composer-reason').isVisible(),true);
+  const signedReason = await signedPage.locator('#composer-reason').innerText();
+  assert.match(signedReason,/SESSION_SENDER_SIGNATURE_REQUIRED/);
+  assert.equal(await signedPage.locator('#send-button').getAttribute('title'),signedReason);
+  // The product correctly prevents this unsigned send in the UI. Probe server
+  // enforcement separately via HTTP; do not claim a disabled-button click ran.
+  const unsigned = await fetch(signedBase+`/sessions/${signedRoom.id}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:operator,payload:{text:'Unsigned enforced HTTP send'},message_kind:'plain'})});
+  assert.equal(unsigned.status,401);
+  assert.equal((await unsigned.json()).error,'SESSION_SENDER_SIGNATURE_REQUIRED');
   assert.equal((await api(signedBase,'GET',`/sessions/${signedRoom.id}/messages`)).count,0);
   await signedPage.screenshot({path:path.join(evidence,'chat-signature-required.png'),fullPage:true});
   await signedPage.close();
   assert.match(await page.locator('#sender-authority').innerText(),/sender-identity-claimed.*not key-verified/);
-  verified('signature enforcement ON: browser Send -> 401 SESSION_SENDER_SIGNATURE_REQUIRED, no transcript recorded; explicit deployment permission OFF: sender-identity-claimed disclosed');
+  verified('signature enforcement ON: browser composer disabled with visible matching reason; separate Node HTTP POST -> 401 SESSION_SENDER_SIGNATURE_REQUIRED, no transcript recorded; explicit deployment permission OFF: sender-identity-claimed disclosed');
   const token = randomBytes(24).toString('hex'); const protectedBase = await start(token);
   const locked = await fetch(protectedBase+'/chat'); assert.equal(locked.status,401);
   const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
