@@ -2949,3 +2949,14 @@ tasks:
   status: in_progress
   created_at: '2026-10-16T18:34:29.835876+00:00'
   completed_at: '2026-10-16T18:51:01.495501+00:00'
+- id: DF-CRIER-412
+  title: Scope install-hooks to the repository
+  criteria:
+  - 'Make install-hooks safe with global core.hooksPath: prevent crier''s hook from
+    being installed into a host-wide hooks directory, preserve crier''s own board
+    gate, add deterministic acceptance coverage for a repo without scripts/check-board.sh
+    and for crier with the checker absent, and include traceability evidence tied
+    to DF-CRIER-412.'
+  status: complete
+  created_at: '2026-10-19T22:18:02.654423+00:00'
+  completed_at: '2026-10-19T22:22:18.919434+00:00'
