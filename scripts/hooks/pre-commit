@@ -209,31 +209,41 @@ n_board="${#board_files[@]}"
 # unchanged — and now NAME the gofmt arm (DF-CRIER-189): a Go-only diff used to
 # read "this gate had nothing to add", which stopped being true once an arm that
 # reads formatting existed.
-if [ "$n_board" -gt 0 ]; then
-  BOARD_CHECKER="$REPO_ROOT/scripts/check-board.sh"
-  if [ ! -f "$BOARD_CHECKER" ]; then
-    echo "gate: ERROR: $BOARD_CHECKER is missing — refusing to let a board change through with the board validation unavailable" >&2
-    exit 1
-  fi
-
-  bash "$BOARD_CHECKER"
+# ── the board arm: runs on EVERY commit, not only when a board file is staged ──
+# DF-CRIER-389 (quorum #5): the first version of this arm fired only when a
+# staged path was under .coding-hermes/board/, so it gated the DIFF and not the
+# CONDITION. An invalid board is a state: it survives in the tree and can arrive
+# through another lane's push or a direct write, and then every Go-only or empty
+# commit read green while `boardctl validate` printed FAIL on the same tree.
+# Like the gofmt arm (which reads the whole tracked .go set, never just staged
+# files), this arm reads the WHOLE board on every commit. It is quiet about the
+# validator's warnings and loud about its errors, and a repo with no board is
+# told so rather than skipped silently.
+BOARD_CHECKER="$REPO_ROOT/scripts/check-board.sh"
+if [ -f "$BOARD_CHECKER" ]; then
+  bash "$BOARD_CHECKER" -q
   board_rc=$?
   if [ "$board_rc" -ne 0 ]; then
     echo "gate: board validation FAILED (exit $board_rc) — fix the rows named above; an invalid board is a durable queue every foreman lane reads" >&2
     exit "$board_rc"
   fi
-
-  echo "gate: board validation PASS on $n_board staged board file(s): ${board_files[*]}"
+  if [ "$n_board" -gt 0 ]; then
+    echo "gate: board validation PASS (whole board; $n_board board file(s) also in this diff): ${board_files[*]}"
+  else
+    echo "gate: board validation PASS (whole board; no board file in this diff)"
+  fi
+else
+  echo "gate: board arm UNAVAILABLE — $BOARD_CHECKER is missing, so this commit was NOT checked against the board canon" >&2
+  if [ "$n_board" -gt 0 ]; then
+    echo "gate: ERROR: a board change cannot be committed while the board checker is missing" >&2
+    exit 1
+  fi
 fi
 
 if [ "$n_make_docker" -eq 0 ]; then
   if [ "$go_count" -eq 0 ]; then
     if [ "$n_shell_yaml" -eq 0 ]; then
-      if [ "$n_board" -gt 0 ]; then
-        echo "gate scope: no Go source, no shell/YAML, no Makefile/Dockerfile staged — the board arm validated $n_board board file(s): ${board_files[*]}"
-        exit 0
-      fi
-      echo "gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff"
+      echo "gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff (the board arm above still validated the whole board)"
       exit 0
     fi
     echo "gate scope: no Go source staged (so no gofmt arm to run) — shell/YAML checks ran on $n_shell_yaml file(s): ${shell_yaml[*]}"

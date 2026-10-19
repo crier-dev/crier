@@ -48,6 +48,7 @@ set -uo pipefail
 
 PROG="check-board.sh"
 tmp=""
+QUIET=0
 
 _err() { printf '%s: %s\n' "$PROG" "$*" >&2; }
 _say() { printf '%s\n' "$*"; }
@@ -79,8 +80,14 @@ run_check() {
   local out rc
   out="$("$validator" validate -C "$root" 2>&1)"
   rc=$?
-  printf '%s\n' "$out"
+  if [ "$QUIET" -eq 1 ] && [ "$rc" -eq 0 ]; then
+    # quiet mode: a PASS does not reprint 20 legacy warnings on every commit
+    QUIET=1
+  else
+    printf '%s\n' "$out"
+  fi
   if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out"
     _err "board: validation FAILED (boardctl exit $rc) — fix the rows named above; do not commit an invalid board with --no-verify."
     return 1
   fi
@@ -179,6 +186,10 @@ main() {
         ;;
       --selftest)
         selftest=1
+        shift
+        ;;
+      -q | --quiet)
+        QUIET=1
         shift
         ;;
       -h | --help)
