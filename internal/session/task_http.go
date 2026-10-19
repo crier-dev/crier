@@ -414,6 +414,15 @@ func (h *Handler) transitionTask(w http.ResponseWriter, r *http.Request, to Task
 				fmt.Sprintf("task %q is %q; only a claimed or running task can be completed", taskID, task.State))
 			return
 		}
+		// The claim's author kind is part of the binding: an agent cannot
+		// impersonate a principal with the same spelling (or vice versa).
+		if owner == "" || actorRefID(actor) != owner ||
+			(actor.Principal != "") != (taskMsg.Author.Principal != "") {
+			writeAPIError(w, http.StatusConflict, "TASK_OWNER_MISMATCH",
+				fmt.Sprintf("task %q owner %q (%s) cannot be completed or failed by actor %q (%s)",
+					taskID, owner, taskActorKind(taskMsg.Author), actorRefID(actor), taskActorKind(actor)))
+			return
+		}
 		next = TaskDone
 		if s := strings.TrimSpace(req.NewState); s != "" {
 			next = TaskState(s)
@@ -422,6 +431,22 @@ func (h *Handler) transitionTask(w http.ResponseWriter, r *http.Request, to Task
 					fmt.Sprintf("new_state must be %q or %q", TaskDone, TaskFailed))
 				return
 			}
+		}
+	}
+
+	if next == TaskDone && !hasTaskEvidence(req.Payload) {
+		if h.opts.TaskEvidence != nil {
+			var err error
+			req.Payload, err = h.opts.TaskEvidence(r.Context(), sess.ID, taskID)
+			if err != nil {
+				writeAPIError(w, http.StatusServiceUnavailable, "TASK_EVIDENCE_UNAVAILABLE", err.Error())
+				return
+			}
+		}
+		if !hasTaskEvidence(req.Payload) {
+			writeAPIError(w, http.StatusConflict, "TASK_EVIDENCE_REQUIRED",
+				"done requires a non-empty evidence payload or a successful terminal run joined from the task trigger journal; task remains unchanged")
+			return
 		}
 	}
 
@@ -515,6 +540,12 @@ type taskView struct {
 	State  string `json:"state"`
 	// Owner names who holds the claimed task; absent while open.
 	Owner string `json:"owner,omitempty"`
+	// Unclaimed work stays open and advertises its explicit claim route.
+	ClaimStatus string `json:"claim_status"`
+	ClaimURL    string `json:"claim_url,omitempty"`
+	// Evidence is the terminal record's payload, not the creation instruction
+	// or claim message. It survives store reopen with that lifecycle record.
+	Evidence json.RawMessage `json:"evidence,omitempty"`
 	// UpdatedAt is the ts of the record-version that last moved the state.
 	UpdatedAt time.Time `json:"updated_at"`
 	// MessageID is the message record-version carrying this state.
@@ -554,6 +585,18 @@ func tasksInState(st *State) []taskView {
 		}
 		v.State = string(m.Task.State)
 		v.Owner = m.Task.Owner
+		v.ClaimStatus = "claimed"
+		v.ClaimURL = ""
+		if m.Task.Owner == "" {
+			v.ClaimStatus = "unclaimed"
+			if m.Task.State == TaskOpen {
+				v.ClaimURL = "/sessions/" + m.SessionID + "/tasks/" + m.Task.ID + "/claim"
+			}
+		}
+		v.Evidence = nil
+		if m.Task.State == TaskDone || m.Task.State == TaskFailed {
+			v.Evidence = m.Payload
+		}
 		v.UpdatedAt = m.Task.UpdatedAt
 		v.MessageID = m.ID
 		v.ThreadID = m.ThreadID

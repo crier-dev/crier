@@ -834,6 +834,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		if trigger := daggerctl.NewTaskTrigger(daggerSvc, cfg.Dagger.TriggerOnTask,
 			cfg.Dagger.TriggerAgent, cfg.Dagger.StoreDir); trigger != nil {
 			sessHandler.SetTaskTrigger(trigger.OnTaskCreated)
+			sessHandler.SetTaskEvidence(trigger.CompletionEvidence)
 			slog.Info("dagger task trigger armed", "agent", cfg.Dagger.TriggerAgent, "store_dir", cfg.Dagger.StoreDir)
 		}
 		// The watcher STOPS when this invocation returns (serve ends,

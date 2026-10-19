@@ -7,6 +7,20 @@
 // caller) fires nothing and behaves byte-identically to before.
 package session
 
+import (
+	"context"
+	"encoding/json"
+)
+
+// TaskEvidenceHook returns an observed successful run joined to this exact
+// session and task, or nil when none exists. Errors must fail closed.
+// The returned snapshot is persisted as the completion message's payload.
+// It is a read-only seam: the session package never imports daggerctl.
+type TaskEvidenceHook func(ctx context.Context, sessionID, taskID string) (json.RawMessage, error)
+
+// SetTaskEvidence installs the bridge's journal-backed evidence reader at boot.
+func (h *Handler) SetTaskEvidence(fn TaskEvidenceHook) { h.opts.TaskEvidence = fn }
+
 // TaskTriggerHook is the callback a dagger task trigger installs
 // (CR-CHAT-034): after a task's transcript record is durable and its fan-out
 // is accepted, the hook fires once with the task's id, its session and the

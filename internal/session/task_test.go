@@ -460,7 +460,8 @@ func TestTaskLifecycleSQLStoreRoundTrip(t *testing.T) {
 			}, nil, nil)
 			require.Equal(t, http.StatusCreated, code)
 			code = h.do(t, http.MethodPost, "/sessions/"+room+"/tasks/"+taskID+"/complete", map[string]any{
-				"actor": fixAgentA,
+				"actor":   fixAgentA,
+				"payload": map[string]string{"artifact": "test://sweep-result"},
 			}, nil, nil)
 			require.Equal(t, http.StatusCreated, code)
 
@@ -595,7 +596,7 @@ func runTaskLifecycleVerifiable(t *testing.T, b localBackend) {
 
 	// After complete, GET reads "done" over three record-versions.
 	code = h.do(t, http.MethodPost, "/sessions/"+room+"/tasks/"+created.TaskID+"/complete",
-		map[string]any{"actor": fixAgentA}, nil, nil)
+		map[string]any{"actor": fixAgentA, "payload": map[string]string{"artifact": "test://sweep-result"}}, nil, nil)
 	require.Equal(t, http.StatusCreated, code)
 	code = h.do(t, http.MethodGet, "/sessions/"+room+"/tasks/"+created.TaskID, nil, &got, nil)
 	require.Equal(t, http.StatusOK, code)

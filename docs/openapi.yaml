@@ -2890,12 +2890,28 @@ paths:
       tags: [sessions]
       summary: Complete a task (claimed/running -> done, or failed via new_state)
       description: |-
-        The §2.5 lifecycle, step two: the owner (or any actor with `send` on
-        the session) completes the task. The transition is a NEW
-        `task`-kind record-version in the SAME thread — the completion output
-        (`payload`) is what the human reads there. A task that is not
-        `claimed` or `running` is refused `409 INVALID_TASK_TRANSITION`; a
-        failure closes with `new_state: "failed"`.
+        The §2.5 lifecycle, step two: ONLY the recorded owner (same actor id
+        and kind), with session send authority, may complete or fail the task.
+        A different actor is refused 409 TASK_OWNER_MISMATCH; the detail names
+        both owner and actor. There is no privileged or silent override.
+
+        Done requires a non-empty explicit evidence payload, or a successful
+        terminal run read from the run store and joined by exact session/task
+        through the trigger journal. Empty objects, arrays, null and blank text
+        (including nested placeholders) are not evidence. Running, unknown,
+        failed, cancelled and link-lost runs do not justify done. A completion
+        without evidence is refused 409 TASK_EVIDENCE_REQUIRED, never recorded
+        as self_reported. An unreadable journal/store is 503
+        TASK_EVIDENCE_UNAVAILABLE. Refusals append no event and leave the task
+        unchanged. The UI displays that refusal rather than a done state.
+
+        Accepted completion appends a NEW task-kind message in the SAME thread.
+        Explicit evidence is kept as its payload; joined run evidence is a
+        snapshot with source=trigger_run, trigger and run. Both are readable as
+        evidence on the task GET/list views and survive session-store reopen.
+        A task not claimed or running is refused 409 INVALID_TASK_TRANSITION.
+        A failure closes with new_state=failed, with the same owner rule but no
+        success-evidence requirement.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
@@ -2924,7 +2940,9 @@ paths:
         "404":
           description: No such task in this session (TASK_NOT_FOUND)
         "409":
-          description: The task is neither claimed nor running (INVALID_TASK_TRANSITION)
+          description: Invalid state (INVALID_TASK_TRANSITION), different owner/actor (TASK_OWNER_MISMATCH), or missing completion evidence (TASK_EVIDENCE_REQUIRED). No mutation occurs.
+        "503":
+          description: The trigger journal or run store cannot be read (TASK_EVIDENCE_UNAVAILABLE). No mutation occurs.
 
   /sessions/{id}/participants:
     get:
@@ -5704,7 +5722,7 @@ components:
           type: string
         payload:
           type: object
-          description: The transition's output (the claim note, or the completion report the human reads in the thread).
+          description: The claim note or explicit completion evidence. Done requires non-empty evidence here unless a successful terminal run is joined from the trigger journal; empty containers, null and blank text do not qualify. Stored verbatim as the transition payload and returned as evidence by task reads.
         new_state:
           type: string
           enum: [done, failed]
@@ -5724,7 +5742,7 @@ components:
           $ref: "#/components/schemas/TranscriptMessage"
     SessionTask:
       type: object
-      required: [session_id, task_id, state, updated_at, message_id, thread_id, versions]
+      required: [session_id, task_id, state, claim_status, updated_at, message_id, thread_id, versions]
       description: |-
         One task at its CURRENT state (DF-CRIER-304) — the state of the LATEST
         record-version over the task id (§3.7 keep-LAST).
@@ -5740,6 +5758,15 @@ components:
         owner:
           type: string
           description: Who holds the claimed task; absent while open.
+        claim_status:
+          type: string
+          enum: [unclaimed, claimed]
+          description: Unclaimed tasks remain open until someone explicitly claims them. The chat panel shows Owner unassigned and a Claim button; no automatic claim occurs.
+        claim_url:
+          type: string
+          description: The reachable POST claim route for an open unclaimed task; submit actor and actor_kind to claim it.
+        evidence:
+          description: The terminal lifecycle message payload (explicit evidence or a journal-joined trigger/run snapshot); absent before completion. No evidence is inferred from the creation instruction or claim note.
         updated_at:
           type: string
           format: date-time

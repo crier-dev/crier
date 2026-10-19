@@ -127,6 +127,9 @@ type HTTPOptions struct {
 	// was. It is set by the server wiring (SetTaskTrigger) after the handler
 	// is built, so the session package never imports daggerctl.
 	TaskTrigger TaskTriggerHook
+	// TaskEvidence reads a successful run joined by the trigger journal. Nil
+	// means completion requires an explicit non-empty evidence payload.
+	TaskEvidence TaskEvidenceHook
 }
 
 // Handler serves the session API. It is safe for concurrent callers when its
