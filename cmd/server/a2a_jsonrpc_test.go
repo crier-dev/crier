@@ -699,7 +699,8 @@ func (s *sseStream) waitClosed(t *testing.T) {
 // through (submitted → working → completed), and any artifact published to the
 // task's relay topic.
 func TestA2AJSONRPCStreaming_CompletesTheTaskLifecycleAndCarriesRelayArtifacts(t *testing.T) {
-	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
+	// This legacy stream test intentionally publishes unsigned progress/output.
+	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true", "CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	const agentID = "a2a-streamer"
 	priv := registerA2AAgent(t, base, agentID, true, nil)

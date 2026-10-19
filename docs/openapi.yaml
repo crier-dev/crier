@@ -517,6 +517,15 @@ paths:
         an identical topic name — and the rate limit that applies is that
         namespace's own (keyed by (namespace, agent)), which is what stops one
         realm's flood from costing another realm's agents their budget.
+        Offered agent signature headers are verified against the registered key,
+        including freshness and optional X-Agent-Body-SHA256 body binding. Invalid
+        proof is refused before evidence or fanout, even when signing is optional.
+        Ordinary topics keep signing optional. With CR_A2A_ENABLED=true and
+        CR_REQUIRE_AGENT_SIG=true, a2a.task.* topics require agent signatures.
+        Retained A2A answers expose publisher_identity_basis in artifact and task
+        metadata.crier: publisher-identity-verified or publisher-identity-claimed.
+        The legacy method/path/timestamp signature does not bind the body unless
+        X-Agent-Body-SHA256 is supplied (specs/A2A-OPTION.md, DF-CRIER-372).
       parameters:
         - $ref: "#/components/parameters/XCrierNamespace"
         - $ref: "#/components/parameters/XCrierNamespaceToken"
@@ -547,6 +556,8 @@ paths:
             zero subscribers the event is dropped by design — publishes to
             empty topics are not queued or retained, and the topic does not
             appear in GET /relay/topics until at least one subscriber connects.
+            A2A task answer evidence is retained separately before fanout and
+            needs no subscriber; 202 does not by itself prove task completion.
         "400":
           description: |-
             Invalid request — malformed JSON, missing or empty topic/event, an
@@ -557,7 +568,7 @@ paths:
             X-Crier-Namespace header instead), or a namespace that disagrees
             between the header and the query parameter.
         "401":
-          description: X-Agent-ID header required (rate limiting enabled), or the named namespace requires its own credential (X-Crier-Namespace-Token) and it is missing or wrong (error NAMESPACE_UNAUTHORIZED)
+          description: Missing required agent signature on an A2A task topic, invalid offered agent signature or body binding, X-Agent-ID header required (rate limiting enabled), or missing/wrong namespace credential (NAMESPACE_UNAUTHORIZED)
         "429":
           description: |
             Rate limit exceeded — the cap is the publishing namespace's OWN

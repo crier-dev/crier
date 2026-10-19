@@ -16,8 +16,9 @@ func TestPublishObserverBeforeFanoutAndAccept(t *testing.T) {
 	ch, unsub := r.Subscribe("a2a.task.test")
 	defer unsub()
 	calls := 0
-	r.SetPublishObserver(func(realm, agent, topic string, event json.RawMessage) error {
+	r.SetPublishObserver(func(realm, agent, topic string, event json.RawMessage, verified bool) error {
 		calls++
+		require.False(t, verified)
 		require.Empty(t, realm)
 		require.Equal(t, "owner", agent)
 		require.Equal(t, "a2a.task.test", topic)
@@ -47,7 +48,7 @@ func TestPublishObserverErrorAndInvalidPublish(t *testing.T) {
 	ch, unsub := r.Subscribe("valid")
 	defer unsub()
 	calls := 0
-	r.SetPublishObserver(func(_, _, _ string, _ json.RawMessage) error {
+	r.SetPublishObserver(func(_, _, _ string, _ json.RawMessage, _ bool) error {
 		calls++
 		return errors.New("store unavailable")
 	})

@@ -40,7 +40,7 @@ func outputEnvelope(taskID, text string) map[string]any {
 // This is the acceptance measurement against run()'s production composition,
 // with real registration, signed retrieve/ack, and no stream until step three.
 func TestA2APublishOutputWithoutStreamHTTP(t *testing.T) {
-	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
+	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true", "CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	const agent = "publish-answer-361"
 	priv := registerA2AAgent(t, base, agent, true, nil)

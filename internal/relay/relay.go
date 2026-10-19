@@ -3,6 +3,7 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -59,16 +60,26 @@ type Relay struct {
 
 	// publishObserver is optional write-through for accepted HTTP publishes.
 	// It runs outside mu, before fanout, and is absent on a plain relay.
-	publishObserver func(namespace, agentID, topic string, event json.RawMessage) error
+	publishObserver   func(namespace, agentID, topic string, event json.RawMessage, identityVerified bool) error
+	publishAuthorizer func(http.ResponseWriter, *http.Request, string) (verified, allowed bool)
 }
 
 // SetPublishObserver installs a synchronous HTTP-publish observer. An error
 // prevents fanout and the 202 response, so persistence cannot fail silently.
 // Direct Publish/PublishIn calls have no publisher identity and do not observe.
-func (r *Relay) SetPublishObserver(observer func(namespace, agentID, topic string, event json.RawMessage) error) {
+func (r *Relay) SetPublishObserver(observer func(namespace, agentID, topic string, event json.RawMessage, identityVerified bool) error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.publishObserver = observer
+}
+
+// SetPublishAuthorizer installs optional pre-observation authorization. A refusal
+// writes its own response and suppresses both evidence and fanout. The bool proof
+// is server-owned, never taken from event metadata or publisher headers.
+func (r *Relay) SetPublishAuthorizer(authorize func(http.ResponseWriter, *http.Request, string) (verified, allowed bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.publishAuthorizer = authorize
 }
 
 // namespaceSep separates the realm from the topic in the relay's internal

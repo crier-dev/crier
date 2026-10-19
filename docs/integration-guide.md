@@ -1151,7 +1151,7 @@ relay, all with `Authorization: Bearer <token>` and no signature headers:
 | `GET /agents/{id}` | bearerAuth | `200` | — |
 | `POST /agents/{id}/inbox` (deliver) | bearerAuth | `201` — **no signature in any configuration** | — |
 | `GET /relay/topics` | bearerAuth | `200` | — |
-| `POST /relay/publish` | bearerAuth | `202` | — |
+| `POST /relay/publish` | bearerAuth; conditional agentSignature on A2A task topics | `202` on ordinary topics; `401` on A2A task topics when signature enforcement is on | Offered proof must verify; stale or bogus proof is refused |
 | `GET /mesh/peers` | bearerAuth | `200` | — |
 | `GET /fed/peers` | bearerAuth | `200` | — |
 | `GET /agents/{id}/inbox` (retrieve) | bearerAuth + agentSignature | `401` | `200` |

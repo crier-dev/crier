@@ -611,15 +611,17 @@ func (a DeliverAccept) Held() bool { return a.Status == "held" }
 // StateBasis (INT-A2A-004).
 type CrierMeta struct {
 	// Answered reports retained output evidence, never consumption or request history.
-	Answered         bool            `json:"answered"`
-	AnswerObservedAt string          `json:"answer_observed_at,omitempty"`
-	Transport        string          `json:"transport,omitempty"`
-	DeliveryMode     string          `json:"delivery_mode,omitempty"`
-	ExpiresAt        json.RawMessage `json:"expires_at,omitempty"`
-	Held             bool            `json:"held,omitempty"`
-	MaxHoldS         int             `json:"max_hold_s,omitempty"`
-	IdempotentReplay bool            `json:"idempotent_replay,omitempty"`
-	Guard            json.RawMessage `json:"guard,omitempty"`
+	Answered         bool   `json:"answered"`
+	AnswerObservedAt string `json:"answer_observed_at,omitempty"`
+	// PublisherIdentityBasis distinguishes registered-key proof from a header claim.
+	PublisherIdentityBasis string          `json:"publisher_identity_basis,omitempty"`
+	Transport              string          `json:"transport,omitempty"`
+	DeliveryMode           string          `json:"delivery_mode,omitempty"`
+	ExpiresAt              json.RawMessage `json:"expires_at,omitempty"`
+	Held                   bool            `json:"held,omitempty"`
+	MaxHoldS               int             `json:"max_hold_s,omitempty"`
+	IdempotentReplay       bool            `json:"idempotent_replay,omitempty"`
+	Guard                  json.RawMessage `json:"guard,omitempty"`
 	// StateBasis names the crier record a READ task's state was resolved from
 	// (INT-A2A-004, specs/A2A-OPTION.md §5.5.2). It is absent on a task a
 	// delivery wrote — the write path reports what the delivery did, not what a

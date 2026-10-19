@@ -13,12 +13,10 @@ import (
 
 // recordPublishedOutput is installed only with the A2A route. It runs on the
 // validated HTTP publish path, before fanout/202, never in a subscriber or poll.
-// X-Agent-ID is the publishing identity (as on the existing relay route), not
-// the envelope's self-reported role/metadata. No header means no task evidence;
-// ordinary anonymous relay traffic remains accepted when rate limiting is off.
-// This checks ownership, not cryptographic authorship: the relay's existing
-// bearer/realm authorization still governs who can assert X-Agent-ID.
-func (h *a2aHandler) recordPublishedOutput(realm, agentID, topic string, event json.RawMessage) error {
+// Identity assurance comes from the publish authorizer, never the envelope's
+// self-reported role/metadata. Unsigned permitted output is explicitly a claim;
+// ordinary relay topics retain their existing authorization policy.
+func (h *a2aHandler) recordPublishedOutput(realm, agentID, topic string, event json.RawMessage, identityVerified bool) error {
 	if agentID == "" || !strings.HasPrefix(topic, "a2a.task.") {
 		return nil
 	}
@@ -74,9 +72,13 @@ func (h *a2aHandler) recordPublishedOutput(realm, agentID, topic string, event j
 	if _, ok := a2a.ParseEnvelope(ev.Entry.Payload); !ok {
 		return nil
 	}
+	identityBasis := a2a.PublisherIdentityClaimed
+	if identityVerified {
+		identityBasis = a2a.PublisherIdentityVerified
+	}
 	artifact, err := json.Marshal(a2a.Artifact{
 		ArtifactID: taskID + "-answer", Parts: parts,
-		Metadata: map[string]any{"crier": map[string]any{"relay_topic": topic}},
+		Metadata: map[string]any{"crier": map[string]any{"relay_topic": topic, "publisher_identity_basis": identityBasis}},
 	})
 	if err != nil {
 		return fmt.Errorf("encode published output: %w", err)

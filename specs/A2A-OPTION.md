@@ -395,7 +395,8 @@ The stream carries **two** things, and says which is which:
    `TASK_STATE_SUBMITTED` (stored, unclaimed) → `TASK_STATE_WORKING` (leased, i.e. a consumer
    retrieved it). Retrieval alone is not completion. `TASK_STATE_COMPLETED` is emitted only from an
    observed successful acknowledgement or a retained `ACKed` row AND retained agent output, with
-   the explanation "the receiving agent acknowledged the message and an answer was observed";
+   the explanation "the receiving agent acknowledged the message and an answer was observed"
+   followed by `(publisher-identity-verified)` or `(publisher-identity-claimed)`;
    acknowledgement alone remains `WORKING` and explicitly says no answer was observed. `TASK_STATE_FAILED` still reports a present
    entry past its TTL, or a removed entry whose expiry sweep recorded a dead letter. Terminal
    states close the stream, as §3.1.2 requires.
@@ -577,10 +578,11 @@ Four properties of that table are decisions, and each is stated so a client neve
    No stream or background poll is required. The owning agent is the existing `X-Agent-ID` publisher:
    its registry realm must match the publish realm (`X-Crier-Namespace`, default when omitted), and
    its own inbox or retained lifecycle snapshot must contain the original task envelope. Foreign or
-   nonexistent tasks record nothing. Missing publisher identity records nothing either, without adding
-   an auth requirement to ordinary relay publishes (rate limiting still requires the header as before).
-   This is reported agent-role output, not cryptographic authorship: existing bearer/realm publish
-   authorization governs who may assert `X-Agent-ID`; payload metadata cannot select a different owner.
+   nonexistent tasks record nothing. With signature enforcement off, missing publisher identity records
+   nothing either; enforcement on refuses it. Ordinary relay topics keep their existing policy
+   (rate limiting still requires the header as before).
+   Publisher identity is reported separately from lifecycle evidence; see the dated DF-CRIER-372
+   paragraph below. Payload metadata cannot select a different owner or upgrade identity assurance.
    A storage failure returns HTTP `500` before fanout, rather than accepting an answer it discarded.
    SSE consumers only forward artifacts/read evidence; an open stream cannot bypass these checks.
    A stream emits the retained answer (stable `<task-id>-answer` artifact id) before its terminal
@@ -590,6 +592,8 @@ Four properties of that table are decisions, and each is stated so a client neve
    without rewriting immutable lifecycle evidence. GetTask and ListTasks join the same two records;
    output alone never licenses COMPLETED. This is first-output evidence, not an assertion that every
    application-specific step succeeded or that all later artifacts were captured.
+
+   **2026-10-19 — DF-CRIER-372, publish identity:** With A2A enabled, `a2a.task.*` HTTP publishes use the existing registry signature verifier. `CR_REQUIRE_AGENT_SIG=true` (the configuration default) requires proof against the `X-Agent-ID` agent's registered key; a different key returns HTTP `401` with `signature verification failed`, before evidence or fanout. With enforcement off, absent signing headers remain accepted, but supplied signatures must still verify; empty, partial, stale or invalid proof is refused. Retained answers expose `publisher_identity_basis` in both artifact metadata and `GetTask`/`ListTasks` `metadata.crier`: `publisher-identity-verified` means registered-key possession was verified; `publisher-identity-claimed` means only the header claim was accepted, even with a shared bearer token. The existing signature covers method, path and timestamp; the delivered body is additionally bound only when `X-Agent-Body-SHA256` is supplied. Neither label proves application success. `state_basis` still names acknowledgement evidence, and COMPLETED status text includes the identity label. First-answer assurance is retained unchanged; legacy answers without assurance are only claimed. Ordinary relay topics keep signatures optional, but supplied proof is checked even with A2A disabled; owner completion still needs no stream.
 
    `Ack` hard-deletes the inbox row while retaining a task envelope's pre-Ack `TaskEvidence` snapshot
    and acknowledgement time in the SAME mutation (DF-CRIER-352): one memory-store critical section,

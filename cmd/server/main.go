@@ -395,6 +395,11 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	}
 	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
+	// Supplied relay signatures are checked even when A2A is disabled. Ordinary
+	// unsigned relay traffic stays permissive; A2A installs its task-topic policy.
+	relaySvc.SetPublishAuthorizer(func(w http.ResponseWriter, req *http.Request, _ string) (bool, bool) {
+		return registryHandler.AuthorizePublisher(w, req, false)
+	})
 	// Global ingest budget (CR-FEAT-035): a shed on the delivery path itself,
 	// so a runaway producer cannot push every inbox deeper without limit.
 	// 0 (the default) installs nothing — the delivery path is then exactly what

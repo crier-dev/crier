@@ -76,9 +76,11 @@ const (
 	// StateBasisDeadLetter — the expiry sweep's durable failure record.
 	StateBasisDeadLetter = "dead-letter-recorded"
 	// StateBasisCanceled — a successful CancelTask recorded by the inbox backend.
-	StateBasisCanceled     = "canceled-by-request"
-	StateBasisAcknowledged = "acknowledgement-observed"
-	StateBasisUnknown      = "removed-outcome-unknown"
+	StateBasisCanceled        = "canceled-by-request"
+	StateBasisAcknowledged    = "acknowledgement-observed"
+	StateBasisUnknown         = "removed-outcome-unknown"
+	PublisherIdentityClaimed  = "publisher-identity-claimed"
+	PublisherIdentityVerified = "publisher-identity-verified"
 )
 
 // ---------------------------------------------------------------------------
@@ -458,6 +460,7 @@ func (e TaskEvidence) Task(state TaskState, basis string, historyLength *int, no
 	meta := CrierMeta{Transport: TransportInbox, StateBasis: basis, Answered: e.Answered()}
 	if meta.Answered {
 		meta.AnswerObservedAt = formatTimestamp(e.AnswerObservedAt)
+		meta.PublisherIdentityBasis = e.PublisherIdentityBasis()
 	}
 	var history []Message
 
@@ -501,6 +504,17 @@ func (e TaskEvidence) Task(state TaskState, basis string, historyLength *int, no
 	return task, nil
 }
 
+// PublisherIdentityBasis reads the server-stamped assurance retained with the
+// first answer. Legacy output without proof is conservatively only claimed.
+func (e TaskEvidence) PublisherIdentityBasis() string {
+	if e.Answer != nil {
+		if meta, ok := e.Answer.Metadata["crier"].(map[string]any); ok && meta["publisher_identity_basis"] == PublisherIdentityVerified {
+			return PublisherIdentityVerified
+		}
+	}
+	return PublisherIdentityClaimed
+}
+
 // expiryJSON renders an entry's resolved expiry the way the delivery accept
 // states it: JSON null for a message that never expires, the RFC 3339 instant
 // otherwise, and absent when there is no inbox entry behind the task.
@@ -538,7 +552,7 @@ func statusMessage(state TaskState, e TaskEvidence, contextID string) *Message {
 			text = "the receiving agent acknowledged the message; no answer observed yet"
 		}
 	case TaskStateCompleted:
-		text = "the receiving agent acknowledged the message and an answer was observed"
+		text = "the receiving agent acknowledged the message and an answer was observed (" + e.PublisherIdentityBasis() + ")"
 	case TaskStateCanceled:
 		text = "canceled by request: the lease on the message was released and its inbox entry was closed, so it can no longer be retrieved or acknowledged"
 	}

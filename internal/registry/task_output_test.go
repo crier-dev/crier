@@ -11,7 +11,7 @@ import (
 )
 
 func taskOutputFixture() TaskOutput {
-	return TaskOutput{TaskID: "task", ObservedAt: time.Now().UTC().Truncate(time.Microsecond), Artifact: json.RawMessage(`{"artifactId":"answer","parts":[{"text":"deployed"}]}`)}
+	return TaskOutput{TaskID: "task", ObservedAt: time.Now().UTC().Truncate(time.Microsecond), Artifact: json.RawMessage(`{"artifactId":"answer","parts":[{"text":"deployed"}],"metadata":{"crier":{"publisher_identity_basis":"publisher-identity-verified"}}}`)}
 }
 
 func TestTaskOutputMemoryScopeCopiesAndFirstEvidence(t *testing.T) {

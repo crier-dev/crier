@@ -109,6 +109,11 @@ func registerA2ARoute(r *mux.Router, store registry.Store, deliver, patch http.H
 	}
 	h := &a2aHandler{store: store, deliver: deliver, patch: patch, relay: relaySvc, opts: opts}
 	if relaySvc != nil {
+		publisherAuth := registry.NewHandler(store)
+		relaySvc.SetPublishAuthorizer(func(w http.ResponseWriter, req *http.Request, topic string) (bool, bool) {
+			required := opts.agentSignatureEnforced && strings.HasPrefix(topic, "a2a.task.")
+			return publisherAuth.AuthorizePublisher(w, req, required)
+		})
 		relaySvc.SetPublishObserver(h.recordPublishedOutput)
 	}
 	r.HandleFunc(a2a.JSONRPCBindingPath, h.handle).Methods(http.MethodPost)

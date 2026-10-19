@@ -27,7 +27,7 @@ func publishAgentAnswer(t *testing.T, base, agentID, taskID string) {
 // injected TaskEvidence. It proves output after consumption still reaches
 // polling clients, ListTasks agrees, and only explicit task output counts.
 func TestA2AAnswerObservedHTTP(t *testing.T) {
-	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
+	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true", "CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	const agent = "answer-agent-355"
 	priv := registerA2AAgent(t, base, agent, true, nil)

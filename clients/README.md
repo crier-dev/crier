@@ -118,8 +118,10 @@ against a server:
     **not** per-agent signed: registration carries the public key in the body and
     delivery is open to any sender.
 *   `POST /relay/publish` needs `X-Agent-ID` (the relay's rate limiter keys on
-    it); the relay does not verify the signature there. `GET
-    /relay/subscribe/{topic}` is a WebSocket whose frames are the envelopes
+    it). Offered agent signatures are verified; ordinary topics keep signing
+    optional. With A2A enabled, task topics require signatures when
+    `CR_REQUIRE_AGENT_SIG=true`; unsigned permissive output is explicitly only
+    `publisher-identity-claimed`. `GET /relay/subscribe/{topic}` is a WebSocket whose frames are the envelopes
     `{"topic": …, "event": …}`.
 *   If the server runs with `CR_AUTH_TOKEN`, every request except the five exempt
     paths (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) needs

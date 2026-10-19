@@ -759,11 +759,11 @@ curl -s -X POST localhost:8767/agents/agent-1/inbox "${AUTH[@]}" -H 'Content-Typ
 
 # 3. Publish to a relay topic (pub/sub). `X-Agent-ID` is the header the relay
 #    requires — the per-agent rate limiter keys on it and a publish without it
-#    is 401. The signature trio is NOT verified on this endpoint (measured at
-#    HEAD: a stale `X-Agent-Ts` and a bogus `X-Agent-Sig` both still answer
-#    202); it is enforced on the agent-scoped endpoints in steps 4-6, which is
-#    why the shared `sig` helper is used here too. A publish to a topic with no
-#    live subscriber still answers 202 and drops the event (see §1).
+#    is 401. Signing is optional on ordinary topics, but offered proof is checked:
+#    stale or bogus agent signature proof is refused with 401.
+#    A2A task topics require proof when CR_REQUIRE_AGENT_SIG=true; retained
+#    answers distinguish publisher-identity-verified from publisher-identity-claimed.
+#    Without subscribers, ordinary events still answer 202 and are dropped (see §1).
 TS=$(date +%s)
 curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8767/relay/publish "${AUTH[@]}" \
   -H 'Content-Type: application/json' -H 'X-Agent-ID: agent-1' \

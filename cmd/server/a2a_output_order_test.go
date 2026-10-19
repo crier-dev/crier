@@ -38,7 +38,7 @@ func TestA2APublishedOutputBeforeTerminalStatus(t *testing.T) {
 			require.True(t, ok)
 			raw, err := json.Marshal(outputEnvelope(id, "ordered answer"))
 			require.NoError(t, err)
-			require.NoError(t, h.recordPublishedOutput("", "terminal-agent", topic, raw))
+			require.NoError(t, h.recordPublishedOutput("", "terminal-agent", topic, raw, false))
 			if frameFirst {
 				frame, err := json.Marshal(relay.Frame{Topic: topic, Event: raw})
 				require.NoError(t, err)

@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -173,8 +175,19 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 	// The rejection bodies are JSON: net/http's Error helper would hard-code
 	// "text/plain; charset=utf-8" over any Content-Type set here, which is
 	// exactly what these four sites used to answer (DF-CRIER-212).
+	r.mu.RLock()
+	authorizer := r.publishAuthorizer
+	r.mu.RUnlock()
+	// Preserve the exact wire bytes for the existing opt-in body signature check.
+	// TeeReader captures decoder read-ahead as well; MultiReader restores the
+	// consumed prefix plus the remaining body without re-encoding the JSON.
+	var consumed bytes.Buffer
+	var input io.Reader = req.Body
+	if authorizer != nil {
+		input = io.TeeReader(req.Body, &consumed)
+	}
 	var body publishRequest
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(input).Decode(&body); err != nil {
 		slog.Warn("relay: publish rejected", "reason", "invalid json",
 			"sender", agentID, "request_id", rid)
 		httperr.WriteJSONError(w, http.StatusBadRequest, "invalid json")
@@ -208,11 +221,24 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		httperr.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	verified := false
+	if authorizer != nil {
+		original := req.Body
+		req.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(consumed.Bytes()), original), original}
+		var allowed bool
+		verified, allowed = authorizer(w, req, body.Topic)
+		if !allowed {
+			return
+		}
+	}
 	r.mu.RLock()
 	observer := r.publishObserver
 	r.mu.RUnlock()
 	if observer != nil {
-		if err := observer(nsName, agentID, body.Topic, body.Event); err != nil {
+		if err := observer(nsName, agentID, body.Topic, body.Event, verified); err != nil {
 			slog.Error("relay: publish observation failed", "topic", body.Topic,
 				"sender", agentID, "request_id", rid, "error", err)
 			httperr.WriteJSONError(w, http.StatusInternalServerError, "publish evidence could not be retained")

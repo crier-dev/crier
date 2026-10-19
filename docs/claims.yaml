@@ -722,17 +722,14 @@ claims:
     quote: '400 {"error":"webhook.batch: unknown field \"max_msgs\" (accepted: max_messages, flush_interval_s)"}'
     expect: "400"
     xfail: null
-  # README relay quickstart (CR-GAP-065c): the quickstart states the
-  # signature trio is NOT verified on POST /relay/publish. Mapping:
-  #   202 = the publish with a stale X-Agent-Ts and a bogus X-Agent-Sig was
-  #         still accepted (the trio is presence-only there);
-  #   401 = relay publish started verifying signatures (or the X-Agent-ID
-  #         requirement changed) — the quickstart sentence drifted.
+  # README relay quickstart (DF-CRIER-372): offered proof is now verified.
+  # The historical claim ID stays stable for the existing status probe.
+  #   401 = stale/bogus proof refused; 202 would silently ignore the proof.
   - id: STATUS-README-RELAY-PUBLISH-BOGUS-SIG-202
     kind: status
     doc: README.md
-    quote: "a stale `X-Agent-Ts` and a bogus `X-Agent-Sig` both still answer"
-    expect: "202"
+    quote: "stale or bogus agent signature proof is refused with 401"
+    expect: "401"
     xfail: null
   # --- AGENT-ECOSYSTEM.md (CR-GAP-065): the crier endpoints the stack
   # drives, claimed live from the doc's own prose. kind: route — only a 404
@@ -935,9 +932,8 @@ claims:
   - id: ROUTE-GUIDE-MUSTER-RELAY-PUBLISH
     kind: route
     doc: docs/integration-guide.md
-    # INT-MUSTER-003: publish is bearer-only (202, and it needs X-Agent-ID while
-    # rate limiting is on — the §4 contract, replayed by the docs-check recipe).
-    quote: '| `POST /relay/publish` | bearerAuth | `202` | — |'
+    # DF-CRIER-372: ordinary topics retain unsigned support; offered proof is checked.
+    quote: '| `POST /relay/publish` | bearerAuth; conditional agentSignature on A2A task topics | `202` on ordinary topics; `401` on A2A task topics when signature enforcement is on | Offered proof must verify; stale or bogus proof is refused |'
     expect: "/relay/publish"
     xfail: null
   - id: ROUTE-GUIDE-MUSTER-MESH-PEERS

@@ -280,6 +280,24 @@ func isHexSignature(s string) bool {
 	return true
 }
 
+// AuthorizePublisher verifies any supplied signing headers, even when enforcement
+// is off. requireSignature selects the publish scope requiring proof; its caller
+// supplies the deployment policy. A missing proof outside that scope must not
+// be reported as verified. Refusals are written by the existing signature helper.
+func (h *Handler) AuthorizePublisher(w http.ResponseWriter, r *http.Request, requireSignature bool) (verified, allowed bool) {
+	hasProof := false
+	for _, header := range []string{HeaderAgentSig, HeaderAgentTS, HeaderAgentBodySHA256} {
+		hasProof = hasProof || len(r.Header.Values(header)) > 0
+	}
+	if !requireSignature && !hasProof {
+		return false, true
+	}
+	if err := h.authorizeAgent(w, r, r.Header.Get(HeaderAgentID)); err != nil {
+		return false, false
+	}
+	return true, true
+}
+
 // requireAgent writes the authorization error if per-agent signing is enabled
 // and the request is not properly signed for targetID.
 func (h *Handler) requireAgent(w http.ResponseWriter, r *http.Request, targetID string) bool {
