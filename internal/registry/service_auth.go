@@ -101,8 +101,9 @@ func (h *Handler) SetServiceDelivery(raw, audience string) error {
 
 type serviceDeliveryContextKey struct{}
 
-// authorizeServiceDelivery runs BEFORE detection, budgets, replay registration,
-// holder rotation or transports. A protected recipient is reached ONLY via its
+// authorizeServiceDelivery runs BEFORE budgets, replay registration, holder
+// rotation or transports. Detection only records the response; it cannot admit
+// a protected recipient. A protected recipient is reached ONLY via its
 // explicit URL, not a pool, human binding, reply_to, or shared bearer identity.
 // The authenticated recipient in context is the sole bypass of the human ACL;
 // the untrusted JSON/header fields themselves never provide that bypass.

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -37,6 +38,11 @@ const (
 	// VerdictGuardBlocked — the message guard refused the message (403
 	// GUARD_BLOCKED).
 	VerdictGuardBlocked = "guard_blocked"
+	// The 403 family is normative in specs/CHAT-SESSIONS.md §3.2.
+	VerdictACLForbidden             = "acl_forbidden"
+	VerdictNamespaceMismatch        = "namespace_mismatch"
+	VerdictUnsignedServiceAuthority = "unsigned_service_authority"
+	VerdictForbiddenUnclassified    = "forbidden_unclassified"
 	// VerdictQuarantined — the detector's own containment refused the
 	// delivery (403 AGENT_QUARANTINED).
 	VerdictQuarantined = "quarantined"
@@ -68,6 +74,9 @@ type DeliveryObservation struct {
 	Verdict   string
 	Transport string
 	Payload   []byte
+	// Detail retains the response error for forbidden deliveries, including
+	// unknown causes; it rides the audit's existing signed detail field.
+	Detail string
 }
 
 // Detector is the detection layer's view of the delivery path (CR-FEAT-030).
@@ -96,6 +105,8 @@ func (h *Handler) SetDetector(d Detector) { h.detector = d }
 type statusRecorder struct {
 	http.ResponseWriter
 	code int
+	// Only refusal bodies are retained: never buffer successful webhook replies.
+	forbiddenBody []byte
 }
 
 func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
@@ -113,6 +124,9 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	if s.code == 0 {
 		s.code = http.StatusOK
 	}
+	if s.code == http.StatusForbidden {
+		s.forbiddenBody = append(s.forbiddenBody, b...)
+	}
 	return s.ResponseWriter.Write(b)
 }
 
@@ -125,9 +139,45 @@ func (s *statusRecorder) status() int {
 	return s.code
 }
 
-// deliveryVerdict maps the status the caller received (plus an explicit
-// override for the two branches a status code alone cannot distinguish) to the
-// documented verdict and transport.
+// deliveryResponseVerdict refines a 403 from the actual bus response, not the
+// request payload or arbitrary substring matches. Explicit branch verdicts keep
+// federation/containment semantics; all forbidden responses retain their error.
+func deliveryResponseVerdict(status int, override string, body []byte) (verdict, transport, detail string) {
+	verdict, transport = deliveryVerdict(status, override)
+	if status != http.StatusForbidden {
+		return
+	}
+	var response struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &response); err == nil && response.Error != "" {
+		detail = response.Error
+	} else {
+		// Malformed JSON, absent or non-string error: preserve the raw body,
+		// but do not turn text mentioning a known code into that code.
+		detail = string(body)
+		response.Error = ""
+	}
+	if override != "" {
+		return
+	}
+	switch response.Error {
+	case "GUARD_BLOCKED":
+		verdict = VerdictGuardBlocked
+	case "DELIVERY_FORBIDDEN":
+		verdict = VerdictACLForbidden
+	case "NAMESPACE_MISMATCH":
+		verdict = VerdictNamespaceMismatch
+	case "service delivery requires signed service authority":
+		verdict = VerdictUnsignedServiceAuthority
+	case "AGENT_QUARANTINED":
+		verdict = VerdictQuarantined
+	}
+	return
+}
+
+// deliveryVerdict maps status and explicit branch evidence to a verdict. A bare
+// 403 cannot establish a cause; deliveryResponseVerdict refines it when possible.
 func deliveryVerdict(status int, override string) (verdict, transport string) {
 	if override != "" {
 		return override, transportForVerdict(override)
@@ -144,7 +194,7 @@ func deliveryVerdict(status int, override string) (verdict, transport string) {
 	case http.StatusBadRequest:
 		return VerdictRejected, ""
 	case http.StatusForbidden:
-		return VerdictGuardBlocked, ""
+		return VerdictForbiddenUnclassified, ""
 	case http.StatusBadGateway, http.StatusGatewayTimeout:
 		return VerdictWebhookFailed, "webhook"
 	default:

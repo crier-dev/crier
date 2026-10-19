@@ -1067,14 +1067,6 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 	// no timing, which the wire spells as an absent field, never a zero.
 	deliverStart := time.Now()
 
-	if h.rejectOversizedBody(w, r) {
-		return
-	}
-	if !h.authorizeServiceDelivery(w, r, id, capability) {
-		return
-	}
-	serviceAuthority, _ := r.Context().Value(serviceDeliveryContextKey{}).(*ServiceAuthority)
-
 	var req deliverRequest
 
 	// DETECTION (CR-FEAT-030): exactly one observation per delivery request,
@@ -1083,18 +1075,16 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 	// The status recorder is the measurement, not a re-derivation of the
 	// branch: whatever this handler writes is what the log records, so a
 	// branch that returns early (bad JSON, bad payload, a refusal) is logged
-	// too — the log's whole point is that it is not selective. verdictOverride
-	// carries the two outcomes a status code alone cannot distinguish (the
-	// guard's 403 from the detection layer's own 403, and the federation
-	// hold/failure pair). Installed only when a detector is wired: with
-	// detection off, w is the bare ResponseWriter it always was.
+	// too — the log's whole point is that it is not selective. The recorder
+	// retains 403 response errors, while verdictOverride carries branch evidence
+	// for federation/containment. With detection off, w remains bare.
 	var verdictOverride string
 	var observationID string
 	if h.detector != nil {
 		rec := newStatusRecorder(w)
 		w = rec
 		defer func() {
-			verdict, transport := deliveryVerdict(rec.status(), verdictOverride)
+			verdict, transport, detail := deliveryResponseVerdict(rec.status(), verdictOverride, rec.forbiddenBody)
 			h.detector.Observe(DeliveryObservation{
 				At:        time.Now().UTC(),
 				Sender:    req.Sender,
@@ -1103,9 +1093,21 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 				Verdict:   verdict,
 				Transport: transport,
 				Payload:   req.Payload,
+				Detail:    detail,
 			})
 		}()
 	}
+
+	// Install observation before service authorization too, so an early 403
+	// cannot disappear from the audit. Authorization still precedes body
+	// decoding, budgets, replay admission and every transport side effect.
+	if h.rejectOversizedBody(w, r) {
+		return
+	}
+	if !h.authorizeServiceDelivery(w, r, id, capability) {
+		return
+	}
+	serviceAuthority, _ := r.Context().Value(serviceDeliveryContextKey{}).(*ServiceAuthority)
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})

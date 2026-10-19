@@ -300,6 +300,7 @@ func (d *Detector) Observe(obs registry.DeliveryObservation) {
 		MessageID: obs.MessageID,
 		Verdict:   obs.Verdict,
 		Transport: obs.Transport,
+		Detail:    obs.Detail,
 	})
 
 	// 2. Canaries first: a trip is never a baseline question.

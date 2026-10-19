@@ -90,6 +90,27 @@ func (r DeliveryResult) writeHTTP(w http.ResponseWriter) {
 // rejection. Queue acceptance is distinguished from blocking completion by mode.
 func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery DeliveryRequest) (result DeliveryResult, dispatchErr error) {
 	entry := delivery.Entry
+	var verdictOverride string
+	if h.detector != nil && delivery.httpState == nil && entry != nil {
+		// HTTP ingress owns its one observation. Direct session dispatch has
+		// no ResponseWriter, so observe the same terminal response here once.
+		defer func() {
+			var body []byte
+			if result.StatusCode == http.StatusForbidden {
+				body, _ = json.Marshal(result.response)
+			}
+			verdict, transport, detail := deliveryResponseVerdict(result.StatusCode, verdictOverride, body)
+			id := entry.AgentID
+			if target != nil {
+				id = target.ID
+			}
+			h.detector.Observe(DeliveryObservation{
+				At: time.Now().UTC(), Sender: entry.Sender, Target: id,
+				MessageID: entry.ID, Verdict: verdict, Transport: transport,
+				Payload: entry.Payload, Detail: detail,
+			})
+		}()
+	}
 	respond := func(status int, body any) {
 		result.StatusCode, result.response = status, body
 		switch b := body.(type) {
@@ -142,6 +163,9 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 		// a protected service with a webhook must not bypass the store's gate.
 		if secured, ok := h.store.(*AuthorityStore); ok {
 			if err := secured.validateAuthority(id, entry, nil); err != nil {
+				if errors.Is(err, ErrServiceAuthorityRequired) {
+					verdictOverride = VerdictUnsignedServiceAuthority
+				}
 				respond(http.StatusForbidden, map[string]string{"error": err.Error()})
 				return
 			}

@@ -51,7 +51,7 @@ call. A delivery record carries exactly the question an incident review asks:
 | `message_id` | the message id the bus minted, when one was minted |
 | `verdict` | what the bus decided (see §3.2) |
 | `transport` | `inbox` \| `webhook` \| `federation`, when it applies |
-| `signal`, `detail` | the alert signal, or the containment summary |
+| `signal`, `detail` | the alert signal, containment summary, or a forbidden delivery's original response error (raw body when no string error can be decoded) |
 
 ### 3.2 Verdicts
 
@@ -61,6 +61,14 @@ target's webhook transport), `webhook_failed`, `federation_held`,
 `rate_limited` (the global ingest budget shed the delivery — 429
 `RATE_LIMITED_GLOBAL`, CR-FEAT-035: the request was fine and the bus was full,
 which is not the same finding as `rejected`), `rejected`, `unspecified`.
+
+For the 403 family and its response-error evidence, use the single normative
+[CHAT-SESSIONS.md §3.2 vocabulary table](CHAT-SESSIONS.md#delivery-outcome-vocabulary).
+HTTP ingress and direct session dispatch each produce one observation; ingress
+owns the observation when it calls dispatch, so it is never counted twice.
+Explicit containment and federation policy verdicts are preserved. All forbidden
+observations retain the original response error in the existing signed `detail`
+field. No historical records are rewritten or re-signed.
 
 These detector verdicts describe transport observations, not session task states.
 For transcript outcomes use the single

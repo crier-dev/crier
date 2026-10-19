@@ -234,10 +234,10 @@ about and whose delivery outcomes are incomplete — a **visible, repairable sta
 divergence.
 
 <a id="delivery-outcome-vocabulary"></a>
-#### Delivery outcome vocabulary (DF-CRIER-402, DF-CRIER-404, DF-CRIER-409)
+#### Delivery outcome vocabulary (DF-CRIER-402, DF-CRIER-404, DF-CRIER-409, DF-CRIER-424)
 
 This is the single normative vocabulary table for per-target transcript `outcome`
-values and message request `replay_action` states. Producers, API descriptions and UI summaries refer here rather than
+values, message request `replay_action` states and the detector's 403 refusal family. Detector rows below are explicitly scoped to audit `verdict`, not transcript outcomes. Producers, API descriptions and UI summaries refer here rather than
 maintaining another list of meanings. Transport admission, policy permission,
 receipt flushing, inbox consumption and an observed answer are different evidence.
 
@@ -255,6 +255,11 @@ receipt flushing, inbox consumption and an observed answer are different evidenc
 | `acked` | Where inbox lifecycle evidence applies, the holder acknowledged the entry. Consumption alone does not establish a reply or task completion. |
 | `expired` | Where inbox lifecycle evidence applies, the entry expired unacknowledged and was dead-lettered with reason `ttl_expired_unacked`. |
 | `in_progress` | Same-key dispatch is already running (`DELIVERY_IN_PROGRESS`), not refused or delivered. Wait and refresh; retryability is not permission to resend while pending. |
+| audit `verdict: "guard_blocked"` | HTTP 403 with the bus response error `GUARD_BLOCKED`: the content guard actually refused the message. Not a generic name for forbidden sends. |
+| audit `verdict: "acl_forbidden"` | HTTP 403 with response error `DELIVERY_FORBIDDEN`: the delivery ACL refused authorization before the content guard. |
+| audit `verdict: "namespace_mismatch"` | HTTP 403 with response error `NAMESPACE_MISMATCH`: the requested realm differs from the target's realm. |
+| audit `verdict: "unsigned_service_authority"` | HTTP 403 because direct dispatch lacks signed service authority: the response is `service delivery requires signed service authority`, or the authority store returns typed `ErrServiceAuthorityRequired`. |
+| audit `verdict: "forbidden_unclassified"` | HTTP 403 without recognized cause or explicit branch evidence. Never infer a guard decision from status alone. The existing signed `detail` field retains the response's original string `error`, or its raw body if that field cannot be decoded; an empty body leaves detail absent, meaning no diagnostic was available. |
 | `replay_action: "replayed"` | Same-key HTTP 201, no new dispatch. Outcomes were recorded, or a completed fan-out with zero targets proves no dispatch was required. Never means an unknown/unfinished send completed. |
 | `replay_action: "redelivered"` | Same-key HTTP 201 after another fan-out attempt of the same intent, permitted only when all prior outcomes are retryable negatives and no dispatch evidence remains uncommitted to outcomes. |
 | `replay_action: "replayed_outcome_missing"` | Same-key HTTP 201, no new dispatch, `outcomes_incomplete: true`. The latest durable dispatch evidence has `completed_at`, but transcript outcomes are missing or its outcome write-back did not commit. Return the evidence (including per-target receipts) without promoting it to transcript outcomes or claiming execution. |
