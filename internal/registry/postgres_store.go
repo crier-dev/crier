@@ -53,6 +53,7 @@ type connPool interface {
 
 // PostgresStore is a pgxpool-backeded implementation of Store.
 type PostgresStore struct {
+	inboxAcknowledgements
 	pool connPool
 
 	// listMu guards listErr, the recorded failure of the LAST List call
@@ -1103,6 +1104,7 @@ RETURNING id;`, agentID, leaseID, messageIDs)
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("ack commit: %w", err)
 	}
+	s.recordAcknowledgement(agentID, messageIDs)
 	return nil
 }
 

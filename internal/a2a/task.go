@@ -79,7 +79,7 @@ const (
 	StateBasisClosed = "inbox-entry-closed"
 	// StateBasisDeadLetter — the expiry sweep's durable failure record.
 	StateBasisDeadLetter = "dead-letter-recorded"
-	// StateBasisCanceled — the task this request itself canceled.
+	// StateBasisCanceled — a successful CancelTask recorded by this process.
 	StateBasisCanceled = "canceled-by-request"
 )
 
@@ -290,7 +290,8 @@ func (v InboxView) expired(now time.Time) bool {
 
 // TaskEvidence is everything crier can prove about ONE task id: the inbox entry
 // it holds (nil when it holds none) and the expiry sweep's durable failure
-// record, if that sweep ever removed the message.
+// record, if that sweep ever removed the message. Successful cancellations
+// additionally retain their pre-close Entry snapshot and CanceledAt in memory.
 //
 // Both facts are needed because crier's store keeps no tombstone: an entry that
 // is gone was either acknowledged (and is unobservable — "completed and purged"
@@ -298,6 +299,9 @@ func (v InboxView) expired(now time.Time) bool {
 // TTL, and only the second of those leaves a record behind.
 type TaskEvidence struct {
 	Entry *InboxView
+	// CanceledAt records a successful CancelTask in this serving process.
+	// Entry retains the pre-close snapshot for the task identity and history.
+	CanceledAt time.Time
 	// DeadLetteredAt is when the expiry sweep recorded this message as a dead
 	// letter, zero when it recorded nothing.
 	DeadLetteredAt time.Time
@@ -341,6 +345,9 @@ func (e TaskEvidence) TaskID() string {
 //     unreachable in production and exists so that a backend which ever changes
 //     that is mapped honestly instead of reported as not-found.
 func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState, string, *RPCError) {
+	if !e.CanceledAt.IsZero() {
+		return TaskStateCanceled, StateBasisCanceled, nil
+	}
 	if e.Entry != nil {
 		switch {
 		case e.Entry.ACKed:
@@ -366,6 +373,8 @@ func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState,
 // unclaimed message is as old as its delivery.
 func (e TaskEvidence) StatusTimestamp(now time.Time) time.Time {
 	switch {
+	case !e.CanceledAt.IsZero():
+		return e.CanceledAt
 	case e.Entry == nil:
 		return e.DeadLetteredAt
 	case e.Entry.expired(now):

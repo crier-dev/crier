@@ -393,20 +393,29 @@ The stream carries **two** things, and says which is which:
 1. **The task's own lifecycle**, read from crier's inbox — the mapping table's "task state ⇄ inbox
    entry + lease/ack". The stream opens with the Task, then reports each state change it OBSERVES:
    `TASK_STATE_SUBMITTED` (stored, unclaimed) → `TASK_STATE_WORKING` (leased, i.e. a consumer
-   retrieved it) → `TASK_STATE_COMPLETED` (acknowledged: the entry was removed before its expiry) or
-   `TASK_STATE_FAILED` (its TTL passed unacknowledged, so it can never be retrieved). It closes when
-   the task reaches a terminal state, as §3.1.2 requires.
-   - `TASK_STATE_CANCELED` is not asserted **by this adapter's disappearance inference**, and the
-     reason is stated rather than implied: an entry leaves crier's inbox two ways — an ack, and the
-     expiry sweep — and, since INT-A2A-004, a third: a `CancelTask` (which releases the lease and
-     closes the entry, §5.5.4). The third one is indistinguishable from the first HERE, because both
-     remove the entry and crier keeps no tombstone; the observation is a poll of the store, and the
-     store cannot tell the two apart. The consequences are bounded and are stated in §5.5.4: a live
-     stream open across a cancel reports the task as leaving the inbox without a failure record
-     (`TASK_STATE_COMPLETED`), and the client that cancelled is the one party that knows otherwise —
-     it has the `CancelTask` answer. A `SubscribeToTask`/`SendStreamingMessage` client that did not
-     cancel cannot be misled about its own action, and `GetTask` — the surface a returning client uses
-     — answers `TaskNotFoundError` for both, never an invented state (§5.5.2).
+   retrieved it). Retrieval alone is not completion. `TASK_STATE_COMPLETED` is emitted only from an
+   observed successful acknowledgement or a retained `ACKed` row, with the explanation
+   "the receiving agent acknowledged the message". `TASK_STATE_FAILED` still reports a present
+   entry past its TTL, or a removed entry whose expiry sweep recorded a dead letter. Terminal
+   states close the stream, as §3.1.2 requires.
+   - **Cancellation is recorded (DF-CRIER-330).** A successful `CancelTask` atomically closes the
+     entry and records its pre-close evidence plus cancellation time in the serving handler,
+     scoped by agent and task id. Every open subscriber, including one that started before the
+     cancel, reports `TASK_STATE_CANCELED`. `GetTask` returns that state too; a new subscription
+     receives the existing terminal-task refusal instead of a success stream. These records last
+     for the handler's process lifetime, are not persisted even on PostgreSQL, and disappear on
+     restart. They do not appear in `ListTasks`, which remains an inbox-only listing.
+   - **Removal is not acknowledgement.** Each stream registers `registry.InboxAckObserver` before
+     its first Task frame. Both local backends notify only after a successful `Ack` (after commit
+     on PostgreSQL), irrespective of whether the ack came through HTTP, MCP or a direct store call.
+     The watch retains only a boolean for that stream and is released on close; it is not an ack
+     archive, so an ack before watch registration cannot be reconstructed. A vanished entry with
+     no observed ack, cancellation or dead letter emits non-terminal `TASK_STATE_UNSPECIFIED`:
+     "the inbox entry was removed; no acknowledgement or cancellation was observed, so the task
+     outcome is unknown". A2A v1.0 has no `TASK_STATE_UNKNOWN`; `UNSPECIFIED` is the truthful
+     indeterminate state. The stream remains open until later evidence or its normal budget,
+     never inventing `COMPLETED` from absence or `FAILED` just because the vanished entry's old
+     expiry timestamp has since passed. Backends without ack observation degrade the same way.
    - The state is read through an **optional read-only store capability** (`registry.InboxPeeker`),
      because the only other read of an inbox — `Retrieve` — LEASES what it returns, and an observer
      built on it would steal the message from the agent whose work it is watching. A backend that
@@ -471,7 +480,8 @@ of approximating it silently:
 
 ### 5.5 The task lifecycle (INT-A2A-004, SHIPPED)
 
-The four task operations map onto **the inbox entry crier already keeps**. There is no task store, no
+The four task operations map onto **the inbox entry crier already keeps**, with process-local
+cancellation evidence added by DF-CRIER-330. There is no durable task store, no
 task index, no A2A column on any crier table and no A2A field on any crier route: a task IS a
 delivery, its id IS crier's message id, and every state this section names is derived from the entry's
 own lifecycle (stored → leased → acked / expired / closed) plus the one durable record the expiry
@@ -547,7 +557,7 @@ from.
 | an inbox entry the store reports as **closed** (`acked`) | `TASK_STATE_COMPLETED` | `inbox-entry-closed` | `Peek` |
 | **no entry**, and the expiry sweep recorded this message as a dead letter | `TASK_STATE_FAILED` | `dead-letter-recorded` | `DeadLetterLookup` |
 | **no entry**, and no failure record | **`-32001 TaskNotFoundError`** | *(no state)* | — |
-| the `CancelTask` this request performed | `TASK_STATE_CANCELED` | `canceled-by-request` | the operation's own answer |
+| a successful `CancelTask` recorded by this process | `TASK_STATE_CANCELED` | `canceled-by-request` | the operation's answer, `GetTask`, and open streams |
 
 Four properties of that table are decisions, and each is stated so a client never has to infer it:
 
@@ -570,8 +580,8 @@ Four properties of that table are decisions, and each is stated so a client neve
    gives the same state from a different record.
 3. **`FAILED` outlives the entry.** Crier's expiry sweep writes a dead letter and a receipt
    (CR-FEAT-025, "failure is a message, not a mystery"), so a swept task is still reported `FAILED`,
-   with `metadata.crier.dead_lettered_at` naming when the sweep recorded it. This is the only terminal
-   state that is re-readable after the fact, and it is re-readable because crier chose to record it —
+   with `metadata.crier.dead_lettered_at` naming when the sweep recorded it. Unlike process-local cancellation evidence, this failure record is durable. It is
+   re-readable because crier chose to record it —
    not because this adapter reconstructed it.
 4. **A never-expiring entry never expires.** `ttl_seconds: 0` stores the zero `ExpiresAt` (DF-CRIER-37),
    and the mapping reads that as "no expiry", never as "expired long ago".
@@ -611,22 +621,22 @@ agent's own queue depth across the refusal.
   lease, and an A2A client never holds one;
 - a cancel aimed at a **terminal** task is `-32002 TaskNotCancelableError` (§3.1.5) — never a `200`
   reporting a cancellation that did not happen;
-- a cancel aimed at a task with **no record** is `-32001 TaskNotFoundError`. A **duplicate** cancel
-  therefore also answers `-32001`, which §3.1.5 explicitly allows: "A duplicate cancellation request
-  MAY return `TaskNotFoundError` if the task has already been canceled and purged."
+- a cancel aimed at a task with **no record** is `-32001 TaskNotFoundError`. A duplicate cancel
+  in the same serving process is `-32002 TaskNotCancelableError` naming `TASK_STATE_CANCELED`,
+  because the handler retains the successful cancellation evidence.
 
-**The one residual ambiguity, stated rather than hidden.** Crier keeps no tombstone, so a closed entry
-is indistinguishable from an acknowledged one *by looking at the store*. A stream that is already open
-when a cancel happens therefore reports the task as leaving the inbox without a failure record
-(`TASK_STATE_COMPLETED`, §5.4.5), and `GetTask` after a cancel answers `TaskNotFoundError`. Neither is
-a fabrication — both are the same honest "this task is no longer in the queue" — and the party that is
-never misled is the one that cancelled, because it holds the `CancelTask` answer. Closing this gap
-would need a durable terminal record crier does not keep today; it is deliberately NOT invented here,
-because a second store is exactly what this row forbids (§1.1).
+**Observer consistency (DF-CRIER-330).** The close and publication of cancellation evidence are
+serialized against observers, so an open stream cannot mistake cancellation for acknowledgement.
+The same process's `GetTask` reads the recorded cancellation and returns `TASK_STATE_CANCELED`;
+`SubscribeToTask` refuses it as a known terminal task. After restart the process-local cancellation
+record is lost and the purged task again yields `TaskNotFoundError`. This is a process-local
+observability guarantee, not durable terminal history or cross-server replication. An out-of-band
+removal with no ack or cancellation evidence is `TASK_STATE_UNSPECIFIED` on an open stream, never
+successful completion (§5.4.5).
 
 #### 5.5.5 What this row added to crier's store (and what it did not)
 
-Three OPTIONAL store capabilities, in the family `InboxPeeker` opened (INT-A2A-003), with no schema
+The three original OPTIONAL store capabilities, in the family `InboxPeeker` opened (INT-A2A-003), with no schema
 change, no migration and no change to any existing method:
 
 | capability | method | contract |
@@ -639,7 +649,12 @@ All three are implemented by both shipped backends and are OPTIONAL like their p
 remote proxy does not implement them, and a task-lifecycle operation on such a backend is refused with
 `-32004 UnsupportedOperationError` naming the capability rather than answered with an invented state.
 
-**No existing crier surface changed to make this possible.** The inbox row's columns, `Ack`,
+**DF-CRIER-330 adds one optional capability:** `registry.InboxAckObserver.WatchAcknowledgement`
+registers a process-local ack watch and returns concurrent-safe observation and cleanup functions.
+Both shipped local stores publish successful acks to active watches; `RemoteStore` does not.
+This changes no schema, migration, HTTP envelope, or lease/ack removal semantics.
+
+**No existing crier wire surface changed to make this possible.** The inbox row's columns, `Ack`,
 `Retrieve`, `PurgeExpired`, the dead-letter destination, the long-poll notifier, the guard, delivery,
 federation, the webhook driver, the mesh, the MCP surface, `docs/openapi.yaml` and its generated copy
 and the docs-claims gate are all exactly what they were: nothing in any of them consults the A2A switch
@@ -647,8 +662,9 @@ or an agent's `a2a` block (§1.1, §6).
 
 #### 5.5.6 What this row does not do
 
-- **No second store, no task index, no tombstone.** A task is the inbox entry; what crier does not
-  record is not reported (§5.5.2).
+- **No durable task index or terminal archive.** A task is the inbox entry. Successful cancellations
+  retain process-local evidence; acknowledgement watches exist only while streams are open
+  (DF-CRIER-330). What crier does not observe is not reported (§5.5.2).
 - **No task continuation.** A message that names an open task is refused (§5.5.3), because delivering
   it would create a second task rather than continue the named one.
 - **No artifacts.** `Task.artifacts` is empty (and omitted unless asked for); crier stores no artifact

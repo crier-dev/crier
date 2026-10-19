@@ -413,6 +413,7 @@ func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 		filtered = append(filtered, entry)
 	}
 	s.inboxes[agentID] = filtered
+	s.recordAcknowledgement(agentID, messageIDs)
 	return nil
 }
 

@@ -410,25 +410,22 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	}
 	tr.step("cancel → retrieve/ack", "nothing claimable; the stale lease cannot ack (404)")
 
-	// A later read is the not-found §3.1.5 sanctions for a canceled task.
+	// The process retains cancellation evidence for returning observers too.
 	status, body, _ = a2aRPC(t, client, base, getTaskBody(a2aLifecycleTenant, canceledID, ""))
 	if status != http.StatusOK {
 		t.Fatalf("GetTask after a cancel = %d: %s", status, body)
 	}
-	if code, message = rpcError(t, body); code != a2a.CodeTaskNotFoundError {
-		t.Errorf("GetTask after a cancel = %d (%s), want %d: a canceled task is purged", code, message, a2a.CodeTaskNotFoundError)
+	if state := rpcTaskState(t, rpcResult(t, body)); state != "TASK_STATE_CANCELED" {
+		t.Errorf("GetTask after cancel = %s, want TASK_STATE_CANCELED", state)
 	}
-	// A duplicate cancel is TaskNotFoundError, which §3.1.5 explicitly allows
-	// ("MAY return TaskNotFoundError if the task has already been canceled and
-	// purged") — and is never a second, false cancellation.
 	status, body, _ = a2aRPC(t, client, base, cancelTaskBody(a2aLifecycleTenant, canceledID))
 	if status != http.StatusOK {
 		t.Fatalf("the duplicate CancelTask = %d: %s", status, body)
 	}
-	if code, message = rpcError(t, body); code != a2a.CodeTaskNotFoundError {
-		t.Errorf("a duplicate CancelTask = %d (%s), want %d for a canceled-and-purged task", code, message, a2a.CodeTaskNotFoundError)
+	if code, message = rpcError(t, body); code != a2a.CodeTaskNotCancelableError {
+		t.Errorf("a duplicate CancelTask = %d (%s), want %d for a known canceled task", code, message, a2a.CodeTaskNotCancelableError)
 	}
-	tr.step("cancel → read again", "GetTask/CancelTask = -32001 TaskNotFoundError (canceled and purged, §3.1.5)")
+	tr.step("cancel → read again", "GetTask = TASK_STATE_CANCELED; duplicate CancelTask = -32002 TaskNotCancelableError")
 
 	// --- 10. an OPEN task cannot be continued ------------------------------
 	liveID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,

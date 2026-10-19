@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -120,6 +121,11 @@ type a2aHandler struct {
 	patch http.HandlerFunc
 	relay *relay.Relay
 	opts  a2aOptions
+	// cancelMu serializes close+record with observers; a missing entry must
+	// never race publication of its successful cancellation. Process-local,
+	// agent-scoped records survive for this handler's lifetime.
+	cancelMu sync.RWMutex
+	canceled map[a2aCancellationKey]a2a.TaskEvidence
 }
 
 // handle dispatches one JSON-RPC 2.0 request (§9.4). Every JSON-RPC response —
@@ -342,8 +348,8 @@ func (h *a2aHandler) refineSendRefusal(err error, target *registry.Agent) *a2a.R
 //
 // An A2A task IS a crier inbox entry: GetTask, ListTasks and CancelTask answer
 // from that entry's own state and mutate nothing but the lease/close semantics
-// crier already has. There is no task store here, no task index, and no A2A
-// field on any crier route — the entry is the record, and the state mapping
+// crier already has. Successful cancellations additionally leave process-local
+// evidence for observers (DF-CRIER-330), not a durable task index. The state mapping
 // (specs/A2A-OPTION.md §5.5.2) is the whole of it.
 //
 // The two reads go through the store's OPTIONAL read-only capabilities
@@ -364,6 +370,9 @@ func (h *a2aHandler) refineSendRefusal(err error, target *registry.Agent) *a2a.R
 // cannot support. The specification defines TaskNotFoundError for exactly this
 // task ("invalid, expired, or already completed and purged", §3.3.2).
 func (h *a2aHandler) evidence(agentID, taskID string) (a2a.TaskEvidence, *a2a.RPCError) {
+	if ev, ok := h.cancellation(agentID, taskID); ok {
+		return ev, nil
+	}
 	peeker, ok := h.store.(registry.InboxPeeker)
 	if !ok {
 		return a2a.TaskEvidence{}, a2a.TaskCapabilityUnsupportedError(
@@ -383,6 +392,9 @@ func (h *a2aHandler) evidence(agentID, taskID string) (a2a.TaskEvidence, *a2a.RP
 		}}, nil
 
 	case errors.Is(err, registry.ErrMessageNotFound):
+		if ev, ok := h.cancellation(agentID, taskID); ok {
+			return ev, nil
+		}
 		if looker, ok := h.store.(registry.DeadLetterLookup); ok {
 			dl, found, lookupErr := looker.LookupDeadLetter(agentID, taskID)
 			if lookupErr != nil {
@@ -542,18 +554,11 @@ func listReadError(agentID string, err error) *a2a.RPCError {
 
 // cancelTask serves CancelTask (§9.4.5).
 //
-// The cancellation is crier's OWN removal, not a state crier invents: the lease
-// on the message is released and the entry is closed (removed from the inbox),
-// which is what `CancelTask` means here — after it, no consumer can retrieve or
-// acknowledge the message, and the task has no entry left to report. It reuses
-// the store's lease/close semantics rather than adding a task store: the entry
-// IS the task, so closing the entry IS cancelling it.
-//
-// The answer is the Task in TASK_STATE_CANCELED, as §3.1.5 requires ("Updated
-// Task with cancellation status"). A LATER read of that task is TaskNotFoundError
-// — the entry is gone and crier keeps no tombstone — which §3.1.5 itself
-// sanctions: "A duplicate cancellation request MAY return TaskNotFoundError if
-// the task has already been canceled and purged."
+// The cancellation uses crier's own per-entry close. On success the handler
+// retains the pre-close evidence and cancellation time for its process lifetime,
+// scoped by agent and task id. GetTask and every already-open stream can then
+// report CANCELED; duplicate cancellation is TaskNotCancelableError. The record
+// is not durable across restart and is not a second inbox or task listing.
 //
 // A cancel aimed at a task in a terminal state is refused with
 // TaskNotCancelableError (§3.1.5), never answered with a 200 and a false
@@ -592,7 +597,7 @@ func (h *a2aHandler) cancelTask(w http.ResponseWriter, r *http.Request, req *a2a
 			"CancelTask", "a per-entry close (registry.InboxCloser)")))
 		return
 	}
-	if err := closer.CloseEntry(target.ID, ev.TaskID()); err != nil {
+	if err := h.closeCanceled(closer, target.ID, ev, now); err != nil {
 		if errors.Is(err, registry.ErrMessageNotFound) {
 			// The entry left the inbox between the read above and this close —
 			// a consumer acknowledged it, or the sweep took it. Answered as the
@@ -672,7 +677,7 @@ func (h *a2aHandler) subscribeToTask(w http.ResponseWriter, r *http.Request, req
 	if !h.openStream(w) {
 		return
 	}
-	// The stream derives the task's expiry and its inbox-observability from the
+	// The stream derives the task's inbox-observability from the
 	// task's own crier metadata, which the read path just filled in — so a
 	// subscription observes exactly the entry a streaming send would, with no
 	// second path through the store.
@@ -936,11 +941,6 @@ type a2aStream struct {
 	// state is the last state reported to the client, so a change is only ever
 	// reported once.
 	state a2a.TaskState
-	// expiresAt is the resolved message expiry the delivery accept stated, and
-	// hasExpiry whether it applies at all (a webhook delivery creates no inbox
-	// entry and therefore has none).
-	expiresAt time.Time
-	hasExpiry bool
 	// observe reports whether this task's state can be read from crier's own
 	// inbox, which is true only for an inbox delivery: a pushed delivery has no
 	// inbox entry to look at, and pretending to read one would turn "no row"
@@ -951,14 +951,20 @@ type a2aStream struct {
 	artifactSeq int
 	// events counts what was written, for the close log.
 	events int
+	// acknowledged reads a watch registered before the first stream frame.
+	acknowledged func() bool
 	// relay topic subscription, when one could be derived.
 	topic string
 }
 
 // run streams until a terminal state, the budget, or the client going away.
 func (s *a2aStream) run() {
-	s.expiresAt, s.hasExpiry = deliverExpiry(s.task)
 	s.observe = acceptCarriesInboxEntry(s.task)
+	if observer, ok := s.h.store.(registry.InboxAckObserver); ok && s.observe {
+		var stop func()
+		s.acknowledged, stop = observer.WatchAcknowledgement(s.target, s.task.ID)
+		defer stop()
+	}
 
 	if !s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamTask(s.task))) {
 		s.close("client-disconnect")
@@ -995,6 +1001,13 @@ func (s *a2aStream) run() {
 			s.close("client-disconnect")
 			return
 		case <-budget.C:
+			// Refresh once before closing: a cancel or ack may have happened
+			// since the last poll, including when the poll interval is longer
+			// than the budget. Never end with stale non-terminal state.
+			if state, done := s.observeOnce(); done {
+				s.close(closeReason(state))
+				return
+			}
 			// The stream budget elapsed. This is NOT a terminal state: the last
 			// event says where the task stands and that it is still open, so a
 			// client is never left guessing whether the silence meant "done".
@@ -1066,8 +1079,22 @@ func (s *a2aStream) observeOnce() (a2a.TaskState, bool) {
 
 	now := s.h.opts.now()
 	entry, err := peeker.Peek(s.target, s.task.ID)
+	// Check after Peek as well as before interpreting expiry/removal: CancelTask
+	// closes and publishes its record atomically under cancelMu.
+	if _, canceled := s.h.cancellation(s.target, s.task.ID); canceled {
+		s.emitTerminal(a2a.TaskStateCanceled, "canceled by request: the inbox entry was closed")
+		return a2a.TaskStateCanceled, true
+	}
+	if s.acknowledged != nil && s.acknowledged() {
+		s.emitTerminal(a2a.TaskStateCompleted, "the receiving agent acknowledged the message")
+		return a2a.TaskStateCompleted, true
+	}
 	switch {
 	case err == nil:
+		if entry.ACKed {
+			s.emitTerminal(a2a.TaskStateCompleted, "the receiving agent acknowledged the message")
+			return a2a.TaskStateCompleted, true
+		}
 		if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
 			s.emitTerminal(a2a.TaskStateFailed,
 				"the message expired unacknowledged: no agent acknowledged it before its TTL elapsed, so the task cannot complete")
@@ -1080,21 +1107,25 @@ func (s *a2aStream) observeOnce() (a2a.TaskState, bool) {
 		s.setState(a2a.TaskStateSubmitted, "")
 		return "", false
 	case errors.Is(err, registry.ErrMessageNotFound):
-		// The entry is gone. In crier an inbox entry leaves the store exactly
-		// two ways: an ACK removes it (completed), and the expiry sweep removes
-		// it after its TTL passed (failed — the row cannot be retrieved any
-		// more). The expiry the delivery accept resolved decides which, and the
-		// state is only asserted from those two facts — a third removal path an
-		// operator drives out of band (a transferred message, a purge) is not
-		// observable here and is why GetTask is the authority (INT-A2A-004).
-		if s.hasExpiry && !s.expiresAt.IsZero() && now.After(s.expiresAt) {
-			s.emitTerminal(a2a.TaskStateFailed,
-				"the message expired unacknowledged and was removed from the inbox")
-			return a2a.TaskStateFailed, true
+		// A missing entry alone proves neither an ack nor expiry. A transfer,
+		// purge or CloseEntry removes it too. Only the sweep's record proves
+		// expiry once the row is gone; an ack watch above proves completion.
+		if looker, ok := s.h.store.(registry.DeadLetterLookup); ok {
+			_, found, lookupErr := looker.LookupDeadLetter(s.target, s.task.ID)
+			if lookupErr != nil {
+				s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError,
+					"the task's failure record could not be read: "+lookupErr.Error())))
+				s.events++
+				return "", true
+			}
+			if found {
+				s.emitTerminal(a2a.TaskStateFailed, "the message expired unacknowledged and was removed from the inbox")
+				return a2a.TaskStateFailed, true
+			}
 		}
-		s.emitTerminal(a2a.TaskStateCompleted,
-			"acknowledged: the receiving agent retrieved and acknowledged the message")
-		return a2a.TaskStateCompleted, true
+		s.setState(a2a.TaskStateUnspecified,
+			"the inbox entry was removed; no acknowledgement or cancellation was observed, so the task outcome is unknown")
+		return "", false
 	default:
 		s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError,
 			"the task's inbox could not be read while streaming it: "+err.Error())))
@@ -1186,34 +1217,6 @@ func closeReason(state a2a.TaskState) string {
 		return "observe-error"
 	}
 	return "terminal:" + string(state)
-}
-
-// deliverExpiry reads the resolved expiry the delivery accept reported. It is
-// carried on the Task's crier metadata, which is the same value the accept body
-// stated — the accept's own `expires_at` is not part of the Task, so the Task is
-// what the stream reads back.
-func deliverExpiry(task *a2a.Task) (time.Time, bool) {
-	if task == nil || task.Metadata == nil {
-		return time.Time{}, false
-	}
-	raw, ok := task.Metadata["crier"].(a2a.CrierMeta)
-	if !ok {
-		return time.Time{}, false
-	}
-	if len(raw.ExpiresAt) == 0 {
-		return time.Time{}, false
-	}
-	trimmed := strings.TrimSpace(string(raw.ExpiresAt))
-	if trimmed == "null" {
-		// Never expires (ttl_seconds=0): the expiry applies but is the zero
-		// time, which the observer reads as "no clock to compare against".
-		return time.Time{}, true
-	}
-	var at time.Time
-	if err := json.Unmarshal(raw.ExpiresAt, &at); err != nil {
-		return time.Time{}, false
-	}
-	return at, true
 }
 
 // acceptCarriesInboxEntry reports whether the accepted delivery created a

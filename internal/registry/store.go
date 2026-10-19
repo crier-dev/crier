@@ -543,6 +543,7 @@ func quoteMessageIDs(ids []string) string {
 // State is ephemeral: agents and undelivered messages are lost on restart.
 // Use PostgresStore (CR_DATABASE_URL) for durability across restarts.
 type MemoryStore struct {
+	inboxAcknowledgements
 	mu      sync.RWMutex
 	agents  map[string]*Agent
 	inboxes map[string][]*InboxEntry
