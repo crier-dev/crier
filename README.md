@@ -219,14 +219,19 @@ registers with `POST /agents`. This is the one prerequisite of a group send, and
 a group whose roster is all-placeholder delivers to nobody.
 
 The send is nevertheless **not all-or-nothing** (§3.2's named-outcome rule): the
-message is recorded and delivered to every member the registry DOES hold, and
-each member it does NOT hold is **skipped**, never fatal. A send to a
-three-member roster with one unregistered agent answers `201` and carries the
-partial-success summary beside the per-target `outcomes`:
+message is recorded and each registered member's transport is attempted; each
+member the registry does NOT hold is **skipped**, never fatal. With plain inbox
+writes, a send to a three-member roster with one unregistered agent answers
+`201` and carries acceptance, not execution, beside the per-target `outcomes`:
 
 ```json
-{"delivered":2,"skipped":1,"skipped_agents":["ghost"]}
+{"accepted":2,"outcome_counts":{"accepted":2,"refused":1},"skipped":1,"skipped_agents":["ghost"]}
 ```
+
+A queue/inbox accept is `accepted`; an explicit peer hold is `held`. Only a
+genuine blocking webhook reply or an explicit inbox/peer delivery receipt is
+`delivered`. Token-only federation admission stays `accepted` with code
+`FED_TOKEN_ONLY`. The chat summary keeps each exact outcome name separate.
 
 The skipped target keeps its own reason instead of being hidden behind the
 count, so an unregistered agent reads differently from a namespace mismatch:
@@ -242,7 +247,7 @@ at all delivers to nobody and is reported the same way — a skip, never a silen
 drop:
 
 ```
-WARN fan-out: skipping target (delivery refused) — the message was still delivered to every other target target=ghost reason="agent not found: \"ghost\"" group=ops
+WARN fan-out: skipping target (delivery refused) — other targets retain their own outcomes target=ghost reason="agent not found: \"ghost\"" group=ops
 ```
 
 ## Quick Start

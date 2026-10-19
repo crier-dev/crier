@@ -587,6 +587,8 @@ function deliverySummary(outcomes) {
     const name = o.outcome || "unknown";
     counts.set(name, (counts.get(name) || 0) + 1);
   }
+  // Queue/hold receipts must make the absence of a delivered answer explicit.
+  if ((counts.has("accepted") || counts.has("held")) && !counts.has("delivered")) counts.set("delivered", 0);
   return counts.size ? "; " + [...counts].sort(([a],[b]) => a.localeCompare(b)).map(([name,count]) => name + ": " + count).join("; ") + "." : ".";
 }
 async function send(event) {

@@ -178,7 +178,7 @@ func TestCompile_MergesAcrossThreadsAndSessionsWithACitationPerPart(t *testing.T
 	for _, o := range compiled.Outcomes {
 		delivered[o.Target] = o.Outcome
 	}
-	require.Equal(t, string(OutcomeDelivered), delivered[fixAgentB], "the tagged agent is delivered to")
+	require.Equal(t, string(OutcomeAccepted), delivered[fixAgentB], "the tagged agent's inbox accepted the message")
 	_, selfTagged := delivered[fixAgentA]
 	require.False(t, selfTagged, "the compiler is not in its own audience")
 

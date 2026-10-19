@@ -139,7 +139,7 @@ func TestFederatedRoomRemoteParticipantCrosses(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(body), &sent))
 	require.Len(t, sent.Outcomes, 1)
 	require.Equal(t, "remote:peer_b:atlas-b", sent.Outcomes[0].Target)
-	require.Equal(t, OutcomeDelivered, sent.Outcomes[0].Outcome, "outcome: %+v", sent.Outcomes[0])
+	require.Equal(t, OutcomeAccepted, sent.Outcomes[0].Outcome, "outcome: %+v", sent.Outcomes[0])
 
 	// The message is IN B's member's durable inbox on B.
 	entries, _, err := b.reg.Retrieve("atlas-b", 0, 10)

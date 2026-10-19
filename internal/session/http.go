@@ -234,22 +234,22 @@ type transcriptMessage struct {
 	// the same durable message. Omitted on an original send/transcript GET.
 	ReplayAction string    `json:"replay_action,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
-	// Delivered / Skipped / SkippedAgents are the PARTIAL-SUCCESS summary of a
-	// SEND (DF-CRIER-305): a send is delivered to every target the registry
-	// holds and a target whose delivery is REFUSED (an unregistered agent, a
-	// namespace mismatch, an unwired remote transport, ...) is SKIPPED — the
-	// message is still recorded and the other members still receive it, so a
-	// group whose roster names an unregistered agent succeeds for the rest
-	// instead of failing whole. SkippedAgents names each skipped target, so
-	// the caller does not have to scan `outcomes` to learn who was missed; the
-	// per-target `refused` outcome still carries that target's own reason
-	// (both, never one INSTEAD of the other — a skip is explained, never
-	// swallowed). These are a projection of ONE send, so a transcript re-read
-	// leaves them empty (they are not persisted; the durable facts stay
-	// `outcomes`).
-	Delivered     int      `json:"delivered,omitempty"`
-	Skipped       int      `json:"skipped,omitempty"`
-	SkippedAgents []string `json:"skipped_agents,omitempty"`
+	// Delivered / Accepted / Held / Skipped / SkippedAgents summarize ONE send.
+	// Inbox/queue admission is accepted, an explicit peer hold is held, and only
+	// a confirmed delivery is delivered. A target whose delivery is REFUSED
+	// (an unregistered agent, a namespace mismatch, an unwired remote transport,
+	// ...) is SKIPPED — the message is still recorded and other targets can
+	// still accept it, so a group whose roster names an unregistered agent
+	// succeeds for the rest instead of failing whole. SkippedAgents names
+	// each refused target alongside its per-target reason. These send-only
+	// counters are not persisted; transcript GET retains the durable outcomes.
+	Delivered int `json:"delivered,omitempty"`
+	Accepted  int `json:"accepted,omitempty"`
+	Held      int `json:"held,omitempty"`
+	// OutcomeCounts preserves every exact name, including future vocabulary.
+	OutcomeCounts map[Outcome]int `json:"outcome_counts,omitempty"`
+	Skipped       int             `json:"skipped,omitempty"`
+	SkippedAgents []string        `json:"skipped_agents,omitempty"`
 	// ThreadDepth is the thread tree's level (a deliberate branch adds one);
 	// ReplyDepth is the parent_id chain length (reply attribution, never
 	// depth — D11).
@@ -1034,19 +1034,21 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	return view, true
 }
 
-// summarizeFanout projects the exact outcome vocabulary into the existing
-// response counters: delivered counts only delivered, skipped only refused.
-// Leased, acked, expired and runtime non-answers remain distinct in Outcomes;
-// they are neither relabelled as delivered nor collapsed into refused/skipped.
+// summarizeFanout counts every outcome under its exact name. The legacy
+// delivered/skipped projections still mean only delivered/refused; queue and
+// hold receipts have their own counters and are never evidence of execution.
 func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	seen := make(map[string]bool, len(outcomes))
+	v.OutcomeCounts = make(map[Outcome]int, len(outcomes))
 	for _, o := range outcomes {
-		// Only a delivered outcome is a delivered answer (DF-CRIER-378).
-		// leased/acked/expired/canned/failed/budget_cut/unreadable_reply/
-		// in_progress stay visible per target and are never counted here.
-		if o.Outcome == OutcomeDelivered {
+		v.OutcomeCounts[o.Outcome]++
+		switch o.Outcome {
+		case OutcomeDelivered:
 			v.Delivered++
-			continue
+		case OutcomeAccepted:
+			v.Accepted++
+		case OutcomeHeld:
+			v.Held++
 		}
 		if o.Outcome != OutcomeRefused {
 			continue
@@ -1060,14 +1062,13 @@ func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	sort.Strings(v.SkippedAgents)
 }
 
-// warnSkippedTargets logs one WARNING per target a send could not deliver to
-// (DF-CRIER-305): the message is delivered to every other target, so this is
-// a SKIP, not a failure — but an unregistered (or unreachable) target must be
-// visible in the log, never only in a response the caller may not read. When
-// the target was addressed through a named group, the warning names it.
+// warnSkippedTargets logs one WARNING per refused/non-answer target. A
+// refusal is per-target; it does not imply any other target executed the work.
+// An unregistered (or unreachable) target must be visible in the log, never
+// only in a response the caller may not read. Named groups are included.
 func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf map[string]string) {
 	for _, o := range outcomes {
-		if o.Outcome == OutcomeDelivered || o.Code == codeDeliveryUnguardedUnavailable {
+		if o.Outcome == OutcomeDelivered || o.Outcome == OutcomeAccepted || o.Outcome == OutcomeHeld || o.Code == codeDeliveryUnguardedUnavailable {
 			// The unavailable-dispatcher refusal is logged at the fan-out
 			// boundary, including for non-HTTP callers. Do not log it twice.
 			continue
@@ -1084,7 +1085,7 @@ func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf ma
 			slog.Warn("fan-out: webhook runtime reported a non-answer", append(attrs, "outcome", o.Outcome)...)
 			continue
 		}
-		slog.Warn("fan-out: skipping target (delivery refused) — the message was still delivered to every other target", attrs...)
+		slog.Warn("fan-out: skipping target (delivery refused) — other targets retain their own outcomes", attrs...)
 	}
 }
 
@@ -1188,7 +1189,8 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 		if err != nil {
 			return nil, fmt.Errorf("marshal remote delivery for %q: %w", m.MemberID, err)
 		}
-		status, response, ferr := h.opts.Fed.ForwardToURLWithNamespaceToken(ctx, policy.URL, subject, envelope, namespaceToken)
+		receipt, ferr := h.opts.Fed.ForwardToURLReceiptWithNamespaceToken(ctx, policy.URL, subject, envelope, namespaceToken)
+		status, response := receipt.StatusCode, receipt.Body
 		if ferr != nil {
 			// Transport-level failure: the message was NOT delivered. A
 			// transient outage is the caller's FANOUT_INCOMPLETE (the
@@ -1211,9 +1213,11 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 			return nil, fmt.Errorf("forward to peer %q for %q: %w", peer, m.MemberID, ferr)
 		}
 		if status >= 200 && status < 300 {
+			outcome, code := transportReceiptOutcome(response, receipt.Verdict, receipt.InboundVerdict)
 			outcomes = append(outcomes, DeliveryOutcome{
 				Target:    m.MemberID,
-				Outcome:   OutcomeDelivered,
+				Outcome:   outcome,
+				Code:      code,
 				UpdatedAt: now,
 			})
 			continue

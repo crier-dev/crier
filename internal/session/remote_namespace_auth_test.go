@@ -91,7 +91,7 @@ func TestRemote369NamespaceCredentialAndTranscript(t *testing.T) {
 			require.NoError(t, err)
 			if tc.delivered {
 				require.Len(t, entries, 1)
-				require.Equal(t, "delivered", sent.Outcomes[0].Outcome)
+				require.Equal(t, "accepted", sent.Outcomes[0].Outcome)
 			} else {
 				require.Empty(t, entries)
 				require.Equal(t, "refused", sent.Outcomes[0].Outcome)
@@ -124,7 +124,7 @@ func TestRemote369NamespaceCredentialAndTranscript(t *testing.T) {
 			require.NotEmpty(t, entries, "unwired auth control must write")
 			var controlSent transcriptMessage
 			require.NoError(t, json.Unmarshal([]byte(control), &controlSent))
-			require.Equal(t, "delivered", controlSent.Outcomes[0].Outcome)
+			require.Equal(t, "accepted", controlSent.Outcomes[0].Outcome)
 		})
 	}
 }

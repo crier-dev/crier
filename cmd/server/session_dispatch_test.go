@@ -271,7 +271,7 @@ func TestSessionFanoutWebhookReplyDoesNotFanout(t *testing.T) {
 func TestSessionFanoutGuardRunsOnceBeforeStore(t *testing.T) {
 	base, room, calls, _ := sessionDispatchFixture(t, nil, "allow")
 	msg := sendDispatchMessage(t, base, room)
-	require.Equal(t, "delivered", msg.Outcomes[0].Outcome)
+	require.Equal(t, "accepted", msg.Outcomes[0].Outcome)
 	require.EqualValues(t, 1, calls.Load(), "the durable write must not re-check the guard")
 	var inbox struct {
 		Messages []struct {

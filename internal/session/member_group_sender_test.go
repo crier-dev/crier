@@ -18,7 +18,7 @@ func TestSessionGroupExpansionExcludesAuthor(t *testing.T) {
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room+"/messages", postMessageRequest{Sender: "atlas", Payload: json.RawMessage(`{"text":"hello"}`), Targets: []AudienceTarget{{Kind: TargetGroup, ID: "self-and-echo"}}}, &sent, nil))
 	require.Len(t, sent.Outcomes, 1)
 	require.Equal(t, "nimbus", sent.Outcomes[0].Target)
-	require.Equal(t, "delivered", sent.Outcomes[0].Outcome)
+	require.Equal(t, "accepted", sent.Outcomes[0].Outcome)
 	entries, _, err := h.reg.Retrieve("atlas", time.Minute, 10)
 	require.NoError(t, err)
 	require.Empty(t, entries)

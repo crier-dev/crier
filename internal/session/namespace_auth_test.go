@@ -23,7 +23,7 @@ func TestSessionAPI_TargetNamespaceAuth(t *testing.T) {
 	}{
 		{name: "missing_token", want: OutcomeRefused},
 		{name: "wrong_token", token: "wrong", want: OutcomeRefused},
-		{name: "correct_token", token: "realm-secret", want: OutcomeDelivered},
+		{name: "correct_token", token: "realm-secret", want: OutcomeAccepted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			policies, err := namespace.Parse(`{"namespaces":[{"name":"private","auth":"token","token_ref":"env:TARGET_REALM_TOKEN"}]}`, func(key string) (string, bool) {
@@ -68,7 +68,7 @@ func TestSessionAPI_TargetNamespaceAuth(t *testing.T) {
 				outcomes[outcome.Target] = outcome
 			}
 			require.Equal(t, string(tc.want), outcomes["protected"].Outcome)
-			require.Equal(t, string(OutcomeDelivered), outcomes["open"].Outcome, "default namespace needs no token")
+			require.Equal(t, string(OutcomeAccepted), outcomes["open"].Outcome, "default namespace needs no token")
 			if tc.want == OutcomeRefused {
 				require.Contains(t, outcomes["protected"].Detail, "NAMESPACE_UNAUTHORIZED")
 				require.Equal(t, "NAMESPACE_UNAUTHORIZED", outcomes["protected"].Code)

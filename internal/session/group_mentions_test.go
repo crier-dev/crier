@@ -150,8 +150,9 @@ func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
 	_, _, err := h.reg.Retrieve("ghost", time.Minute, 10)
 	require.Error(t, err, "an unregistered member has no inbox")
 
-	// The response states the partial success: 2 delivered, 1 skipped, named.
-	require.Equal(t, 2, msg.Delivered)
+	// The response states the partial success: 2 accepted, 1 skipped, named.
+	require.Equal(t, 2, msg.Accepted)
+	require.Zero(t, msg.Delivered)
 	require.Equal(t, 1, msg.Skipped)
 	require.Equal(t, []string{"ghost"}, msg.SkippedAgents)
 
@@ -162,8 +163,8 @@ func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
 	for _, o := range msg.Outcomes {
 		byTarget[o.Target] = o
 	}
-	require.Equal(t, string(OutcomeDelivered), byTarget["atlas"].Outcome)
-	require.Equal(t, string(OutcomeDelivered), byTarget["nimbus"].Outcome)
+	require.Equal(t, string(OutcomeAccepted), byTarget["atlas"].Outcome)
+	require.Equal(t, string(OutcomeAccepted), byTarget["nimbus"].Outcome)
 	require.Equal(t, string(OutcomeRefused), byTarget["ghost"].Outcome)
 	require.Contains(t, byTarget["ghost"].Detail, "agent not found",
 		"a skipped target is SHOWN with its reason, never swallowed")

@@ -31,7 +31,7 @@ func TestSessionFanoutNamespaceDeliveryAudit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, outcomes, 2)
 	for _, outcome := range outcomes {
-		require.Equal(t, OutcomeDelivered, outcome.Outcome)
+		require.Equal(t, OutcomeAccepted, outcome.Outcome)
 	}
 	var audits []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(logs.Bytes()))

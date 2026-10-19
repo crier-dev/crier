@@ -161,7 +161,7 @@ identities still sees, per message, which agent it was addressed to.
 
 | Status | Meaning | Action |
 |---|---|---|
-| 2xx | delivered | blocking: body parsed per schema → RESPONSE to sender |
+| 2xx | transport accepted; not proof of execution | blocking: parse the body, then classify the runtime verdict before admitting an answer |
 | 408/429 | transient | retry with backoff |
 | 4xx (other) | permanent | ERROR frame to sender, no retry |
 | 5xx / timeout | transient | retry with exponential backoff (1s,2s,4s,8s,16s), then ERROR |
@@ -178,6 +178,39 @@ map (`{"error":"webhook: permanent failure: reply extraction: …"}`) — the sa
 answer, so retrying cannot succeed. A transient `5xx / 408 / 429 / timeout` that exhausts the caller's budget
 answers **504 Gateway Timeout** with `{"error":"webhook: blocking delivery timed out after 30s (last: status 503)"}`;
 only that class can still land on a later attempt. (Timeout and budget exhaustion are the only 504 cases.)
+
+### Session outcome vocabulary (DF-CRIER-397)
+
+A successful transport exchange is not automatically `delivered` in the session
+transcript. Producers, counters and the chat summary use these exact words:
+
+- `accepted`: a plain `201` inbox write or an async/batch `202` queue accept,
+  without an explicit delivery receipt. Neither is an agent execution/answer.
+- `held`: the peer receipt explicitly names `held` (for example
+  `202 {"status":"held"}`). A hold creates no agent-authored answer bubble.
+- `delivered`: a blocking webhook reply passes the existing genuine/failed/canned
+  classifier, or an inbox/peer receipt explicitly names delivery. Supported
+  receipt statements are `status`, `outcome` or `verdict` equal to `delivered`
+  (case-insensitive, surrounding whitespace ignored), or `delivered: true`.
+  Federation's `X-Crier-Fed-Verdict` and `X-Crier-Fed-Inbound-Verdict` retain
+  exact receipt words too. `FED_ALLOWED` authorizes crossing; it does not confirm
+  delivery. Empty blocking replies remain `unreadable_reply`, never `delivered`.
+- `FED_TOKEN_ONLY` in either verdict header or the receipt's `verdict` /
+  `inbound_verdict` means `accepted` with `code: "FED_TOKEN_ONLY"`, not refusal or
+  delivery. An explicit hold takes precedence and retains that code; token-only
+  otherwise overrides an optimistic delivery statement. Unknown/malformed peer
+  receipt content stays `accepted`; untrusted receipt prose is not persisted.
+
+Send responses expose `accepted`, `held` and the existing `delivered` counters
+(nonzero scalar counters only), plus `outcome_counts` keyed by every exact outcome
+name. `skipped` remains the compatibility projection of `refused` only. Transcript
+GET retains the per-target outcomes; send counters are not persisted. The chat
+summary derives its counts from those exact outcomes, sorted by name, retaining
+its `; name: count` format: `; accepted: 2; delivered: 1; held: 1.`. When receipts
+exist but no delivery is confirmed it explicitly includes `delivered: 0` (for
+example `; delivered: 0; held: 1.`). Accepted/held are non-negative receipt states,
+not skipped targets; neither grants another same-key delivery attempt. Retry
+policy, timeout ordering and the guarded-dispatch requirement are unchanged.
 
 ## 4. Delivery modes
 

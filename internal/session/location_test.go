@@ -65,7 +65,7 @@ func TestLocation_DeliverCarriesLocationOnAccept(t *testing.T) {
 	outcomes, err := Fanout(context.Background(), registry.NewSessionDeliverer(registry.NewHandler(reg)), msg, []string{fixAgentA}, nil)
 	require.NoError(t, err)
 	require.Len(t, outcomes, 1)
-	require.Equal(t, OutcomeDelivered, outcomes[0].Outcome)
+	require.Equal(t, OutcomeAccepted, outcomes[0].Outcome)
 
 	entries, _, err := reg.Retrieve(fixAgentA, time.Minute, 10)
 	require.NoError(t, err)

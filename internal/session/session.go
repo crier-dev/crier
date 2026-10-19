@@ -98,6 +98,10 @@ type Outcome string
 
 const (
 	OutcomeDelivered Outcome = "delivered"
+	// Accepted is queue/inbox admission, not execution or an agent answer.
+	OutcomeAccepted Outcome = "accepted"
+	// Held is the destination's explicit hold receipt, not a refusal.
+	OutcomeHeld Outcome = "held"
 	// BudgetCut means the blocking wait ended without a complete answer.
 	OutcomeBudgetCut Outcome = "budget_cut"
 	// Canned and failed are runtime verdicts after HTTP acceptance, not

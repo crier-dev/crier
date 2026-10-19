@@ -7,10 +7,11 @@ import (
 )
 
 func TestSummarizeFanoutExactOutcome(t *testing.T) {
-	for _, outcome := range []Outcome{OutcomeDelivered, OutcomeLeased, OutcomeAcked, OutcomeExpired, OutcomeRefused, OutcomeFailed, OutcomeCanned, OutcomeBudgetCut, OutcomeUnreadableReply, "future"} {
+	for _, outcome := range []Outcome{OutcomeDelivered, OutcomeAccepted, OutcomeHeld, OutcomeLeased, OutcomeAcked, OutcomeExpired, OutcomeRefused, OutcomeFailed, OutcomeCanned, OutcomeBudgetCut, OutcomeUnreadableReply, "future"} {
 		t.Run(string(outcome), func(t *testing.T) {
 			var view transcriptMessage
 			summarizeFanout(&view, []DeliveryOutcome{{Target: "agent", Outcome: outcome}})
+			require.Equal(t, map[Outcome]int{outcome: 1}, view.OutcomeCounts)
 			if outcome == OutcomeDelivered {
 				require.Equal(t, 1, view.Delivered)
 			} else {

@@ -434,6 +434,31 @@ func (c *Client) SelfLinks() []Link {
 // policy is keyed by that claim. An announcement is data, not authority
 // (§3.3): the destination still decides.
 func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, body []byte) (int, []byte, error) {
+	var receipt ForwardReceipt
+	status, response, err := c.forwardDeliverReceipt(ctx, link, agentID, body, &receipt)
+	return status, response, err
+}
+
+// ForwardReceipt retains the finite peer receipt without interpreting policy
+// authorization as delivery. No request credentials are retained here.
+type ForwardReceipt struct {
+	StatusCode     int
+	Body           []byte
+	Verdict        string
+	InboundVerdict string
+}
+
+// ForwardToURLReceiptWithNamespaceToken uses the same transport as ForwardToURL
+// but retains the peer's verdict headers for callers classifying acceptance.
+func (c *Client) ForwardToURLReceiptWithNamespaceToken(ctx context.Context, url, agentID string, body []byte, token string) (ForwardReceipt, error) {
+	ctx = context.WithValue(ctx, namespaceTokenKey{}, token)
+	var receipt ForwardReceipt
+	status, response, err := c.forwardDeliverReceipt(ctx, Link{URL: url}, agentID, body, &receipt)
+	receipt.StatusCode, receipt.Body = status, response
+	return receipt, err
+}
+
+func (c *Client) forwardDeliverReceipt(ctx context.Context, link Link, agentID string, body []byte, receipt *ForwardReceipt) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		link.URL+"/agents/"+url.PathEscape(agentID)+"/inbox", bytes.NewReader(body))
 	if err != nil {
@@ -486,6 +511,8 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 			}
 		}
 	}
+	receipt.Verdict = resp.Header.Get(VerdictHeader)
+	receipt.InboundVerdict = resp.Header.Get("X-Crier-Fed-Inbound-Verdict")
 	return resp.StatusCode, respBody, nil
 }
 

@@ -106,9 +106,10 @@ func TestSessionTranscriptGuardedDeliveryBoundary(t *testing.T) {
 					require.Len(t, entries, 1)
 					require.JSONEq(t, `{"text":"boundary test"}`, string(entries[0].Payload))
 					require.Equal(t, "atlas", entries[0].Sender)
-					require.Equal(t, string(OutcomeDelivered), sent.Outcomes[0].Outcome)
+					require.Equal(t, string(OutcomeAccepted), sent.Outcomes[0].Outcome)
 					require.Empty(t, sent.Outcomes[0].Code)
-					require.Equal(t, 1, sent.Delivered)
+					require.Equal(t, 1, sent.Accepted)
+					require.Zero(t, sent.Delivered)
 					require.Zero(t, sent.Skipped)
 					require.Empty(t, log.String())
 				} else {

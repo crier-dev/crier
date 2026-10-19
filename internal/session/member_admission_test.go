@@ -60,7 +60,8 @@ func TestSessionLegacyMemberSendExcludesAuthorAndKeepsPartialSuccess(t *testing.
 			}
 			var msg transcriptMessage
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room+"/messages", postMessageRequest{Sender: "operator", Payload: json.RawMessage(`{"text":"hello"}`)}, &msg, nil))
-			require.Equal(t, 2, msg.Delivered)
+			require.Equal(t, 2, msg.Accepted)
+			require.Zero(t, msg.Delivered)
 			require.Equal(t, 1, msg.Skipped)
 			require.Equal(t, []string{"ghost"}, msg.SkippedAgents)
 			for _, o := range msg.Outcomes {
@@ -69,7 +70,7 @@ func TestSessionLegacyMemberSendExcludesAuthorAndKeepsPartialSuccess(t *testing.
 					require.Equal(t, "refused", o.Outcome)
 					require.Contains(t, o.Detail, "no such agent")
 				} else {
-					require.Equal(t, "delivered", o.Outcome)
+					require.Equal(t, "accepted", o.Outcome)
 				}
 			}
 			entries, _, err := h.reg.Retrieve("nimbus", time.Minute, 10)

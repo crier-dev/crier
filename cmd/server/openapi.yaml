@@ -5551,7 +5551,7 @@ components:
                     type: string
         outcomes:
           type: array
-          description: The per-target fan-out result (§3.2). In_progress means the same delivery key is already held, not refused or delivered; wait and refresh rather than resending. Budget_cut means no complete answer arrived before the blocking delivery budget (or the upstream reported a timeout), with partial/late answers discarded. Refused means a target refusal or transport failure, even when retry backoff consumed the budget; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles. Unreadable_reply means a received blocking webhook body has no displayable text; its detail names the sorted top-level keys, with no invented answer bubble.
+          description: The per-target fan-out result (§3.2). Accepted means inbox/async queue admission, not execution. Held means an explicit peer hold receipt. Delivered requires a genuine blocking webhook reply or an explicit inbox/peer delivery receipt; FED_ALLOWED alone is policy permission, while FED_TOKEN_ONLY remains accepted with that code. In_progress means the same delivery key is already held, not refused or delivered; wait and refresh rather than resending. Budget_cut means no complete answer arrived before the blocking delivery budget (or the upstream reported a timeout), with partial/late answers discarded. Refused means a target refusal or transport failure, even when retry backoff consumed the budget; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles. Unreadable_reply means a received blocking webhook body has no displayable text; its detail names the sorted top-level keys, with no invented answer bubble.
           items:
             type: object
             properties:
@@ -5559,7 +5559,7 @@ components:
                 type: string
               outcome:
                 type: string
-                enum: [delivered, budget_cut, canned, failed, unreadable_reply, leased, acked, expired, refused, in_progress]
+                enum: [delivered, accepted, held, budget_cut, canned, failed, unreadable_reply, leased, acked, expired, refused, in_progress]
               code:
                 type: string
                 description: Machine-readable dispatch diagnostic, such as DELIVERY_IN_PROGRESS, DELIVERY_BUDGET_CUT, TARGET_HTTP_503 or AGENT_NOT_FOUND. Absent on historical records or outcomes without a diagnostic.
@@ -5574,6 +5574,20 @@ components:
               updated_at:
                 type: string
                 format: date-time
+        delivered:
+          type: integer
+          description: Send-only count of confirmed delivered outcomes, never queue/hold receipts. Omitted when zero.
+        accepted:
+          type: integer
+          description: Send-only count of queue/inbox accepts without delivery confirmation. Omitted when zero.
+        held:
+          type: integer
+          description: Send-only count of explicit peer hold receipts. Omitted when zero.
+        outcome_counts:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Send-only counts keyed by every exact per-target outcome name, without roll-ups.
         idempotency_key:
           type: string
         replay_action:

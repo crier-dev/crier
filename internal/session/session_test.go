@@ -617,7 +617,7 @@ func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
 	require.NotEqual(t, IdempotencyKey(fixSessionID, "msg_fanout", "msg_fanout", "nimbus"),
 		IdempotencyKey(fixSessionID, "msg_fanout", "msg_fanout", "kappa"))
 	for _, o := range outcomes {
-		require.Equal(t, OutcomeDelivered, o.Outcome)
+		require.Equal(t, OutcomeAccepted, o.Outcome)
 		require.Equal(t, InboxEntryID("msg_fanout", o.Target), o.InboxEntryID)
 	}
 	require.Len(t, msg.Outcomes, 2)
@@ -660,7 +660,7 @@ func TestFanout_RefusalIsANamedOutcome(t *testing.T) {
 	for _, o := range outcomes {
 		byTarget[o.Target] = o
 	}
-	require.Equal(t, OutcomeDelivered, byTarget["atlas"].Outcome)
+	require.Equal(t, OutcomeAccepted, byTarget["atlas"].Outcome)
 	require.Equal(t, OutcomeRefused, byTarget["nimbus"].Outcome)
 	require.Contains(t, byTarget["nimbus"].Reason, "agent not found", "a refusal is SHOWN with its reason, never swallowed")
 }

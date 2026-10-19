@@ -262,7 +262,8 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 			}
 			entry.PrincipalID = msg.Author.Principal
 			var deliveryErr error
-			outcome, reason := OutcomeDelivered, ""
+			outcome, reason := OutcomeAccepted, ""
+			outcomeCode := ""
 			// Keep this runtime check at the legacy public composition boundary:
 			// changing InboxDeliverer would break existing embedders that pass a
 			// Store. Such wiring must produce an auditable refusal, NEVER a plain
@@ -275,10 +276,17 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				deliveryErr = err
 				// A successful HTTP exchange may still report a canned reply or
 				// runtime failure. Classify it before admitting an answer bubble.
-				if err == nil && result.Transport == "webhook" && result.DeliveryMode == "blocking" && len(result.Reply) > 0 {
-					outcome, reason = webhookReplyVerdict(result.Reply)
-					if outcome == OutcomeDelivered {
-						replies[i] = result.Reply
+				if err == nil {
+					if result.Transport == "webhook" && result.DeliveryMode == "blocking" {
+						// Empty replies must pass the same genuine/canned/failed gate.
+						outcome, reason = webhookReplyVerdict(result.Reply)
+						if outcome == OutcomeDelivered {
+							replies[i] = result.Reply
+						}
+					} else if result.Transport == "inbox" {
+						// An explicit inbox receipt may confirm delivery; a plain
+						// queue write (including 201) confirms acceptance only.
+						outcome, outcomeCode = transportReceiptOutcome(result.Reply, "", "")
 					}
 				}
 			} else {
@@ -302,6 +310,7 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 			outcomes[i] = DeliveryOutcome{
 				Target:       target,
 				Outcome:      outcome,
+				Code:         outcomeCode,
 				Reason:       reason,
 				InboxEntryID: entry.ID,
 				UpdatedAt:    time.Now().UTC(),

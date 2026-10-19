@@ -64,10 +64,10 @@ let outcomes;
 const call = async () => ({outcomes});
 ` + extract("function renderMessages(", "function renderParticipants(") + extract("let pendingMessageRequest = null;", "$(\"add-participant-form\").addEventListener") + `
 (async () => {
-  for (const outcome of ['delivered','leased','acked','expired','refused','failed','canned','budget_cut','unreadable_reply','future']) {
+  for (const outcome of ['delivered','accepted','held','leased','acked','expired','refused','failed','canned','budget_cut','unreadable_reply','future']) {
     outcomes = [{target:'agent',outcome}];
     const summary = deliverySummary(outcomes);
-    assert.equal(summary, '; '+outcome+': 1.', outcome+' must retain its own summary vocabulary');
+    assert.equal(summary, outcome === 'accepted' ? '; accepted: 1; delivered: 0.' : outcome === 'held' ? '; delivered: 0; held: 1.' : '; '+outcome+': 1.', outcome+' must retain its own summary vocabulary');
     $('text').value = 'keep this draft'; $('recipient').value = 'agent'; $('intent').value = 'message';
     state.reply = 'parent'; pendingMessageRequest = null;
     await send({preventDefault(){}});
@@ -85,6 +85,7 @@ const call = async () => ({outcomes});
     assert.ok($('transcript').innerHTML.includes('<span class="'+(negative?'error':'note')+'">agent:'),outcome+' transcript style');
   }
   assert.equal(deliverySummary([{outcome:'leased'},{outcome:'expired'},{outcome:'delivered'},{outcome:'leased'}]),'; delivered: 1; expired: 1; leased: 2.');
+  assert.equal(deliverySummary([{outcome:'delivered'},{outcome:'accepted'},{outcome:'accepted'},{outcome:'held'}]),'; accepted: 2; delivered: 1; held: 1.');
   outcomes = [{target:'a',outcome:'delivered'},{target:'b',outcome:'unreadable_reply'}];
   $('text').value='mixed draft'; await send({preventDefault(){}});
   assert.equal($('text').value,'mixed draft','mixed non-answer retains draft without enabling redelivery');
