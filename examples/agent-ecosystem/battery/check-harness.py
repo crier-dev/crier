@@ -43,7 +43,7 @@ def assert_execution(status, body, nonce, previous_digest=""):
     if isinstance(result, dict):
         reason = result.get("reason") or result.get("error")
         if isinstance(reason, str) and reason:
-            prefix = "REFUSED: " if result.get("status") == "REFUSED" else ""
+            prefix = f"{result['status']}: " if result.get("status") in ("REFUSED", "FAILED") else ""
             detail = f"; {prefix}{reason}"
     if status != "200":
         raise ValueError(f"HTTP {status}, want 200{detail}")
@@ -51,6 +51,8 @@ def assert_execution(status, body, nonce, previous_digest=""):
         raise ValueError(f"invalid response or delivery error{detail}")
     # Only unwrap the known transport envelope, never search arbitrary nested text.
     result = body["reply"] if isinstance(body.get("reply"), dict) else body
+    if result.get("status") in ("FAILED", "REFUSED"):
+        raise ValueError(f"harness did not succeed{detail}")
     if "error" in result:
         raise ValueError(f"harness error, not a reply{detail}")
     if result.get("live") is False:

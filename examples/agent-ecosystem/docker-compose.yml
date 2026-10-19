@@ -66,6 +66,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9101
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     ports: ["${PI_HOST_PORT:-19101}:9101"]
     depends_on:
@@ -80,6 +81,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9102
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENCODE_LIVE: ${OPENCODE_LIVE:-}
     ports: ["${OPENCODE_HOST_PORT:-19102}:9102"]
@@ -95,6 +97,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9103
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_LIVE: ${CLAUDE_CODE_LIVE:-}
     ports: ["${CLAUDE_CODE_HOST_PORT:-19103}:9103"]
@@ -110,6 +113,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9104
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CODEX_LIVE: ${CODEX_LIVE:-}
     ports: ["${CODEX_HOST_PORT:-19104}:9104"]
@@ -125,6 +129,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9105
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       AIDER_LIVE: ${AIDER_LIVE:-}
     ports: ["${AIDER_HOST_PORT:-19105}:9105"]
@@ -140,6 +145,7 @@ services:
     environment:
       CRIER_URL: http://crier:8767
       PORT: 9106
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOSE_LIVE: ${GOOSE_LIVE:-}
     ports: ["${GOOSE_HOST_PORT:-19106}:9106"]

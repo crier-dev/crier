@@ -86,6 +86,37 @@ explicitly configured for `openai` / `gpt-4o-mini`; Aider explicitly selects
 `deepseek/deepseek-v4-flash`; Pi's current SDK `ModelRuntime` selects an available
 DeepSeek model instead of defaulting to another provider.
 
+### 2.1.2 Bounded runtime failures (DF-CRIER-346)
+
+This supersedes the historical 60s CLI cap below. All six consumers use
+`RUNTIME_TIMEOUT_MS` (default 20000, integer 1–25000), forwarded by Compose, so
+runtime execution ends before the battery's 30000ms delivery budget. Shorter
+caller deadlines require a correspondingly shorter runtime limit. Missing keys
+still return `REFUSED` before starting a runtime; no credential gate is relaxed.
+
+The runtime runs in a killable subprocess/process group, including Pi SDK import,
+model lookup, prompt and disposal. A Linux timeout SIGKILLs that group without
+waiting for descendants' pipe handles. Nonzero exit, timeout, no stdout, missing
+executable/import/model, and stdout over 1 MiB yield HTTP 200 with
+`status:"FAILED",live:false,error:<reason>,reason:<reason>,runtime:<harness>` and
+no `reply`. HTTP 200 preserves the failure through the generic/raw webhook mapping;
+it is not runtime success. Diagnostics include `exit_code` (null if unavailable),
+`timed_out`, stream excerpts (first 2048 bytes each), resolved `exec`, `signal`
+and `timeout_ms` where a runtime was launched. The reason names the exit code or
+timeout and includes stderr/stdout, explicitly `(empty)` when absent. Invalid
+runtime-budget configuration fails before spawning. Successful runtime output
+adds `status:"OK",runtime:<harness>` to the unchanged nonce/digest/live evidence.
+The checker rejects explicit FAILED/REFUSED even if success markers are present,
+and includes the consumer's reason on the battery line and in JSONL evidence.
+
+Pi selects SDK model `deepseek/deepseek-flash` and surfaces nonthrowing SDK
+assistant error events. Goose keeps the DF-CRIER-345 OpenAI credential gate and
+openai/gpt-4o-mini configuration, with no saved session/default extensions or
+non-answer banners (`--no-session --no-profile --quiet`). A Goose failure names
+the precise blocker: DeepSeek is not wired for that consumer. Neither its wiring
+nor bounded network-disabled real-image probes constitute a paid DeepSeek success;
+current blockers and verification limits are explicit in the example README.
+
 ### 2.2 Shipped harnesses (CR-FEAT-018/019/020 waves)
 
 All four shipped harnesses are **thin consumers**: a small HTTP server that (a) self-registers

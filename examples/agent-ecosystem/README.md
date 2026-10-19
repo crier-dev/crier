@@ -62,7 +62,8 @@ consumer must finish its CLI (exit 0) or Pi SDK prompt and emit non-empty text,
 `"live": true`, a non-empty `exec`, and positive integer `stdout_bytes`.
 The battery parses those fields from crier's generic/raw `reply` object; a
 reply substring alone cannot pass. CLI errors, auth errors, timeouts and empty
-output return HTTP 500 with `error` and **no `reply`**. Pi uses
+output return HTTP 200 with `status:"FAILED"`, `live:false`, `error` and **no `reply`**
+(the HTTP success preserves the diagnostic through crier; it is not harness success). Pi uses
 `exec: "sdk:@earendil-works/pi-coding-agent"`; its `stdout_bytes` counts emitted
 SDK text, not an OS stdout stream.
 
@@ -82,14 +83,69 @@ particular upstream provider/model.
 
 | Harness | Runtime command / provider | Required key | Missing-key result |
 |---|---|---|---|
-| `pi-agent` | `createAgentSession` SDK, available DeepSeek model | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
+| `pi-agent` | `createAgentSession` SDK, `deepseek/deepseek-flash` | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
 | `opencode` | `opencode run … --model deepseek/deepseek-v4-flash` | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
 | `claude-code` | `claude -p … --output-format text` | `ANTHROPIC_API_KEY` | `REFUSED: missing ANTHROPIC_API_KEY` |
 | `codex` | `codex exec --skip-git-repo-check …` (child `CODEX_API_KEY` alias) | `OPENAI_API_KEY` | `REFUSED: missing OPENAI_API_KEY` |
 | `aider` | `aider --model deepseek/deepseek-v4-flash --message …` | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
-| `goose` | `goose run --text …` (`GOOSE_PROVIDER=openai`, `GOOSE_MODEL=gpt-4o-mini`) | `OPENAI_API_KEY` | `REFUSED: missing OPENAI_API_KEY` |
+| `goose` | `goose run --no-session --no-profile --quiet --text …` (`GOOSE_PROVIDER=openai`, `GOOSE_MODEL=gpt-4o-mini`) | `OPENAI_API_KEY` | `REFUSED: missing OPENAI_API_KEY` |
 
 Missing/empty keys return immediately as HTTP 200 `{live:false,status:"REFUSED",reason:"missing VARIABLE"}` without starting a runtime; the battery reports a FAIL carrying that reason (only the guard matrix SKIPs without DeepSeek), CLI live opt-ins remain required, and sink/Hermes gain no key requirement.
+
+### Runtime failures and current blockers (DF-CRIER-346)
+
+`REFUSED` means the required provider key is absent/empty: no runtime was started.
+`FAILED` means the runtime could not start, failed, produced no stdout, or exceeded
+its own budget. `OK` means exit 0 plus nonempty runtime stdout and `live:true`;
+the battery still separately requires the nonce/digest checks above.
+
+Every runtime request has `RUNTIME_TIMEOUT_MS=20000` by default (Compose forwards
+this knob to all six consumers). Allowed values are integers 1–25000; invalid values
+return `FAILED` before spawning. The 25s maximum stays below the battery's 30s
+blocking-delivery budget; callers using shorter delivery budgets must lower this knob.
+On Linux a timeout kills the isolated runtime process group, including descendants,
+with SIGKILL and immediately returns a reason, rather than waiting on inherited pipes.
+Pi's SDK import, model selection, prompt and cleanup run inside the same killable
+child-process boundary. A timeout is not evidence of a particular provider defect.
+
+A failed response includes `runtime`, resolved `exec` when available, `exit_code`
+(null if no exit was observed), `signal`, `timed_out`, `timeout_ms`, and the first
+2048 bytes each of `stderr`/`stdout`. `reason` includes the exit code or timeout
+and both excerpts, with `(empty)` explicitly shown. The same diagnostic is written
+to the consumer log and appears on the battery FAIL line and JSONL `reason`.
+Successful stdout is capped at 1 MiB; exceeding it is a diagnosed failure.
+Diagnostics can contain provider/user text; review them before sharing evidence.
+
+Current per-harness findings (offline checks, not a claim of vendor success):
+
+- Pi: the installed SDK exposes `ModelRuntime`, and its DeepSeek catalog contains
+  `deepseek-flash` and `deepseek-v4-pro`. The consumer explicitly selects
+  `deepseek/deepseek-flash` and now preserves SDK `message_end.errorMessage`
+  (which may arrive without a thrown exception). An incompatible/missing SDK or
+  missing model reports that exact import/model error; the latter says to rebuild
+  the Pi image. A stalled import/prompt reports its timeout, never a silent 500.
+  A successful paid DeepSeek round-trip has not been verified by this patch.
+- Goose: **DeepSeek is not wired for this consumer**. It deliberately selects
+  `GOOSE_PROVIDER=openai`, `GOOSE_MODEL=gpt-4o-mini` with `OPENAI_API_KEY`, as in
+  DF-CRIER-345; exporting only `DEEPSEEK_API_KEY` cannot run Goose. Missing OpenAI
+  credentials still return `REFUSED`. With a present but broken OpenAI credential,
+  failures include this provider/model/key mismatch explanation plus the actual
+  runtime stderr/exit or timeout. `--no-session --no-profile --quiet` avoids saved
+  sessions/extensions and non-answer banners; these flags were checked against
+  the installed binary. A DeepSeek-backed Goose answer remains blocked on a
+  separately configured provider/key mapping, not on crier delivery.
+- OpenCode: still selects `deepseek/deepseek-v4-flash`; startup/provider calls may
+  exceed the budget. It now returns the exact stderr/exit or
+  `opencode: runtime timeout after …ms` with captured output. No paid OpenCode
+  completion is claimed.
+
+With the updated consumer mounted into the existing Pi/Goose/OpenCode images,
+network-disabled probes with inert credentials and a 1500ms runtime budget each
+returned HTTP 200 / `FAILED` in 1.52s (rounded); all three correctly reported a
+runtime timeout with empty stream excerpts. This proves bounded real-image
+execution, not upstream authentication or a DeepSeek answer. Stub tests additionally
+prove exit 3 / `boom-347`, silent TERM-resistant descendants, empty success, SDK
+error events, and known-line success without making paid provider calls.
 
 ### Auditable evidence in the checkout
 
@@ -227,6 +283,7 @@ current harness claims.
 | `DEEPSEEK_API_KEY` | — | enables guard verdicts and pi-agent / opencode / aider runtime credentials |
 | `OPENAI_API_KEY` | — | Codex and Goose runtime credentials |
 | `ANTHROPIC_API_KEY` | — | Claude Code runtime credential |
+| `RUNTIME_TIMEOUT_MS` | `20000` | per-request runtime limit in ms, integer 1–25000; must be shorter than the caller's delivery budget |
 | `CR_GUARD_ENABLED` | `true` | master guard switch |
 | `CR_GUARD_DEFAULT_POLICY` | — | server-wide default policy JSON (provider presets, fail-closed…) |
 | `CRIER_REQUIRE_SIG` | `false` | agent signature enforcement (demo wiring keeps it off) |

@@ -120,7 +120,8 @@ harness_probe() { # agent-id prompt — two distinct prompts, one harness verdic
     else
       result=FAIL; harness_failed=1
     fi
-    reason="$(printf '%s' "$proof" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reason"])')" || exit 1
+    # One console line per result; retain the unmodified reason in JSONL proof.
+    reason="$(printf '%s' "$proof" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reason"].replace("\r", "\\r").replace("\n", "\\n"))')" || exit 1
     echo "$result  $desc prompt $index ($reason)"
     # Full response plus independently computed proof; never truncate the nonce away.
     printf '%s' "$body" | python3 -c 'import datetime,json,sys; row={"ts":datetime.datetime.now(datetime.timezone.utc).isoformat(),"test":sys.argv[1],"http":sys.argv[2],"body":sys.stdin.read(),"run_nonce":sys.argv[3],"run_started_at":sys.argv[4],"request_started_at":sys.argv[5],"prompt_index":int(sys.argv[6]),"prompt":sys.argv[7],"previous_content_sha256":sys.argv[8]}; row.update(json.loads(sys.argv[9])); print(json.dumps(row))' "$desc" "$code" "$RUN_NONCE" "$RUN_STARTED_AT" "$started_at" "$index" "$text" "$first_digest" "$proof" >> "$EVIDENCE" || exit 1

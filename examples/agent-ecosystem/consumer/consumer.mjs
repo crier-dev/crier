@@ -15,9 +15,10 @@
 // <HARNESS>_LIVE=1 AND a key; the CLIs' model bootstrap is heavy and can
 // exceed the blocking-delivery budget, so canned keeps the battery
 // deterministic on any host).
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { delimiter, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 
@@ -96,7 +97,7 @@ function liveReply(stdout, command) {
   const reply = stdout.trim();
   // Extract only from the completed runtime's output, NEVER from the request.
   const echoes = [...reply.matchAll(/\[crier-battery-nonce:([0-9a-f-]{36})\]/g)];
-  return { reply, live: true, exec: command, stdout_bytes: Buffer.byteLength(stdout),
+  return { reply, live: true, exec: command, status: "OK", runtime: HARNESS, stdout_bytes: Buffer.byteLength(stdout),
     stdout_sha256: createHash("sha256").update(reply).digest("hex"),
     nonce: echoes.length === 1 ? echoes[0][1] : null };
 }
@@ -112,19 +113,106 @@ function resolveCommand(bin) {
   throw new Error(`${HARNESS} executable not found: ${bin}`);
 }
 
-// CLI failure (including timeout/auth failure) rejects; never turn it into reply text.
-function runCli(bin, args, extraEnv = {}) {
-  const command = resolveCommand(bin);
-  return new Promise((resolve, reject) => {
-    execFile(
-      command, args,
-      { env: { ...process.env, ...extraEnv }, timeout: 60000 },
-      (err, stdout) => {
-        if (err) return reject(err);
-        try { resolve(liveReply(stdout, command)); } catch (e) { reject(e); }
+// Keep runtime failures in the generic/raw HTTP 200 envelope so crier does not
+// replace diagnostics with a webhook transport error. FAILED never earns live=true.
+function failed(reason, detail = {}) {
+  const result = { status: "FAILED", runtime: HARNESS, live: false, error: reason, reason, ...detail };
+  console.error(JSON.stringify(result));
+  return result;
+}
+
+function runtimeBudget() {
+  const ms = Number(process.env.RUNTIME_TIMEOUT_MS || "20000");
+  if (!Number.isInteger(ms) || ms < 1 || ms > 25000) {
+    throw new Error("RUNTIME_TIMEOUT_MS must be an integer from 1 to 25000 (delivery budget is 30000ms)");
+  }
+  return ms;
+}
+
+function runCli(bin, args, extraEnv = {}, runtime = undefined) {
+  let command, budget;
+  try {
+    budget = runtimeBudget();
+    command = runtime ? bin : resolveCommand(bin);
+  } catch (err) {
+    return Promise.resolve(failed(err.message, { exit_code: null, timed_out: false, stdout: "", stderr: "" }));
+  }
+  return new Promise((resolve) => {
+    // Separate process group lets a hard deadline also kill CLI descendants.
+    // Pi imports/prompts/disposes in this same killable boundary, not an
+    // uncancellable Promise.race in the HTTP process.
+    const child = spawn(command, args, { env: { ...process.env, ...extraEnv },
+      detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), settled = false;
+    const kill = () => {
+      try {
+        if (process.platform === "win32") child.kill("SIGKILL");
+        else process.kill(-child.pid, "SIGKILL");
+      } catch { /* Already exited, or spawn failed. */ }
+    };
+    const finish = (cause, code = null, signal = null, timedOut = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      kill();
+      // Do not wait for inherited pipe handles after the deadline.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      const out = stdout.toString("utf8"), err = stderr.subarray(0, 2048).toString("utf8");
+      if (!cause && code === 0 && out.trim()) {
+        resolve(liveReply(out, runtime || command));
+        return;
       }
-    );
+      const excerpt = stdout.subarray(0, 2048).toString("utf8");
+      let reason = `${HARNESS}: ${cause || (code === 0 ? "exit code 0 but no stdout" : `exit code ${code ?? "unknown"}${signal ? ` (${signal})` : ""}`)}`;
+      if (HARNESS === "goose") reason += "; configured openai/gpt-4o-mini requires OPENAI_API_KEY; DeepSeek is not wired for Goose";
+      reason += `; stderr: ${err || "(empty)"}; stdout: ${excerpt || "(empty)"}`;
+      const result = failed(reason, { exec: runtime || command, exit_code: code, signal,
+        timed_out: timedOut, timeout_ms: budget, stdout: excerpt, stderr: err });
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(`runtime timeout after ${budget}ms`, null, "SIGKILL", true), budget);
+    child.stdout.on("data", (chunk) => {
+      // Retain normal answers up to 1 MiB, but keep failure excerpts small.
+      stdout = Buffer.concat([stdout, chunk]).subarray(0, 1024 * 1024 + 1);
+      if (stdout.length > 1024 * 1024) finish("stdout exceeded 1 MiB capture limit");
+    });
+    child.stderr.on("data", (chunk) => { stderr = Buffer.concat([stderr, chunk]).subarray(0, 2048); });
+    child.once("error", (err) => finish(`could not start runtime: ${err.message}`));
+    child.once("close", (code, signal) => finish(null, code, signal));
   });
+}
+
+async function piPrompt(prompt) {
+  const { createAgentSession, SessionManager, ModelRuntime } =
+    await import("@earendil-works/pi-coding-agent");
+  const modelRuntime = await ModelRuntime.create();
+  // Verified against the installed image: DeepSeek exposes deepseek-flash and
+  // deepseek-v4-pro, not the OpenCode provider/model spelling.
+  const model = (await modelRuntime.getAvailable()).find((candidate) =>
+    candidate.provider === "deepseek" && candidate.id === "deepseek-flash");
+  if (!model) throw new Error("pi-agent: SDK has no deepseek/deepseek-flash model for DEEPSEEK_API_KEY; rebuild the Pi image with a compatible SDK");
+  const { session } = await createAgentSession({
+    sessionManager: SessionManager.inMemory(), modelRuntime, model,
+  });
+  const out = [];
+  let runtimeError;
+  try {
+    session.subscribe((ev) => {
+      if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
+        out.push(ev.assistantMessageEvent.delta);
+      }
+      // The SDK can complete a prompt with an error message instead of throwing.
+      if (ev.type === "message_end" && ev.message?.role === "assistant" && ev.message.errorMessage) {
+        runtimeError = ev.message.errorMessage;
+      }
+    });
+    await session.prompt(`Answer in one sentence, no tools: ${prompt}`);
+    if (runtimeError) throw new Error(runtimeError);
+    return out.join("");
+  } finally {
+    await session.dispose();
+  }
 }
 
 async function answer(text, nonce) {
@@ -145,32 +233,8 @@ async function answer(text, nonce) {
   }
   const prompt = nonce === undefined ? text : `${text.slice(0, 350)}\nAnswer the question, then echo exactly this marker on a separate line: [crier-battery-nonce:${nonce}]`;
   if (HARNESS === "pi-agent") {
-    // Real pi SDK session: minimal prompt pointing at the message
-    // (discovery pattern keeps the prompt small; model resolved from env).
-    const { createAgentSession, SessionManager, ModelRuntime } =
-      await import("@earendil-works/pi-coding-agent");
-    const modelRuntime = await ModelRuntime.create();
-    // The image installs the current SDK. Select the credential's provider
-    // explicitly rather than letting the SDK fall back to Anthropic.
-    const model = (await modelRuntime.getAvailable()).find((candidate) => candidate.provider === "deepseek");
-    if (!model) throw new Error("pi-agent: no DeepSeek model available for DEEPSEEK_API_KEY");
-    const { session } = await createAgentSession({
-      sessionManager: SessionManager.inMemory(),
-      modelRuntime,
-      model,
-    });
-    const out = [];
-    try {
-      session.subscribe((ev) => {
-        if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
-          out.push(ev.assistantMessageEvent.delta);
-        }
-      });
-      await session.prompt(`Answer in one sentence, no tools: ${nonce === undefined ? text.slice(0, 500) : prompt}`);
-      return liveReply(out.join(""), "sdk:@earendil-works/pi-coding-agent");
-    } finally {
-      await session.dispose();
-    }
+    return runCli(process.execPath, [fileURLToPath(import.meta.url), "--pi-runtime",
+      nonce === undefined ? text.slice(0, 500) : prompt], {}, "sdk:@earendil-works/pi-coding-agent");
   }
   switch (HARNESS) {
     case "opencode":
@@ -184,7 +248,7 @@ async function answer(text, nonce) {
     case "aider":
       return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"]);
     case "goose":
-      return runCli("goose", ["run", "--text", prompt], { GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" });
+      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" });
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
@@ -198,7 +262,14 @@ async function ensureRegistered() {
   return registered;
 }
 
-createServer(async (req, res) => {
+if (process.argv[2] === "--pi-runtime") {
+  try {
+    process.stdout.write(await piPrompt(process.argv[3]));
+  } catch (err) {
+    console.error(err.stack || err.message);
+    process.exitCode = 1;
+  }
+} else createServer(async (req, res) => {
   const send = (code, obj) => {
     const b = JSON.stringify(obj);
     res.writeHead(code, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(b) });
@@ -223,7 +294,7 @@ createServer(async (req, res) => {
       const text = typeof payload === "string" ? payload : payload.text || JSON.stringify(payload);
       return send(200, await answer(text, payload.battery_nonce));
     } catch (e) {
-      return send(500, { error: e.message, live: false });
+      return send(200, failed(e.message, { exit_code: null, timed_out: false, stdout: "", stderr: "" }));
     }
   }
   send(404, { error: "not found" });
