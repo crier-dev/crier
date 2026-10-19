@@ -90,6 +90,17 @@
 #      nonzero checker exit stops the commit. It runs whenever such a file is
 #      staged, for the same reason as (4).
 #
+#  (6) the board checker (scripts/check-board.sh, DF-CRIER-387) is run whenever
+#      a staged path is under .coding-hermes/board/. This is the arm whose
+#      ABSENCE let an invalid board ship: a board-only diff has no Go, no shell
+#      and no Makefile, so it used to fall through to `gate scope: nothing
+#      guardable staged — exit 0` while `boardctl validate` was printing
+#      `RESULT: FAIL (5 error(s))` on the same tree. Errors fail the commit;
+#      warnings are printed and stay non-fatal, because the validator itself
+#      tolerates legacy shapes and says so per line. A missing boardctl is exit
+#      2, never a silent skip. Its own vocabulary gaps are boardctl's business,
+#      not this hook's: the same row names that half.
+#
 # The classification below MIRRORS scripts/check-gofmt.sh (_is_go),
 # scripts/check-shell-yaml.sh (_is_shell / _is_workflow) and
 # scripts/check-make-docker.sh (_is_makefile / _is_dockerfile). Drift here can
@@ -122,6 +133,7 @@ go_count=0
 go_files=()
 shell_yaml=()
 make_docker=()
+board_files=()
 
 while IFS= read -r path; do
   [ -n "$path" ] || continue
@@ -130,6 +142,15 @@ while IFS= read -r path; do
       # MIRRORS scripts/check-gofmt.sh (_is_go): the .go suffix is the whole rule.
       go_files+=("$path")
       go_count=$((go_count + 1))
+      continue
+      ;;
+  esac
+  case "$path" in
+    .coding-hermes/board/*)
+      # MIRRORS scripts/check-board.sh: board data is the whole rule. This is
+      # the shape that used to read "nothing guardable staged — exit 0", which
+      # is exactly how an invalid board shipped (DF-CRIER-387).
+      board_files+=("$path")
       continue
       ;;
   esac
@@ -177,6 +198,7 @@ done <<<"$staged"
 n_go="${#go_files[@]}"
 n_shell_yaml="${#shell_yaml[@]}"
 n_make_docker="${#make_docker[@]}"
+n_board="${#board_files[@]}"
 
 # ── (2) state the scope, then check it ────────────────────────────────────────
 # The scope line is printed BEFORE the checkers' per-file output so the gate log
@@ -187,9 +209,30 @@ n_make_docker="${#make_docker[@]}"
 # unchanged — and now NAME the gofmt arm (DF-CRIER-189): a Go-only diff used to
 # read "this gate had nothing to add", which stopped being true once an arm that
 # reads formatting existed.
+if [ "$n_board" -gt 0 ]; then
+  BOARD_CHECKER="$REPO_ROOT/scripts/check-board.sh"
+  if [ ! -f "$BOARD_CHECKER" ]; then
+    echo "gate: ERROR: $BOARD_CHECKER is missing — refusing to let a board change through with the board validation unavailable" >&2
+    exit 1
+  fi
+
+  bash "$BOARD_CHECKER"
+  board_rc=$?
+  if [ "$board_rc" -ne 0 ]; then
+    echo "gate: board validation FAILED (exit $board_rc) — fix the rows named above; an invalid board is a durable queue every foreman lane reads" >&2
+    exit "$board_rc"
+  fi
+
+  echo "gate: board validation PASS on $n_board staged board file(s): ${board_files[*]}"
+fi
+
 if [ "$n_make_docker" -eq 0 ]; then
   if [ "$go_count" -eq 0 ]; then
     if [ "$n_shell_yaml" -eq 0 ]; then
+      if [ "$n_board" -gt 0 ]; then
+        echo "gate scope: no Go source, no shell/YAML, no Makefile/Dockerfile staged — the board arm validated $n_board board file(s): ${board_files[*]}"
+        exit 0
+      fi
       echo "gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff"
       exit 0
     fi
