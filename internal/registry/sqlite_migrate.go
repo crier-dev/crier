@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// SQLite follows the embedded PostgreSQL 001..016 sequence. Reuse the source
-// DDL where SQLite supports it, translating only type spellings. Overrides
+// SQLite follows the complete embedded PostgreSQL migration sequence. Reuse the
+// source DDL where SQLite supports it, translating only type spellings. Overrides
 // below cover PostgreSQL-only casts/functions, identity, multi-column ALTER,
 // ALTER CONSTRAINT and regex syntax. 004's keyless change is folded into 001:
 // SQLite cannot drop a column constraint without rebuilding the table.
@@ -48,6 +48,27 @@ var sqliteMigrationOverrides = map[int]string{
  body_digest TEXT NOT NULL CHECK(length(body_digest)=64 AND body_digest NOT GLOB '*[^0-9a-f]*'),
  status_code INTEGER NOT NULL, message_id TEXT NOT NULL UNIQUE, response_body BLOB NOT NULL,
  created_at INTEGER NOT NULL, PRIMARY KEY(sender,recipient,idempotency_key));`,
+	// Keep PostgreSQL's lowercase hex, nonblank, uniqueness and JSON-object
+	// constraints at the SQL boundary too. Byte lengths also reject NUL suffixes
+	// (SQLite text length and GLOB stop at NUL). Signed JSON stays verbatim TEXT.
+	17: `CREATE TABLE trust_anchors (
+ id TEXT NOT NULL PRIMARY KEY CHECK(trim(id) <> ''),
+ public_key TEXT NOT NULL UNIQUE CHECK(length(CAST(public_key AS BLOB)) = 64 AND instr(public_key, char(0)) = 0 AND public_key NOT GLOB '*[^0-9a-f]*'),
+ label TEXT NOT NULL CHECK(trim(label) <> ''), created_at INTEGER NOT NULL);
+ CREATE TABLE trust_delegations (
+ signature TEXT NOT NULL PRIMARY KEY CHECK(length(CAST(signature AS BLOB)) = 128 AND instr(signature, char(0)) = 0 AND signature NOT GLOB '*[^0-9a-f]*'),
+ subject_key TEXT NOT NULL CHECK(length(CAST(subject_key AS BLOB)) = 64 AND instr(subject_key, char(0)) = 0 AND subject_key NOT GLOB '*[^0-9a-f]*'),
+ record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object'));
+ CREATE INDEX trust_delegations_subject_idx ON trust_delegations(subject_key);`,
+}
+
+// sqliteMigrationDDL is the single dialect-selection seam used by startup and
+// the full-chain executable portability guard. PostgreSQL reads the source as-is.
+func sqliteMigrationDDL(version int, source string) string {
+	if ddl, ok := sqliteMigrationOverrides[version]; ok {
+		return ddl
+	}
+	return strings.NewReplacer("TIMESTAMPTZ", "INTEGER", "JSONB", "TEXT", "BYTEA", "BLOB", "btrim(", "trim(").Replace(source)
 }
 
 func (s *SQLiteStore) migrate() error {
@@ -75,10 +96,7 @@ func (s *SQLiteStore) migrate() error {
 			if err != nil {
 				return err
 			}
-			ddl, override := sqliteMigrationOverrides[version]
-			if !override {
-				ddl = strings.NewReplacer("TIMESTAMPTZ", "INTEGER", "JSONB", "TEXT", "BYTEA", "BLOB", "btrim(", "trim(").Replace(string(source))
-			}
+			ddl := sqliteMigrationDDL(version, string(source))
 			if _, err = q.ExecContext(ctx, ddl); err != nil {
 				return fmt.Errorf("SQLite migration %03d: %w", version, err)
 			}

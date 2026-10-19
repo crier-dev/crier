@@ -26,7 +26,13 @@ func TestSQLiteRegistryProductionRestart(t *testing.T) {
 		require.NoError(t, err, "%s child:\n%s", phase, out)
 		require.Contains(t, string(out), "type=sqlite durable=true")
 		require.NotContains(t, string(out), "DEMO-ONLY")
-		t.Logf("%s production boot: SQLite durable=true, no DEMO-ONLY warning", phase)
+		require.Contains(t, string(out), "/health HTTP 200")
+		if phase == "seed" {
+			require.Contains(t, string(out), "agent a HTTP 201")
+		} else {
+			require.Contains(t, string(out), "agent a after restart HTTP 200")
+		}
+		t.Logf("%s production boot transcript:\n%s", phase, out)
 	}
 }
 func TestSQLiteRegistryProductionChild(t *testing.T) {
@@ -41,10 +47,14 @@ func TestSQLiteRegistryProductionChild(t *testing.T) {
 		"CR_GROUP_ROOT": filepath.Join(root, "groups"), "CR_REQUIRE_AGENT_SIG": "false",
 	})
 	client := &http.Client{Timeout: 5 * time.Second}
+	code, raw := sessionDo(t, client, "GET", base+"/health", nil, nil)
+	require.Equal(t, http.StatusOK, code, "%s", raw)
+	t.Logf("%s /health HTTP %d: %s", phase, code, raw)
 	if phase == "seed" {
 		for _, id := range []string{"a", "b"} {
 			code, raw := sessionDo(t, client, "POST", base+"/agents", map[string]any{"id": id}, nil)
 			require.Equal(t, 201, code, "%s", raw)
+			t.Logf("agent %s HTTP %d: %s", id, code, raw)
 		}
 		code, raw := sessionDo(t, client, "POST", base+"/agents/a/inbox", map[string]any{"payload": map[string]string{"text": "survive restart"}}, nil)
 		require.Equal(t, 201, code, "%s", raw)
@@ -62,13 +72,14 @@ func TestSQLiteRegistryProductionChild(t *testing.T) {
 			code, raw := sessionDo(t, client, "GET", base+"/agents/"+id, nil, nil)
 			require.Equal(t, 200, code, "%s", raw)
 			require.Contains(t, raw, `"id":"`+id+`"`)
+			t.Logf("agent %s after restart HTTP %d: %s", id, code, raw)
 		}
 	}
 	var stats struct {
 		QueueDepth  int `json:"queue_depth"`
 		LeasedCount int `json:"leased_count"`
 	}
-	code, raw := sessionDo(t, client, "GET", base+"/agents/a/inbox/stats", nil, &stats)
+	code, raw = sessionDo(t, client, "GET", base+"/agents/a/inbox/stats", nil, &stats)
 	require.Equal(t, 200, code, "%s", raw)
 	require.Equal(t, 1, stats.QueueDepth)
 	require.Equal(t, 1, stats.LeasedCount)

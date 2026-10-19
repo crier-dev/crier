@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -191,16 +190,12 @@ func TestSQLiteServiceReceiptDurableAndAtomic(t *testing.T) {
 }
 
 func TestSQLiteMigrationsAndBackendFailures(t *testing.T) {
-	s := newTestSQLiteStore(t)
-	var count int
-	require.NoError(t, s.db.QueryRow(`SELECT count(*) FROM registry_schema_migrations`).Scan(&count))
-	require.Equal(t, 16, count)
-	// A pre-015 file upgrades rather than silently missing the newest surfaces.
-	require.NoError(t, s.transaction(func(ctx context.Context, q *sqliteQueries) error {
-		_, err := q.ExecContext(ctx, `DROP TABLE a2a_task_outputs; DROP TABLE a2a_task_observations; DELETE FROM registry_schema_migrations WHERE version>=15`)
-		return err
-	}))
+	// Build the historical prefix, rather than deleting newer markers while
+	// leaving their tables behind. New migrations must not move this boundary.
+	_, db := sqliteMigrationFixture(t, 14)
+	s := &SQLiteStore{db: db}
 	require.NoError(t, s.migrate())
+	assertSQLiteMigrationVersions(t, s)
 	require.NoError(t, s.RecordTaskOutput("a", taskOutputFixture()))
 	require.True(t, s.Healthy())
 	require.NoError(t, s.Close())
