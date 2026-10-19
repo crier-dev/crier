@@ -8,7 +8,24 @@ set -uo pipefail
 
 CRIER="${CRIER_URL:-http://crier:8767}"
 SINK="${SINK_URL:-http://sink:9002}"
-EVIDENCE="${EVIDENCE:-/tmp/ecosystem.jsonl}"
+BATTERY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+EVIDENCE="${EVIDENCE:-$BATTERY_DIR/evidence/ecosystem.jsonl}"
+# Compose retains the named volume AND mirrors it to a checkout bind mount.
+EVIDENCE_REPO="${EVIDENCE_REPO:-}"
+mkdir -p -- "$(dirname -- "$EVIDENCE")" || exit 1
+copy_evidence() {
+  local rc=$?
+  if [[ -n "$EVIDENCE_REPO" && "$EVIDENCE_REPO" != "$EVIDENCE" ]]; then
+    if mkdir -p -- "$(dirname -- "$EVIDENCE_REPO")" && cp -- "$EVIDENCE" "$EVIDENCE_REPO"; then
+      echo "evidence copied: $EVIDENCE_REPO"
+    else
+      echo "FAIL  evidence copy to $EVIDENCE_REPO" >&2
+      rc=1
+    fi
+  fi
+  exit "$rc"
+}
+trap copy_evidence EXIT
 KEY="${DEEPSEEK_API_KEY:-}"
 PASS=0; FAIL=0; SKIP=0
 
@@ -81,19 +98,36 @@ wait_registered "codex"
 wait_registered "aider"
 wait_registered "goose"
 
-# 2. round-trips through the bus (blocking delivery, schema template)
-probe "round-trip pi-agent via crier" 200 '"reply":"' POST "/agents/pi-agent/inbox" \
-  '{"payload":{"text":"What is the capital of France?"},"sender":"battery","session_id":"eco-pi","delivery_mode":"blocking","timeout_ms":30000}'
-probe "round-trip opencode via crier" 200 '"reply":"' POST "/agents/opencode/inbox" \
-  '{"payload":{"text":"Explain what a message bus is."},"sender":"battery","session_id":"eco-oc","delivery_mode":"blocking","timeout_ms":30000}'
-probe "round-trip claude-code via crier" 200 '"reply":"' POST "/agents/claude-code/inbox" \
-  '{"payload":{"text":"What is the capital of France?"},"sender":"battery","session_id":"eco-cc","delivery_mode":"blocking","timeout_ms":30000}'
-probe "round-trip codex via crier" 200 '"reply":"' POST "/agents/codex/inbox" \
-  '{"payload":{"text":"Explain what a message bus is."},"sender":"battery","session_id":"eco-cx","delivery_mode":"blocking","timeout_ms":30000}'
-probe "round-trip aider via crier" 200 '"reply":"' POST "/agents/aider/inbox" \
-  '{"payload":{"text":"Suggest a good commit message for a typo fix."},"sender":"battery","session_id":"eco-ai","delivery_mode":"blocking","timeout_ms":30000}'
-probe "round-trip goose via crier" 200 '"reply":"' POST "/agents/goose/inbox" \
-  '{"payload":{"text":"What does a message bus do?"},"sender":"battery","session_id":"eco-gs","delivery_mode":"blocking","timeout_ms":30000}'
+# Harness checks deliberately do NOT use probe's transit-only substring contract.
+harness_probe() { # agent-id prompt
+  local id="$1" text="$2" desc="round-trip $1 via crier"
+  local out code body reason result data
+  code=000; body=""
+  if [[ -z "$KEY" ]]; then
+    SKIP=$((SKIP+1)); result=SKIP
+    reason="no DEEPSEEK_API_KEY — canned mode; harness execution not tested"
+  else
+    data="$(python3 -c 'import json,sys; print(json.dumps({"payload":{"text":sys.argv[2]},"sender":"battery","session_id":"eco-"+sys.argv[1],"delivery_mode":"blocking","timeout_ms":30000}))' "$id" "$text")"
+    out="$(curl -s --max-time 35 -w '\n%{http_code}' -X POST "$CRIER/agents/$id/inbox" -H 'Content-Type: application/json' -d "$data")"
+    code="${out##*$'\n'}"; body="${out%$'\n'*}"
+    if reason="$(printf '%s' "$body" | python3 "$BATTERY_DIR/check-harness.py" "$code")"; then
+      PASS=$((PASS+1)); result=PASS
+    else
+      FAIL=$((FAIL+1)); result=FAIL
+    fi
+  fi
+  echo "$result  $desc ($reason)"
+  # Keep the FULL response and verdict so live/exec/byte markers are auditable.
+  printf '%s' "$body" | python3 -c 'import datetime,json,sys; print(json.dumps({"ts":datetime.datetime.now(datetime.timezone.utc).isoformat(),"test":sys.argv[1],"http":sys.argv[2],"result":sys.argv[3],"reason":sys.argv[4],"body":sys.stdin.read()}))' "$desc" "$code" "$result" "$reason" >> "$EVIDENCE" || exit 1
+}
+
+# 2. Real harness execution through the bus; no credentials => one SKIP per harness.
+harness_probe pi-agent "What is the capital of France?"
+harness_probe opencode "Explain what a message bus is."
+harness_probe claude-code "What is the capital of France?"
+harness_probe codex "Explain what a message bus is."
+harness_probe aider "Suggest a good commit message for a typo fix."
+harness_probe goose "What does a message bus do?"
 probe "round-trip sink echo via crier" 200 "ECHO" POST "/agents/sink/inbox" \
   '{"payload":{"text":"What vegetable is in plot B?"},"sender":"battery","session_id":"eco-sink","delivery_mode":"blocking","timeout_ms":15000}'
 

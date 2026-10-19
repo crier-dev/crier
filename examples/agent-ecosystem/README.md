@@ -34,8 +34,12 @@ docker compose --profile battery run --rm battery
 #    → 10+ probes: health, round-trips through the bus, async delivery,
 #      LLM guard matrix (with DEEPSEEK_API_KEY set)
 
-# 3. with the guard live (real verdicts):
-DEEPSEEK_API_KEY=sk-... docker compose up -d
+# 3. with real runtime execution + guard verdicts (set credentials in your shell
+#    or .env; do not commit them). CLI harnesses ALSO need their live opt-ins:
+export OPENCODE_LIVE=1 CLAUDE_CODE_LIVE=1 CODEX_LIVE=1 AIDER_LIVE=1 GOOSE_LIVE=1
+# DEEPSEEK_API_KEY must be exported / present in .env for BOTH commands.
+# Each CLI still needs its own valid provider/auth configuration.
+docker compose up -d
 docker compose --profile battery run --rm battery
 ```
 
@@ -54,26 +58,68 @@ where a default is already taken. To run two stacks side by side, also give each
 its own project name — `docker compose -p lab-a up -d --build` (repeat `-p lab-a` on
 every compose command for that stack).
 
-Expect (key set → real guard verdicts; no key → guard runs fail-open, matrix skipped):
+Harness PASS means **real runtime execution**, not merely HTTP delivery: the
+consumer must finish its CLI (exit 0) or Pi SDK prompt and emit non-empty text,
+`"live": true`, a non-empty `exec`, and positive integer `stdout_bytes`.
+The battery parses those fields from crier's generic/raw `reply` object; a
+reply substring alone cannot pass. CLI errors, auth errors, timeouts and empty
+output return HTTP 500 with `error` and **no `reply`**. Pi uses
+`exec: "sdk:@earendil-works/pi-coding-agent"`; its `stdout_bytes` counts emitted
+SDK text, not an OS stdout stream. This proves runtime execution and returned
+text, not answer quality or a particular upstream provider/model.
+
+With no `DEEPSEEK_API_KEY`, all six harness execution checks explicitly SKIP
+(canned mode / no credentials). Health, sink and async transport checks may
+still PASS, but **none of those proves a harness ran**. A key with a missing
+`*_LIVE=1` opt-in is a misconfigured live run: `live:false` is a **FAIL**, not a
+skip. A DeepSeek key does not authenticate every vendor CLI; configure each
+runtime's provider credentials separately.
+
+Expected no-key output (not a transcript of live execution):
 
 ```
-PASS  crier health
-PASS  round-trip pi-agent via crier
-PASS  round-trip opencode via crier
-PASS  round-trip claude-code via crier
-PASS  round-trip codex via crier
-PASS  round-trip aider via crier
-PASS  round-trip goose via crier
-PASS  round-trip sink echo via crier
-PASS  wrong-shape payload yields 200 ECHO: no text (documented trap)
-PASS  async deliver (202)
-PASS  async delivered
-PASS  guard clean payload allowed
-PASS  guard injection blocked
-battery done: 13 pass / 0 fail
+SKIP  round-trip pi-agent via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  round-trip opencode via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  round-trip claude-code via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  round-trip codex via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  round-trip aider via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  round-trip goose via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
+SKIP  guard matrix (no DEEPSEEK_API_KEY — guard runs fail-open)
+== battery done: 5 pass / 0 fail / 7 skip (evidence /evidence/ecosystem.jsonl)
 ```
 
-(no key → the guard matrix is skipped: `battery done: 11 pass / 0 fail / 1 skip`)
+A fully configured, successful live run has `13 pass / 0 fail / 0 skip`.
+An exit code of 0 with SKIPs is **not** full execution coverage.
+
+### Auditable evidence in the checkout
+
+The same `docker compose --profile battery run --rm battery` command keeps the
+`battery-evidence:/evidence` named-volume behavior and, on exit (success or
+failure), copies that JSONL to a bind mount at `./battery/evidence/ecosystem.jsonl`
+relative to this compose file. From the repo root this is:
+`examples/agent-ecosystem/battery/evidence/ecosystem.jsonl`.
+A failed evidence copy makes the run fail; retain the console output alongside
+the JSONL. Do not use `docker compose down -v` if you want to keep the volume.
+The file is an accumulating log, not a fresh per-run verdict: use the latest
+`["battery","start", ...]` boundary and inspect every harness `result`.
+Harness records include `PASS`/`FAIL`/`SKIP`, the reason, HTTP status and the full
+response body (including execution markers); evidence may contain prompt/output
+text, so review it before committing or sharing it.
+
+For a local shell run, `battery/battery.sh` defaults to
+`battery/evidence/ecosystem.jsonl`. Override `EVIDENCE` for the primary log and
+`EVIDENCE_REPO` for an optional second copy. After edits, rebuild the battery
+image to include **both** `battery.sh` and `check-harness.py`:
+
+```bash
+# From examples/agent-ecosystem (the long-lived stack must already be up):
+docker compose --profile battery build battery
+docker compose --profile battery run --rm battery
+# Inspect from the repo root:
+python3 -m json.tool --json-lines examples/agent-ecosystem/battery/evidence/ecosystem.jsonl
+# Offline regression checks (fake CLI/SDK/transport; no real provider calls):
+node --test examples/agent-ecosystem/battery/execution.test.mjs
+```
 
 ## Services
 
@@ -93,8 +139,10 @@ battery done: 13 pass / 0 fail
 All consumers (pi-agent through goose) run the **same shared consumer**
 (`consumer/consumer.mjs`) — parameterized by `AGENT_ID` / `HARNESS` / `PORT` /
 `CRIER_URL` / `DEEPSEEK_API_KEY` and the per-harness live-mode env. Each
-Dockerfile installs the harness's real runtime; live mode is opt-in so the
-battery stays deterministic on any host.
+Dockerfile installs the harness's real runtime; live mode is opt-in. Without
+a key or its opt-in, the consumer still returns canned text for manual transport
+demos, explicitly marked `"live": false, "canned": true`. Canned mode is not a
+successful harness execution test.
 
 ## How the agents wire in
 
@@ -159,7 +207,10 @@ range). All four agents
 full battery passes remotely with the guard matrix enabled (real DeepSeek
 verdicts): **8 pass / 0 fail / 0 skip** — clean payload 201, injection
 `403 GUARD_BLOCKED` with structured verdict. Raw evidence:
-`battery/evidence/remote-bunker-server-2026-08-24.jsonl`.
+`battery/evidence/remote-bunker-server-2026-08-24.jsonl`. This is historical
+transit/guard evidence from before DF-CRIER-329; the old reply-substring battery
+did not prove runtime execution. Use the execution-marker battery above for
+current harness claims.
 
 ## Config knobs
 
@@ -174,9 +225,10 @@ verdicts): **8 pass / 0 fail / 0 skip** — clean payload 201, injection
 
 ## Battery coverage
 
-`battery/battery.sh` (JSONL evidence → `battery-evidence` volume / `$EVIDENCE`):
+`battery/battery.sh` (JSONL evidence → `battery-evidence` volume / `$EVIDENCE`,
+mirrored to `battery/evidence/ecosystem.jsonl` by compose on exit):
 health · sink/pi/opencode/claude-code/codex/aider/goose readiness · blocking
-round-trips through the bus ·
+runtime execution (key required, boolean `live` + exec/byte metadata asserted) ·
 async fire-and-forget delivery (sink count delta) · guard matrix (clean allow
 201, injection 403 GUARD_BLOCKED) when a key is set. Exit code 0 iff zero
-failures — CI-friendly.
+failures and the evidence copy succeeded — SKIPs remain incomplete coverage.

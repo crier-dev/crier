@@ -16,7 +16,8 @@
 // exceed the blocking-delivery budget, so canned keeps the battery
 // deterministic on any host).
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
+import { delimiter, resolve } from "node:path";
 import { createServer } from "node:http";
 
 const REGISTRATION_TEMPLATE = JSON.parse(
@@ -76,61 +77,81 @@ async function register() {
   }
 }
 
-// Run a CLI harness binary; 60s cap so a slow model bootstrap never exceeds
-// the blocking-delivery budget. Errors become the reply text (best-effort).
+// A live marker is emitted only AFTER a successful runtime call with output.
+// Pi uses an SDK rather than a CLI; stdout_bytes then counts its emitted text.
+function liveReply(stdout, command) {
+  if (!stdout.trim()) throw new Error(`${HARNESS} produced no output`);
+  return { reply: stdout.trim(), live: true, exec: command, stdout_bytes: Buffer.byteLength(stdout) };
+}
+
+function resolveCommand(bin) {
+  for (const dir of (process.env.PATH || "").split(delimiter)) {
+    const command = resolve(dir, bin);
+    try {
+      accessSync(command, constants.X_OK);
+      return command;
+    } catch { /* Try the next PATH entry, just like execFile. */ }
+  }
+  throw new Error(`${HARNESS} executable not found: ${bin}`);
+}
+
+// CLI failure (including timeout/auth failure) rejects; never turn it into reply text.
 function runCli(bin, args) {
-  return new Promise((resolve) => {
+  const command = resolveCommand(bin);
+  return new Promise((resolve, reject) => {
     execFile(
-      bin, args,
+      command, args,
       { env: { ...process.env, DEEPSEEK_API_KEY: KEY }, timeout: 60000 },
-      (err, stdout) => resolve(err ? `(${HARNESS} error: ${err.message})` : (stdout.trim() || `(${HARNESS} produced no output)`))
+      (err, stdout) => {
+        if (err) return reject(err);
+        try { resolve(liveReply(stdout, command)); } catch (e) { reject(e); }
+      }
     );
   });
 }
 
 async function answer(text) {
   if (!LIVE) {
-    return `${HARNESS}(canned, no ${LIVE_ENV}): received "${text.slice(0, 80)}"`;
+    return { reply: `${HARNESS}(canned, requires ${LIVE_ENV} + DEEPSEEK_API_KEY): received "${text.slice(0, 80)}"`, live: false, canned: true };
   }
-  try {
-    if (HARNESS === "pi-agent") {
-      // Real pi SDK session: minimal prompt pointing at the message
-      // (discovery pattern keeps the prompt small; model resolved from env).
-      const { createAgentSession, SessionManager, ModelRegistry, AuthStorage } =
-        await import("@earendil-works/pi-coding-agent");
-      const auth = AuthStorage.create();
-      const modelRegistry = ModelRegistry.create(auth);
-      const { session } = await createAgentSession({
-        sessionManager: SessionManager.inMemory(),
-        authStorage: auth,
-        modelRegistry,
-      });
-      const out = [];
+  if (HARNESS === "pi-agent") {
+    // Real pi SDK session: minimal prompt pointing at the message
+    // (discovery pattern keeps the prompt small; model resolved from env).
+    const { createAgentSession, SessionManager, ModelRegistry, AuthStorage } =
+      await import("@earendil-works/pi-coding-agent");
+    const auth = AuthStorage.create();
+    const modelRegistry = ModelRegistry.create(auth);
+    const { session } = await createAgentSession({
+      sessionManager: SessionManager.inMemory(),
+      authStorage: auth,
+      modelRegistry,
+    });
+    const out = [];
+    try {
       session.subscribe((ev) => {
         if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
           out.push(ev.assistantMessageEvent.delta);
         }
       });
       await session.prompt(`Answer in one sentence, no tools: ${text.slice(0, 500)}`);
+      return liveReply(out.join(""), "sdk:@earendil-works/pi-coding-agent");
+    } finally {
       await session.dispose();
-      return (out.join("") || "(pi session produced no text)").trim();
     }
-    switch (HARNESS) {
-      case "opencode":
-        return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${text.slice(0, 400)}`, "--model", "deepseek/deepseek-v4-flash"]);
-      case "claude-code":
-        return runCli("claude", ["-p", text, "--output-format", "text"]);
-      case "codex":
-        return runCli("codex", ["exec", "--skip-git-repo-check", text]);
-      case "aider":
-        return runCli("aider", ["--message", text, "--no-auto-commits", "--yes-always"]);
-      case "goose":
-        return runCli("goose", ["run", "--text", text]);
-      default:
-        return `${HARNESS}(no live runner configured for this harness)`;
-    }
-  } catch (e) {
-    return `(${HARNESS} error: ${e.message})`;
+  }
+  switch (HARNESS) {
+    case "opencode":
+      return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${text.slice(0, 400)}`, "--model", "deepseek/deepseek-v4-flash"]);
+    case "claude-code":
+      return runCli("claude", ["-p", text, "--output-format", "text"]);
+    case "codex":
+      return runCli("codex", ["exec", "--skip-git-repo-check", text]);
+    case "aider":
+      return runCli("aider", ["--message", text, "--no-auto-commits", "--yes-always"]);
+    case "goose":
+      return runCli("goose", ["run", "--text", text]);
+    default:
+      throw new Error(`${HARNESS}: no live runner configured`);
   }
 }
 
@@ -165,10 +186,9 @@ createServer(async (req, res) => {
       const msg = JSON.parse(raw);
       const payload = msg.payload || {};
       const text = typeof payload === "string" ? payload : payload.text || JSON.stringify(payload);
-      const reply = await answer(text);
-      return send(200, { reply });
+      return send(200, await answer(text));
     } catch (e) {
-      return send(500, { error: e.message });
+      return send(500, { error: e.message, live: false });
     }
   }
   send(404, { error: "not found" });

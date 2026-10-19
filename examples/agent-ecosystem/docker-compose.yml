@@ -176,8 +176,11 @@ services:
       CRIER_URL: http://crier:8767
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       EVIDENCE: /evidence/ecosystem.jsonl
+      EVIDENCE_REPO: /repo-evidence/ecosystem.jsonl
     volumes:
       - battery-evidence:/evidence
+      # Copy the volume evidence here on exit (success AND failure).
+      - ./battery/evidence:/repo-evidence
     depends_on:
       crier: { condition: service_healthy }
       sink: { condition: service_started }

@@ -1,0 +1,202 @@
+// Offline regression battery: fake CLIs/SDK and transport, never real credentials.
+// Run: node --test examples/agent-ecosystem/battery/execution.test.mjs
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const here = fileURLToPath(new URL(".", import.meta.url));
+const consumer = resolve(here, "../consumer/consumer.mjs");
+const checker = join(here, "check-harness.py");
+const live = { reply: "executed", live: true, exec: "/fixture/opencode", stdout_bytes: 9 };
+const canned = { reply: "canned", live: false, canned: true };
+
+function check(body, code = "200") {
+  return spawnSync("python3", [checker, code], { input: JSON.stringify(body), encoding: "utf8" });
+}
+
+test("execution assertion rejects canned, errored, missing and invalid markers", () => {
+  for (const body of [canned, { reply: canned }, { reply: "(opencode error: missing executable)" },
+    { ...live, error: "auth failed" }, { ...live, canned: true }, { ...live, live: "true" },
+    { ...live, exec: "" }, { ...live, stdout_bytes: 0 }, { ...live, stdout_bytes: true },
+    { ...live, reply: "" }, { reply: { ...live, error: "auth failed" } }]) {
+    assert.equal(check(body).status, 1, JSON.stringify(body));
+  }
+  assert.match(check(canned).stdout, /live=false/);
+  assert.equal(check(live, "500").status, 1);
+  assert.equal(check({ error: "delivery failed", reply: live }).status, 1);
+  assert.equal(spawnSync("python3", [checker, "200"], { input: "not JSON" }).status, 1);
+  assert.equal(check(live).status, 0);
+  assert.equal(check({ reply: live }).status, 0, "crier generic/raw reply envelope");
+});
+
+async function startConsumer(t, { key = "fixture-only", command, harness = "opencode", sdk, liveFlag = "1" } = {}) {
+  const dir = await mkdtemp(join(tmpdir(), "crier-execution-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await copyFile(consumer, join(dir, "consumer.mjs"));
+  await copyFile(resolve(here, "../registration-payloads.json"), join(dir, "registration-payloads.json"));
+  await mkdir(join(dir, "bin"));
+  if (command !== undefined) await writeFile(join(dir, "bin/opencode"), `#!/bin/sh\n${command}\n`, { mode: 0o755 });
+  if (sdk) {
+    const pkg = join(dir, "node_modules/@earendil-works/pi-coding-agent");
+    await mkdir(pkg, { recursive: true });
+    await writeFile(join(pkg, "package.json"), JSON.stringify({ type: "module", exports: "./index.mjs" }));
+    await writeFile(join(pkg, "index.mjs"), sdk);
+  }
+  const registry = createServer((req, res) => { req.resume(); res.writeHead(200); res.end("{}"); });
+  registry.listen(0, "127.0.0.1");
+  await once(registry, "listening");
+  t.after(() => new Promise((done) => registry.close(done)));
+  const reserve = createServer();
+  reserve.listen(0, "127.0.0.1");
+  await once(reserve, "listening");
+  const port = reserve.address().port;
+  await new Promise((done) => reserve.close(done));
+  const child = spawn(process.execPath, [join(dir, "consumer.mjs")], {
+    env: { ...process.env, PATH: join(dir, "bin"), AGENT_ID: harness, HARNESS: harness,
+      PORT: String(port), CRIER_URL: `http://127.0.0.1:${registry.address().port}`,
+      OPENCODE_LIVE: liveFlag, DEEPSEEK_API_KEY: key }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  child.stdout.on("data", (b) => { log += b; });
+  child.stderr.on("data", (b) => { log += b; });
+  t.after(async () => { if (child.exitCode === null) { child.kill(); await once(child, "exit"); } });
+  const url = `http://127.0.0.1:${port}`;
+  let ready = false;
+  for (let i = 0; i < 100; i++) {
+    if (child.exitCode !== null) break;
+    try { if ((await fetch(`${url}/health`)).ok) { ready = true; break; } } catch {}
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  assert.ok(ready, log);
+  const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text: "hello" } }) });
+  return { status: response.status, body: await response.json(), dir };
+}
+
+test("consumer labels canned replies and never claims execution", async (t) => {
+  const { status, body } = await startConsumer(t, { key: "" });
+  assert.equal(status, 200);
+  assert.equal(body.live, false);
+  assert.equal(body.canned, true);
+  assert.ok(JSON.stringify(body).includes('"reply":"'), "old substring check accepted this actual canned consumer");
+  assert.equal(check(body).status, 1);
+  console.log(`FAIL  actual canned consumer (HTTP ${status}; ${check(body).stdout.trim()}); old reply substring accepted it`);
+});
+
+test("key without live opt-in still fails the execution assertion", async (t) => {
+  const { status, body } = await startConsumer(t, { liveFlag: "" });
+  assert.equal(status, 200);
+  assert.equal(body.live, false);
+  assert.equal(body.canned, true);
+  assert.equal(check(body).status, 1);
+});
+
+test("consumer marks successful CLI execution with resolved path and UTF-8 byte count", async (t) => {
+  const { status, body, dir } = await startConsumer(t, { command: "printf 'héllo\\n'" });
+  assert.equal(status, 200);
+  assert.equal(body.reply, "héllo");
+  assert.equal(body.exec, join(dir, "bin/opencode"));
+  assert.equal(body.stdout_bytes, Buffer.byteLength("héllo\n"));
+  assert.equal(check({ reply: body }).status, 0);
+});
+
+for (const [name, command] of [["missing executable", undefined], ["nonzero CLI exit", "printf 'partial output'; exit 7"], ["empty CLI stdout", "exit 0"]]) {
+  test(`consumer fails closed on ${name}`, async (t) => {
+    const { status, body } = await startConsumer(t, { command });
+    assert.ok(status >= 400);
+    assert.equal(Object.hasOwn(body, "reply"), false);
+    assert.equal(body.live, false);
+    assert.equal(typeof body.error, "string");
+    assert.equal(check(body, String(status)).status, 1);
+  });
+}
+
+test("pi SDK execution carries the same marker after prompt succeeds", async (t) => {
+  const { status, body } = await startConsumer(t, { harness: "pi-agent", sdk: `
+    export const AuthStorage = { create() { return {}; } };
+    export const ModelRegistry = { create() { return {}; } };
+    export const SessionManager = { inMemory() { return {}; } };
+    export async function createAgentSession() {
+      let listener;
+      return { session: { subscribe(fn) { listener = fn; },
+        async prompt() { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed" } }); },
+        async dispose() {} } };
+    }` });
+  assert.equal(status, 200);
+  assert.equal(body.exec, "sdk:@earendil-works/pi-coding-agent");
+  assert.equal(body.stdout_bytes, Buffer.byteLength("SDK executed"));
+  assert.equal(check(body).status, 0);
+});
+
+test("pi SDK import failure is an error, not a reply", async (t) => {
+  const { status, body } = await startConsumer(t, { harness: "pi-agent" });
+  assert.ok(status >= 400);
+  assert.equal(Object.hasOwn(body, "reply"), false);
+  assert.equal(typeof body.error, "string");
+});
+
+test("whole battery skips six harnesses without key; rejects canned with key; copies evidence even on failure", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "crier-battery-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // Transport fixture only. The battery's real parser, counters and evidence run unchanged.
+  await writeFile(join(dir, "curl"), `#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+url = next(a for a in args if a.startswith('http'))
+code, body = 200, {}
+if url.endswith('/health'): body = {'status': 'ok'}
+elif url.endswith('/stats'):
+    path = os.environ['STATS_FILE']
+    try: n = int(open(path).read())
+    except FileNotFoundError: n = 0
+    with open(path, 'w') as f: f.write(str(n + 1))
+    body = {'deliveries': n}
+elif url.endswith('/inbox'):
+    data = args[args.index('-d') + 1]
+    if '/guarded/' in url:
+        code = 403 if 'Ignore all previous' in data else 201
+        body = {'error': 'GUARD_BLOCKED'} if code == 403 else {}
+    elif '/sink/' in url:
+        code = 202 if 'fire and forget' in data else 200
+        body = {'reply': 'ECHO: no text'}
+    else:
+        body = {'reply': json.loads(os.environ['HARNESS_BODY'])}
+if '-o' not in args: print(json.dumps(body, separators=(',', ':')), end='')
+if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(code)).replace('\\\\n', '\\n'), end='')
+`, { mode: 0o755 });
+  await writeFile(join(dir, "not-a-directory"), "copy must fail loudly");
+  for (const [name, key, fixture, expected] of [["no-key", "", canned, "5 pass / 0 fail / 7 skip"],
+    ["canned-with-key", "fixture-only", canned, "7 pass / 6 fail / 0 skip"],
+    ["live-with-key", "fixture-only", live, "13 pass / 0 fail / 0 skip"],
+    ["copy-failure", "", canned, "5 pass / 0 fail / 7 skip"]]) {
+    const evidence = join(dir, `${name}.jsonl`);
+    const mirror = name === "copy-failure" ? join(dir, "not-a-directory", "ecosystem.jsonl") : join(dir, `repo/${name}.jsonl`);
+    const run = spawnSync("bash", [join(here, "battery.sh")], { encoding: "utf8", env: {
+      ...process.env, PATH: `${dir}:${process.env.PATH}`, DEEPSEEK_API_KEY: key,
+      EVIDENCE: evidence, EVIDENCE_REPO: mirror, HARNESS_BODY: JSON.stringify(fixture), STATS_FILE: join(dir, `${name}.stats`),
+    } });
+    assert.equal(run.status, name === "canned-with-key" || name === "copy-failure" ? 1 : 0, run.stdout + run.stderr);
+    assert.ok(run.stdout.includes(expected), run.stdout + run.stderr);
+    console.log(`fixture ${name}: ${expected}; exit ${run.status}`);
+    if (!key) {
+      assert.equal((run.stdout.match(/^SKIP  round-trip /gm) || []).length, 6);
+      assert.doesNotMatch(run.stdout, /^PASS  round-trip (pi-agent|opencode|claude-code|codex|aider|goose) /m);
+    }
+    if (name === "canned-with-key") {
+      const line = run.stdout.split("\n").find((s) => s.startsWith("FAIL  round-trip opencode"));
+      assert.match(line, /live=false/);
+      console.log(line);
+    }
+    const original = await readFile(evidence, "utf8");
+    if (name === "copy-failure") assert.match(run.stderr, /FAIL  evidence copy/);
+    else assert.equal(await readFile(mirror, "utf8"), original);
+    const rows = original.trim().split("\n").map(JSON.parse);
+    assert.equal(rows.filter((r) => r.test?.startsWith("round-trip ") && r.test !== "round-trip sink echo via crier" && r.result === (key ? name === "canned-with-key" ? "FAIL" : "PASS" : "SKIP")).length, 6);
+  }
+});
