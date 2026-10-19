@@ -23,12 +23,14 @@ copy_evidence() {
       rc=1
     fi
   fi
+  [[ -z "${RUN_STATE:-}" ]] || rm -rf -- "$RUN_STATE"
   exit "$rc"
 }
 trap copy_evidence EXIT
 KEY="${DEEPSEEK_API_KEY:-}"
 PASS=0; FAIL=0; SKIP=0
 RUN_STARTED_AT="$(date -u +%FT%TZ)"
+RUN_STATE="$(mktemp -d)" || exit 1
 RUN_NONCE="$(python3 -c 'import uuid; print(uuid.uuid4())')" || exit 1
 
 say() { echo "== $*"; }
@@ -103,18 +105,14 @@ wait_registered "goose"
 # Harness checks deliberately do NOT use probe's transit-only substring contract.
 harness_probe() { # agent-id prompt — two distinct prompts, one harness verdict
   local id="$1" text="$2" desc="round-trip $1 via crier"
-  local out code body reason result data nonce started_at proof previous_digest=""
+  local reason result started_at proof previous_digest=""
   local index harness_failed=0 first_digest=""
   # Ask the consumer: the battery's DeepSeek key is ONLY for the guard.
   # Codex/Claude/Goose use other credentials, and refusals must remain visible.
   for index in 1 2; do
-    nonce="$(python3 -c 'import uuid; print(uuid.uuid4())')" || exit 1
     started_at="$(date -u +%FT%TZ)"
     if [[ "$index" == 2 ]]; then text="What is two plus three? Give the number, not the answer to the previous question."; fi
-    data="$(python3 -c 'import json,sys; print(json.dumps({"payload":{"text":sys.argv[2],"battery_nonce":sys.argv[3]},"sender":"battery","session_id":"eco-"+sys.argv[1]+"-"+sys.argv[3],"delivery_mode":"blocking","timeout_ms":30000}))' "$id" "$text" "$nonce")" || exit 1
-    out="$(curl -s --max-time 35 -w '\n%{http_code}' -X POST "$CRIER/agents/$id/inbox" -H 'Content-Type: application/json' -d "$data")"
-    code="${out##*$'\n'}"; body="${out%$'\n'*}"
-    if proof="$(printf '%s' "$body" | python3 "$BATTERY_DIR/check-harness.py" "$code" "$nonce" "$previous_digest")"; then
+    if proof="$(python3 "$BATTERY_DIR/probe-runtime.py" "$CRIER" "$id" "$text" "$previous_digest" "$RUN_STATE")"; then
       result=PASS
       previous_digest="$(printf '%s' "$proof" | python3 -c 'import json,sys; print(json.load(sys.stdin)["content_sha256"])')" || exit 1
     else
@@ -124,7 +122,7 @@ harness_probe() { # agent-id prompt — two distinct prompts, one harness verdic
     reason="$(printf '%s' "$proof" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reason"].replace("\r", "\\r").replace("\n", "\\n"))')" || exit 1
     echo "$result  $desc prompt $index ($reason)"
     # Full response plus independently computed proof; never truncate the nonce away.
-    printf '%s' "$body" | python3 -c 'import datetime,json,sys; row={"ts":datetime.datetime.now(datetime.timezone.utc).isoformat(),"test":sys.argv[1],"http":sys.argv[2],"body":sys.stdin.read(),"run_nonce":sys.argv[3],"run_started_at":sys.argv[4],"request_started_at":sys.argv[5],"prompt_index":int(sys.argv[6]),"prompt":sys.argv[7],"previous_content_sha256":sys.argv[8]}; row.update(json.loads(sys.argv[9])); print(json.dumps(row))' "$desc" "$code" "$RUN_NONCE" "$RUN_STARTED_AT" "$started_at" "$index" "$text" "$first_digest" "$proof" >> "$EVIDENCE" || exit 1
+    python3 -c 'import datetime,json,sys; row={"ts":datetime.datetime.now(datetime.timezone.utc).isoformat(),"test":sys.argv[1],"run_nonce":sys.argv[2],"run_started_at":sys.argv[3],"request_started_at":sys.argv[4],"prompt_index":int(sys.argv[5]),"prompt":sys.argv[6],"previous_content_sha256":sys.argv[7]}; row.update(json.loads(sys.argv[8])); print(json.dumps(row))' "$desc" "$RUN_NONCE" "$RUN_STARTED_AT" "$started_at" "$index" "$text" "$first_digest" "$proof" >> "$EVIDENCE" || exit 1
     if [[ "$index" == 1 ]]; then first_digest="$previous_digest"; fi
   done
   if [[ "$harness_failed" == 0 ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi

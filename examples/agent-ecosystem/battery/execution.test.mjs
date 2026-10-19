@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,16 +17,30 @@ const consumer = resolve(here, "../consumer/consumer.mjs");
 const checker = join(here, "check-harness.py");
 const nonce = "4bb57a79-dd26-45be-a3ed-bf78d52e7b68";
 const marker = `[crier-battery-nonce:${nonce}]`;
-const runtimeText = `executed\n${marker}`;
+const requestDigest = (text, value) => createHash("sha256").update(JSON.stringify({battery_nonce:value,text})).digest("hex");
+const digestMarker = `[crier-battery-request-sha256:${requestDigest("hello", nonce)}]`;
+const runtimeText = `executed\n${marker}\n${digestMarker}`;
 const live = { reply: runtimeText, live: true, exec: "/fixture/opencode", stdout_bytes: Buffer.byteLength(runtimeText),
-  nonce, stdout_sha256: createHash("sha256").update(runtimeText).digest("hex") };
+  nonce, request_sha256: requestDigest("hello", nonce), stdout_sha256: createHash("sha256").update(runtimeText).digest("hex") };
 const canned = { reply: "canned", live: false, canned: true };
 
 const credentialFor = { "pi-agent": "DEEPSEEK_API_KEY", opencode: "DEEPSEEK_API_KEY",
   "claude-code": "ANTHROPIC_API_KEY", codex: "OPENAI_API_KEY", aider: "DEEPSEEK_API_KEY", goose: "OPENAI_API_KEY" };
 
+const captures = new WeakMap();
 function check(body, code = "200", requestNonce = nonce, previousDigest = "") {
-  return spawnSync("python3", [checker, code, requestNonce, previousDigest], { input: JSON.stringify(body), encoding: "utf8" });
+  const inner = typeof body.reply === "object" ? body.reply : body;
+  // Synthetic assertion fixtures are explicit; actual consumers below use their
+  // independently captured HTTP child-output stream, never their reply field.
+  const observation = captures.get(inner) || {output:runtimeText,text:"hello"};
+  const dir = mkdtempSync(join(tmpdir(), "crier-checker-"));
+  try {
+    writeFileSync(join(dir,"request"),JSON.stringify({payload:{text:observation.text,battery_nonce:requestNonce}}));
+    writeFileSync(join(dir,"output"),observation.output);
+    writeFileSync(join(dir,"ledger"),JSON.stringify({minted:[requestNonce],used:[]}));
+    return spawnSync("python3", [checker, code, requestNonce, previousDigest,
+      join(dir,"request"),join(dir,"output"),join(dir,"ledger")], { input: JSON.stringify(body), encoding: "utf8" });
+  } finally { rmSync(dir,{recursive:true,force:true}); }
 }
 
 test("execution assertion rejects canned, errored, missing and invalid markers", () => {
@@ -89,11 +104,15 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   assert.ok(ready, log);
   const hook = async (text = "hello", requestNonce = nonce) => {
     const started = performance.now();
+    const observed = await fetch(`${url}/battery-output/${requestNonce}`);
+    assert.equal(observed.status,200);
+    const output = observed.text();
     const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_nonce: requestNonce } }) });
     const body = await response.json();
+    captures.set(body,{output:await output,text});
     return { status: response.status, body, elapsed: performance.now() - started };
   };
-  return { ...await hook(), dir, hook };
+  return { ...await hook(), dir, hook, url };
 }
 
 test("consumer labels canned replies and never claims execution", async (t) => {
@@ -115,13 +134,13 @@ test("key without live opt-in still fails the execution assertion", async (t) =>
 });
 
 test("consumer marks successful CLI execution with resolved path and UTF-8 byte count", async (t) => {
-  const { status, body, dir } = await startConsumer(t, { command: `printf 'héllo\\n${marker}\\n'` });
+  const { status, body, dir } = await startConsumer(t, { command: `printf 'héllo\\n${marker}\\n${digestMarker}\\n'` });
   assert.equal(status, 200);
   assert.equal(body.status, "OK");
-  assert.equal(body.reply, `héllo\n${marker}`);
+  assert.equal(body.reply, `héllo\n${marker}\n${digestMarker}`);
   assert.equal(body.nonce, nonce);
   assert.equal(body.exec, join(dir, "bin/opencode"));
-  assert.equal(body.stdout_bytes, Buffer.byteLength(`héllo\n${marker}\n`));
+  assert.equal(body.stdout_bytes, Buffer.byteLength(`héllo\n${marker}\n${digestMarker}\n`));
   assert.equal(check({ reply: body }).status, 0);
 });
 
@@ -148,12 +167,12 @@ test("pi SDK execution carries the same marker after prompt succeeds", async (t)
       if (process.env.DEEPSEEK_API_KEY !== "fixture-only") throw new Error("missing SDK credential");
       let listener;
       return { session: { subscribe(fn) { listener = fn; },
-        async prompt(text) { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] } }); },
+        async prompt(text) { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] + "\\n" + text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0] } }); },
         async dispose() {} } };
     }` });
   assert.equal(status, 200);
   assert.equal(body.exec, "sdk:@earendil-works/pi-coding-agent");
-  assert.equal(body.stdout_bytes, Buffer.byteLength(`SDK executed\n${marker}`));
+  assert.equal(body.stdout_bytes, Buffer.byteLength(`SDK executed\n${marker}\n${digestMarker}`));
   assert.equal(check(body).status, 0);
 });
 
@@ -175,6 +194,12 @@ import hashlib, json, os, sys
 args = sys.argv[1:]
 url = next(a for a in args if a.startswith('http'))
 code, body = 200, {}
+if '/battery-output/' in url:
+    nonce = url.rsplit('/', 1)[-1]
+    with open(args[args.index('-D') + 1], 'wb') as f: f.write(b'HTTP/1.1 200 OK\\r\\n\\r\\n')
+    if os.environ['HARNESS_MODE'] not in ('echo-without-run', 'no-key', 'canned-with-key', 'failed-runtime', 'copy-failure'):
+        print('[crier-battery-nonce:' + nonce + ']')
+    sys.exit(0)
 if url.endswith('/health'): body = {'status': 'ok'}
 elif url.endswith('/stats'):
     path = os.environ['STATS_FILE']
@@ -202,7 +227,9 @@ elif url.endswith('/inbox'):
             nonce = payload['battery_nonce']
             if mode == 'replayed': nonce = 'abc81347-807b-4b10-aace-9ce6030d233f'
             text = 'one canned answer' if mode == 'same-text' else 'fixture runtime: ' + payload['text']
-            text += '\\n[crier-battery-nonce:' + nonce + ']'
+            digest = hashlib.sha256(json.dumps({'battery_nonce': payload['battery_nonce'], 'text': payload['text']}, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+            text += '\\n[crier-battery-nonce:' + nonce + ']\\n[crier-battery-request-sha256:' + digest + ']'
+            result['request_sha256'] = digest
             result.update(reply=text, nonce=nonce, stdout_bytes=len(text.encode()), stdout_sha256=hashlib.sha256(text.encode()).hexdigest())
             if mode == 'missing': del result['nonce']
         body = {'reply': result}
@@ -214,6 +241,7 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     ["canned-with-key", "fixture-only", canned, "7 pass / 6 fail / 0 skip"],
     ["live-with-key", "fixture-only", live, "13 pass / 0 fail / 0 skip"],
     ["live-without-guard-key", "", live, "11 pass / 0 fail / 1 skip"],
+    ["echo-without-run", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["replayed", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["missing", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["same-text", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
@@ -221,7 +249,7 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     ["copy-failure", "", canned, "5 pass / 6 fail / 1 skip"]]) {
     const evidence = join(dir, `${name}.jsonl`);
     const mirror = name === "copy-failure" ? join(dir, "not-a-directory", "ecosystem.jsonl") : join(dir, `repo/${name}.jsonl`);
-    const run = spawnSync("bash", [join(here, "battery.sh")], { encoding: "utf8", env: {
+    const run = spawnSync("bash", [process.env.DF_CRIER_BATTERY || join(here, "battery.sh")], { encoding: "utf8", env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`, DEEPSEEK_API_KEY: key,
       EVIDENCE: evidence, EVIDENCE_REPO: mirror, HARNESS_BODY: JSON.stringify(fixture), HARNESS_MODE: name, STATS_FILE: join(dir, `${name}.stats`),
     } });
@@ -236,6 +264,8 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
         console.log(line);
       }
     }
+    if (name === "echo-without-run") assert.match(run.stdout,/NOT_EXECUTED/);
+    if (name === "replayed") assert.match(run.stdout,/NONCE_REPLAY/);
     if (name === "failed-runtime") {
       for (const harness of Object.keys(credentialFor)) {
         const line = run.stdout.split("\n").find((s) => s.startsWith(`FAIL  round-trip ${harness} `));
@@ -296,7 +326,7 @@ test("consumer never copies request nonce into constant runtime output", async (
 });
 
 test("same canned answer with fresh runtime markers still fails the paired digest check", async (t) => {
-  const script = 'const text = process.argv.join(" "); console.log("one canned answer\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0]);';
+  const script = 'const text = process.argv.join(" "); console.log("one canned answer\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] + "\\n" + text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0]);';
   const { body, hook } = await startConsumer(t, { command: `exec ${process.execPath} -e '${script}' -- "$@"` });
   const first = check(body);
   assert.equal(first.status, 0, first.stdout);
@@ -497,4 +527,40 @@ test("Goose failures name the OpenAI versus DeepSeek wiring blocker", async (t) 
   const { body } = await startConsumer(t, { harness: "goose", command: "printf 'goose-provider-error' >&2; exit 3" });
   assert.match(body.reason, /configured openai\/gpt-4o-mini requires OPENAI_API_KEY; DeepSeek is not wired for Goose/);
   assert.match(body.reason, /goose-provider-error/);
+});
+
+// Exercise the production verifier against the real shipped HTTP consumer too,
+// rather than proving only the checker and observation endpoint in isolation.
+test("verifier probe captures actual runtime pipes independently of HTTP body", async (t) => {
+  const script = 'const text=process.argv.join(" "); console.log("fixture answer\\n"+text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0]+"\\n"+text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0]);';
+  const {url,dir} = await startConsumer(t,{command:`exec ${process.execPath} -e '${script}' -- "$@"`});
+  const state=join(dir,"state"); await mkdir(state);
+  // Tiny transport stand-in forwards inbox POSTs, just as generic/raw delivery
+  // does. This is explicitly not a Crier transport conformance test.
+  const transport=createServer(async(req,res)=>{
+    let raw=""; for await(const chunk of req) raw+=chunk;
+    const reply=await fetch(url+"/hook",{method:"POST",body:raw});
+    res.writeHead(200,{"Content-Type":"application/json"});
+    res.end(JSON.stringify({reply:await reply.json()}));
+  });
+  transport.listen(0,"127.0.0.1"); await once(transport,"listening");
+  t.after(()=>new Promise(done=>transport.close(done)));
+  const child=spawn("python3",[join(here,"probe-runtime.py"),`http://127.0.0.1:${transport.address().port}`,"opencode","héllo world","",state],
+    {env:{...process.env,BATTERY_RUNTIME_BASE:url},stdio:["ignore","pipe","pipe"]});
+  let output="",errors=""; child.stdout.on("data",b=>output+=b);child.stderr.on("data",b=>errors+=b);
+  const [code]=await once(child,"exit");
+  assert.equal(code,0,output+errors);
+  const proof=JSON.parse(output);
+  assert.equal(proof.outcome,"SUPPORTED"); assert.equal(proof.capture_ok,true);
+  assert.equal(proof.runtime_nonce_observed,true);
+  assert.match(proof.runtime_output,/fixture answer/);
+  assert.equal(proof.expected_request_sha256,requestDigest("héllo world",proof.nonce));
+  console.log(`actual consumer + fake runtime: ${proof.outcome}; nonce in child pipes; verifier request digest matched`);
+});
+
+test("runtime stderr is independently observed but cannot replace the required body echo", async(t)=>{
+  const {body}=await startConsumer(t,{command:`printf 'answer\\n${digestMarker}'; printf '${marker}' >&2`});
+  const proof=JSON.parse(check(body).stdout);
+  assert.equal(proof.runtime_nonce_observed,true);
+  assert.equal(proof.outcome,"ECHOED_WITHOUT_RUN");
 });

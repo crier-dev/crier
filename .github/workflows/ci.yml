@@ -29,6 +29,13 @@ jobs:
       - name: Agent-ecosystem registration contract
         run: go test -count=1 ./internal/ci
 
+      # DF-CRIER-373: real fake-consumer subprocess/HTTP observations, nonce
+      # replay and body-only forgery controls; no provider credentials or calls.
+      - name: Agent-ecosystem offline execution binding
+        run: |
+          python3 examples/agent-ecosystem/battery/test_binding.py
+          node --test examples/agent-ecosystem/battery/execution.test.mjs
+
       - name: Build
         run: go build ./...
 

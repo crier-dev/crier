@@ -1,5 +1,5 @@
 FROM python:3.12-alpine
 WORKDIR /battery
-COPY battery.sh check-harness.py ./
+COPY battery.sh check-harness.py probe-runtime.py ./
 RUN apk add --no-cache curl bash
 ENTRYPOINT ["bash", "battery.sh"]

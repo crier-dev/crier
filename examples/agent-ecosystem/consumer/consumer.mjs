@@ -54,6 +54,14 @@ const LIVE_ENV = {
 const OPTED_IN = HARNESS === "pi-agent" || process.env[LIVE_ENV] === "1";
 const LIVE = OPTED_IN && HAS_KEY;
 
+// Separate observation channel: only child pipe bytes go here, never the
+// request, liveReply metadata, or the HTTP response body. The battery opens it
+// before delivery and captures it independently. This is not hostile-code attestation.
+const observations = new Map();
+const noncePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function requestDigest(text, nonce) {
+  return createHash("sha256").update(JSON.stringify({ battery_nonce: nonce, text })).digest("hex");
+}
 let registered = false;
 let lastStatus = null;
 let lastBody = "";
@@ -99,7 +107,8 @@ function liveReply(stdout, command) {
   const echoes = [...reply.matchAll(/\[crier-battery-nonce:([0-9a-f-]{36})\]/g)];
   return { reply, live: true, exec: command, status: "OK", runtime: HARNESS, stdout_bytes: Buffer.byteLength(stdout),
     stdout_sha256: createHash("sha256").update(reply).digest("hex"),
-    nonce: echoes.length === 1 ? echoes[0][1] : null };
+    nonce: echoes.length === 1 ? echoes[0][1] : null,
+    request_sha256: reply.match(/\[crier-battery-request-sha256:([0-9a-f]{64})\]/)?.[1] ?? null };
 }
 
 function resolveCommand(bin) {
@@ -129,7 +138,7 @@ function runtimeBudget() {
   return ms;
 }
 
-function runCli(bin, args, extraEnv = {}, runtime = undefined) {
+function runCli(bin, args, extraEnv = {}, runtime = undefined, observation = undefined) {
   let command, budget;
   try {
     budget = runtimeBudget();
@@ -174,10 +183,14 @@ function runCli(bin, args, extraEnv = {}, runtime = undefined) {
     const timer = setTimeout(() => finish(`runtime timeout after ${budget}ms`, null, "SIGKILL", true), budget);
     child.stdout.on("data", (chunk) => {
       // Retain normal answers up to 1 MiB, but keep failure excerpts small.
+      if (observation && !observation.destroyed) observation.write(chunk);
       stdout = Buffer.concat([stdout, chunk]).subarray(0, 1024 * 1024 + 1);
       if (stdout.length > 1024 * 1024) finish("stdout exceeded 1 MiB capture limit");
     });
-    child.stderr.on("data", (chunk) => { stderr = Buffer.concat([stderr, chunk]).subarray(0, 2048); });
+    child.stderr.on("data", (chunk) => {
+      if (observation && !observation.destroyed) observation.write(chunk);
+      stderr = Buffer.concat([stderr, chunk]).subarray(0, 2048);
+    });
     child.once("error", (err) => finish(`could not start runtime: ${err.message}`));
     child.once("close", (code, signal) => finish(null, code, signal));
   });
@@ -215,7 +228,7 @@ async function piPrompt(prompt) {
   }
 }
 
-async function answer(text, nonce) {
+async function answer(text, nonce, observation) {
   // Refuse before resolving/importing/starting any runtime. Keep HTTP 200 so
   // crier's generic webhook envelope preserves the consumer's diagnostic.
   if (KEY_ENV && !HAS_KEY) {
@@ -228,27 +241,27 @@ async function answer(text, nonce) {
   }
   // Put the challenge AFTER the bounded question; no runner may truncate it.
   // Payload (not a custom HTTP header) survives crier's generic webhook mapping.
-  if (nonce !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(nonce)) {
+  if (nonce !== undefined && !noncePattern.test(nonce)) {
     throw new Error("invalid battery nonce");
   }
-  const prompt = nonce === undefined ? text : `${text.slice(0, 350)}\nAnswer the question, then echo exactly this marker on a separate line: [crier-battery-nonce:${nonce}]`;
+  const prompt = nonce === undefined ? text : `${text.slice(0, 350)}\nAnswer the question, then echo exactly these markers on separate lines: [crier-battery-nonce:${nonce}]\n[crier-battery-request-sha256:${requestDigest(text, nonce)}]`;
   if (HARNESS === "pi-agent") {
     return runCli(process.execPath, [fileURLToPath(import.meta.url), "--pi-runtime",
-      nonce === undefined ? text.slice(0, 500) : prompt], {}, "sdk:@earendil-works/pi-coding-agent");
+      nonce === undefined ? text.slice(0, 500) : prompt], {}, "sdk:@earendil-works/pi-coding-agent", observation);
   }
   switch (HARNESS) {
     case "opencode":
-      return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${nonce === undefined ? text.slice(0, 400) : prompt}`, "--model", "deepseek/deepseek-v4-flash"]);
+      return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${nonce === undefined ? text.slice(0, 400) : prompt}`, "--model", "deepseek/deepseek-v4-flash"], {}, undefined, observation);
     case "claude-code":
-      return runCli("claude", ["-p", prompt, "--output-format", "text"]);
+      return runCli("claude", ["-p", prompt, "--output-format", "text"], {}, undefined, observation);
     case "codex":
       // Noninteractive Codex reads CODEX_API_KEY; keep the public stack
       // credential OPENAI_API_KEY and pass the alias only in the child env.
-      return runCli("codex", ["exec", "--skip-git-repo-check", prompt], { CODEX_API_KEY: process.env.OPENAI_API_KEY });
+      return runCli("codex", ["exec", "--skip-git-repo-check", prompt], { CODEX_API_KEY: process.env.OPENAI_API_KEY }, undefined, observation);
     case "aider":
-      return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"]);
+      return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"], {}, undefined, observation);
     case "goose":
-      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" });
+      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" }, undefined, observation);
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
@@ -275,6 +288,18 @@ if (process.argv[2] === "--pi-runtime") {
     res.writeHead(code, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(b) });
     res.end(b);
   };
+  if (req.method === "GET" && req.url.startsWith("/battery-output/")) {
+    const nonce = req.url.slice("/battery-output/".length);
+    if (!noncePattern.test(nonce)) return send(400, { error: "invalid battery nonce" });
+    if (observations.has(nonce)) return send(409, { error: "observation already open" });
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" });
+    res.flushHeaders();
+    observations.set(nonce, res);
+    // Bound idle observers too; no process is started by this endpoint.
+    const timer = setTimeout(() => res.end(), 35000);
+    res.on("close", () => { clearTimeout(timer); observations.delete(nonce); });
+    return;
+  }
   if (req.method === "GET" && req.url === "/ready") {
     // 200 ONLY once registered; until then 503 naming the last registration
     // attempt, so an unregistered agent cannot masquerade as ready
@@ -292,7 +317,13 @@ if (process.argv[2] === "--pi-runtime") {
       const msg = JSON.parse(raw);
       const payload = msg.payload || {};
       const text = typeof payload === "string" ? payload : payload.text || JSON.stringify(payload);
-      return send(200, await answer(text, payload.battery_nonce));
+      const observation = observations.get(payload.battery_nonce);
+      try {
+        return send(200, await answer(text, payload.battery_nonce, observation));
+      } finally {
+        // EOF is independent of the body: even refusals/no-spawn close capture.
+        observation?.end();
+      }
     } catch (e) {
       return send(200, failed(e.message, { exit_code: null, timed_out: false, stdout: "", stderr: "" }));
     }

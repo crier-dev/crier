@@ -65,21 +65,22 @@ reply substring alone cannot pass. CLI errors, auth errors, timeouts and empty
 output return HTTP 200 with `status:"FAILED"`, `live:false`, `error` and **no `reply`**
 (the HTTP success preserves the diagnostic through crier; it is not harness success). Pi uses
 `exec: "sdk:@earendil-works/pi-coding-agent"`; its `stdout_bytes` counts emitted
-SDK text, not an OS stdout stream.
+SDK text written to stdout by its bounded child process.
 
-Each harness now receives **two different prompts**, each with a fresh UUID in
-`payload.battery_nonce` (the payload crosses the webhook mapping; no forwarded
-custom HTTP header is assumed). The consumer asks the runtime to emit
-`[crier-battery-nonce:<uuid>]`, extracts `nonce` only from completed runtime
-output, and computes `stdout_sha256` over the trimmed UTF-8 reply. The checker
-requires both that field and the exact output marker to match this request.
-Missing/wrong/replayed nonces fail. The second answer must have a different
-`content_sha256` after removing nonce markers, so simply appending a fresh marker
-to the same canned text also fails. Both prompts must pass for one harness PASS.
-This is request-binding/replay detection under the checked-in consumer, **not
-cryptographic runtime attestation**: a malicious consumer that synthesizes fresh
-nonce-aware bodies can still lie. It proves neither answer quality nor a
-particular upstream provider/model.
+A harness is **supported** only when both distinct prompts pass: the verifier mints and records a fresh single-use nonce before sending each request, independently captures the runtime child's stdout/stderr through a separately opened observation stream, finds that nonce in those captured bytes, and checks that the returned body echoes both the nonce and the SHA-256 digest it recomputes from the exact sent `payload.text` and `payload.battery_nonce` (compact UTF-8 JSON with keys `battery_nonce`, then `text`). Missing runtime evidence is `NOT_EXECUTED`; observed runtime nonce but missing body echo is `ECHOED_WITHOUT_RUN`; a wrong request/output digest is `DIGEST_MISMATCH`; an old, unminted or reused nonce is `NONCE_REPLAY`. `REFUSED`, `TIMEOUT` and `FAILED` remain failures with their diagnostics. The existing live/exec/byte assertions, reply hash and different-content check (both challenge markers removed) still apply. HTTP delivery success alone is not execution success. This proves process execution and challenge echoing under the shipped consumer, **not that a model produced the work**, answer quality, provider/model identity, or cryptographic attestation against a malicious consumer that fabricates both channels.
+
+The verifier opens `GET /battery-output/<nonce>` on the runtime consumer before
+posting through crier. Only raw child pipe chunks are teed there; request metadata,
+observer headers, response fields and consumer diagnostic logs are never runtime
+output. The stream closes on completion/refusal and expires after 35 seconds if
+unused. No runtime is started by observing. This endpoint is part of the isolated
+example stack, not a Crier server API; do not expose this diagnostic stack to
+untrusted clients. `probe-runtime.py` owns the temporary nonce ledger and saves the
+sent request, capture status and captured bytes in each JSONL proof. For direct
+shell probes, `BATTERY_RUNTIME_BASE` overrides the consumer base URL; Compose
+uses the service's internal host/port. Rebuild the runtime images as well as the
+battery after updating the consumer; old consumers with no observation endpoint
+cannot earn supported verdicts.
 
 | Harness | Runtime command / provider | Required key | Missing-key result |
 |---|---|---|---|
@@ -161,7 +162,9 @@ The file is an accumulating log, not a fresh per-run verdict: use the latest
 Harness records include `PASS`/`FAIL`/`SKIP`, the reason, HTTP status and the full
 response body (including execution markers). Each attempted prompt also records
 `run_nonce`, `run_started_at`, `request_started_at`, `prompt_index`, `prompt`,
-`nonce`, `nonce_echo`, `nonce_matched`, `stdout_sha256`, `content_sha256` and
+`nonce`, `nonce_echo`, `nonce_matched`, `runtime_nonce_observed`, `outcome`,
+`expected_request_sha256`, `request`, `runtime_output`, `capture_ok`,
+`stdout_sha256`, `content_sha256` and
 `previous_content_sha256`. The run UUID groups records; the request UUID provides
 freshness (timestamps are audit context, not a claimed runtime clock check).
 Refused harnesses retain their request nonce and `nonce_matched: false`, explicitly unexecuted.
@@ -172,7 +175,7 @@ fixture evidence for all six harness ids, NOT vendor-runtime execution evidence.
 For a local shell run, `battery/battery.sh` defaults to
 `battery/evidence/ecosystem.jsonl`. Override `EVIDENCE` for the primary log and
 `EVIDENCE_REPO` for an optional second copy. After edits, rebuild the battery
-image to include **both** `battery.sh` and `check-harness.py`:
+image to include `battery.sh`, `check-harness.py` and `probe-runtime.py`:
 
 ```bash
 # From examples/agent-ecosystem (the long-lived stack must already be up):
