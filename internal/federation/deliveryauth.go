@@ -60,12 +60,18 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 			defer func() {
 				if completed {
 					receipt.finish(v, posture.Peers > 0)
-				} else {
-					// Preserve the outer recovery middleware's authority: never flush
-					// a buffered success while unwinding a downstream panic.
-					receipt.status = http.StatusInternalServerError
+					slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
+						"verdict", v, "status", receipt.status, "delivered", true)
+					return
 				}
-				slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path, "verdict", v, "status", receipt.status)
+				// Preserve the outer recovery middleware's authority: never flush
+				// a buffered success while unwinding a downstream panic. DF-CRIER-394:
+				// the receipt was ABANDONED, so the audit line must not carry a status
+				// or a verdict-shaped success an operator could read as a classified
+				// delivery the client received. The verdict header above still goes
+				// out with the recovery middleware's own response.
+				slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
+					"verdict", v, "delivered", false, "abandoned", true)
 			}()
 			if v != FedAllowed && v != FedTokenOnly {
 				RefuseDelivery(receipt, v)

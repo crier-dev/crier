@@ -114,7 +114,13 @@ func TestInbound371EveryDoorHasReceiptAndAudit(t *testing.T) {
 		}()
 		require.Equal(t, 500, w.Code)
 		require.NotContains(t, w.Body.String(), "buffered_success")
-		require.Contains(t, logs.String(), `"status":500`)
+		// DF-CRIER-394: the 500 the client sees is the recovery middleware's
+		// response, not this receipt's, so the audit line may not carry a status
+		// for it. It must say the receipt was abandoned instead - an operator or
+		// an alert reading this line must not see a classified delivery.
+		require.NotContains(t, logs.String(), `"status":`, "no status is claimed for a receipt that was never sent")
+		require.Contains(t, logs.String(), `"delivered":false`)
+		require.Contains(t, logs.String(), `"abandoned":true`)
 		require.Equal(t, 1, strings.Count(logs.String(), `"msg":"federation inbound delivery"`))
 	})
 }
