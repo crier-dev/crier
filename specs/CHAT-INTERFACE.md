@@ -680,8 +680,17 @@ This document is a **specification of an interface that does not exist yet**. Co
   late-join context share (CR-CHAT-016); no depth collapse, no timeline rail, no generated summary and no
   location-returning search (CR-CHAT-017); no attachment upload/fetch surface (CR-CHAT-014 — the reference
   is the shipped opaque payload, the bytes are not, and the design is not this document's).
-- **No UI at all** — the four images are layout references with placeholder lettering (CR-CHAT-011); no
-  HTML client exists in this repository.
+- **UI and session surface — status as of 2026-10-19, superseding the CR-CHAT-011 / -013 / -017 / -018
+  statements in the two bullets above.** An embedded HTML client now ships at `GET /chat`
+  (`cmd/server/chat.html`, CR-CHAT-038): one file, no build step, no socket — it polls the REST API
+  and holds no state the server does not have. Sessions carry a `kind` of `channel` or `direct`
+  (`internal/session/session.go:43-48`) and channel creation accepts an initial member list; a
+  message carries `parent_id` for same-level replies (`internal/session/http.go:203`) and the
+  composer distinguishes a plain message from an explicit task. Still genuinely unbuilt: named-group
+  objects and rosters, sub-thread branching and anchors, recorded late-join context share, depth
+  collapse, generated summaries, location-returning search, attachment bytes, and any per-principal
+  permission matrix. The four reference images below remain layout references with placeholder
+  lettering (CR-CHAT-011).
 
 What **is** shipped and reusable, and must not be reinvented: the relay (publish / subscribe / topics),
 the durable inbox with lease / ack / TTL and dead letters, capability delivery
