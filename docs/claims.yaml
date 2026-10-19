@@ -16,6 +16,8 @@
 #         default — expect is the value the doc prints; compared against the imported
 #                   production default via the id-keyed probe table
 #         count   — expect is the number the doc prints; re-measured from source
+#         behavior — expect names a fixed, id-allowlisted fixture probe; executed
+#                    by TestDocsClaimsBehaviors (no arbitrary YAML commands)
 #   doc:   path relative to the repo root (README.md / TESTERS.md this tick)
 #   quote: EXACT substring that must still appear in that doc — editing/removing that
 #          line makes the gate FAIL (the load-bearing anchor)
@@ -1702,4 +1704,11 @@ claims:
     kind: anchor
     doc: docs/router-dispatch.md
     quote: "never by anything inside the payload"
+    xfail: null
+
+  - id: BEHAVIOR-HOOK-DOCTOR
+    kind: behavior
+    doc: README.md
+    quote: "`make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,\nnon-executable or stale-generation hooks, and missing tracked hook sources; it accepts\nonly a matching executable install in this repository's common Git hooks directory."
+    expect: doctor-hooks-selftest
     xfail: null

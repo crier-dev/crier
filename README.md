@@ -2411,6 +2411,21 @@ Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default*
 | [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md) | A2A interoperability as an opt-in extra (INT-A2A-001/002/003) — binding decision (JSON-RPC 2.0 + SSE), A2A ⇄ crier object mapping, the two-half gate, the route surface, the JSON-RPC binding and its part/error/streaming contracts, the non-regression contract |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
+## Contributor hook health
+
+`make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,
+non-executable or stale-generation hooks, and missing tracked hook sources; it accepts
+only a matching executable install in this repository's common Git hooks directory.
+It works in linked worktrees and prints one OK line per hook only after all checks pass.
+Repair: `make install-hooks`.
+
+`make doctor-hooks-selftest` proves those refusals and acceptance on isolated temporary
+repositories, including a NEUTER control that accepts a fixture the real doctor rejects.
+`make docs-check` executes that behaviour claim, not just the prose anchor. CI runs
+`make install-hooks && make doctor-hooks` because fresh checkouts have no installed
+hooks: failure means the installer/doctor contract regressed, not that CI arrived armed.
+The doctor is read-only; it does not prevent later hook changes or Git's explicit bypasses.
+
 ## Project Status
 
 All core primitives are implemented and tested:

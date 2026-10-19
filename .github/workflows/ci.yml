@@ -72,6 +72,14 @@ jobs:
           "$RUNNER_TEMP/agent-ecosystem-battery-venv/bin/python" examples/agent-ecosystem/battery/test_binding.py
           node --test examples/agent-ecosystem/battery/execution.test.mjs
 
+      # Fresh checkouts have no installed gate. Failure here means the repo's
+      # installer/doctor contract regressed, not that CI arrived pre-armed.
+      - name: Install and verify repository hooks
+        run: make install-hooks && make doctor-hooks
+
+      - name: Hook doctor rejection and NEUTER selftest
+        run: make doctor-hooks-selftest
+
       - name: Build
         run: go build ./...
 

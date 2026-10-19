@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -71,7 +71,9 @@ help:
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
-	@echo "  install-hooks     Install commit/merge/applypatch hooks into the effective Git hook directory (idempotent) so a green commit states its scope (DF-CRIER-206)"
+	@echo "  install-hooks     Install commit/merge/applypatch hooks in this repository's common Git hooks directory (idempotent)"
+	@echo "  doctor-hooks      Fail closed unless repository-local hooksPath and all three installed hooks match the tracked gate"
+	@echo "  doctor-hooks-selftest  Prove hook-health refusals and acceptance on scratch repositories, including a NEUTER control"
 	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
@@ -599,6 +601,14 @@ mcp-stdout-selftest:
 judge-diff-class-selftest:
 	bash scripts/lib/judge-diff-class-selftest.sh
 
+# DF-CRIER-421: prove installed state without changing it. The selftest runs
+# real installer/doctor fixtures in temporary repositories, never in this one.
+doctor-hooks:
+	@bash scripts/doctor-hooks.sh
+
+doctor-hooks-selftest:
+	python3 scripts/doctor-hooks-selftest.py
+
 # DF-CRIER-403/408/412: install all three entrypoints in this repository's own
 # Git hooks directory. Inherited core.hooksPath configuration is deliberately
 # ignored: installing crier's strict board gate into a shared/global hooks path
@@ -630,6 +640,7 @@ install-hooks:
 	chmod +x "$$src"; \
 	dst="$$hooks_dir/$$hook"; \
 	if [ -f "$$dst" ] && cmp -s "$$src" "$$dst"; then \
+		chmod +x "$$dst" || exit 1; \
 		echo "install-hooks: already installed — $$dst is byte-identical to scripts/hooks/$$hook"; \
 		continue; \
 	fi; \
