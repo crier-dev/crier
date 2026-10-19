@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,7 +24,10 @@ func sendLockHash(sessionID, key string) [32]byte {
 	return sha256.Sum256([]byte(fmt.Sprintf("%d:%s%s", len(sessionID), sessionID, key)))
 }
 
-func lockWait(ctx context.Context, try func() (bool, error)) error {
+// ErrMessageInProgress reports contention on the shared session/request lock.
+var ErrMessageInProgress = errors.New("a delivery with this idempotency_key is already in progress")
+
+func lockWait(ctx context.Context, wait bool, try func() (bool, error)) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -35,6 +39,9 @@ func lockWait(ctx context.Context, try func() (bool, error)) error {
 		if ok {
 			return nil
 		}
+		if !wait {
+			return ErrMessageInProgress
+		}
 		timer := time.NewTimer(10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
@@ -45,13 +52,13 @@ func lockWait(ctx context.Context, try func() (bool, error)) error {
 	}
 }
 
-func lockSendFile(ctx context.Context, prefix, sessionID, key string) (func(), error) {
+func lockSendFile(ctx context.Context, prefix, sessionID, key string, wait bool) (func(), error) {
 	hash := sendLockHash(sessionID, key)
 	f, err := os.OpenFile(prefix+".send-"+hex.EncodeToString(hash[:])+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("session send lock: %w", err)
 	}
-	if err := lockWait(ctx, func() (bool, error) { return trySendFileLock(f) }); err != nil {
+	if err := lockWait(ctx, wait, func() (bool, error) { return trySendFileLock(f) }); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("session send lock: %w", err)
 	}
@@ -61,12 +68,24 @@ func lockSendFile(ctx context.Context, prefix, sessionID, key string) (func(), e
 }
 
 func (s *JSONLStore) LockMessage(ctx context.Context, sessionID, key string) (func(), error) {
-	return lockSendFile(ctx, filepath.Join(s.root, "request"), sessionID, key)
+	return lockSendFile(ctx, filepath.Join(s.root, "request"), sessionID, key, true)
+}
+
+func (s *JSONLStore) TryLockMessage(ctx context.Context, sessionID, key string) (func(), error) {
+	return lockSendFile(ctx, filepath.Join(s.root, "request"), sessionID, key, false)
 }
 
 var memorySendLocks sync.Map // *sql.DB -> *sync.Map of session/key -> semaphore
 
 func (s *SQLStore) LockMessage(ctx context.Context, sessionID, key string) (func(), error) {
+	return s.lockMessage(ctx, sessionID, key, true)
+}
+
+func (s *SQLStore) TryLockMessage(ctx context.Context, sessionID, key string) (func(), error) {
+	return s.lockMessage(ctx, sessionID, key, false)
+}
+
+func (s *SQLStore) lockMessage(ctx context.Context, sessionID, key string, wait bool) (func(), error) {
 	if s.dialect.Name() == BackendPostgres {
 		// Take configuration briefly, then release the data connection BEFORE
 		// waiting. Lock waiters must not exhaust the pool the winner writes to.
@@ -87,7 +106,7 @@ func (s *SQLStore) LockMessage(ctx context.Context, sessionID, key string) (func
 		if err != nil {
 			return nil, err
 		}
-		return lockPostgresSend(ctx, cfg, sessionID, key)
+		return lockPostgresSend(ctx, cfg, sessionID, key, wait)
 	}
 	// SQLite serialises individual statements, not a read/append/fanout/update
 	// sequence. Lock the database's canonical file, without holding its sole
@@ -114,7 +133,7 @@ func (s *SQLStore) LockMessage(ctx context.Context, sessionID, key string) (func
 		return nil, err
 	}
 	if file != "" {
-		return lockSendFile(ctx, file, sessionID, key)
+		return lockSendFile(ctx, file, sessionID, key, wait)
 	}
 	// :memory: is private to this DB handle. There is no cross-process file.
 	value, _ := memorySendLocks.LoadOrStore(s.db, &sync.Map{})
@@ -122,6 +141,17 @@ func (s *SQLStore) LockMessage(ctx context.Context, sessionID, key string) (func
 	hash := sendLockHash(sessionID, key)
 	value, _ = locks.LoadOrStore(hash, make(chan struct{}, 1))
 	sem := value.(chan struct{})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !wait {
+		select {
+		case sem <- struct{}{}:
+			return func() { <-sem }, nil
+		default:
+			return nil, ErrMessageInProgress
+		}
+	}
 	select {
 	case sem <- struct{}{}:
 		return func() { <-sem }, nil
@@ -131,10 +161,14 @@ func (s *SQLStore) LockMessage(ctx context.Context, sessionID, key string) (func
 }
 
 func (s *PostgresStore) LockMessage(ctx context.Context, sessionID, key string) (func(), error) {
-	return lockPostgresSend(ctx, s.pool.Config().ConnConfig.Copy(), sessionID, key)
+	return lockPostgresSend(ctx, s.pool.Config().ConnConfig.Copy(), sessionID, key, true)
 }
 
-func lockPostgresSend(ctx context.Context, cfg *pgx.ConnConfig, sessionID, key string) (func(), error) {
+func (s *PostgresStore) TryLockMessage(ctx context.Context, sessionID, key string) (func(), error) {
+	return lockPostgresSend(ctx, s.pool.Config().ConnConfig.Copy(), sessionID, key, false)
+}
+
+func lockPostgresSend(ctx context.Context, cfg *pgx.ConnConfig, sessionID, key string, wait bool) (func(), error) {
 	// A dedicated connection owns the advisory lock, not a pooled data slot.
 	// Closing it releases the lock on success, cancellation or process death.
 	conn, err := pgx.ConnectConfig(ctx, cfg)
@@ -148,7 +182,7 @@ func lockPostgresSend(ctx context.Context, cfg *pgx.ConnConfig, sessionID, key s
 	}
 	hash := sendLockHash(sessionID, key)
 	id := int64(binary.BigEndian.Uint64(hash[:8]))
-	if err := lockWait(ctx, func() (bool, error) {
+	if err := lockWait(ctx, wait, func() (bool, error) {
 		var ok bool
 		err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", id).Scan(&ok)
 		return ok, err

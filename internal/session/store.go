@@ -323,6 +323,9 @@ type Repository interface {
 	// repository handles/processes. The caller holds it from lookup through
 	// intent/fanout/outcome persistence and must release it on every exit.
 	LockMessage(ctx context.Context, sessionID, key string) (release func(), err error)
+	// TryLockMessage takes the SAME lock without waiting for another send.
+	// ErrMessageInProgress means the key is held; no reservation was made.
+	TryLockMessage(ctx context.Context, sessionID, key string) (release func(), err error)
 	// PostMessage appends a message record — a thread root or a reply (§5.1).
 	PostMessage(ctx context.Context, m *Message) error
 	// Branch appends a session.thread.branch record — the ONE record that

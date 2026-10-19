@@ -28,6 +28,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -133,6 +134,46 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// trust-by-reach posture for every kind alike (the ACL states nothing).
 	if !h.authorizeTask(w, r, sess, author, req.Targets) {
 		return
+	}
+
+	if req.IdempotencyKey != "" {
+		// Reuse the message request's cross-handle/process lock and durable
+		// transcript lookup. Unlike a message send, a busy task retry answers
+		// 409 immediately; it must not queue another execution behind it.
+		release, err := h.store.TryLockMessage(r.Context(), sess.ID, req.IdempotencyKey)
+		if errors.Is(err, ErrMessageInProgress) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": ErrMessageInProgress.Error()})
+			return
+		}
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return
+		}
+		defer release()
+		st, err := h.store.Load(r.Context(), sess.ID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return
+		}
+		for _, existing := range st.Messages {
+			if existing.IdempotencyKey != req.IdempotencyKey {
+				continue
+			}
+			// A key shared with a non-task intent cannot mint a second
+			// message or pretend that intent has a task id.
+			if existing.Kind != MessageTask || existing.Task.ID == "" {
+				writeAPIError(w, http.StatusConflict, "IDEMPOTENCY_KEY_CONFLICT",
+					"this idempotency_key already identifies a non-task message in the session")
+				return
+			}
+			view := h.messageViewOf(st, existing)
+			view.Outcomes = outcomeViews(existing.Outcomes)
+			summarizeFanout(&view, existing.Outcomes)
+			writeJSON(w, http.StatusCreated, taskCreateResponse{
+				transcriptMessage: view, TaskID: existing.Task.ID, State: string(existing.Task.State),
+			})
+			return // No new id, append, fan-out, re-delivery or trigger.
+		}
 	}
 
 	// The task rides its message record: kind `task` + a lifecycle payload

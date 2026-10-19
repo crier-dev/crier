@@ -311,6 +311,19 @@ caller claiming the top-level `id` was refused `TASK_NOT_FOUND` on a task it had
 earlier. Proven by `TestTaskLifecycle_Verifiable` (internal/session/task_test.go), on both the JSONL
 log and the SQLite view.
 
+**BUILT (DF-CRIER-351):** `POST /sessions/{id}/tasks` honours a nonempty
+`idempotency_key` per session. After validation and task authorization, it takes the SAME
+cross-process store lock as message sends, but without waiting: a held key returns `409`
+`{"error":"a delivery with this idempotency_key is already in progress"}`. A completed
+creation replays `201` with the original `task_id`, message `id`, creation `state` and
+recorded outcomes, without new IDs, transcript writes, delivery or task trigger (even if
+those recorded outcomes were refused). Lifecycle transitions do not change that creation
+response. Missing/empty keys create fresh tasks; different keys and different sessions are
+independent. Validation failures release the lock without reserving the key. A key already
+used for a non-task message returns `409 IDEMPOTENCY_KEY_CONFLICT`, never a fabricated task.
+Proven on durable stores by `TestTaskRequestIdempotency` and
+`TestTaskRequestIdempotencyConcurrent` (internal/session/task_idempotency_test.go).
+
 ### 2.6 A reply STAYS IN THREAD — depth is earned, never implied by an address (D11, corrected)
 
 > **A reply STAYS IN THREAD. Depth is never a function of who replied or how many replied. A sub-thread is
