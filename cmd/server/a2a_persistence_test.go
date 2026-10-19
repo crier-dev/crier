@@ -90,7 +90,7 @@ type failingObservationStore struct{ *registry.MemoryStore }
 func (s *failingObservationStore) RecordTaskObservation(string, registry.TaskObservation) error {
 	return errors.New("injected observation write failure")
 }
-func TestA2APersistence_WriteFailureIsNotCompletion(t *testing.T) {
+func TestA2APersistence_AckDoesNotDependOnStreamWrite(t *testing.T) {
 	store := &failingObservationStore{registry.NewMemoryStore()}
 	registerStoreAgent(t, store, "terminal-agent", true)
 	base := reloadedA2AServer(t, store)
@@ -98,6 +98,19 @@ func TestA2APersistence_WriteFailureIsNotCompletion(t *testing.T) {
 	_, lease, err := store.Retrieve("terminal-agent", time.Minute, 1)
 	require.NoError(t, err)
 	require.NoError(t, store.Ack("terminal-agent", lease, []string{id}))
+	stream.nextStatus(t, string(a2a.TaskStateCompleted))
+	stream.waitClosed(t)
+	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateCompleted)
+}
+
+func TestA2APersistence_StreamWriteFailureIsNotUnknown(t *testing.T) {
+	store := &failingObservationStore{registry.NewMemoryStore()}
+	registerStoreAgent(t, store, "terminal-agent", true)
+	base := reloadedA2AServer(t, store)
+	id, stream := terminalSubscription(t, base)
+	// This is disappearance, not Ack: Ack now commits its own evidence and
+	// correctly bypasses the stream's fallible RecordTaskObservation hook.
+	require.NoError(t, store.CloseEntry("terminal-agent", id))
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 observing:
@@ -109,7 +122,7 @@ observing:
 				break observing
 			}
 			if update, ok := event["statusUpdate"].(map[string]any); ok {
-				require.NotEqual(t, string(a2a.TaskStateCompleted), update["status"].(map[string]any)["state"], "a failed persistence step must not emit COMPLETED")
+				require.NotEqual(t, string(a2a.TaskStateUnspecified), update["status"].(map[string]any)["state"], "a failed persistence step must not emit a retained unknown state")
 			}
 		case <-deadline.C:
 			t.Fatal("no explicit persistence error")

@@ -7,7 +7,29 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/crier-dev/crier/internal/a2a"
 )
+
+// acknowledgementObservation uses the same evidence format as the A2A adapter.
+// The task ID is the delivered inbox ID, never a payload-supplied task_id.
+// Plain messages keep their existing hard-delete-only behavior. Build evidence
+// before mutating memory, or inside the PostgreSQL deletion transaction.
+func acknowledgementObservation(entry *InboxEntry, now time.Time) (TaskObservation, bool, error) {
+	if _, ok := a2a.ParseEnvelope(entry.Payload); !ok {
+		return TaskObservation{}, false, nil
+	}
+	ev := a2a.TaskEvidence{
+		Entry: &a2a.InboxView{
+			ID: entry.ID, Payload: entry.Payload, CreatedAt: entry.CreatedAt,
+			ExpiresAt: entry.ExpiresAt, LeasedAt: entry.LeasedAt,
+			LeaseID: entry.LeaseID, ACKed: entry.ACKed,
+		},
+		AcknowledgedAt: now,
+	}
+	raw, err := json.Marshal(ev)
+	return TaskObservation{TaskID: entry.ID, ObservedAt: now, Outcome: "acknowledged", Evidence: raw}, true, err
+}
 
 // TaskObservation is evidence collected by the A2A adapter, not an inference
 // from a missing inbox row. Evidence retains the pre-removal task snapshot.

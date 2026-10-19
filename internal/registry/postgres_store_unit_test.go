@@ -1111,8 +1111,8 @@ func TestPostgresStoreUnit_Ack_Success(t *testing.T) {
 		WithArgs("agent", []string{"msg-1"}).
 		WillReturnRows(pgxmock.NewRows([]string{"id", "lease_id"}).AddRow("msg-1", "lease-1"))
 
-	returningRows := pgxmock.NewRows([]string{"id"}).
-		AddRow("msg-1")
+	returningRows := pgxmock.NewRows([]string{"id", "payload", "created_at", "expires_at", "leased_at", "lease_id", "acked"}).
+		AddRow("msg-1", []byte(`{}`), time.Now().UTC(), time.Now().UTC().Add(time.Hour), nil, "lease-1", false)
 	mock.ExpectQuery(`DELETE FROM inbox_entries`).
 		WithArgs("agent", "lease-1", []string{"msg-1"}).
 		WillReturnRows(returningRows)

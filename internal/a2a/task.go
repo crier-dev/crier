@@ -298,7 +298,8 @@ type TaskEvidence struct {
 	// CanceledAt records an actual successful CancelTask.
 	// Entry retains the pre-close snapshot for the task identity and history.
 	CanceledAt time.Time
-	// AcknowledgedAt is a successful acknowledgement actually observed by a stream.
+	// AcknowledgedAt is a successful acknowledgement retained by the inbox backend
+	// or observed by a stream.
 	AcknowledgedAt time.Time
 	// RemovedAt records disappearance, not completion, with the known task snapshot.
 	RemovedAt time.Time

@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/pashagolub/pgxmock/v5"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func TestInboxAcknowledgementPostgresRequiresCommit(t *testing.T) {
 			mock.ExpectQuery(`SELECT id, COALESCE`).WithArgs("a", []string{"m"}).
 				WillReturnRows(pgxmock.NewRows([]string{"id", "lease_id"}).AddRow("m", "lease"))
 			mock.ExpectQuery(`DELETE FROM inbox_entries`).WithArgs("a", "lease", []string{"m"}).
-				WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("m"))
+				WillReturnRows(pgxmock.NewRows([]string{"id", "payload", "created_at", "expires_at", "leased_at", "lease_id", "acked"}).AddRow("m", []byte(`{}`), time.Now().UTC(), time.Now().UTC().Add(time.Hour), nil, "lease", false))
 			commit := mock.ExpectCommit()
 			if commitFailure {
 				commit.WillReturnError(errors.New("commit failed"))

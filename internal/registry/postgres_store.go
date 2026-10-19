@@ -1083,13 +1083,32 @@ DELETE FROM inbox_entries
 WHERE agent_id = $1
   AND lease_id = $2
   AND id = ANY($3::text[])
-RETURNING id;`, agentID, leaseID, messageIDs)
+RETURNING id, payload, created_at, expires_at, leased_at, lease_id, acked;`, agentID, leaseID, messageIDs)
 	if err != nil {
 		return fmt.Errorf("ack delete: %w", err)
 	}
 
 	deleted := 0
+	observations := make([]TaskObservation, 0, len(messageIDs))
+	// Match timestamptz precision so the serialized evidence and observed_at
+	// retain exactly the same instant after a pool reopen.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	for rows.Next() {
+		var entry InboxEntry
+		var expiresAt pgtype.Timestamptz
+		if err := rows.Scan(&entry.ID, &entry.Payload, &entry.CreatedAt, &expiresAt, &entry.LeasedAt, &entry.LeaseID, &entry.ACKed); err != nil {
+			rows.Close()
+			return fmt.Errorf("ack delete scan: %w", err)
+		}
+		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
+		o, task, err := acknowledgementObservation(&entry, now)
+		if err != nil {
+			rows.Close()
+			return fmt.Errorf("ack evidence: %w", err)
+		}
+		if task {
+			observations = append(observations, o)
+		}
 		deleted++
 	}
 	rows.Close()
@@ -1101,6 +1120,14 @@ RETURNING id;`, agentID, leaseID, messageIDs)
 		return fmt.Errorf("%w: expected %d matching messages, got %d", ErrLeaseConflict, len(messageIDs), deleted)
 	}
 
+	// RETURNING supplies the actual pre-Ack rows, not an earlier stream
+	// snapshot. Persist only after draining rows (pgx connections are busy
+	// until then), and commit evidence and deletion as one atomic mutation.
+	for _, o := range observations {
+		if _, err := tx.Exec(ctx, saveTaskObservationSQL, agentID, o.TaskID, o.ObservedAt, o.Outcome, []byte(o.Evidence)); err != nil {
+			return fmt.Errorf("ack evidence insert: %w", err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("ack commit: %w", err)
 	}

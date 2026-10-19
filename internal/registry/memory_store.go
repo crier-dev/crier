@@ -400,6 +400,24 @@ func (s *MemoryStore) Ack(agentID, leaseID string, messageIDs []string) error {
 			ErrLeaseConflict, mismatched[0], leaseID, index[mismatched[0]].LeaseID)
 	}
 
+	// Prepare every task snapshot before changing anything: a serialization
+	// failure must leave the whole batch queued, with no partial evidence.
+	observations := make([]TaskObservation, 0, len(messageIDs))
+	now := time.Now().UTC()
+	for id := range idSet {
+		o, task, err := acknowledgementObservation(index[id], now)
+		if err != nil {
+			return fmt.Errorf("ack evidence: %w", err)
+		}
+		if task {
+			observations = append(observations, o)
+		}
+	}
+	// The deletion and evidence writes share this critical section. Readers
+	// can never see a successfully acked task without its terminal evidence.
+	for _, o := range observations {
+		s.saveTaskObservation(agentID, o)
+	}
 	// Filter out ACKed messages.
 	filtered := make([]*InboxEntry, 0, len(queue))
 	for _, entry := range queue {

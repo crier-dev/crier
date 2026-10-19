@@ -406,9 +406,12 @@ The stream carries **two** things, and says which is which:
    - **Removal is not acknowledgement.** Each stream registers `registry.InboxAckObserver` before
      its first Task frame. Both local backends notify only after a successful `Ack` (after commit
      on PostgreSQL), irrespective of whether the ack came through HTTP, MCP or a direct store call.
-     The watch retains a boolean until close; the adapter persists an observed ack BEFORE emitting
-     COMPLETED (DF-CRIER-340). An ack before watch registration cannot be reconstructed unless
-     another stream already retained it. A vanished entry with
+     The watch retains a boolean until close. For task envelopes, `Ack` itself retains the
+     pre-Ack payload and lease snapshot with an `acknowledged` observation, atomically with the
+     removal (DF-CRIER-352). No stream or watcher is required. The task id is the actual delivered
+     inbox id, never a payload-supplied id. Plain non-task messages retain their hard-delete-only
+     behavior; failed or foreign-inbox acknowledgements retain no evidence. The adapter still
+     persists watch-only evidence before emitting COMPLETED where necessary. A vanished entry with
      no observed ack, cancellation or dead letter emits non-terminal `TASK_STATE_UNSPECIFIED`:
      "the inbox entry was removed; no acknowledgement or cancellation was observed, so the task
      outcome is unknown". A2A v1.0 has no `TASK_STATE_UNKNOWN`; `UNSPECIFIED` is the truthful
@@ -564,15 +567,18 @@ from.
 
 Four properties of that table are decisions, and each is stated so a client never has to infer it:
 
-1. **`TASK_STATE_COMPLETED` requires an observed acknowledgement or a retained `ACKed` row.**
-   `Ack` still hard-deletes the inbox row (DF-CRIER-32). An active stream's successful ack watch
-   (DF-CRIER-330) is persisted BEFORE emitting COMPLETED, so closing the stream cannot erase that
-   fact. No watch, no retained closed row and no observation means no invented completion. A task
-   known to a stream whose entry disappears without proof is UNSPECIFIED with the exact explanation:
+1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence or a retained `ACKed` row.**
+   `Ack` hard-deletes the inbox row while retaining a task envelope's pre-Ack `TaskEvidence` snapshot
+   and acknowledgement time in the SAME mutation (DF-CRIER-352): one memory-store critical section,
+   or PostgreSQL `DELETE ... RETURNING` plus observation upsert before transaction commit. Failure
+   rolls back the deletion; no stream needs to be open. Unknown observations may be replaced by
+   terminal evidence, never the reverse, including when a stream closes concurrently with Ack.
+   Plain non-task acknowledgements remain hard-delete-only. Missing ids, foreign-inbox ids and
+   wrong leases are rejected before any observation is written. A task known to a stream whose
+   entry disappears without proof is UNSPECIFIED with the exact explanation:
    "the inbox entry was removed; no acknowledgement or cancellation was observed, so the task outcome
    is unknown". Its snapshot preserves that honest unknown on later reads. A completely unknown id,
-   or one whose every record was removed, remains TaskNotFoundError. An ack that happens while no
-   stream watches does not manufacture historical evidence.
+   or one whose every record was removed, remains TaskNotFoundError.
 2. **An entry PAST ITS TTL is `FAILED` even before the sweep removes it.** Every consumption path
    skips an expired row, so the message can never be retrieved and the work cannot complete; reporting
    the `SUBMITTED` state the row still stores would tell a client to keep waiting for a message nobody

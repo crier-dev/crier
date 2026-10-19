@@ -308,26 +308,26 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	}
 	status, body, _ = a2aRPC(t, client, base, getTaskBody(a2aLifecycleTenant, taskID, ""))
 	if status != http.StatusOK {
-		t.Fatalf("the JSON-RPC answer to GetTask after an ack must still be HTTP 200 (the error travels in the JSON-RPC object): %d %s", status, body)
+		t.Fatalf("GetTask after an ack = %d: %s", status, body)
 	}
-	code, message := rpcError(t, body)
-	if code != a2a.CodeTaskNotFoundError {
-		t.Fatalf("GetTask after an ack = %d (%s), want %d TaskNotFoundError: crier's ack REMOVES the entry and keeps no tombstone, so a completed task is not re-readable — the answer must not be an invented TASK_STATE_COMPLETED",
-			code, message, a2a.CodeTaskNotFoundError)
+	got = rpcResult(t, body)
+	if state := rpcTaskState(t, got); state != string(a2a.TaskStateCompleted) {
+		t.Fatalf("GetTask after an ack = %s, want COMPLETED from Ack's own retained evidence", state)
 	}
-	if !strings.Contains(message, "no retained inbox, failure or observation record") {
-		t.Errorf("the TaskNotFoundError must state why (no retained observation / completed and purged): %q", message)
+	if basis := rpcTaskBasis(t, got); basis != a2a.StateBasisAcknowledged {
+		t.Errorf("state_basis = %q, want %q", basis, a2a.StateBasisAcknowledged)
 	}
-	tr.step("ack → entry removed", "GetTask = -32001 TaskNotFoundError: no stream observed the ack, so no terminal observation was retained; no invented TASK_STATE_COMPLETED")
+	tr.step("ack → entry removed, evidence retained", "GetTask = TASK_STATE_COMPLETED without an open stream")
 
 	status, body, _ = a2aRPC(t, client, base, listTasksBody(a2aLifecycleTenant, ""))
 	if status != http.StatusOK {
 		t.Fatalf("ListTasks after an ack = %d: %s", status, body)
 	}
-	if n := len(rpcTasks(t, rpcResult(t, body))); n != 0 {
-		t.Errorf("ListTasks after an ack = %d tasks, want none: the entry is gone", n)
+	listedTasks := rpcTasks(t, rpcResult(t, body))
+	if len(listedTasks) != 1 || listedTasks[0]["id"] != taskID || rpcTaskState(t, listedTasks[0]) != string(a2a.TaskStateCompleted) {
+		t.Errorf("ListTasks after an ack = %v, want the retained COMPLETED task", listedTasks)
 	}
-	tr.step("ack → ListTasks", "0 tasks (the queue really is empty)")
+	tr.step("ack → ListTasks", "1 COMPLETED task (the queue is empty; acknowledgement evidence remains)")
 
 	// --- 6. TTL elapsed: FAILED, from the entry itself -----------------------
 	expiredID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,
@@ -352,7 +352,7 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("SendMessage to a terminal task = %d: %s", status, body)
 	}
-	code, message = rpcError(t, body)
+	code, message := rpcError(t, body)
 	if code != a2a.CodeUnsupportedOperationError {
 		t.Fatalf("a message to a TERMINAL task = %d (%s), want %d UnsupportedOperationError (§3.1.1)", code, message, a2a.CodeUnsupportedOperationError)
 	}
