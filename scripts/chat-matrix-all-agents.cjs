@@ -32,7 +32,7 @@ async function run() {
     assert.deepEqual(registry.agents.map(a => a.id).sort(),ids);
     const roster = await api('GET',`/sessions/${session.id}/participants`);
     assert.equal(roster.participants.length,6,'channel must really contain six participants');
-    const page = await browser.newPage({viewport:{width:390,height:1000}});
+    const page = await browser.newPage({viewport:{width:1280,height:1000}});
     const errors = []; page.on('pageerror',e => errors.push(e.message));
     const idle = () => page.waitForFunction(() => !state.busy && document.getElementById('refresh-state').textContent.startsWith('Last HTTP refresh'));
     await page.goto(base+'/chat'); await idle();
@@ -71,10 +71,23 @@ async function run() {
       });
     };
     const measurements = [];
-    for (const width of [390,768,1280]) {
-      await resize(width); await checkNotice();
+    // DF-CRIER-382 rework: keep this SAME page and channel throughout. Read
+    // geometry and copy together after layout, without waiting for desired copy
+    // (which could mask a stale notice). Include same-breakpoint rail resizes.
+    for (const width of [1280,390,420,390,1280,768,1280]) {
+      await resize(width);
       const result = await measure(); measurements.push(result);
       console.log('MATRIX MEASUREMENT '+JSON.stringify(result));
+      assert.equal(result.inRail,width < 1024,'matrix placement must follow the desktop breakpoint');
+      if (result.matrixOverflow > 0) {
+        assert.match(result.notice,/^Showing [1-5] of 6 agent columns fully/,
+          'overflow and notice disagree in the same layout snapshot: '+JSON.stringify(result));
+        assert.ok(result.notice.startsWith(`Showing ${result.fullyVisible} of 6 agent columns fully`),
+          'notice must count CURRENT fully-visible column bounds: '+JSON.stringify(result));
+      } else {
+        assert.ok(result.notice === '' || result.notice === 'All 6 agent columns shown (this realm).',
+          'unclipped matrix must not claim a partial view: '+JSON.stringify(result));
+      }
       assert.equal(result.pageOverflow,0,'page must not scroll horizontally at '+width);
       assert.equal(result.bodyOverflow,0,'body must not scroll horizontally at '+width);
       assert.deepEqual((await headers()).slice(1).sort(),ids,'all six agents remain rendered at '+width);
@@ -88,6 +101,32 @@ async function run() {
       }
       if (evidence) { fs.mkdirSync(evidence,{recursive:true}); await page.screenshot({path:path.join(evidence,'chat-matrix-six-'+width+'.png'),fullPage:true}); }
     }
+    // Pin the post-reparent scheduling contract independently of browser
+    // timing: the measurement must not run inside placeCapabilityMatrix.
+    const placementTiming = await page.evaluate(async () => {
+      const original = updateCapabilityMatrixView;
+      let reads = 0;
+      updateCapabilityMatrixView = () => { reads++; original(); };
+      try {
+        placeCapabilityMatrix();
+        const synchronousReads = reads;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return {synchronousReads,settledReads:reads};
+      } finally { updateCapabilityMatrixView = original; }
+    });
+    console.log('MATRIX PLACEMENT TIMING '+JSON.stringify(placementTiming));
+    assert.equal(placementTiming.synchronousReads,0,'panel relocation must defer geometry reads until the animation frame');
+    assert.ok(placementTiming.settledReads > 0,'panel relocation must recompute after layout');
+    // Resize the observed element WITHOUT a viewport/breakpoint event. This
+    // must exercise ResizeObserver, not just the panel-placement callback.
+    await page.locator('#capability-matrix').evaluate(el => { el.style.maxWidth = '390px'; });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const elementResize = await measure();
+    console.log('MATRIX ELEMENT RESIZE '+JSON.stringify(elementResize));
+    assert.ok(elementResize.matrixOverflow > 0);
+    assert.ok(elementResize.notice.startsWith(`Showing ${elementResize.fullyVisible} of 6 agent columns fully`),JSON.stringify(elementResize));
+    await page.locator('#capability-matrix').evaluate(el => { el.style.maxWidth = ''; });
+    await checkNotice();
     if (evidence) await page.locator('#capability-matrix-panel').screenshot({path:path.join(evidence,'chat-matrix-six-detail.png')});
     // Back at a narrow width, keyboard users can reach the scroll region.
     await resize(390); await checkNotice();
@@ -138,7 +177,7 @@ async function run() {
     // the six-agent acceptance above uses only real registry/channel writes.
     const compactMeasurements = [];
     for (const count of [0,1]) {
-      await page.route('**/agents',r => r.fulfill({contentType:'application/json',body:JSON.stringify({agents:registry.agents.slice(0,count)})}));
+      await page.route('**/agents',r => r.fulfill({contentType:'application/json',body:JSON.stringify({agents:registry.agents.slice(0,count).map(a => ({...a,capabilities:[]}))})}));
       await page.locator('#refresh').click(); await idle();
       assert.equal(await page.locator('#capability-matrix-table').count(),count);
       assert.equal((await headers()).length,count ? 2 : 0);
@@ -158,7 +197,7 @@ async function run() {
       await page.unroute('**/agents');
     }
     assert.deepEqual(errors,[]);
-    if (evidence) fs.writeFileSync(path.join(evidence,'six-agent-measurements.json'),JSON.stringify({ids,measurements,allVisible,compactMeasurements},null,2));
+    if (evidence) fs.writeFileSync(path.join(evidence,'six-agent-measurements.json'),JSON.stringify({ids,measurements,placementTiming,elementResize,allVisible,compactMeasurements},null,2));
     console.log('PASS: all six live agents, declaration cells, resize/scroll notice and page overflow');
   } finally { await browser.close(); }
 }

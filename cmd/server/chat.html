@@ -439,11 +439,15 @@ const matrixDesktop = matchMedia("(min-width:1024px)");
 function placeCapabilityMatrix() {
   if (matrixDesktop.matches) $("transcript").after(matrixPanel);
   else matrixRail.insertBefore(matrixPanel,matrixNextPanel);
-  updateCapabilityMatrixView();
+  // Reparenting changes the layout context. Measure in the next frame, not
+  // inside the matchMedia callback against the panel's previous geometry.
+  requestAnimationFrame(updateCapabilityMatrixView);
 }
 matrixDesktop.addEventListener("change",placeCapabilityMatrix);
 placeCapabilityMatrix();
 $("capability-matrix").addEventListener("scroll",updateCapabilityMatrixView,{passive:true});
+// ResizeObserver runs after layout and covers rail resizes within a breakpoint
+// as well as changes not caused by a window resize. Keep observing the same box.
 new ResizeObserver(updateCapabilityMatrixView).observe($("capability-matrix"));
 function renderCapabilityMatrix(capabilities) {
   const agents = state.agents;
