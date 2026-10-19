@@ -2,8 +2,8 @@
 //
 // The six routes are a CLIENT of the shipped primitives: the session data
 // model and its ordering authority come from internal/session, and every
-// fan-out write goes through the same registry.Store.Deliver the inbox routes
-// use. This file only opens the store (CR_SESSION_BACKEND) and builds the
+// fan-out enters the same guarded registry dispatcher the inbox routes use.
+// This file only opens the store (CR_SESSION_BACKEND) and builds the
 // handler; the always-on routes are registered in main.go beside the other
 // always-on surfaces, so the router-path count the README publishes measures
 // them (the OPT-IN dagger surface, by contrast, registers from its own file so
@@ -36,6 +36,7 @@ import (
 func openSessionAPI(
 	cfg config.Config,
 	registryStore registry.Store,
+	dispatcher *registry.Handler,
 	namespaces *namespace.Registry,
 	perms *permissions.Checker,
 	grantEvents func(context.Context, string) ([]session.PermissionsGrantView, error),
@@ -69,7 +70,7 @@ func openSessionAPI(
 	}
 
 	h := session.NewHTTPHandler(sessStore, session.HTTPOptions{
-		Deliverer:   registryStore,
+		Deliverer:   registry.NewSessionDeliverer(dispatcher),
 		Agents:      registryStore,
 		Namespaces:  namespaces,
 		Permissions: perms,

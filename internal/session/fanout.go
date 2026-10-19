@@ -12,14 +12,9 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 )
 
-// InboxDeliverer is the ONE capability fan-out needs from the shipped
-// registry: the durable-inbox write the deliver path (`POST
-// /agents/{id}/inbox`) already performs. Both registry.MemoryStore and
-// registry.PostgresStore satisfy it, and nothing here adds a second delivery
-// path (§3.4): the same store method the HTTP handler calls is the same one
-// fan-out calls, so the guard choke point, the durable inbox write, lease /
-// ack / TTL, dead-lettering and the federation fallback are all reused rather
-// than reimplemented.
+// InboxDeliverer is the delivery capability used by fan-out. Production uses
+// registry.SessionDeliverer, which enters the shared guarded dispatcher. Bare
+// stores implement this small interface for storage-only tests, not server wiring.
 type InboxDeliverer interface {
 	Deliver(agentID string, entry *registry.InboxEntry) error
 }
@@ -212,7 +207,18 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 			// target's realm from its own row (the authority).
 			Location: locationOf(msg, spawn),
 		}
-		if err := deliverer.Deliver(target, entry); err != nil {
+		entry.PrincipalID = msg.Author.Principal
+		var deliveryErr error
+		if dispatcher, ok := deliverer.(interface {
+			DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
+		}); ok {
+			_, deliveryErr = dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
+				Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind),
+			})
+		} else {
+			deliveryErr = deliverer.Deliver(target, entry)
+		}
+		if err := deliveryErr; err != nil {
 			outcomes = append(outcomes, DeliveryOutcome{
 				Target:    target,
 				Outcome:   OutcomeRefused,

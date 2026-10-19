@@ -728,10 +728,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// 24, 37) and fan-out into a session (row 31). It is a CLIENT of the
 	// shipped primitives: the store is the CR-CHAT-002 data model selected by
 	// CR_SESSION_BACKEND, and every fan-out write goes through the SAME
-	// registry.Store.Deliver the inbox routes use — no second delivery path.
+	// guarded registry dispatcher the inbox routes use — no second delivery path.
 	// Every surface is realm-scoped on arrival (row 38). A store that cannot
 	// open fails the boot rather than serving a deployment with no sessions.
-	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, nsReg, permsChecker, permsGrantEvents)
+	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, registryHandler, nsReg, permsChecker, permsGrantEvents)
 	if err != nil {
 		slog.Error("initialize session api", "error", err)
 		return 1
