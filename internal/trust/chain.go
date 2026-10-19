@@ -19,6 +19,14 @@ const (
 	TrustBasisPossessionVerified  = "possession-verified"
 	TrustBasisRegistryKeyMismatch = "proof-registry-key-mismatch"
 	TrustBasisInvalidSignature    = "proof-invalid-signature"
+	TrustBasisStaleTimestamp      = "proof-stale-timestamp"
+	TrustBasisNoRegistryKey       = "proof-no-registry-key"
+	TrustBasisMalformed           = "proof-malformed"
+	TrustBasisMissing             = "proof-missing"
+	TrustBasisBodyUnbound         = "proof-body-unbound"
+	TrustBasisBodyMismatch        = "proof-body-mismatch"
+	TrustBasisChallengeOversized  = "proof-challenge-oversized"
+	TrustBasisRegistryUnavailable = "proof-registry-unavailable"
 	TrustUnknownAnchor            = "TRUST_UNKNOWN_ANCHOR"
 	TrustDepthExceeded            = "TRUST_DEPTH_EXCEEDED"
 	TrustScopeInsufficient        = "TRUST_SCOPE_INSUFFICIENT"
@@ -152,6 +160,9 @@ type ChainVerdict struct {
 	Depth             int    `json:"depth"`
 	Link              int    `json:"link,omitempty"`
 	MissingCapability string `json:"missing_capability,omitempty"`
+
+	// Signed server-minus-client clock skew, only for a stale possession proof.
+	TimestampSkewSeconds *float64 `json:"timestamp_skew_seconds,omitempty"`
 }
 
 // VerifyChain verifies a caller-supplied PATH (not an unordered certificate set)

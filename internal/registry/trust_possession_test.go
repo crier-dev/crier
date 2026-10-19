@@ -57,6 +57,7 @@ func exerciseTrustPossession(t *testing.T, s Store) {
 	weak := `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"chain-only","anchor_id":"test-anchor","depth":1}`
 	strong := `{"verdict":"TRUST_VERIFIED","basis":"possession-verified","anchor_id":"test-anchor","depth":1}`
 	invalid := `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"proof-invalid-signature","anchor_id":"test-anchor","depth":1}`
+	basis := func(value string) string { return strings.Replace(weak, "chain-only", value, 1) }
 	for _, tc := range []struct {
 		name      string
 		challenge string
@@ -69,25 +70,25 @@ func exerciseTrustPossession(t *testing.T, s Store) {
 		{name: "possession-proven", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", want: strong},
 		{name: "different-key", challenge: "caller-random-nonce-380", key: other, agent: "leaf", want: invalid},
 		{name: "different-registered-agent", challenge: "caller-random-nonce-380", key: other, agent: "other", want: invalid},
-		{name: "challenge-without-signature", challenge: "caller-random-nonce-380", want: invalid},
+		{name: "challenge-without-signature", challenge: "caller-random-nonce-380", want: basis("proof-missing")},
 		{name: "signed-without-challenge", key: leaf, agent: "leaf", want: weak},
-		{name: "keyless", challenge: "caller-random-nonce-380", key: leaf, agent: "keyless", want: invalid},
-		{name: "unregistered", challenge: "caller-random-nonce-380", key: leaf, agent: "missing", want: invalid},
+		{name: "keyless", challenge: "caller-random-nonce-380", key: leaf, agent: "keyless", want: basis("proof-no-registry-key")},
+		{name: "unregistered", challenge: "caller-random-nonce-380", key: leaf, agent: "missing", want: basis("proof-no-registry-key")},
 		{name: "unbound-body", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) {
 			r.Header.Del(HeaderAgentBodySHA256)
 			r.Header.Set(HeaderAgentSig, hex.EncodeToString(ed25519.Sign(leaf, agentSigPayload(r.Method, r.URL.Path, r.Header.Get(HeaderAgentTS), ""))))
-		}, want: invalid},
-		{name: "swapped-challenge", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(_ *http.Request, body map[string]any) { body["challenge"] = "attacker-replaced-nonce" }, want: invalid},
-		{name: "swapped-scope", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(_ *http.Request, body map[string]any) { body["scope"] = []string{} }, want: invalid},
+		}, want: basis("proof-body-unbound")},
+		{name: "swapped-challenge", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(_ *http.Request, body map[string]any) { body["challenge"] = "attacker-replaced-nonce" }, want: basis("proof-body-mismatch")},
+		{name: "swapped-scope", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(_ *http.Request, body map[string]any) { body["scope"] = []string{} }, want: basis("proof-body-mismatch")},
 		{name: "stale-proof", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) {
 			ts := strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)
 			r.Header.Set(HeaderAgentTS, ts)
 			r.Header.Set(HeaderAgentSig, hex.EncodeToString(ed25519.Sign(leaf, agentSigPayload(r.Method, r.URL.Path, ts, r.Header.Get(HeaderAgentBodySHA256)))))
-		}, want: invalid},
-		{name: "malformed-proof", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) { r.Header.Set(HeaderAgentSig, "not-hex") }, want: invalid},
-		{name: "empty-proof", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) { r.Header.Set(HeaderAgentSig, "") }, want: invalid},
+		}, want: basis("proof-stale-timestamp")},
+		{name: "malformed-proof", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) { r.Header.Set(HeaderAgentSig, "not-hex") }, want: basis("proof-malformed")},
+		{name: "empty-proof", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(r *http.Request, _ map[string]any) { r.Header.Set(HeaderAgentSig, "") }, want: basis("proof-missing")},
 		{name: "blank-challenge", challenge: " ", key: leaf, agent: "leaf", want: weak},
-		{name: "oversized-challenge", challenge: strings.Repeat("n", 257), key: leaf, agent: "leaf", want: weak},
+		{name: "oversized-challenge", challenge: strings.Repeat("n", 257), key: leaf, agent: "leaf", want: basis("proof-challenge-oversized")},
 		{name: "valid-proof-cannot-repair-chain", challenge: "caller-random-nonce-380", key: leaf, agent: "leaf", mutate: func(_ *http.Request, body map[string]any) {
 			bad := d
 			bad.Voucher = "unknown"
@@ -123,7 +124,18 @@ func exerciseTrustPossession(t *testing.T, s Store) {
 			h.HandleVerify(w, r)
 			t.Logf("%s -> %d %s", tc.name, w.Code, w.Body.String())
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-			require.JSONEq(t, tc.want, w.Body.String())
+			actual := w.Body.String()
+			if tc.name == "stale-proof" {
+				var got map[string]any
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+				require.Contains(t, got, "timestamp_skew_seconds")
+				require.InDelta(t, 60, got["timestamp_skew_seconds"], 2)
+				delete(got, "timestamp_skew_seconds")
+				raw, err := json.Marshal(got)
+				require.NoError(t, err)
+				actual = string(raw)
+			}
+			require.JSONEq(t, tc.want, actual)
 		})
 	}
 }

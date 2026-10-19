@@ -111,7 +111,7 @@ paths:
     post:
       operationId: trustVerifyChain
       summary: Evaluate key trust against this server's anchors
-      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict and basis. An intact chain has three chain-reachable bases - chain-only when no eligible challenge is offered (absent, blank or oversized), proof-registry-key-mismatch when a fresh body-bound signature verifies against the leaf but the agent's current registry key differs, and proof-invalid-signature when the offered proof fails verification (including missing, stale, malformed or unbound proof). A valid proof against a moved registry key remains TRUST_CHAIN_REACHABLE with proof-registry-key-mismatch, not possession-verified. TRUST_VERIFIED with possession-verified requires BOTH a valid leaf proof and the same registered-key snapshot matching that leaf; the signature alone is insufficient. The challenge must be nonblank and at most 256 UTF-8 bytes, independent of CR_REQUIRE_AGENT_SIG. The signature covers POST, /trust/verify, the Unix timestamp and sha256 of the exact body via the existing agent signature transcript. Timestamp freshness is +/-30s; requests may be replayed within that window (no consumed-nonce store). Unaccepted proof preserves the weaker verdict and chain evidence, not an HTTP error, and never exposes verifier error bodies or key material. NOT delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
+      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict and basis. An intact chain without a nonblank challenge gives chain-only. A challenge exceeding 256 UTF-8 bytes gives proof-challenge-oversized, not chain-only. With an eligible challenge, missing proof gives proof-missing; no usable registered key gives proof-no-registry-key; undecodable signatures or timestamps give proof-malformed; a timestamp outside +/-30s gives proof-stale-timestamp with signed timestamp_skew_seconds (server minus client); missing body binding gives proof-body-unbound and a mismatching digest gives proof-body-mismatch. proof-invalid-signature means a well-formed proof failed cryptographic verification against the leaf, not a parse, clock or key-availability failure. A registry read failure gives proof-registry-unavailable. A fresh body-bound leaf signature with a different current registry key gives proof-registry-key-mismatch. All these unaccepted proofs remain TRUST_CHAIN_REACHABLE and preserve anchor/depth evidence. Checks report the first applicable failure; an identified keyless agent is classified before missing proof headers. TRUST_VERIFIED with possession-verified requires BOTH a valid leaf proof and the same registered-key snapshot matching that leaf. The challenge must be nonblank and at most 256 UTF-8 bytes, independent of CR_REQUIRE_AGENT_SIG. The signature covers POST, /trust/verify, the Unix timestamp and sha256 of the exact body via the existing agent signature transcript. Requests may be replayed within the +/-30s window (no consumed-nonce store). Verifier error bodies and key material are never exposed. Malformed JSON or chain input is still HTTP 400 TRUST_MALFORMED. NOT delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
       parameters:
         - name: X-Agent-ID
           in: header
@@ -145,7 +145,7 @@ paths:
                 signer: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
                 challenge:
                   type: string
-                  description: Optional caller-generated unpredictable nonce. Nonblank and at most 256 UTF-8 bytes to qualify for possession verification; absent, blank or oversized gives chain-only.
+                  description: Optional caller-generated unpredictable nonce. Nonblank and at most 256 UTF-8 bytes to qualify for possession verification; absent or blank gives chain-only, while more than 256 bytes gives proof-challenge-oversized. No minimum length is enforced.
                 scope: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
                 chain:
                   type: array
@@ -164,8 +164,11 @@ paths:
                     enum: [TRUST_CHAIN_REACHABLE, TRUST_VERIFIED, TRUST_UNKNOWN_ANCHOR, TRUST_DEPTH_EXCEEDED, TRUST_SCOPE_INSUFFICIENT, TRUST_BAD_SIGNATURE]
                   basis:
                     type: string
-                    enum: [chain-only, possession-verified, proof-registry-key-mismatch, proof-invalid-signature]
-                    description: Always present for TRUST_CHAIN_REACHABLE (chain-only, proof-registry-key-mismatch or proof-invalid-signature) and TRUST_VERIFIED (possession-verified); omitted on chain failures.
+                    enum: [chain-only, possession-verified, proof-registry-key-mismatch, proof-invalid-signature, proof-stale-timestamp, proof-no-registry-key, proof-malformed, proof-missing, proof-body-unbound, proof-body-mismatch, proof-challenge-oversized, proof-registry-unavailable]
+                    description: Always present for TRUST_CHAIN_REACHABLE (chain-only or the applicable proof refusal basis) and TRUST_VERIFIED (possession-verified); omitted on chain failures.
+                  timestamp_skew_seconds:
+                    type: number
+                    description: Only present for proof-stale-timestamp. Signed observed clock skew in seconds (server time minus the presented Unix timestamp); positive is old and negative is future. The accepted window remains +/-30 seconds.
                   anchor_id: {type: string}
                   depth: {type: integer, minimum: 0}
                   link: {type: integer, minimum: 1}

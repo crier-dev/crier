@@ -175,7 +175,11 @@ func (h *TrustHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verdict := trust.VerifyChain(anchors, req.Signer, req.Scope, req.Chain)
-	if verdict.Verdict == trust.TrustChainReachable && strings.TrimSpace(req.Challenge) != "" && len(req.Challenge) <= 256 {
+	if verdict.Verdict == trust.TrustChainReachable && len(req.Challenge) > 256 {
+		// Retain the existing maximum, but distinguish offered/unusable from
+		// absent. A ~300-byte challenge is oversized, not too short.
+		verdict.Basis = trust.TrustBasisChallengeOversized
+	} else if verdict.Verdict == trust.TrustChainReachable && strings.TrimSpace(req.Challenge) != "" {
 		proof := r.Clone(r.Context())
 		proof.Body = io.NopCloser(bytes.NewReader(body))
 		leaf, _ := hex.DecodeString(req.Signer) // ValidateChainRequest checked the shape.
@@ -190,7 +194,13 @@ func (h *TrustHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errTrustRegistryKeyMismatch):
 			verdict.Basis = trust.TrustBasisRegistryKeyMismatch
 		default:
-			verdict.Basis = trust.TrustBasisInvalidSignature
+			// All verifier refusals carry their own basis. Never infer forgery
+			// from a missing key, parse failure, stale timestamp or store outage.
+			var failure *agentSigError
+			if errors.As(err, &failure) {
+				verdict.Basis = failure.proofBasis
+				verdict.TimestampSkewSeconds = failure.timestampSkewSeconds
+			}
 		}
 	}
 	writeJSON(w, 200, verdict)

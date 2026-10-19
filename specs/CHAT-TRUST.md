@@ -575,7 +575,7 @@ signing leaf). D16's explicit transitive purpose is the capability
 as well as a sufficient depth budget. There is also a global eight-link bound;
 cycles, disconnected vouchers and a mismatched leaf are refused. The HTTP
 response is 200 for a completed trust evaluation, with one of `TRUST_CHAIN_REACHABLE`
-(`basis: chain-only`, `proof-registry-key-mismatch` or `proof-invalid-signature`,
+(`basis: chain-only` or a named `proof-*` refusal below,
 `anchor_id`, `depth`), `TRUST_VERIFIED`
 (`basis: possession-verified`, `anchor_id`, `depth`), `TRUST_UNKNOWN_ANCHOR`, `TRUST_DEPTH_EXCEEDED` (`link`),
 `TRUST_SCOPE_INSUFFICIENT` (`link`, `missing_capability`) or
@@ -596,15 +596,34 @@ Reuse `agentsig.go`'s ed25519 transcript `POST\n/trust/verify\n<unix-seconds>\ns
 challenge, signer, scope and chain. The timestamp must be within the existing ±30s
 window. The same registered-key snapshot used to verify the signature must equal
 `signer`, the chain's leaf. A valid body-bound leaf proof yields `TRUST_VERIFIED`
-with mandatory `basis: possession-verified`. No challenge or a blank/oversized challenge
-still yields HTTP 200 `TRUST_CHAIN_REACHABLE` with `basis: chain-only`. DF-CRIER-395
-distinguishes eligible but unaccepted proofs: `basis: proof-registry-key-mismatch`
-means the fresh body-bound signature verified against the leaf but the SAME registered-key
-snapshot differed (for example, after unregister/re-register rotation). The verdict stays
-`TRUST_CHAIN_REACHABLE`, never `TRUST_VERIFIED` or `possession-verified`. Any missing,
-stale, unbound, malformed or wrong-key proof instead yields `basis: proof-invalid-signature`;
-a wrong-key proof cannot claim a registry mismatch even if the registry has moved.
-Every demotion preserves the same chain evidence. This
+with mandatory `basis: possession-verified`. No challenge or a blank challenge
+still yields HTTP 200 `TRUST_CHAIN_REACHABLE` with `basis: chain-only`.
+DF-CRIER-406/411 retain the existing 256 UTF-8 byte maximum but name an oversized
+challenge `proof-challenge-oversized` (the reported ~300-byte challenge exceeds a
+maximum, not a minimum; no minimum nonce length is enforced). It never promotes.
+For an eligible challenge, every refusal carries its actual first failing basis:
+
+- `proof-no-registry-key`: identified agent is unknown or lacks a usable registered
+  ed25519 key, including a keyless agent that offered no signature. This check uses
+  the same registry snapshot as verification and precedes missing headers for an
+  identified trust caller. Ordinary inbox/service signing refusal order is unchanged.
+- `proof-missing`: required identity, timestamp or signature is absent/empty.
+- `proof-malformed`: signature hex/length or timestamp cannot be parsed.
+- `proof-stale-timestamp`: timestamp is outside the unchanged +/-30s window;
+  `timestamp_skew_seconds` carries signed observed server-minus-client seconds
+  (positive for old proofs, negative for future proofs), omitted for other bases.
+- `proof-body-unbound`: required body digest is missing/empty.
+- `proof-body-mismatch`: digest does not bind the exact delivered request bytes.
+- `proof-invalid-signature`: a well-formed proof fails leaf-key cryptographic verification.
+- `proof-registry-unavailable`: registry lookup failed, not evidence of forgery or no key.
+- `proof-registry-key-mismatch` (DF-CRIER-395): the fresh body-bound signature
+  verified against the leaf but the SAME registered-key snapshot differed (for
+  example, after unregister/re-register rotation). A wrong-key proof cannot claim
+  this basis even if the registry has moved.
+
+These outcomes remain `TRUST_CHAIN_REACHABLE`, never `TRUST_VERIFIED` or
+`possession-verified`. Typed verifier evidence supplies the basis without parsing
+or forwarding diagnostic error text. Every demotion preserves the same chain evidence. This
 rule is enforced in Go for memory, SQLite and PostgreSQL, independent of
 `CR_REQUIRE_AGENT_SIG`; failures never return or log proof/key material. A malformed
 JSON shape (including a numeric/object/array challenge) remains `400 TRUST_MALFORMED`;

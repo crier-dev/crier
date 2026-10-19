@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crier-dev/crier/internal/trust"
 )
 
 // Per-agent request signing headers.
@@ -97,6 +99,10 @@ func sha256Hex(b []byte) string {
 type agentSigError struct {
 	status  int
 	message string
+	// Optional structured evidence for the read-only trust adapter. Existing
+	// authorization HTTP statuses/messages remain unchanged.
+	proofBasis           string
+	timestampSkewSeconds *float64
 }
 
 func (e *agentSigError) Error() string { return e.message }
@@ -158,21 +164,33 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 	tsRaw := r.Header.Get(HeaderAgentTS)
 	sigRaw := r.Header.Get(HeaderAgentSig)
 
-	if callerID == "" || tsRaw == "" {
-		return h.agentSigFail(w, http.StatusUnauthorized,
-			"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)")
-	}
+	checkHeaders := func() error {
+		if callerID == "" || tsRaw == "" {
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMissing,
+				"missing agent signature headers (X-Agent-ID, X-Agent-Ts, X-Agent-Sig)")
+		}
 
-	// X-Agent-ID and X-Agent-Ts are here, so a blank X-Agent-Sig is not a
-	// missing header — it is a signing step that produced no output. Name it,
-	// and name the cause, because the empty string is what a non-seekable
-	// payload looks like from the client side (DF-CRIER-236).
-	if strings.TrimSpace(sigRaw) == "" {
-		return h.agentSigFail(w, http.StatusUnauthorized,
-			"X-Agent-Sig is present but empty — the client's signing step produced no output. "+
-				"openssl pkeyutl -sign -rawin needs OpenSSL >= 3 AND a seekable payload passed with -in <file>: "+
-				"a piped or redirected payload fails with \"unable to determine file size for oneshot operation\" "+
-				"and yields a zero-byte signature.")
+		// X-Agent-ID and X-Agent-Ts are here, so a blank X-Agent-Sig is not a
+		// missing header — it is a signing step that produced no output. Name it,
+		// and name the cause, because the empty string is what a non-seekable
+		// payload looks like from the client side (DF-CRIER-236).
+		if strings.TrimSpace(sigRaw) == "" {
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMissing,
+				"X-Agent-Sig is present but empty — the client's signing step produced no output. "+
+					"openssl pkeyutl -sign -rawin needs OpenSSL >= 3 AND a seekable payload passed with -in <file>: "+
+					"a piped or redirected payload fails with \"unable to determine file size for oneshot operation\" "+
+					"and yields a zero-byte signature.")
+		}
+
+		return nil
+	}
+	// Ordinary signing keeps its historical refusal order. For trust proofs,
+	// resolve an identified agent first so a keyless unsigned caller is named
+	// as unverifiable, not accused of a bad signature. Reuse this ONE snapshot.
+	if expectedKey == nil || callerID == "" {
+		if err := checkHeaders(); err != nil {
+			return err
+		}
 	}
 
 	// Resolve the target agent first. An unknown target returns 404 — no
@@ -181,27 +199,40 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			if requireBody {
-				return h.agentSigFail(w, http.StatusUnauthorized, "service sender has no registered public key")
+				return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisNoRegistryKey, "service sender has no registered public key")
 			}
-			return h.agentSigFail(w, http.StatusNotFound, "agent not found")
+			return h.agentProofFail(w, http.StatusNotFound, trust.TrustBasisNoRegistryKey, "agent not found")
 		}
 		writeStoreError(w, err)
-		return &agentSigError{status: http.StatusInternalServerError, message: "store error"}
+		return &agentSigError{status: http.StatusInternalServerError, message: "store error", proofBasis: trust.TrustBasisRegistryUnavailable}
 	}
 
 	if callerID != targetID {
-		return h.agentSigFail(w, http.StatusForbidden,
+		return h.agentProofFail(w, http.StatusForbidden, trust.TrustBasisMalformed,
 			fmt.Sprintf("agent %q may only access its own resources (target %q)", callerID, targetID))
+	}
+
+	if expectedKey != nil {
+		if len(agent.PublicKey) != ed25519.PublicKeySize {
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisNoRegistryKey,
+				"agent has no registered public key (registered without a key; signature verification is impossible)")
+		}
+		if err := checkHeaders(); err != nil {
+			return err
+		}
 	}
 
 	ts, err := strconv.ParseInt(tsRaw, 10, 64)
 	if err != nil {
-		return h.agentSigFail(w, http.StatusUnauthorized, "X-Agent-Ts must be a unix timestamp in seconds")
+		return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMalformed, "X-Agent-Ts must be a unix timestamp in seconds")
 	}
 	skew := time.Since(time.Unix(ts, 0))
 	if skew > sigWindow || skew < -sigWindow {
-		return h.agentSigFail(w, http.StatusUnauthorized,
+		failure := h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisStaleTimestamp,
 			fmt.Sprintf("request timestamp outside allowed window (±%s)", sigWindow))
+		skewSeconds := skew.Seconds()
+		failure.timestampSkewSeconds = &skewSeconds
+		return failure
 	}
 
 	rawKey := ed25519.PublicKey(agent.PublicKey)
@@ -212,7 +243,7 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 		// signature verification. That is an authorization failure of
 		// this request (401, naming the real reason), not a server
 		// error: it must never 500, and never 200.
-		return h.agentSigFail(w, http.StatusUnauthorized,
+		return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisNoRegistryKey,
 			"agent has no registered public key (registered without a key; signature verification is impossible)")
 	}
 
@@ -222,17 +253,17 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 		// rubbish that is not hex at all, and hex of the wrong length. The
 		// reject decision is unchanged — only the message is specific.
 		if !isHexSignature(sigRaw) {
-			return h.agentSigFail(w, http.StatusUnauthorized,
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMalformed,
 				fmt.Sprintf("X-Agent-Sig is malformed: %q is not hex "+
 					"(expected the hex encoding of a 64-byte ed25519 signature)", sigRaw))
 		}
-		return h.agentSigFail(w, http.StatusUnauthorized,
+		return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMalformed,
 			fmt.Sprintf("X-Agent-Sig is malformed: expected 128 hex chars "+
 				"(64-byte ed25519 signature), got %d character(s) (%q)", len(sigRaw), sigRaw))
 	}
 
 	if requireBody && r.Header.Get(HeaderAgentBodySHA256) == "" {
-		return h.agentSigFail(w, http.StatusUnauthorized, "service delivery requires X-Agent-Body-SHA256")
+		return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisBodyUnbound, "service delivery requires X-Agent-Body-SHA256")
 	}
 	payload := agentSigPayload(r.Method, r.URL.Path, tsRaw, "")
 	if vals := r.Header.Values(HeaderAgentBodySHA256); len(vals) > 0 {
@@ -242,11 +273,11 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 		// the signature over the extended transcript.
 		claimed := strings.ToLower(strings.TrimSpace(strings.Join(vals, ",")))
 		if claimed == "" {
-			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestEmptyError)
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisBodyUnbound, agentSigBodyDigestEmptyError)
 		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyUnreadableError)
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisMalformed, agentSigBodyUnreadableError)
 		}
 		// Restore the body: authorization runs BEFORE the handler's own read
 		// (ack/transfer/patch decode from r.Body), so consuming it here would
@@ -254,7 +285,7 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		actual := sha256Hex(body)
 		if claimed != actual || (requireBody && (len(vals) != 1 || vals[0] != actual)) {
-			return h.agentSigFail(w, http.StatusUnauthorized, agentSigBodyDigestMismatchError)
+			return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisBodyMismatch, agentSigBodyDigestMismatchError)
 		}
 		payload = agentSigPayload(r.Method, r.URL.Path, tsRaw, actual)
 		if audience := r.Header.Get(HeaderServiceAudience); audience != "" {
@@ -266,7 +297,7 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 		verificationKey = expectedKey
 	}
 	if len(verificationKey) != ed25519.PublicKeySize || !ed25519.Verify(verificationKey, payload, sig) {
-		return h.agentSigFail(w, http.StatusUnauthorized, "signature verification failed")
+		return h.agentProofFail(w, http.StatusUnauthorized, trust.TrustBasisInvalidSignature, "signature verification failed")
 	}
 	if expectedKey != nil && !bytes.Equal(rawKey, expectedKey) {
 		// A valid leaf proof is not sufficient for promotion: the SAME registry
@@ -280,8 +311,14 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) agentSigFail(w http.ResponseWriter, status int, message string) error {
+	return h.agentProofFail(w, status, "", message)
+}
+
+// Keep public authorization refusals byte-compatible; the trust adapter consumes
+// only the typed basis/skew, never parses or forwards these diagnostic bodies.
+func (h *Handler) agentProofFail(w http.ResponseWriter, status int, basis, message string) *agentSigError {
 	writeJSON(w, status, map[string]string{"error": message})
-	return &agentSigError{status: status, message: message}
+	return &agentSigError{status: status, message: message, proofBasis: basis}
 }
 
 // isHexSignature reports whether s is non-empty and made only of hexadecimal
