@@ -15,7 +15,7 @@ func TestRegistryBackendResolution(t *testing.T) {
 		{name: "URL auto", url: "postgres://localhost/crier", want: "postgres", session: "postgres"},
 		{name: "explicit memory overrides URL", backend: "memory", url: "postgres://localhost/crier", want: "memory", session: "postgres"},
 		{name: "sqlite", backend: "sqlite", path: "registry.db", want: "sqlite", session: "jsonl"},
-		{name: "sqlite overrides URL", backend: "sqlite", path: "registry.db", url: "postgres://localhost/crier", want: "sqlite", session: "postgres"},
+		{name: "sqlite rejects postgres URL", backend: "sqlite", path: "registry.db", url: "postgres://localhost/crier", err: "DATABASE_BACKEND_MISMATCH"},
 		{name: "sqlite missing path", backend: "sqlite", err: "CR_REGISTRY_SQLITE_PATH"},
 		{name: "postgres missing URL", backend: "postgres", err: "CR_REGISTRY_BACKEND=postgres requires"},
 		{name: "unknown", backend: "jsonl", err: "want memory, sqlite or postgres"},

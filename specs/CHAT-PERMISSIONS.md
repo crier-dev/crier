@@ -91,6 +91,12 @@ wall and are reused, not replaced** — this spec adds an inner wall and never r
 
 ### 2.1 Definition
 
+DF-CRIER-316: management request objects for principal minting, binding/grant creation and agent-class
+writes reject unknown fields with HTTP 400, `unknown field "<key>" (accepted: <struct JSON keys>)`.
+The list is derived from the guarded request type, including the nested grant subject. Principal ids
+are server-generated; a supplied `id` is refused with that explanation, never silently ignored.
+Valid request fields and their defaults are unchanged.
+
 A **Principal** is a HUMAN user. It is a different kind of thing from an Agent, and the distinction is the
 point: *"a human must not need to hold ed25519 keys to chat (hostile UX) and must not be anonymous (no
 audit)"* (CR-CHAT-007). A principal never appears as a bus identity; it appears as the ANSWER to "which

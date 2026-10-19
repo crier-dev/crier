@@ -45,6 +45,7 @@ import (
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/strictjson"
 )
 
 // SetTaskTrigger installs the optional task-created hook (CR-CHAT-034). Nil
@@ -1848,9 +1849,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "a JSON body is required")
 		return false
 	}
-	dec := json.NewDecoder(strings.NewReader(string(body)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	if err := strictjson.Decode(strings.NewReader(string(body)), v); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid JSON body: "+err.Error())
 		return false
 	}

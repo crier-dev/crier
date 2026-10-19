@@ -33,7 +33,17 @@ binding a principal to an agent / group / session / capability. A **Namespace** 
 
 ---
 
-2026-10-19 (DF-CRIER-364): the SQLite Store ships for the registry and inboxes, including leases, dead letters, service-delivery receipts, task observations and task outputs. Set `CR_REGISTRY_BACKEND=sqlite` and `CR_REGISTRY_SQLITE_PATH=/persistent/registry.sqlite`; keep the file and its WAL on persistent local storage (not a network filesystem). SQLite uses WAL with synchronous FULL and applies versioned dialect migrations at startup. Registry selection is independent of `CR_SESSION_BACKEND`: unset keeps PostgreSQL when a database URL is configured, memory otherwise; explicit `memory`, `sqlite` or `postgres` overrides that selection. SQLite requires a path and PostgreSQL requires a URL; unknown backends fail startup. The JSONL log-first registry architecture described here remains NOT BUILT; this is a direct SQLite implementation of the existing Store, not a log-first projection or JSONL registry.
+2026-10-19 (DF-CRIER-364): the SQLite Store ships for the registry and inboxes, including leases, dead letters, service-delivery receipts, task observations and task outputs. Set `CR_REGISTRY_BACKEND=sqlite` and `CR_REGISTRY_SQLITE_PATH=/persistent/registry.sqlite`; keep the file and its WAL on persistent local storage (not a network filesystem). SQLite uses WAL with synchronous FULL and applies versioned dialect migrations at startup. Registry selection is independent of `CR_SESSION_BACKEND`: unset selects the database URL scheme (PostgreSQL or SQLite), memory otherwise; explicit `memory`, `sqlite` or `postgres` overrides that selection. SQLite requires a path and PostgreSQL requires a URL; unknown backends fail startup. The JSONL log-first registry architecture described here remains NOT BUILT; this is a direct SQLite implementation of the existing Store, not a log-first projection or JSONL registry.
+
+DF-CRIER-316: database URL precedence remains `CR_DATABASE_URL` → `DATABASE_URL` → `CRIER_DATABASE_URL`.
+Accepted URL schemes are `postgres`, `postgresql`, `sqlite`; PostgreSQL keyword/value DSNs remain accepted.
+`sqlite:///absolute/path.db` and `sqlite://relative.db` supply the path for each selected SQLite backend;
+unset registry/session selectors resolve to SQLite for a SQLite URL. Explicit `CR_REGISTRY_SQLITE_PATH`
+and `CR_SQLITE_PATH` take precedence over the URL-derived registry and session paths respectively.
+Paths do not override scheme compatibility: SQLite versus PostgreSQL mismatches fail config loading with
+`DATABASE_BACKEND_MISMATCH`, naming the source variable, scheme, backend selector and corrective variable.
+Unknown schemes fail with `DATABASE_URL_SCHEME` and the accepted list before any driver opens.
+SQLite URLs require a nonempty path and do not accept credentials, query parameters or fragments.
 
 ## 1. The requirement
 

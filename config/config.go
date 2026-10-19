@@ -13,7 +13,7 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 )
 
-// DatabaseConfig holds PostgreSQL connection and pool settings.
+// DatabaseConfig holds the database URL and PostgreSQL pool settings.
 type DatabaseConfig struct {
 	URL             string
 	MaxConns        int32
@@ -73,11 +73,14 @@ type SessionConfig struct {
 }
 
 // ResolvedSessionBackend returns the effective backend: the explicit
-// CR_SESSION_BACKEND when set, otherwise postgres when a database URL is
-// configured and jsonl when not (the historical behaviour).
+// CR_SESSION_BACKEND when set, otherwise postgres when a PostgreSQL URL is
+// configured and jsonl when not. A sqlite URL selects sqlite instead.
 func (c Config) ResolvedSessionBackend() string {
 	if b := strings.ToLower(strings.TrimSpace(c.Session.Backend)); b != "" {
 		return b
+	}
+	if databaseScheme(c.Database.URL) == "sqlite" {
+		return SessionBackendSQLite
 	}
 	if strings.TrimSpace(c.Database.URL) != "" {
 		return SessionBackendPostgres
@@ -88,12 +91,15 @@ func (c Config) ResolvedSessionBackend() string {
 // RegistryConfig selects agent/inbox persistence independently of sessions.
 type RegistryConfig struct {
 	Backend    string // CR_REGISTRY_BACKEND: empty preserves URL-based selection.
-	SQLitePath string // CR_REGISTRY_SQLITE_PATH: required for sqlite.
+	SQLitePath string // CR_REGISTRY_SQLITE_PATH overrides a sqlite URL path.
 }
 
 func (c Config) ResolvedRegistryBackend() string {
 	if b := strings.ToLower(strings.TrimSpace(c.Registry.Backend)); b != "" {
 		return b
+	}
+	if databaseScheme(c.Database.URL) == "sqlite" {
+		return "sqlite"
 	}
 	if c.Database.URL != "" {
 		return "postgres"
@@ -539,21 +545,31 @@ func Load() (Config, error) {
 	}
 
 	// Database URL — three env var precedence: CR_DATABASE_URL → DATABASE_URL → CRIER_DATABASE_URL
-	dbURL := os.Getenv("CR_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = os.Getenv("DATABASE_URL")
+	dbURL, dbSource := "", "CR_DATABASE_URL"
+	for _, source := range []string{"CR_DATABASE_URL", "DATABASE_URL", "CRIER_DATABASE_URL"} {
+		if v := os.Getenv(source); v != "" {
+			dbURL, dbSource = v, source
+			break
+		}
 	}
-	if dbURL == "" {
-		dbURL = os.Getenv("CRIER_DATABASE_URL")
+	sqlitePath, err := databaseURLPath(dbURL, dbSource)
+	if err != nil {
+		return cfg, err
 	}
 	cfg.Database.URL = dbURL
 	cfg.Registry.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_REGISTRY_BACKEND")))
 	cfg.Registry.SQLitePath = strings.TrimSpace(os.Getenv("CR_REGISTRY_SQLITE_PATH"))
+	if cfg.Registry.SQLitePath == "" {
+		cfg.Registry.SQLitePath = sqlitePath
+	}
+	if err := cfg.validateDatabaseBackend(dbSource, "CR_REGISTRY_BACKEND", cfg.ResolvedRegistryBackend()); err != nil {
+		return cfg, err
+	}
 	switch cfg.ResolvedRegistryBackend() {
 	case "memory":
 	case "sqlite":
 		if cfg.Registry.SQLitePath == "" {
-			return cfg, fmt.Errorf("CR_REGISTRY_BACKEND=sqlite requires CR_REGISTRY_SQLITE_PATH")
+			return cfg, fmt.Errorf("CR_REGISTRY_BACKEND=sqlite requires CR_REGISTRY_SQLITE_PATH or a sqlite URL in CR_DATABASE_URL (CR_REGISTRY_SQLITE_PATH overrides the URL-derived path)")
 		}
 	case "postgres":
 		if strings.TrimSpace(cfg.Database.URL) == "" {
@@ -618,6 +634,12 @@ func Load() (Config, error) {
 			cfg.Session.Backend, SessionBackendSQLite, SessionBackendPostgres, SessionBackendJSONL)
 	}
 	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+	if cfg.Session.SQLitePath == "" {
+		cfg.Session.SQLitePath = sqlitePath
+	}
+	if err := cfg.validateDatabaseBackend(dbSource, "CR_SESSION_BACKEND", cfg.ResolvedSessionBackend()); err != nil {
+		return cfg, err
+	}
 	cfg.Session.LogRoot = strings.TrimSpace(os.Getenv("CR_SESSION_LOG_ROOT"))
 	cfg.Session.DeliveryTimeoutMs = registry.DefaultSessionDeliveryTimeoutMs
 	if v := os.Getenv("CR_SESSION_DELIVERY_TIMEOUT_MS"); v != "" {
