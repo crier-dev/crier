@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -171,6 +172,15 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 // dispatcher/driver owns timeout enforcement; no detached timeout goroutine or
 // second transport path is introduced here. Deliverers must be concurrency-safe.
 func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int) ([]DeliveryOutcome, error) {
+	return fanoutWithReplies(ctx, deliverer, msg, targets, spawn, timeoutMs, nil)
+}
+
+// fanoutWithReplies preserves Fanout's transport contract while allowing the
+// session send path to record a successful blocking webhook's answer. The hook
+// only appends transcript data; it must never initiate another delivery. It runs
+// after every target has joined and in sorted target order, because concurrent
+// transcript appends would interleave sequence ids.
+func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int, recordReply func(string, json.RawMessage) error) ([]DeliveryOutcome, error) {
 	if timeoutMs == 0 {
 		timeoutMs = registry.DefaultSessionDeliveryTimeoutMs
 	}
@@ -193,6 +203,9 @@ func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 
 	sorted := dedupeSorted(targets)
 	outcomes := make([]DeliveryOutcome, len(sorted))
+	// One reply slot per target: each goroutine writes only its own index, so the
+	// join needs no lock and the recording order is the sorted target order.
+	replies := make([]json.RawMessage, len(sorted))
 	var wg sync.WaitGroup
 	for i, target := range sorted {
 		if prev, ok := prior[target]; ok && prev.Outcome != "" {
@@ -225,9 +238,16 @@ func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 			if dispatcher, ok := deliverer.(interface {
 				DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
 			}); ok {
-				_, deliveryErr = dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
+				result, err := dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
 					Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind), TimeoutMs: timeoutMs,
 				})
+				deliveryErr = err
+				// Only a blocking webhook's own answer is recorded: an inbox append
+				// carries no answer and a queued delivery has none yet. The slot is
+				// filled here and written by the caller AFTER the join.
+				if err == nil && result.Transport == "webhook" && result.DeliveryMode == "blocking" && len(result.Reply) > 0 {
+					replies[i] = result.Reply
+				}
 			} else {
 				deliveryErr = deliverer.Deliver(target, entry)
 			}
@@ -251,6 +271,19 @@ func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Replies are recorded after the join and in sorted target order: concurrent
+	// transcript appends would interleave sequence ids, and a failed delivery
+	// never claims an answer (its slot stays empty).
+	if recordReply != nil {
+		for i, target := range sorted {
+			if len(replies[i]) == 0 {
+				continue
+			}
+			if err := recordReply(target, replies[i]); err != nil {
+				return nil, fmt.Errorf("record webhook reply from %q: %w", target, err)
+			}
+		}
 	}
 	msg.Outcomes = outcomes
 	return outcomes, nil

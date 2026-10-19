@@ -108,6 +108,27 @@ reader of §2 and §4 needs — that a **named** group and a **capability** targ
 kinds and are never conflated, and that an attachment is a **reference** — and does not restate their
 design, which is not its to state.
 
+### 1.3.2 Blocking webhook answers in the transcript (DF-CRIER-341)
+
+A successful blocking webhook delivery's text-mappable `reply` is appended through the existing
+session message store as a **same-thread reply authored by the target agent**. The stored record is
+`session.thread.reply`, with `message_kind: plain`, `author: {"agent": "<target-id>"}`,
+`session_id` / `thread_id` copied from the delivered message, `parent_id` pointing to that message,
+and `payload: {"text": "<answer>"}`. It receives its own message id, sequence and timestamp. It does
+not deliberately branch a thread, create a task, or impersonate the operator.
+
+Text-mappable means a non-blank JSON string (including a schema-extracted reply or a raw plain-text
+body), or an object with a non-blank string `text` or `reply` field (`text` takes precedence).
+Failed/refused deliveries, empty/whitespace-only answers, and other JSON shapes append **nothing**.
+The reply has an **explicit empty audience** and no delivery outcomes; appending it is not another
+send, so it cannot fan out to session members. The operator's original outcome continues to describe
+**transport** (`delivered` / `refused`), never the agent's answer or proof of task completion.
+
+The existing transcript poll and renderer display `payload.text`, `author.agent` and `parent_id`;
+there is no separate reply store or rendering path. This implements D1 without losing the agent's
+answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
+an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
+
 ### 1.4 The acceptance test this interface is judged against (CR-CHAT-015)
 
 This is the whole interface's acceptance, in Bane's own terms (2026-10-03), because it is the problem the

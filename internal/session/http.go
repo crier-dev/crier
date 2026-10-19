@@ -885,7 +885,9 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
-	outcomes, err := fanoutWithTimeout(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs)
+	outcomes, err := fanoutWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, func(target string, reply json.RawMessage) error {
+		return h.recordWebhookReply(r.Context(), msg, target, reply)
+	})
 	if err != nil {
 		// The intent is durable and the outcomes are incomplete — §3.2's
 		// visible, repairable state, not a lost message. Report it as a 502
