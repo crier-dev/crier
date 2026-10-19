@@ -148,7 +148,17 @@ func TestSnapshotBuildDirExcludesUncommittedSiblingEdit(t *testing.T) {
 
 	mustGit(t, root, "init", "-q")
 	mustGit(t, root, "add", "-A")
-	mustGit(t, root, "-c", "user.email=worker@example.test", "-c", "user.name=worker", "commit", "-q", "-m", "fixture")
+	// The fixture commit must be hermetic: this test once reded the repo's OWN
+	// Tier-1 gate because the ambient global core.hooksPath (the host-wide
+	// crier pre-commit wrapper) ran here and its board arm refuses a temp repo
+	// with no scripts/check-board.sh. Pin the configuration and skip hooks, the
+	// same way freshRepoSnapshot in snapshot.go does for the copy branch.
+	mustGit(t, root,
+		"-c", "commit.gpgsign=false",
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "user.email=worker@example.test",
+		"-c", "user.name=worker",
+		"commit", "-q", "--no-verify", "-m", "fixture")
 	committedHead := mustGit(t, root, "rev-parse", "HEAD")
 	if !isHexRevision(committedHead) {
 		t.Fatalf("the fixture reports HEAD %q, want a git revision", committedHead)
