@@ -40,14 +40,20 @@ func TestA2AAnswerPostgresReopen(t *testing.T) {
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	expected := make(map[string]map[string]any)
-	for _, outputFirst := range []bool{false, true} {
-		accepted := sentTask(t, rpcResult(t, mustA2AOK(t, http.DefaultClient, srv.URL, sendMessageBody("terminal-agent", a2a.MethodSendMessage, fmt.Sprintf("pg-output-%t", outputFirst)))))
+	for _, scenario := range []struct{ outputFirst, noStream bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		outputFirst := scenario.outputFirst
+		accepted := sentTask(t, rpcResult(t, mustA2AOK(t, http.DefaultClient, srv.URL, sendMessageBody("terminal-agent", a2a.MethodSendMessage, fmt.Sprintf("pg-output-%t-no-stream-%t", outputFirst, scenario.noStream)))))
 		id := taskIDOf(t, accepted)
-		stream := openSSE(t, srv.URL, subscribeBody("terminal-agent", id))
-		stream.next(t, "opening task")
+		var stream *sseStream
+		if !scenario.noStream {
+			stream = openSSE(t, srv.URL, subscribeBody("terminal-agent", id))
+			stream.next(t, "opening task")
+		}
 		if outputFirst {
-			publishAgentAnswer(t, srv.URL, id)
-			stream.next(t, "answer before ack")
+			publishAgentAnswer(t, srv.URL, "terminal-agent", id)
+			if stream != nil {
+				stream.next(t, "answer before ack")
+			}
 			got := rpcResult(t, mustA2AOK(t, http.DefaultClient, srv.URL, getTaskBody("terminal-agent", id, "")))
 			require.Equal(t, string(a2a.TaskStateSubmitted), rpcTaskState(t, got), "output alone never proves acknowledgement")
 		}
@@ -58,12 +64,18 @@ func TestA2AAnswerPostgresReopen(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 		if !outputFirst {
-			stream.nextStatus(t, string(a2a.TaskStateWorking))
-			publishAgentAnswer(t, srv.URL, id)
-			stream.next(t, "answer after ack")
+			if stream != nil {
+				stream.nextStatus(t, string(a2a.TaskStateWorking))
+			}
+			publishAgentAnswer(t, srv.URL, "terminal-agent", id)
+			if stream != nil {
+				stream.next(t, "answer after ack")
+			}
 		}
-		stream.nextStatus(t, string(a2a.TaskStateCompleted))
-		stream.waitClosed(t)
+		if stream != nil {
+			stream.nextStatus(t, string(a2a.TaskStateCompleted))
+			stream.waitClosed(t)
+		}
 		after, found, err := store.TaskObservation("terminal-agent", id)
 		require.NoError(t, err)
 		require.True(t, found)
@@ -84,6 +96,7 @@ func TestA2AAnswerPostgresReopen(t *testing.T) {
 		require.Equal(t, want, got, "answer, state, timestamps and request history survive PostgreSQL reopen")
 	}
 	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", `"includeArtifacts":true`)))
+	require.Len(t, rpcTasks(t, listing), len(expected))
 	for _, task := range rpcTasks(t, listing) {
 		require.Equal(t, expected[task["id"].(string)], task)
 	}

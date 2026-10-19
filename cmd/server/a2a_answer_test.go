@@ -14,18 +14,13 @@ import (
 	"github.com/crier-dev/crier/internal/a2a"
 )
 
-func publishAgentAnswer(t *testing.T, base, taskID string) {
+func publishAgentAnswer(t *testing.T, base, agentID, taskID string) {
 	t.Helper()
 	topic, ok := a2a.TaskTopic(taskID)
 	require.True(t, ok)
 	env, err := a2a.EnvelopeFromMessage(&a2a.Message{MessageID: "answer-355", TaskID: taskID, Role: a2a.RoleAgent, Parts: []a2a.Part{a2a.TextPart("canary deployed")}})
 	require.NoError(t, err)
-	raw, err := json.Marshal(map[string]any{"topic": topic, "event": env})
-	require.NoError(t, err)
-	resp, err := publishToRelay(base, string(raw))
-	require.NoError(t, err)
-	require.Equal(t, http.StatusAccepted, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusAccepted, publishOutputAs(t, base, agentID, "", topic, env))
 }
 
 // This drives the production listener and real publish/ack routes, not an
@@ -95,7 +90,7 @@ func TestA2AAnswerObservedHTTP(t *testing.T) {
 		stream.next(t, "non-answer artifact")
 		require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, get()))
 	}
-	publishAgentAnswer(t, base, id)
+	publishAgentAnswer(t, base, agent, id)
 	stream.next(t, "agent answer artifact")
 	completed := stream.nextStatus(t, string(a2a.TaskStateCompleted))
 	require.Contains(t, terminalStatusText(t, completed), "an answer was observed")

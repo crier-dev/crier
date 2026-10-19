@@ -108,6 +108,9 @@ func registerA2ARoute(r *mux.Router, store registry.Store, deliver, patch http.H
 		opts.now = time.Now
 	}
 	h := &a2aHandler{store: store, deliver: deliver, patch: patch, relay: relaySvc, opts: opts}
+	if relaySvc != nil {
+		relaySvc.SetPublishObserver(h.recordPublishedOutput)
+	}
 	r.HandleFunc(a2a.JSONRPCBindingPath, h.handle).Methods(http.MethodPost)
 }
 
@@ -998,6 +1001,9 @@ type a2aStream struct {
 	// artifactSeq numbers the artifacts forwarded off the relay, so each has a
 	// unique artifactId within the task (§4.1.7).
 	artifactSeq int
+	// The durable answer is emitted before terminal status even if a poll
+	// wins the race with relay fanout. A forwarded answer is never emitted twice.
+	answerForwarded bool
 	// events counts what was written, for the close log.
 	events int
 	// acknowledged reads a watch registered before the first stream frame.
@@ -1222,6 +1228,11 @@ func (s *a2aStream) projectAcknowledgement() (a2a.TaskState, bool) {
 		s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
 		return "", true
 	}
+	if state == a2a.TaskStateCompleted && ev.Answered() && !s.answerForwarded {
+		if !s.emitAnswer(ev.Answer) {
+			return "", true
+		}
+	}
 	// Same state can gain acknowledgement evidence (leased WORKING -> acked
 	// WORKING); emit that evidence transition once, not just enum changes.
 	prior, _ := s.task.Metadata["crier"].(a2a.CrierMeta)
@@ -1286,6 +1297,23 @@ func (s *a2aStream) artifact(frame []byte) {
 	if err != nil || len(parts) == 0 {
 		return
 	}
+	// If this frame is the persisted answer, use its stable artifact identity
+	// and remember forwarding it. A concurrent lifecycle read may otherwise
+	// close the stream before the queued relay frame is selected.
+	if !s.answerForwarded {
+		if backend, ok := s.h.store.(registry.TaskOutputStore); ok {
+			output, found, err := backend.TaskOutput(s.target, s.task.ID)
+			var answer a2a.Artifact
+			if err == nil && found && json.Unmarshal(output.Artifact, &answer) == nil {
+				actual, actualErr := json.Marshal(parts)
+				retained, retainedErr := json.Marshal(answer.Parts)
+				if actualErr == nil && retainedErr == nil && bytes.Equal(actual, retained) {
+					s.emitAnswer(&answer)
+					return
+				}
+			}
+		}
+	}
 	s.artifactSeq++
 	event := a2a.TaskArtifactUpdateEvent{
 		TaskID:    s.task.ID,
@@ -1296,23 +1324,22 @@ func (s *a2aStream) artifact(frame []byte) {
 			Metadata:   map[string]any{"crier": map[string]any{"relay_topic": f.Topic}},
 		},
 	}
-	// Only an explicit agent-role envelope naming THIS task is answer
-	// evidence. Opaque frames, user messages and cross-task frames still stream
-	// as before, but cannot certify the receiving agent's output.
-	if env, ok := a2a.ParseEnvelope(f.Event); ok && env.Role == a2a.RoleAgent && env.TaskID == s.task.ID && f.Topic == s.topic && a2a.HasOutputParts(parts) {
-		if backend, ok := s.h.store.(registry.TaskOutputStore); ok {
-			raw, err := json.Marshal(event.Artifact)
-			if err == nil {
-				err = backend.RecordTaskOutput(s.target, registry.TaskOutput{TaskID: s.task.ID, ObservedAt: s.h.opts.now(), Artifact: raw})
-			}
-			if err != nil {
-				s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError, "the task output could not be retained: "+err.Error())))
-				return
-			}
-		}
-	}
+	// Answer persistence belongs to the publisher-aware write-through, not
+	// this subscriber: a stream has no trustworthy publishing identity.
 	s.events++
 	s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamArtifact(&event)))
+}
+
+// emitAnswer only projects already-persisted evidence; it never writes it.
+func (s *a2aStream) emitAnswer(answer *a2a.Artifact) bool {
+	s.events++
+	ok := s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamArtifact(&a2a.TaskArtifactUpdateEvent{
+		TaskID: s.task.ID, ContextID: s.context(), Artifact: *answer,
+	})))
+	if ok {
+		s.answerForwarded = true
+	}
+	return ok
 }
 
 // close logs why the stream ended. The reason names the cause rather than the

@@ -571,11 +571,20 @@ Four properties of that table are decisions, and each is stated so a client neve
 1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence (or a retained `ACKed` row) AND observed agent output; an acknowledged task with no answer stays `TASK_STATE_WORKING` and explicitly says no answer was observed (DF-CRIER-355).**
    `metadata.crier.answered` is always explicit; `answer_observed_at` is present only with actual output.
    Request history, generated status text, arbitrary progress JSON and an output for a different task
-   do not count as answers. Output is observed only when an open A2A stream receives a nonempty
-   `role: ROLE_AGENT` envelope whose `task_id` names this task on its exact `a2a.task.<id>` topic. This is
-   reported agent-role output, not a new cryptographic authorship attestation: existing relay publish
-   authorization still governs who may publish. A publication made with no observing stream is not
-   claimed as observed; the task stays WORKING and the producer may publish again while watched.
+   do not count as answers. With A2A enabled, the validated `POST /relay/publish` path synchronously
+   retains nonempty `role: ROLE_AGENT` output naming `task_id` or `taskId` on its exact
+   `a2a.task.<id>` topic, before fanout and `202` (DF-CRIER-361). Conflicting id spellings do not count.
+   No stream or background poll is required. The owning agent is the existing `X-Agent-ID` publisher:
+   its registry realm must match the publish realm (`X-Crier-Namespace`, default when omitted), and
+   its own inbox or retained lifecycle snapshot must contain the original task envelope. Foreign or
+   nonexistent tasks record nothing. Missing publisher identity records nothing either, without adding
+   an auth requirement to ordinary relay publishes (rate limiting still requires the header as before).
+   This is reported agent-role output, not cryptographic authorship: existing bearer/realm publish
+   authorization governs who may assert `X-Agent-ID`; payload metadata cannot select a different owner.
+   A storage failure returns HTTP `500` before fanout, rather than accepting an answer it discarded.
+   SSE consumers only forward artifacts/read evidence; an open stream cannot bypass these checks.
+   A stream emits the retained answer (stable `<task-id>-answer` artifact id) before its terminal
+   status even if the lifecycle read beats relay fanout, without re-emitting an answer already forwarded.
    The first qualifying artifact and its observation time are retained separately (MemoryStore lifetime,
    PostgreSQL migration 016 `a2a_task_outputs` across restart), so output before or after Ack works
    without rewriting immutable lifecycle evidence. GetTask and ListTasks join the same two records;

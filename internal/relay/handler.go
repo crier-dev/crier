@@ -203,6 +203,22 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Validate before write-through: an invalid topic must never create evidence.
+	if err := validateTopic(body.Topic); err != nil {
+		httperr.WriteJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	r.mu.RLock()
+	observer := r.publishObserver
+	r.mu.RUnlock()
+	if observer != nil {
+		if err := observer(nsName, agentID, body.Topic, body.Event); err != nil {
+			slog.Error("relay: publish observation failed", "topic", body.Topic,
+				"sender", agentID, "request_id", rid, "error", err)
+			httperr.WriteJSONError(w, http.StatusInternalServerError, "publish evidence could not be retained")
+			return
+		}
+	}
 	if err := r.PublishIn(nsName, body.Topic, body.Event); err != nil {
 		slog.Warn("relay: publish rejected", "reason", err.Error(),
 			"topic", body.Topic, "sender", agentID, "request_id", rid)

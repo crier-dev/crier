@@ -56,6 +56,19 @@ type Relay struct {
 	// (QA-CRIER-35): armed as the read deadline at subscribe, extended by
 	// every pong. 0 means defaultPongWait. SetPongWait scales it for tests.
 	pongWait time.Duration
+
+	// publishObserver is optional write-through for accepted HTTP publishes.
+	// It runs outside mu, before fanout, and is absent on a plain relay.
+	publishObserver func(namespace, agentID, topic string, event json.RawMessage) error
+}
+
+// SetPublishObserver installs a synchronous HTTP-publish observer. An error
+// prevents fanout and the 202 response, so persistence cannot fail silently.
+// Direct Publish/PublishIn calls have no publisher identity and do not observe.
+func (r *Relay) SetPublishObserver(observer func(namespace, agentID, topic string, event json.RawMessage) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.publishObserver = observer
 }
 
 // namespaceSep separates the realm from the topic in the relay's internal
