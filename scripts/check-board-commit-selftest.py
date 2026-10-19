@@ -24,6 +24,13 @@ def main():
     failures = 0
     with tempfile.TemporaryDirectory(prefix='check-board-commits.') as temporary:
         root = Path(temporary)
+        global_hooks = root / 'global-hooks'
+        global_config = root / 'global.gitconfig'
+        subprocess.run(
+            ('git', 'config', '--file', str(global_config),
+             'core.hooksPath', str(global_hooks)),
+            check=True,
+        )
         tools = root / 'bin'
         tools.mkdir()
         stub = tools / 'gitreins'
@@ -34,7 +41,7 @@ def main():
         for key in list(env):
             if key.startswith('GIT_'):
                 del env[key]
-        env.update(GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1',
+        env.update(GIT_CONFIG_GLOBAL=str(global_config), GIT_CONFIG_NOSYSTEM='1',
                    GIT_AUTHOR_NAME='board selftest', GIT_COMMITTER_NAME='board selftest',
                    GIT_AUTHOR_EMAIL='selftest@example.invalid',
                    GIT_COMMITTER_EMAIL='selftest@example.invalid',
@@ -53,6 +60,14 @@ def main():
         def seed_commit(repo, message):
             git(repo, 'add', '.')
             git(repo, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', message)
+
+        def hooks_snapshot(repo):
+            hooks = repo / '.git/hooks'
+            return [
+                (str(path.relative_to(hooks)), path.stat().st_mode & 0o777,
+                 path.read_bytes())
+                for path in sorted(hooks.rglob('*')) if path.is_file()
+            ]
 
         def fixture(name):
             repo = root / name
@@ -117,28 +132,69 @@ def main():
         expect('whole index includes staged topology-A header, not its worktree repair',
                git(repo, 'commit', '-qm', 'invalid header', check=False), 1, 'board.jsonl')
 
+        unrelated = root / 'unrelated'
+        unrelated.mkdir()
+        git(unrelated, 'init', '-q', '-b', 'main')
+        (unrelated / 'plain.txt').write_text('base\n')
+        seed_commit(unrelated, 'unrelated base')
+        unrelated_hooks_before = hooks_snapshot(unrelated)
+        assert not (unrelated / 'scripts/check-board.sh').exists()
+
         repo = fixture('installer')
-        # Even with pre-commit already identical, install the other entrypoints
-        # into the effective hooksPath, not the inactive .git/hooks directory.
-        for hook in ('pre-merge-commit', 'pre-applypatch'):
-            (repo / '.hooks' / hook).unlink(missing_ok=True)
+        # Expose the isolated inherited hooksPath that caused DF-CRIER-412. The
+        # installer must replace it only for crier, never write into it.
+        git(repo, 'config', '--unset', 'core.hooksPath')
+        effective = git(repo, 'config', '--get', 'core.hooksPath').stdout.strip()
+        assert effective == str(global_hooks)
         result = run(repo, 'make', '--no-print-directory', '-f', str(source / 'Makefile'),
                      'install-hooks')
-        expect('installer fills merge/applypatch beside identical pre-commit', result, 0)
+        expect('installer ignores inherited global hooksPath', result, 0,
+               'repository-scoped hooks active')
+        installed_hooks = repo / '.git/hooks'
         for hook in ('pre-commit', 'pre-merge-commit', 'pre-applypatch'):
-            installed = repo / '.hooks' / hook
+            installed = installed_hooks / hook
             tracked = source / 'scripts/hooks' / hook
             if (not installed.is_file() or not tracked.is_file()
                     or installed.read_bytes() != tracked.read_bytes()
                     or not os.access(installed, os.X_OK)):
-                print(f'commit selftest: installer missing/incorrect {hook}: FAIL')
+                print(f'commit selftest: repository-local installer missing/incorrect {hook}: FAIL')
                 failures += 1
+        configured = git(repo, 'config', '--local', '--get', 'core.hooksPath',
+                         check=False)
+        if (configured.returncode != 0
+                or configured.stdout.strip() != str(installed_hooks.resolve())):
+            print('commit selftest: local core.hooksPath does not select repository hooks: FAIL')
+            failures += 1
+        else:
+            print('commit selftest: local core.hooksPath selects repository hooks: PASS')
+        if global_hooks.exists() and any(global_hooks.iterdir()):
+            print('commit selftest: inherited global hooksPath was modified: FAIL')
+            failures += 1
+        else:
+            print('commit selftest: inherited global hooksPath untouched: PASS')
+        if hooks_snapshot(unrelated) != unrelated_hooks_before:
+            print('commit selftest: unrelated repository .git/hooks changed: FAIL')
+            failures += 1
+        else:
+            print('commit selftest: unrelated repository .git/hooks untouched: PASS')
+        (unrelated / 'plain.txt').write_text('after crier install\n')
+        git(unrelated, 'add', 'plain.txt')
+        expect('unrelated repository without crier checker still commits',
+               git(unrelated, 'commit', '-qm', 'unrelated change', check=False), 0)
+
         result = run(repo, 'make', '--no-print-directory', '-f', str(source / 'Makefile'),
                      'install-hooks')
-        expect('installer repeat is idempotent', result, 0)
+        expect('repository-local installer repeat is idempotent', result, 0,
+               'repository-scoped hooks active')
         if result.stdout.count('already installed') != 3:
-            print('commit selftest: all three hooks must be idempotent: FAIL')
+            print('commit selftest: all three repository-local hooks must be idempotent: FAIL')
             failures += 1
+
+        (repo / 'scripts/check-board.sh').unlink()
+        probe(repo)
+        expect('repository-local crier hook stays fail-closed without checker',
+               git(repo, 'commit', '-qm', 'missing checker', check=False), 1,
+               'UNAVAILABLE')
 
         repo = fixture('deleted-index-repaired-worktree')
         path = '.coding-hermes/board/tasks.jsonl'

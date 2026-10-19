@@ -599,8 +599,10 @@ mcp-stdout-selftest:
 judge-diff-class-selftest:
 	bash scripts/lib/judge-diff-class-selftest.sh
 
-# DF-CRIER-403/408: install all three entrypoints, resolving core.hooksPath via
-# git rev-parse --git-path hooks. No repo-local inert twin is rewritten.
+# DF-CRIER-403/408/412: install all three entrypoints in this repository's own
+# Git hooks directory. Inherited core.hooksPath configuration is deliberately
+# ignored: installing crier's strict board gate into a shared/global hooks path
+# would make unrelated repositories depend on crier's scripts/check-board.sh.
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target
 # puts it in place. Idempotent: re-running when the installed hook is already
@@ -617,9 +619,10 @@ judge-diff-class-selftest:
 # removed AFTER the new backup is written, so the target can never make the
 # situation worse if the prune fails.
 install-hooks:
-	@root="$$(git rev-parse --show-toplevel 2>/dev/null || echo '$(CURDIR)')"; \
-	hooks_dir="$$(git rev-parse --git-path hooks 2>/dev/null || echo .git/hooks)"; \
-	case "$$hooks_dir" in /*) ;; *) hooks_dir="$$root/$$hooks_dir" ;; esac; \
+	@root="$$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "install-hooks: ERROR: not inside a Git repository"; exit 1; }; \
+	git_common_dir="$$(git rev-parse --git-common-dir 2>/dev/null)" || { echo "install-hooks: ERROR: cannot resolve repository Git directory"; exit 1; }; \
+	case "$$git_common_dir" in /*) ;; *) git_common_dir="$$root/$$git_common_dir" ;; esac; \
+	hooks_dir="$$git_common_dir/hooks"; \
 	mkdir -p "$$hooks_dir" || exit 1; \
 	for hook in pre-commit pre-merge-commit pre-applypatch; do \
 	src="$$root/scripts/hooks/$$hook"; \
@@ -646,7 +649,9 @@ install-hooks:
 	chmod +x "$$dst" || exit 1; \
 	cmp -s "$$src" "$$dst" || { echo "install-hooks: ERROR: installed hook is not byte-identical to $$src"; exit 1; }; \
 	echo "install-hooks: installed $$dst (byte-identical copy of scripts/hooks/$$hook)"; \
-	done
+	done; \
+	git config --local core.hooksPath "$$hooks_dir" || { echo "install-hooks: ERROR: cannot set repository-local core.hooksPath"; exit 1; }; \
+	echo "install-hooks: repository-scoped hooks active at $$hooks_dir (local core.hooksPath; inherited global paths ignored)"
 
 # RELEASE-001: v0.1.0-rc1 was cut by hand — `git tag -a` typed directly on main,
 # the gates run ad hoc, and neither a changelog nor the procedure written down
