@@ -9,7 +9,7 @@ package main
 //
 //	undelivered (stored)  → TASK_STATE_SUBMITTED
 //	retrieved (leased)    → TASK_STATE_WORKING
-//	acknowledged          → the entry is REMOVED; a later read is TaskNotFoundError
+//	unobserved ack        → entry REMOVED; no retained observation is TaskNotFoundError
 //	TTL elapsed           → TASK_STATE_FAILED
 //	TTL elapsed + swept   → TASK_STATE_FAILED, from the sweep's own record
 //	canceled              → TASK_STATE_CANCELED, the lease released and the entry closed
@@ -315,10 +315,10 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 		t.Fatalf("GetTask after an ack = %d (%s), want %d TaskNotFoundError: crier's ack REMOVES the entry and keeps no tombstone, so a completed task is not re-readable — the answer must not be an invented TASK_STATE_COMPLETED",
 			code, message, a2a.CodeTaskNotFoundError)
 	}
-	if !strings.Contains(message, "no tombstone") {
-		t.Errorf("the TaskNotFoundError must state why (no tombstone / completed and purged): %q", message)
+	if !strings.Contains(message, "no retained inbox, failure or observation record") {
+		t.Errorf("the TaskNotFoundError must state why (no retained observation / completed and purged): %q", message)
 	}
-	tr.step("ack → entry removed", "GetTask = -32001 TaskNotFoundError: the entry is removed and no tombstone is kept, so a completed task is not re-readable (the spec's \"already completed or purged\"); no invented TASK_STATE_COMPLETED")
+	tr.step("ack → entry removed", "GetTask = -32001 TaskNotFoundError: no stream observed the ack, so no terminal observation was retained; no invented TASK_STATE_COMPLETED")
 
 	status, body, _ = a2aRPC(t, client, base, listTasksBody(a2aLifecycleTenant, ""))
 	if status != http.StatusOK {

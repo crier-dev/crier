@@ -558,8 +558,9 @@ type MemoryStore struct {
 	// pre-lease), but stamping through a copy would not reach the stored
 	// row, and a map keyed by id survives an entry being leased, acked or
 	// replaced without racing a concurrent reader of the entry struct.
-	deliveryMs      map[string]int64
-	serviceReceipts map[string]ServiceDeliveryReceipt
+	deliveryMs       map[string]int64
+	serviceReceipts  map[string]ServiceDeliveryReceipt
+	taskObservations map[inboxAckKey]TaskObservation
 }
 
 // Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020) for

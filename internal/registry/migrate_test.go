@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 14, version, "should reflect migration 014 for durable protected-delivery receipts")
+	assert.Equal(t, 15, version, "should reflect migration 015 for retained A2A observations")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
@@ -86,16 +86,16 @@ func TestMigration014DownAndUpRoundTrip(t *testing.T) {
 	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
 	require.NoError(t, err)
 	require.NoError(t, m.Up())
-	require.NoError(t, m.Steps(-1))
+	require.NoError(t, m.Steps(-2))
 	var exists bool
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('public.service_delivery_receipts') IS NOT NULL`).Scan(&exists))
 	require.False(t, exists)
-	require.NoError(t, m.Steps(1))
+	require.NoError(t, m.Steps(2))
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('public.service_delivery_receipts') IS NOT NULL`).Scan(&exists))
 	require.True(t, exists)
 	version, dirty, err := m.Version()
 	require.NoError(t, err)
-	require.Equal(t, uint(14), version)
+	require.Equal(t, uint(15), version)
 	require.False(t, dirty)
 }
 
@@ -263,7 +263,7 @@ func openTestDB(ctx context.Context, t *testing.T) *sql.DB {
 func clearSchema(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.ExecContext(ctx, `
-		DROP TABLE IF EXISTS service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;
+		DROP TABLE IF EXISTS a2a_task_observations, service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;
 	`)
 	require.NoError(t, err)
 }

@@ -505,7 +505,7 @@ func TestTaskLifecycleRefusals(t *testing.T) {
 	if notFound.Code != CodeTaskNotFoundError {
 		t.Errorf("TaskNotFoundError code = %d, want %d", notFound.Code, CodeTaskNotFoundError)
 	}
-	if !strings.Contains(notFound.Message, "no tombstone") ||
+	if !strings.Contains(notFound.Message, "no retained inbox, failure or observation record") ||
 		!strings.Contains(notFound.Message, "completed and purged") {
 		t.Errorf("TaskNotFoundError must state WHY a purged task has no state: %q", notFound.Message)
 	}

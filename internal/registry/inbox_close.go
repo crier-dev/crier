@@ -56,7 +56,10 @@ func (s *MemoryStore) CloseEntry(agentID, messageID string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.closeEntryLocked(agentID, messageID)
+}
 
+func (s *MemoryStore) closeEntryLocked(agentID, messageID string) error {
 	if _, ok := s.agents[agentID]; !ok {
 		return fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}

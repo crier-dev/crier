@@ -11,14 +11,10 @@
 // Two rules shape everything here, because this is where an interop adapter
 // most easily lies about state:
 //
-//  1. a state is asserted only from a record crier actually holds. The entry is
-//     one record; the expiry sweep's dead letter is another. Where crier holds
-//     neither — the message was acknowledged and removed, or never existed at
-//     all — the honest answer is TaskNotFoundError, which the specification
-//     itself defines for a task that is "invalid, expired, or already completed
-//     and purged" (§3.3.2). Inventing COMPLETED for it would report a state for
-//     a task that may equally have been purged, transferred to another inbox,
-//     or never delivered.
+//  1. a state is asserted only from a record crier actually holds: an inbox
+//     entry, expiry sweep record or retained observation. Absence alone never
+//     proves completion. An unobserved ack remains indistinguishable from an
+//     unrelated removal; a known disappearance is UNSPECIFIED, not COMPLETED.
 //  2. the mapping is a pure function of the evidence, so it is testable without
 //     a server and cannot drift from the table the spec publishes.
 package a2a
@@ -79,8 +75,10 @@ const (
 	StateBasisClosed = "inbox-entry-closed"
 	// StateBasisDeadLetter — the expiry sweep's durable failure record.
 	StateBasisDeadLetter = "dead-letter-recorded"
-	// StateBasisCanceled — a successful CancelTask recorded by this process.
-	StateBasisCanceled = "canceled-by-request"
+	// StateBasisCanceled — a successful CancelTask recorded by the inbox backend.
+	StateBasisCanceled     = "canceled-by-request"
+	StateBasisAcknowledged = "acknowledgement-observed"
+	StateBasisUnknown      = "removed-outcome-unknown"
 )
 
 // ---------------------------------------------------------------------------
@@ -291,17 +289,19 @@ func (v InboxView) expired(now time.Time) bool {
 // TaskEvidence is everything crier can prove about ONE task id: the inbox entry
 // it holds (nil when it holds none) and the expiry sweep's durable failure
 // record, if that sweep ever removed the message. Successful cancellations
-// additionally retain their pre-close Entry snapshot and CanceledAt in memory.
+// retain their pre-close Entry snapshot and CanceledAt in the inbox backend.
 //
-// Both facts are needed because crier's store keeps no tombstone: an entry that
-// is gone was either acknowledged (and is unobservable — "completed and purged"
-// in the specification's own words for TaskNotFoundError) or swept after its
-// TTL, and only the second of those leaves a record behind.
+// Observations retain their entry snapshot after removal, so identity, context,
+// history and the terminal timestamp do not depend on an open stream.
 type TaskEvidence struct {
 	Entry *InboxView
-	// CanceledAt records a successful CancelTask in this serving process.
+	// CanceledAt records an actual successful CancelTask.
 	// Entry retains the pre-close snapshot for the task identity and history.
 	CanceledAt time.Time
+	// AcknowledgedAt is a successful acknowledgement actually observed by a stream.
+	AcknowledgedAt time.Time
+	// RemovedAt records disappearance, not completion, with the known task snapshot.
+	RemovedAt time.Time
 	// DeadLetteredAt is when the expiry sweep recorded this message as a dead
 	// letter, zero when it recorded nothing.
 	DeadLetteredAt time.Time
@@ -325,6 +325,9 @@ func (e TaskEvidence) TaskID() string {
 //
 // The table, in the order the cases are decided (and asserted in tests):
 //
+//	observed acknowledgement       → TASK_STATE_COMPLETED   [acknowledgement-observed]
+//	observed cancellation          → TASK_STATE_CANCELED    [canceled-by-request]
+//	observed unexplained removal   → TASK_STATE_UNSPECIFIED [removed-outcome-unknown]
 //	entry present, closed (ACKed)  → TASK_STATE_COMPLETED   [inbox-entry-closed]
 //	entry present, TTL elapsed     → TASK_STATE_FAILED      [inbox-entry-ttl-elapsed-unacked]
 //	entry present, leased          → TASK_STATE_WORKING     [inbox-entry-leased]
@@ -347,6 +350,15 @@ func (e TaskEvidence) TaskID() string {
 func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState, string, *RPCError) {
 	if !e.CanceledAt.IsZero() {
 		return TaskStateCanceled, StateBasisCanceled, nil
+	}
+	if !e.AcknowledgedAt.IsZero() {
+		return TaskStateCompleted, StateBasisAcknowledged, nil
+	}
+	if !e.DeadLetteredAt.IsZero() {
+		return TaskStateFailed, StateBasisDeadLetter, nil
+	}
+	if !e.RemovedAt.IsZero() {
+		return TaskStateUnspecified, StateBasisUnknown, nil
 	}
 	if e.Entry != nil {
 		switch {
@@ -375,6 +387,12 @@ func (e TaskEvidence) StatusTimestamp(now time.Time) time.Time {
 	switch {
 	case !e.CanceledAt.IsZero():
 		return e.CanceledAt
+	case !e.AcknowledgedAt.IsZero():
+		return e.AcknowledgedAt
+	case !e.DeadLetteredAt.IsZero():
+		return e.DeadLetteredAt
+	case !e.RemovedAt.IsZero():
+		return e.RemovedAt
 	case e.Entry == nil:
 		return e.DeadLetteredAt
 	case e.Entry.expired(now):
@@ -419,7 +437,8 @@ func (e TaskEvidence) Task(state TaskState, basis string, historyLength *int, no
 				}
 			}
 		}
-	} else {
+	}
+	if !e.DeadLetteredAt.IsZero() {
 		meta.DeadLetteredAt = formatTimestamp(e.DeadLetteredAt)
 	}
 
@@ -460,7 +479,7 @@ func statusMessage(state TaskState, e TaskEvidence, contextID string) *Message {
 	var text string
 	switch state {
 	case TaskStateFailed:
-		if e.Entry != nil {
+		if e.Entry != nil && e.DeadLetteredAt.IsZero() {
 			text = fmt.Sprintf(
 				"the message's TTL elapsed unacknowledged at %s: every consumption path skips an expired entry, so the message can no longer be retrieved and the task cannot complete",
 				formatTimestamp(e.Entry.ExpiresAt))
@@ -469,6 +488,8 @@ func statusMessage(state TaskState, e TaskEvidence, contextID string) *Message {
 				"the message expired unacknowledged and was removed from the inbox by the expiry sweep, which recorded it as a dead letter at %s",
 				formatTimestamp(e.DeadLetteredAt))
 		}
+	case TaskStateUnspecified:
+		text = "the inbox entry was removed; no acknowledgement or cancellation was observed, so the task outcome is unknown"
 	case TaskStateCompleted:
 		text = "the message was acknowledged: the inbox entry is closed and can no longer be retrieved"
 	case TaskStateCanceled:
@@ -682,14 +703,8 @@ func contextIDOf(item ListItem) string {
 // The refusals this row adds (§5.5)
 // ---------------------------------------------------------------------------
 
-// TaskNotFoundError is -32001 for a task id crier holds NO record of.
-//
-// The message states the reason, because this answer is the one an interop
-// client is most likely to misread as a failure of the request: crier's ack
-// permanently removes an acknowledged entry (DF-CRIER-32) and keeps no
-// tombstone, so an acknowledged task is not re-readable — which is exactly the
-// case the specification's own definition of this error names ("invalid,
-// expired, or already completed and purged", §3.3.2).
+// TaskNotFoundError is -32001 for a task with no inbox, dead-letter or retained
+// observation record. Missing evidence never licenses an invented outcome.
 func TaskNotFoundError(id, agentID string) *RPCError {
 	var what string
 	switch {
@@ -701,7 +716,7 @@ func TaskNotFoundError(id, agentID string) *RPCError {
 		what = fmt.Sprintf("task %q is not in agent %q's inbox and this relay holds no failure record for it", id, agentID)
 	}
 	return NewRPCError(CodeTaskNotFoundError,
-		what+": crier's ack permanently removes an acknowledged message and keeps no tombstone, so an acknowledged task is not re-readable — the A2A specification defines TaskNotFoundError for a task that is invalid, expired, or already completed and purged. A client that needs to observe the terminal state does so while the task still exists (a stream, or the ack's own answer)",
+		what+": no retained inbox, failure or observation record exists. An unobserved ack removes the entry without proving a terminal state to this adapter; retained observations survive streams and, with PostgreSQL, restart. The task may be invalid, expired, or already completed and purged",
 		ErrorInfo{Type: ErrorInfoType, Reason: ReasonTaskNotFound, Domain: ErrorDomain,
 			Metadata: map[string]string{"taskId": id, "tenant": agentID}})
 }
