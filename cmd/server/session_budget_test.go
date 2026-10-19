@@ -61,6 +61,7 @@ func testSessionFanoutBudget(t *testing.T, allHang bool) {
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": t.TempDir(),
 		"CR_GROUP_ROOT": t.TempDir(), "CR_GUARD_ENABLED": "false",
+		"CR_REQUIRE_AGENT_SIG":           "false", // unsigned fixture tests fanout budgets, not identity
 		"CR_SESSION_DELIVERY_TIMEOUT_MS": "400", "RUNTIME_TIMEOUT_MS": "100",
 	})
 	members := []map[string]string{}

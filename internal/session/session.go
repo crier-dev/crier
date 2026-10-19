@@ -296,6 +296,9 @@ type Message struct {
 	Audience       Audience          `json:"audience"`
 	Outcomes       []DeliveryOutcome `json:"outcomes,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	// SenderIdentityBasis is server-stamped ingress assurance, never payload
+	// metadata. Empty means historical/internal provenance was not recorded.
+	SenderIdentityBasis string `json:"sender_identity_basis,omitempty"`
 	// Seq is the ordering authority within the session; ts is display and
 	// correlation (§3.1). A client must never order by created_at alone.
 	Seq       int64     `json:"seq"`
@@ -521,16 +524,17 @@ func (st *State) findContextShare(mt MemberType, id string) *MemberContext {
 
 func (st *State) upsertMessage(rec *Record) {
 	m := &Message{
-		ID:             rec.MessageID,
-		ThreadID:       rec.ThreadID,
-		ParentID:       rec.ParentID,
-		SessionID:      rec.SessionID,
-		Kind:           rec.MessageKind,
-		Payload:        rec.Payload,
-		Outcomes:       rec.Outcomes,
-		IdempotencyKey: rec.IdempotencyKey,
-		Seq:            rec.Seq,
-		CreatedAt:      rec.TS,
+		ID:                  rec.MessageID,
+		ThreadID:            rec.ThreadID,
+		ParentID:            rec.ParentID,
+		SessionID:           rec.SessionID,
+		Kind:                rec.MessageKind,
+		Payload:             rec.Payload,
+		Outcomes:            rec.Outcomes,
+		IdempotencyKey:      rec.IdempotencyKey,
+		SenderIdentityBasis: rec.SenderIdentityBasis,
+		Seq:                 rec.Seq,
+		CreatedAt:           rec.TS,
 	}
 	if rec.Task != nil {
 		ct := *rec.Task

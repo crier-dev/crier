@@ -93,7 +93,7 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req postTaskRequest
-	if !decodeBody(w, r, &req) {
+	if !decodeSendBody(w, r, &req) {
 		return
 	}
 	if h.opts.Deliverer == nil {
@@ -109,6 +109,11 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, "AUTHOR_REQUIRED",
 			"sender (an agent id), or principal_id (optionally with as_agent), is required: a task records its author")
+		return
+	}
+
+	basis, allowed := h.authorizeSender(w, r, author)
+	if !allowed {
 		return
 	}
 
@@ -191,12 +196,13 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	now := h.now()
 	msg := &Message{
-		ID:        msgID,
-		SessionID: sess.ID,
-		Kind:      MessageTask,
-		Author:    author,
-		Payload:   req.Payload,
-		CreatedAt: now,
+		SenderIdentityBasis: basis,
+		ID:                  msgID,
+		SessionID:           sess.ID,
+		Kind:                MessageTask,
+		Author:              author,
+		Payload:             req.Payload,
+		CreatedAt:           now,
 		Task: Task{
 			ID:        taskID,
 			State:     TaskOpen,
@@ -388,7 +394,7 @@ func (h *Handler) transitionTask(w http.ResponseWriter, r *http.Request, to Task
 	vars := mux.Vars(r)
 	taskID := vars["task_id"]
 	var req taskTransitionRequest
-	if !decodeBody(w, r, &req) {
+	if !decodeSendBody(w, r, &req) {
 		return
 	}
 	taskMsg, task, found := h.findTask(r, sess, taskID)
@@ -414,6 +420,11 @@ func (h *Handler) transitionTask(w http.ResponseWriter, r *http.Request, to Task
 	if actor.IsZero() {
 		writeAPIError(w, http.StatusBadRequest, "AUTHOR_REQUIRED",
 			"actor (an agent id, or principal_id with actor_kind=principal) is required: a transition records who made it")
+		return
+	}
+
+	basis, allowed := h.authorizeSender(w, r, actor)
+	if !allowed {
 		return
 	}
 
@@ -506,15 +517,16 @@ func (h *Handler) transitionTask(w http.ResponseWriter, r *http.Request, to Task
 		return
 	}
 	msg := &Message{
-		ID:        msgID,
-		ParentID:  taskMsg.ID,
-		ThreadID:  taskMsg.ThreadID, // a reply STAYS in the task's thread (D11)
-		SessionID: sess.ID,
-		Kind:      MessageTask,
-		Author:    actor,
-		Payload:   req.Payload,
-		CreatedAt: updated.UpdatedAt,
-		Task:      updated,
+		SenderIdentityBasis: basis,
+		ID:                  msgID,
+		ParentID:            taskMsg.ID,
+		ThreadID:            taskMsg.ThreadID, // a reply STAYS in the task's thread (D11)
+		SessionID:           sess.ID,
+		Kind:                MessageTask,
+		Author:              actor,
+		Payload:             req.Payload,
+		CreatedAt:           updated.UpdatedAt,
+		Task:                updated,
 	}
 	if msg.Payload == nil {
 		msg.Payload = json.RawMessage(`{}`)
@@ -580,7 +592,8 @@ type taskView struct {
 	TaskID string `json:"task_id"`
 	State  string `json:"state"`
 	// Owner names who holds the claimed task; absent while open.
-	Owner string `json:"owner,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	OwnerKind string `json:"owner_kind,omitempty"`
 	// Unclaimed work stays open and advertises its explicit claim route.
 	ClaimStatus string `json:"claim_status"`
 	ClaimURL    string `json:"claim_url,omitempty"`
@@ -626,6 +639,10 @@ func tasksInState(st *State) []taskView {
 		}
 		v.State = string(m.Task.State)
 		v.Owner = m.Task.Owner
+		v.OwnerKind = ""
+		if v.Owner != "" {
+			v.OwnerKind = taskActorKind(m.Author)
+		}
 		v.ClaimStatus = "claimed"
 		v.ClaimURL = ""
 		if m.Task.Owner == "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -30,7 +31,7 @@ func hasMessageRequestMetadata(rec *Record) bool {
 	if rec.Type != RecordMessage && rec.Type != RecordThreadReply {
 		return false
 	}
-	if rec.IdempotencyKey != "" {
+	if rec.IdempotencyKey != "" || rec.SenderIdentityBasis != "" {
 		return true
 	}
 	for _, o := range rec.Outcomes {
@@ -42,7 +43,7 @@ func hasMessageRequestMetadata(rec *Record) bool {
 }
 
 func (s *SQLStore) projectMessageRequest(ctx context.Context, rec *Record) error {
-	outcomes, err := json.Marshal(rec.Outcomes)
+	outcomes, err := marshalMessageRequest(rec)
 	if err != nil {
 		return err
 	}
@@ -54,7 +55,7 @@ func (s *SQLStore) projectMessageRequest(ctx context.Context, rec *Record) error
 }
 
 func (s *PostgresStore) projectMessageRequest(ctx context.Context, rec *Record) error {
-	outcomes, err := json.Marshal(rec.Outcomes)
+	outcomes, err := marshalMessageRequest(rec)
 	if err != nil {
 		return err
 	}
@@ -65,6 +66,18 @@ func (s *PostgresStore) projectMessageRequest(ctx context.Context, rec *Record) 
 	return err
 }
 
+// Preserve the legacy array encoding for old records. New identity-bearing
+// records use an envelope in the SAME metadata column: no schema migration.
+func marshalMessageRequest(rec *Record) ([]byte, error) {
+	if rec.SenderIdentityBasis == "" {
+		return json.Marshal(rec.Outcomes)
+	}
+	return json.Marshal(struct {
+		Outcomes            []DeliveryOutcome `json:"outcomes"`
+		SenderIdentityBasis string            `json:"sender_identity_basis"`
+	}{rec.Outcomes, rec.SenderIdentityBasis})
+}
+
 func restoreMessageRequest(messages []*Message, id, key, raw string) error {
 	for _, m := range messages {
 		if m.ID != id {
@@ -72,7 +85,17 @@ func restoreMessageRequest(messages []*Message, id, key, raw string) error {
 		}
 		m.IdempotencyKey = key
 		var outcomes []DeliveryOutcome
-		if err := json.Unmarshal([]byte(raw), &outcomes); err != nil {
+		if strings.HasPrefix(strings.TrimSpace(raw), "{") {
+			var metadata struct {
+				Outcomes            []DeliveryOutcome `json:"outcomes"`
+				SenderIdentityBasis string            `json:"sender_identity_basis"`
+			}
+			if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+				return fmt.Errorf("load message request metadata: %w", err)
+			}
+			outcomes = metadata.Outcomes
+			m.SenderIdentityBasis = metadata.SenderIdentityBasis
+		} else if err := json.Unmarshal([]byte(raw), &outcomes); err != nil {
 			return fmt.Errorf("load message request outcomes: %w", err)
 		}
 		// Keep the delivery projection authoritative for lifecycle changes;

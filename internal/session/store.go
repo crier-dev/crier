@@ -91,12 +91,13 @@ type Record struct {
 	MessageKind MessageKind `json:"message_kind,omitempty"`
 	// Task is the task lifecycle payload (CR-CHAT-030, §3.7) — present on
 	// `task`-kind message records only, and required there (§3.7 coherence).
-	Task           *Task             `json:"task,omitempty"`
-	Author         *AuthorRef        `json:"author,omitempty"`
-	Payload        json.RawMessage   `json:"payload,omitempty"`
-	Audience       *Audience         `json:"audience,omitempty"`
-	Outcomes       []DeliveryOutcome `json:"outcomes,omitempty"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	Task                *Task             `json:"task,omitempty"`
+	Author              *AuthorRef        `json:"author,omitempty"`
+	Payload             json.RawMessage   `json:"payload,omitempty"`
+	Audience            *Audience         `json:"audience,omitempty"`
+	Outcomes            []DeliveryOutcome `json:"outcomes,omitempty"`
+	IdempotencyKey      string            `json:"idempotency_key,omitempty"`
+	SenderIdentityBasis string            `json:"sender_identity_basis,omitempty"`
 
 	// --- session.thread.branch ---
 	ParentThreadID  string `json:"parent_thread_id,omitempty"`
@@ -433,21 +434,22 @@ func (m *Message) Record() *Record {
 		task = &ct
 	}
 	return &Record{
-		V:              RecordFormatVersion,
-		Type:           typ,
-		SessionID:      m.SessionID,
-		Seq:            m.Seq,
-		TS:             m.CreatedAt.UTC(),
-		MessageID:      m.ID,
-		ThreadID:       threadID,
-		ParentID:       m.ParentID,
-		MessageKind:    m.Kind,
-		Task:           task,
-		Author:         &author,
-		Payload:        m.Payload,
-		Audience:       &aud,
-		Outcomes:       m.Outcomes,
-		IdempotencyKey: m.IdempotencyKey,
+		V:                   RecordFormatVersion,
+		Type:                typ,
+		SessionID:           m.SessionID,
+		Seq:                 m.Seq,
+		TS:                  m.CreatedAt.UTC(),
+		MessageID:           m.ID,
+		ThreadID:            threadID,
+		ParentID:            m.ParentID,
+		MessageKind:         m.Kind,
+		Task:                task,
+		Author:              &author,
+		Payload:             m.Payload,
+		Audience:            &aud,
+		Outcomes:            m.Outcomes,
+		IdempotencyKey:      m.IdempotencyKey,
+		SenderIdentityBasis: m.SenderIdentityBasis,
 	}
 }
 

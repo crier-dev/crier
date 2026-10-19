@@ -172,6 +172,7 @@ main { min-width:0; display:flex; flex-direction:column; }
       </div>
     </form>
     <p id="composer-hint" class="note composer-hint">A tag addresses; it never executes. Recipient selects delivery. Only “Explicit task” requests work. Replies stay in their recorded thread. Ctrl/⌘ + Enter sends.</p>
+    <p id="sender-authority" class="note composer-hint" role="status">Send authority: unknown until runtime posture is read. This browser cannot sign agent requests. Acting ID is attribution, not key verification; browser authentication is an open owner decision (DF-CRIER-333).</p>
     <p id="composer-why" class="gate" role="status" hidden></p>
     <p id="audience-warning" class="gate" role="status" hidden></p>
     <p id="send-result" role="status" aria-live="polite"></p>
@@ -207,6 +208,8 @@ const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" 
 const canonicalRealm = name => name === "default" ? "" : name || "";
 const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, agent:"", namespace:"" };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
+const taskDrafts = new Map(), taskNotices = new Map();
+const taskKey = taskID => state.current + "/" + taskID;
 const ATTRIBUTION_KEY = "crier.chat.attribution-id";
 function forgetAttribution() {
   try {
@@ -314,7 +317,12 @@ function updateComposer() {
   if (w) { w.textContent = why; w.hidden = !why; }
   $("send-button").title = why;
   for (const id of ["participant-agent","add-participant"]) { $(id).disabled = !enabled; $(id).title = why; }
-  for (const button of document.querySelectorAll("[data-task-action]")) { button.disabled = !enabled; button.title = why; }
+  for (const button of document.querySelectorAll("[data-task-action]")) {
+    const ownerMismatch = button.dataset.taskAction === "complete" && (button.dataset.taskOwner !== state.agent || button.dataset.taskOwnerKind !== "agent");
+    button.disabled = !enabled || ownerMismatch;
+    button.title = why || (ownerMismatch ? "Only the claimed owner (same actor kind) can complete this task." : button.dataset.taskAction === "complete" ? "Evidence is required to complete this task." : "");
+  }
+  for (const input of document.querySelectorAll("[data-task-evidence]")) input.disabled = !enabled;
   const g = $("identity-gate");
   if (g) g.hidden = !!state.agent;
 }
@@ -344,7 +352,7 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
@@ -364,22 +372,35 @@ function renderPermissions(body) {
   $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + (body.actions || Object.keys(r.allowed || {})).map(a => '<span class="pill ' + (r.allowed?.[a] === true ? 'mint' : '') + '">' + esc(a) + ': ' + (r.allowed?.[a] === true ? 'allowed' : r.allowed && typeof r.allowed === 'object' ? 'denied' : 'unknown') + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
 }
 function renderTasks(body) {
-  $("tasks").innerHTML = (body.tasks || []).map(t => {
-    const action = t.state === "open" ? '<button type="button" data-task-action="claim"'
-      : t.state === "claimed" || t.state === "running" ? '<button type="button" data-task-action="complete"' : "";
-    const control = action ? action + ' data-task-id="' + esc(t.task_id) + '" aria-describedby="composer-why">' + (t.state === "open" ? 'Claim' : 'Complete') + '</button>' : "";
-    return '<div class="card"><button type="button" class="task-link ghost" data-thread="' + esc(t.thread_id) + '"><span class="pill warning">' + esc(t.state) + '</span><p><strong>' + esc(t.task_id) + '</strong></p><p class="note">Owner: ' + esc(t.owner || "unassigned") + '</p><p class="note">Updated ' + esc(stamp(t.updated_at)) + '</p><p class="note">Open task thread</p></button><div class="actions">' + control + '</div></div>';
+  const html = (body.tasks || []).map(t => {
+    const active = t.state === "claimed" || t.state === "running", key = taskKey(t.task_id);
+    const inputID = "task-evidence-" + t.task_id, resultID = "task-result-" + t.task_id;
+    const control = t.state === "open"
+      ? '<button type="button" data-task-action="claim" data-task-id="' + esc(t.task_id) + '">Claim</button>'
+      : active ? '<label>Completion evidence (required)<textarea rows="2" id="' + esc(inputID) + '" data-task-evidence="' + esc(t.task_id) + '" aria-required="true" placeholder="Describe the result or link the verified artifact">' + esc(taskDrafts.get(key) || "") + '</textarea></label><button type="button" data-task-action="complete" data-task-id="' + esc(t.task_id) + '" data-task-owner="' + esc(t.owner || "") + '" data-task-owner-kind="' + esc(t.owner_kind || "unknown") + '" aria-describedby="' + esc(inputID) + ' ' + esc(resultID) + '">Complete</button><p class="note">Only the claimed owner can complete; non-empty evidence is required.</p>' : "";
+    const result = taskNotices.get(key);
+    return '<div class="card" data-task-row="' + esc(t.task_id) + '"><button type="button" class="task-link ghost" data-thread="' + esc(t.thread_id) + '"><span class="pill warning">' + esc(t.state) + '</span><p><strong>' + esc(t.task_id) + '</strong></p><p class="note">Owner: ' + esc(t.owner || "unassigned") + '</p><p class="note">Updated ' + esc(stamp(t.updated_at)) + '</p><p class="note">Open task thread</p></button><div class="stack">' + control + '</div><p id="' + esc(resultID) + '" role="status" class="note' + (result?.error ? ' error' : '') + '">' + esc(result?.text || "") + '</p></div>';
   }).join("") || '<p class="note">No tasks recorded. Addressing an agent does not create a task.</p>';
+  // Preserve focus and draft selection across an unchanged background refresh.
+  if ($("tasks").innerHTML !== html) $("tasks").innerHTML = html;
   updateComposer();
 }
 async function changeTask(taskID, action) {
   if (composerReason() || !["claim","complete"].includes(action)) return;
-  const id = state.current;
+  const id = state.current, key = taskKey(taskID);
+  const payload = {actor:state.agent, actor_kind:"agent"};
+  if (action === "complete") payload.payload = {text:$("task-evidence-" + taskID)?.value.trim() || ""};
   state.sending = true; ++state.generation; updateComposer();
   try {
-    const result = await call(sessionPath(id,"tasks/" + encodeURIComponent(taskID) + "/" + action), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({actor:state.agent, actor_kind:"agent"}) });
-    notice("task-result", "Task " + result.task_id + ": " + result.state + (result.owner ? " · Owner: " + result.owner : ""));
-  } catch(e) { notice("task-result", e.serverMessage || e.message, true); }
+    const result = await call(sessionPath(id,"tasks/" + encodeURIComponent(taskID) + "/" + action), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    const text = "Task " + result.task_id + ": " + result.state + (result.owner ? " · Owner: " + result.owner : "");
+    taskNotices.set(key,{text}); taskDrafts.delete(key);
+    notice("task-result", text);
+  } catch(e) {
+    // Keep the server's named refusal AND diagnostic in the affected task row.
+    taskNotices.set(key,{text:e.message,error:true});
+    notice("task-result",e.message,true);
+  }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
 function renderCapabilityMatrix(capabilities) {
@@ -408,6 +429,12 @@ function renderDirectory() {
   for (const option of $("initial-members").options) option.selected = members.has(option.value);
 }
 function renderPosture(b) {
+  const signature = b.require_agent_signature;
+  const access = b.auth_enabled === true ? "deployment Bearer access" : b.auth_enabled === false ? "deployment reach access (Bearer auth disabled)" : "deployment access unknown";
+  notice("sender-authority", signature === true
+    ? "Send authority: agent signatures REQUIRED. This browser cannot sign; sends are refused as SESSION_SENDER_SIGNATURE_REQUIRED and record nothing. " + access + " alone does not authorize a session send. Browser authentication remains an open owner decision (DF-CRIER-333)."
+    : signature === false ? "Send authority: " + access + "; signatures not required by this deployment. Browser sends record sender-identity-claimed: deployment-asserted attribution, not key-verified identity. Browser authentication remains an open owner decision (DF-CRIER-333)."
+    : "Send authority: unknown (signature policy unavailable). This browser cannot sign; an acting ID is attribution, not a login or verified identity.");
   const reported = value => typeof value === "string" && value.trim() ? value : "unknown";
   const enabled = value => value === true ? "enabled" : value === false ? "disabled" : "unknown";
   const durability = b.registry_durable === true ? "durable"
@@ -425,7 +452,7 @@ async function refresh() {
   const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
   const reads = [registry,
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
-    read("/status", renderPosture, e => { unavailable("health",e); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
+    read("/status", renderPosture, e => { unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
   if (id) {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
@@ -523,7 +550,7 @@ async function send(event) {
     const keepDraft = retryable || outcomes.some(o => ["failed","canned","unreadable_reply"].includes(o.outcome));
     const details = outcomes.map(outcomeLine).join("\n");
     const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
-    notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : inProgress ? "\nDelivery is already in flight. Draft kept. Refresh the transcript for confirmation; do not send again while it is in progress." : keepDraft ? "\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result." : ""), negative);
+    notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (result.sender_identity_basis ? "\nSender identity: " + result.sender_identity_basis + "." : "") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : inProgress ? "\nDelivery is already in flight. Draft kept. Refresh the transcript for confirmation; do not send again while it is in progress." : keepDraft ? "\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result." : ""), negative);
     if (!keepDraft && !inProgress) { $("text").value = ""; state.reply = null; renderReply(); }
   } catch(e) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
@@ -595,6 +622,7 @@ $("transcript").addEventListener("click", e => {
   state.reply = m.id; state.thread = m.thread_id; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("text").focus();
 });
 $("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; renderReply(); } });
+$("tasks").addEventListener("input", e => { if (e.target.dataset.taskEvidence) taskDrafts.set(taskKey(e.target.dataset.taskEvidence),e.target.value); });
 $("tasks").addEventListener("click", e => { const action = e.target.closest("[data-task-action]"); if (action) { changeTask(action.dataset.taskId, action.dataset.taskAction); return; } const row = e.target.closest("[data-thread]"); if (row && !state.sending) { state.thread = row.dataset.thread; state.reply = null; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("transcript").scrollIntoView({block:"start"}); } });
 $("text").addEventListener("input",resetAudienceWarning);
 $("recipient").addEventListener("change",resetAudienceWarning);

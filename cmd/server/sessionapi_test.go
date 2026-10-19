@@ -77,8 +77,9 @@ func TestSessionAPIRoutesServed(t *testing.T) {
 // never registered fails here rather than only in a client.
 func TestSessionAPICompileRoutesServed(t *testing.T) {
 	base := startTestServerWithEnv(t, map[string]string{
-		"CR_SESSION_BACKEND":  "jsonl",
-		"CR_SESSION_LOG_ROOT": t.TempDir(),
+		"CR_SESSION_BACKEND":   "jsonl",
+		"CR_REQUIRE_AGENT_SIG": "false", // unsigned fixture tests compile routes
+		"CR_SESSION_LOG_ROOT":  t.TempDir(),
 	})
 	client := &http.Client{}
 

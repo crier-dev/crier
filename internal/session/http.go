@@ -71,9 +71,15 @@ type AgentLookup interface {
 }
 
 // HTTPOptions wires the optional collaborators of the session surface. The
-// zero value is a valid, usable handler over the default realm with no
-// permissions deployment — which is exactly the shipped posture.
+// zero value is a standalone, unarmed handler over the default realm. Server
+// boot explicitly supplies the deployment's signature requirement and verifier.
 type HTTPOptions struct {
+	// RequireAgentSignature is supplied by CR_REQUIRE_AGENT_SIG at server boot.
+	// The embedded browser cannot sign; enforcement is never bypassed for it.
+	RequireAgentSignature bool
+	// AuthorizeSender reuses the live registry signature verifier for every
+	// offered proof, including when enforcement is disabled.
+	AuthorizeSender func(http.ResponseWriter, *http.Request, bool) (bool, bool)
 	// Deliverer is the shipped durable-inbox write every fan-out uses. Nil
 	// means fan-out is unconfigured and a send is refused with
 	// 503 SESSION_DELIVERY_UNCONFIGURED rather than silently dropped.
@@ -211,15 +217,16 @@ type transcriptMessage struct {
 	// ParentResolvable is true when parent_id names a message in this
 	// transcript, or when the message is a thread root (no parent). A false
 	// value is the §4.3 broken-thread case, reported not hidden.
-	ParentResolvable bool            `json:"parent_resolvable"`
-	RootID           string          `json:"root_id,omitempty"`
-	Seq              int64           `json:"seq"`
-	MessageKind      string          `json:"message_kind"`
-	Author           AuthorRef       `json:"author"`
-	Payload          json.RawMessage `json:"payload,omitempty"`
-	Audience         Audience        `json:"audience"`
-	Outcomes         []outcomeView   `json:"outcomes,omitempty"`
-	IdempotencyKey   string          `json:"idempotency_key,omitempty"`
+	ParentResolvable    bool            `json:"parent_resolvable"`
+	RootID              string          `json:"root_id,omitempty"`
+	Seq                 int64           `json:"seq"`
+	MessageKind         string          `json:"message_kind"`
+	Author              AuthorRef       `json:"author"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+	Audience            Audience        `json:"audience"`
+	Outcomes            []outcomeView   `json:"outcomes,omitempty"`
+	IdempotencyKey      string          `json:"idempotency_key,omitempty"`
+	SenderIdentityBasis string          `json:"sender_identity_basis,omitempty"`
 	// ReplayAction distinguishes a pure replay from a new delivery attempt of
 	// the same durable message. Omitted on an original send/transcript GET.
 	ReplayAction string    `json:"replay_action,omitempty"`
@@ -699,7 +706,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req postMessageRequest
-	if !decodeBody(w, r, &req) {
+	if !decodeSendBody(w, r, &req) {
 		return
 	}
 	if h.opts.Deliverer == nil {
@@ -718,6 +725,11 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 			"sender (an agent id), or principal_id (optionally with as_agent), is required: a message records its author")
 		return
 	}
+	basis, allowed := h.authorizeSender(w, r, author)
+	if !allowed {
+		return
+	}
+
 	kind := MessageKind(strings.TrimSpace(req.MessageKind))
 	switch kind {
 	case "":
@@ -774,14 +786,15 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	now := h.now()
 	msg := &Message{
-		ID:             msgID,
-		ParentID:       strings.TrimSpace(req.ParentID),
-		SessionID:      sess.ID,
-		Kind:           kind,
-		Author:         author,
-		Payload:        req.Payload,
-		CreatedAt:      now,
-		IdempotencyKey: req.IdempotencyKey,
+		SenderIdentityBasis: basis,
+		ID:                  msgID,
+		ParentID:            strings.TrimSpace(req.ParentID),
+		SessionID:           sess.ID,
+		Kind:                kind,
+		Author:              author,
+		Payload:             req.Payload,
+		CreatedAt:           now,
+		IdempotencyKey:      req.IdempotencyKey,
 	}
 
 	// Thread resolution: a root's thread is its own id; a reply stays in its
@@ -1297,18 +1310,19 @@ func (h *Handler) viewOf(st *State) sessionView {
 // messageViewOf renders one transcript message with its ancestry.
 func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 	v := transcriptMessage{
-		ID:             m.ID,
-		ThreadID:       m.ThreadID,
-		ParentID:       m.ParentID,
-		Seq:            m.Seq,
-		MessageKind:    string(m.Kind),
-		Author:         m.Author,
-		Payload:        m.Payload,
-		Audience:       m.Audience,
-		Outcomes:       outcomeViews(m.Outcomes),
-		IdempotencyKey: m.IdempotencyKey,
-		CreatedAt:      m.CreatedAt,
-		ThreadDepth:    st.ThreadDepth(m.ThreadID),
+		ID:                  m.ID,
+		ThreadID:            m.ThreadID,
+		ParentID:            m.ParentID,
+		Seq:                 m.Seq,
+		MessageKind:         string(m.Kind),
+		Author:              m.Author,
+		Payload:             m.Payload,
+		Audience:            m.Audience,
+		Outcomes:            outcomeViews(m.Outcomes),
+		IdempotencyKey:      m.IdempotencyKey,
+		SenderIdentityBasis: m.SenderIdentityBasis,
+		CreatedAt:           m.CreatedAt,
+		ThreadDepth:         st.ThreadDepth(m.ThreadID),
 	}
 	v.ParentResolvable = m.ParentID == "" || st.Message(m.ParentID) != nil
 	if t := st.Thread(m.ThreadID); t != nil {

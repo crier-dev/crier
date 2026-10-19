@@ -174,7 +174,7 @@ func (h *Handler) HandleCompile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req compileRequest
-	if !decodeBody(w, r, &req) {
+	if !decodeSendBody(w, r, &req) {
 		return
 	}
 	if h.opts.Deliverer == nil {
@@ -187,6 +187,11 @@ func (h *Handler) HandleCompile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, "AUTHOR_REQUIRED",
 			"sender (an agent id), or principal_id (optionally with as_agent), is required: a compiled message records its author")
+		return
+	}
+
+	basis, allowed := h.authorizeSender(w, r, author)
+	if !allowed {
 		return
 	}
 
@@ -285,12 +290,13 @@ func (h *Handler) HandleCompile(w http.ResponseWriter, r *http.Request) {
 	}
 	now := h.now()
 	msg := &Message{
-		ID:        msgID,
-		SessionID: sess.ID,
-		Kind:      kind,
-		Author:    author,
-		Payload:   payload,
-		CreatedAt: now,
+		SenderIdentityBasis: basis,
+		ID:                  msgID,
+		SessionID:           sess.ID,
+		Kind:                kind,
+		Author:              author,
+		Payload:             payload,
+		CreatedAt:           now,
 		// A compile is a NEW message: it opens its own thread and is not a
 		// reply to any source. Citation is not reply attribution (§4.8).
 		ThreadID:       msgID,

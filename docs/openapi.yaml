@@ -2802,6 +2802,14 @@ paths:
       tags: [sessions]
       summary: Send a message into a session (fan-out to its participants)
       description: |-
+        Session ingress honors CR_REQUIRE_AGENT_SIG (default true): unsigned requests
+        are refused 401 SESSION_SENDER_SIGNATURE_REQUIRED before recording or dispatch.
+        Every offered signature is verified, even with enforcement off; invalid proof
+        is SESSION_SENDER_SIGNATURE_INVALID. A signed agent must match the resolved
+        sender/actor (403 SESSION_SENDER_IDENTITY_MISMATCH); an agent key does not
+        authenticate a principal/as_agent binding. The browser cannot sign (DF-CRIER-333).
+        Accepted sends retain sender_identity_basis on the transcript message.
+
         Composes INTO a session (specs/CHAT-INTERFACE.md §4 row 31): one message
         delivered to each participant through the SHIPPED inbox path — the same
         guard choke point, durable inbox write, lease/ack/TTL and federation
@@ -2840,6 +2848,9 @@ paths:
             schema:
               $ref: "#/components/schemas/PostSessionMessageRequest"
       responses:
+        "401":
+          description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
+
         "201":
           description: The recorded transcript message, with its per-target outcomes.
           content:
@@ -2863,6 +2874,14 @@ paths:
       tags: [sessions]
       summary: Create a TASK addressed to explicit targets (the agent-driven call-out)
       description: |-
+        Session ingress honors CR_REQUIRE_AGENT_SIG (default true): unsigned requests
+        are refused 401 SESSION_SENDER_SIGNATURE_REQUIRED before recording or dispatch.
+        Every offered signature is verified, even with enforcement off; invalid proof
+        is SESSION_SENDER_SIGNATURE_INVALID. A signed agent must match the resolved
+        sender/actor (403 SESSION_SENDER_IDENTITY_MISMATCH); an agent key does not
+        authenticate a principal/as_agent binding. The browser cannot sign (DF-CRIER-333).
+        Accepted sends retain sender_identity_basis on the transcript message.
+
         The explicit "do this" kind (specs/CHAT-ADDRESSING.md §2.5, D12;
         specs/CHAT-PERMISSIONS.md §6.11). A tag is ADDRESSING, never an
         action: only this route creates work. The task rides a `task`-kind
@@ -2892,6 +2911,9 @@ paths:
             schema:
               $ref: "#/components/schemas/PostSessionTaskRequest"
       responses:
+        "401":
+          description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
+
         "201":
           description: |-
             The recorded task message (kind `task`, with its task payload and
@@ -2986,6 +3008,14 @@ paths:
       tags: [sessions]
       summary: Claim a task (open -> claimed, naming its owner)
       description: |-
+        Session ingress honors CR_REQUIRE_AGENT_SIG (default true): unsigned requests
+        are refused 401 SESSION_SENDER_SIGNATURE_REQUIRED before recording or dispatch.
+        Every offered signature is verified, even with enforcement off; invalid proof
+        is SESSION_SENDER_SIGNATURE_INVALID. A signed agent must match the resolved
+        sender/actor (403 SESSION_SENDER_IDENTITY_MISMATCH); an agent key does not
+        authenticate a principal/as_agent binding. The browser cannot sign (DF-CRIER-333).
+        Accepted sends retain sender_identity_basis on the transcript message.
+
         The §2.5 lifecycle, step one: an addressee claims the open task, and
         the transition is a NEW `task`-kind record-version in the SAME thread
         (a reply anchored to the task's message), so the human sees who took
@@ -3007,6 +3037,9 @@ paths:
             schema:
               $ref: "#/components/schemas/TaskTransitionRequest"
       responses:
+        "401":
+          description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
+
         "201":
           description: The transition record (state `claimed`, owner = the actor).
           content:
@@ -3028,6 +3061,14 @@ paths:
       tags: [sessions]
       summary: Complete a task (claimed/running -> done, or failed via new_state)
       description: |-
+        Session ingress honors CR_REQUIRE_AGENT_SIG (default true): unsigned requests
+        are refused 401 SESSION_SENDER_SIGNATURE_REQUIRED before recording or dispatch.
+        Every offered signature is verified, even with enforcement off; invalid proof
+        is SESSION_SENDER_SIGNATURE_INVALID. A signed agent must match the resolved
+        sender/actor (403 SESSION_SENDER_IDENTITY_MISMATCH); an agent key does not
+        authenticate a principal/as_agent binding. The browser cannot sign (DF-CRIER-333).
+        Accepted sends retain sender_identity_basis on the transcript message.
+
         The §2.5 lifecycle, step two: ONLY the recorded owner (same actor id
         and kind), with session send authority, may complete or fail the task.
         A different actor is refused 409 TASK_OWNER_MISMATCH; the detail names
@@ -3065,6 +3106,9 @@ paths:
             schema:
               $ref: "#/components/schemas/TaskTransitionRequest"
       responses:
+        "401":
+          description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
+
         "201":
           description: The transition record (state `done`, or `failed` when new_state names it).
           content:
@@ -3240,6 +3284,14 @@ paths:
       tags: [sessions]
       summary: Compile (merge) messages into ONE cited context bundle
       description: |-
+        Session ingress honors CR_REQUIRE_AGENT_SIG (default true): unsigned requests
+        are refused 401 SESSION_SENDER_SIGNATURE_REQUIRED before recording or dispatch.
+        Every offered signature is verified, even with enforcement off; invalid proof
+        is SESSION_SENDER_SIGNATURE_INVALID. A signed agent must match the resolved
+        sender/actor (403 SESSION_SENDER_IDENTITY_MISMATCH); an agent key does not
+        authenticate a principal/as_agent binding. The browser cannot sign (DF-CRIER-333).
+        Accepted sends retain sender_identity_basis on the transcript message.
+
         Gathers the named sources into ONE new message in this session and hands
         it to the tagged agents through the shipped inbox path — the same guard
         choke point, durable inbox write, lease/ack/TTL and federation fallback
@@ -3276,6 +3328,9 @@ paths:
             schema:
               $ref: "#/components/schemas/CompileSessionRequest"
       responses:
+        "401":
+          description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
+
         "201":
           description: The ONE recorded compiled message, its parts and its completeness.
           content:
@@ -5194,6 +5249,10 @@ components:
       description: |-
         One transcript record (row 14) with its ancestry (rows 42, 43).
       properties:
+        sender_identity_basis:
+          type: string
+          enum: [sender-identity-claimed, sender-identity-verified]
+          description: Server-stamped session ingress assurance. Claimed means deployment-asserted attribution, not key-verified identity; absent on historical records and internally recorded replies. Retained in storage and replay, including empty audiences. Legacy request signatures bind the body only with X-Agent-Body-SHA256.
         id:
           type: string
         thread_id:
@@ -5927,6 +5986,10 @@ components:
         owner:
           type: string
           description: Who holds the claimed task; absent while open.
+        owner_kind:
+          type: string
+          enum: [agent, principal, system]
+          description: Actor kind of the recorded owner. Identical principal and agent spellings are not the same task owner.
         claim_status:
           type: string
           enum: [unclaimed, claimed]

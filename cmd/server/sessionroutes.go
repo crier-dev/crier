@@ -70,13 +70,15 @@ func openSessionAPI(
 	}
 
 	h := session.NewHTTPHandler(sessStore, session.HTTPOptions{
-		Deliverer:         registry.NewSessionDeliverer(dispatcher),
-		DeliveryTimeoutMs: cfg.Session.DeliveryTimeoutMs,
-		Agents:            registryStore,
-		Namespaces:        namespaces,
-		Permissions:       perms,
-		Groups:            groupStore,
-		GrantEvents:       grantEvents,
+		Deliverer:             registry.NewSessionDeliverer(dispatcher),
+		RequireAgentSignature: cfg.RequireAgentSig,
+		AuthorizeSender:       dispatcher.AuthorizePublisher,
+		DeliveryTimeoutMs:     cfg.Session.DeliveryTimeoutMs,
+		Agents:                registryStore,
+		Namespaces:            namespaces,
+		Permissions:           perms,
+		Groups:                groupStore,
+		GrantEvents:           grantEvents,
 		// The delivery LOCATION (CR-CHAT-029): the same name /fed/peers
 		// announces, so an agent reading its location and an operator
 		// reading the peers listing see the same identity.

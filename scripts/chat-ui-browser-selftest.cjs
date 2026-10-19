@@ -50,11 +50,11 @@ try {
     assert.deepEqual(report.completion.transitions.map(t => t.state),['open','claimed','done']);
     assert.equal(report.completion.transitions[1].owner,'ui-test-recipient');
     assert.equal(report.completion.transitions[2].owner,'ui-test-recipient');
-    assert.ok(fs.existsSync(new URL(report.completion.evidence.artifact)),'completion evidence artifact exists');
-    const evidence = run('missing-evidence',mutated('missing-evidence','actor:agent,payload:taskEvidence','actor:agent,payload:{}'));
+    assert.ok(fs.existsSync(new URL(report.completion.evidenceArtifact)),'completion evidence artifact exists');
+    const evidence = run('missing-evidence',mutated('missing-evidence',"await page.locator('[data-task-evidence]').fill(taskEvidence.text);","await page.locator('[data-task-evidence]').fill(''); taskEvidence.text = '';"));
     assert.equal(evidence.status,1,'empty evidence regression must FAIL, not skip or pass');
-    assert.match(evidence.stderr,/browser fetch POST .*\/complete: .*TASK_EVIDENCE_REQUIRED/);
-    console.log('REJECTION VERIFIED: browser fetch POST /sessions/:session/tasks/:task/complete: TASK_EVIDENCE_REQUIRED (real server 409, harness rc 1)');
+    assert.match(evidence.stderr,/UI Complete POST .*\/complete: .*TASK_EVIDENCE_REQUIRED/);
+    console.log('REJECTION VERIFIED: UI Complete input/button POST /sessions/:session/tasks/:task/complete: TASK_EVIDENCE_REQUIRED (real server 409, harness rc 1)');
     const revision = run('wrong-revision',mutated('wrong-revision',"'CR-CHAT-038','/chat UI revision must be CR-CHAT-038'","'SEEDED_WRONG_REVISION','/chat UI revision must be CR-CHAT-038'"));
     assert.equal(revision.status,1,'wrong DOM expectation must FAIL');
     assert.match(revision.stderr,/\/chat UI revision must be CR-CHAT-038/);

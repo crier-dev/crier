@@ -151,6 +151,49 @@ there is no separate reply store or rendering path. This implements D1 without l
 answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
 an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
 
+### Session send authority and task completion controls (DF-CRIER-376, DF-CRIER-379)
+
+2026-10-19 — The chosen option is signature enforcement, not a browser exemption.
+The production session message, task creation, claim/complete and compile entrypoints
+honor CR_REQUIRE_AGENT_SIG (default true) before replay, branch creation, sequence
+allocation, transcript writes or dispatch. An unsigned request under enforcement is
+HTTP 401 SESSION_SENDER_SIGNATURE_REQUIRED: "this deployment requires a signed
+agent request; this browser cannot sign. No message was recorded." Every offered
+proof is checked by the existing registry verifier even when enforcement is off;
+invalid/partial/stale proof is SESSION_SENDER_SIGNATURE_INVALID. A valid signing
+agent must equal the resolved sender, otherwise HTTP 403
+SESSION_SENDER_IDENTITY_MISMATCH. An agent signature does not authenticate a human
+principal or an as_agent binding. An enforced handler missing its verifier fails
+closed with HTTP 503 SESSION_SENDER_SIGNATURE_UNAVAILABLE. The browser displays
+these named refusals and retains the unsent draft. It obtains no private keys and
+adds no authentication flow: DF-CRIER-333 remains the open owner decision on browser
+authentication, so a Bearer header alone is not an enforced session-send grant.
+
+When an operator explicitly sets CR_REQUIRE_AGENT_SIG=false, absent proof is
+permitted by the deployment's existing access policy (Bearer when enabled, reach
+access otherwise). The server stamps sender_identity_basis: sender-identity-claimed,
+meaning deployment-asserted attribution, NOT key-verified identity. Accepted signed
+requests instead stamp sender-identity-verified. This additive disclosure is stored
+with the message, survives JSONL/SQLite/PostgreSQL projection reload, keyed replay
+and empty audiences, and appears on POST/transcript GET and in the page. Historical
+records lacking it show "sender identity basis not recorded", never inferred proof.
+The legacy method/path/timestamp signature does not bind a body without the existing
+optional X-Agent-Body-SHA256 header; exact raw request bytes are retained for that
+check. Outcome names and publisher-identity-* labels remain unchanged. The visible
+send-authority text reads require_agent_signature and auth_enabled from /status;
+missing/failed policy reads disclose unknown rather than claiming an auth posture.
+
+An open task offers Claim, never Complete. A claimed/running task shows a small
+completion-evidence textarea and Complete; only the current claimed agent owner can
+use that button. The required non-empty evidence is sent as payload.text. Task reads
+expose owner_kind alongside owner so matching principal/agent spellings do not enable
+the wrong actor. TASK_EVIDENCE_REQUIRED and TASK_OWNER_MISMATCH retain their server
+diagnostics in the affected row after refresh. Evidence drafts survive background
+reads. The browser harness claims and completes through these controls, reads back
+the exact evidence, and its selftest removes the input text to prove the real 409
+TASK_EVIDENCE_REQUIRED still rejects completion. No agent runtime execution is
+claimed by that harness evidence.
+
 ### Operator posture and outcome reporting (DF-CRIER-377, DF-CRIER-378)
 
 The embedded `/chat` page shows an always-visible Runtime posture block directly below its
