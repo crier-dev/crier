@@ -29,6 +29,9 @@
 package permissions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"strings"
@@ -226,6 +229,10 @@ func ValidPrincipalID(id string) bool {
 type Principal struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
+	// TokenFingerprint is a read-only projection of optional token material
+	// found while decoding a stored record. The credential itself is never
+	// retained here or serialized; mint/append semantics remain unchanged.
+	TokenFingerprint string `json:"-"`
 	// DisplayName is the human-facing name.
 	DisplayName string `json:"display_name,omitempty"`
 	// Namespace is the realm the principal belongs to. Empty is the default
@@ -245,6 +252,27 @@ type Principal struct {
 	RemoteRef      string     `json:"remote_ref,omitempty"`
 	CreatedAt      time.Time  `json:"created_at,omitempty"`
 	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
+}
+
+// UnmarshalJSON preserves the principal schema while reducing an optional
+// stored token to its first eight SHA-256 hex digits at the read boundary.
+// Fingerprints supplied in JSON are not trusted; only token bytes derive one.
+// No token is minted, accepted by the write request, or added to stored records.
+func (p *Principal) UnmarshalJSON(data []byte) error {
+	type principalFields Principal
+	var decoded struct {
+		principalFields
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = Principal(decoded.principalFields)
+	if decoded.Token != "" {
+		sum := sha256.Sum256([]byte(decoded.Token))
+		p.TokenFingerprint = hex.EncodeToString(sum[:4])
+	}
+	return nil
 }
 
 // Active reports whether the principal may currently act. `active` is the only

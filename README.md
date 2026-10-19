@@ -1895,7 +1895,7 @@ namespace membership is deliberately **not** blanket permission.
   (`CR_AUTH_TOKEN`) is the **reach gate** — who may put a message on the bus —
   and it is the credential an ordinary delivery presents. The admin token
   (`CR_PERMISSIONS_ADMIN_TOKEN`) is the **admin gate** — who may MANAGE
-  permissions — and it is the only credential the management writes accept. A
+  permissions — and it is the only credential the management reads and writes accept. A
   deployment sets BOTH: reach for the agents that talk, admin for the operator
   who governs, so **a leaked message token cannot mint permissions**. A caller
   holding only the reach credential can deliver all day and is still refused
@@ -1909,8 +1909,26 @@ namespace membership is deliberately **not** blanket permission.
   and that boot check are its fix). With `CR_PERMISSIONS_ADMIN_TOKEN` unset the
   gate is **closed**: every management write answers the named
   `403 MANAGEMENT_FORBIDDEN` whose `detail` says the surface is not armed — the
-  tokenless dev posture of this section therefore configures the ACL's *reads*
-  and deliveries, never its *writes*.
+  tokenless dev posture of this section therefore configures ACL evaluation
+  and deliveries, never unauthenticated management reads or writes.
+- **The management reads (DF-CRIER-315).** `GET /principals`, `GET /bindings`
+  and `GET /grants` return `{"items":[],"count":0}` for an empty inventory,
+  including a missing permissions directory/log. The agent-class GET sibling
+  returns the effective class/owner/scope record; no class record is
+  `404 AGENT_NOT_FOUND` with the named agent in `detail` (registered but
+  unclassed is also missing). All four reuse the **same admin gate as writes**;
+  the message token gets `403 MANAGEMENT_FORBIDDEN`, and missing/unknown tokens
+  get `401` when shared authentication is configured. Without shared auth the
+  handler still refuses callers without the admin token with `403`; localhost
+  is never exempt. The JSONL remains the **durable record**: these routes fold
+  it on every request, not a second source of truth or a cache. Keep-LAST is
+  per principal/grant/agent id and per `(principal, agent)` for bindings, in
+  append order rather than by timestamp. Grants exclude revoked and expired
+  rows after folding; this list is not a complete delivery-authorization verdict.
+  Principals expose only `id`, `kind`, `created_at` and, if stored token material
+  exists, `token_fingerprint` (first 8 SHA-256 hex digits) — **never a token or
+  full hash**. Minting still creates no token, so minted principals omit the
+  fingerprint. Reads never create or modify the directory or log.
 - **The management writes.** `POST /principals`, `POST /bindings`,
   `POST /grants` and `POST /grants/{grantid}/revoke` are the write half of the
   ACL and require the ADMIN token (`CR_PERMISSIONS_ADMIN_TOKEN`), never the
@@ -2236,11 +2254,11 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **57 paths** and **70 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **57 paths** and **74 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
 grep -c '^  /' docs/openapi.yaml                                    # 57 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 70 operations
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 74 operations
 grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 54 router paths
 ```
 
@@ -2346,7 +2364,7 @@ All core primitives are implemented and tested:
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
-- **API** — 54 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 49 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007 + the 3 trust paths of DF-CRIER-362) plus the 5 opt-in detection routes — documented as 57 paths / 70 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
+- **API** — 54 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 49 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007 + the 3 trust paths of DF-CRIER-362) plus the 5 opt-in detection routes — documented as 57 paths / 74 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.6
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

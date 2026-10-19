@@ -755,6 +755,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	r.HandleFunc("/trust/delegations", trustHandler.HandleListDelegations).Methods("GET")
 	r.HandleFunc("/trust/verify", trustHandler.HandleVerify).Methods("POST")
 
+	r.HandleFunc("/principals", registryHandler.HandleListPrincipals).Methods("GET")
+	r.HandleFunc("/bindings", registryHandler.HandleListBindings).Methods("GET")
+	r.HandleFunc("/grants", registryHandler.HandleListGrants).Methods("GET")
+	r.HandleFunc("/agents/{agentid}/class", registryHandler.HandleGetAgentClass).Methods("GET")
 	r.HandleFunc("/principals", registryHandler.HandleMintPrincipal).Methods("POST")
 	r.HandleFunc("/bindings", registryHandler.HandleCreateBinding).Methods("POST")
 	r.HandleFunc("/grants", registryHandler.HandleCreateGrant).Methods("POST")

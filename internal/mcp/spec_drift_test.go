@@ -94,6 +94,10 @@ var toolCoverage = map[string][]string{
 // Each justification is grounded in the repo (the operation's own summary/tag
 // description in docs/openapi.yaml, or the bridge's own comments), never invented.
 var excludedOperations = map[string]string{
+	"listPrincipals":        "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",
+	"listBindings":          "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",
+	"listGrants":            "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",
+	"getAgentClass":         "DF-CRIER-315 permissions-management read: same operator admin gate as mintPrincipal; bridge holds the message token, not an admin credential.",
 	"trustCreateAnchor":     "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
 	"trustListAnchors":      "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
 	"trustCreateDelegation": "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",

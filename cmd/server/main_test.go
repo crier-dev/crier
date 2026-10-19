@@ -1467,11 +1467,23 @@ func TestOpenAPIDocumentsAgentClassRoute(t *testing.T) {
 	if !ok {
 		t.Fatalf("path item declares no POST operation: %v", item)
 	}
-	// main.go registers this path with .Methods("POST") and nothing else, so a
-	// second method in the document would describe a route nobody serves.
-	for _, m := range []string{"get", "put", "patch", "delete", "head", "options", "trace"} {
+	// DF-CRIER-315 adds GET behind the same admin gate; no other methods
+	// are served. Keep the write contract checks below unchanged.
+	read, ok := item["get"]
+	if !ok || read.OperationID != "getAgentClass" {
+		t.Fatal("agent-class read operation missing or misnamed")
+	}
+	for _, code := range []string{"200", "401", "403", "404", "500"} {
+		if _, ok := read.Responses[code]; !ok {
+			t.Errorf("agent-class read responses lack %q", code)
+		}
+	}
+	if got := read.Responses["200"].Content["application/json"].Schema.Ref; got != "#/components/schemas/AgentClassRecord" {
+		t.Errorf("agent-class read schema = %q, want AgentClassRecord", got)
+	}
+	for _, m := range []string{"put", "patch", "delete", "head", "options", "trace"} {
 		if _, ok := item[m]; ok {
-			t.Errorf("path item declares %s: the handler is registered POST-only (cmd/server/main.go)", strings.ToUpper(m))
+			t.Errorf("path item declares unsupported method %s (cmd/server/main.go)", strings.ToUpper(m))
 		}
 	}
 	if op.OperationID != "setAgentClass" {
@@ -1520,18 +1532,11 @@ func TestOpenAPIDocumentsAgentClassRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read main.go: %v", err)
 	}
-	registration := ""
-	for _, line := range strings.Split(string(mainSrc), "\n") {
-		if strings.Contains(line, `HandleFunc("/agents/{agentid}/class"`) {
-			registration = strings.TrimSpace(line)
-			break
+	for method, handler := range map[string]string{"GET": "HandleGetAgentClass", "POST": "HandleSetAgentClass"} {
+		registration := fmt.Sprintf(`r.HandleFunc("/agents/{agentid}/class", registryHandler.%s).Methods("%s")`, handler, method)
+		if !strings.Contains(string(mainSrc), registration) {
+			t.Errorf("main.go lacks registration %q for the documented %s operation", registration, method)
 		}
-	}
-	if registration == "" {
-		t.Fatal("main.go registers no /agents/{agentid}/class route — the documented path has no router registration")
-	}
-	if !strings.Contains(registration, `.Methods("POST")`) {
-		t.Errorf("registration %q is not POST-only, but the document declares exactly one POST operation", registration)
 	}
 }
 

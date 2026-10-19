@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -226,6 +227,35 @@ func Replay(recs []*Record) (*Snapshot, error) {
 		}
 	}
 	return s, nil
+}
+
+// Principals returns current principal records in stable id order. Transport
+// handlers must redact credential material rather than serialize these records.
+func (s *Snapshot) Principals() []*Principal {
+	out := make([]*Principal, 0)
+	if s != nil {
+		for _, p := range s.principals {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// Bindings returns the current binding per (principal, agent) in stable order,
+// using the same reduction as Binding and the delivery checker, including false
+// as_agent values so operators can inspect disabled speech rights.
+func (s *Snapshot) Bindings() []*Binding {
+	out := make([]*Binding, 0)
+	if s != nil {
+		for _, b := range s.bindings {
+			out = append(out, b)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return bindingKey(out[i].Principal, out[i].Agent) < bindingKey(out[j].Principal, out[j].Agent)
+	})
+	return out
 }
 
 // Principal returns a principal by id, or nil.

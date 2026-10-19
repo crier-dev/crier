@@ -14,17 +14,9 @@ package main
 // fleet runs, so nothing here re-implements a code path, and the assertions are
 // the STATUS CODES a client sees plus the handler's own JSON.
 //
-// Two names in the task's acceptance list do not match the served surface, and
-// the tests assert what the code actually does (measured live on this build)
-// rather than the assumption:
-//
-//   - the mint route answers 201 Created, not 200 (HandleMintPrincipal writes
-//     http.StatusCreated) — every management create is a 201;
-//   - there is no GET /principals route: /principals is registered POST-only,
-//     so the method mismatch is a 405 from mux. The four openapi-documented
-//     management paths are POST /principals, /bindings, /grants and
-//     /grants/{grantid}/revoke; POST /agents/{agentid}/class is the fifth
-//     route on the same admin gate, and this file drives all five.
+// Management creates answer 201. DF-CRIER-315 adds the four read operations
+// behind the same admin gate; the no-GET/405 assertion from DF-CRIER-297 is
+// deliberately replaced by a successful authorized inventory read below.
 
 import (
 	"encoding/json"
@@ -149,12 +141,10 @@ func TestManagementRoutesWithDualTokens(t *testing.T) {
 		t.Fatalf("revoke answered %q, want the revoked id %q", revoked, grantID)
 	}
 
-	// The task's acceptance names "GET /principals 200". No such route exists:
-	// /principals is POST-only, so mux answers the method mismatch — asserted
-	// here so the absence is recorded rather than silently believed.
+	// DF-CRIER-315 adds the read half behind the very same admin gate.
 	status, body = df297Request(t, client, http.MethodGet, baseURL+"/principals", df297AdminToken, "", "")
-	if status != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /principals = %d, want 405 (there is no read route on this surface; body: %s)", status, body)
+	if status != http.StatusOK {
+		t.Fatalf("GET /principals = %d, want 200 (body: %s)", status, body)
 	}
 
 	// ── 2. the same surface with the MESSAGE token: the handler's named 403 ──

@@ -2356,6 +2356,42 @@ paths:
   # presented. granted_by is recorded as "admin" — phase 1 has no login (§2.4),
   # so the operator's token is the granter of record.
   /principals:
+    get:
+      operationId: listPrincipals
+      tags: [registry]
+      summary: List current principals without credential material
+      description: >-
+        Keep-LAST by principal id. Only id, kind, created_at and an optional token_fingerprint are exposed. Minting creates no token; an optional stored token is reduced to the first eight SHA-256 hex digits. Never returns raw tokens or full hashes.
+        Requires CR_PERMISSIONS_ADMIN_TOKEN as Bearer through the same admin gate as writes.
+        The JSONL remains the durable record, not a second source of truth.
+        Reads never create or mutate a directory or log. Missing storage is an empty inventory.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current folded state, ordered deterministically for inventories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, count]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PrincipalReadView"
+                  count:
+                    type: integer
+                    minimum: 0
+              example:
+                items: []
+                count: 0
+        "401":
+          description: Missing or unknown bearer when CR_AUTH_TOKEN is configured.
+        "403":
+          description: MANAGEMENT_FORBIDDEN — admin gate unarmed or caller holds only the message token. Also applies without shared authentication; localhost is not exempt.
+        "500":
+          description: Store failure (no raw record or credential material in the diagnostic).
     post:
       operationId: mintPrincipal
       tags: [registry]
@@ -2394,6 +2430,42 @@ paths:
         "403":
           description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
   /bindings:
+    get:
+      operationId: listBindings
+      tags: [registry]
+      summary: List current principal-to-agent bindings
+      description: >-
+        Keep-LAST by (principal, agent), exactly as the delivery ACL folds the log; includes as_agent false so disabled speech rights remain inspectable.
+        Requires CR_PERMISSIONS_ADMIN_TOKEN as Bearer through the same admin gate as writes.
+        The JSONL remains the durable record, not a second source of truth.
+        Reads never create or mutate a directory or log. Missing storage is an empty inventory.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current folded state, ordered deterministically for inventories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, count]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BindingRecord"
+                  count:
+                    type: integer
+                    minimum: 0
+              example:
+                items: []
+                count: 0
+        "401":
+          description: Missing or unknown bearer when CR_AUTH_TOKEN is configured.
+        "403":
+          description: MANAGEMENT_FORBIDDEN — admin gate unarmed or caller holds only the message token. Also applies without shared authentication; localhost is not exempt.
+        "500":
+          description: Store failure (no raw record or credential material in the diagnostic).
     post:
       operationId: createBinding
       tags: [registry]
@@ -2428,6 +2500,42 @@ paths:
         "403":
           description: The management surface is not armed, or the admin token was not presented (MANAGEMENT_FORBIDDEN)
   /grants:
+    get:
+      operationId: listGrants
+      tags: [registry]
+      summary: List live grants
+      description: >-
+        Keep-LAST by grant id, then exclude revoked or expired grants at request time. This is grant liveness, not a complete may_deliver authorization decision.
+        Requires CR_PERMISSIONS_ADMIN_TOKEN as Bearer through the same admin gate as writes.
+        The JSONL remains the durable record, not a second source of truth.
+        Reads never create or mutate a directory or log. Missing storage is an empty inventory.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current folded state, ordered deterministically for inventories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, count]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GrantRecord"
+                  count:
+                    type: integer
+                    minimum: 0
+              example:
+                items: []
+                count: 0
+        "401":
+          description: Missing or unknown bearer when CR_AUTH_TOKEN is configured.
+        "403":
+          description: MANAGEMENT_FORBIDDEN — admin gate unarmed or caller holds only the message token. Also applies without shared authentication; localhost is not exempt.
+        "500":
+          description: Store failure (no raw record or credential material in the diagnostic).
     post:
       operationId: createGrant
       tags: [registry]
@@ -2522,6 +2630,52 @@ paths:
   # either token on this path (middleware.AuthTokens' isManagementPath) and
   # answers a missing or unknown bearer with 401, exactly as for the four above.
   /agents/{agentid}/class:
+    get:
+      operationId: getAgentClass
+      tags: [registry]
+      summary: Read the effective agent class
+      description: >-
+        The current class, owner and scope record from the SAME fold the delivery ACL reads. No class record is AGENT_NOT_FOUND, including registered but unclassed agents; a class record may exist before registry registration.
+        Requires CR_PERMISSIONS_ADMIN_TOKEN as Bearer through the same admin gate as writes.
+        The JSONL remains the durable record, not a second source of truth.
+        Reads never create or mutate a directory or log. Missing storage is an empty inventory.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current folded state, ordered deterministically for inventories.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentClassRecord"
+        "401":
+          description: Missing or unknown bearer when CR_AUTH_TOKEN is configured.
+        "403":
+          description: MANAGEMENT_FORBIDDEN — admin gate unarmed or caller holds only the message token. Also applies without shared authentication; localhost is not exempt.
+        "500":
+          description: Store failure (no raw record or credential material in the diagnostic).
+        "404":
+          description: AGENT_NOT_FOUND — no stored class record for the named agent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, detail]
+                properties:
+                  error:
+                    type: string
+                    enum: [AGENT_NOT_FOUND]
+                  detail:
+                    type: string
+              example:
+                error: AGENT_NOT_FOUND
+                detail: 'no such agent "ghost": no agent class record is stored for this agent'
     post:
       operationId: setAgentClass
       tags: [registry]
@@ -4435,6 +4589,24 @@ components:
             match a response from its own inbox alone, and never an address or
             an authorization. ABSENT when the message answers nothing, which is
             what every pre-CR-FEAT-036 message is.
+    PrincipalReadView:
+      type: object
+      additionalProperties: false
+      required: [id, kind, created_at]
+      description: Explicit read allowlist; never a serialized stored principal or credential. Minted principals currently have no token.
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [principal]
+        created_at:
+          type: string
+          format: date-time
+        token_fingerprint:
+          type: string
+          pattern: '^[0-9a-f]{8}$'
+          description: Fingerprint only — first eight hex digits of SHA-256 of an optional stored token. Omitted when no token exists. Not the token or its full hash, and not an authentication credential.
     PrincipalRecord:
       type: object
       description: |-
