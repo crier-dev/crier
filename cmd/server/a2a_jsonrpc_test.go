@@ -803,6 +803,10 @@ func TestA2AJSONRPCStreaming_CompletesTheTaskLifecycleAndCarriesRelayArtifacts(t
 	}
 	working := stream.nextStatus(t, string(a2a.TaskStateWorking))
 
+	// An explicit agent answer, not the opaque progress artifact above, is
+	// retained as output evidence before the consumer acknowledges.
+	publishAgentAnswer(t, base, taskID)
+	stream.next(t, "agent answer artifact")
 	// The consumer acks (removing the entry) → the stream reports COMPLETED and
 	// closes, which is what §3.1.2 requires of a terminal state.
 	ackBody, _ := json.Marshal(map[string]any{"lease_id": retrieved.LeaseID, "message_ids": []string{taskID}})

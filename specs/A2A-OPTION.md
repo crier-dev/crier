@@ -73,7 +73,7 @@ The mapping is the normative contract for INT-A2A-002..006. Each row is
 | `AgentCard` (§4.4.1) | the agent registry row — `GET /agents/{id}` | The card is a **projection** of the row, not a second store. Discovery path `GET /.well-known/agent-card.json` (§8.2, §14.3) serves the same projection for the process's own identity. **SHIPPED (INT-A2A-002), §5.3.** |
 | `AgentSkill[]` (§4.4.5) | `agent.capabilities[]` | Each capability tag becomes a skill entry; the projection is one-way (crier's registry stays the source of truth). |
 | `SendMessage` (§9.4.1) | deliver — `POST /agents/{id}/inbox` | The A2A message becomes a crier delivery to the target agent. **SHIPPED (INT-A2A-003), §5.4** — the binding calls that route's own handler, so the guard, idempotency, detection, federation, webhook and inbox paths are the shipped ones. |
-| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted` = stored and unclaimed; `working` = leased; `completed` = acked; `failed` = TTL elapsed unacknowledged (or the sweep recorded the expiry); `canceled` = closed by `CancelTask`. The crier entry id is the A2A `task.id`, and the mapping is the table in §5.5.2. **SHIPPED (INT-A2A-003 §5.4.5 for the streamed states, INT-A2A-004 §5.5 for the read operations)**: the states a send can observe are reported on the stream, and `GetTask`/`ListTasks`/`CancelTask` report and produce the same states from the same entry. |
+| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted` = stored and unclaimed; `working` = leased; `completed` = acked with observed agent output; acknowledged without output remains `working`; `failed` = TTL elapsed unacknowledged (or the sweep recorded the expiry); `canceled` = closed by `CancelTask`. The crier entry id is the A2A `task.id`, and the mapping is the table in §5.5.2. **SHIPPED (INT-A2A-003 §5.4.5 for the streamed states, INT-A2A-004 §5.5 for the read operations)**: the states a send can observe are reported on the stream, and `GetTask`/`ListTasks`/`CancelTask` report and produce the same states from the same entry. |
 | `SubscribeToTask` / `SendStreamingMessage` (SSE) (§9.4.2, §9.4.6) | relay WS subscribe | A2A's stream is the SSE view of the same subscription surface; the mesh is untouched. **SHIPPED (INT-A2A-003 §5.4.5 for `SendStreamingMessage`, INT-A2A-004 §5.5.1 for `SubscribeToTask`)** — one SSE adapter over `Relay.Subscribe` that also reports the task's own inbox lifecycle, reached both by a send that asked for a stream and by a subscription to an existing task id. |
 | `Part` — `text` \| `file` \| `data` — plus `Part.metadata` (§4.1.6) | crier message parts plus `alt`/`tags` | No new payload model: an A2A part maps onto the delivery payload's part metadata. **SHIPPED (INT-A2A-003), §5.4.4** — the mapping is lossless in both directions. |
 | `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism, and no second configuration store. **SHIPPED (INT-A2A-005), §5.6** — the four §9.4.7 operations are a view over that config, and the §4.3.3 notification payload is the config's own schema. An inline `taskPushNotificationConfig` on a send is still REFUSED (§5.6.3) rather than silently accepted. |
@@ -394,8 +394,9 @@ The stream carries **two** things, and says which is which:
    entry + lease/ack". The stream opens with the Task, then reports each state change it OBSERVES:
    `TASK_STATE_SUBMITTED` (stored, unclaimed) → `TASK_STATE_WORKING` (leased, i.e. a consumer
    retrieved it). Retrieval alone is not completion. `TASK_STATE_COMPLETED` is emitted only from an
-   observed successful acknowledgement or a retained `ACKed` row, with the explanation
-   "the receiving agent acknowledged the message". `TASK_STATE_FAILED` still reports a present
+   observed successful acknowledgement or a retained `ACKed` row AND retained agent output, with
+   the explanation "the receiving agent acknowledged the message and an answer was observed";
+   acknowledgement alone remains `WORKING` and explicitly says no answer was observed. `TASK_STATE_FAILED` still reports a present
    entry past its TTL, or a removed entry whose expiry sweep recorded a dead letter. Terminal
    states close the stream, as §3.1.2 requires.
    - **Cancellation is recorded (DF-CRIER-330, DF-CRIER-340).** A successful `CancelTask`
@@ -534,10 +535,9 @@ Details that are decisions rather than restatements:
   means at most `n` of the messages crier holds. The message is projected from the delivery payload
   when that payload is one of this binding's own envelopes (§5.4.3); a task started by a non-A2A
   sender has whatever payload it was given, and no A2A message can be reconstructed from it.
-- **`artifacts` is omitted entirely** unless `includeArtifacts` is true, in which case it is present as
-  an empty array: crier keeps no artifact for a task (a task's outputs are relay frames an observing
-  stream forwards, §5.4.5 — never stored rows), and §3.1.4's conditional member is answered rather
-  than dropped.
+- **`artifacts` is omitted entirely** on ListTasks unless `includeArtifacts` is true, in which case it
+  contains the first retained agent output or an empty array when no answer was observed. GetTask
+  includes that retained artifact without requiring a stream. Other progress artifacts remain live-only.
 - **`SubscribeToTask` reuses the §5.4.5 adapter** — the same lifecycle observation through the
   read-only peek, the same relay subscription written as `text/event-stream`, the same 120-second
   stream budget. The stream opens with the `Task` (§9.4.6: "The operation MUST return a Task object as
@@ -558,16 +558,30 @@ from.
 | an inbox entry, unacked, unleased, TTL not elapsed | `TASK_STATE_SUBMITTED` | `inbox-entry-unleased` | `Peek` |
 | an inbox entry, unacked, **leased** (`lease_id` set), TTL not elapsed | `TASK_STATE_WORKING` | `inbox-entry-leased` | `Peek` |
 | an inbox entry, unacked, **past its TTL** (the sweep has not run yet) | `TASK_STATE_FAILED` | `inbox-entry-ttl-elapsed-unacked` | `Peek` |
-| an inbox entry the store reports as **closed** (`acked`) | `TASK_STATE_COMPLETED` | `inbox-entry-closed` | `Peek` |
+| an inbox entry the store reports as **closed** (`acked`), without observed output | `TASK_STATE_WORKING` | `inbox-entry-closed` | `Peek` |
 | **no entry**, and the expiry sweep recorded this message as a dead letter | `TASK_STATE_FAILED` | `dead-letter-recorded` | `DeadLetterLookup` |
-| a successful acknowledgement observed and retained | `TASK_STATE_COMPLETED` | `acknowledgement-observed` | `GetTask`, `ListTasks`, streams |
+| a successful acknowledgement observed and retained, without observed output | `TASK_STATE_WORKING` | `acknowledgement-observed` | `GetTask`, `ListTasks`, streams |
+| acknowledgement evidence **and** retained agent output | `TASK_STATE_COMPLETED` | `acknowledgement-observed` (or `inbox-entry-closed`) | `GetTask`, `ListTasks`, streams |
 | a successful `CancelTask` atomically recorded with the close | `TASK_STATE_CANCELED` | `canceled-by-request` | the operation's answer, `GetTask`, `ListTasks`, streams |
 | a known task's disappearance observed without an ack or cancellation | `TASK_STATE_UNSPECIFIED` | `removed-outcome-unknown` | `GetTask`, `ListTasks`, streams |
 | **no entry**, no failure record, and no retained observation | **`-32001 TaskNotFoundError`** | *(no state)* | — |
 
 Four properties of that table are decisions, and each is stated so a client never has to infer it:
 
-1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence or a retained `ACKed` row.**
+1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence (or a retained `ACKed` row) AND observed agent output; an acknowledged task with no answer stays `TASK_STATE_WORKING` and explicitly says no answer was observed (DF-CRIER-355).**
+   `metadata.crier.answered` is always explicit; `answer_observed_at` is present only with actual output.
+   Request history, generated status text, arbitrary progress JSON and an output for a different task
+   do not count as answers. Output is observed only when an open A2A stream receives a nonempty
+   `role: ROLE_AGENT` envelope whose `task_id` names this task on its exact `a2a.task.<id>` topic. This is
+   reported agent-role output, not a new cryptographic authorship attestation: existing relay publish
+   authorization still governs who may publish. A publication made with no observing stream is not
+   claimed as observed; the task stays WORKING and the producer may publish again while watched.
+   The first qualifying artifact and its observation time are retained separately (MemoryStore lifetime,
+   PostgreSQL migration 016 `a2a_task_outputs` across restart), so output before or after Ack works
+   without rewriting immutable lifecycle evidence. GetTask and ListTasks join the same two records;
+   output alone never licenses COMPLETED. This is first-output evidence, not an assertion that every
+   application-specific step succeeded or that all later artifacts were captured.
+
    `Ack` hard-deletes the inbox row while retaining a task envelope's pre-Ack `TaskEvidence` snapshot
    and acknowledgement time in the SAME mutation (DF-CRIER-352): one memory-store critical section,
    or PostgreSQL `DELETE ... RETURNING` plus observation upsert before transaction commit. Failure
@@ -595,8 +609,9 @@ Four properties of that table are decisions, and each is stated so a client neve
 `Task.status.timestamp` is crier's own timestamp for the state it reports, so §3.1.4's ordering is
 crier's ordering: a lease stamps the instant it was taken, an expiry stamps the instant that elapsed,
 a swept record stamps when the sweep recorded it, and an unclaimed message is as old as its delivery.
-`Task.status.message` explains the two states whose REASON is not in the state's name (`FAILED` and
-`CANCELED`); `SUBMITTED` and `WORKING` carry none, because the state says everything crier knows.
+`Task.status.message` also explains acknowledged-but-unanswered `WORKING` and answered `COMPLETED`.
+The completion timestamp is the later of acknowledgement and output observation, so list filters and
+ordering agree with GetTask; neither record's original timestamp is rewritten.
 
 #### 5.5.3 A message that names a task
 
@@ -690,7 +705,8 @@ or an agent's `a2a` block (§1.1, §6).
   observer or universal ack archive was added. What crier does not observe is not reported (§5.5.2).
 - **No task continuation.** A message that names an open task is refused (§5.5.3), because delivering
   it would create a second task rather than continue the named one.
-- **No artifacts.** `Task.artifacts` is empty (and omitted unless asked for); crier stores no artifact
+- **Bounded artifacts (DF-CRIER-355).** GetTask retains the first observed agent answer; ListTasks
+  returns it only with `includeArtifacts:true`. Other relay artifact frames are not retained as artifact
   for a task.
 - **No push-notification configs, and no extended card.** Push configuration is INT-A2A-005's surface
   (§5.6); the extended card (INT-A2A-006) is the one remaining A2A surface and still answers `-32601`.

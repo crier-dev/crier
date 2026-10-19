@@ -41,11 +41,14 @@ func TestA2APersistence_PostgresRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, entries, 1)
 			require.NoError(t, store.Ack("terminal-agent", lease, []string{id}))
-			state = a2a.TaskStateCompleted
+			state = a2a.TaskStateWorking
 		} else {
 			rpcResult(t, mustA2AOK(t, http.DefaultClient, base, cancelTaskBody("terminal-agent", id)))
 		}
 		stream.nextStatus(t, string(state))
+		if state == a2a.TaskStateWorking {
+			require.NoError(t, stream.body.Body.Close())
+		}
 		stream.waitClosed(t)
 		task := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
 		require.Equal(t, string(state), rpcTaskState(t, task))

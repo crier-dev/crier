@@ -561,6 +561,7 @@ type MemoryStore struct {
 	deliveryMs       map[string]int64
 	serviceReceipts  map[string]ServiceDeliveryReceipt
 	taskObservations map[inboxAckKey]TaskObservation
+	taskOutputs      map[inboxAckKey]TaskOutput
 }
 
 // Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020) for

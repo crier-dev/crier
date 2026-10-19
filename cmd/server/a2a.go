@@ -345,6 +345,27 @@ func (h *a2aHandler) refineSendRefusal(err error, target *registry.Agent) *a2a.R
 // outlive a stream in the same backend; disappearance alone proves no outcome.
 // A task with no inbox, dead-letter or observation record remains not-found.
 func (h *a2aHandler) evidence(agentID, taskID string) (a2a.TaskEvidence, *a2a.RPCError) {
+	ev, rpcErr := h.lifecycleEvidence(agentID, taskID)
+	if rpcErr != nil || !ev.Present() {
+		return ev, rpcErr
+	}
+	if backend, ok := h.store.(registry.TaskOutputStore); ok {
+		output, found, err := backend.TaskOutput(agentID, taskID)
+		if err != nil {
+			return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInternalError, "the task output could not be read: "+err.Error())
+		}
+		if found {
+			var artifact a2a.Artifact
+			if err := json.Unmarshal(output.Artifact, &artifact); err != nil {
+				return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInternalError, "decode task output: "+err.Error())
+			}
+			ev.Answer, ev.AnswerObservedAt = &artifact, output.ObservedAt
+		}
+	}
+	return ev, nil
+}
+
+func (h *a2aHandler) lifecycleEvidence(agentID, taskID string) (a2a.TaskEvidence, *a2a.RPCError) {
 	observed, observedFound, observationErr := h.observedEvidence(agentID, taskID)
 	if observationErr != nil {
 		return a2a.TaskEvidence{}, a2a.NewRPCError(a2a.CodeInternalError, "the task observation could not be read: "+observationErr.Error())
@@ -525,6 +546,21 @@ func (h *a2aHandler) listTasks(w http.ResponseWriter, r *http.Request, req *a2a.
 			}
 		}
 		items = append(items, a2a.ListItem{ID: ev.TaskID(), Evidence: ev, State: state, Basis: basis, StatusTimestamp: ev.StatusTimestamp(now)})
+	}
+	// Use the same output join BEFORE filtering/ordering as GetTask; the output
+	// may arrive after Ack and changes both state and last-update timestamp.
+	for i := range items {
+		ev, rpcErr := h.evidence(target.ID, items[i].ID)
+		if rpcErr != nil {
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+			return
+		}
+		state, basis, rpcErr := ev.Resolve(target.ID, items[i].ID, now)
+		if rpcErr != nil {
+			continue
+		}
+		items[i].Evidence, items[i].State, items[i].Basis = ev, state, basis
+		items[i].StatusTimestamp = ev.StatusTimestamp(now)
 	}
 	page, rpcErr := a2a.BuildListPage(items, params)
 	if rpcErr != nil {
@@ -988,12 +1024,6 @@ func (s *a2aStream) run() {
 			}
 		}
 	}
-	if !s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamTask(s.task))) {
-		s.close("client-disconnect")
-		return
-	}
-	s.events++
-
 	// The SSE view of crier's relay subscription. The relay keeps serving its
 	// WebSocket subscribers untouched: this calls the same exported Subscribe
 	// and writes what arrives as event-stream frames. Publishing to the task's
@@ -1006,6 +1036,12 @@ func (s *a2aStream) run() {
 		defer unsub()
 		relayCh = ch
 	}
+
+	if !s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamTask(s.task))) {
+		s.close("client-disconnect")
+		return
+	}
+	s.events++
 
 	slog.Info("A2A stream opened",
 		"task_id", s.task.ID, "target", s.target, "topic", s.topic,
@@ -1110,15 +1146,13 @@ func (s *a2aStream) observeOnce() (a2a.TaskState, bool) {
 		s.emitTerminal(a2a.TaskStateCanceled, "canceled by request: the inbox entry was closed")
 		return a2a.TaskStateCanceled, true
 	} else if found && !ev.AcknowledgedAt.IsZero() {
-		s.emitTerminal(a2a.TaskStateCompleted, "the receiving agent acknowledged the message")
-		return a2a.TaskStateCompleted, true
+		return s.projectAcknowledgement()
 	}
 	if s.acknowledged != nil && s.acknowledged() {
 		if !s.persistObservation("acknowledged", now) {
 			return "", true
 		}
-		s.emitTerminal(a2a.TaskStateCompleted, "the receiving agent acknowledged the message")
-		return a2a.TaskStateCompleted, true
+		return s.projectAcknowledgement()
 	}
 	switch {
 	case err == nil:
@@ -1126,8 +1160,7 @@ func (s *a2aStream) observeOnce() (a2a.TaskState, bool) {
 			if !s.persistObservation("acknowledged", now) {
 				return "", true
 			}
-			s.emitTerminal(a2a.TaskStateCompleted, "the receiving agent acknowledged the message")
-			return a2a.TaskStateCompleted, true
+			return s.projectAcknowledgement()
 		}
 		if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
 			s.emitTerminal(a2a.TaskStateFailed,
@@ -1169,6 +1202,35 @@ func (s *a2aStream) observeOnce() (a2a.TaskState, bool) {
 		s.events++
 		return "", true
 	}
+}
+
+// projectAcknowledgement uses the polling projection too: Ack without output
+// leaves the stream open so an answer arriving AFTER consumption is not lost.
+func (s *a2aStream) projectAcknowledgement() (a2a.TaskState, bool) {
+	ev, rpcErr := s.h.evidence(s.target, s.task.ID)
+	if rpcErr != nil {
+		s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, rpcErr))
+		return "", true
+	}
+	state, basis, rpcErr := ev.Resolve(s.target, s.task.ID, s.h.opts.now())
+	if rpcErr != nil {
+		s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, rpcErr))
+		return "", true
+	}
+	task, err := ev.Task(state, basis, nil, s.h.opts.now())
+	if err != nil {
+		s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
+		return "", true
+	}
+	// Same state can gain acknowledgement evidence (leased WORKING -> acked
+	// WORKING); emit that evidence transition once, not just enum changes.
+	prior, _ := s.task.Metadata["crier"].(a2a.CrierMeta)
+	next, _ := task.Metadata["crier"].(a2a.CrierMeta)
+	if state != s.state || prior.StateBasis != next.StateBasis || prior.Answered != next.Answered {
+		s.task, s.state = task, state
+		s.emit(a2a.TaskStatusUpdateEvent{Status: task.Status, Metadata: task.Metadata})
+	}
+	return state, state.IsTerminal()
 }
 
 // setState reports a non-terminal state change, once.
@@ -1233,6 +1295,21 @@ func (s *a2aStream) artifact(frame []byte) {
 			Parts:      parts,
 			Metadata:   map[string]any{"crier": map[string]any{"relay_topic": f.Topic}},
 		},
+	}
+	// Only an explicit agent-role envelope naming THIS task is answer
+	// evidence. Opaque frames, user messages and cross-task frames still stream
+	// as before, but cannot certify the receiving agent's output.
+	if env, ok := a2a.ParseEnvelope(f.Event); ok && env.Role == a2a.RoleAgent && env.TaskID == s.task.ID && f.Topic == s.topic && a2a.HasOutputParts(parts) {
+		if backend, ok := s.h.store.(registry.TaskOutputStore); ok {
+			raw, err := json.Marshal(event.Artifact)
+			if err == nil {
+				err = backend.RecordTaskOutput(s.target, registry.TaskOutput{TaskID: s.task.ID, ObservedAt: s.h.opts.now(), Artifact: raw})
+			}
+			if err != nil {
+				s.h.writeEvent(s.w, a2a.ErrorResponse(s.id, a2a.NewRPCError(a2a.CodeInternalError, "the task output could not be retained: "+err.Error())))
+				return
+			}
+		}
 	}
 	s.events++
 	s.h.writeEvent(s.w, a2a.SuccessResponse(s.id, a2a.StreamArtifact(&event)))

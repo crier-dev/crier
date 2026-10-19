@@ -42,6 +42,6 @@ func TestA2AAckEvidencePostgres(t *testing.T) {
 	for id, want := range before {
 		got := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
 		require.Equal(t, want, got, "full evidence survives PostgreSQL pool reopen")
-		require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, got))
+		require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, got))
 	}
 }

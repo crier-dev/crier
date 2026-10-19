@@ -311,23 +311,23 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 		t.Fatalf("GetTask after an ack = %d: %s", status, body)
 	}
 	got = rpcResult(t, body)
-	if state := rpcTaskState(t, got); state != string(a2a.TaskStateCompleted) {
-		t.Fatalf("GetTask after an ack = %s, want COMPLETED from Ack's own retained evidence", state)
+	if state := rpcTaskState(t, got); state != string(a2a.TaskStateWorking) {
+		t.Fatalf("GetTask after an ack = %s, want WORKING until an answer is observed", state)
 	}
 	if basis := rpcTaskBasis(t, got); basis != a2a.StateBasisAcknowledged {
 		t.Errorf("state_basis = %q, want %q", basis, a2a.StateBasisAcknowledged)
 	}
-	tr.step("ack → entry removed, evidence retained", "GetTask = TASK_STATE_COMPLETED without an open stream")
+	tr.step("ack → entry removed, evidence retained", "GetTask = TASK_STATE_WORKING (acknowledged, no answer observed)")
 
 	status, body, _ = a2aRPC(t, client, base, listTasksBody(a2aLifecycleTenant, ""))
 	if status != http.StatusOK {
 		t.Fatalf("ListTasks after an ack = %d: %s", status, body)
 	}
 	listedTasks := rpcTasks(t, rpcResult(t, body))
-	if len(listedTasks) != 1 || listedTasks[0]["id"] != taskID || rpcTaskState(t, listedTasks[0]) != string(a2a.TaskStateCompleted) {
-		t.Errorf("ListTasks after an ack = %v, want the retained COMPLETED task", listedTasks)
+	if len(listedTasks) != 1 || listedTasks[0]["id"] != taskID || rpcTaskState(t, listedTasks[0]) != string(a2a.TaskStateWorking) {
+		t.Errorf("ListTasks after an ack = %v, want the consumed-but-unanswered WORKING task", listedTasks)
 	}
-	tr.step("ack → ListTasks", "1 COMPLETED task (the queue is empty; acknowledgement evidence remains)")
+	tr.step("ack → ListTasks", "1 WORKING task (the queue is empty; acknowledgement is not an answer)")
 
 	// --- 6. TTL elapsed: FAILED, from the entry itself -----------------------
 	expiredID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,
@@ -665,10 +665,11 @@ func TestA2ATaskLifecycle_SubscribeToTaskStreamsUntilTerminal(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a statusUpdate, got %v", terminal)
 	}
-	if state := rpcTaskState(t, update); state != "TASK_STATE_COMPLETED" {
-		t.Errorf("the terminal update = %s, want TASK_STATE_COMPLETED for an acknowledged message", state)
+	if state := rpcTaskState(t, update); state != "TASK_STATE_WORKING" {
+		t.Errorf("the terminal update = %s, want TASK_STATE_WORKING for an unanswered message", state)
 	}
-	// §3.1.2/§9.4.6: the stream MUST close when the task reaches a terminal state.
+	// Consumption is non-terminal; the caller closes this still-open stream.
+	_ = stream.body.Body.Close()
 	stream.waitClosed(t)
 }
 

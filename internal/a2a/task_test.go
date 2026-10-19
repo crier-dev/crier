@@ -69,13 +69,13 @@ func TestTaskLifecycleStateMappingIsTheDocumentedTable(t *testing.T) {
 			wantBasis: StateBasisExpired,
 		},
 		{
-			name: "a CLOSED row a backend retained is COMPLETED",
+			name: "a CLOSED row without output is WORKING",
 			evidence: TaskEvidence{Entry: func() *InboxView {
 				v := entryView("m-4", lifecycleNow.Add(-time.Minute), "", nil, lifecycleNow.Add(time.Hour), `{"parts":[]}`)
 				v.ACKed = true
 				return v
 			}()},
-			wantState: TaskStateCompleted,
+			wantState: TaskStateWorking,
 			wantBasis: StateBasisClosed,
 		},
 		{

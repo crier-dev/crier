@@ -5,7 +5,7 @@
 // entry. Its id is the entry's message id, its state is what crier's own store
 // can prove about that entry right now, and its terminal states are produced by
 // the operations crier already has — Retrieve leases (WORKING), Ack acknowledges
-// and removes (COMPLETED), the TTL sweep removes and records (FAILED), and
+// and removes (WORKING until output is observed), the TTL sweep removes and records (FAILED), and
 // CancelTask (this row) releases the lease and closes the entry (CANCELED).
 //
 // Two rules shape everything here, because this is where an interop adapter
@@ -295,6 +295,11 @@ func (v InboxView) expired(now time.Time) bool {
 // history and the terminal timestamp do not depend on an open stream.
 type TaskEvidence struct {
 	Entry *InboxView
+	// Answer is output observed on this task's topic, retained separately from
+	// lifecycle observations. The creating request and generated status text are
+	// never output evidence.
+	Answer           *Artifact `json:"-"`
+	AnswerObservedAt time.Time `json:"-"`
 	// CanceledAt records an actual successful CancelTask.
 	// Entry retains the pre-close snapshot for the task identity and history.
 	CanceledAt time.Time
@@ -306,6 +311,30 @@ type TaskEvidence struct {
 	// DeadLetteredAt is when the expiry sweep recorded this message as a dead
 	// letter, zero when it recorded nothing.
 	DeadLetteredAt time.Time
+}
+
+// Answered requires actual output parts and their observation time. A bare
+// timestamp or an empty artifact cannot certify an answer.
+func (e TaskEvidence) Answered() bool {
+	return e.Answer != nil && HasOutputParts(e.Answer.Parts) && !e.AnswerObservedAt.IsZero()
+}
+
+// HasOutputParts excludes empty payloads while preserving the existing A2A
+// oneof validation. A generated status or request never reaches this helper as
+// output: the caller must first establish the explicit agent/task envelope.
+func HasOutputParts(parts []Part) bool {
+	present := false
+	for _, p := range parts {
+		if _, err := partFromA2A(p, "output.parts"); err != nil {
+			return false
+		}
+		if (p.Text != nil && strings.TrimSpace(*p.Text) != "") ||
+			(p.Raw != nil && *p.Raw != "") || (p.URL != nil && *p.URL != "") ||
+			(len(p.Data) > 0 && string(p.Data) != "null" && string(p.Data) != "{}" && string(p.Data) != "[]") {
+			present = true
+		}
+	}
+	return present
 }
 
 // Present reports whether crier holds ANY record for this task id.
@@ -326,10 +355,11 @@ func (e TaskEvidence) TaskID() string {
 //
 // The table, in the order the cases are decided (and asserted in tests):
 //
-//	observed acknowledgement       → TASK_STATE_COMPLETED   [acknowledgement-observed]
+//	observed acknowledgement + output → TASK_STATE_COMPLETED [acknowledgement-observed]
+//	observed acknowledgement only → TASK_STATE_WORKING     [acknowledgement-observed]
 //	observed cancellation          → TASK_STATE_CANCELED    [canceled-by-request]
 //	observed unexplained removal   → TASK_STATE_UNSPECIFIED [removed-outcome-unknown]
-//	entry present, closed (ACKed)  → TASK_STATE_COMPLETED   [inbox-entry-closed]
+//	entry present, closed (ACKed)  → WORKING (COMPLETED with output) [inbox-entry-closed]
 //	entry present, TTL elapsed     → TASK_STATE_FAILED      [inbox-entry-ttl-elapsed-unacked]
 //	entry present, leased          → TASK_STATE_WORKING     [inbox-entry-leased]
 //	entry present, unleased        → TASK_STATE_SUBMITTED   [inbox-entry-unleased]
@@ -343,17 +373,17 @@ func (e TaskEvidence) TaskID() string {
 //     the work cannot complete, and reporting the submitted state it still
 //     stores would tell a client to keep waiting for a message nobody can
 //     claim. The sweep will record the same outcome durably a moment later.
-//   - a CLOSED row is COMPLETED: the store's own ACKed flag IS crier's "final"
-//     marker (Retrieve, Stats, QueueDepth and RevokeLeases all skip one).
-//     Neither shipped backend retains such a row — Ack deletes — so this case is
-//     unreachable in production and exists so that a backend which ever changes
-//     that is mapped honestly instead of reported as not-found.
+//   - a CLOSED row proves acknowledgement, not output. Like an observed Ack,
+//     it remains WORKING until separate output evidence is present.
 func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState, string, *RPCError) {
 	if !e.CanceledAt.IsZero() {
 		return TaskStateCanceled, StateBasisCanceled, nil
 	}
 	if !e.AcknowledgedAt.IsZero() {
-		return TaskStateCompleted, StateBasisAcknowledged, nil
+		if e.Answered() {
+			return TaskStateCompleted, StateBasisAcknowledged, nil
+		}
+		return TaskStateWorking, StateBasisAcknowledged, nil
 	}
 	if !e.DeadLetteredAt.IsZero() {
 		return TaskStateFailed, StateBasisDeadLetter, nil
@@ -364,7 +394,10 @@ func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState,
 	if e.Entry != nil {
 		switch {
 		case e.Entry.ACKed:
-			return TaskStateCompleted, StateBasisClosed, nil
+			if e.Answered() {
+				return TaskStateCompleted, StateBasisClosed, nil
+			}
+			return TaskStateWorking, StateBasisClosed, nil
 		case e.Entry.expired(now):
 			return TaskStateFailed, StateBasisExpired, nil
 		case e.Entry.LeaseID != "":
@@ -389,6 +422,9 @@ func (e TaskEvidence) StatusTimestamp(now time.Time) time.Time {
 	case !e.CanceledAt.IsZero():
 		return e.CanceledAt
 	case !e.AcknowledgedAt.IsZero():
+		if e.Answered() && e.AnswerObservedAt.After(e.AcknowledgedAt) {
+			return e.AnswerObservedAt
+		}
 		return e.AcknowledgedAt
 	case !e.DeadLetteredAt.IsZero():
 		return e.DeadLetteredAt
@@ -419,7 +455,10 @@ func (e TaskEvidence) Task(state TaskState, basis string, historyLength *int, no
 	}
 	id := e.TaskID()
 	contextID := id
-	meta := CrierMeta{Transport: TransportInbox, StateBasis: basis}
+	meta := CrierMeta{Transport: TransportInbox, StateBasis: basis, Answered: e.Answered()}
+	if meta.Answered {
+		meta.AnswerObservedAt = formatTimestamp(e.AnswerObservedAt)
+	}
 	var history []Message
 
 	if e.Entry != nil {
@@ -456,6 +495,9 @@ func (e TaskEvidence) Task(state TaskState, basis string, historyLength *int, no
 	if len(history) > 0 {
 		task.History = history
 	}
+	if e.Answered() {
+		task.Artifacts = []Artifact{*e.Answer}
+	}
 	return task, nil
 }
 
@@ -474,8 +516,8 @@ func expiryJSON(at time.Time) json.RawMessage {
 }
 
 // statusMessage is the one-sentence explanation a client gets for the states
-// whose REASON is not in the state's name. SUBMITTED and WORKING carry none:
-// the state says everything crier knows.
+// whose reason is not in the state name. In particular acknowledged WORKING
+// explains that consumption did not provide an answer.
 func statusMessage(state TaskState, e TaskEvidence, contextID string) *Message {
 	var text string
 	switch state {
@@ -491,8 +533,12 @@ func statusMessage(state TaskState, e TaskEvidence, contextID string) *Message {
 		}
 	case TaskStateUnspecified:
 		text = "the inbox entry was removed; no acknowledgement or cancellation was observed, so the task outcome is unknown"
+	case TaskStateWorking:
+		if !e.AcknowledgedAt.IsZero() || (e.Entry != nil && e.Entry.ACKed) {
+			text = "the receiving agent acknowledged the message; no answer observed yet"
+		}
 	case TaskStateCompleted:
-		text = "the message was acknowledged: the inbox entry is closed and can no longer be retrieved"
+		text = "the receiving agent acknowledged the message and an answer was observed"
 	case TaskStateCanceled:
 		text = "canceled by request: the lease on the message was released and its inbox entry was closed, so it can no longer be retrieved or acknowledged"
 	}
@@ -541,15 +587,14 @@ type ListTask struct {
 
 // ForListing renders the task as one element of a ListTasks response.
 //
-// crier keeps no artifact for a task: a task's outputs are relay frames an
-// observing stream forwards (§5.4.5), never stored rows, so a listing has none
-// to return — and says so with an explicit empty array rather than by dropping
-// a member the client asked for.
+// The first explicit agent output observed on the task topic is retained for
+// polling. When none was observed, includeArtifacts still yields an explicit
+// empty array instead of dropping a member the client requested.
 func (t *Task) ForListing(includeArtifacts bool) ListTask {
 	out := ListTask{Task: t}
 	if includeArtifacts {
-		empty := []Artifact{}
-		out.Artifacts = &empty
+		artifacts := append([]Artifact{}, t.Artifacts...)
+		out.Artifacts = &artifacts
 	}
 	return out
 }

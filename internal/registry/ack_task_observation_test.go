@@ -66,7 +66,7 @@ func testAckTaskObservation(t *testing.T, store Store) {
 			require.True(t, o.ObservedAt.Equal(ev.AcknowledgedAt))
 			state, basis, rpcErr := ev.Resolve("ack-agent", id, time.Now())
 			require.Nil(t, rpcErr)
-			require.Equal(t, a2a.TaskStateCompleted, state)
+			require.Equal(t, a2a.TaskStateWorking, state, "Ack proves consumption, not an answer")
 			require.Equal(t, a2a.StateBasisAcknowledged, basis)
 			_, err = store.(InboxPeeker).Peek("ack-agent", id)
 			require.ErrorIs(t, err, ErrMessageNotFound)

@@ -32,9 +32,10 @@ func TestA2APersistence_AckAfterStreamAndHandlerClose(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.NoError(t, store.Ack("terminal-agent", lease, []string{id}))
-	stream.nextStatus(t, string(a2a.TaskStateCompleted))
+	stream.nextStatus(t, string(a2a.TaskStateWorking))
+	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateCompleted)
+	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateWorking)
 }
 
 func TestA2APersistence_CancelAfterStreamAndHandlerClose(t *testing.T) {
@@ -98,9 +99,10 @@ func TestA2APersistence_AckDoesNotDependOnStreamWrite(t *testing.T) {
 	_, lease, err := store.Retrieve("terminal-agent", time.Minute, 1)
 	require.NoError(t, err)
 	require.NoError(t, store.Ack("terminal-agent", lease, []string{id}))
-	stream.nextStatus(t, string(a2a.TaskStateCompleted))
+	stream.nextStatus(t, string(a2a.TaskStateWorking))
+	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateCompleted)
+	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateWorking)
 }
 
 func TestA2APersistence_StreamWriteFailureIsNotUnknown(t *testing.T) {

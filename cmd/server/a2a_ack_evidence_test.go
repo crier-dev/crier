@@ -91,21 +91,21 @@ func testA2AAckEvidence(t *testing.T, store registry.Store) {
 func assertA2AAckEvidence(t *testing.T, base, id string, accepted map[string]any) {
 	t.Helper()
 	got := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-	require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, got))
+	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, got))
 	require.Equal(t, accepted["history"], got["history"], "original parts, metadata and context survive Ack")
 	require.Equal(t, accepted["contextId"], got["contextId"])
 	require.Equal(t, a2a.StateBasisAcknowledged, got["metadata"].(map[string]any)["crier"].(map[string]any)["state_basis"])
-	require.Equal(t, "the message was acknowledged: the inbox entry is closed and can no longer be retrieved", terminalStatusText(t, got))
+	require.Equal(t, "the receiving agent acknowledged the message; no answer observed yet", terminalStatusText(t, got))
 	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", "")))
 	matches := 0
 	for _, raw := range listing["tasks"].([]any) {
 		task := raw.(map[string]any)
 		if task["id"] == id {
 			matches++
-			require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, task))
+			require.Equal(t, got, task, "GetTask and ListTasks project the same evidence")
 		}
 	}
-	require.Equal(t, 1, matches, "ListTasks must contain one COMPLETED, never immortal UNSPECIFIED")
+	require.Equal(t, 1, matches, "ListTasks must contain one consumed-but-unanswered WORKING task")
 }
 
 func TestA2AAckEvidenceMemory(t *testing.T) {

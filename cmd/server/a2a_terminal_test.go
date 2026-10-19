@@ -120,8 +120,9 @@ func TestA2ATerminal_RetrieveWithAck(t *testing.T) {
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	completed := stream.next(t, "ack status")["statusUpdate"].(map[string]any)
-	require.Equal(t, string(a2a.TaskStateCompleted), completed["status"].(map[string]any)["state"])
-	require.Equal(t, "the receiving agent acknowledged the message", terminalStatusText(t, completed))
+	require.Equal(t, string(a2a.TaskStateWorking), completed["status"].(map[string]any)["state"])
+	require.Equal(t, "the receiving agent acknowledged the message; no answer observed yet", terminalStatusText(t, completed))
+	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
 }
 

@@ -610,6 +610,9 @@ func (a DeliverAccept) Held() bool { return a.Status == "held" }
 // can prove from the entry and states which record it read the state from in
 // StateBasis (INT-A2A-004).
 type CrierMeta struct {
+	// Answered reports retained output evidence, never consumption or request history.
+	Answered         bool            `json:"answered"`
+	AnswerObservedAt string          `json:"answer_observed_at,omitempty"`
 	Transport        string          `json:"transport,omitempty"`
 	DeliveryMode     string          `json:"delivery_mode,omitempty"`
 	ExpiresAt        json.RawMessage `json:"expires_at,omitempty"`
