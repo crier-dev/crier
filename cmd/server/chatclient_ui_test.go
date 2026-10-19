@@ -176,7 +176,7 @@ func TestChatClientNoParallelAuthOrExecution(t *testing.T) {
 		`credentials:"same-origin"`,
 		`o.outcome === "refused"`,
 		`outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut")`,
-		`if (!task && !retryable) pendingMessageRequest = null`,
+		`if (!task && !retryable && !inProgress) pendingMessageRequest = null`,
 		`result.replay_action === "redelivered"`,
 		`replayed without another delivery`,
 		`its outcomes will be replaced, not a second operator row added.`,

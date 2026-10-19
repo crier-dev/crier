@@ -339,7 +339,7 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "refused" || o.outcome === "budget_cut" ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : o.outcome === "refused" || o.outcome === "budget_cut" ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
@@ -438,8 +438,9 @@ let pendingMessageRequest = null;
 // 465 is the operator's missing-agent label, not the HTTP add-member status.
 // Also recognize pre-change persisted details without rewriting their wire data.
 function outcomeLabel(o) {
+  if (o.outcome === "in_progress") return "in progress";
   if (o.outcome !== "refused") return o.outcome;
-  if (/AGENT_NOT_FOUND|agent not found|no such agent/i.test(o.detail || "")) return "no such agent (465)";
+  if (o.code === "AGENT_NOT_FOUND" || /AGENT_NOT_FOUND|agent not found|no such agent/i.test(o.detail || "")) return "no such agent (465)";
   return "delivery refused";
 }
 function outcomeLine(o) {
@@ -447,8 +448,9 @@ function outcomeLine(o) {
 }
 function deliverySummary(outcomes) {
   const delivered = outcomes.filter(o => ["delivered","leased","acked","expired"].includes(o.outcome)).length;
-  const missed = outcomes.length - delivered;
-  return outcomes.length ? "; delivered to " + delivered + " recipient(s)" + (missed ? "; " + missed + " recipient(s) not delivered." : ".") : ".";
+  const pending = outcomes.filter(o => o.outcome === "in_progress").length;
+  const missed = outcomes.length - delivered - pending;
+  return outcomes.length ? "; delivered to " + delivered + " recipient(s)" + (pending ? "; " + pending + " recipient(s) in progress" : "") + (missed ? "; " + missed + " recipient(s) not delivered." : ".") : ".";
 }
 async function send(event) {
   event.preventDefault();
@@ -493,13 +495,14 @@ async function send(event) {
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) }, !task);
     const outcomes = result.outcomes || [];
     const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut");
-    if (!task && !retryable) pendingMessageRequest = null;
+    const inProgress = outcomes.some(o => o.outcome === "in_progress");
+    if (!task && !retryable && !inProgress) pendingMessageRequest = null;
     const refused = outcomes.some(o => o.outcome === "refused");
     const negative = refused || outcomes.some(o => o.outcome === "failed" || o.outcome === "canned" || o.outcome === "budget_cut");
     const details = outcomes.map(outcomeLine).join("\n");
     const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
-    notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : ""), negative);
-    if (!retryable) { $("text").value = ""; state.reply = null; renderReply(); }
+    notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : inProgress ? "\nDelivery is already in flight. Draft kept. Refresh the transcript for confirmation; do not send again while it is in progress." : ""), negative);
+    if (!retryable && !inProgress) { $("text").value = ""; state.reply = null; renderReply(); }
   } catch(e) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
     // federation and persistence can outlast it. Do not label that uncertainty

@@ -11,7 +11,10 @@ import (
 // timed-out exchange (including an upstream 408/504), not an endpoint refusal.
 // Unwrap preserves ErrPermanent and context deadline/cancellation classification.
 type BlockingDeliveryError struct {
-	Attempts        int
+	Attempts int
+	// TargetStatus is the last actual response, never crier's wrapper status.
+	// Zero means the last attempt received no HTTP response.
+	TargetStatus    int
 	Budget          time.Duration
 	BudgetExhausted bool
 	Cut             bool

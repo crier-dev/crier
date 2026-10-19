@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
-	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // InboxDeliverer is the delivery capability used by fan-out. Production uses
@@ -276,21 +274,8 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				deliveryErr = deliverer.Deliver(target, entry)
 			}
 			if err := deliveryErr; err != nil {
-				outcome = OutcomeRefused
-				var blocking *webhook.BlockingDeliveryError
-				if errors.As(err, &blocking) && blocking.Cut {
-					outcome = OutcomeBudgetCut
-				}
-				reason := err.Error()
-				if errors.Is(err, registry.ErrAgentNotFound) {
-					reason = fmt.Sprintf("no such agent %q (AGENT_NOT_FOUND): %v", target, err)
-				}
-				outcomes[i] = DeliveryOutcome{
-					Target:    target,
-					Outcome:   outcome,
-					Reason:    reason,
-					UpdatedAt: time.Now().UTC(),
-				}
+				outcomes[i] = deliveryFailure(target, err)
+				outcomes[i].UpdatedAt = time.Now().UTC()
 				return
 			}
 			outcomes[i] = DeliveryOutcome{
@@ -299,6 +284,14 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				Reason:       reason,
 				InboxEntryID: entry.ID,
 				UpdatedAt:    time.Now().UTC(),
+			}
+			switch outcome {
+			case OutcomeFailed:
+				outcomes[i].Code, outcomes[i].Retryable = "RUNTIME_FAILED", true
+			case OutcomeCanned:
+				outcomes[i].Code = "RUNTIME_CANNED"
+			case OutcomeUnreadableReply:
+				outcomes[i].Code = "UNREADABLE_REPLY"
 			}
 		}(i, target)
 	}

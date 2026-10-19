@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +38,10 @@ func TestSessionDeliveryBudgetCut(t *testing.T) {
 			msg := sendDispatchMessage(t, base, room)
 			elapsed := time.Since(start)
 			t.Logf("cut wall=%s budget=%s flushed=%t detail=%s", elapsed, budget, flushed, msg.Outcomes[0].Reason)
+			require.True(t, strings.HasPrefix(msg.Outcomes[0].Reason, "answer did not arrive inside the budget:"), "budget must lead, not crier's wrapper status: %s", msg.Outcomes[0].Reason)
 			require.Equal(t, "budget_cut", msg.Outcomes[0].Outcome)
+			require.Equal(t, "DELIVERY_BUDGET_CUT", msg.Outcomes[0].Code)
+			require.True(t, msg.Outcomes[0].Retryable)
 			require.Zero(t, msg.Delivered)
 			require.Zero(t, msg.Skipped, "a budget cut is not a refusal")
 			for _, text := range []string{"200ms", "1 attempt", "budget exhausted", "answer did not arrive", "late answer", "discarded", "RUNTIME_TIMEOUT_MS", "CR_SESSION_DELIVERY_TIMEOUT_MS"} {
@@ -76,7 +80,10 @@ func TestSessionDelivery503RefusalReportsAttempts(t *testing.T) {
 	msg := sendDispatchMessage(t, base, room)
 	elapsed := time.Since(start)
 	t.Logf("refusal wall=%s calls=%d detail=%s", elapsed, calls.Load(), msg.Outcomes[0].Reason)
+	require.True(t, strings.HasPrefix(msg.Outcomes[0].Reason, "target answered status 503;"), "target status must lead, budget must be secondary: %s", msg.Outcomes[0].Reason)
 	require.Equal(t, "refused", msg.Outcomes[0].Outcome)
+	require.Equal(t, "TARGET_HTTP_503", msg.Outcomes[0].Code)
+	require.True(t, msg.Outcomes[0].Retryable)
 	require.GreaterOrEqual(t, calls.Load(), int32(2), "exercise retry until budget, not only first refusal")
 	for _, text := range []string{fmt.Sprintf("%d attempts", calls.Load()), "1.2s", "budget exhausted", "503"} {
 		require.Contains(t, msg.Outcomes[0].Reason, text)

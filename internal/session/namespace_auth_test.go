@@ -71,7 +71,9 @@ func TestSessionAPI_TargetNamespaceAuth(t *testing.T) {
 			require.Equal(t, string(OutcomeDelivered), outcomes["open"].Outcome, "default namespace needs no token")
 			if tc.want == OutcomeRefused {
 				require.Contains(t, outcomes["protected"].Detail, "NAMESPACE_UNAUTHORIZED")
-				require.Contains(t, outcomes["protected"].Detail, `namespace \"private\"`)
+				require.Equal(t, "NAMESPACE_UNAUTHORIZED", outcomes["protected"].Code)
+				require.False(t, outcomes["protected"].Retryable)
+				require.Contains(t, outcomes["protected"].Detail, `namespace "private"`)
 				require.NotContains(t, outcomes["protected"].Detail, "NAMESPACE_MISMATCH")
 				require.Empty(t, outcomes["protected"].InboxEntryID)
 			}

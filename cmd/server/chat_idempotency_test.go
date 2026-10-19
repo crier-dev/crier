@@ -83,6 +83,20 @@ async function call(path, options) {
     assert.equal(requests.at(-1).body.idempotency_key,first.idempotency_key);
     assert.equal($('text').value,'');
   }
+  // Busy is pending, not negative, and must not advise another send or mint a key.
+  $('text').value='already in flight';
+  outcomes=[{target:'nimbus',outcome:'in_progress',code:'DELIVERY_IN_PROGRESS',retryable:true,detail:'already in progress'}];
+  await send({preventDefault(){}});
+  const busyKey=requests.at(-1).body.idempotency_key;
+  const pending=notices.at(-1);
+  assert.match(pending[1],/1 recipient\(s\) in progress/);
+  assert.doesNotMatch(pending[1],/not delivered|Send again unchanged|refused/);
+  assert.match(pending[1],/Refresh the transcript/);
+  assert.match(pending[1],/do not send again/);
+  assert.notEqual(pending[2],true);
+  assert.equal($('text').value,'already in flight');
+  await send({preventDefault(){}});
+  assert.equal(requests.at(-1).body.idempotency_key,busyKey);
   console.log('composer timeout and retry-key behavior PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});
 `)

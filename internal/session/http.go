@@ -262,6 +262,8 @@ type outcomeView struct {
 	Outcome      string    `json:"outcome"`
 	InboxEntryID string    `json:"inbox_entry_id,omitempty"`
 	Detail       string    `json:"detail,omitempty"`
+	Code         string    `json:"code,omitempty"`
+	Retryable    bool      `json:"retryable"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
@@ -276,6 +278,8 @@ func outcomeViews(outcomes []DeliveryOutcome) []outcomeView {
 			Outcome:      string(o.Outcome),
 			InboxEntryID: o.InboxEntryID,
 			Detail:       o.Reason,
+			Code:         o.Code,
+			Retryable:    o.Retryable,
 			UpdatedAt:    o.UpdatedAt,
 		})
 	}
@@ -1024,7 +1028,7 @@ func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	for _, o := range outcomes {
 		// Runtime-negative verdicts are neither delivered answers nor skipped
 		// deliveries. Their per-target outcome remains visible separately.
-		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed || o.Outcome == OutcomeBudgetCut || o.Outcome == OutcomeUnreadableReply {
+		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed || o.Outcome == OutcomeBudgetCut || o.Outcome == OutcomeUnreadableReply || o.Outcome == OutcomeInProgress {
 			continue
 		}
 		// Only a refused delivery is a skip. The remaining lifecycle states
@@ -1050,6 +1054,10 @@ func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf map[string]string) {
 	for _, o := range outcomes {
 		if o.Outcome == OutcomeDelivered {
+			continue
+		}
+		if o.Outcome == OutcomeInProgress {
+			slog.Info("fan-out: delivery already in progress", "target", o.Target, "message_id", messageID, "code", o.Code)
 			continue
 		}
 		attrs := []any{"target", o.Target, "message_id", messageID, "reason", o.Reason}

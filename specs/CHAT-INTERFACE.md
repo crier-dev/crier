@@ -172,6 +172,28 @@ answer or replace the cut with success. Retrying all-negative outcomes includes
 `budget_cut`, retaining the original intent and operator row (DF-CRIER-349).
 The existing `canned` / `failed` verdict handling (DF-CRIER-348) is unchanged.
 
+### Busy dispatch and diagnostic ordering (DF-CRIER-353, DF-CRIER-358)
+
+A held registry delivery idempotency key yields `in_progress`, with
+`code: "DELIVERY_IN_PROGRESS"`, the existing `target` and `retryable: true`.
+This is neither refusal nor delivery evidence, so neither summary count includes it.
+The UI uses a pending warning rather than refusal styling and tells the operator to
+refresh for confirmation, not send again. Retryability describes the condition;
+it does not authorize duplicate work. Same-key session POST remains pure replay
+while an outcome is `in_progress`; no automatic reconciliation is implied.
+
+Outcome diagnostics add `code` (when known) and `retryable` to the existing human
+`detail`. They survive transcript reads and storage reopen through the existing
+JSONL record / SQL request projection; no table migration is required. Historical
+records without diagnostics remain readable. A busy dispatch's HTTP 409 body is
+unchanged; fan-out consumes its typed dispatch code, not a guessed status match.
+A completed refusal leads with the target's status, for example
+`target answered status 503; 2 attempts, 1.2s delivery budget exhausted: ...`
+(`code: "TARGET_HTTP_503"`). A cut instead leads with
+`answer did not arrive inside the budget: ...` (`code: "DELIVERY_BUDGET_CUT"`).
+Neither human detail embeds the serialized registry JSON error or leads with
+crier's wrapper 502/504. All existing outcome names and retry eligibility remain.
+
 ### 1.3.3 Retried message sends and browser waiting (DF-CRIER-343)
 
 `POST /sessions/{id}/messages` honours a nonempty `idempotency_key` within that session.

@@ -79,6 +79,8 @@ type sessionDispatchView struct {
 	Skipped   int    `json:"skipped"`
 	Outcomes  []struct {
 		Target       string `json:"target"`
+		Code         string `json:"code"`
+		Retryable    bool   `json:"retryable"`
 		Outcome      string `json:"outcome"`
 		Reason       string `json:"detail"`
 		InboxEntryID string `json:"inbox_entry_id"`

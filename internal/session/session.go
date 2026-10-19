@@ -110,6 +110,8 @@ const (
 	OutcomeAcked           Outcome = "acked"
 	OutcomeExpired         Outcome = "expired"
 	OutcomeRefused         Outcome = "refused"
+	// InProgress is a busy same-key dispatch, not evidence of refusal.
+	OutcomeInProgress Outcome = "in_progress"
 )
 
 // ContextShareMode is the late-join context decision (§4.6, D10). `summary`
@@ -267,6 +269,10 @@ type DeliveryOutcome struct {
 	// can return the same explanation; SQL stores retain it in the additive
 	// request projection rather than changing chat_deliveries' schema.
 	Reason string `json:"reason,omitempty"`
+	// Additive diagnostics retained in the same JSON request projection.
+	Code string `json:"code,omitempty"`
+	// Retryable describes the condition, not permission to duplicate in-flight work.
+	Retryable bool `json:"retryable"`
 }
 
 // Message is one transcript record (§4.2, §5.2 chat_transcript).

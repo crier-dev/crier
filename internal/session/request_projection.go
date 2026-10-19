@@ -24,6 +24,23 @@ const messageRequestSchema = `CREATE TABLE IF NOT EXISTS chat_message_requests (
 	PRIMARY KEY (session_id, message_id)
 )`
 
+// Even an unkeyed send must retain its structured diagnostic on SQL reopen.
+// Keep the metadata and transcript in the same existing transaction.
+func hasMessageRequestMetadata(rec *Record) bool {
+	if rec.Type != RecordMessage && rec.Type != RecordThreadReply {
+		return false
+	}
+	if rec.IdempotencyKey != "" {
+		return true
+	}
+	for _, o := range rec.Outcomes {
+		if o.Reason != "" || o.Code != "" || o.Retryable {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *SQLStore) projectMessageRequest(ctx context.Context, rec *Record) error {
 	outcomes, err := json.Marshal(rec.Outcomes)
 	if err != nil {
@@ -68,6 +85,8 @@ func restoreMessageRequest(messages []*Message, id, key, raw string) error {
 					// original wire timestamp while this is still the same outcome;
 					// a later leased/acked state keeps its own projection timestamp.
 					if recorded.Outcome == m.Outcomes[i].Outcome && recorded.InboxEntryID == m.Outcomes[i].InboxEntryID {
+						m.Outcomes[i].Code = recorded.Code
+						m.Outcomes[i].Retryable = recorded.Retryable
 						m.Outcomes[i].UpdatedAt = recorded.UpdatedAt
 					}
 				}

@@ -300,12 +300,13 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		budget = 30 * time.Second
 	}
 	attempts := 0
+	targetStatus := 0
 	cut := false
 	deadline := time.Now().Add(budget)
 	defer func() {
 		if deliveryErr != nil {
 			deliveryErr = &BlockingDeliveryError{Attempts: attempts, Budget: budget,
-				BudgetExhausted: !time.Now().Before(deadline), Cut: cut, Cause: deliveryErr}
+				BudgetExhausted: !time.Now().Before(deadline), Cut: cut, TargetStatus: targetStatus, Cause: deliveryErr}
 		}
 	}()
 	rid := middleware.RequestIDFromContext(ctx)
@@ -354,6 +355,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
 		res := d.client.PostContext(attemptCtx, cfg, env, attempt)
+		targetStatus = res.StatusCode
 		// The full response body, not HTTP headers or a JSON prefix, must
 		// arrive before this SAME per-target deadline. Never admit a late 2xx.
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 && !time.Now().Before(deadline) {

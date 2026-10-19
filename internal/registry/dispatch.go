@@ -61,6 +61,8 @@ type DeliveryResult struct {
 // DispatchError is a refusal or transport/store failure. Its status and body are
 // the original HTTP contract, while Error is usable by non-HTTP clients.
 type DispatchError struct {
+	// Code identifies a dispatch condition without parsing its HTTP prose.
+	Code       string
 	StatusCode int
 	Response   any
 	Cause      error // structured transport evidence for non-HTTP consumers
@@ -213,6 +215,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 				return
 			case idempotencyBusy:
 				respond(http.StatusConflict, map[string]string{"error": "a delivery with this idempotency_key is already in progress"})
+				dispatchErr.(*DispatchError).Code = "DELIVERY_IN_PROGRESS"
 				return
 			}
 			attempt = att

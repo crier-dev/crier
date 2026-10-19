@@ -142,7 +142,7 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
-	if s.requestTx == nil && rec.IdempotencyKey != "" && (rec.Type == RecordMessage || rec.Type == RecordThreadReply) {
+	if s.requestTx == nil && hasMessageRequestMetadata(rec) {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -158,7 +158,7 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	if err := s.project(ctx, rec); err != nil {
 		return err
 	}
-	if (rec.Type == RecordMessage || rec.Type == RecordThreadReply) && rec.IdempotencyKey != "" {
+	if hasMessageRequestMetadata(rec) {
 		if err := s.projectMessageRequest(ctx, rec); err != nil {
 			return err
 		}
