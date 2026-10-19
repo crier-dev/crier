@@ -78,7 +78,7 @@ type apiHarness struct {
 func newAPIHarness(t *testing.T, store Repository) *apiHarness {
 	t.Helper()
 	reg := registry.NewMemoryStore()
-	for _, id := range []string{"atlas", "nimbus"} {
+	for _, id := range []string{"atlas", "nimbus", "nimbus-2", "nimbus-3", "nimbus-4"} {
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
 	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})

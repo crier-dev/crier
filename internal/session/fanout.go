@@ -209,7 +209,7 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 		}
 	}
 
-	sorted := dedupeSorted(targets)
+	sorted := withoutAuthor(dedupeSorted(targets), msg.Author.AgentID())
 	outcomes := make([]DeliveryOutcome, len(sorted))
 	// One reply slot per target: each goroutine writes only its own index, so the
 	// join needs no lock and the recording order is the sorted target order.
@@ -281,10 +281,14 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				if errors.As(err, &blocking) && blocking.Cut {
 					outcome = OutcomeBudgetCut
 				}
+				reason := err.Error()
+				if errors.Is(err, registry.ErrAgentNotFound) {
+					reason = fmt.Sprintf("no such agent %q (AGENT_NOT_FOUND): %v", target, err)
+				}
 				outcomes[i] = DeliveryOutcome{
 					Target:    target,
 					Outcome:   outcome,
-					Reason:    err.Error(),
+					Reason:    reason,
 					UpdatedAt: time.Now().UTC(),
 				}
 				return
@@ -366,5 +370,18 @@ func dedupeSorted(ids []string) []string {
 		out = append(out, id)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// withoutAuthor is applied after roster expansion and again at the transport
+// boundary, so explicit targets and historical retries cannot self-deliver.
+func withoutAuthor(targets []string, author string) []string {
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if author != "" && strings.TrimSpace(target) == author {
+			continue
+		}
+		out = append(out, target)
+	}
 	return out
 }

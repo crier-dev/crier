@@ -26,7 +26,11 @@ func TestSessionAPIRoutesServed(t *testing.T) {
 	var created struct {
 		ID string `json:"id"`
 	}
-	code, raw := sessionDo(t, client, http.MethodPost, base+"/sessions", map[string]any{
+	code, raw := sessionDo(t, client, http.MethodPost, base+"/agents", map[string]any{
+		"id": "atlas", "public_key": strings.Repeat("ab", 32),
+	}, nil)
+	require.Equal(t, http.StatusCreated, code, "register: %s", raw)
+	code, raw = sessionDo(t, client, http.MethodPost, base+"/sessions", map[string]any{
 		"title":      "wiring",
 		"created_by": map[string]string{"principal": "kara"},
 		"members": []map[string]string{

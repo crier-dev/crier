@@ -1,0 +1,219 @@
+{
+  "fixture": "scratch JSONL historical membership + real registry/webhooks; no production data",
+  "errors": [],
+  "badAdd": {
+    "status": 404,
+    "body": {
+      "detail": "no such agent \"bad-id\": register the agent before adding it to a session",
+      "error": "AGENT_NOT_FOUND"
+    }
+  },
+  "lastEnvelope": {
+    "crier": {
+      "version": 1,
+      "message_id": "f6aa52b503144509a259bfa0.refuse-bot",
+      "request_id": "f6aa52b503144509a259bfa0",
+      "session_id": "df347-legacy",
+      "thread_id": "f6aa52b503144509a259bfa0",
+      "delivery_mode": "blocking",
+      "sender": "operator",
+      "target": "refuse-bot",
+      "kind": "addressed"
+    },
+    "payload": {
+      "text": "target refusal test"
+    }
+  },
+  "sent": {
+    "status": 201,
+    "body": {
+      "id": "1dc31fed6823ebabc95d5070",
+      "thread_id": "1dc31fed6823ebabc95d5070",
+      "parent_resolvable": true,
+      "root_id": "1dc31fed6823ebabc95d5070",
+      "seq": 5,
+      "message_kind": "plain",
+      "author": {
+        "agent": "operator"
+      },
+      "payload": {
+        "text": "Hello real echo target"
+      },
+      "audience": {
+        "rule": "session",
+        "targets": [
+          {
+            "kind": "agent",
+            "id": "echo-bot"
+          },
+          {
+            "kind": "agent",
+            "id": "ghost"
+          }
+        ]
+      },
+      "outcomes": [
+        {
+          "target": "echo-bot",
+          "outcome": "delivered",
+          "inbox_entry_id": "1dc31fed6823ebabc95d5070.echo-bot",
+          "updated_at": "2026-10-19T12:01:12.679875474Z"
+        },
+        {
+          "target": "ghost",
+          "outcome": "refused",
+          "detail": "no such agent \"ghost\" (AGENT_NOT_FOUND): resolve delivery target \"ghost\": agent not found: \"ghost\"",
+          "updated_at": "2026-10-19T12:01:12.676111792Z"
+        }
+      ],
+      "idempotency_key": "0a821f188d4041412e07ec36e35201f3",
+      "created_at": "2026-10-19T12:01:12.671110558Z",
+      "delivered": 1,
+      "skipped": 1,
+      "skipped_agents": [
+        "ghost"
+      ],
+      "thread_depth": 0,
+      "reply_depth": 0
+    }
+  },
+  "partialNotice": "Message recorded; delivered to 1 recipient(s); 1 recipient(s) not delivered.\necho-bot: delivered\nghost: no such agent (465) — no such agent \"ghost\" (AGENT_NOT_FOUND): resolve delivery target \"ghost\": agent not found: \"ghost\"",
+  "transcript": {
+    "session": {
+      "id": "df347-legacy",
+      "kind": "channel",
+      "title": "Legacy member verification",
+      "created_at": "2026-10-19T12:01:11.973Z",
+      "created_by": {
+        "principal": "human"
+      },
+      "state": "open",
+      "audience_count": 3,
+      "participant_count": 3,
+      "message_count": 2,
+      "thread_count": 1,
+      "last_message_at": "2026-10-19T12:01:12.68017593Z",
+      "preview": "Echo reply from real target"
+    },
+    "messages": [
+      {
+        "id": "1dc31fed6823ebabc95d5070",
+        "thread_id": "1dc31fed6823ebabc95d5070",
+        "parent_resolvable": true,
+        "root_id": "1dc31fed6823ebabc95d5070",
+        "seq": 5,
+        "message_kind": "plain",
+        "author": {
+          "agent": "operator"
+        },
+        "payload": {
+          "text": "Hello real echo target"
+        },
+        "audience": {
+          "rule": "session",
+          "targets": [
+            {
+              "kind": "agent",
+              "id": "echo-bot"
+            },
+            {
+              "kind": "agent",
+              "id": "ghost"
+            }
+          ]
+        },
+        "outcomes": [
+          {
+            "target": "echo-bot",
+            "outcome": "delivered",
+            "inbox_entry_id": "1dc31fed6823ebabc95d5070.echo-bot",
+            "updated_at": "2026-10-19T12:01:12.679875474Z"
+          },
+          {
+            "target": "ghost",
+            "outcome": "refused",
+            "detail": "no such agent \"ghost\" (AGENT_NOT_FOUND): resolve delivery target \"ghost\": agent not found: \"ghost\"",
+            "updated_at": "2026-10-19T12:01:12.676111792Z"
+          }
+        ],
+        "idempotency_key": "0a821f188d4041412e07ec36e35201f3",
+        "created_at": "2026-10-19T12:01:12.671110558Z",
+        "thread_depth": 0,
+        "reply_depth": 0
+      },
+      {
+        "id": "5f041e91c9221727ca500869",
+        "thread_id": "1dc31fed6823ebabc95d5070",
+        "parent_id": "1dc31fed6823ebabc95d5070",
+        "parent_resolvable": true,
+        "root_id": "1dc31fed6823ebabc95d5070",
+        "seq": 6,
+        "message_kind": "plain",
+        "author": {
+          "agent": "echo-bot"
+        },
+        "payload": {
+          "text": "Echo reply from real target"
+        },
+        "audience": {
+          "rule": "explicit",
+          "targets": []
+        },
+        "created_at": "2026-10-19T12:01:12.68017593Z",
+        "thread_depth": 0,
+        "reply_depth": 1
+      }
+    ],
+    "count": 2
+  },
+  "overflow": {
+    "390": 0,
+    "768": 0,
+    "1280": 0
+  },
+  "refused": {
+    "status": 201,
+    "body": {
+      "id": "f6aa52b503144509a259bfa0",
+      "thread_id": "f6aa52b503144509a259bfa0",
+      "parent_resolvable": true,
+      "root_id": "f6aa52b503144509a259bfa0",
+      "seq": 7,
+      "message_kind": "addressed",
+      "author": {
+        "agent": "operator"
+      },
+      "payload": {
+        "text": "target refusal test"
+      },
+      "audience": {
+        "rule": "explicit",
+        "targets": [
+          {
+            "kind": "agent",
+            "id": "refuse-bot"
+          }
+        ]
+      },
+      "outcomes": [
+        {
+          "target": "refuse-bot",
+          "outcome": "refused",
+          "detail": "delivery failed (502): {\"error\":\"1 attempt, 30s delivery budget: webhook: permanent failure: status 400\"}",
+          "updated_at": "2026-10-19T12:01:12.930340132Z"
+        }
+      ],
+      "idempotency_key": "3ea836a5a64fe702a73316a9a243b0b2",
+      "created_at": "2026-10-19T12:01:12.922724625Z",
+      "skipped": 1,
+      "skipped_agents": [
+        "refuse-bot"
+      ],
+      "thread_depth": 0,
+      "reply_depth": 0
+    }
+  },
+  "refusalNotice": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.\nrefuse-bot: delivery refused — delivery failed (502): {\"error\":\"1 attempt, 30s delivery budget: webhook: permanent failure: status 400\"}\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added.",
+  "hookCalls": 2,
+  "result": "PASS"
+}

@@ -592,11 +592,11 @@ func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
 	}
 	outcomes, err := Fanout(ctx, store, msg, []string{"nimbus", "kappa", "atlas"}, nil)
 	require.NoError(t, err)
-	require.Len(t, outcomes, 3)
+	require.Len(t, outcomes, 2)
 
 	// Every member's durable inbox holds the message — through the EXISTING
 	// deliver path, so the inbox's own lease/ack/TTL machinery applies.
-	for _, target := range []string{"atlas", "nimbus", "kappa"} {
+	for _, target := range []string{"nimbus", "kappa"} {
 		entries, _, err := store.Retrieve(target, time.Minute, 10)
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "%s must have exactly one delivery", target)
@@ -620,7 +620,10 @@ func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
 		require.Equal(t, OutcomeDelivered, o.Outcome)
 		require.Equal(t, InboxEntryID("msg_fanout", o.Target), o.InboxEntryID)
 	}
-	require.Len(t, msg.Outcomes, 3)
+	require.Len(t, msg.Outcomes, 2)
+	entries, _, err := store.Retrieve("atlas", time.Minute, 10)
+	require.NoError(t, err)
+	require.Empty(t, entries, "the author must never receive its own message")
 }
 
 func TestFanout_RetryDoesNotDoubleDeliver(t *testing.T) {
@@ -648,7 +651,7 @@ func TestFanout_RefusalIsANamedOutcome(t *testing.T) {
 	store := newFanoutFixture(t, "atlas") // nimbus is unknown
 
 	msg := &Message{ID: "msg_r", SessionID: "s1", ThreadID: "msg_r", Kind: MessagePlain,
-		Author: *agentRef("atlas"), Payload: json.RawMessage(`{"text":"hi"}`)}
+		Author: *agentRef("speaker"), Payload: json.RawMessage(`{"text":"hi"}`)}
 
 	outcomes, err := Fanout(ctx, store, msg, []string{"atlas", "nimbus"}, nil)
 	require.NoError(t, err, "a refused target is not a fan-out error")

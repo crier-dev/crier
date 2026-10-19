@@ -287,7 +287,7 @@ func TestGroupAPI_DirectMessageIsOneToOne(t *testing.T) {
 // TestGroupAPI_UnknownGroupIsASkipNotADelivery: a group target with no roster
 // is a RECORDED skip — no member is guessed, nothing is delivered.
 func TestGroupAPI_UnknownGroupIsASkipNotADelivery(t *testing.T) {
-	h := newGroupHarness(t, "atlas")
+	h := newGroupHarness(t, "atlas", "nimbus")
 	room := h.createRoom(t)
 
 	var msg transcriptMessage

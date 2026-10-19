@@ -98,7 +98,7 @@ func TestGroupAPI_TeamMentionEditRoutesToCurrentMembers(t *testing.T) {
 // roster is a recorded skip — nothing is delivered to anybody, and the
 // message is still recorded (the named-error rule, never a silent drop).
 func TestGroupAPI_TeamMentionUnknownGroupIsASkip(t *testing.T) {
-	h := newGroupHarness(t, "atlas")
+	h := newGroupHarness(t, "atlas", "nimbus")
 	room := h.createRoom(t)
 
 	var msg transcriptMessage
@@ -192,7 +192,7 @@ func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
 // prefix order means an agent literally named "team" (bare form) is still an
 // agent addressee and is NOT expanded as a group (D8 / §2.1.1).
 func TestGroupAPI_MentionOfAgentLiteralNameIsNotAGroup(t *testing.T) {
-	h := newGroupHarness(t, "team", "atlas")
+	h := newGroupHarness(t, "team", "atlas", "nimbus")
 	room := h.createRoom(t)
 
 	var msg transcriptMessage

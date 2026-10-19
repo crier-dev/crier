@@ -82,8 +82,9 @@ type HTTPOptions struct {
 	// shared dispatcher. Zero uses the five-second session default.
 	DeliveryTimeoutMs int
 	// Agents resolves a member agent's stored namespace so a fan-out cannot
-	// leave its realm. Nil skips the realm cross-check (every target is
-	// treated as in-realm) — the pre-CR-FEAT-029 posture.
+	// leave its realm and local agent membership can be validated. Nil refuses
+	// local agent admission with 503 AGENT_LOOKUP_UNAVAILABLE; legacy sends
+	// still rely on the deliverer for target resolution.
 	Agents AgentLookup
 	// Namespaces is the realm policy set. Nil is one implicit namespace,
 	// exactly as the registry handler treats it.
@@ -533,6 +534,13 @@ func (h *Handler) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 		RetentionSeconds: req.RetentionSeconds,
 		Visibility:       visibility,
 	}
+	// Reject unresolved initial agents before writing any room or membership.
+	for _, m := range req.Members {
+		if err := h.checkMemberAgent(sess, m); err != nil {
+			writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
+			return
+		}
+	}
 	if err := h.store.CreateSession(r.Context(), sess, 1); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return
@@ -923,6 +931,9 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 			"target_kind", string(s.Target.Kind), "target", s.Target.ID,
 			"message_id", msg.ID, "reason", s.Reason)
 	}
+	// Explicit targets, group expansion and pre-change retry outcomes must not
+	// reintroduce the sender before realm checks can produce a false refusal.
+	recipients = withoutAuthor(recipients, msg.Author.AgentID())
 	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm
 
@@ -1098,7 +1109,7 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 		// refused with the named reason rather than silently skipped —
 		// a refused outcome is shown, never swallowed (§3.2).
 		for _, m := range st.Members {
-			if !m.ActiveAt(now) || m.MemberType != MemberAgent || !IsRemoteMember(m.MemberID) {
+			if !m.ActiveAt(now) || m.MemberType != MemberAgent || m.MemberID == msg.Author.AgentID() || !IsRemoteMember(m.MemberID) {
 				continue
 			}
 			if !inAudience(audienceOf(msg), m.MemberID) {
@@ -1114,7 +1125,7 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 		return outcomes, nil
 	}
 	for _, m := range st.Members {
-		if !m.ActiveAt(now) || m.MemberType != MemberAgent || !IsRemoteMember(m.MemberID) {
+		if !m.ActiveAt(now) || m.MemberType != MemberAgent || m.MemberID == msg.Author.AgentID() || !IsRemoteMember(m.MemberID) {
 			continue
 		}
 		if !inAudience(audienceOf(msg), m.MemberID) {
@@ -1289,7 +1300,7 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 }
 
 // resolveAudience builds the resolved audience of a send (§4.2). An explicit
-// target list is used as given; otherwise the audience is the session's active
+// target list excludes the author; otherwise the audience is the session's active
 // participants minus the author.
 func (h *Handler) resolveAudience(ctx context.Context, sess *Session, req *postMessageRequest, authorAgent string) (Audience, error) {
 	if len(req.Targets) > 0 {
@@ -1298,6 +1309,9 @@ func (h *Handler) resolveAudience(ctx context.Context, sess *Session, req *postM
 		for _, t := range req.Targets {
 			if t.ID == "" {
 				return Audience{}, errors.New("every audience target needs an id")
+			}
+			if t.Kind == TargetAgent && strings.TrimSpace(t.ID) == authorAgent {
+				continue
 			}
 			key := string(t.Kind) + "\x00" + t.ID
 			if seen[key] {
@@ -1362,8 +1376,39 @@ func (h *Handler) partitionRealm(recipients []string, realm string, now time.Tim
 	return crossRealm, deliverable
 }
 
+// checkMemberAgent validates local agent admission against the registry. Remote
+// identities retain their separate peer-policy admission contract; principals
+// have no registry inbox. A registry outage is not evidence an agent is missing.
+func (h *Handler) checkMemberAgent(sess *Session, req addParticipantRequest) error {
+	id := strings.TrimSpace(req.MemberID)
+	if MemberType(strings.TrimSpace(req.MemberType)) != MemberAgent || id == "" || IsRemoteMember(id) {
+		return nil
+	}
+	unavailable := func() error {
+		return &memberError{status: http.StatusServiceUnavailable, code: "AGENT_LOOKUP_UNAVAILABLE",
+			msg: fmt.Sprintf("cannot validate agent %q: registry lookup unavailable", id)}
+	}
+	if h.opts.Agents == nil {
+		return unavailable()
+	}
+	ag, err := h.opts.Agents.Get(id)
+	if errors.Is(err, registry.ErrAgentNotFound) {
+		return &memberError{status: http.StatusNotFound, code: "AGENT_NOT_FOUND",
+			msg: fmt.Sprintf("no such agent %q: register the agent before adding it to a session", id)}
+	}
+	if err != nil || ag == nil {
+		return unavailable()
+	}
+	if namespace.Canonical(ag.Namespace) != namespace.Canonical(sess.Namespace) {
+		return &memberError{status: http.StatusConflict, code: "NAMESPACE_MISMATCH",
+			msg: fmt.Sprintf("agent %q is in namespace %q, but session %q is in %q",
+				id, namespace.Display(ag.Namespace), sess.ID, namespace.Display(sess.Namespace))}
+	}
+	return nil
+}
+
 // addMember records one membership event (§2.3). A join to a session in
-// another realm is refused, and so is adding a KNOWN agent that lives in
+// another realm is refused, and so is adding an unknown agent or one in
 // another realm: either would put two realms in one room.
 func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) error {
 	mt := MemberType(strings.TrimSpace(req.MemberType))
@@ -1393,14 +1438,8 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 			return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
 		}
 	}
-	if mt == MemberAgent && h.opts.Agents != nil {
-		if ag, err := h.opts.Agents.Get(id); err == nil && ag != nil {
-			if namespace.Canonical(ag.Namespace) != namespace.Canonical(sess.Namespace) {
-				return &memberError{status: http.StatusConflict, code: "NAMESPACE_MISMATCH",
-					msg: fmt.Sprintf("agent %q is in namespace %q, but session %q is in %q",
-						id, namespace.Display(ag.Namespace), sess.ID, namespace.Display(sess.Namespace))}
-			}
-		}
+	if err := h.checkMemberAgent(sess, req); err != nil {
+		return err
 	}
 
 	// CR-CHAT-023 (§3.2, §3.3, §6.2): a remote-qualified member id names a

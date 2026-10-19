@@ -52,10 +52,6 @@ func TestSessionAPI_TargetNamespaceAuth(t *testing.T) {
 			var room sessionView
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions", createSessionRequest{
 				Title: "namespace auth", CreatedBy: &AuthorRef{Principal: "operator"},
-				Members: []addParticipantRequest{
-					{MemberType: string(MemberAgent), MemberID: "protected"},
-					{MemberType: string(MemberAgent), MemberID: "open"},
-				},
 			}, &room, nil))
 			headers := map[string]string{}
 			if tc.token != "" {
@@ -64,6 +60,7 @@ func TestSessionAPI_TargetNamespaceAuth(t *testing.T) {
 			var sent transcriptMessage
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room.ID+"/messages", postMessageRequest{
 				Payload: json.RawMessage(`{"text":"namespace-gated send"}`), PrincipalID: "operator",
+				Targets: []AudienceTarget{{Kind: TargetAgent, ID: "protected"}, {Kind: TargetAgent, ID: "open"}},
 			}, &sent, headers), "per-target auth refusal must not become a whole-send 502")
 			require.Len(t, sent.Outcomes, 2)
 			outcomes := make(map[string]outcomeView)

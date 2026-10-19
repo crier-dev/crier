@@ -141,12 +141,16 @@ func (h *taskHarness) createRoomAs(t *testing.T) string {
 func TestTaskCreatedWithLifecycle(t *testing.T) {
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
+	// A task addresses another agent, never its own author.
+	now := time.Now().UTC()
+	require.NoError(t, h.permStore.Append(t.Context(), (&permissions.AgentInfo{ID: fixAgentB, Class: permissions.ClassPersonal, Owner: "prin_owner"}).Record(now)))
+	h.seedGrant(t, &permissions.Grant{ID: "g_invoke_nimbus", Kind: "grant", Principal: "prin_owner", Subject: permissions.Subject{Type: permissions.SubjectAgent, Ref: fixAgentB}, Actions: []permissions.Action{permissions.ActionInvoke}, GrantedBy: "prin_owner"})
 
 	var sent transcriptMessage
 	code := h.do(t, http.MethodPost, "/sessions/"+room+"/tasks", map[string]any{
 		"principal_id": "prin_owner", "as_agent": "atlas",
 		"payload": map[string]string{"text": "Run the data sweep for the new environment."},
-		"targets": []map[string]string{{"kind": "agent", "id": fixAgentA}},
+		"targets": []map[string]string{{"kind": "agent", "id": fixAgentB}},
 	}, &sent, nil)
 	require.Equal(t, http.StatusCreated, code, "task create failed")
 

@@ -142,6 +142,28 @@ history, and it is a different primitive by design.
 
 ### 2.3 How membership changes
 
+Local agent admission (DF-CRIER-347): both initial `members` and later participant
+adds require a registered local agent for `member_type: agent`. A missing id
+answers HTTP 404 `AGENT_NOT_FOUND`, with `detail` naming the id and asking the
+operator to register it first; no membership row is appended. Initial missing
+agents are checked before the session is created. A registry lookup failure,
+nil result or missing lookup collaborator answers HTTP 503
+`AGENT_LOOKUP_UNAVAILABLE`, never a false missing-agent verdict. Principal members
+and remote-qualified identities retain their existing admission rules.
+
+The author is never a delivery target: exclude its effective agent id from
+explicit targets, default membership, expanded groups and historical retry
+recipients, including a principal's `as_agent` identity. Legacy unknown members
+remain readable; a send still answers 201 with the existing successful outcome
+shape and partial-success counts. Its missing target retains `outcome: refused`
+for compatibility but `detail` names `no such agent` and `AGENT_NOT_FOUND`.
+The chat client renders this as `no such agent (465)` (an operator-facing label,
+not a new HTTP response code), distinct from `delivery refused` for other refusal
+reasons. Both the send notice and persisted transcript use that distinction;
+partial sends state how many recipients received the message and how many did not,
+never that the entire send was refused. Pre-change `agent not found` details use
+the same missing-agent display without rewriting historical records.
+
 Membership is an **append-only event sequence**, never a mutable set:
 
 - `session.member.add` — carries `member_type` (principal | agent), `member_id`, `role`, `actor`, `ts`, and
