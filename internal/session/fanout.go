@@ -284,9 +284,15 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 							replies[i] = result.Reply
 						}
 					} else if result.Transport == "inbox" {
-						// An explicit inbox receipt may confirm delivery; a plain
-						// queue write (including 201) confirms acceptance only.
+						// Queue vocabulary is not an answer. Normalize an observed
+						// reply for the same post-join answer callback as webhooks.
 						outcome, outcomeCode = transportReceiptOutcome(result.Reply, "", "")
+						reason = transportReceiptReason(outcomeCode)
+						if outcome == OutcomeDelivered {
+							replies[i], _ = json.Marshal(struct {
+								Text string `json:"text"`
+							}{Text: transportReplyText(result.Reply)})
+						}
 					}
 				}
 			} else {

@@ -86,7 +86,12 @@ func (h *Handler) recordWebhookReply(ctx context.Context, parent *Message, targe
 	if outcome, _ := webhookReplyVerdict(raw); outcome != OutcomeDelivered {
 		return nil
 	}
-	text := webhookReplyText(raw)
+	return h.recordAnswerText(ctx, parent, target, webhookReplyText(raw))
+}
+
+// recordAnswerText is shared by local blocking replies and observed peer replies.
+// Only callers that have classified an answer may invoke this append path.
+func (h *Handler) recordAnswerText(ctx context.Context, parent *Message, target, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}

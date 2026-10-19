@@ -86,6 +86,16 @@ const call = async () => ({outcomes});
   }
   assert.equal(deliverySummary([{outcome:'leased'},{outcome:'expired'},{outcome:'delivered'},{outcome:'leased'}]),'; delivered: 1; expired: 1; leased: 2.');
   assert.equal(deliverySummary([{outcome:'delivered'},{outcome:'accepted'},{outcome:'accepted'},{outcome:'held'}]),'; accepted: 2; delivered: 1; held: 1.');
+  // An accepted receipt can also be an unsubstantiated delivery claim. Keep
+  // the exact accepted counter and the visible diagnostic, never a retry grant.
+  outcomes = [{target:'peer',outcome:'accepted',code:'PEER_CLAIMED_DELIVERY',retryable:false,detail:'peer claimed delivery but no reply observed; transport accepted, not confirmed execution'}];
+  $('text').value='claim probe'; $('recipient').value='peer';
+  await send({preventDefault(){}});
+  assert.match($('send-result').textContent,/; accepted: 1; delivered: 0\./);
+  assert.match($('send-result').textContent,/peer claimed delivery but no reply observed/);
+  assert.doesNotMatch($('send-result').textContent,/Send again unchanged to retry/);
+  assert.equal(pendingMessageRequest,null);
+  assert.equal($('text').value,'');
   outcomes = [{target:'a',outcome:'delivered'},{target:'b',outcome:'unreadable_reply'}];
   $('text').value='mixed draft'; await send({preventDefault(){}});
   assert.equal($('text').value,'mixed draft','mixed non-answer retains draft without enabling redelivery');

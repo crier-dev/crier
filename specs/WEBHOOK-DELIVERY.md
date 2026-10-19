@@ -179,27 +179,60 @@ answer, so retrying cannot succeed. A transient `5xx / 408 / 429 / timeout` that
 answers **504 Gateway Timeout** with `{"error":"webhook: blocking delivery timed out after 30s (last: status 503)"}`;
 only that class can still land on a later attempt. (Timeout and budget exhaustion are the only 504 cases.)
 
-### Session outcome vocabulary (DF-CRIER-397)
+### Session outcome vocabulary (DF-CRIER-397, DF-CRIER-401)
 
 A successful transport exchange is not automatically `delivered` in the session
 transcript. Producers, counters and the chat summary use these exact words:
 
 - `accepted`: a plain `201` inbox write or an async/batch `202` queue accept,
-  without an explicit delivery receipt. Neither is an agent execution/answer.
+  without an observed answer. This also covers a peer's refused delivery CLAIM:
+  `delivered: true`, or `delivered` in `status`, `outcome`, `verdict`,
+  `inbound_verdict`, `X-Crier-Fed-Verdict` or `X-Crier-Fed-Inbound-Verdict`
+  (case-insensitive, surrounding whitespace ignored) with no reply observed.
+  That claim is visible as `code: "PEER_CLAIMED_DELIVERY"`, detail
+  `peer claimed delivery but no reply observed; transport accepted, not confirmed execution`,
+  and `retryable: false`. The message reached the peer; the claim is not a
+  transport refusal or a reason to retry. No agent-authored bubble is created.
 - `held`: the peer receipt explicitly names `held` (for example
-  `202 {"status":"held"}`). A hold creates no agent-authored answer bubble.
+  `202 {"status":"held"}`). A hold creates no agent-authored answer bubble,
+  and retains precedence over both delivery claims and reply content.
 - `delivered`: a blocking webhook reply passes the existing genuine/failed/canned
-  classifier, or an inbox/peer receipt explicitly names delivery. Supported
-  receipt statements are `status`, `outcome` or `verdict` equal to `delivered`
-  (case-insensitive, surrounding whitespace ignored), or `delivered: true`.
-  Federation's `X-Crier-Fed-Verdict` and `X-Crier-Fed-Inbound-Verdict` retain
-  exact receipt words too. `FED_ALLOWED` authorizes crossing; it does not confirm
-  delivery. Empty blocking replies remain `unreadable_reply`, never `delivered`.
+  classifier, or a successful inbox/peer exchange returns an observed reply in
+  one of the shapes below. A delivery word alone never qualifies. Each such
+  session delivery records an answer bubble authored by the addressed target,
+  with `parent_id` equal to the operator message, the same session/thread,
+  `message_kind: "plain"`, payload `{"text":"…"}`, an explicitly empty audience
+  and no outcomes — the SAME append shape as a local blocking webhook reply.
+  Federation's `FED_ALLOWED` authorizes crossing, not execution. Observing a
+  reply is NOT proof of model authorship or cryptographic attestation; peer
+  request authentication does not attest the response body. Empty blocking
+  webhook replies remain `unreadable_reply`, never `delivered`.
 - `FED_TOKEN_ONLY` in either verdict header or the receipt's `verdict` /
-  `inbound_verdict` means `accepted` with `code: "FED_TOKEN_ONLY"`, not refusal or
-  delivery. An explicit hold takes precedence and retains that code; token-only
-  otherwise overrides an optimistic delivery statement. Unknown/malformed peer
-  receipt content stays `accepted`; untrusted receipt prose is not persisted.
+  `inbound_verdict` remains `accepted` with `code: "FED_TOKEN_ONLY"`, not refusal
+  or delivery. An explicit hold takes precedence and retains that code. A
+  delivery claim without an observed reply instead exposes
+  `PEER_CLAIMED_DELIVERY` so the unsubstantiated claim is never hidden.
+
+Peer/inbox reply extraction is an allowlist (first matching shape wins):
+
+1. A nonblank JSON string or nonblank raw plain-text body, except a standalone
+   receipt word (`accepted`, `delivered`, `held`, `queued`, `ok`, `success`,
+   `completed`, `pending`, `failed`, or a `FED_`-prefixed word).
+2. A nonblank string in `text`, then `reply`, then `answer` on a JSON object.
+3. A nested `artifact`, then `message` OBJECT, with those same string fields,
+   or `parts` containing nonblank `text` strings. Text parts can use A2A's
+   `{ "text": "…" }` shape or the `kind: "text"` / `type: "text"` discriminators;
+   a non-text discriminator excludes that part. Parts join in wire order with
+   a newline; individual strings retain their original whitespace.
+
+Top-level failed/canned runtime markers (`status: "FAILED"`, nonblank `error`,
+`live: false`, or `canned: true`) exclude the body as answer evidence. Whitespace,
+malformed JSON/structured markup, arbitrary objects, arrays, JSON scalars other
+than strings, file/data-only parts, and diagnostic `message` STRINGS are not
+replies. There is no recursive search through arbitrary keys and no stringifying
+transport metadata into speech. Unknown/unreadable peer receipts stay `accepted`;
+only extracted answer text or the fixed claim diagnostic is persisted, never
+untrusted receipt reasons. Local blocking webhook extraction is unchanged.
 
 Send responses expose `accepted`, `held` and the existing `delivered` counters
 (nonzero scalar counters only), plus `outcome_counts` keyed by every exact outcome

@@ -17,17 +17,22 @@ import (
 // must exercise the old producers, not fail because new constants are absent.
 func TestRemoteTransportReceipt(t *testing.T) {
 	for _, tc := range []struct {
-		name, body, inbound, verdict, want, code string
-		status                                   int
+		name, body, inbound, verdict, want, code, answer string
+		status                                           int
 	}{
-		{name: "held", status: 202, body: `{"status":"held"}`, want: "held"},
+		{name: "held-unchanged", status: 202, body: `{"status":"held"}`, want: "held"},
 		{name: "token_only", status: 201, body: `{}`, inbound: "FED_TOKEN_ONLY", want: "accepted", code: "FED_TOKEN_ONLY"},
 		{name: "inbox_queue", status: 201, body: `{"id":"queued","transport":"inbox"}`, want: "accepted"},
 		{name: "async", status: 202, body: `{}`, want: "accepted"},
-		{name: "explicit_body_delivery", status: 201, body: `{"status":"delivered"}`, want: "delivered"},
-		{name: "explicit_verdict_delivery", status: 201, body: `{}`, verdict: "delivered", want: "delivered"},
+		{name: "claimed-delivered-no-reply", status: 200, body: `{"delivered":true}`, want: "accepted", code: "PEER_CLAIMED_DELIVERY"},
+		{name: "status-word-delivered-no-reply", status: 200, body: `{"status":"delivered"}`, want: "accepted", code: "PEER_CLAIMED_DELIVERY"},
+		{name: "real-reply-no-word", status: 200, body: `{"reply":"the answer","live":true}`, want: "delivered", answer: "the answer"},
+		{name: "nested-artifact", status: 200, body: `{"artifact":{"parts":[{"text":"first"},{"kind":"text","text":"second"}]}}`, want: "delivered", answer: "first\nsecond"},
+		{name: "nested-message", status: 200, body: `{"message":{"parts":[{"type":"text","text":"the answer"}]}}`, want: "delivered", answer: "the answer"},
+		{name: "plain-text", status: 200, body: "the answer", want: "delivered", answer: "the answer"},
+		{name: "explicit_verdict_delivery", status: 201, body: `{}`, verdict: "delivered", want: "accepted", code: "PEER_CLAIMED_DELIVERY"},
 		{name: "policy_allow_is_not_delivery", status: 201, body: `{"verdict":"FED_ALLOWED"}`, want: "accepted"},
-		{name: "token_only_body", status: 201, body: `{"verdict":"FED_TOKEN_ONLY","status":"delivered"}`, want: "accepted", code: "FED_TOKEN_ONLY"},
+		{name: "token_only_body", status: 201, body: `{"verdict":"FED_TOKEN_ONLY","status":"delivered"}`, want: "accepted", code: "PEER_CLAIMED_DELIVERY"},
 		{name: "untrusted_body", status: 201, body: `{"status":"secret-not-a-verdict","reason":"do-not-persist"}`, want: "accepted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,6 +61,13 @@ func TestRemoteTransportReceipt(t *testing.T) {
 			t.Logf("SEND %s", body)
 			require.Equal(t, tc.want, sent.Outcomes[0].Outcome, "transport accept must not be called delivered: %s", body)
 			require.Equal(t, tc.code, sent.Outcomes[0].Code)
+			require.False(t, sent.Outcomes[0].Retryable)
+			if tc.code == "PEER_CLAIMED_DELIVERY" {
+				require.Contains(t, sent.Outcomes[0].Detail, "no reply observed")
+			}
+			if tc.answer != "" {
+				require.Equal(t, 1, sent.Delivered)
+			}
 			var counters map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(body), &counters))
 			if tc.want == "accepted" || tc.want == "held" {
@@ -68,7 +80,26 @@ func TestRemoteTransportReceipt(t *testing.T) {
 				Messages []transcriptMessage `json:"messages"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(body), &transcript))
-			require.Len(t, transcript.Messages, 1, "a receipt is not an agent answer")
+			answers := 0
+			if tc.answer != "" {
+				answers = 1
+			}
+			require.Len(t, transcript.Messages, 1+answers, "only an observed reply creates an agent answer")
+			if answers == 1 {
+				bubble := transcript.Messages[1]
+				require.Equal(t, "remote:peer:worker", bubble.Author.AgentID())
+				require.Equal(t, transcript.Messages[0].ID, bubble.ParentID)
+				require.Equal(t, transcript.Messages[0].ThreadID, bubble.ThreadID)
+				require.Equal(t, string(MessagePlain), bubble.MessageKind)
+				var payload struct {
+					Text string `json:"text"`
+				}
+				require.NoError(t, json.Unmarshal(bubble.Payload, &payload))
+				require.Equal(t, tc.answer, payload.Text)
+				require.Empty(t, bubble.Outcomes)
+				require.Equal(t, AudienceExplicit, bubble.Audience.Rule)
+				require.Empty(t, bubble.Audience.Targets)
+			}
 			require.Equal(t, sent.Outcomes, transcript.Messages[0].Outcomes)
 			require.NotContains(t, body, "do-not-persist")
 			wire, err := json.Marshal(transcript.Messages[0].Outcomes)
@@ -94,7 +125,8 @@ func TestLocalTransportReceipt(t *testing.T) {
 		{"inbox_queue", "inbox", "", "", "accepted", 0},
 		{"async", "webhook", "async", `{"reply":"not a blocking answer"}`, "accepted", 0},
 		{"batch", "webhook", "batch", "", "accepted", 0},
-		{"explicit_inbox_delivery", "inbox", "", `{"status":"delivered"}`, "delivered", 0},
+		{"explicit_inbox_delivery", "inbox", "", `{"status":"delivered"}`, "accepted", 0},
+		{"observed_inbox_reply", "inbox", "", `{"answer":"genuine answer"}`, "delivered", 1},
 		{"genuine_blocking", "webhook", "blocking", `{"reply":"genuine answer"}`, "delivered", 1},
 		{"empty_blocking", "webhook", "blocking", "", "unreadable_reply", 0},
 		{"canned_blocking", "webhook", "blocking", `{"reply":"demo","canned":true}`, "canned", 0},

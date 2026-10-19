@@ -1222,10 +1222,16 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 		}
 		if status >= 200 && status < 300 {
 			outcome, code := transportReceiptOutcome(response, receipt.Verdict, receipt.InboundVerdict)
+			if outcome == OutcomeDelivered {
+				if err := h.recordAnswerText(ctx, msg, m.MemberID, transportReplyText(response)); err != nil {
+					return nil, fmt.Errorf("record peer reply from %q: %w", m.MemberID, err)
+				}
+			}
 			outcomes = append(outcomes, DeliveryOutcome{
 				Target:    m.MemberID,
 				Outcome:   outcome,
 				Code:      code,
+				Reason:    transportReceiptReason(code),
 				UpdatedAt: now,
 			})
 			continue
