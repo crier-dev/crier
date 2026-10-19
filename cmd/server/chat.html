@@ -101,7 +101,7 @@ main { min-width:0; display:flex; flex-direction:column; }
 .dot.stale { background:var(--amber); }
 .dot.offline { background:var(--red); }
 .cap { display:inline-block; padding:2px 6px; margin:5px 3px 0 0; border-radius:4px; color:var(--lav); background:var(--input); font-size:11px; }
-#capability-matrix-panel { min-width:0; max-width:100%; }
+#capability-matrix-panel { min-width:0; max-width:100%; align-self:start; }
 #capability-matrix { width:100%; overflow-x:auto; }
 .capability-matrix { width:100%; table-layout:fixed; border-collapse:collapse; font-size:11px; }
 .capability-matrix th,.capability-matrix td { border-bottom:1px solid var(--border); padding:6px 2px; text-align:center; overflow-wrap:anywhere; }
@@ -117,6 +117,9 @@ main { min-width:0; display:flex; flex-direction:column; }
 .skip:focus { left:12px; top:12px; z-index:2; background:var(--panel); padding:10px; }
 @media(min-width:901px) and (max-width:1100px) { .layout { grid-template-columns:220px minmax(0,1fr); } .rail { grid-column:1 / -1; border-left:0; border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; } }
 @media(max-width:900px) { .layout { grid-template-columns:minmax(0,1fr); } .sidebar { border-right:0; border-bottom:1px solid var(--border); } .sessions { max-height:230px; } .rail { border-left:0; border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; } #transcript { max-height:none; } }
+/* Use the full transcript width on desktop, not the narrow context rail.
+   Content-sized height keeps a 0–1-agent registry compact. */
+@media(min-width:1024px) { #capability-matrix-panel { flex:none; align-self:stretch; margin:0; padding:18px 20px; border-top:1px solid var(--border); background:var(--raised); } }
 @media(max-width:480px) { .topbar { padding:12px 14px; gap:8px 12px; } .breadcrumb { flex-basis:65%; } .top-status { width:100%; } .thread-header,.toolbar,#transcript,.composer-wrap { padding-left:12px; padding-right:12px; } .rail { display:block; padding:16px 12px; } .msg { gap:8px; } .msg.reply { margin-left:8px; padding-left:8px; } .composer-controls label:nth-child(2) { flex:1 1 100px; } .composer-controls button { width:100%; } }
 </style>
 </head>
@@ -428,6 +431,18 @@ function updateCapabilityMatrixView() {
     ? "Showing " + visible + " of " + columns.length + " agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
     : "All " + columns.length + " agent columns shown (this realm).");
 }
+// Keep one live grid: desktop uses the transcript's full width immediately
+// below it; smaller screens retain its position in the context rail.
+const matrixPanel = $("capability-matrix-panel");
+const matrixRail = matrixPanel.parentElement, matrixNextPanel = matrixPanel.nextElementSibling;
+const matrixDesktop = matchMedia("(min-width:1024px)");
+function placeCapabilityMatrix() {
+  if (matrixDesktop.matches) $("transcript").after(matrixPanel);
+  else matrixRail.insertBefore(matrixPanel,matrixNextPanel);
+  updateCapabilityMatrixView();
+}
+matrixDesktop.addEventListener("change",placeCapabilityMatrix);
+placeCapabilityMatrix();
 $("capability-matrix").addEventListener("scroll",updateCapabilityMatrixView,{passive:true});
 new ResizeObserver(updateCapabilityMatrixView).observe($("capability-matrix"));
 function renderCapabilityMatrix(capabilities) {

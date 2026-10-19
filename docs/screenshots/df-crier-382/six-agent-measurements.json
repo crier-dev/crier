@@ -1,0 +1,174 @@
+{
+  "ids": [
+    "matrix-test-agent-1",
+    "matrix-test-agent-2",
+    "matrix-test-agent-3",
+    "matrix-test-agent-4",
+    "matrix-test-agent-5",
+    "matrix-test-agent-6"
+  ],
+  "measurements": [
+    {
+      "width": 390,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 366,
+      "matrixOverflow": 214,
+      "columnWidths": [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      "fullyVisible": 3,
+      "panelHeight": 312.5,
+      "inRail": true,
+      "notice": "Showing 3 of 6 agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    },
+    {
+      "width": 768,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 361,
+      "matrixOverflow": 219,
+      "columnWidths": [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      "fullyVisible": 3,
+      "panelHeight": 312.5,
+      "inRail": true,
+      "notice": "Showing 3 of 6 agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    },
+    {
+      "width": 1280,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 700,
+      "matrixOverflow": 0,
+      "columnWidths": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "fullyVisible": 6,
+      "panelHeight": 313.5,
+      "inRail": false,
+      "notice": "All 6 agent columns shown (this realm)."
+    }
+  ],
+  "allVisible": {
+    "width": 1280,
+    "pageOverflow": 0,
+    "bodyOverflow": 0,
+    "matrixWidth": 700,
+    "matrixOverflow": 0,
+    "columnWidths": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "fullyVisible": 6,
+    "panelHeight": 313.5,
+    "inRail": false,
+    "notice": "All 6 agent columns shown (this realm)."
+  },
+  "compactMeasurements": [
+    {
+      "width": 390,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 366,
+      "matrixOverflow": 0,
+      "columnWidths": [],
+      "fullyVisible": 0,
+      "panelHeight": 93,
+      "inRail": true,
+      "notice": "",
+      "agents": 0
+    },
+    {
+      "width": 768,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 361,
+      "matrixOverflow": 0,
+      "columnWidths": [],
+      "fullyVisible": 0,
+      "panelHeight": 93,
+      "inRail": true,
+      "notice": "",
+      "agents": 0
+    },
+    {
+      "width": 1280,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 700,
+      "matrixOverflow": 0,
+      "columnWidths": [],
+      "fullyVisible": 0,
+      "panelHeight": 112,
+      "inRail": false,
+      "notice": "",
+      "agents": 0
+    },
+    {
+      "width": 390,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 366,
+      "matrixOverflow": 0,
+      "columnWidths": [
+        266
+      ],
+      "fullyVisible": 1,
+      "panelHeight": 148.5,
+      "inRail": true,
+      "notice": "All 1 agent columns shown (this realm).",
+      "agents": 1
+    },
+    {
+      "width": 768,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 361,
+      "matrixOverflow": 0,
+      "columnWidths": [
+        261
+      ],
+      "fullyVisible": 1,
+      "panelHeight": 148.5,
+      "inRail": true,
+      "notice": "All 1 agent columns shown (this realm).",
+      "agents": 1
+    },
+    {
+      "width": 1280,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixWidth": 700,
+      "matrixOverflow": 0,
+      "columnWidths": [
+        600
+      ],
+      "fullyVisible": 1,
+      "panelHeight": 167.5,
+      "inRail": false,
+      "notice": "All 1 agent columns shown (this realm).",
+      "agents": 1
+    }
+  ]
+}
