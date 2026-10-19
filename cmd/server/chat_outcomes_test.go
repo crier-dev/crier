@@ -40,8 +40,8 @@ assert.ok(transcript.innerHTML.includes('<span class="warning">receiver: in prog
 assert.ok(transcript.innerHTML.includes('<span class="error">receiver: delivery refused — target answered status 503;'));
 assert.ok(transcript.innerHTML.includes('<span class="error">receiver: budget_cut — answer did not arrive inside the budget:'));
 assert.equal(outcomeLabel({outcome:'refused',code:'AGENT_NOT_FOUND',detail:'absent'}),'no such agent (465)');
-assert.equal(deliverySummary([outcomes[0]]),'; delivered to 0 recipient(s); 1 recipient(s) in progress.');
-assert.equal(deliverySummary([outcomes[0],outcomes[1],{outcome:'delivered'}]),'; delivered to 1 recipient(s); 1 recipient(s) in progress; 1 recipient(s) not delivered.');
+assert.equal(deliverySummary([outcomes[0]]),'; in_progress: 1.');
+assert.equal(deliverySummary([outcomes[0],outcomes[1],{outcome:'delivered'}]),'; delivered: 1; in_progress: 1; refused: 1.');
 console.log('pending/refused/cut rendered line and summary PASS');
 `)
 	out, err := cmd.CombinedOutput()

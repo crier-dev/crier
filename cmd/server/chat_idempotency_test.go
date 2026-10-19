@@ -89,7 +89,7 @@ async function call(path, options) {
   await send({preventDefault(){}});
   const busyKey=requests.at(-1).body.idempotency_key;
   const pending=notices.at(-1);
-  assert.match(pending[1],/1 recipient\(s\) in progress/);
+  assert.match(pending[1],/in_progress: 1/);
   assert.doesNotMatch(pending[1],/not delivered|Send again unchanged|refused/);
   assert.match(pending[1],/Refresh the transcript/);
   assert.match(pending[1],/do not send again/);
