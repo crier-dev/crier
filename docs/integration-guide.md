@@ -1445,11 +1445,12 @@ the shared dispatcher's `DeliveryRequest.TimeoutMs`, not a second timeout path.
 Recipients dispatch concurrently; outcomes remain sorted by target id. Thus
 webhook fan-out waits for the slowest recipient budget rather than their sum,
 including a wait behind an earlier delivery to the same target/session.
-A timed-out recipient is `refused` with a timeout detail; successful recipients
-remain `delivered`, and the persisted transcript reports both. Normal guard
-checks and transcript persistence still run; this is a webhook budget, not an
-end-to-end HTTP deadline. HTTP inbox delivery keeps its existing modes and
-default timeout unchanged.
+Per-target evidence and timeout/refusal distinctions follow the single
+[delivery outcome vocabulary](../specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary);
+the persisted transcript reports each target separately. Normal guard checks
+and transcript persistence still run; this is a webhook budget, not an end-to-end
+HTTP deadline. HTTP inbox delivery keeps its existing modes and default timeout
+unchanged.
 
 ### A single-user deployment with no PostgreSQL service
 

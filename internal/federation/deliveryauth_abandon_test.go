@@ -53,8 +53,9 @@ func TestInboundAuditLineMarksAbandonedReceipt(t *testing.T) {
 	_, hasStatus := line["status"]
 	require.False(t, hasStatus, "no status is claimed for a receipt this middleware never sent")
 	require.Equal(t, true, line["abandoned"])
+	require.NotContains(t, line, "receipt_flushed")
 
-	// Control: a handler that answers normally still reports delivered + status.
+	// Control: a normal receipt reports flushing + status, not target execution.
 	logs.Reset()
 	okHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
@@ -64,7 +65,8 @@ func TestInboundAuditLineMarksAbandonedReceipt(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/agents/atlas/inbox", strings.NewReader(`{"message":"x"}`)))
 	line = lastInboundAudit(t, logs.String())
-	require.Equal(t, true, line["delivered"])
+	require.Equal(t, true, line["receipt_flushed"])
+	require.NotContains(t, line, "delivered")
 	require.EqualValues(t, http.StatusAccepted, line["status"])
 	_, abandoned := line["abandoned"]
 	require.False(t, abandoned)

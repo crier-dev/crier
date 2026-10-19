@@ -55,12 +55,18 @@ call. A delivery record carries exactly the question an incident review asks:
 
 ### 3.2 Verdicts
 
-`delivered` (stored in the target's inbox), `webhook_accepted` (handed to the
+`inbox_accepted` (stored in the target's inbox; admission, not a reply), `webhook_accepted` (handed to the
 target's webhook transport), `webhook_failed`, `federation_held`,
 `federation_failed`, `guard_blocked`, `quarantined`, `agent_not_found`,
 `rate_limited` (the global ingest budget shed the delivery — 429
 `RATE_LIMITED_GLOBAL`, CR-FEAT-035: the request was fine and the bus was full,
 which is not the same finding as `rejected`), `rejected`, `unspecified`.
+
+These detector verdicts describe transport observations, not session task states.
+For transcript outcomes use the single
+[CHAT-SESSIONS.md vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary).
+The old inbox verdict `delivered` is renamed to `inbox_accepted`; historical
+signed log entries are not rewritten or re-signed.
 
 The verdict is measured from **what the caller received** — the handler wraps
 its own response and maps the status it wrote — not re-derived from which branch

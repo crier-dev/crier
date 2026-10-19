@@ -554,7 +554,7 @@ delivered.
 |---|---|
 | a revoked peer's new forward | `403 FED_PEER_REVOKED` |
 | a held outbound delivery whose link was revoked | immediate terminal `FEDERATION_FAILED`, `detail` naming the revocation |
-| a delivery already in a local inbox | delivered; not recalled |
+| a delivery already in a local inbox | remains stored; not recalled (receipt evidence follows the [owning vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary)) |
 | an audit requirement | `peer.revoked` line with `revoked_by` |
 
 **NOT BUILT:** no revocation, no peer state, no hold-queue interaction with a peer decision. The hold

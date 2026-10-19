@@ -119,32 +119,21 @@ not deliberately branch a thread, create a task, or impersonate the operator.
 
 Text-mappable means a non-blank JSON string (including a schema-extracted reply or a raw plain-text
 body), or an object with a non-blank string `text` or `reply` field (`text` takes precedence).
-Before recording text, the session path checks the blocking reply's runtime verdict (DF-CRIER-348):
+The single [outcome vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary)
+owns the wire names, negative-marker precedence, evidence requirements and
+answer-bubble rules. This section owns the local blocking text mapping and display:
+a non-blank JSON string (including a schema-extracted reply or raw plain-text
+body), or an object with a non-blank string `text` or `reply` (`text` first).
 
-- `status: "FAILED"` (case-insensitive) or a non-blank string `error` produces outcome `failed`.
-  Its diagnostic retains the runtime's `reason` and `error` (identical strings are not repeated);
-  absent diagnostics use `webhook reported FAILED`. This takes precedence over demo markers.
-- Otherwise, `live: false` or `canned: true` produces outcome `canned`, retaining `reason` or a
-  canned/demo diagnostic when none was supplied. Even `live: true` cannot override `canned: true`.
-- Neither negative outcome appends an agent-authored answer bubble. They are not `refused`:
-  HTTP delivery happened, but the runtime did not produce a real answer. Send summaries exclude
-  them from both `delivered` and `skipped`; the per-target outcome and `detail` carry the verdict.
-- Without a negative marker, a plain `{reply}` / `{text}` or an explicitly live reply retains the
-  existing `delivered` behavior. Missing or null flags are not treated as `live: false`.
-
-Failed/refused deliveries, empty/whitespace-only answers, and other JSON shapes append **nothing**.
-A received blocking reply body without displayable text has outcome `unreadable_reply`
-(DF-CRIER-356), not `delivered`. This includes missing, empty, non-string or whitespace-only
-`text` / `reply` fields and unsupported JSON shapes. Its `detail` is
-`reply body had no displayable text field; keys: <sorted top-level keys>`; the key list is
-comma-separated, or `(none)` when no object keys exist. No body values are stringified into
-an answer bubble. Existing `failed` and `canned` verdicts take precedence. Unreadable replies
-are excluded from both delivered and skipped counts and logged as non-answers, with exactly
-one outcome per target. This does not change async delivery or other transports.
-The reply has an **explicit empty audience** and no delivery outcomes; appending it is not another
-send, so it cannot fan out to session members. Runtime diagnostics persist in the original message's
-outcomes and are exposed as `detail` on both send and transcript reads; a delivery outcome does not
-prove task completion.
+Runtime diagnostics retain `reason` and `error` without repeating identical
+strings. Absent failed diagnostics use `webhook reported FAILED`; absent canned
+diagnostics use the canned/demo default. An unreadable blocking body records
+`reply body had no displayable text field; keys: <sorted top-level keys>`;
+keys are comma-separated, or `(none)` without object keys. No body values are
+stringified into an answer. Missing/null runtime flags are not false markers.
+Diagnostics persist on send and transcript reads as `detail`. The reply has an
+explicitly empty audience and no outcomes, so appending it is not another send
+and cannot fan out to session members. None of this proves task completion.
 
 The existing transcript poll and renderer display `payload.text`, `author.agent` and `parent_id`;
 there is no separate reply store or rendering path. This implements D1 without losing the agent's
@@ -209,8 +198,9 @@ explicit unknown/error. No backend compatibility list is maintained in the clien
 Send notices count each exact outcome name separately (for example `leased: 1; refused: 1`),
 without changing outcomes or HTTP message shapes. Only `delivered` contributes to the server's
 existing `delivered` counter. Only `refused` contributes to `skipped` / `skipped_agents`;
-`leased`, `acked`, `expired`, `failed`, `canned`, `budget_cut` and `unreadable_reply` keep their
-own words in `outcomes` rather than being reclassified as delivered or refused.
+All other states retain their exact names from the
+[owning vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary), rather than
+being reclassified as delivered or refused.
 
 `failed`, `canned` and `unreadable_reply` are negative in both transcript and send notice and
 retain the draft and reply context, including mixed outcomes. Existing refused/budget-cut

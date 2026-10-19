@@ -30,7 +30,7 @@ func mustOpen(t *testing.T, dir string) (*AuditLog, *Signer, string) {
 func appendRecords(t *testing.T, l *AuditLog, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if _, err := l.Append(Entry{Kind: KindDelivery, Sender: "agent-a", Target: "agent-b", Verdict: "delivered"}); err != nil {
+		if _, err := l.Append(Entry{Kind: KindDelivery, Sender: "agent-a", Target: "agent-b", Verdict: "inbox_accepted"}); err != nil {
 			t.Fatalf("Append %d: %v", i, err)
 		}
 	}
@@ -138,7 +138,7 @@ func TestAuditLogVerifySeesTamperingAfterOpen(t *testing.T) {
 	}
 
 	lines := readLines(t, path)
-	lines[2] = strings.Replace(lines[2], `"verdict":"delivered"`, `"verdict":"exfiltrated"`, 1)
+	lines[2] = strings.Replace(lines[2], `"verdict":"inbox_accepted"`, `"verdict":"exfiltrated"`, 1)
 	writeLines(t, path, lines)
 
 	rep := log.Verify()

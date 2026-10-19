@@ -5551,7 +5551,7 @@ components:
                     type: string
         outcomes:
           type: array
-          description: The per-target fan-out result (§3.2). Accepted means inbox/async queue admission, not execution, and includes unsubstantiated delivery claims with code PEER_CLAIMED_DELIVERY and retryable false. Held means an explicit peer hold receipt. Delivered requires a genuine blocking webhook reply or an observed inbox/peer reply recorded as a target-authored answer bubble; a delivered word or boolean alone is not evidence. FED_ALLOWED alone is policy permission, while FED_TOKEN_ONLY remains accepted with that code unless a no-reply delivery claim must be exposed. In_progress means the same delivery key is already held, not refused or delivered; wait and refresh rather than resending. Budget_cut means no complete answer arrived before the blocking delivery budget (or the upstream reported a timeout), with partial/late answers discarded. Refused means a target refusal or transport failure, even when retry backoff consumed the budget; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles. Unreadable_reply means a received blocking webhook body has no displayable text; its detail names the sorted top-level keys, with no invented answer bubble.
+          description: "Per-target fan-out evidence. The single normative vocabulary and counter projection are defined in specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary; transport extraction is in specs/WEBHOOK-DELIVERY.md. The enum below preserves the wire names, not a second list of meanings."
           items:
             type: object
             properties:

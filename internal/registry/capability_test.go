@@ -522,8 +522,8 @@ func TestCapabilityDeliveryIsObservedOncePerRequest(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("observations = %d, want exactly one per delivery request", len(seen))
 	}
-	if seen[0].Target != "worker-a" || seen[0].Verdict != VerdictDelivered {
-		t.Errorf("routed observation = target %q verdict %q, want worker-a/%s", seen[0].Target, seen[0].Verdict, VerdictDelivered)
+	if seen[0].Target != "worker-a" || seen[0].Verdict != VerdictInboxAccepted {
+		t.Errorf("routed observation = target %q verdict %q, want worker-a/%s", seen[0].Target, seen[0].Verdict, VerdictInboxAccepted)
 	}
 	if seen[1].Target != "" {
 		t.Errorf("refusal observation named a target (%q) — no holder was chosen, so none may be invented", seen[1].Target)

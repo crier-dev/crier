@@ -233,22 +233,61 @@ leaves a message that exists in one agent's inbox and not in the room: two truth
 about and whose delivery outcomes are incomplete — a **visible, repairable state** rather than a silent
 divergence.
 
-Per-target outcome, recorded on the transcript record: `delivered` (the inbox accepted it),
-`leased` (a holder has it in flight), `acked`, `expired` (dead-lettered unacknowledged — the shipped
-reason is `ttl_expired_unacked`), `refused` (a named refusal — no grant, unknown agent, `NO_CAPABLE_AGENT`
-for a capability target, a namespace mismatch). A `refused` outcome is **shown**, never swallowed:
-`B` renders exactly this surface as its per-message meta line (`lease: active` / `lease: closing` /
-`ack: ✓ delivered`, from `README`-visible deliver state), which is why the UI already has somewhere to
-put it.
+<a id="delivery-outcome-vocabulary"></a>
+#### Delivery outcome vocabulary (DF-CRIER-402, DF-CRIER-404, DF-CRIER-409)
 
-Blocking webhook delivery additionally records `budget_cut` when a full answer
-misses its per-target budget or the upstream reports a timeout (DF-CRIER-354).
-This is not `refused`: repeated endpoint refusals such as 503 remain `refused`,
-even if retry backoff exhausts the budget. The persisted `detail` names attempts,
-budget/exhaustion and the explicit partial/late-answer discard policy. Cuts never
-append answer bubbles or increment delivered/skipped counts. See
-`CHAT-INTERFACE.md` §Delivery cuts and retry evidence for timeout remedies and
-same-key retry behavior; `canned` / `failed` runtime verdicts remain unchanged.
+This is the single normative vocabulary table for per-target transcript `outcome`
+values. Producers, API descriptions and UI summaries refer here rather than
+maintaining another list of meanings. Transport admission, policy permission,
+receipt flushing, inbox consumption and an observed answer are different evidence.
+
+| Wire outcome | Meaning and evidence |
+|---|---|
+| `delivered` | The target produced a real reply: a genuine, displayable blocking webhook answer or an observed inbox/peer reply in the allowlisted shapes in [WEBHOOK-DELIVERY.md](WEBHOOK-DELIVERY.md#peerinbox-reply-extraction). A delivery word or boolean alone never qualifies. |
+| `accepted` | The target's transport accepted the message (plain inbox `201`, async/batch queue `202`, or peer acceptance) without an observed answer. Includes an unsubstantiated peer delivery claim, exposed as `code: "PEER_CLAIMED_DELIVERY"`, `retryable: false`, and detail `peer claimed delivery but no reply observed; transport accepted, not confirmed execution`. |
+| `held` | The peer explicitly reports a hold, for example `202 {"status":"held"}`. A hold takes precedence over delivery claims and reply content. No answer bubble. |
+| `refused` | A named target refusal or transport failure: for example no grant, unknown agent, `NO_CAPABLE_AGENT`, namespace mismatch, or repeated endpoint refusals such as 503 even if retry backoff consumes the budget. No answer bubble. |
+| `failed` | The blocking webhook runtime reports `status: "FAILED"` (case-insensitive) or a nonblank string `error` after HTTP acceptance. Retain its diagnostic; this takes precedence over canned markers. No answer bubble. |
+| `canned` | Without a failed marker, the blocking webhook runtime reports `live: false` or `canned: true`. Even `live: true` cannot override `canned: true`. Retain its diagnostic; no answer bubble. |
+| `budget_cut` | The blocking wait ends without a complete answer before its per-target budget, or the upstream reports a timeout. Discard partial/late answers; detail names attempts, budget/exhaustion and the discard policy. No answer bubble. |
+| `unreadable_reply` | A received blocking webhook body has no displayable text (empty, whitespace-only, wrong type or unsupported shape), after failed/canned checks. Detail names sorted top-level keys, never invented text. No answer bubble. |
+| `leased` | Where inbox lifecycle evidence applies, a holder has the entry in flight under a lease. Consumption state, not answer evidence. |
+| `acked` | Where inbox lifecycle evidence applies, the holder acknowledged the entry. Consumption alone does not establish a reply or task completion. |
+| `expired` | Where inbox lifecycle evidence applies, the entry expired unacknowledged and was dead-lettered with reason `ttl_expired_unacked`. |
+| `in_progress` | Same-key dispatch is already running (`DELIVERY_IN_PROGRESS`), not refused or delivered. Wait and refresh; retryability is not permission to resend while pending. |
+
+`FED_ALLOWED` authorizes crossing, not execution. `FED_TOKEN_ONLY` in a verdict
+header or receipt stays `accepted` with that code; an explicit hold keeps its
+precedence and that code. A no-reply delivery claim instead exposes
+`PEER_CLAIMED_DELIVERY` so the unsubstantiated claim is visible. The no-reply
+claim check covers `delivered: true`, or `delivered` in `status`, `outcome`,
+`verdict`, `inbound_verdict`, `X-Crier-Fed-Verdict` or
+`X-Crier-Fed-Inbound-Verdict` (case-insensitive, surrounding whitespace ignored). Unknown or
+unreadable peer receipts remain transport acceptance, unlike an unreadable
+blocking webhook answer. See [WEBHOOK-DELIVERY.md](WEBHOOK-DELIVERY.md#peerinbox-reply-extraction)
+for exact extraction and transport behavior.
+
+Each observed answer appends a target-authored `session.thread.reply`: same
+session/thread, `parent_id` pointing to the operator message, `message_kind: "plain"`, payload `{"text":"…"}`, explicitly empty audience and no outcomes.
+An acceptance or hold does not create such a bubble. Observed text is not proof
+of model authorship, cryptographic response attestation or task completion.
+
+Send responses expose nonzero `accepted`, `held` and `delivered` scalar counters
+plus `outcome_counts` keyed by each exact outcome. Only `refused` contributes to
+`skipped` / `skipped_agents`; other states are never folded into either count.
+Transcript reads retain outcomes, not send counters. The chat summary sorts exact
+names and keeps `; name: count` formatting, including `delivered: 0` when there
+are receipts but no confirmed answer (for example `; delivered: 0; held: 1.`).
+Acceptance/hold grants no additional same-key attempt. Refusals and negative
+runtime outcomes are shown, never swallowed. See `CHAT-INTERFACE.md` for display,
+timeout remedies and same-key retry behavior.
+
+Detector verdicts are transport-specific names, not transcript outcomes:
+`inbox_accepted` records inbox storage (201), while `webhook_accepted` records
+webhook handoff. Their log contract is [DETECTION.md §3.2](DETECTION.md#32-verdicts).
+Federation's completed audit uses `receipt_flushed: true` with `status` and
+`verdict`, even for a refusal such as `FED_NO_LINK`; this proves only that the
+receipt was flushed. Panic abandonment retains `delivered: false, abandoned: true` with no status and no receipt-flushed claim (DF-CRIER-394).
 
 ### 3.2.1 Request-key replay across restart (DF-CRIER-357)
 
@@ -683,15 +722,16 @@ One **record per line**, `v` (record version) first, so a reader can dispatch on
  "context_share":{"mode":"summary","boundary_message_id":"…"}}
 {"v":1,"type":"session.member.context","session_id":"…","seq":3,"ts":"…","member_type":"agent","member_id":"atlas","context_share":{"mode":"full"},"actor":{…}}
 {"v":1,"type":"session.member.remove","session_id":"…","seq":4,"ts":"…","member_type":"agent","member_id":"atlas","actor":{…},"reason":"…"}
-{"v":1,"type":"session.message","session_id":"…","seq":5,"ts":"…","message_id":"…","thread_id":"…","message_kind":"addressed","author":{…},"payload":…,
- "audience":{"rule":"session"|"reply-default"|"explicit","targets":[{"kind":"agent","id":"nimbus"},…]},
- "outcomes":[{"target":"nimbus","outcome":"delivered","inbox_entry_id":"…"}],"idempotency_key":"…"}
+{"v":1,"type":"session.message","session_id":"room-1","seq":5,"ts":"2026-10-19T20:00:00Z","message_id":"operator-1","thread_id":"operator-1","message_kind":"addressed","author":{"agent":"atlas"},"payload":{"text":"Run the sweep."},"audience":{"rule":"explicit","targets":[{"kind":"agent","id":"nimbus"},{"kind":"agent","id":"orion"}]},"outcomes":[{"target":"nimbus","outcome":"accepted","inbox_entry_id":"inbox-1"},{"target":"orion","outcome":"delivered"}],"idempotency_key":"sweep-1"}
 {"v":1,"type":"session.thread.branch","session_id":"…","seq":6,"ts":"…","thread_id":"…","parent_thread_id":"…","anchor_message_id":"…","root_message_id":"…","actor":{…},"reason":"…"}
-{"v":1,"type":"session.thread.reply","session_id":"…","seq":7,"ts":"…","message_id":"…","thread_id":"…","parent_id":"…","message_kind":"plain","author":{…},"payload":…,
- "audience":{…},"outcomes":[…],"idempotency_key":"…"}
+{"v":1,"type":"session.thread.reply","session_id":"room-1","seq":7,"ts":"2026-10-19T20:00:01Z","message_id":"answer-1","thread_id":"operator-1","parent_id":"operator-1","message_kind":"plain","author":{"agent":"orion"},"payload":{"text":"The sweep is complete."},"audience":{"rule":"explicit","targets":[]},"outcomes":[]}
 {"v":1,"type":"session.close","session_id":"…","seq":8,"ts":"…","actor":{…},"reason":"…"}
 {"v":1,"type":"session.reopen","session_id":"…","seq":9,"ts":"…","actor":{…}}
 ```
+
+In the fan-out example, nimbus only stores the message; orion returns the
+observed answer at seq 7, whose `parent_id` names the seq 5 operator message.
+Only orion qualifies for `delivered`; see the [owning vocabulary](#delivery-outcome-vocabulary).
 
 Fields shared by every record: `v`, `type`, `session_id`, `seq`, `ts`. `session.message` and
 `session.thread.reply` carry `message_id`, `thread_id`, **`message_kind`** (`plain` \| `addressed` \|

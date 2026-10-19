@@ -312,7 +312,7 @@ shape.
          "payload":{"parts":[{"type":"text","text":"Kick off the data sweep for the new environment."}]},
          "attachments":[{"ref":"asset_01J9ZB3K","kind":"asset"}],
          "kind":"addressed","task":null,"idempotency_key":"…",
-         "delivered":[{"agent":"kappa","message_id":"msg_…"}],
+         "outcomes":[{"target":"kappa","outcome":"accepted","inbox_entry_id":"msg_…"}],
          "guard":{"decision":"allow","policy":"builtin-default"},
          "created_at":"2026-10-03T18:28:03Z","edited_at":null}}
 ```
@@ -324,9 +324,10 @@ Five rules, each closing a hole a naive transcript leaves open:
 - **`addresses` records the RESOLVED tags, not the typed ones** (CHAT-ADDRESSING.md §2.2). A transcript
   must answer "who was this sent to" years later, when a group has been renamed — so the resolved
   `{tag, type, ref}` is stored, and the tag is not re-resolved on read.
-- **`delivered` names the inbox entries the message fanned out into** (§2.4): the session-level record is
-  the message; its deliveries are the queue rows. A message with no `delivered` entries is a message that
-  was recorded and not dispatched, which is a state worth being able to see.
+- **`outcomes` records per-target evidence**, including an `inbox_entry_id` when a queue row exists.
+  Use the single [CHAT-SESSIONS.md vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary),
+  not a separate storage-specific definition. An empty list means outcomes are not yet recorded,
+  not proof that dispatch did not happen (for example a crash between dispatch and write-back).
 - **`kind` is the message KIND, a closed set `plain` | `addressed` | `task` (D12).** A `plain` message has
   no `addresses`; an `addressed` message has at least one (a tag marks the intended reader and **nothing
   executes**); a `task` is the explicit "do this" kind and is the ONLY kind that may create work or be

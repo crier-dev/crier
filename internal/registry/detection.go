@@ -9,8 +9,8 @@ import (
 // bus's own words for what happened to a delivery, and the detector logs them
 // verbatim.
 const (
-	// VerdictDelivered — the message was stored in the target's inbox (201).
-	VerdictDelivered = "delivered"
+	// VerdictInboxAccepted — the target's inbox stored the message (201), not an observed reply.
+	VerdictInboxAccepted = "inbox_accepted"
 	// VerdictWebhookAccepted — the message was handed to the target's webhook
 	// transport (200 blocking reply or 202 accepted for async/batch).
 	VerdictWebhookAccepted = "webhook_accepted"
@@ -134,7 +134,7 @@ func deliveryVerdict(status int, override string) (verdict, transport string) {
 	}
 	switch status {
 	case http.StatusCreated:
-		return VerdictDelivered, "inbox"
+		return VerdictInboxAccepted, "inbox"
 	case http.StatusAccepted:
 		return VerdictWebhookAccepted, "webhook"
 	case http.StatusOK:
@@ -154,7 +154,7 @@ func deliveryVerdict(status int, override string) (verdict, transport string) {
 
 func transportForVerdict(v string) string {
 	switch v {
-	case VerdictDelivered:
+	case VerdictInboxAccepted:
 		return "inbox"
 	case VerdictWebhookAccepted, VerdictWebhookFailed:
 		return "webhook"

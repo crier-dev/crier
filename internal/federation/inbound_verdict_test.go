@@ -83,6 +83,8 @@ func TestInbound371EveryDoorHasReceiptAndAudit(t *testing.T) {
 			require.Equal(t, string(tc.want), receipt["verdict"])
 			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"federation inbound delivery"`), logs.String())
 			require.Contains(t, logs.String(), `"verdict":"`+string(tc.want)+`"`)
+			require.Contains(t, logs.String(), `"receipt_flushed":true`)
+			require.NotContains(t, logs.String(), `"delivered":`)
 			require.NotContains(t, logs.String(), "must-not-log")
 			require.NotContains(t, logs.String(), "deployment")
 			if tc.status == 201 {
@@ -121,8 +123,42 @@ func TestInbound371EveryDoorHasReceiptAndAudit(t *testing.T) {
 		require.NotContains(t, logs.String(), `"status":`, "no status is claimed for a receipt that was never sent")
 		require.Contains(t, logs.String(), `"delivered":false`)
 		require.Contains(t, logs.String(), `"abandoned":true`)
+		require.NotContains(t, logs.String(), `"receipt_flushed":`)
 		require.Equal(t, 1, strings.Count(logs.String(), `"msg":"federation inbound delivery"`))
 	})
+}
+
+func TestInboundRefusalAuditNamesReceiptNotDelivery(t *testing.T) {
+	h, _, _ := handshakeFixture(t)
+	h.Store.SetRequirePeer(true)
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	for _, token := range []string{"", "deployment"} {
+		t.Run("token="+token, func(t *testing.T) {
+			logs.Reset()
+			r := httptest.NewRequest(http.MethodPost, "/agents/target/inbox", strings.NewReader(`{"payload":{}}`))
+			if token != "" {
+				r.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			DeliveryAuth(middleware.Auth("deployment"), func() *PeerStore { return h.Store })(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("unsigned request bypassed strict peer policy")
+			})).ServeHTTP(w, r)
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Contains(t, w.Body.String(), string(FedNoLink))
+			var audit map[string]any
+			require.NoError(t, json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &audit), "exactly one JSON audit line")
+			require.Equal(t, "federation inbound delivery", audit["msg"])
+			require.Equal(t, string(FedNoLink), audit["verdict"])
+			require.Equal(t, float64(w.Code), audit["status"])
+			require.Equal(t, true, audit["receipt_flushed"])
+			require.NotContains(t, audit, "delivered")
+			require.NotContains(t, audit, "abandoned")
+			t.Logf("refusal audit: %s", logs.String())
+		})
+	}
 }
 
 func TestInbound371StrictPolicyAndEmptyStoreCompatibility(t *testing.T) {

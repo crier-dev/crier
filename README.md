@@ -228,10 +228,9 @@ writes, a send to a three-member roster with one unregistered agent answers
 {"accepted":2,"outcome_counts":{"accepted":2,"refused":1},"skipped":1,"skipped_agents":["ghost"]}
 ```
 
-A queue/inbox accept is `accepted`; an explicit peer hold is `held`. Only a
-genuine blocking webhook reply or an explicit inbox/peer delivery receipt is
-`delivered`. Token-only federation admission stays `accepted` with code
-`FED_TOKEN_ONLY`. The chat summary keeps each exact outcome name separate.
+The single [delivery outcome vocabulary](specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary)
+defines the evidence required for each wire name. Receipt claims alone are not
+answers; the chat summary keeps each exact outcome name separate.
 
 The skipped target keeps its own reason instead of being hidden behind the
 count, so an unregistered agent reads differently from a namespace mismatch:

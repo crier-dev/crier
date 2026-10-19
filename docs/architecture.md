@@ -83,16 +83,15 @@ the current members, and it lives in an append-only JSONL log (`groups.jsonl`
 under `CR_GROUP_ROOT`, reduced keep-LAST per name) so it survives every
 `CR_SESSION_BACKEND` selection.
 
-A group send is DELIVERED to every member the registry holds and each member with
-no registry entry is SKIPPED — a **partial success, not a failed send**:
-`POST /sessions/{id}/messages` still answers `201`, the response carries the
-`delivered` / `skipped` / `skipped_agents` summary, and the skipped target keeps
-its own per-target `refused` outcome with the real reason (`agent not found:
-"…"`) rather than being hidden behind the count. Each skip is logged (WARN)
-naming the group it was addressed through, so an unregistered roster member is
-visible in the log and never a silent drop (§3.2's named-outcome rule,
-DF-CRIER-305). Registering the members (`POST /agents`) is therefore the one
-prerequisite of a group send.
+A group send attempts every member the registry holds and skips each member with
+no registry entry — a partial success, not a failed send. The send still answers
+`201`, with per-target evidence and counter projections defined by the single
+[delivery outcome vocabulary](../specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary).
+The skipped target retains its real reason (`agent not found: "…"`), rather than
+being hidden behind a count. Each skip is logged (WARN), naming the group it was
+addressed through, so an unregistered roster member is visible in the log and
+never a silent drop (§3.2's named-outcome rule, DF-CRIER-305). Registering the
+members (`POST /agents`) is therefore the one prerequisite of a group send.
 
 ## Delivery & Escalation Lanes
 Three lanes carry agent work (lane split, CR-FEAT-009):

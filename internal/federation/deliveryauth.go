@@ -61,7 +61,7 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 				if completed {
 					receipt.finish(v, posture.Peers > 0)
 					slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
-						"verdict", v, "status", receipt.status, "delivered", true)
+						"verdict", v, "status", receipt.status, "receipt_flushed", true)
 					return
 				}
 				// Preserve the outer recovery middleware's authority: never flush

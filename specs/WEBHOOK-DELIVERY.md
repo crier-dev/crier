@@ -179,40 +179,14 @@ answer, so retrying cannot succeed. A transient `5xx / 408 / 429 / timeout` that
 answers **504 Gateway Timeout** with `{"error":"webhook: blocking delivery timed out after 30s (last: status 503)"}`;
 only that class can still land on a later attempt. (Timeout and budget exhaustion are the only 504 cases.)
 
-### Session outcome vocabulary (DF-CRIER-397, DF-CRIER-401)
+### Session outcomes and reply extraction (DF-CRIER-397, DF-CRIER-401)
 
-A successful transport exchange is not automatically `delivered` in the session
-transcript. Producers, counters and the chat summary use these exact words:
+The single normative outcome table is in
+[CHAT-SESSIONS.md §3.2 — Delivery outcome vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary).
+Use that table for producers, counters, claim/hold precedence and answer-bubble
+semantics; this transport spec owns only the extraction algorithm below.
 
-- `accepted`: a plain `201` inbox write or an async/batch `202` queue accept,
-  without an observed answer. This also covers a peer's refused delivery CLAIM:
-  `delivered: true`, or `delivered` in `status`, `outcome`, `verdict`,
-  `inbound_verdict`, `X-Crier-Fed-Verdict` or `X-Crier-Fed-Inbound-Verdict`
-  (case-insensitive, surrounding whitespace ignored) with no reply observed.
-  That claim is visible as `code: "PEER_CLAIMED_DELIVERY"`, detail
-  `peer claimed delivery but no reply observed; transport accepted, not confirmed execution`,
-  and `retryable: false`. The message reached the peer; the claim is not a
-  transport refusal or a reason to retry. No agent-authored bubble is created.
-- `held`: the peer receipt explicitly names `held` (for example
-  `202 {"status":"held"}`). A hold creates no agent-authored answer bubble,
-  and retains precedence over both delivery claims and reply content.
-- `delivered`: a blocking webhook reply passes the existing genuine/failed/canned
-  classifier, or a successful inbox/peer exchange returns an observed reply in
-  one of the shapes below. A delivery word alone never qualifies. Each such
-  session delivery records an answer bubble authored by the addressed target,
-  with `parent_id` equal to the operator message, the same session/thread,
-  `message_kind: "plain"`, payload `{"text":"…"}`, an explicitly empty audience
-  and no outcomes — the SAME append shape as a local blocking webhook reply.
-  Federation's `FED_ALLOWED` authorizes crossing, not execution. Observing a
-  reply is NOT proof of model authorship or cryptographic attestation; peer
-  request authentication does not attest the response body. Empty blocking
-  webhook replies remain `unreadable_reply`, never `delivered`.
-- `FED_TOKEN_ONLY` in either verdict header or the receipt's `verdict` /
-  `inbound_verdict` remains `accepted` with `code: "FED_TOKEN_ONLY"`, not refusal
-  or delivery. An explicit hold takes precedence and retains that code. A
-  delivery claim without an observed reply instead exposes
-  `PEER_CLAIMED_DELIVERY` so the unsubstantiated claim is never hidden.
-
+<a id="peerinbox-reply-extraction"></a>
 Peer/inbox reply extraction is an allowlist (first matching shape wins):
 
 1. A nonblank JSON string or nonblank raw plain-text body, except a standalone
@@ -234,16 +208,9 @@ transport metadata into speech. Unknown/unreadable peer receipts stay `accepted`
 only extracted answer text or the fixed claim diagnostic is persisted, never
 untrusted receipt reasons. Local blocking webhook extraction is unchanged.
 
-Send responses expose `accepted`, `held` and the existing `delivered` counters
-(nonzero scalar counters only), plus `outcome_counts` keyed by every exact outcome
-name. `skipped` remains the compatibility projection of `refused` only. Transcript
-GET retains the per-target outcomes; send counters are not persisted. The chat
-summary derives its counts from those exact outcomes, sorted by name, retaining
-its `; name: count` format: `; accepted: 2; delivered: 1; held: 1.`. When receipts
-exist but no delivery is confirmed it explicitly includes `delivered: 0` (for
-example `; delivered: 0; held: 1.`). Accepted/held are non-negative receipt states,
-not skipped targets; neither grants another same-key delivery attempt. Retry
-policy, timeout ordering and the guarded-dispatch requirement are unchanged.
+Send-counter projections and the chat summary follow the
+[owning vocabulary](CHAT-SESSIONS.md#delivery-outcome-vocabulary).
+Retry policy, timeout ordering and guarded dispatch are unchanged.
 
 ## 4. Delivery modes
 

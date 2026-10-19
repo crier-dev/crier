@@ -55,13 +55,13 @@ func TestFanoutSpikeTripsOnceAndRearms(t *testing.T) {
 	d, c := newTestDetector(t, Config{FanoutWindow: 60 * time.Second, FanoutMinTargets: 5, NewPeerMinTargets: 99})
 
 	for _, target := range []string{"peer-1", "peer-2", "peer-3", "peer-4"} {
-		observe(d, "compromised", target, registry.VerdictDelivered)
+		observe(d, "compromised", target, registry.VerdictInboxAccepted)
 	}
 	if got := d.Alerts(); len(got) != 0 {
 		t.Fatalf("4 distinct targets tripped %v, want nothing (threshold is 5)", signalsOf(got))
 	}
 
-	observe(d, "compromised", "peer-5", registry.VerdictDelivered)
+	observe(d, "compromised", "peer-5", registry.VerdictInboxAccepted)
 	alerts := d.Alerts()
 	if len(alerts) != 1 || alerts[0].Signal != SignalFanoutSpike {
 		t.Fatalf("5 distinct targets = %v, want exactly one %s", signalsOf(alerts), SignalFanoutSpike)
@@ -77,13 +77,13 @@ func TestFanoutSpikeTripsOnceAndRearms(t *testing.T) {
 	}
 
 	// More targets inside the same window: still ONE alert.
-	observe(d, "compromised", "peer-6", registry.VerdictDelivered)
+	observe(d, "compromised", "peer-6", registry.VerdictInboxAccepted)
 	if got := d.Alerts(); len(got) != 1 {
 		t.Fatalf("6th target produced %d alerts, want the window to stay quiet after the first", len(got))
 	}
 
 	// A different sender is its own baseline: the alert is per agent.
-	observe(d, "quiet-agent", "worker-1", registry.VerdictDelivered)
+	observe(d, "quiet-agent", "worker-1", registry.VerdictInboxAccepted)
 	if got := d.Alerts(); len(got) != 1 {
 		t.Fatalf("an unrelated sender raised an alert: %v", signalsOf(got))
 	}
@@ -91,7 +91,7 @@ func TestFanoutSpikeTripsOnceAndRearms(t *testing.T) {
 	// After the window slides, a fresh burst re-alarms.
 	c.advance(2 * time.Minute)
 	for _, target := range []string{"seven", "eight", "nine", "ten", "eleven"} {
-		observe(d, "compromised", target, registry.VerdictDelivered)
+		observe(d, "compromised", target, registry.VerdictInboxAccepted)
 	}
 	if got := d.Alerts(); len(got) != 2 {
 		t.Fatalf("after the window slid, alerts = %d, want 2 (the signal must re-arm)", len(got))
@@ -104,15 +104,15 @@ func TestFanoutSpikeTripsOnceAndRearms(t *testing.T) {
 func TestNewPeerBurstCountsFirstContactOnly(t *testing.T) {
 	d, _ := newTestDetector(t, Config{NewPeerWindow: 60 * time.Second, NewPeerMinTargets: 3, FanoutMinTargets: 99})
 
-	observe(d, "scanner", "peer-1", registry.VerdictDelivered)
-	observe(d, "scanner", "peer-1", registry.VerdictDelivered) // same peer again
-	observe(d, "scanner", "peer-2", registry.VerdictDelivered)
-	observe(d, "scanner", "peer-2", registry.VerdictDelivered)
+	observe(d, "scanner", "peer-1", registry.VerdictInboxAccepted)
+	observe(d, "scanner", "peer-1", registry.VerdictInboxAccepted) // same peer again
+	observe(d, "scanner", "peer-2", registry.VerdictInboxAccepted)
+	observe(d, "scanner", "peer-2", registry.VerdictInboxAccepted)
 	if got := d.Alerts(); len(got) != 0 {
 		t.Fatalf("two distinct new peers tripped %v, want nothing (threshold is 3)", signalsOf(got))
 	}
 
-	observe(d, "scanner", "peer-3", registry.VerdictDelivered)
+	observe(d, "scanner", "peer-3", registry.VerdictInboxAccepted)
 	alerts := d.Alerts()
 	if len(alerts) != 1 || alerts[0].Signal != SignalNewPeerBurst {
 		t.Fatalf("3 distinct new peers = %v, want one %s", signalsOf(alerts), SignalNewPeerBurst)
@@ -131,17 +131,17 @@ func TestOddHourVolumeAndWrapWindow(t *testing.T) {
 	d, c := newTestDetector(t, Config{QuietStartHour: 1, QuietEndHour: 5, QuietMinMessages: 3, FanoutMinTargets: 99, NewPeerMinTargets: 99})
 
 	// 12:00 UTC is not quiet.
-	observe(d, "night-owl", "a", registry.VerdictDelivered)
-	observe(d, "night-owl", "b", registry.VerdictDelivered)
-	observe(d, "night-owl", "c", registry.VerdictDelivered)
+	observe(d, "night-owl", "a", registry.VerdictInboxAccepted)
+	observe(d, "night-owl", "b", registry.VerdictInboxAccepted)
+	observe(d, "night-owl", "c", registry.VerdictInboxAccepted)
 	if got := d.Alerts(); len(got) != 0 {
 		t.Fatalf("daytime volume tripped %v, want nothing", signalsOf(got))
 	}
 
 	c.at = time.Date(2026, 9, 26, 2, 0, 0, 0, time.UTC) // inside 01:00-05:00
-	observe(d, "night-owl", "d", registry.VerdictDelivered)
-	observe(d, "night-owl", "e", registry.VerdictDelivered)
-	observe(d, "night-owl", "f", registry.VerdictDelivered)
+	observe(d, "night-owl", "d", registry.VerdictInboxAccepted)
+	observe(d, "night-owl", "e", registry.VerdictInboxAccepted)
+	observe(d, "night-owl", "f", registry.VerdictInboxAccepted)
 	alerts := d.Alerts()
 	if len(alerts) != 1 || alerts[0].Signal != SignalOddHourVolume {
 		t.Fatalf("quiet-window volume = %v, want one %s", signalsOf(alerts), SignalOddHourVolume)
@@ -158,14 +158,14 @@ func TestOddHourVolumeAndWrapWindow(t *testing.T) {
 	} {
 		c2.at = at
 		before := len(wrap.Alerts())
-		observe(wrap, "night-owl", "x", registry.VerdictDelivered)
+		observe(wrap, "night-owl", "x", registry.VerdictInboxAccepted)
 		if len(wrap.Alerts()) != before+1 {
 			t.Fatalf("%s was not counted inside the wrapping quiet window 22-6", at.Format(time.RFC3339))
 		}
 	}
 	c2.at = time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	before := len(wrap.Alerts())
-	observe(wrap, "night-owl", "y", registry.VerdictDelivered)
+	observe(wrap, "night-owl", "y", registry.VerdictInboxAccepted)
 	if len(wrap.Alerts()) != before {
 		t.Fatal("12:00 UTC counted as quiet with CR_DETECT_QUIET_HOURS=22-6")
 	}
@@ -176,8 +176,8 @@ func TestOddHourVolumeAndWrapWindow(t *testing.T) {
 // contained agent would look like a permanent spike.
 func TestQuarantinedDeliveriesAreNotBehaviour(t *testing.T) {
 	d, _ := newTestDetector(t, Config{FanoutMinTargets: 2, NewPeerMinTargets: 2})
-	observe(d, "attacker", "peer-1", registry.VerdictDelivered)
-	observe(d, "attacker", "peer-2", registry.VerdictDelivered)
+	observe(d, "attacker", "peer-1", registry.VerdictInboxAccepted)
+	observe(d, "attacker", "peer-2", registry.VerdictInboxAccepted)
 	if got := len(d.Alerts()); got == 0 {
 		t.Fatal("the baseline did not trip at all")
 	}
@@ -212,7 +212,7 @@ func TestCanaryTripByTargetAndByPayload(t *testing.T) {
 	}
 
 	d.Observe(registry.DeliveryObservation{
-		Sender: "leaker", Target: "peer-1", Verdict: registry.VerdictDelivered,
+		Sender: "leaker", Target: "peer-1", Verdict: registry.VerdictInboxAccepted,
 		Payload: []byte(`{"stolen":"crier-canary-test-token-1"}`),
 	})
 	alerts := d.Alerts()
@@ -225,7 +225,7 @@ func TestCanaryTripByTargetAndByPayload(t *testing.T) {
 	// assumed.
 	big := strings.Repeat("x", maxCanaryScanBytes+1) + "crier-canary-test-token-1"
 	d.Observe(registry.DeliveryObservation{
-		Sender: "leaker", Target: "peer-2", Verdict: registry.VerdictDelivered, Payload: []byte(big),
+		Sender: "leaker", Target: "peer-2", Verdict: registry.VerdictInboxAccepted, Payload: []byte(big),
 	})
 	if got := len(d.Alerts()); got != 2 {
 		t.Fatalf("an oversize payload raised an alert (%d), want the documented cap to skip the scan", got)
@@ -285,8 +285,8 @@ func TestObservationsAndAlertsLandInTheLog(t *testing.T) {
 		NewPeerMinTargets: 99,
 	})
 
-	observe(d, "attacker", "peer-1", registry.VerdictDelivered)
-	observe(d, "attacker", "peer-2", registry.VerdictDelivered)
+	observe(d, "attacker", "peer-1", registry.VerdictInboxAccepted)
+	observe(d, "attacker", "peer-2", registry.VerdictInboxAccepted)
 	observe(d, "attacker", "peer-3", registry.VerdictQuarantined)
 
 	audit := d.Audit()
@@ -323,7 +323,7 @@ func TestObservationsAndAlertsLandInTheLog(t *testing.T) {
 // TestStatsReportsVerdictsAndQuarantines pins the operator-facing tally.
 func TestStatsReportsVerdictsAndQuarantines(t *testing.T) {
 	d, _ := newTestDetector(t, Config{FanoutMinTargets: 99, NewPeerMinTargets: 99})
-	observe(d, "a", "b", registry.VerdictDelivered)
+	observe(d, "a", "b", registry.VerdictInboxAccepted)
 	observe(d, "a", "b", registry.VerdictAgentNotFound)
 	observe(d, "a", "b", registry.VerdictQuarantined)
 
@@ -331,7 +331,7 @@ func TestStatsReportsVerdictsAndQuarantines(t *testing.T) {
 	if st.Observed != 3 {
 		t.Fatalf("observed = %d, want 3", st.Observed)
 	}
-	if st.Verdicts[registry.VerdictDelivered] != 1 || st.Verdicts[registry.VerdictAgentNotFound] != 1 {
+	if st.Verdicts[registry.VerdictInboxAccepted] != 1 || st.Verdicts[registry.VerdictAgentNotFound] != 1 {
 		t.Fatalf("verdicts = %v, want one of each", st.Verdicts)
 	}
 	if st.Canaries != DefaultCanaryCount {
