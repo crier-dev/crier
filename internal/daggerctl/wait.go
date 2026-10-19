@@ -457,8 +457,8 @@ func (j *waitJournal) readAll() ([]*waitEntry, error) {
 // wait verbs answering the named 503 a missing bridge does.
 func (s *Service) SetWaitRegistry(r *WaiterRegistry) { s.waits = r }
 
-// SetInboxStore wires the durable-inbox write a wait delivers through — the
-// SAME store the notification path uses, never a second delivery path.
+// SetInboxStore wires wait delivery through the same capability as terminal
+// notifications. Production supplies the guarded registry handler, not a store.
 func (s *Service) SetInboxStore(store InboxStore) { s.inbox = store }
 
 // waitSender is the Sender recorded on a wait's inbox entry. It is not an

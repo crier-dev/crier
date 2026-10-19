@@ -151,10 +151,21 @@ func run(args []string) int {
 	// operator registering the agent by hand (DF-CRIER-28).
 	ensureBridgeIdentity(store, identity, slog.Default())
 
+	var deliveryHandler *registry.Handler
+	if !identity.Remote {
+		var closeDelivery func()
+		deliveryHandler, closeDelivery, err = localDeliveryHandler(cfg, store)
+		if err != nil {
+			slog.Error("initialize MCP delivery", "error", err)
+			return 1
+		}
+		defer closeDelivery()
+	}
 	server := mcp.NewWithOptions(store, mcp.Options{
-		AgentID: os.Getenv(mcp.EnvAgentID),
-		HTTPURL: os.Getenv(mcp.EnvHTTPURL),
-		MeshURL: os.Getenv(mcp.EnvMeshURL),
+		DeliveryHandler: deliveryHandler,
+		AgentID:         os.Getenv(mcp.EnvAgentID),
+		HTTPURL:         os.Getenv(mcp.EnvHTTPURL),
+		MeshURL:         os.Getenv(mcp.EnvMeshURL),
 		// DF-CRIER-197: the bridge is in the same process and reads the same
 		// CR_REQUIRE_AGENT_SIG variable cmd/server does, so it can know the
 		// registration mode and mirror the HTTP handler's conditional rule —

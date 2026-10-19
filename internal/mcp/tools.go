@@ -157,7 +157,7 @@ func (s *MCPServer) handleDeliverMessage(args json.RawMessage) (any, error) {
 		Sender: s.bridgeSender(),
 		Model:  in.Model, Provider: in.Provider, ReplyTo: in.ReplyTo, IdempotencyKey: in.IdempotencyKey,
 	}
-	if err := s.store.Deliver(in.AgentID, entry); err != nil {
+	if err := s.deliver(in.AgentID, entry); err != nil {
 		return nil, err
 	}
 	return DeliverMessageOutput{

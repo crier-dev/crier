@@ -13,6 +13,39 @@ agent (or its operator) controls. The server becomes a delivery primitive: durab
 Non-goals (v1): no server-side LLM integration, no message transformation beyond schema templates,
 no full-mesh federation (links only).
 
+### Guarded delivery boundary (DF-CRIER-344)
+
+`registry.Handler.Dispatch` is the guard → webhook OR durable-inbox choke point.
+The callers inside it are:
+
+- HTTP by-id and capability sends (including remote MCP `RemoteStore` sends).
+- Local session fan-out through `registry.SessionDeliverer`.
+- MCP `send_message`, `deliver_message`, and the request leg of `ask_agent`:
+  local memory/Postgres mode uses `Handler.Deliver`; remote mode requests blocking
+  HTTP dispatch once, with its existing signed identity. Local MCP boot wires the
+  configured guard, realm policies and webhook driver; library embedders can pass
+  their live `DeliveryHandler` (the bare constructor has no configured guard).
+- Dagger control terminal notifications and deliver-and-wait requests: server boot
+  injects the same live handler as HTTP ingress, not the underlying store.
+
+MCP inputs and success objects are unchanged. MCP and dagger control deliveries
+confirm a blocking webhook response (or a completed inbox write) before reporting
+success; they do not call queue admission delivery a completed send. `ask_agent`
+still waits for its separately correlated inbox reply; a webhook response does not
+replace that protocol. Dagger waits still resolve by acknowledgement or explicit
+wait resolution; transport success alone does not resolve a wait.
+
+Deliberately outside: low-level store operations, inbox transfer/reassignment,
+`MESSAGE_EXPIRED`, `WEBHOOK_FAILED` and `FEDERATION_FAILED` durable receipts.
+These are lifecycle/storage operations, not fresh producer sends; error receipts
+must remain store-only to avoid recursive webhook failures. Mesh request/response,
+relay pub/sub and remote-session federation retain their separate transports;
+this choke-point claim covers local registry deliveries, not every bus operation.
+
+All non-HTTP dispatches reuse `logNamespaceDeliver` after target-realm auth, with
+exactly the HTTP audit vocabulary: debug message `inbox deliver scoped to namespace`
+and fields `target`, `namespace`, `sender`. The default realm emits no such line.
+
 ## 2. Agent registration extension
 
 `POST /agents` gains an optional `webhook` object:

@@ -168,6 +168,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 			return
 		}
 		entry.Namespace = targetNS
+		logNamespaceDeliver(id, targetNS, req.Sender)
 		if entry.Location == nil {
 			entry.Location = h.locationOf(entry, req.SessionID)
 		} else {

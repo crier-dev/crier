@@ -816,7 +816,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// shipped inbox path (see cmd/server/daggerctl.go). With the variable
 	// unset registerDaggerRoutes returns (nil, nil) and registers nothing, so
 	// the served surface is unchanged.
-	daggerSvc, _, err := registerDaggerRoutes(r, cfg.Dagger, regStore)
+	daggerSvc, _, err := registerDaggerRoutes(r, cfg.Dagger, registryHandler)
 	if err != nil {
 		slog.Error("initialize dagger control", "error", err)
 		return 1

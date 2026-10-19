@@ -106,7 +106,7 @@ func (s *MCPServer) handleSendMessage(args json.RawMessage) (any, error) {
 		Sender: s.bridgeSender(),
 		Model:  in.Model, Provider: in.Provider, ReplyTo: in.ReplyTo, IdempotencyKey: in.IdempotencyKey,
 	}
-	if err := s.store.Deliver(in.AgentID, entry); err != nil {
+	if err := s.deliver(in.AgentID, entry); err != nil {
 		return nil, err
 	}
 	return SendMessageOutput{MessageID: entry.ID, AgentID: in.AgentID}, nil
@@ -197,7 +197,7 @@ func (s *MCPServer) handleAskAgent(args json.RawMessage) (any, error) {
 	// a payload convention (the reply leg is send_message + reply_to, and
 	// that delivery stamps the REPLIER's own id the same way).
 	entry := &registry.InboxEntry{AgentID: in.AgentID, Payload: raw, Sender: s.bridgeSender()}
-	if err := s.store.Deliver(in.AgentID, entry); err != nil {
+	if err := s.deliver(in.AgentID, entry); err != nil {
 		return nil, err
 	}
 

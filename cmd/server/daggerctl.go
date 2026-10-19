@@ -114,9 +114,9 @@ func daggerStoreUnusable(dir, what string, cause error) error {
 //	GET  /dagger/waits/{key}            read a wait's state (CR-CHAT-034)
 //
 // Everything is additive: no existing route, body or auth requirement moves,
-// and the terminal outcome travels the SHIPPED inbox path (registry Deliver)
-// rather than a side channel.
-func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry.Store) (*daggerctl.Service, *registry.Handler, error) {
+// and the terminal outcome travels the guarded registry dispatch path rather
+// than a side channel.
+func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *registry.Handler) (*daggerctl.Service, *registry.Handler, error) {
 	if cfg.URL == "" {
 		return nil, nil, nil
 	}
@@ -144,13 +144,15 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 
-	svc := daggerctl.NewService(bridge, runStore, daggerctl.InboxDeliverer(store))
+	// Both terminal notifications and wait requests use the live handler's
+	// guard -> webhook OR inbox dispatcher, never a direct store append.
+	svc := daggerctl.NewService(bridge, runStore, daggerctl.InboxDeliverer(dispatcher))
 	svc.SetWatchInterval(cfg.PollInterval)
 
 	// Delivery waits (CR-CHAT-034): the waiter registry journals beside the
 	// run records so an idempotency key recorded before a crash still refuses
 	// a second delivery after a restart. The waits deliver through the SAME
-	// store the notifications use. A registry that cannot open fails the boot
+	// dispatcher the notifications use. A registry that cannot open fails the boot
 	// — a wait surface that silently lost its journal would be a second
 	// delivery waiting to happen.
 	waits, err := daggerctl.NewWaiterRegistry(cfg.StoreDir)
@@ -158,7 +160,7 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, store registry
 		return nil, nil, fmt.Errorf("dagger control: %w", err)
 	}
 	svc.SetWaitRegistry(waits)
-	svc.SetInboxStore(store)
+	svc.SetInboxStore(dispatcher)
 
 	// Named remote execution targets (CR-CHAT-035): the local bridge above is
 	// the default target, and each CR_DAGGER_TARGET_<NAME>=<url> adds a named

@@ -446,11 +446,24 @@ func (s *RemoteStore) Unregister(id string) error {
 }
 
 func (s *RemoteStore) Deliver(agentID string, entry *InboxEntry) error {
+	return s.deliver(agentID, entry, "")
+}
+
+// DeliverConfirmed enters the remote HTTP dispatch core once, with the bridge's
+// existing signing identity. MCP success must mean delivery, not queue admission.
+func (s *RemoteStore) DeliverConfirmed(agentID string, entry *InboxEntry) error {
+	return s.deliver(agentID, entry, "blocking")
+}
+
+func (s *RemoteStore) deliver(agentID string, entry *InboxEntry, mode string) error {
 	var out struct {
 		ID string `json:"id"`
 	}
 	body := map[string]any{
 		"payload": json.RawMessage(entry.Payload),
+	}
+	if mode != "" {
+		body["delivery_mode"] = mode
 	}
 	// Forward the envelope sender verbatim when the caller named one
 	// (CR-FEAT-025). The server stores it WITH the message and it is the

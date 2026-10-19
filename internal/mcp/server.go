@@ -18,6 +18,7 @@ import (
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 const (
@@ -42,6 +43,7 @@ func serverVersion() string { return buildinfo.VersionSegment() }
 // acks, correlation ids and the mesh connection are all owned here.
 type MCPServer struct {
 	store             registry.Store
+	deliver           func(string, *registry.InboxEntry) error
 	tools             map[string]toolHandler
 	stdin             *bufio.Scanner
 	stdout            *json.Encoder
@@ -64,6 +66,10 @@ type toolHandler func(args json.RawMessage) (any, error)
 
 // Options configures the bridge layer of the MCP server.
 type Options struct {
+	// DeliveryHandler shares an embedding server's live guard, webhook driver
+	// and namespace policies. Standalone local binaries configure it at boot.
+	// RemoteStore is already HTTP ingress and must not be dispatched locally.
+	DeliveryHandler *registry.Handler
 	// AgentID is the bridge's own identity: the agent whose inbox
 	// get_messages/ask_agent read, and the mesh identity for mesh_request.
 	AgentID string
@@ -105,6 +111,21 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 		allowKeylessAgent: opts.AllowKeylessAgents,
 		agentID:           opts.AgentID,
 		httpURL:           strings.TrimSuffix(opts.HTTPURL, "/"),
+	}
+	if remote, ok := store.(*registry.RemoteStore); ok {
+		// RemoteStore is not a local append: it signs and POSTs to the
+		// owning server's HTTP choke point. Wrapping it in a local handler
+		// would check the guard twice and lose signed service authority.
+		s.deliver = remote.DeliverConfirmed
+	} else {
+		h := opts.DeliveryHandler
+		if h == nil {
+			// Library default: guarded core with no configured guard policy.
+			// Blocking-only delivery needs no background queue lifecycle.
+			h = registry.NewHandler(store)
+			h.SetWebhookDriver(webhook.NewDriver(webhook.NewClient(30*time.Second, nil), webhook.NewMemoryQueue(), webhook.DriverConfig{}))
+		}
+		s.deliver = h.Deliver
 	}
 	if opts.MeshURL != "" && opts.AgentID != "" {
 		s.bridge = newMeshBridge(opts.AgentID, opts.MeshURL)
