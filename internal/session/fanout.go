@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
+	"github.com/crier-dev/crier/internal/webhook"
 )
 
 // InboxDeliverer is the delivery capability used by fan-out. Production uses
@@ -215,7 +217,7 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 	var wg sync.WaitGroup
 	for i, target := range sorted {
 		prev, known := prior[target]
-		retryNegative := retry && (prev.Outcome == OutcomeRefused || prev.Outcome == OutcomeFailed)
+		retryNegative := retry && (prev.Outcome == OutcomeRefused || prev.Outcome == OutcomeFailed || prev.Outcome == OutcomeBudgetCut)
 		if known && prev.Outcome != "" && !retryNegative {
 			outcomes[i] = prev
 			continue
@@ -274,9 +276,14 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				deliveryErr = deliverer.Deliver(target, entry)
 			}
 			if err := deliveryErr; err != nil {
+				outcome = OutcomeRefused
+				var blocking *webhook.BlockingDeliveryError
+				if errors.As(err, &blocking) && blocking.Cut {
+					outcome = OutcomeBudgetCut
+				}
 				outcomes[i] = DeliveryOutcome{
 					Target:    target,
-					Outcome:   OutcomeRefused,
+					Outcome:   outcome,
 					Reason:    err.Error(),
 					UpdatedAt: time.Now().UTC(),
 				}

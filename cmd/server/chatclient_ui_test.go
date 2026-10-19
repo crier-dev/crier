@@ -151,7 +151,7 @@ func TestChatClientNoParallelAuthOrExecution(t *testing.T) {
 		`generation === state.generation`,
 		`credentials:"same-origin"`,
 		`o.outcome === "refused"`,
-		`outcomes.every(o => o.outcome === "refused" || o.outcome === "failed")`,
+		`outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut")`,
 		`if (!task && !retryable) pendingMessageRequest = null`,
 		`result.replay_action === "redelivered"`,
 		`replayed without another delivery`,

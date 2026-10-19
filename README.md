@@ -1333,9 +1333,17 @@ transport/queue work consumes the remaining headroom. The session budget is not
 a whole-request deadline, and the browser's shorter wait is not a refusal.
 HTTP inbox and A2A budgets are unchanged.
 
+A cut answer is recorded as `budget_cut`, not `delivered` or `refused`. The outcome
+shows the attempt count, delivery budget and exhaustion, explains that no complete
+answer arrived in time and partial/late answers are discarded, and names the two
+timeout settings or retry. A 503 refusal stays `refused`, with attempts and budget
+exhaustion visible even when retries consume the full wait. Complete live answers
+stay `delivered` and appear as same-thread bubbles; cuts never produce a bubble.
+These details remain visible on transcript refresh.
+
 Retry `POST /sessions/{id}/messages` with the same `idempotency_key`:
 
-- If ALL recorded outcomes are `refused` or `failed`, a real delivery attempt
+- If ALL recorded outcomes are `refused`, `failed` or `budget_cut`, a real delivery attempt
   runs using the original payload and resolved targets, same message ID, sequence,
   thread and operator row. Its outcomes replace the previous outcomes. The reply
   says `replay_action: "redelivered"` (an attempt, not a promise of success).
@@ -1351,7 +1359,7 @@ Retry `POST /sessions/{id}/messages` with the same `idempotency_key`:
 The page stops waiting after 12 seconds without aborting a session-message POST;
 the server can finish and the next transcript refresh shows its answer. Other
 requests retain their existing abort deadlines. The page keeps the draft and
-request key after an all-refused/failed result.
+request key after an all-refused/failed/budget_cut result.
 Click Send again unchanged to re-attempt delivery and update that same row.
 
 ## Message guard (LLM)

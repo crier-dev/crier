@@ -114,7 +114,7 @@ func testSessionFanoutBudget(t *testing.T, allHang bool) {
 		outcome := msg.Outcomes[i]
 		require.Equal(t, id, outcome.Target, "outcomes remain sorted despite concurrent dispatch")
 		if allHang || id == "b-hang" {
-			require.Equal(t, "refused", outcome.Outcome)
+			require.Equal(t, "budget_cut", outcome.Outcome)
 			require.Contains(t, outcome.Reason, "timed out")
 		} else {
 			require.Equal(t, "delivered", outcome.Outcome)
@@ -126,30 +126,29 @@ func testSessionFanoutBudget(t *testing.T, allHang bool) {
 		wantDelivered = 0
 	}
 	require.Equal(t, wantDelivered, msg.Delivered)
-	require.Equal(t, 3-wantDelivered, msg.Skipped)
+	require.Zero(t, msg.Skipped, "budget cuts are not refused/skipped targets")
 	var transcript struct {
 		Messages []sessionDispatchView `json:"messages"`
 	}
 	code, raw = sessionDo(t, http.DefaultClient, http.MethodGet, base+"/sessions/"+room.ID+"/messages", nil, &transcript)
 	require.Equal(t, http.StatusOK, code, "%s", raw)
 	require.Len(t, transcript.Messages, 1)
-	// Refusal detail is deliberately response-only (DeliveryOutcome.Reason has
-	// json:"-"). Preserve that contract; the durable transcript stores outcomes,
-	// while the POST summary above must count the same delivered/refused mixture.
-	durableDelivered, durableRefused := 0, 0
+	// Cut detail persists in the transcript and must match the POST response.
+	durableDelivered, durableCut := 0, 0
 	for i, outcome := range transcript.Messages[0].Outcomes {
 		require.Equal(t, msg.Outcomes[i].Target, outcome.Target)
 		require.Equal(t, msg.Outcomes[i].Outcome, outcome.Outcome)
+		require.Equal(t, msg.Outcomes[i].Reason, outcome.Reason)
 		require.Equal(t, msg.Outcomes[i].InboxEntryID, outcome.InboxEntryID)
 		if outcome.Outcome == "delivered" {
 			durableDelivered++
 		} else {
-			durableRefused++
+			durableCut++
 		}
 	}
 	require.Len(t, transcript.Messages[0].Outcomes, 3)
 	require.Equal(t, msg.Delivered, durableDelivered)
-	require.Equal(t, msg.Skipped, durableRefused)
+	require.Equal(t, 3-wantDelivered, durableCut)
 	require.Eventually(t, func() bool { return completed.Load() == 3 && active.Load() == 0 }, time.Second, time.Millisecond,
 		"all endpoint handlers must complete after the budget, not linger")
 }

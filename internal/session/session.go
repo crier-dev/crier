@@ -98,6 +98,8 @@ type Outcome string
 
 const (
 	OutcomeDelivered Outcome = "delivered"
+	// BudgetCut means the blocking wait ended without a complete answer.
+	OutcomeBudgetCut Outcome = "budget_cut"
 	// Canned and failed are runtime verdicts after HTTP acceptance, not
 	// delivery refusals. Neither permits an agent-authored answer bubble.
 	OutcomeCanned  Outcome = "canned"

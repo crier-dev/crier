@@ -144,6 +144,27 @@ there is no separate reply store or rendering path. This implements D1 without l
 answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
 an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
 
+### Delivery cuts and retry evidence (DF-CRIER-354)
+
+A blocking delivery whose full response did not arrive inside its per-target budget
+has outcome `budget_cut`, never `delivered` or `refused`. This includes a response
+whose HTTP 200 headers or partial body arrived before the budget, but whose body
+read was cut. Upstream 408/504 timeout responses are cuts too. A target answering
+503 is `refused`, even when repeated refusals/backoff consume the entire budget.
+The existing driver enforces the same per-target deadline; no second timer is added.
+
+The outcome `detail` persists on POST and transcript GET. It reports the actual
+attempt count (initial call included), configured budget and whether that budget
+was exhausted. A cut explicitly says the answer did not arrive inside the budget,
+that partial or late answers are discarded, and names `RUNTIME_TIMEOUT_MS` /
+`CR_SESSION_DELIVERY_TIMEOUT_MS` or retry as remedies. Keep runtime strictly less
+than session; neither default nor maximum changes. Cuts suppress answer bubbles
+and are excluded from both delivered and skipped/refused summary counts. The
+transport cancels the response read; no detached callback can later append an
+answer or replace the cut with success. Retrying all-negative outcomes includes
+`budget_cut`, retaining the original intent and operator row (DF-CRIER-349).
+The existing `canned` / `failed` verdict handling (DF-CRIER-348) is unchanged.
+
 ### 1.3.3 Retried message sends and browser waiting (DF-CRIER-343)
 
 `POST /sessions/{id}/messages` honours a nonempty `idempotency_key` within that session.
@@ -151,7 +172,7 @@ The first send records the key with its message; later sends with the same key r
 and the existing message's `id`, `seq` and audience. Delivered/mixed-success, canned,
 empty or incomplete outcomes are a pure replay (`replay_action: "replayed"`): no
 branch, append or delivery, even if the retried payload differs. When ALL persisted
-outcomes are `refused` or `failed`, retry actually invokes the original resolved
+outcomes are `refused`, `failed` or `budget_cut`, retry actually invokes the original resolved
 targets with the stored intent and replaces outcomes on that SAME operator row
 (`replay_action: "redelivered"`, whether the new attempt succeeds or not). A live
 successful answer may append its own agent reply; canned/failed answers still
@@ -178,7 +199,7 @@ the fetch remains attached and drains its eventual response, so a 12–25s runti
 is not canceled by the page. Other calls retain their aborting timeout. This is the simpler honest option: `CR_SESSION_DELIVERY_TIMEOUT_MS` is a per-target
 budget, not a guarantee for the complete request including federation and persistence. Guessing
 a larger fixed browser timeout would recreate the mismatch. Message retries of the unchanged
-draft/author/realm/session/routing reuse one request key; an all-refused/failed
+draft/author/realm/session/routing reuse one request key; an all-refused/failed/budget_cut
 response also keeps that draft/key and explicitly offers another delivery attempt.
 A successful/nonretryable send or changed draft gets a new key. The server budget
 now defaults/caps at 30000ms and startup enforces `RUNTIME_TIMEOUT_MS` (default

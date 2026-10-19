@@ -883,7 +883,7 @@ func allRetryableOutcomes(outcomes []DeliveryOutcome) bool {
 		return false
 	}
 	for _, o := range outcomes {
-		if o.Outcome != OutcomeRefused && o.Outcome != OutcomeFailed {
+		if o.Outcome != OutcomeRefused && o.Outcome != OutcomeFailed && o.Outcome != OutcomeBudgetCut {
 			return false
 		}
 	}
@@ -1013,7 +1013,7 @@ func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	for _, o := range outcomes {
 		// Runtime-negative verdicts are neither delivered answers nor skipped
 		// deliveries. Their per-target outcome remains visible separately.
-		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed {
+		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed || o.Outcome == OutcomeBudgetCut {
 			continue
 		}
 		// Only a refused delivery is a skip. The remaining lifecycle states
@@ -1045,7 +1045,7 @@ func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf ma
 		if g := groupOf[o.Target]; g != "" {
 			attrs = append(attrs, "group", g)
 		}
-		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed {
+		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed || o.Outcome == OutcomeBudgetCut {
 			slog.Warn("fan-out: webhook runtime reported a non-answer", append(attrs, "outcome", o.Outcome)...)
 			continue
 		}

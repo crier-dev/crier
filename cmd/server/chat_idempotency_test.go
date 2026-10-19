@@ -70,7 +70,7 @@ async function call(path, options) {
   // A confirmed refusal/runtime failure must KEEP the draft and key too;
   // otherwise the next click silently appends another operator row.
   timeout=false; state.namespace='realm';
-  for (const outcome of ['refused','failed']) {
+  for (const outcome of ['refused','failed','budget_cut']) {
     $('text').value='retry negative '+outcome;
     outcomes=[{target:'nimbus',outcome,detail:'first attempt negative'}];
     await send({preventDefault(){}});

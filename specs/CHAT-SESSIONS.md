@@ -219,6 +219,15 @@ for a capability target, a namespace mismatch). A `refused` outcome is **shown**
 `ack: ✓ delivered`, from `README`-visible deliver state), which is why the UI already has somewhere to
 put it.
 
+Blocking webhook delivery additionally records `budget_cut` when a full answer
+misses its per-target budget or the upstream reports a timeout (DF-CRIER-354).
+This is not `refused`: repeated endpoint refusals such as 503 remain `refused`,
+even if retry backoff exhausts the budget. The persisted `detail` names attempts,
+budget/exhaustion and the explicit partial/late-answer discard policy. Cuts never
+append answer bubbles or increment delivered/skipped counts. See
+`CHAT-INTERFACE.md` §Delivery cuts and retry evidence for timeout remedies and
+same-key retry behavior; `canned` / `failed` runtime verdicts remain unchanged.
+
 ### 3.3 The transcript is a view, not a second store of messages
 
 The transcript's records are **the room's own ordered log**; the *messages* they describe are delivered

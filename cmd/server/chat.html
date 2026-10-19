@@ -329,7 +329,7 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "refused" ? "error" : "note") + '">' + esc(o.target) + ': ' + esc(o.outcome) + (o.detail ? ' — ' + esc(o.detail) : '') + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "refused" || o.outcome === "budget_cut" ? "error" : "note") + '">' + esc(o.target) + ': ' + esc(o.outcome) + (o.detail ? ' — ' + esc(o.detail) : '') + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
@@ -456,10 +456,10 @@ async function send(event) {
     postStarted = true;
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) }, !task);
     const outcomes = result.outcomes || [];
-    const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed");
+    const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut");
     if (!task && !retryable) pendingMessageRequest = null;
     const refused = outcomes.some(o => o.outcome === "refused");
-    const negative = refused || outcomes.some(o => o.outcome === "failed" || o.outcome === "canned");
+    const negative = refused || outcomes.some(o => o.outcome === "failed" || o.outcome === "canned" || o.outcome === "budget_cut");
     const details = outcomes.map(o => o.target + ": " + o.outcome + (o.detail ? " — " + o.detail : "")).join("\n");
     const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
     notice("send-result", (task ? "Task recorded" : "Message recorded") + action + (refused ? "; delivery refused for one or more recipients." : ".") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : ""), negative);
@@ -468,10 +468,10 @@ async function send(event) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
     // federation and persistence can outlast it. Do not label that uncertainty
     // a failed send or increase a guessed global budget. Keep the draft/key so
-    // retry reuses the original record. Only ALL refused/failed outcomes grant
+    // retry reuses the original record. Only ALL refused/failed/budget_cut outcomes grant
     // another delivery attempt; delivered/mixed/canned/incomplete is pure replay.
     if (postStarted && (e.name === "TimeoutError" || e.name === "AbortError")) {
-      notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key and operator row: all refused/failed outcomes re-attempt delivery; otherwise it only replays the record."));
+      notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key and operator row: all refused/failed/budget_cut outcomes re-attempt delivery; otherwise it only replays the record."));
     } else {
       notice("send-result", "Request failed — " + e.message + "\nDraft kept. Refresh the transcript before retrying.",true);
     }

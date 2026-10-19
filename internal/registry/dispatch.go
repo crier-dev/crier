@@ -63,7 +63,10 @@ type DeliveryResult struct {
 type DispatchError struct {
 	StatusCode int
 	Response   any
+	Cause      error // structured transport evidence for non-HTTP consumers
 }
+
+func (e *DispatchError) Unwrap() error { return e.Cause }
 
 func (e *DispatchError) Error() string {
 	b, _ := json.Marshal(e.Response)
@@ -346,6 +349,14 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 			}
 			reply, err := h.webhooks.DeliverBlocking(ctx, id, target.Webhook, env, budget)
 			if err != nil {
+				// Keep attempts/budget/cut evidence across the HTTP-shaped error;
+				// session fan-out must not classify a flattened 504 by string.
+				defer func() {
+					var dispatch *DispatchError
+					if errors.As(dispatchErr, &dispatch) {
+						dispatch.Cause = err
+					}
+				}()
 				// 502 vs 504 (DF-CRIER-157): a PERMANENT endpoint rejection —
 				// a non-retryable status, or a 2xx whose body the agent's reply
 				// schema cannot map — can never succeed on retry, so it is a

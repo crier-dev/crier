@@ -40,7 +40,7 @@ func TestSessionSlowHarnessAnswerLands(t *testing.T) {
 }
 
 func TestSessionRetryRedeliversOnlyAllNegative(t *testing.T) {
-	for _, firstOutcome := range []string{"refused", "failed", "delivered", "canned"} {
+	for _, firstOutcome := range []string{"refused", "failed", "budget_cut", "delivered", "canned"} {
 		t.Run(firstOutcome, func(t *testing.T) {
 			// A short declared runtime keeps the timeout arm fast and satisfies
 			// the same startup invariant as the shipped 20s/30s defaults.
@@ -52,6 +52,9 @@ func TestSessionRetryRedeliversOnlyAllNegative(t *testing.T) {
 				if calls.Add(1) == 1 {
 					switch firstOutcome {
 					case "refused":
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					case "budget_cut":
 						<-r.Context().Done()
 						return
 					case "failed":
@@ -90,7 +93,7 @@ func TestSessionRetryRedeliversOnlyAllNegative(t *testing.T) {
 			require.Equal(t, first.ID, second.ID)
 			require.Equal(t, first.ThreadID, second.ThreadID)
 			wantCalls, wantAction, wantOutcome := int32(1), "replayed", firstOutcome
-			if firstOutcome == "refused" || firstOutcome == "failed" {
+			if firstOutcome == "refused" || firstOutcome == "failed" || firstOutcome == "budget_cut" {
 				wantCalls, wantAction, wantOutcome = 2, "redelivered", "delivered"
 			}
 			require.Equal(t, wantAction, second.ReplayAction)

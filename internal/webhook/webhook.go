@@ -390,7 +390,12 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 		return Result{Err: fmt.Errorf("post %s: %w", cfg.URL, err), Retryable: true}
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		// A partial 2xx is not a reply. In particular cancellation while
+		// reading must not turn a cut answer into a successful receipt.
+		return Result{StatusCode: resp.StatusCode, Err: fmt.Errorf("read webhook reply: %w", err), Retryable: true}
+	}
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:

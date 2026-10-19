@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -286,7 +288,7 @@ func (d *Driver) wake(ch chan struct{}) {
 // ctx is also the correlation source (DF-CRIER-141): the id it carries
 // (middleware.RequestIDFromContext) is logged on every dispatch and outcome
 // line, including each in-budget retry.
-func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Config, env *Envelope, budget time.Duration) ([]byte, error) {
+func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Config, env *Envelope, budget time.Duration) (reply []byte, deliveryErr error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("webhook: nil config for %s", agentID)
 	}
@@ -297,8 +299,16 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	if budget <= 0 {
 		budget = 30 * time.Second
 	}
-	rid := middleware.RequestIDFromContext(ctx)
+	attempts := 0
+	cut := false
 	deadline := time.Now().Add(budget)
+	defer func() {
+		if deliveryErr != nil {
+			deliveryErr = &BlockingDeliveryError{Attempts: attempts, Budget: budget,
+				BudgetExhausted: !time.Now().Before(deadline), Cut: cut, Cause: deliveryErr}
+		}
+	}()
+	rid := middleware.RequestIDFromContext(ctx)
 	gateCtx, cancelGate := context.WithDeadline(ctx, deadline)
 	defer cancelGate()
 	gateKey := ""
@@ -307,6 +317,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	}
 	release, err := d.gate.acquireContext(gateCtx, gateKey)
 	if err != nil {
+		cut = errors.Is(err, context.DeadlineExceeded)
 		return nil, fmt.Errorf("webhook: blocking delivery gate timeout/cancellation after %s: %w", budget, err)
 	}
 	defer release()
@@ -315,13 +326,17 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("webhook: blocking delivery cancelled: %w", err)
 		}
-		if time.Now().After(deadline) {
+		if !time.Now().Before(deadline) {
+			if attempts == 0 {
+				cut = true
+			}
 			if lastErr != nil {
-				return nil, fmt.Errorf("webhook: blocking delivery timed out after %s (last: %v)", budget, lastErr)
+				return nil, fmt.Errorf("webhook: blocking delivery timed out after %s (last: %w)", budget, lastErr)
 			}
 			return nil, fmt.Errorf("webhook: blocking delivery timed out after %s", budget)
 		}
 		d.logDispatch(agentID, cfg, env, attempt, rid)
+		attempts++
 		// Bound the ATTEMPT ITSELF by the remaining budget (INT-CI-004).
 		// Without this the attempt is capped only by the driver-global
 		// client timeout, so a delivery carrying timeout_ms=100 could run
@@ -339,6 +354,13 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
 		res := d.client.PostContext(attemptCtx, cfg, env, attempt)
+		// The full response body, not HTTP headers or a JSON prefix, must
+		// arrive before this SAME per-target deadline. Never admit a late 2xx.
+		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 && !time.Now().Before(deadline) {
+			res.Err, res.Retryable = context.DeadlineExceeded, true
+		}
+		var timeout net.Error
+		cut = errors.Is(res.Err, context.DeadlineExceeded) || (errors.As(res.Err, &timeout) && timeout.Timeout()) || res.StatusCode == http.StatusRequestTimeout || res.StatusCode == http.StatusGatewayTimeout
 		cancel()
 		d.logOutcome(agentID, cfg, env, attempt, res, rid)
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
