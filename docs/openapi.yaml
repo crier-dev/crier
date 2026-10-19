@@ -191,10 +191,11 @@ paths:
                     example: 90
                   registry_backend:
                     type: string
-                    enum: [memory, postgres]
+                    enum: [memory, sqlite, postgres]
                     description: >-
-                      The backend actually serving this process: "postgres" when
-                      CR_DATABASE_URL is set, "memory" otherwise. Derived from
+                      The backend actually serving this process: CR_REGISTRY_BACKEND
+                      selects memory, sqlite or postgres; unset selects postgres
+                      when CR_DATABASE_URL is set, memory otherwise. Derived from
                       the same value that selected the store, so it cannot
                       advertise a backend other than the one answering.
                     example: memory

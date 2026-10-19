@@ -116,17 +116,10 @@ const (
 	statusHealthDown     = "down"
 )
 
-// registryBackendForURL is the SINGLE decision point for which registry
-// backend serves this process: run() keys the store construction off this same
-// helper, so the "registry_backend" GET /status reports is derived from the
-// identical input that selected the store. A separate copy of the rule in the
-// status path could drift from the selection and report a backend that is not
-// the one answering — the exact lie this endpoint exists to prevent.
+// registryBackendForURL preserves the legacy URL-only rule for callers/tests
+// without an explicit backend. Production selection uses Config's resolver.
 func registryBackendForURL(dbURL string) string {
-	if dbURL != "" {
-		return registryBackendPostgres
-	}
-	return registryBackendMemory
+	return (config.Config{Database: config.DatabaseConfig{URL: dbURL}}).ResolvedRegistryBackend()
 }
 
 // Federation hold-queue modes (DF-CRIER-7): these are the three reachable
@@ -385,7 +378,7 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		ServiceDeliveryAudiencePresent:         cfg.ServiceDeliveryAudience != "",
 		ServiceDeliveryProtectedRecipients:     len(policy),
 		ServiceDeliveryDirectedPairs:           pairs,
-		ServiceDeliveryDurableIdempotencyReady: len(policy) == 0 || registryBackend == registryBackendPostgres,
+		ServiceDeliveryDurableIdempotencyReady: len(policy) == 0 || registryBackend == registryBackendPostgres || registryBackend == "sqlite",
 		AuthEnabled:                            cfg.AuthToken != "",
 		RequireAgentSignature:                  cfg.RequireAgentSig,
 		MeshAuthRequired:                       cfg.RequireMeshAuth,

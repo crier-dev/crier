@@ -33,6 +33,8 @@ binding a principal to an agent / group / session / capability. A **Namespace** 
 
 ---
 
+2026-10-19 (DF-CRIER-364): the SQLite Store ships for the registry and inboxes, including leases, dead letters, service-delivery receipts, task observations and task outputs. Set `CR_REGISTRY_BACKEND=sqlite` and `CR_REGISTRY_SQLITE_PATH=/persistent/registry.sqlite`; keep the file and its WAL on persistent local storage (not a network filesystem). SQLite uses WAL with synchronous FULL and applies versioned dialect migrations at startup. Registry selection is independent of `CR_SESSION_BACKEND`: unset keeps PostgreSQL when a database URL is configured, memory otherwise; explicit `memory`, `sqlite` or `postgres` overrides that selection. SQLite requires a path and PostgreSQL requires a URL; unknown backends fail startup. The JSONL log-first registry architecture described here remains NOT BUILT; this is a direct SQLite implementation of the existing Store, not a log-first projection or JSONL registry.
+
 ## 1. The requirement
 
 Bane's constraint, in the words of the goal (non-negotiable 7, verbatim):

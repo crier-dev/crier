@@ -84,11 +84,28 @@ func (c Config) ResolvedSessionBackend() string {
 	return SessionBackendJSONL
 }
 
+// RegistryConfig selects agent/inbox persistence independently of sessions.
+type RegistryConfig struct {
+	Backend    string // CR_REGISTRY_BACKEND: empty preserves URL-based selection.
+	SQLitePath string // CR_REGISTRY_SQLITE_PATH: required for sqlite.
+}
+
+func (c Config) ResolvedRegistryBackend() string {
+	if b := strings.ToLower(strings.TrimSpace(c.Registry.Backend)); b != "" {
+		return b
+	}
+	if c.Database.URL != "" {
+		return "postgres"
+	}
+	return "memory"
+}
+
 // Config holds all Crier configuration.
 type Config struct {
 	Port               int
 	AuthToken          string
 	Database           DatabaseConfig
+	Registry           RegistryConfig
 	Session            SessionConfig
 	LogLevel           string
 	LogFormat          string
@@ -522,6 +539,21 @@ func Load() (Config, error) {
 		dbURL = os.Getenv("CRIER_DATABASE_URL")
 	}
 	cfg.Database.URL = dbURL
+	cfg.Registry.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_REGISTRY_BACKEND")))
+	cfg.Registry.SQLitePath = strings.TrimSpace(os.Getenv("CR_REGISTRY_SQLITE_PATH"))
+	switch cfg.ResolvedRegistryBackend() {
+	case "memory":
+	case "sqlite":
+		if cfg.Registry.SQLitePath == "" {
+			return cfg, fmt.Errorf("CR_REGISTRY_BACKEND=sqlite requires CR_REGISTRY_SQLITE_PATH")
+		}
+	case "postgres":
+		if strings.TrimSpace(cfg.Database.URL) == "" {
+			return cfg, fmt.Errorf("CR_REGISTRY_BACKEND=postgres requires a database URL (CR_DATABASE_URL)")
+		}
+	default:
+		return cfg, fmt.Errorf("invalid CR_REGISTRY_BACKEND: %q (want memory, sqlite or postgres)", cfg.Registry.Backend)
+	}
 
 	// Pool settings
 	if v := os.Getenv("CR_DATABASE_MAX_CONNS"); v != "" {

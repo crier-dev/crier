@@ -2187,6 +2187,10 @@ fire, and every named failure (`bridge` / `unconfigured`), is recorded in
 task creation**: the task is the user's intent and already succeeded; the
 trigger is automation layered on it.
 
+### Registry and inbox storage
+
+2026-10-19 (DF-CRIER-364): the SQLite Store ships for the registry and inboxes, including leases, dead letters, service-delivery receipts, task observations and task outputs. Set `CR_REGISTRY_BACKEND=sqlite` and `CR_REGISTRY_SQLITE_PATH=registry.sqlite`; keep the file and its WAL on persistent local storage (not a network filesystem). SQLite uses WAL with synchronous FULL and applies versioned dialect migrations at startup. Registry selection is independent of `CR_SESSION_BACKEND`: unset keeps PostgreSQL when a database URL is configured, memory otherwise; explicit `memory`, `sqlite` or `postgres` overrides that selection. SQLite requires a path and PostgreSQL requires a URL; unknown backends fail startup. The JSONL log-first registry architecture described in [CHAT-STORAGE.md](specs/CHAT-STORAGE.md) remains NOT BUILT; this is a direct SQLite implementation of the existing Store, not a log-first projection or JSONL registry.
+
 ### Durable backend (PostgreSQL)
 
 This is the backend [Run](#run) documents: its two commands are the
@@ -2288,7 +2292,7 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 ```
 
 - `auth_enabled`, `require_agent_signature` and `guard_enabled` are the effective switches at the delivery choke point — the same values the startup log lines report, readable at any time instead of only at boot.
-- `registry_backend` is the backend **actually serving**: `postgres` when `CR_DATABASE_URL` (or its fallbacks) is set, `memory` otherwise. `run()` selects the store and derives this field from the same value, so it cannot advertise a backend other than the one answering.
+- `registry_backend` is the backend **actually serving**: explicit `CR_REGISTRY_BACKEND` (`memory`, `sqlite`, `postgres`); when unset, `postgres` when `CR_DATABASE_URL` (or its fallbacks) is set, `memory` otherwise. `run()` selects the store and derives this field from the same value, so it cannot advertise a backend other than the one answering.
 - `webhook_signing` and `federation_enabled` report whether the corresponding secret/link configuration is in effect — as booleans, never as values.
 - `federation_hold_queue` is the **durability mode** of the federation hold path: `none` (no `CR_FED_LINKS`, so no hold path exists), `memory` (held deliveries are process-lifetime and lost on restart) or `file` (`CR_FED_QUEUE_FILE` is set, so they survive a restart). The path itself is config, not posture, and is never in the body.
 - `metrics_enabled` / `pprof_enabled` say whether the opt-in inspection surfaces are registered at all (`false` = those paths answer `404`).

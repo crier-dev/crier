@@ -213,10 +213,10 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	initLogger(cfg)
 
 	// Which registry backend serves is decided ONCE, from the configuration,
-	// by registryBackendForURL: the store selection below and the GET /status
+	// by cfg.ResolvedRegistryBackend: store selection below and GET /status
 	// body (DF-CRIER-113) both key off this value, so the backend it advertises
 	// cannot drift from the store that actually answers.
-	regBackend := registryBackendForURL(cfg.Database.URL)
+	regBackend := cfg.ResolvedRegistryBackend()
 
 	// Configure the WebSocket origin check PER LANE (DF-CRIER-287). They are
 	// different clients: the relay is subscribed to from browsers (whose
@@ -370,6 +370,19 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		defer pgStore.Close()
 		regStore = pgStore
 		slog.Info("registry backend", "type", "postgres", "max_conns", cfg.Database.MaxConns)
+	} else if regBackend == "sqlite" {
+		sqliteStore, err := registry.NewSQLiteStore(cfg.Registry.SQLitePath)
+		if err != nil {
+			slog.Error("initialize SQLite registry store", "error", err)
+			return 1
+		}
+		defer func() {
+			if err := sqliteStore.Close(); err != nil {
+				slog.Error("close SQLite registry store", "error", err)
+			}
+		}()
+		regStore = sqliteStore
+		slog.Info("registry backend", "type", "sqlite", "durable", true)
 	} else {
 		regStore = registry.NewMemoryStore()
 		logMemoryBackendWarning()
@@ -1404,10 +1417,10 @@ func federationName(cfg config.Config) string {
 // fix and a machine-readable `durable=false`; it changes no behaviour, and
 // GET /status still reports registry_backend=memory for a programmatic check.
 func logMemoryBackendWarning() {
-	slog.Warn("registry backend is the in-memory store — DEMO-ONLY and non-durable: agents and undelivered inbox messages are lost when this process exits. Set CR_DATABASE_URL (docker compose up -d postgres) for the durable inbox the docs document",
+	slog.Warn("registry backend is the in-memory store — DEMO-ONLY and non-durable: agents and undelivered inbox messages are lost when this process exits. Set CR_REGISTRY_BACKEND=sqlite with CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL (docker compose up -d postgres), for durable agents and inboxes",
 		"type", "memory",
 		"durable", false,
-		"hint", "set CR_DATABASE_URL for PostgreSQL",
+		"hint", "set CR_REGISTRY_BACKEND=sqlite and CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL for PostgreSQL",
 	)
 }
 
@@ -1469,4 +1482,6 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_CANARY_TOKENS            comma-separated canary tokens to plant; empty = the server generates them at boot and logs them")
 	fmt.Fprintln(out, "  DEEPSEEK_API_KEY            deepseek preset API key (env:DEEPSEEK_API_KEY ref)")
 	fmt.Fprintln(out, "  CR_DATABASE_*               PostgreSQL pool tuning (MAX_CONNS, MIN_CONNS, ...)")
+	_, _ = fmt.Fprintln(out, "  CR_REGISTRY_BACKEND         memory | sqlite | postgres (unset: URL selects postgres, else memory)")
+	_, _ = fmt.Fprintln(out, "  CR_REGISTRY_SQLITE_PATH     SQLite registry file (required for sqlite)")
 }
