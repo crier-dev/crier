@@ -247,13 +247,9 @@ type transcriptMessage struct {
 	Task map[string]any `json:"task,omitempty"`
 }
 
-// outcomeView is one DeliveryOutcome as this API renders it. It carries the
-// persisted vocabulary plus, when the caller is being told about a refusal in
-// the response to their OWN send, the immediate reason: DeliveryOutcome.Reason
-// is `json:"-"` because the durable shape has no reason column (§5.2, §3.2),
-// so a refusal that is not explained here would be shown only as a bare
-// `refused`. On a re-read from storage the detail is empty and the outcome is
-// the durable fact.
+// outcomeView renders the persisted outcome and its diagnostic as detail on
+// both the send response and transcript re-reads. SQL retains reasons through
+// the additive request projection; JSONL retains them directly in the record.
 type outcomeView struct {
 	Target       string    `json:"target"`
 	Outcome      string    `json:"outcome"`
@@ -961,10 +957,13 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	seen := make(map[string]bool, len(outcomes))
 	for _, o := range outcomes {
-		// A SKIP is exactly a REFUSED outcome. Every other state — delivered,
-		// plus the leased/acked/expired delivery lifecycle a retried send can
-		// carry forward from its prior outcomes — means the target RECEIVED
-		// the message, so it counts as delivered, never as skipped.
+		// Runtime-negative verdicts are neither delivered answers nor skipped
+		// deliveries. Their per-target outcome remains visible separately.
+		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed {
+			continue
+		}
+		// Only a refused delivery is a skip. The remaining lifecycle states
+		// (delivered/leased/acked/expired) still count as received.
 		if o.Outcome != OutcomeRefused {
 			v.Delivered++
 			continue
@@ -991,6 +990,10 @@ func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf ma
 		attrs := []any{"target", o.Target, "message_id", messageID, "reason", o.Reason}
 		if g := groupOf[o.Target]; g != "" {
 			attrs = append(attrs, "group", g)
+		}
+		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed {
+			slog.Warn("fan-out: webhook runtime reported a non-answer", append(attrs, "outcome", o.Outcome)...)
+			continue
 		}
 		slog.Warn("fan-out: skipping target (delivery refused) — the message was still delivered to every other target", attrs...)
 	}

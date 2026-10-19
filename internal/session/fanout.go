@@ -235,6 +235,7 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 			}
 			entry.PrincipalID = msg.Author.Principal
 			var deliveryErr error
+			outcome, reason := OutcomeDelivered, ""
 			if dispatcher, ok := deliverer.(interface {
 				DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
 			}); ok {
@@ -243,11 +244,13 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 					NamespaceToken: namespaceToken,
 				})
 				deliveryErr = err
-				// Only a blocking webhook's own answer is recorded: an inbox append
-				// carries no answer and a queued delivery has none yet. The slot is
-				// filled here and written by the caller AFTER the join.
+				// A successful HTTP exchange may still report a canned reply or
+				// runtime failure. Classify it before admitting an answer bubble.
 				if err == nil && result.Transport == "webhook" && result.DeliveryMode == "blocking" && len(result.Reply) > 0 {
-					replies[i] = result.Reply
+					outcome, reason = webhookReplyVerdict(result.Reply)
+					if outcome == OutcomeDelivered {
+						replies[i] = result.Reply
+					}
 				}
 			} else {
 				deliveryErr = deliverer.Deliver(target, entry)
@@ -263,7 +266,8 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 			}
 			outcomes[i] = DeliveryOutcome{
 				Target:       target,
-				Outcome:      OutcomeDelivered,
+				Outcome:      outcome,
+				Reason:       reason,
 				InboxEntryID: entry.ID,
 				UpdatedAt:    time.Now().UTC(),
 			}

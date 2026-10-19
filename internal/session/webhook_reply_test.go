@@ -33,3 +33,33 @@ func TestWebhookReplyText(t *testing.T) {
 		})
 	}
 }
+
+func TestWebhookReplyVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		outcome Outcome
+		reason  string
+	}{
+		{"legacy string", `"answer"`, OutcomeDelivered, ""},
+		{"legacy reply", `{"reply":"answer"}`, OutcomeDelivered, ""},
+		{"empty", ``, OutcomeDelivered, ""},
+		{"null", `null`, OutcomeDelivered, ""},
+		{"array", `[]`, OutcomeDelivered, ""},
+		{"malformed", `{"reply":`, OutcomeDelivered, ""},
+		{"null flags", `{"live":null,"canned":null}`, OutcomeDelivered, ""},
+		{"wrong flag types", `{"live":"false","canned":1}`, OutcomeDelivered, ""},
+		{"reason alone is not failure", `{"reason":"completed","reply":"answer"}`, OutcomeDelivered, ""},
+		{"demo reason", `{"live":false,"reason":"requires live mode"}`, OutcomeCanned, "requires live mode"},
+		{"case insensitive failure", `{"status":" failed ","reason":"boom"}`, OutcomeFailed, "boom"},
+		{"deduplicated diagnostics", `{"status":"FAILED","reason":"boom","error":"boom"}`, OutcomeFailed, "boom"},
+		{"both diagnostics", `{"status":"FAILED","reason":"boom","error":"exit 3"}`, OutcomeFailed, "boom; exit 3"},
+		{"error only", `{"error":"exit 3"}`, OutcomeFailed, "exit 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome, reason := webhookReplyVerdict(json.RawMessage(tc.raw))
+			require.Equal(t, tc.outcome, outcome)
+			require.Equal(t, tc.reason, reason)
+		})
+	}
+}

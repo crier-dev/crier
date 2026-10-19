@@ -119,10 +119,25 @@ not deliberately branch a thread, create a task, or impersonate the operator.
 
 Text-mappable means a non-blank JSON string (including a schema-extracted reply or a raw plain-text
 body), or an object with a non-blank string `text` or `reply` field (`text` takes precedence).
+Before recording text, the session path checks the blocking reply's runtime verdict (DF-CRIER-348):
+
+- `status: "FAILED"` (case-insensitive) or a non-blank string `error` produces outcome `failed`.
+  Its diagnostic retains the runtime's `reason` and `error` (identical strings are not repeated);
+  absent diagnostics use `webhook reported FAILED`. This takes precedence over demo markers.
+- Otherwise, `live: false` or `canned: true` produces outcome `canned`, retaining `reason` or a
+  canned/demo diagnostic when none was supplied. Even `live: true` cannot override `canned: true`.
+- Neither negative outcome appends an agent-authored answer bubble. They are not `refused`:
+  HTTP delivery happened, but the runtime did not produce a real answer. Send summaries exclude
+  them from both `delivered` and `skipped`; the per-target outcome and `detail` carry the verdict.
+- Without a negative marker, a plain `{reply}` / `{text}` or an explicitly live reply retains the
+  existing `delivered` behavior. Missing or null flags are not treated as `live: false`.
+
 Failed/refused deliveries, empty/whitespace-only answers, and other JSON shapes append **nothing**.
+An empty successful reply without negative markers still has outcome `delivered`, not `failed`.
 The reply has an **explicit empty audience** and no delivery outcomes; appending it is not another
-send, so it cannot fan out to session members. The operator's original outcome continues to describe
-**transport** (`delivered` / `refused`), never the agent's answer or proof of task completion.
+send, so it cannot fan out to session members. Runtime diagnostics persist in the original message's
+outcomes and are exposed as `detail` on both send and transcript reads; a delivery outcome does not
+prove task completion.
 
 The existing transcript poll and renderer display `payload.text`, `author.agent` and `parent_id`;
 there is no separate reply store or rendering path. This implements D1 without losing the agent's

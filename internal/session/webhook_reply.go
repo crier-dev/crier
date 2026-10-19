@@ -26,7 +26,51 @@ func webhookReplyText(reply json.RawMessage) string {
 	return ""
 }
 
+// webhookReplyVerdict interprets the runtime's verdict, not HTTP acceptance.
+// Failure wins over demo markers (failed live runs also report live:false).
+// Missing/null flags are not false: legacy reply-only agents remain supported.
+func webhookReplyVerdict(reply json.RawMessage) (Outcome, string) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(reply, &fields) != nil {
+		return OutcomeDelivered, ""
+	}
+	readText := func(key string) string {
+		var value string
+		_ = json.Unmarshal(fields[key], &value)
+		return value
+	}
+	status, reason, runtimeError := readText("status"), readText("reason"), readText("error")
+	if strings.EqualFold(strings.TrimSpace(status), "FAILED") || strings.TrimSpace(runtimeError) != "" {
+		if strings.TrimSpace(reason) == "" {
+			reason = runtimeError
+		} else if strings.TrimSpace(runtimeError) != "" && runtimeError != reason {
+			reason += "; " + runtimeError
+		}
+		if strings.TrimSpace(reason) == "" {
+			reason = "webhook reported FAILED"
+		}
+		return OutcomeFailed, reason
+	}
+	var live, canned *bool
+	if err := json.Unmarshal(fields["live"], &live); err != nil {
+		live = nil
+	}
+	if err := json.Unmarshal(fields["canned"], &canned); err != nil {
+		canned = nil
+	}
+	if (live != nil && !*live) || (canned != nil && *canned) {
+		if strings.TrimSpace(reason) == "" {
+			reason = "webhook reported a canned/demo reply (live:false or canned:true)"
+		}
+		return OutcomeCanned, reason
+	}
+	return OutcomeDelivered, ""
+}
+
 func (h *Handler) recordWebhookReply(ctx context.Context, parent *Message, target string, raw json.RawMessage) error {
+	if outcome, _ := webhookReplyVerdict(raw); outcome != OutcomeDelivered {
+		return nil
+	}
 	text := webhookReplyText(raw)
 	if strings.TrimSpace(text) == "" {
 		return nil

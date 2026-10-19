@@ -5071,7 +5071,7 @@ components:
                     type: string
         outcomes:
           type: array
-          description: The per-target fan-out result (§3.2). A `refused` outcome is shown, never swallowed.
+          description: The per-target fan-out result (§3.2). Refused means delivery did not happen; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles.
           items:
             type: object
             properties:
@@ -5079,12 +5079,12 @@ components:
                 type: string
               outcome:
                 type: string
-                enum: [delivered, leased, acked, expired, refused]
+                enum: [delivered, canned, failed, leased, acked, expired, refused]
               inbox_entry_id:
                 type: string
               detail:
                 type: string
-                description: Why a delivery was refused, when the caller is being told about their own send. Empty on a re-read from storage (the durable shape carries the outcome vocabulary only).
+                description: Refusal or canned/failed runtime diagnostic, retained on transcript re-reads as well as the send response.
               updated_at:
                 type: string
                 format: date-time
