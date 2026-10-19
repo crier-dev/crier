@@ -84,6 +84,8 @@ type a2aOptions struct {
 	streamPoll time.Duration
 	// now is the clock (a stream's timestamps and its expiry comparison).
 	now func() time.Time
+	// replayWindow is the registry's configured sender retry window.
+	replayWindow time.Duration
 }
 
 // registerA2ARoute registers the JSON-RPC binding at the path the Agent Card
@@ -237,26 +239,17 @@ func (h *a2aHandler) send(w http.ResponseWriter, r *http.Request, req *a2a.RPCRe
 		return
 	}
 
-	status, respBody, err := h.deliverTo(target.ID, tr.Request, r.Context())
-	if err != nil {
-		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError,
-			"crier's delivery path could not be reached: "+err.Error())))
+	receipt, rpcErr := h.sendOnce(target.ID, tr, r.Context())
+	if rpcErr != nil {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 		return
 	}
-	if status < 200 || status > 299 {
-		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.ErrorFromStatus(status, respBody)))
-		return
-	}
-
-	var accept a2a.DeliverAccept
-	if err := json.Unmarshal(respBody, &accept); err != nil {
-		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError,
-			"crier's delivery accept could not be read: "+err.Error())))
-		return
-	}
+	// Replays project the ORIGINAL request and timestamp, never the retry's
+	// payload. Only the existing metadata replay marker differs.
+	tr, accept := receipt.Translation, receipt.Accept
 
 	if streaming {
-		h.stream(w, r, req, tr, target.ID, accept)
+		h.stream(w, r, req, tr, target.ID, accept, receipt.AcceptedAt)
 		return
 	}
 
@@ -272,7 +265,7 @@ func (h *a2aHandler) send(w http.ResponseWriter, r *http.Request, req *a2a.RPCRe
 		return
 	}
 
-	task, err := a2a.TaskFromAccept(tr, accept, h.opts.now())
+	task, err := a2a.TaskFromAccept(tr, accept, receipt.AcceptedAt)
 	if err != nil {
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
 		return
@@ -915,7 +908,7 @@ func readAll(r io.Reader) ([]byte, error) {
 //   - every other accepted delivery gives the TASK LIFECYCLE stream: the Task
 //     first, then its status changes and any artifacts published for it, closing
 //     when the task reaches a terminal state (§3.1.2 pattern 2).
-func (h *a2aHandler) stream(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest, tr *a2a.Translation, targetID string, accept a2a.DeliverAccept) {
+func (h *a2aHandler) stream(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest, tr *a2a.Translation, targetID string, accept a2a.DeliverAccept, acceptedAt time.Time) {
 	if reply := accept.ReplyPayload(); len(reply) > 0 {
 		msg, err := a2a.MessageFromReply(tr, accept, h.opts.now())
 		if err != nil {
@@ -929,7 +922,7 @@ func (h *a2aHandler) stream(w http.ResponseWriter, r *http.Request, req *a2a.RPC
 		return
 	}
 
-	task, err := a2a.TaskFromAccept(tr, accept, h.opts.now())
+	task, err := a2a.TaskFromAccept(tr, accept, acceptedAt)
 	if err != nil {
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, a2a.NewRPCError(a2a.CodeInternalError, err.Error())))
 		return

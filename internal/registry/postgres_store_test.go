@@ -100,7 +100,7 @@ func newTestStore(t *testing.T) *PostgresStore {
 	defer pool.Close()
 
 	_, err = pool.Exec(ctx, `
-DROP TABLE IF EXISTS trust_delegations, trust_anchors, a2a_task_outputs, a2a_task_observations, service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;`)
+DROP TABLE IF EXISTS a2a_message_replays, trust_delegations, trust_anchors, a2a_task_outputs, a2a_task_observations, service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;`)
 	require.NoError(t, err)
 
 	store, err := NewPostgresStore(ctx, testConnString)

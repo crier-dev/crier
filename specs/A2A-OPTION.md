@@ -270,6 +270,48 @@ wire and stated so nobody has to infer them:
   "payload objects travel as base64-encoded strings; decode each entry's payload before use"). This
   row changes nothing about that contract.
 
+#### 5.4.1a Durable send replay and retention (DF-CRIER-370)
+
+- The replay scope is `(target agent / tenant, message.messageId)`, shared by
+  `SendMessage` and `SendStreamingMessage`. Different message ids (or tenants)
+  create independent deliveries; changing the payload under an existing key does
+  not create work or replace the original creating message.
+- A2A reservations and receipts live in the selected **registry backend**, alongside
+  the inbox they identify, not in a handler map or in the unrelated session transcript.
+  SQLite uses `a2a_message_replays` in `CR_REGISTRY_SQLITE_PATH` (migration `018`);
+  PostgreSQL uses the same table in `CR_DATABASE_URL`. Memory stores the same record
+  for the lifetime of that `MemoryStore` only, and loses registry, inbox and replay
+  state together on process exit. Session-backend selection does not override this.
+- Retention is **24 hours by default**, or `CR_IDEMPOTENCY_WINDOW_S` when configured,
+  measured from the first committed reservation. Reading/replaying does not extend
+  that deadline. The record retains the original translation, accept and response
+  timestamp even if the inbox entry has since been acknowledged or canceled.
+  Expiry is enforced on acquisition (`now >= expires_at`); every acquisition deletes
+  expired records, including abandoned pending reservations. An idle database can
+  physically retain expired rows until the next A2A send, but they never replay.
+- After the deadline, or after an operator deletes the replay store, the same
+  `messageId` may create a **new task**. Clients must not assume deduplication beyond
+  retention. Unregistering an agent does not itself delete its replay records.
+- Reservation commits before dispatch; the successful receipt commits before an
+  HTTP response or SSE stream is opened. A repeat with a retained receipt performs
+  **no delivery dispatch** and returns the original task id, creating history and
+  timestamp with the existing `metadata.crier.idempotent_replay: true` marker
+  (direct blocking Message responses use the existing `metadata.crier.replay`).
+  The observation log names `A2A send replayed existing task` with task id and
+  `idempotent_replay=true`; it is not a new task/lifecycle observation.
+- A concurrent send waits up to the existing two-second delivery-claim budget
+  for the original receipt, then replays it. A reservation still pending or
+  unconfirmed at that boundary returns the existing JSON-RPC `-32603` error
+  naming that outcome, rather
+  than dispatching another task. This reservation lasts until the same retention
+  deadline; it is not a promise to recover an unknown external delivery outcome.
+  A known 4xx refusal releases its reservation for a corrected retry; an ambiguous
+  delivery/storage failure retains it. Tokens fence late writes after expiry.
+  Receipt-storage failure is fail-closed, never an in-memory success fallback.
+- This is additive replay persistence only: `POST /a2a`, method names, task states,
+  JSON-RPC HTTP status and stream framing are unchanged. Session keyed sends and
+  session fan-out are not involved.
+
 #### 5.4.2 Request mapping — `params` ⇄ the crier deliver body
 
 | A2A | crier deliver field | Rule |

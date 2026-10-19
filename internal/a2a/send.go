@@ -558,10 +558,10 @@ type DeliverAccept struct {
 	ID               string          `json:"id"`
 	Transport        string          `json:"transport"`
 	DeliveryMode     string          `json:"delivery_mode"`
-	ExpiresAt        json.RawMessage `json:"expires_at"`
-	Guard            json.RawMessage `json:"guard"`
+	ExpiresAt        json.RawMessage `json:"expires_at,omitempty"`
+	Guard            json.RawMessage `json:"guard,omitempty"`
 	IdempotentReplay bool            `json:"idempotent_replay"`
-	Reply            json.RawMessage `json:"reply"`
+	Reply            json.RawMessage `json:"reply,omitempty"`
 	Status           string          `json:"status"`
 	MaxHoldS         int             `json:"max_hold_s"`
 }

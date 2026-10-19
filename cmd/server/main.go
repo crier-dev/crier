@@ -952,6 +952,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		// ordinary crier webhook update (HandleUpdateAgent). Nothing about
 		// delivery or configuration is re-implemented for A2A.
 		registerA2ARoute(r, regStore, registryHandler.HandleDeliver, registryHandler.HandleUpdateAgent, relaySvc, a2aOptions{
+			replayWindow:           cfg.IdempotencyWindow,
 			port:                   cfg.Port,
 			authTokenSet:           cfg.AuthToken != "",
 			agentSignatureEnforced: cfg.RequireAgentSig,

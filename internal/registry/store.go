@@ -566,6 +566,7 @@ type MemoryStore struct {
 	trustAnchors     []trust.ChainAnchor
 	trustDelegations []trust.ChainDelegation
 	taskOutputs      map[inboxAckKey]TaskOutput
+	a2aReplays       map[inboxAckKey]a2aReplayRecord
 }
 
 // Healthy is the HealthReporter Store capability (store.go, CR-CHAT-020) for
