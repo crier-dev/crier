@@ -101,9 +101,11 @@ main { min-width:0; display:flex; flex-direction:column; }
 .dot.stale { background:var(--amber); }
 .dot.offline { background:var(--red); }
 .cap { display:inline-block; padding:2px 6px; margin:5px 3px 0 0; border-radius:4px; color:var(--lav); background:var(--input); font-size:11px; }
+#capability-matrix-panel { min-width:0; max-width:100%; }
+#capability-matrix { width:100%; overflow-x:auto; }
 .capability-matrix { width:100%; table-layout:fixed; border-collapse:collapse; font-size:11px; }
 .capability-matrix th,.capability-matrix td { border-bottom:1px solid var(--border); padding:6px 2px; text-align:center; overflow-wrap:anywhere; }
-.capability-matrix tr > :first-child { width:36%; text-align:left; }
+.capability-matrix tr > :first-child { width:100px; text-align:left; }
 .capability-matrix td { color:var(--mint); }
 #capability-matrix-legend,#capability-matrix-more { margin-top:8px; }
 .task-link { text-align:left; width:100%; font-weight:400; }
@@ -188,7 +190,7 @@ main { min-width:0; display:flex; flex-direction:column; }
     </form><p id="participant-result" role="status"></p>
   </section>
   <section class="panel" id="capability-matrix-panel" aria-labelledby="capability-matrix-title"><h2 id="capability-matrix-title">Declared-capability matrix</h2>
-    <div id="capability-matrix" class="note">Loading registry…</div>
+    <div id="capability-matrix" class="note" role="region" tabindex="0" aria-labelledby="capability-matrix-title" aria-describedby="capability-matrix-more capability-matrix-legend">Loading registry…</div>
     <p id="capability-matrix-more" class="note"></p>
     <p id="capability-matrix-legend" class="note">Declared capabilities only — crier records declarations and has no approval state, so "ask" is not shown.</p>
   </section>
@@ -403,15 +405,31 @@ async function changeTask(taskID, action) {
   }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
+function updateCapabilityMatrixView() {
+  const box = $("capability-matrix"), columns = [...box.querySelectorAll("thead th")].slice(1);
+  if (!columns.length) { notice("capability-matrix-more", ""); return; }
+  const rect = box.getBoundingClientRect();
+  // Count fully visible columns, not merely a sliver of a clipped agent ID.
+  const visible = columns.filter(column => {
+    const cell = column.getBoundingClientRect();
+    return cell.left >= rect.left - 1 && cell.right <= rect.left + box.clientWidth + 1;
+  }).length;
+  notice("capability-matrix-more", box.scrollWidth > box.clientWidth
+    ? "Showing " + visible + " of " + columns.length + " agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    : "All " + columns.length + " agent columns shown (this realm).");
+}
+$("capability-matrix").addEventListener("scroll",updateCapabilityMatrixView,{passive:true});
+new ResizeObserver(updateCapabilityMatrixView).observe($("capability-matrix"));
 function renderCapabilityMatrix(capabilities) {
-  // The row union covers the whole visible registry, not only capped columns.
-  const agents = state.agents.slice(0,4);
-  const remaining = state.agents.length - agents.length;
-  notice("capability-matrix-more", remaining ? "+" + remaining + " more agents not shown. Rows include all agents in this realm." : "");
+  const agents = state.agents;
   notice("capability-matrix", "");
-  $("capability-matrix").innerHTML = capabilities.size
-    ? '<table id="capability-matrix-table" class="capability-matrix" aria-labelledby="capability-matrix-title" aria-describedby="capability-matrix-legend"><thead><tr><th scope="col">Capability</th>' + agents.map(a => '<th scope="col">' + esc(a.id) + '</th>').join("") + '</tr></thead><tbody>' + [...capabilities.keys()].sort().map(cap => '<tr><th scope="row">' + esc(cap) + '</th>' + agents.map(a => (a.capabilities || []).includes(cap) ? '<td aria-label="Declared">✓</td>' : '<td aria-label="Not declared"></td>').join("") + '</tr>').join("") + '</tbody></table>'
+  $("capability-matrix").innerHTML = agents.length
+    ? '<table id="capability-matrix-table" class="capability-matrix" aria-labelledby="capability-matrix-title" aria-describedby="capability-matrix-legend"><thead><tr><th scope="col">Capability</th>' + agents.map(a => '<th scope="col">' + esc(a.id) + '</th>').join("") + '</tr></thead><tbody>' + [...capabilities.keys()].sort().map(cap => '<tr><th scope="row">' + esc(cap) + '</th>' + agents.map(a => (a.capabilities || []).includes(cap) ? '<td aria-label="Declared">✓</td>' : '<td aria-label="Not declared"></td>').join("") + '</tr>').join("") + '</tbody></table>' + (capabilities.size ? '' : '<p class="note">No capabilities declared in this realm.</p>')
     : '<p class="note">No capabilities declared in this realm.</p>';
+  const table = $("capability-matrix-table");
+  // Keep each declaration column readable; constrain scrolling to this panel.
+  if (table) table.style.minWidth = (100 + agents.length * 80) + "px";
+  updateCapabilityMatrixView();
 }
 function renderDirectory() {
   $("registered-agents").innerHTML = state.agents.map(a => '<option value="' + esc(a.id) + '"></option>').join("");

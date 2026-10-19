@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChatClientOperatorShell(t *testing.T) {
@@ -145,7 +148,9 @@ func TestChatClientDeclaredCapabilityMatrix(t *testing.T) {
 	for _, marker := range []string{
 		`Declared capabilities only — crier records declarations and has no approval state, so "ask" is not shown.`,
 		`renderCapabilityMatrix(capabilities);`,
-		`state.agents.slice(0,4)`,
+		`const agents = state.agents;`,
+		`new ResizeObserver(updateCapabilityMatrixView)`,
+		`scroll the matrix to view all declarations.`,
 		`[...capabilities.keys()].sort()`,
 		`unavailable("capability-matrix",e)`,
 		`aria-describedby="capability-matrix-legend"`,
@@ -155,6 +160,31 @@ func TestChatClientDeclaredCapabilityMatrix(t *testing.T) {
 		if !strings.Contains(html, marker) {
 			t.Errorf("embedded chat missing declaration-only matrix contract %q", marker)
 		}
+	}
+}
+
+// DF-CRIER-374 runs Chromium against the real router, registry and channel APIs.
+// Install Playwright outside the repo and expose it through NODE_PATH, as for
+// scripts/chat-ui-browser.cjs. Missing browser prerequisites are SKIP, never PASS.
+func TestChatClientCapabilityMatrixAllAgentsBrowser(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required for the capability matrix browser regression")
+	}
+	base := startTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "../../scripts/chat-matrix-all-agents.cjs", base)
+	out, err := cmd.CombinedOutput()
+	if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 77 {
+		t.Skipf("browser prerequisite unavailable: %s", out)
+	}
+	t.Logf("%s", out)
+	if err != nil {
+		t.Fatalf("capability matrix browser regression: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "PASS: all six live agents") {
+		t.Fatal("browser regression did not finish its assertions")
 	}
 }
 

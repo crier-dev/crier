@@ -1,0 +1,44 @@
+{
+  "ids": [
+    "matrix-test-agent-1",
+    "matrix-test-agent-2",
+    "matrix-test-agent-3",
+    "matrix-test-agent-4",
+    "matrix-test-agent-5",
+    "matrix-test-agent-6"
+  ],
+  "measurements": [
+    {
+      "width": 390,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixOverflow": 214,
+      "fullyVisible": 3,
+      "notice": "Showing 3 of 6 agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    },
+    {
+      "width": 768,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixOverflow": 219,
+      "fullyVisible": 3,
+      "notice": "Showing 3 of 6 agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    },
+    {
+      "width": 1280,
+      "pageOverflow": 0,
+      "bodyOverflow": 0,
+      "matrixOverflow": 329,
+      "fullyVisible": 1,
+      "notice": "Showing 1 of 6 agent columns fully — scroll the matrix to view all declarations. All agents in this realm are included."
+    }
+  ],
+  "allVisible": {
+    "width": 768,
+    "pageOverflow": 0,
+    "bodyOverflow": 0,
+    "matrixOverflow": 0,
+    "fullyVisible": 6,
+    "notice": "All 6 agent columns shown (this realm)."
+  }
+}

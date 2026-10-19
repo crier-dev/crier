@@ -35,30 +35,31 @@ module.exports = async function capabilityMatrix(page, evidence) {
       await page.screenshot({path:path.join(evidence,'chat-matrix-populated-'+width+'.png'),fullPage:true});
     }
     await page.locator('#capability-matrix-panel').screenshot({path:path.join(evidence,'chat-matrix-populated-detail.png')});
-    // The row union includes even agents hidden by the four-column cap. Long
-    // registry values and HTML-like declarations must be text, not DOM markup.
+    // Every registry column remains present. Long registry values and HTML-like
+    // declarations must be text, not DOM markup, even off the scroll viewport.
     const hostile = '<img src=x onerror="window.__matrixInjected=true">';
     const long = 'ui-test-capability-'+'x'.repeat(120);
     payload = {agents:Array.from({length:10},(_,i) => ({id:'ui-test-agent-'+i+'-'+'z'.repeat(40),capabilities:i === 9 ? ['ui-test-hidden-column-capability',hostile,long] : ['ui-test-common']})).concat({id:'foreign-agent',namespace:'other-realm',capabilities:['ui-test-foreign-capability']})};
     await refresh();
-    assert.equal(await page.locator('#capability-matrix-table thead th[scope="col"]').count(),5); // row label + four agents
-    assert.equal(await page.locator('#capability-matrix-more').textContent(),'+6 more agents not shown. Rows include all agents in this realm.');
+    assert.equal(await page.locator('#capability-matrix-table thead th[scope="col"]').count(),11); // row label + all ten agents
+    assert.match(await page.locator('#capability-matrix-more').textContent(),/Showing \d+ of 10 agent columns fully — scroll the matrix/);
     assert.ok((await rows()).includes('ui-test-hidden-column-capability'));
     assert.ok(!(await rows()).includes('ui-test-foreign-capability'));
     assert.ok((await rows()).includes(hostile));
     assert.equal(await page.locator('#capability-matrix img, #capability-matrix [onerror]').count(),0);
     assert.equal(await page.evaluate(() => window.__matrixInjected),undefined);
     const hiddenRow = page.locator('#capability-matrix-table tbody tr').filter({hasText:'ui-test-hidden-column-capability'});
-    assert.deepEqual(await hiddenRow.locator('td').allTextContents(),['','','','']);
+    assert.deepEqual(await hiddenRow.locator('td').allTextContents(),[...Array(9).fill(''),'✓']);
     assert.ok((await cells()).every(text => text === '' || text === '✓'));
     const measurements = [];
     for (const width of [390,768,1280]) {
       await page.setViewportSize({width,height:1000});
       const result = await page.evaluate(() => {
         const gap = el => Math.max(0,el.scrollWidth-el.clientWidth);
-        return {width:innerWidth,pageOverflow:gap(document.documentElement),panelOverflow:gap(document.getElementById('capability-matrix-panel')),tableOverflow:gap(document.getElementById('capability-matrix-table'))};
+        return {width:innerWidth,pageOverflow:gap(document.documentElement),panelOverflow:gap(document.getElementById('capability-matrix-panel')),matrixOverflow:gap(document.getElementById('capability-matrix')),tableOverflow:gap(document.getElementById('capability-matrix-table'))};
       });
-      assert.deepEqual(result,{width,pageOverflow:0,panelOverflow:0,tableOverflow:0});
+      assert.equal(result.pageOverflow,0); assert.equal(result.panelOverflow,0); assert.equal(result.tableOverflow,0);
+      assert.ok(result.matrixOverflow > 0,'scrolling belongs inside the matrix, not the page');
       measurements.push(result);
       await page.screenshot({path:path.join(evidence,'chat-matrix-'+width+'.png'),fullPage:true});
     }
@@ -75,7 +76,7 @@ module.exports = async function capabilityMatrix(page, evidence) {
     assert.match(await page.locator('#capability-matrix').textContent(),/Unavailable — HTTP 403: TEST_REGISTRY_REFUSAL: Registry read refused/);
     assert.equal(await page.locator('#capability-matrix-table').count(),0);
     assert.equal(await page.locator('#capability-matrix-legend').textContent(),legend);
-    const report = {legend,columnCap:4,addedCapability:'ui-test-new-capability',measurements};
+    const report = {legend,agentColumns:10,addedCapability:'ui-test-new-capability',measurements};
     fs.writeFileSync(path.join(evidence,'capability-matrix-results.json'),JSON.stringify(report,null,2));
     console.log('PASS: declared-capability matrix '+JSON.stringify(report));
   } finally {
