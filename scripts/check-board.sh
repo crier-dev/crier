@@ -48,7 +48,11 @@ set -uo pipefail
 
 PROG="check-board.sh"
 tmp=""
+INDEX_ROOT=""
 QUIET=0
+STAGED_INDEX=0
+cleanup_index_root() { [ -n "${INDEX_ROOT:-}" ] && rm -rf "$INDEX_ROOT"; INDEX_ROOT=""; }
+trap cleanup_index_root EXIT
 
 _err() { printf '%s: %s\n' "$PROG" "$*" >&2; }
 _say() { printf '%s\n' "$*"; }
@@ -56,8 +60,28 @@ _say() { printf '%s\n' "$*"; }
 ROOT_DEFAULT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$ROOT_DEFAULT" ] || ROOT_DEFAULT="$PWD"
 
+# materialise_index <root> <dest>
+#
+# DF-CRIER-399: when board files are staged, what lands in the commit is the
+# INDEX blob, not the working-tree file. A worker that stages an invalid row and
+# then restores the file would otherwise be validated on a tree the commit does
+# not contain. This writes every staged board path from the index into <dest>,
+# preserving the relative path, so boardctl validates exactly what will be
+# committed.
+materialise_index() {
+  local root="$1" dest="$2"
+  local path
+  mkdir -p "$dest/.coding-hermes/board"
+  for path in .coding-hermes/board/tasks.jsonl .coding-hermes/board/events.jsonl; do
+    if git -C "$root" cat-file -e ":$path" 2>/dev/null; then
+      git -C "$root" show ":$path" > "$dest/$path" || return 1
+    fi
+  done
+  return 0
+}
+
 run_check() {
-  local root="$1"
+  local root="$1" staged="${2:-0}"
   local validator
   validator="$(command -v boardctl 2>/dev/null || true)"
   if [ -z "$validator" ]; then
@@ -69,7 +93,23 @@ run_check() {
   version="$("$validator" version 2>/dev/null | head -1)"
   [ -n "$version" ] || version="boardctl (no version output)"
   _say "board: validator $validator — $version"
+
+  local scope="working tree"
+  if [ "$staged" -eq 1 ]; then
+    # Validate the INDEX, not the tree: the commit carries these blobs.
+    local idxroot
+    idxroot="$(mktemp -d "${TMPDIR:-/tmp}/check-board-index.XXXXXX")"
+    if ! materialise_index "$root" "$idxroot"; then
+      _err "board: could not read the staged board blobs from the index — refusing to validate the working tree instead."
+      rm -rf "$idxroot"
+      return 2
+    fi
+    root="$idxroot"
+    scope="staged index (the blobs this commit will carry)"
+    INDEX_ROOT="$idxroot"
+  fi
   _say "board: root $root"
+  _say "board: scope $scope"
 
   local board="$root/.coding-hermes/board"
   if [ ! -f "$board/tasks.jsonl" ]; then
@@ -168,6 +208,31 @@ PY
     fails=$((fails + 1))
   fi
 
+  # fixture 5 (DF-CRIER-399): a commit carries the INDEX, so a staged-only
+  # invalid row must be rejected even when the working tree was restored clean.
+  idxrepo="$tmp/idxrepo"
+  mkdir -p "$idxrepo/.coding-hermes/board"
+  git -C "$idxrepo" init -q >/dev/null 2>&1
+  cp "$tmp/ok/.coding-hermes/board/tasks.jsonl" "$idxrepo/.coding-hermes/board/tasks.jsonl"
+  if [ -f "$tmp/ok/.coding-hermes/board/events.jsonl" ]; then
+    cp "$tmp/ok/.coding-hermes/board/events.jsonl" "$idxrepo/.coding-hermes/board/events.jsonl"
+  else
+    : > "$idxrepo/.coding-hermes/board/events.jsonl"
+  fi
+  git -C "$idxrepo" add .coding-hermes/board >/dev/null 2>&1
+  git -C "$idxrepo" -c user.email=selftest@example.invalid -c user.name=selftest commit -qm base >/dev/null 2>&1
+  cp "$tmp/bad/.coding-hermes/board/tasks.jsonl" "$idxrepo/.coding-hermes/board/tasks.jsonl"
+  git -C "$idxrepo" add .coding-hermes/board/tasks.jsonl >/dev/null 2>&1
+  cp "$tmp/ok/.coding-hermes/board/tasks.jsonl" "$idxrepo/.coding-hermes/board/tasks.jsonl"
+  run_check "$idxrepo" 1 >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    _err "selftest: a staged-only invalid row was ACCEPTED — the index scope is not being read"
+    fails=$((fails + 1))
+  else
+    _say "selftest: staged-only invalid row rejected while the worktree is clean (index scope)"
+  fi
+
   if [ "$fails" -ne 0 ]; then
     _err "selftest FAILED ($fails problem(s))"
     return 1
@@ -192,6 +257,10 @@ main() {
         QUIET=1
         shift
         ;;
+      --staged-index)
+        STAGED_INDEX=1
+        shift
+        ;;
       -h | --help)
         sed -n '2,40p' "$0"
         return 0
@@ -208,7 +277,7 @@ main() {
     return $?
   fi
 
-  run_check "$root"
+  run_check "$root" "${STAGED_INDEX:-0}"
 }
 
 main "$@"

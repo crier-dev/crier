@@ -221,7 +221,14 @@ n_board="${#board_files[@]}"
 # told so rather than skipped silently.
 BOARD_CHECKER="$REPO_ROOT/scripts/check-board.sh"
 if [ -f "$BOARD_CHECKER" ]; then
-  bash "$BOARD_CHECKER" -q
+  # DF-CRIER-399: a staged board row is what this commit will carry, so the
+  # index is what gets validated - never the working tree that a staged-then-
+  # restored edit would leave looking clean.
+  if [ "$n_board" -gt 0 ]; then
+    bash "$BOARD_CHECKER" -q --staged-index
+  else
+    bash "$BOARD_CHECKER" -q
+  fi
   board_rc=$?
   if [ "$board_rc" -ne 0 ]; then
     echo "gate: board validation FAILED (exit $board_rc) — fix the rows named above; an invalid board is a durable queue every foreman lane reads" >&2
