@@ -1,6 +1,6 @@
 # Crier — Agent-to-Agent Message Bus
 
-[![Go Version](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26.9%2B-00ADD8?logo=go)](https://go.dev)
 [![CI](https://github.com/crier-dev/crier/actions/workflows/ci.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/ci.yml)
 [![bunker-e2e](https://github.com/crier-dev/crier/actions/workflows/bunker-e2e.yml/badge.svg)](https://github.com/crier-dev/crier/actions/workflows/bunker-e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -289,7 +289,7 @@ not have to match the libc of the machine that built it.
 
 ### Install both binaries from source (available now)
 
-This path requires Git, GNU Make, and Go 1.26.6 or later. It checks out the
+This path requires Git, GNU Make, and Go 1.26.9 or later. It checks out the
 existing `v0.1.0-rc2` tag, uses the repository's `build` and `build-mcp` targets,
 and installs both binaries without relying on GitHub release assets:
 
@@ -324,7 +324,7 @@ stamps `internal/buildinfo` exactly as `make build` and `make build-mcp` do (a
 
 ### Prerequisites
 
-- Go 1.26.6 or later
+- Go 1.26.9 or later
 - **Docker with the Compose plugin — for the durable path, which is the one this
   README documents** (`docker compose up -d postgres`, step 1 of [Run](#run)).
   Any PostgreSQL 14+ server works instead of the compose service: point
@@ -353,15 +353,15 @@ directory, and `$HOME/go` is the default `GOPATH` (see the warning below).
 
 ```bash
 mkdir -p "$HOME/sdk" && cd "$HOME/sdk"
-curl -LO https://go.dev/dl/go1.26.6.linux-amd64.tar.gz   # linux-arm64 on an ARM machine
-tar -C "$HOME/sdk" -xzf go1.26.6.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
+curl -LO https://go.dev/dl/go1.26.9.linux-amd64.tar.gz   # linux-arm64 on an ARM machine
+tar -C "$HOME/sdk" -xzf go1.26.9.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
 export PATH="$HOME/sdk/go/bin:$PATH"
-go version                                               # go version go1.26.6 linux/amd64
+go version                                               # go version go1.26.9 linux/amd64
 ```
 
 The archive is named `go<version>.linux-<arch>.tar.gz` and always unpacks one
-`go/` directory. `go1.26.6` is this repo's minimum; the current stable release is
-`go1.27.1`, and any later version works the same way — download the one you want
+`go/` directory. `go1.26.9` is this repo's minimum; the current stable release is
+`go1.27.2`, and any later version works the same way — download the one you want
 and pass that same file name to `tar`. `export PATH` lasts for one shell, so make
 it permanent in your shell rc (`$HOME/.bashrc` for bash, `$HOME/.profile`, or
 `$HOME/.zshrc` for zsh):
@@ -373,7 +373,7 @@ echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
 > **Do not set `GOPATH` to the Go installation directory.** `GOROOT` is the
 > toolchain (`$HOME/sdk/go` above) and `GOPATH` is your workspace; pointing one at
 > the other is the classic fresh-install mistake, and the toolchain flags it on
-> every command. Captured verbatim on go1.26.6 — it prints your own absolute path
+> every command. Captured verbatim on go1.26.9 — it prints your own absolute path
 > in place of `$HOME`:
 >
 > ```
@@ -387,7 +387,7 @@ echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
 > and the warning is gone. The collision needs no env var either: untar the
 > archive into `$HOME` and it unpacks to `$HOME/go`, which IS the default `GOPATH`,
 > so `GOROOT` and `GOPATH` are the same directory from the very first command. On
-> go1.26.6 this is a warning rather than a fatal error (run the two commands above
+> go1.26.9 this is a warning rather than a fatal error (run the two commands above
 > to see your own toolchain's wording), but it is not cosmetic: with `GOBIN` unset
 > the toolchain then installs into itself — `go install` writes the binary into the
 > toolchain's own `bin` beside `go` and `gofmt`, and the module cache lands under
@@ -408,13 +408,13 @@ echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
 > echo 'export GOPATH="$HOME/gopath"' >> "$HOME/.bashrc"  # every shell
 > ```
 >
-> Measured on go1.26.6: the warning above appears whenever `GOROOT` and `GOPATH`
+> Measured on go1.26.9: the warning above appears whenever `GOROOT` and `GOPATH`
 > resolve to the same directory (`GOPATH="$(go env GOROOT)" go env GOROOT GOPATH`
 > prints it), and the same command prints no warning at all with `GOPATH` set to
 > `$HOME/gopath`. Either fix works — a toolchain under `$HOME/sdk/go` as in the
 > recipe above, or this export; you do not need both.
 
-A distro package — `sudo apt install golang-go` on Debian/Ubuntu, `sudo dnf install golang` on Fedora — is a one-line alternative, but the packaged Go can be older than the 1.26.6 this repo requires: check `go version` afterwards.
+A distro package — `sudo apt install golang-go` on Debian/Ubuntu, `sudo dnf install golang` on Fedora — is a one-line alternative, but the packaged Go can be older than the 1.26.9 this repo requires: check `go version` afterwards.
 
 #### Installing xxd without root (Debian 13)
 
@@ -2423,7 +2423,7 @@ All core primitives are implemented and tested:
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
 - **API** — 54 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 49 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007 + the 3 trust paths of DF-CRIER-362) plus the 5 opt-in detection routes — documented as 57 paths / 74 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
-- **CI** — GitHub Actions, matrix build Go 1.26.6
+- **CI** — GitHub Actions, matrix build Go 1.26.9
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.
 

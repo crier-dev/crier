@@ -100,7 +100,7 @@ Three lanes carry agent work (lane split, CR-FEAT-009):
 - **Cross-profile queue** = the Hermes kanban. Crier may write cards there as an opt-in escalation sink (guard output option, spec `specs/LLM-MESSAGE-GUARD.md` §8): fire-and-forget cards via the `hermes kanban create` CLI writer (default) or an HTTP sink when `CR_GUARD_KANBAN_URL` is set. The kanban lane NEVER dispatches fleet work — cards are visibility/cross-profile exceptions only.
 
 ## Stack
-- **Language:** Go 1.26.6+
+- **Language:** Go 1.26.9+
 - **Transport:** HTTP/WebSocket (gorilla/websocket)
 - **Storage:** In-memory by default for the registry; chat sessions run on the selected backend (CR-CHAT-006) — SQLite (`CR_SESSION_BACKEND=sqlite`, no service required) or PostgreSQL (CI-003b) when `CR_DATABASE_URL` is set — registry and inboxes durable across restarts when a durable backend is configured
 - **Auth:** Bearer shared token (`CR_AUTH_TOKEN`) on the bus, with `/health`,
