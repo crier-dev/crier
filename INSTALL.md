@@ -31,7 +31,7 @@ which is the smallest thing "a fresh box" means:
 | `sha256sum` | present | the installer verifies every download against it |
 | `git` | **absent** | Path B clones the source with it |
 | `make` | **absent** | Path B builds with it |
-| `go` | **absent** | Path B needs Go 1.26.6+ |
+| `go` | **absent** | Path B needs Go 1.26.9+ |
 | `useradd` | present | the system service wants its own account (§6.1) |
 | `systemd` | present (on a real host) | §6 runs crier as a service |
 | `openssl`, `xxd` | **absent** | only the *hand-written signing* recipes need these, not the install |
@@ -51,7 +51,7 @@ Two consequences you should act on before anything else:
 
 | | Path A — prebuilt binaries | Path B — build from source |
 | --- | --- | --- |
-| needs a toolchain | no | Go 1.26.6+, git, make |
+| needs a toolchain | no | Go 1.26.9+, git, make |
 | needs a fetch tool | yes (`curl`/`wget`) | yes (for git/Go, or bring a tarball) |
 | needs root | no | no (no-root recipe in §2.2) |
 | installs to | `$HOME/.local/bin` | anywhere you choose |
@@ -84,7 +84,7 @@ Without root there is no supported no-root route to a TLS-capable fetch tool
 `/dev/tcp` cannot do TLS). If you have no root on a box with no fetch tool, use
 a machine that has one to carry the Go tarball in (§2.2), or ask for `curl`.
 
-### 2.2 Go 1.26.6 or later (Path B only)
+### 2.2 Go 1.26.9 or later (Path B only)
 
 A no-root install of the official tarball. **Unpack it somewhere other than
 `$HOME/go`** — that path is the default `GOPATH`, and pointing `GOROOT` and
@@ -93,11 +93,11 @@ its own binaries into itself:
 
 ```sh
 mkdir -p "$HOME/sdk" && cd "$HOME/sdk"
-curl -LO https://go.dev/dl/go1.26.6.linux-amd64.tar.gz   # linux-arm64 on ARM
-tar -C "$HOME/sdk" -xzf go1.26.6.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
+curl -LO https://go.dev/dl/go1.26.9.linux-amd64.tar.gz   # linux-arm64 on ARM
+tar -C "$HOME/sdk" -xzf go1.26.9.linux-amd64.tar.gz      # -> $HOME/sdk/go/bin/go
 export PATH="$HOME/sdk/go/bin:$PATH"
 echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
-go version            # go version go1.26.6 linux/amd64
+go version            # go version go1.26.9 linux/amd64
 go env GOROOT GOPATH  # MUST print two DIFFERENT paths, and no warning
 ```
 
