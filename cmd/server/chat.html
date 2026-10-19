@@ -121,6 +121,18 @@ main { min-width:0; display:flex; flex-direction:column; }
    Content-sized height keeps a 0–1-agent registry compact. */
 @media(min-width:1024px) { #capability-matrix-panel { flex:none; align-self:stretch; margin:0; padding:18px 20px; border-top:1px solid var(--border); background:var(--raised); } }
 @media(max-width:480px) { .topbar { padding:12px 14px; gap:8px 12px; } .breadcrumb { flex-basis:65%; } .top-status { width:100%; } .thread-header,.toolbar,#transcript,.composer-wrap { padding-left:12px; padding-right:12px; } .rail { display:block; padding:16px 12px; } .msg { gap:8px; } .msg.reply { margin-left:8px; padding-left:8px; } .composer-controls label:nth-child(2) { flex:1 1 100px; } .composer-controls button { width:100%; } }
+.management { padding:20px; border-top:1px solid var(--border); min-width:0; }
+.management-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.management-grid > section { min-width:0; }
+.management .section-head { flex-wrap:wrap; }
+.management-read { overflow-wrap:anywhere; white-space:pre-wrap; }
+.management-table-wrap { max-width:100%; overflow-x:auto; }
+.management-table { border-collapse:collapse; width:100%; font-size:12px; }
+.management-table th,.management-table td { border-bottom:1px solid var(--border); padding:8px; text-align:left; vertical-align:top; min-width:100px; max-width:240px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.management-table caption { text-align:left; color:var(--dim); padding:6px 0; }
+.management form { margin-top:12px; }
+@media(max-width:900px) { .management-grid { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:480px) { .management { padding:16px 12px; } }
 </style>
 </head>
 <body data-openapi-client="CR-CHAT-009" data-ui-revision="CR-CHAT-038">
@@ -202,6 +214,23 @@ main { min-width:0; display:flex; flex-direction:column; }
   <section class="panel"><h2>Capability directory</h2><div id="capabilities" class="note">Loading registry…</div><p class="note">Registry advertisements, not an execution grant. Capability delivery selects one holder per delivery; it is not a broadcast. Capability routing is unavailable in this session composer.</p></section>
 </aside>
 </div>
+<section class="management" aria-labelledby="management-title">
+  <div class="section-head"><h2 id="management-title">Operator management · read-only</h2><button id="management-refresh" type="button" class="ghost">Refresh management reads</button></div>
+  <p class="note">Fetched once on page load, then only on request. Refusals are not empty lists and are not automatically retried. Records are deployment-wide, not filtered to the selected conversation. No credential entry, minting or permission changes here.</p>
+  <p class="note">Permissions reads require CR_PERMISSIONS_ENABLED=true and a distinct CR_PERMISSIONS_ADMIN_TOKEN. Trust records require that distinct token even with delivery ACLs off. An authorized deployment gateway must supply access; this page does not collect or store tokens.</p>
+  <div class="management-grid">
+    <section class="panel" aria-labelledby="principals-title"><h2 id="principals-title">Principals</h2><div id="management-principals" class="management-read note" role="status">Loading GET /principals…</div><p class="note">ID identifies the credential holder; kind is the record type; display_name is the human label; namespace is the recorded realm; role and status are stored authority/lifecycle values; created_at is creation time. An omitted field is not reported, not an inferred default. Only a server-provided token_fingerprint is shown, never a credential.</p></section>
+    <section class="panel" aria-labelledby="bindings-title"><h2 id="bindings-title">Bindings</h2><div id="management-bindings" class="management-read note" role="status">Loading GET /bindings…</div><p class="note">id is the binding record; kind is its type; principal is the credential holder; agent is the bound agent; as_agent permits acting as that agent; created_at is creation time; created_by names the author. The endpoint returns the effective record per principal/agent pair.</p></section>
+    <section class="panel" aria-labelledby="grants-title"><h2 id="grants-title">Grants</h2><div id="management-grants" class="management-read note" role="status">Loading GET /grants…</div><p class="note">id identifies the grant; kind is its type; principal is the grantee; subject.type/ref identify the target; actions are permitted operations; granted_by/at record who and when; expires_at is the expiry (null means no expiry); revoked_at/by record revocation; note is the author's explanation. Only current, unexpired, unrevoked grants are returned.</p></section>
+    <section class="panel" aria-labelledby="federation-title"><h2 id="federation-title">Federation</h2><p id="management-federation-posture" class="note" role="status">Loading GET /status…</p><div id="management-peers" class="management-read note" role="status">Loading GET /fed/peers…</div><p class="note">id/name/label identify the peer; url is its relay address; state is the lifecycle link state, not a connectivity probe; direction is permitted link direction; key_id/public_key identify its public signing key; created_at/updated_at/linked_at/revoked_at are lifecycle timestamps. Discovery responses expose name/url/agents but no link state: those rows say not reported, never live by inference. The status lifecycle-record count and this list may describe different inventories.</p></section>
+    <section class="panel" aria-labelledby="anchors-title"><h2 id="anchors-title">Trust anchors</h2><div id="management-anchors" class="management-read note" role="status">Loading GET /trust/anchors…</div><p class="note">id is the local anchor identifier; label is its name; public_key is the trusted public key; created_at is acceptance time. Scope is not stored on the current anchor endpoint: scope belongs to signed delegation links and the query, not an invented anchor permission.</p>
+      <form id="trust-query-form" class="stack"><label>Chain query JSON (signer, scope array, chain array; optional challenge)<textarea id="trust-query" rows="5" required spellcheck="false" placeholder="Paste the public chain query JSON, in anchor-to-leaf order. Never paste private keys or tokens."></textarea></label><button id="trust-query-submit" type="submit" class="ghost">Evaluate chain (read-only)</button></form>
+      <div id="management-chain" class="management-read note" role="status">No chain query submitted.</div>
+      <p class="note">POST /trust/verify evaluates without storing records, using ordinary reach access, not the admin credential. This browser cannot generate possession proofs. chain-only means chain reachability only; proof-registry-key-mismatch means the leaf proof verified but the current registered key differs; proof-invalid-signature means offered proof was missing, stale, malformed, unbound or invalid; possession-verified means both leaf proof and registry-key match passed. No trust verdict is a delivery grant or a revocation check. Use an authorized signed client for possession verification.</p>
+    </section>
+    <section class="panel" aria-labelledby="agent-class-title"><h2 id="agent-class-title">Agent class &amp; scope</h2><form id="agent-class-form" class="stack"><label>Agent ID<input id="class-agent" list="registered-agents" required autocomplete="off"></label><button id="class-query-submit" type="submit" class="ghost">Read agent class</button></form><div id="management-class" class="management-read note" role="status">No agent class query submitted.</div><p class="note">id is the agent; class is personal/service; owner is the recorded principal; namespace is its realm; capabilities are declarations; scopes list the reach rules the ACL actually reads. A missing class record is an error, not an inferred class.</p></section>
+  </div>
+</section>
 <script>
 "use strict";
 // A client of the stock API. POST /sessions/{id}/messages is the message path;
@@ -275,10 +304,15 @@ async function call(path, options = {}, waitWithoutAbort = false) {
     const response = await fetch(path, { ...options, headers, credentials:"same-origin", signal:waitWithoutAbort ? undefined : AbortSignal.timeout(12000) });
     const raw = await response.text();
     let body;
-    try { body = JSON.parse(raw); } catch { throw new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway."); }
+    try { body = JSON.parse(raw); } catch {
+      const error = new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway.");
+      error.status = response.status; throw error;
+    }
     if (!response.ok) {
       const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
       error.serverMessage = typeof body.error === "string" ? body.error : body.error?.message;
+      error.status = response.status;
+      error.detail = body.detail;
       throw error;
     }
     return body;
@@ -293,6 +327,87 @@ async function call(path, options = {}, waitWithoutAbort = false) {
 }
 function notice(id, text, error = false) { $(id).textContent = text; $(id).className = error ? "note error" : "note"; }
 function unavailable(id, error) { notice(id, "Unavailable — " + error.message, true); }
+// Management reads deliberately do NOT join the transcript's polling loop.
+// No swallowed 401/403, automatic retries, fixture rows or browser-held tokens.
+function managementState(id, kind, text) {
+  notice(id, text, kind === "refused" || kind === "error");
+  $(id).classList.add("management-read");
+  $(id).dataset.readState = kind;
+}
+function managementFailure(id, route, error, admin = true) {
+  const refused = error.status === 401 || error.status === 403;
+  const detail = typeof error.detail === "string" ? error.detail : error.message;
+  managementState(id, refused ? "refused" : "error", (refused ? "Refused" : "Error") + " — " + route + (error.status ? " (HTTP " + error.status + ")" : "") + "\n" + detail + (refused
+    ? admin ? "\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      : "\nThis route uses ordinary deployment reach access, not CR_PERMISSIONS_ADMIN_TOKEN. Not retried automatically."
+    : "\nNo empty result is inferred. Refresh explicitly to try again."));
+}
+const managementValue = value => value === undefined ? "not reported" : value === null ? "null (no value)" : typeof value === "object" ? JSON.stringify(value) : String(value);
+function managementRows(id, route, rows, columns, empty) {
+  if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== "object" || Array.isArray(row))) throw new Error("Invalid list response from " + route);
+  if (!rows.length) { managementState(id,"empty","Empty — " + route + " succeeded. " + empty); return; }
+  const fields = [...new Set([...columns,...rows.flatMap(row => Object.keys(row))])];
+  managementState(id,"populated","Populated — " + route + " succeeded. " + rows.length + " record(s) returned.");
+  const wrap = document.createElement("div"); wrap.className = "management-table-wrap"; wrap.tabIndex = 0; wrap.setAttribute("role","region"); wrap.setAttribute("aria-label",route + " records; scroll horizontally for all columns");
+  wrap.innerHTML = '<table class="management-table"><caption>Server-returned records · omitted fields are not reported · scroll horizontally for all columns</caption><thead><tr>' + fields.map(field => '<th scope="col">' + esc(field) + '</th>').join("") + '</tr></thead><tbody>' + rows.map(row => '<tr>' + fields.map(field => '<td>' + esc(managementValue(row[field])) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
+  $(id).append(wrap);
+}
+async function managementList(id, route, key, columns, empty) {
+  managementState(id,"loading","Loading GET " + route + "…");
+  try {
+    const body = await call(route);
+    managementRows(id,"GET " + route,body[key],columns,empty);
+  } catch(error) { managementFailure(id,"GET " + route,error); }
+}
+async function refreshManagement() {
+  $("management-refresh").disabled = true;
+  await Promise.all([
+    managementList("management-principals","/principals","items",["id","kind","display_name","namespace","role","status","created_at"],"No principals returned."),
+    managementList("management-bindings","/bindings","items",["id","kind","principal","agent","as_agent","created_at","created_by"],"No bindings returned."),
+    managementList("management-grants","/grants","items",["id","kind","principal","subject","actions","granted_by","granted_at","expires_at"],"No current grants returned."),
+    managementList("management-peers","/fed/peers","peers",["id","name","label","url","state"],"No federation peers returned (0 peers)."),
+    managementList("management-anchors","/trust/anchors","anchors",["id","label","scope","created_at"],"No trust anchors returned."),
+    (async () => {
+      try {
+        const b = await call("/status");
+        const flag = value => value === true ? "true" : value === false ? "false" : "unknown (not reported)";
+        notice("management-federation-posture", "GET /status · Configured require-peer: " + flag(b.federation_require_peer_configured) + " · Effective require-peer: " + flag(b.federation_require_peer_effective) + " · Token-only inbound accepted: " + flag(b.federation_token_only_accepted) + " · Lifecycle peer records: " + (Number.isInteger(b.federation_peer_count) ? b.federation_peer_count : "unknown (not reported)"));
+      } catch(error) { managementFailure("management-federation-posture","GET /status",error,false); }
+    })()
+  ]);
+  $("management-refresh").disabled = false;
+}
+$("management-refresh").addEventListener("click",refreshManagement);
+$("agent-class-form").addEventListener("submit",async event => {
+  event.preventDefault();
+  const route = "/agents/" + encodeURIComponent($("class-agent").value.trim()) + "/class";
+  $("class-query-submit").disabled = true;
+  managementState("management-class","loading","Loading GET " + route + "…");
+  try {
+    const body = await call(route);
+    if (!body || typeof body.id !== "string") throw new Error("Invalid class response from " + route);
+    managementRows("management-class","GET " + route,[body],["id","class","owner","namespace","capabilities","scopes"],"No agent class record returned.");
+  } catch(error) { managementFailure("management-class","GET " + route,error); }
+  finally { $("class-query-submit").disabled = false; }
+});
+$("trust-query-form").addEventListener("submit",async event => {
+  event.preventDefault();
+  $("trust-query-submit").disabled = true;
+  managementState("management-chain","loading","Evaluating POST /trust/verify…");
+  try {
+    const raw = $("trust-query").value;
+    JSON.parse(raw); // Validate syntax only; send the caller's exact public bytes.
+    const body = await call("/trust/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:raw});
+    if (!body || typeof body.verdict !== "string") throw new Error("Invalid verdict response from /trust/verify");
+    managementRows("management-chain","POST /trust/verify",[body],["verdict","basis","anchor_id","depth","link","missing_capability"],"No chain verdict returned.");
+    const basisWords = {"chain-only":"Chain reachability only; no eligible possession challenge.","possession-verified":"Leaf proof verified and current registry key matches.","proof-registry-key-mismatch":"Leaf proof verified, but the current registered key differs.","proof-invalid-signature":"Possession proof missing, stale, malformed, unbound or invalid."};
+    const explanation = document.createElement("p");
+    explanation.textContent = "Basis: " + (body.basis || "not reported by server") + " — " + (basisWords[body.basis] || "No basis explanation reported; inspect the verdict and chain evidence.");
+    $("management-chain").append(explanation);
+  } catch(error) { managementFailure("management-chain","POST /trust/verify",error,false); }
+  finally { $("trust-query-submit").disabled = false; }
+});
+refreshManagement();
 function renderSessions() {
   const q = $("session-search").value.trim().toLowerCase();
   const sessions = state.sessions.filter(s => [s.title,s.id,s.preview].join(" ").toLowerCase().includes(q));

@@ -334,8 +334,18 @@ async function run() {
   const measurements = [];
   for (const width of [390,768,1280]) {
     await page.setViewportSize({width,height:1000});
-    const result = await page.evaluate(() => ({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth,overflows:[...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.scrollWidth > el.clientWidth+1 && !['SELECT','TEXTAREA'].includes(el.tagName) && getComputedStyle(el).overflowX !== 'hidden' && !el.classList.contains('skip')).map(el => ({id:el.id,tag:el.tagName,class:el.className,client:el.clientWidth,scroll:el.scrollWidth}))}));
+    const result = await page.evaluate(() => ({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth,overflows:[...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.scrollWidth > el.clientWidth+1 && !['SELECT','TEXTAREA'].includes(el.tagName) && getComputedStyle(el).overflowX !== 'hidden' && !el.classList.contains('skip') && !el.matches('.management-table-wrap[role="region"][tabindex="0"][aria-label]')).map(el => ({id:el.id,tag:el.tagName,class:el.className,client:el.clientWidth,scroll:el.scrollWidth}))}));
     assert.equal(result.viewport,width); assert.ok(result.scrollWidth<=width,JSON.stringify(result)); assert.ok(result.bodyWidth<=width,JSON.stringify(result)); assert.deepEqual(result.overflows,[]);
+    // Read-only management tables are explicit, labeled keyboard-scroll regions,
+    // not page overflow. Their horizontal reachability is pinned independently.
+    for (const region of await page.locator('.management-table-wrap').all()) {
+      const bounds = await region.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x+bounds.width <= width);
+      if (await region.evaluate(el => el.scrollWidth > el.clientWidth)) {
+        await region.focus(); await page.keyboard.press('ArrowRight');
+        await region.evaluate(el => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert.ok(await region.evaluate(el => el.scrollLeft > 0),'management table must be keyboard-scrollable');
+      }
+    }
     await page.locator('#text').scrollIntoViewIfNeeded();
     for (const selector of ['#text','#recipient','#intent','#send-button']) { const b = await page.locator(selector).boundingBox(); assert.ok(b && b.x >= 0 && b.x+b.width <= width && b.width >= 42, selector+' clipped'); }
     await page.evaluate(() => { const panel = document.getElementById('transcript'); panel.scrollTop = panel.scrollHeight; });
