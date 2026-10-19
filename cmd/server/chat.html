@@ -337,6 +337,11 @@ function updateComposer() {
     button.disabled = !enabled || ownerMismatch;
     button.title = why || (ownerMismatch ? "Only the claimed owner (same actor kind) can complete this task." : button.dataset.taskAction === "complete" ? "Evidence is required to complete this task." : "");
   }
+  for (const button of document.querySelectorAll("[data-message-task] .task-link")) {
+    button.disabled = state.sending;
+    if (state.sending) button.title = "Wait for the current send to finish before opening the task.";
+    else button.removeAttribute("title");
+  }
   for (const input of document.querySelectorAll("[data-task-evidence]")) input.disabled = !enabled;
   const g = $("identity-gate");
   if (g) g.hidden = !!state.agent;
@@ -367,10 +372,40 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") : '') + '</div><div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
+}
+function loadedTaskLink(taskID) {
+  // Reuse the loaded panel's identity and thread, never a transcript status.
+  const row = [...$("tasks").querySelectorAll("[data-task-row]")].find(row => row.dataset.taskRow === taskID);
+  return row?.querySelector(".task-link[data-thread]") || null;
+}
+function taskMessageLink(taskID) {
+  const target = loadedTaskLink(taskID);
+  return 'Lifecycle lives in the Tasks panel. ' + (target?.dataset.thread
+    ? '<button type="button" class="task-link ghost"' + (state.sending ? ' disabled title="Wait for the current send to finish before opening the task."' : '') + ' data-task-id="' + esc(taskID) + '" data-thread="' + esc(target.dataset.thread) + '">Open in Tasks</button>'
+    : 'Task not in the loaded task list.');
+}
+function updateMessageTaskLinks() {
+  for (const el of $("transcript").querySelectorAll("[data-message-task]")) {
+    const html = taskMessageLink(el.dataset.messageTask);
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+}
+function openTaskThread(event) {
+  const link = event.target.closest(".task-link[data-thread]");
+  if (!link) return false;
+  if (state.sending) return true;
+  const target = link.dataset.taskId ? loadedTaskLink(link.dataset.taskId) : null;
+  // A refresh can remove a row between rendering and activation. Fail closed.
+  if (link.dataset.taskId && !target) { updateMessageTaskLinks(); return true; }
+  state.thread = link.dataset.thread; state.reply = null; $("thread-filter").value = state.thread;
+  renderReply(); renderMessages();
+  if (target) { target.focus(); target.scrollIntoView({block:"nearest"}); }
+  else $("transcript").scrollIntoView({block:"start"});
+  return true;
 }
 function renderParticipants(body) {
   const participants = body.participants || [];
@@ -398,6 +433,7 @@ function renderTasks(body) {
   }).join("") || '<p class="note">No tasks recorded. Addressing an agent does not create a task.</p>';
   // Preserve focus and draft selection across an unchanged background refresh.
   if ($("tasks").innerHTML !== html) $("tasks").innerHTML = html;
+  updateMessageTaskLinks();
   updateComposer();
 }
 async function changeTask(taskID, action) {
@@ -504,7 +540,7 @@ async function refresh() {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
     reads.push(read(sessionPath(id,"permissions"), renderPermissions, e => unavailable("permissions",e)));
-    reads.push(read(sessionPath(id,"tasks"), renderTasks, e => unavailable("tasks",e)));
+    reads.push(read(sessionPath(id,"tasks"), renderTasks, e => { unavailable("tasks",e); updateMessageTaskLinks(); }));
   }
   await Promise.all(reads);
   if (valid()) { state.busy = false; notice("refresh-state", "Last HTTP refresh attempt: " + new Date().toLocaleTimeString() + ". Automatic refresh every 15 seconds; failures are shown in each panel. Not a WebSocket connection."); }
@@ -668,13 +704,14 @@ $("remember-agent").addEventListener("change",rememberAttribution);
 $("forget-agent").addEventListener("click",forgetAttribution);
 $("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; renderReply(); renderMessages(); });
 $("transcript").addEventListener("click", e => {
+  if (openTaskThread(e)) return;
   const row = e.target.closest("[data-reply]"); if (!row || state.sending) return;
   const m = state.messages.find(m => m.id === row.dataset.reply); if (!m) return;
   state.reply = m.id; state.thread = m.thread_id; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("text").focus();
 });
 $("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; renderReply(); } });
 $("tasks").addEventListener("input", e => { if (e.target.dataset.taskEvidence) taskDrafts.set(taskKey(e.target.dataset.taskEvidence),e.target.value); });
-$("tasks").addEventListener("click", e => { const action = e.target.closest("[data-task-action]"); if (action) { changeTask(action.dataset.taskId, action.dataset.taskAction); return; } const row = e.target.closest("[data-thread]"); if (row && !state.sending) { state.thread = row.dataset.thread; state.reply = null; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("transcript").scrollIntoView({block:"start"}); } });
+$("tasks").addEventListener("click", e => { const action = e.target.closest("[data-task-action]"); if (action) { changeTask(action.dataset.taskId, action.dataset.taskAction); return; } openTaskThread(e); });
 $("text").addEventListener("input",resetAudienceWarning);
 $("recipient").addEventListener("change",resetAudienceWarning);
 $("intent").addEventListener("change", () => { resetAudienceWarning(); updateComposer(); });

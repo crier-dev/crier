@@ -1,0 +1,18 @@
+{
+  "method": "Real Chromium; production HTML; explicitly intercepted API fixtures",
+  "control": "button",
+  "affordance": "Open in Tasks",
+  "absent": "not in the loaded task list; no operable control",
+  "keyboard": "Tab + Enter selects thread and focuses matching task row",
+  "checks": [
+    "present task",
+    "absent task",
+    "wrong ID same thread",
+    "tasks after messages",
+    "messages after tasks",
+    "task read failure",
+    "existing reverse link",
+    "snapshot remains not exposed"
+  ],
+  "pageErrors": []
+}
