@@ -22,6 +22,22 @@ type A2AReplayStore interface {
 	FinishA2AReplay(agentID, key, token string, record []byte) error
 }
 
+// A2AReplayDurability reports whether this backend retains A2A reservations
+// across process exit. It describes storage, not a different replay decision.
+// A backend without this capability must not be advertised as durable.
+type A2AReplayDurability interface {
+	A2AReplayDurable() bool
+}
+
+func (*MemoryStore) A2AReplayDurable() bool   { return false }
+func (*SQLiteStore) A2AReplayDurable() bool   { return true }
+func (*PostgresStore) A2AReplayDurable() bool { return true }
+
+func (s *AuthorityStore) A2AReplayDurable() bool {
+	backend, ok := s.Store.(A2AReplayDurability)
+	return ok && backend.A2AReplayDurable()
+}
+
 type a2aReplayRecord struct {
 	token     string
 	record    []byte

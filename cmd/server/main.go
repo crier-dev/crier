@@ -951,6 +951,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// CR_AUTH_TOKEN set it requires the same Bearer header as every other route.
 	if cfg.A2AEnabled {
 		registerA2ACardRoute(r, regStore, a2aCardOptions{
+			replayWindow:           cfg.IdempotencyWindow,
 			port:                   cfg.Port,
 			authTokenSet:           cfg.AuthToken != "",
 			agentSignatureEnforced: cfg.RequireAgentSig,

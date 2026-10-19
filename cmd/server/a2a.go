@@ -245,7 +245,7 @@ func (h *a2aHandler) send(w http.ResponseWriter, r *http.Request, req *a2a.RPCRe
 		return
 	}
 	// Replays project the ORIGINAL request and timestamp, never the retry's
-	// payload. Only the existing metadata replay marker differs.
+	// payload. Send-time metadata labels the replay and deployment guarantee.
 	tr, accept := receipt.Translation, receipt.Accept
 
 	if streaming {

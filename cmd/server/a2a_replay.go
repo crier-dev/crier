@@ -33,6 +33,7 @@ func (h *a2aHandler) sendOnce(agentID string, tr *a2a.Translation, ctx context.C
 			return fail(fmt.Errorf("read A2A replay receipt: %w", err))
 		}
 		receipt.Accept.IdempotentReplay = true
+		receipt.Accept.Idempotency = a2aIdempotencyInfo(h.store, h.opts.replayWindow, true)
 		slog.Info("A2A send replayed existing task", "agent_id", agentID, "message_id", key, "task_id", receipt.Accept.ID, "idempotent_replay", true)
 		return receipt, nil
 	}
@@ -63,6 +64,9 @@ func (h *a2aHandler) sendOnce(agentID string, tr *a2a.Translation, ctx context.C
 	if err := store.FinishA2AReplay(agentID, key, token, raw); err != nil {
 		return fail(fmt.Errorf("persist A2A replay receipt (delivery may have succeeded): %w", err))
 	}
+	// Report acquisition, not the delivery handler's independent cache marker.
+	// This is computed after persistence and never stored in the receipt.
+	receipt.Accept.Idempotency = a2aIdempotencyInfo(h.store, h.opts.replayWindow, false)
 	return receipt, nil
 }
 

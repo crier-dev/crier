@@ -555,15 +555,18 @@ func contains(list []string, s string) bool {
 // Every member is one crier already publishes on POST /agents/{id}/inbox — no
 // field is added to that response for A2A's benefit.
 type DeliverAccept struct {
-	ID               string          `json:"id"`
-	Transport        string          `json:"transport"`
-	DeliveryMode     string          `json:"delivery_mode"`
-	ExpiresAt        json.RawMessage `json:"expires_at,omitempty"`
-	Guard            json.RawMessage `json:"guard,omitempty"`
-	IdempotentReplay bool            `json:"idempotent_replay"`
-	Reply            json.RawMessage `json:"reply,omitempty"`
-	Status           string          `json:"status"`
-	MaxHoldS         int             `json:"max_hold_s"`
+	// Idempotency is request-local observation, never part of the stored receipt
+	// or the non-A2A inbox accept. sendOnce fills it after resolving acquisition.
+	Idempotency      *IdempotencyInfo `json:"-"`
+	ID               string           `json:"id"`
+	Transport        string           `json:"transport"`
+	DeliveryMode     string           `json:"delivery_mode"`
+	ExpiresAt        json.RawMessage  `json:"expires_at,omitempty"`
+	Guard            json.RawMessage  `json:"guard,omitempty"`
+	IdempotentReplay bool             `json:"idempotent_replay"`
+	Reply            json.RawMessage  `json:"reply,omitempty"`
+	Status           string           `json:"status"`
+	MaxHoldS         int              `json:"max_hold_s"`
 }
 
 // ReplyPayload returns the reply body of a blocking delivery, if any.
@@ -610,6 +613,9 @@ func (a DeliverAccept) Held() bool { return a.Status == "held" }
 // can prove from the entry and states which record it read the state from in
 // StateBasis (INT-A2A-004).
 type CrierMeta struct {
+	// Idempotency describes this SEND's replay decision and serving deployment.
+	// Reads do not claim that they acquired or replayed a reservation.
+	Idempotency *IdempotencyInfo `json:"idempotency,omitempty"`
 	// Answered reports retained output evidence, never consumption or request history.
 	Answered         bool   `json:"answered"`
 	AnswerObservedAt string `json:"answer_observed_at,omitempty"`
@@ -668,6 +674,7 @@ func TaskFromAccept(t *Translation, accept DeliverAccept, now time.Time) (*Task,
 	}
 	if len(t.Request.Payload) > 0 {
 		task.Metadata = map[string]any{"crier": CrierMeta{
+			Idempotency:      accept.Idempotency,
 			Transport:        accept.Transport,
 			DeliveryMode:     accept.DeliveryMode,
 			ExpiresAt:        accept.ExpiresAt,
@@ -741,6 +748,12 @@ func MessageFromReply(t *Translation, accept DeliverAccept, now time.Time) (*Mes
 			"replies_to": t.SentMessage.MessageID,
 			"replay":     accept.IdempotentReplay,
 		}}
+	}
+	if accept.Idempotency != nil {
+		if msg.Metadata == nil {
+			msg.Metadata = map[string]any{"crier": map[string]any{}}
+		}
+		msg.Metadata["crier"].(map[string]any)["idempotency"] = accept.Idempotency
 	}
 	_ = now
 	return msg, nil

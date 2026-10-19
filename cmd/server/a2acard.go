@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/buildinfo"
@@ -47,6 +48,7 @@ type a2aCardOptions struct {
 	authTokenSet bool
 	// agentSignatureEnforced reports CR_REQUIRE_AGENT_SIG is in force.
 	agentSignatureEnforced bool
+	replayWindow           time.Duration
 }
 
 // registerA2ACardRoute registers GET /.well-known/agent-card.json on r. It is
@@ -108,6 +110,10 @@ func newA2ACardHandler(store registry.Store, opts a2aCardOptions) http.HandlerFu
 			AuthTokenSet:           opts.authTokenSet,
 			AgentSignatureEnforced: opts.agentSignatureEnforced,
 		})
+
+		// Deployment evidence belongs in the served description, not an invented
+		// agent skill or an extension/capability the protocol does not define.
+		card.Description += " " + a2aIdempotencyInfo(store, opts.replayWindow, false).Description
 
 		// Encode into a buffer before touching the response: the body is
 		// hashed for the ETag, so a partial write would serve bytes whose tag

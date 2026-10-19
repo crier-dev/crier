@@ -176,7 +176,7 @@ discovers a card here knows what to send back on every A2A request.
 | AgentCard field | Source |
 |---|---|
 | `name` | the registry id (the identifier clients address the agent by) |
-| `description` | generated from the row: the id, and the capability tags it advertises. crier's registry has no description field, and prose invented here would read as the agent's own claim |
+| `description` | generated from the row: the id and capability tags, followed by the actual store-derived idempotency durability/window limit (§5.4.1a). Registry tags are not invented skill prose; the appended limit describes this deployment |
 | `supportedInterfaces[]` | one entry: `url` = the origin the client reached + `/a2a`, `protocolBinding` = `JSONRPC`, `protocolVersion` = `1.0`, `tenant` = the agent id. The URL is the JSON-RPC endpoint the client sends its methods to, and that endpoint is **now served** (`POST /a2a`, INT-A2A-003, §5.4) — the forward declaration this row made is what §5.4 implements, not a second path |
 | `version` | the serving build's identity (`internal/buildinfo`). The registry row carries no version of its own, and a second, invented one would be a source of truth that could drift |
 | `documentationUrl` | the same origin + `/docs` (the live API documentation of the surface being described) |
@@ -270,7 +270,36 @@ wire and stated so nobody has to infer them:
   "payload objects travel as base64-encoded strings; decode each entry's payload before use"). This
   row changes nothing about that contract.
 
-#### 5.4.1a Durable send replay and retention (DF-CRIER-370)
+#### 5.4.1a Send replay: deployment guarantee and retention (DF-CRIER-370, DF-CRIER-390)
+
+**Sender-visible guarantee (DF-CRIER-390).** Every successful `SendMessage`
+response carries `metadata.crier.idempotency` on its returned Task OR direct
+Message. `SendStreamingMessage` carries the same object on its opening Task or
+single direct Message frame. This describes the current send and deployment,
+not a task lifecycle read or an unlimited exactly-once promise:
+
+| Field | Exact meaning |
+|---|---|
+| `durability` | `"durable"` for the actual SQLite/PostgreSQL registry replay store, `"process"` for memory. Derived from the serving store's read-only durability capability, including through AuthorityStore; never inferred from an unset backend name or session storage. Custom stores without that capability are granted only the conservative process-lifetime guarantee. |
+| `window_seconds` | The effective non-sliding replay window in seconds: `registry.DefaultIdempotencyWindow` (24 hours) when unset/nonpositive at the storage seam, otherwise the configured `CR_IDEMPOTENCY_WINDOW_S`. Environment parsing and semantics are unchanged. |
+| `replay` | `"replayed"` only when this acquisition returned an existing retained receipt; `"new"` when it created a fresh reservation, including after expiry or a memory process restart. This is independent of the delivery handler's own cache marker. |
+| `description` | Plain-language durability and retention limit. With memory it explicitly says: "Idempotency holds for the life of the process only; a restart may mint a second task for the same messageId." Every backend says the window runs from the first reservation and a send after expiry may create a new task. |
+
+The Agent Card's `description` appends that SAME deployment-derived limit and
+effective window, without inventing a new protocol capability, skill or extension.
+Its content-derived ETag covers those words too. The machine-readable per-send
+object is on the response, not only `/status` or logs. For example, the default
+memory deployment's first send reports:
+
+```json
+{"durability":"process","window_seconds":86400,"replay":"new","description":"Idempotency holds for the life of the process only; a restart may mint a second task for the same messageId. The messageId replay window is 86400 seconds from the first reservation; after expiry the same messageId may create a new task."}
+```
+
+These labels are computed per response, not frozen into stored receipts. Existing
+`idempotent_replay` / direct Message `replay` booleans retain their meaning.
+**No expired-key tombstone store is added or promised:** `"new"` does not distinguish
+an unseen key from one whose reservation expired, was deleted, or died with a memory
+process. The label exposes that boundary; it does not change the replay decision.
 
 - The replay scope is `(target agent / tenant, message.messageId)`, shared by
   `SendMessage` and `SendStreamingMessage`. Different message ids (or tenants)
@@ -318,7 +347,7 @@ wire and stated so nobody has to infer them:
 |---|---|---|
 | `params.tenant` | the route's `{id}` | Required. Must name an opted-in row (§4.2); otherwise `-32602` |
 | `params.message` | the payload (§5.4.3) | Required, with `messageId`, `role` and at least one part (§4.1.4) |
-| `message.messageId` | `idempotency_key` | A2A §3.3.1's deduplication rule made executable: a retry of the same message id answers with the FIRST delivery's accept — the same task id — instead of delivering the same work twice. Bounded at 128 characters, crier's own limit for the field |
+| `message.messageId` | `idempotency_key` | Within the deployment guarantee and retained window (§5.4.1a), a retry answers with the FIRST delivery's accept — the same task id — instead of delivering the same work twice. The response labels a fresh reservation `"new"`, including after expiry or memory restart. Bounded at 128 characters, crier's own limit for the field |
 | `message.contextId` | `session_id` | Both mean "the conversation this belongs to" (CR-FEAT-004) |
 | `message.role` | carried in the payload | Must be `ROLE_USER` or `ROLE_AGENT`; `ROLE_UNSPECIFIED` or absent is `-32602` (the field is REQUIRED) |
 | `message.parts[]` | `payload.parts[]` | §5.4.3 |
@@ -388,7 +417,7 @@ That is the same "no second source that could disagree" rule the whole option is
 claimed the message, and a state this server cannot observe is exactly the kind of claim this option
 is forbidden from inventing. The Task carries the crier facts A2A has no field for under
 `metadata.crier` (`transport`, `delivery_mode`, `expires_at`, `held`, `max_hold_s`,
-`idempotent_replay`, `guard`), namespaced so they can never be confused with an agent's own metadata.
+`idempotent_replay`, `idempotency`, `guard`), namespaced so they can never be confused with an agent's own metadata.
 Its `history` is the message that created it, bounded by `historyLength` (§3.2.4: `0` asks for none).
 
 Errors use the JSON-RPC error object with the specification's own detail shapes (§9.5): an
