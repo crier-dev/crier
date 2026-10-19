@@ -252,6 +252,14 @@ func (c *Client) PolicyFor(peer string) *PeerPolicy {
 // than a Link from the configured link list: it is how the session fan-out
 // reaches a REMOTE PARTICIPANT's home instance (§3.2) through the SHIPPED
 // forward transport — the same POST the link path makes, no second transport.
+type namespaceTokenKey struct{}
+
+// ForwardToURLWithNamespaceToken carries the per-send target realm credential
+// only as HTTP metadata. It is never marshaled into a message or transcript.
+func (c *Client) ForwardToURLWithNamespaceToken(ctx context.Context, url, agentID string, body []byte, token string) (int, []byte, error) {
+	return c.ForwardToURL(context.WithValue(ctx, namespaceTokenKey{}, token), url, agentID, body)
+}
+
 func (c *Client) ForwardToURL(ctx context.Context, url, agentID string, body []byte) (int, []byte, error) {
 	return c.ForwardDeliver(ctx, Link{URL: url}, agentID, body)
 }
@@ -433,6 +441,9 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(HopHeader, "1")
+	if token, ok := ctx.Value(namespaceTokenKey{}).(string); ok && token != "" {
+		req.Header.Set("X-Crier-Namespace-Token", token)
+	}
 	if p := c.policyForLink(link); p != nil && p.SelfAs != "" {
 		req.Header.Set(PeerHeader, p.SelfAs)
 	}

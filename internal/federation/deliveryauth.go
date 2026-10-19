@@ -1,32 +1,114 @@
 package federation
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 )
 
-// DeliveryAuth adds exactly one credential to the deployment gate: a linked
-// instance key on a signed inbox POST. No key announcement can authenticate
-// discovery, peer management, or any other route. All other requests run the
-// existing bearer middleware unchanged; a claimed key can never fall back to
-// a token after a failed proof. The later legacy peer-auth/policy and local
-// delivery checks still run. getStore is resolved after startup composition.
+type inboundDecisionKey struct{}
+
+// DeliveryAuth authenticates inbox ingress before the deployment gate. Claimed
+// peer identities never downgrade to bearer auth when lifecycle records are
+// enabled. Keyless calls remain deployment-authenticated in compatibility mode.
+// With records configured, even an unmarked inbox POST is classified: a caller
+// cannot evade the strict posture or audit by omitting the hop/peer headers.
 func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *PeerStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		legacy := existing(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			store := getStore()
-			if store == nil || r.Header.Get(PeerHeader) == "" || !keyedInboxRoute(r) {
+			if !keyedInboxRoute(r) || r.Context().Value(inboundDecisionKey{}) != nil {
 				legacy.ServeHTTP(w, r)
 				return
 			}
-			if v := store.VerifyDelivery(r); v != FedAllowed {
-				RefuseDelivery(w, v)
+			store := getStore()
+			configured := store != nil && len(store.List()) > 0
+			peer := r.Header.Get(PeerHeader)
+			v := FedTokenOnly
+			if peer != "" && store != nil {
+				v = store.VerifyDelivery(r)
+			} else if configured && store.requiresPeer() {
+				v = FedNoLink
+			}
+			// Inbox responses are finite JSON receipts, never streaming routes. Capture
+			// once so all handler exits (including auth refusals) carry the same verdict.
+			// Empty/no records preserve the legacy response bytes; its header and audit
+			// still expose the degraded crossing without breaking legacy consumers.
+			receipt := &inboundReceipt{ResponseWriter: w}
+			receipt.Header().Set(VerdictHeader, string(v))
+			receipt.Header().Set("X-Crier-Fed-Inbound-Verdict", string(v))
+			completed := false
+			defer func() {
+				if completed {
+					receipt.finish(v, configured)
+				} else {
+					// Preserve the outer recovery middleware's authority: never flush
+					// a buffered success while unwinding a downstream panic.
+					receipt.status = http.StatusInternalServerError
+				}
+				slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path, "verdict", v, "status", receipt.status)
+			}()
+			if v != FedAllowed && v != FedTokenOnly {
+				RefuseDelivery(receipt, v)
+				completed = true
 				return
 			}
-			next.ServeHTTP(w, r)
+			r = r.WithContext(context.WithValue(r.Context(), inboundDecisionKey{}, v))
+			if v == FedAllowed {
+				next.ServeHTTP(receipt, r)
+			} else {
+				legacy.ServeHTTP(receipt, r)
+			}
+			completed = true
 		})
 	}
+}
+
+type inboundReceipt struct {
+	http.ResponseWriter
+	body   bytes.Buffer
+	status int
+}
+
+func (w *inboundReceipt) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+}
+func (w *inboundReceipt) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(p)
+}
+func (w *inboundReceipt) finish(v Verdict, annotate bool) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	body := w.body.Bytes()
+	if annotate {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(body, &object) == nil && object != nil {
+			encodedVerdict, _ := json.Marshal(v)
+			if outgoing, exists := object["verdict"]; exists && !bytes.Equal(outgoing, encodedVerdict) {
+				// A local caller can enter here then forward to another instance. Keep
+				// the existing outbound verdict and expose ingress separately, never
+				// relabel an outbound key refusal as successful token authentication.
+				object["inbound_verdict"] = encodedVerdict
+			} else {
+				object["verdict"] = encodedVerdict
+			}
+			if encoded, err := json.Marshal(object); err == nil {
+				body = append(encoded, '\n')
+			}
+		}
+	}
+	w.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(w.status)
+	_, _ = w.ResponseWriter.Write(body)
 }
 
 func keyedInboxRoute(r *http.Request) bool {

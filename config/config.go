@@ -450,6 +450,9 @@ type FederationConfig struct {
 	// Empty keeps legacy discovery. The explicit value "auto" resolves
 	// alongside the hold queue (or, without a hold file, the self key).
 	RecordsFile string
+	// RequirePeer refuses token-only inbox requests when lifecycle records exist.
+	// CR_FED_REQUIRE_PEER defaults false; an empty peer store remains legacy.
+	RequirePeer bool
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -737,6 +740,13 @@ func Load() (Config, error) {
 	// CR_FED_SELF_KEY_FILE (CR-CHAT-024): path of this relay's own hex
 	// ed25519 seed, used to sign outbound forwards (mutual auth).
 	cfg.Federation.SelfKeyFile = os.Getenv("CR_FED_SELF_KEY_FILE")
+	if v := os.Getenv("CR_FED_REQUIRE_PEER"); v != "" {
+		parsed, err := parseTolerantBool("CR_FED_REQUIRE_PEER", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Federation.RequirePeer = parsed
+	}
 	cfg.Federation.RecordsFile = os.Getenv("CR_FED_RECORDS_FILE")
 	if cfg.Federation.RecordsFile == "auto" {
 		base := cfg.Federation.QueueFile

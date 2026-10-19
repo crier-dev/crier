@@ -600,6 +600,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		slog.Error("federation peers", "error", peerErr)
 		return 1
 	}
+	slog.Info("federation inbound posture", "require_peer_when_configured", cfg.Federation.RequirePeer)
 	if peerService != nil {
 		fedRecordGate = peerService.Store
 	}

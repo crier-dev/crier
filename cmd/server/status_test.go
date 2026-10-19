@@ -53,7 +53,7 @@ var statusScrubbedEnv = []string{
 	// case under test sets it explicitly.
 	"CR_PRESENCE_STALE_AFTER_S",
 	"CR_WEBHOOK_SECRET",
-	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE",
+	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE", "CR_FED_REQUIRE_PEER",
 	"CR_ENABLE_METRICS", "CR_ENABLE_PPROF",
 	"CR_LOG_LEVEL", "CR_LOG_FORMAT", "CR_RATE_LIMIT_PER_MINUTE",
 	// CR-FEAT-035: the global inbox-ingest budget is read from this one, for
@@ -76,6 +76,7 @@ var statusTopLevelKeys = []string{
 	"build",
 	"federation_enabled",
 	"federation_hold_queue",
+	"federation_require_peer",
 	// CR-FEAT-035: the effective global inbox-ingest budget (posture) and the
 	// LIVE store-wide queue measurement. Both are documented in
 	// docs/openapi.yaml's /status schema; adding one here without adding it

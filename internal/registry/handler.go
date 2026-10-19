@@ -1051,6 +1051,14 @@ func (h *Handler) rejectOversizedBody(w http.ResponseWriter, r *http.Request) bo
 func (h *Handler) SetPeerRecords(s *federation.PeerStore) { h.peerRecords = s }
 
 func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
+	// Direct embeddings and the production middleware share one ingress verdict.
+	// DeliveryAuth's context marker prevents duplicate audit/receipt wrapping.
+	federation.DeliveryAuth(func(next http.Handler) http.Handler { return next }, func() *federation.PeerStore { return h.peerRecords })(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.deliverAuthenticated(w, r, id, capability)
+	})).ServeHTTP(w, r)
+}
+
+func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, id, capability string) {
 	// CR-CHAT-020: the per-message delivery latency is measured from the top
 	// of the shared deliver path, so the figure covers everything this POST
 	// did to produce the message — decode, guard verdict, durable write. It
@@ -1061,15 +1069,6 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 
 	if h.rejectOversizedBody(w, r) {
 		return
-	}
-	if h.peerRecords != nil &&
-		((len(h.peerRecords.List()) > 0 && r.Header.Get(federation.HopHeader) != "") || r.Header.Get(federation.PeerHeader) != "") {
-		v := h.peerRecords.VerifyDelivery(r)
-		if v != federation.FedAllowed {
-			federation.RefuseDelivery(w, v)
-			return
-		}
-		w.Header().Set(federation.VerdictHeader, string(v))
 	}
 	if !h.authorizeServiceDelivery(w, r, id, capability) {
 		return

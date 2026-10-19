@@ -962,7 +962,7 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return transcriptMessage{}, false
 	}
-	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg)
+	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, r.Header.Get(namespace.HeaderNamespaceToken))
 	if err != nil {
 		// A remote fan-out that cannot complete is the same visible,
 		// repairable state §3.2 already names: the record is durable,
@@ -1107,7 +1107,7 @@ func groupOfTarget(roster map[string][]string) map[string]string {
 // guarantees every remote member's peer policy admitted the namespace; the
 // re-check here is the wall applied per SEND, not per JOIN (a policy can be
 // tightened between the two).
-func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, msg *Message) ([]DeliveryOutcome, error) {
+func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, msg *Message, namespaceToken string) ([]DeliveryOutcome, error) {
 	outcomes := []DeliveryOutcome{}
 	now := h.now()
 	if h.opts.Fed == nil {
@@ -1170,13 +1170,20 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 		if err != nil {
 			return nil, fmt.Errorf("marshal remote delivery for %q: %w", m.MemberID, err)
 		}
-		status, _, ferr := h.opts.Fed.ForwardToURL(ctx, policy.URL, subject, envelope)
+		status, response, ferr := h.opts.Fed.ForwardToURLWithNamespaceToken(ctx, policy.URL, subject, envelope, namespaceToken)
 		if ferr != nil {
 			// Transport-level failure: the message was NOT delivered. A
 			// transient outage is the caller's FANOUT_INCOMPLETE (the
 			// record is durable, the sender retries); a policy refusal on
 			// the DESTINATION side (§6.4's inbound FED_* codes) is a
 			// definitive refused outcome carrying the remote's own answer.
+			var refusal *federation.DeliveryRefusal
+			if errors.As(ferr, &refusal) {
+				o := refusedOutcome(m.MemberID, string(refusal.Verdict), now)
+				o.Code = string(refusal.Verdict)
+				outcomes = append(outcomes, o)
+				continue
+			}
 			var nsnp *federation.NamespaceNotPermittedError
 			if errors.As(ferr, &nsnp) {
 				outcomes = append(outcomes, refusedOutcome(m.MemberID,
@@ -1192,6 +1199,22 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 				UpdatedAt: now,
 			})
 			continue
+		}
+		// Keep only our known symbolic codes. Remote detail is untrusted and may
+		// echo a credential, so it must never be copied into the durable transcript.
+		var remoteRefusal struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(response, &remoteRefusal) == nil {
+			switch remoteRefusal.Error {
+			case "NAMESPACE_UNAUTHORIZED", "UNKNOWN_NAMESPACE", "NAMESPACE_MISMATCH",
+				"FED_NO_LINK", "FED_BAD_SIGNATURE", "FED_PEER_REVOKED", "FED_NAMESPACE_NOT_PERMITTED",
+				"FED_AGENT_NOT_PERMITTED", "FED_DIRECTION_NOT_PERMITTED", "FED_SESSION_NOT_PERMITTED", "DELIVERY_FORBIDDEN":
+				o := refusedOutcome(m.MemberID, fmt.Sprintf("the destination refused the delivery (status %d, %s)", status, remoteRefusal.Error), now)
+				o.Code = remoteRefusal.Error
+				outcomes = append(outcomes, o)
+				continue
+			}
 		}
 		if status == http.StatusForbidden || status == http.StatusUnauthorized {
 			// The destination refused the crossing (its own per-peer

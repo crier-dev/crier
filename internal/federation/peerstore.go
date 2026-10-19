@@ -58,9 +58,10 @@ type peerDocument struct {
 // A corrupt existing file is a startup error: recovering an older snapshot
 // could resurrect a revoked credential, so auth state never rolls back to .bak.
 type PeerStore struct {
-	mu    sync.RWMutex
-	path  string
-	peers map[string]PeerRecord
+	mu          sync.RWMutex
+	path        string
+	peers       map[string]PeerRecord
+	requirePeer bool
 }
 
 func OpenPeerStore(path string) (*PeerStore, error) {
@@ -121,6 +122,19 @@ func validatePeer(p PeerRecord) error {
 		return errors.New("federation: url must be a canonical http(s) base URL")
 	}
 	return nil
+}
+
+// SetRequirePeer refuses keyless inbox ingress while any lifecycle records
+// exist. Empty stores retain the legacy deployment-token path.
+func (s *PeerStore) SetRequirePeer(required bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requirePeer = required
+}
+func (s *PeerStore) requiresPeer() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.requirePeer
 }
 
 func (s *PeerStore) List() []PeerRecord {

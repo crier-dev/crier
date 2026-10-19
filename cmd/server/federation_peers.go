@@ -29,6 +29,7 @@ func configureFederationPeers(cfg config.Config, r *mux.Router, handler *registr
 	if err != nil {
 		return nil, err
 	}
+	store.SetRequirePeer(cfg.Federation.RequirePeer)
 	handler.SetPeerRecords(store)
 	// Management is never public, even if CR_AUTH_TOKEN is empty. A
 	// separate admin token is useful on a key-only, bearer-free relay.

@@ -357,8 +357,9 @@ type statusResponse struct {
 	// (CR_FED_LINKS). FederationHoldQueue is the durability mode of the hold
 	// path in force: "none" (no links), "memory" (process-lifetime) or
 	// "file" (survives a restart).
-	FederationEnabled   bool   `json:"federation_enabled"`
-	FederationHoldQueue string `json:"federation_hold_queue"`
+	FederationRequirePeer bool   `json:"federation_require_peer"`
+	FederationEnabled     bool   `json:"federation_enabled"`
+	FederationHoldQueue   string `json:"federation_hold_queue"`
 	// MetricsEnabled and PProfEnabled report whether the opt-in inspection
 	// surfaces (DF-CRIER-142) are registered. False means the paths answer
 	// 404, which is a different posture from "registered but empty".
@@ -408,14 +409,15 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		// resolves it (registry.Presence.StaleAfter) — so an unset or
 		// malformed-shaped setting reports the window actually in force rather
 		// than a zero the derivation never uses (CR-FEAT-024).
-		PresenceStaleAfterS: int(registry.NewPresence(cfg.PresenceStaleAfter).StaleAfter().Seconds()),
-		RegistryBackend:     registryBackend,
-		RateLimitPerMinute:  cfg.RateLimitPerMinute,
-		LogLevel:            cfg.LogLevel,
-		LogFormat:           cfg.LogFormat,
-		WebhookSigning:      cfg.Webhook.Secret != "",
-		FederationEnabled:   len(cfg.Federation.Links) > 0,
-		FederationHoldQueue: federationHoldQueueMode(cfg),
+		PresenceStaleAfterS:   int(registry.NewPresence(cfg.PresenceStaleAfter).StaleAfter().Seconds()),
+		RegistryBackend:       registryBackend,
+		RateLimitPerMinute:    cfg.RateLimitPerMinute,
+		LogLevel:              cfg.LogLevel,
+		LogFormat:             cfg.LogFormat,
+		WebhookSigning:        cfg.Webhook.Secret != "",
+		FederationRequirePeer: cfg.Federation.RequirePeer,
+		FederationEnabled:     len(cfg.Federation.Links) > 0,
+		FederationHoldQueue:   federationHoldQueueMode(cfg),
 		// The global ingest budget (CR-FEAT-035). Read from the same
 		// configuration the handler was installed from, so a server that had
 		// no budget installed cannot advertise one.
