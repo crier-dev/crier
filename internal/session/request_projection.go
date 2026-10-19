@@ -12,6 +12,10 @@ import (
 // An additive projection reaches already-created databases without rewriting
 // their transcript schema. JSONL already retains these fields in the record.
 // No reservation is stored here: the message record itself owns the key.
+// There is no TTL or process-lifetime reset: retain this metadata alongside the
+// transcript for messages AND task creation records. File-backed SQLite and
+// PostgreSQL restore it on Load after reopen; JSONL restores it from its log.
+// SQLite :memory: intentionally loses the entire session on process exit.
 const messageRequestSchema = `CREATE TABLE IF NOT EXISTS chat_message_requests (
 	session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
 	message_id TEXT NOT NULL,

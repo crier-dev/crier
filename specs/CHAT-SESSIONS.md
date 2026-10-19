@@ -228,6 +228,48 @@ append answer bubbles or increment delivered/skipped counts. See
 `CHAT-INTERFACE.md` §Delivery cuts and retry evidence for timeout remedies and
 same-key retry behavior; `canned` / `failed` runtime verdicts remain unchanged.
 
+### 3.2.1 Request-key replay across restart (DF-CRIER-357)
+
+A nonempty `idempotency_key` on a session message or task creation identifies
+one recorded intent within that session. A successful send followed by the same
+key returns the recorded message id, sequence, thread, outcomes and (for tasks)
+task creation result, without another delivery or task trigger. Another key or
+another session is independent. This is separate from the per-target inbox
+idempotency window in §3.4: an expired or empty registry receipt cache must not
+cause a confirmed session send to execute again.
+
+The replay authority is durable, not a process-local reservation map:
+
+- SQLite and PostgreSQL keep the key and original outcome metadata in
+  `chat_message_requests`, joined to `chat_transcript` and `chat_deliveries` when
+  loading a session. The message intent and request metadata commit in one
+  transaction; failure to persist metadata rolls the intent back. Both the pgx
+  and database/sql PostgreSQL adapters implement this contract.
+- JSONL keeps `idempotency_key` and outcomes in the fsynced session message
+  record; keep-LAST restores the outcome write-back on reopen.
+- There is no separate configured session memory backend. SQLite `:memory:` is
+  deliberately process-local: closing it loses the session and its replay
+  metadata together. The registry may independently be in-memory; that does not
+  weaken a durable session backend's replay contract.
+
+There is **no request-key expiry/TTL**. Metadata is retained with the session
+transcript, including task creation records after later lifecycle transitions.
+Restart, deploy, handler replacement and receipt-cache expiry do not forget it.
+This does not recover keys lost by a pre-metadata version of the SQL projection,
+restore missing storage, or promise exactly-once execution by a remote agent.
+A crash after intent persistence but before outcome persistence leaves a visible
+incomplete intent: a keyed retry replays it without speculative re-execution.
+The existing explicit all-negative message retry (`refused`, `failed` or
+`budget_cut` only) can re-deliver that same intent; this is not a successful-send
+replay and does not allocate a second message. Task creation retries never
+re-deliver or re-trigger, including negative outcomes.
+
+The repository lock spans lookup, intent persistence, delivery and outcome
+persistence. File locks coordinate JSONL/file-backed SQLite handles and
+processes; PostgreSQL uses dedicated advisory-lock connections. Message retries
+wait then replay; task retries in flight return 409. Process death releases the
+lock, not the recorded key.
+
 ### 3.3 The transcript is a view, not a second store of messages
 
 The transcript's records are **the room's own ordered log**; the *messages* they describe are delivered

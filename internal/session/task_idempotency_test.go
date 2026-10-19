@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,19 +133,28 @@ func runTaskRequestIdempotency(t *testing.T, backends []localBackend) {
 				t.Run(tc.name, func(t *testing.T) {
 					path := backend.pathFn(t)
 					store := backend.open(t, path)
-					h := newAPIHarness(t, store)
+					var calls atomic.Int32
+					h := newRequestExecutionHarness(t, store, &calls)
 					room := h.createRoom(t)
 					req := keyedTaskRequest(tc.first)
 					var first, second taskCreateResponse
 					require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room+"/tasks", req, &first, nil))
 					require.NotEmpty(t, first.TaskID)
 					require.Equal(t, "open", first.State)
+					require.EqualValues(t, 1, calls.Load())
+					if tc.first != "" {
+						require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room+"/tasks", req, &second, nil))
+						require.Equal(t, first, second)
+						require.EqualValues(t, 1, calls.Load(), "same-process task retry must not execute")
+					}
 					require.NoError(t, store.Close())
 					reopened := backend.open(t, path)
 					t.Cleanup(func() { _ = reopened.Close() })
-					h2 := newAPIHarness(t, reopened)
+					h2 := newRequestExecutionHarness(t, reopened, &calls)
 					req.IdempotencyKey = tc.second
 					require.Equal(t, http.StatusCreated, h2.do(t, http.MethodPost, "/sessions/"+room+"/tasks", req, &second, nil))
+					require.EqualValues(t, tc.want, calls.Load(), "reopened task request must not dispatch twice")
+					t.Logf("target invocations before reopen=1 after=%d", calls.Load())
 					st, err := reopened.Load(t.Context(), room)
 					require.NoError(t, err)
 					require.Len(t, st.Messages, tc.want)

@@ -21,6 +21,33 @@ func TestMessageRequestIdempotency(t *testing.T) {
 	runMessageRequestIdempotency(t, localBackends())
 }
 
+// Count the delivery seam itself, not just transcript rows: a duplicate harness
+// invocation can be hidden by downstream inbox deduplication (DF-CRIER-357).
+type requestExecutionCounter struct {
+	*registry.MemoryStore
+	calls *atomic.Int32
+}
+
+func (d requestExecutionCounter) Deliver(target string, entry *registry.InboxEntry) error {
+	d.calls.Add(1)
+	return d.MemoryStore.Deliver(target, entry)
+}
+
+func newRequestExecutionHarness(t *testing.T, store Repository, calls *atomic.Int32) *apiHarness {
+	t.Helper()
+	reg := registry.NewMemoryStore()
+	for _, id := range []string{"atlas", "nimbus"} {
+		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
+	}
+	router := mux.NewRouter()
+	registerSessionRoutes(router, NewHTTPHandler(store, HTTPOptions{
+		Deliverer: requestExecutionCounter{MemoryStore: reg, calls: calls}, Agents: reg,
+	}))
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	return &apiHarness{srv: srv, reg: reg}
+}
+
 func runMessageRequestIdempotency(t *testing.T, backends []localBackend) {
 	for _, backend := range backends {
 		t.Run(backend.name, func(t *testing.T) {
@@ -35,17 +62,25 @@ func runMessageRequestIdempotency(t *testing.T, backends []localBackend) {
 				t.Run(tc.name, func(t *testing.T) {
 					path := backend.pathFn(t)
 					store := backend.open(t, path)
-					h := newAPIHarness(t, store)
+					var calls atomic.Int32
+					h := newRequestExecutionHarness(t, store, &calls)
 					room := h.createRoom(t)
 					req := postMessageRequest{Sender: "atlas", Payload: json.RawMessage(`{"text":"hello"}`), IdempotencyKey: tc.first}
 					first := h.postTo(t, room, req)
+					require.EqualValues(t, 1, calls.Load())
+					if tc.first != "" {
+						require.Equal(t, first.ID, h.postTo(t, room, req).ID)
+						require.EqualValues(t, 1, calls.Load(), "same-process retry must not execute")
+					}
 					require.NoError(t, store.Close())
 					// A fresh store AND handler must recover the key and outcomes.
 					reopened := backend.open(t, path)
 					t.Cleanup(func() { _ = reopened.Close() })
-					h2 := newAPIHarness(t, reopened)
+					h2 := newRequestExecutionHarness(t, reopened, &calls)
 					req.IdempotencyKey = tc.second
 					second := h2.postTo(t, room, req)
+					require.EqualValues(t, tc.want, calls.Load(), "reopened store must recover the request before dispatch")
+					t.Logf("target invocations before reopen=1 after=%d", calls.Load())
 					st, err := reopened.Load(context.Background(), room)
 					require.NoError(t, err)
 					require.Len(t, st.Messages, tc.want)
