@@ -1,0 +1,46 @@
+[
+  {
+    "deployment": "empty",
+    "width": 1280,
+    "words": "Federation: require-peer configured but inert (0 peers) — token-only inbound accepted",
+    "overflow": 0,
+    "inboxStatus": 201,
+    "configured": true,
+    "effective": false,
+    "peers": 0,
+    "bootLine": "time=2026-10-19T13:23:28.488-05:00 level=INFO msg=\"federation inbound posture\" require_peer_configured=true require_peer_effective=false peers=0 token_only_accepted=true"
+  },
+  {
+    "deployment": "empty",
+    "width": 390,
+    "words": "Federation: require-peer configured but inert (0 peers) — token-only inbound accepted",
+    "overflow": 0,
+    "inboxStatus": 201,
+    "configured": true,
+    "effective": false,
+    "peers": 0,
+    "bootLine": "time=2026-10-19T13:23:28.488-05:00 level=INFO msg=\"federation inbound posture\" require_peer_configured=true require_peer_effective=false peers=0 token_only_accepted=true"
+  },
+  {
+    "deployment": "linked",
+    "width": 1280,
+    "words": "Federation: strict (1 peer)",
+    "overflow": 0,
+    "inboxStatus": 403,
+    "configured": true,
+    "effective": true,
+    "peers": 1,
+    "bootLine": "time=2026-10-19T13:23:29.296-05:00 level=INFO msg=\"federation inbound posture\" require_peer_configured=true require_peer_effective=true peers=1 token_only_accepted=false"
+  },
+  {
+    "deployment": "linked",
+    "width": 390,
+    "words": "Federation: strict (1 peer)",
+    "overflow": 0,
+    "inboxStatus": 403,
+    "configured": true,
+    "effective": true,
+    "peers": 1,
+    "bootLine": "time=2026-10-19T13:23:29.296-05:00 level=INFO msg=\"federation inbound posture\" require_peer_configured=true require_peer_effective=true peers=1 token_only_accepted=false"
+  }
+]

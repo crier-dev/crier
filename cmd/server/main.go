@@ -605,10 +605,22 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		slog.Error("federation peers", "error", peerErr)
 		return 1
 	}
-	slog.Info("federation inbound posture", "require_peer_when_configured", cfg.Federation.RequirePeer)
 	if peerService != nil {
 		fedRecordGate = peerService.Store
 	}
+	// Read the SAME live store the ingress middleware consults, never link URLs
+	// or a second store. A requested requirement can be inert (including when
+	// lifecycle storage is disabled); only the actual gate can report effect.
+	readFedPosture := func() federation.InboundPosture {
+		p := fedRecordGate.InboundPosture()
+		p.RequirePeerConfigured = cfg.Federation.RequirePeer
+		return p
+	}
+	inboundPosture := readFedPosture()
+	slog.Info("federation inbound posture",
+		"require_peer_configured", inboundPosture.RequirePeerConfigured,
+		"require_peer_effective", inboundPosture.RequirePeerEffective,
+		"peers", inboundPosture.Peers, "token_only_accepted", inboundPosture.TokenOnlyAccepted)
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
 		fedClient.SetPeerPolicies(fedPeers)
@@ -922,7 +934,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		return false, false
 	}
 	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
-		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler)).Methods("GET")
+		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture)).Methods("GET")
 
 	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
 	// OPT-IN extra, and the only A2A surface any row of this series has

@@ -79,6 +79,10 @@ var statusTopLevelKeys = []string{
 	"federation_enabled",
 	"federation_hold_queue",
 	"federation_require_peer",
+	"federation_require_peer_configured",
+	"federation_require_peer_effective",
+	"federation_peer_count",
+	"federation_token_only_accepted",
 	// CR-FEAT-035: the effective global inbox-ingest budget (posture) and the
 	// LIVE store-wide queue measurement. Both are documented in
 	// docs/openapi.yaml's /status schema; adding one here without adding it

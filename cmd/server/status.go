@@ -9,6 +9,7 @@ import (
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -263,10 +264,11 @@ type statusAggregator interface {
 	CountAgentsForStatus(now time.Time) registry.AgentsOnlineCount
 }
 
-// statusResponse is the wire contract of GET /status. Every field is an
-// effective boolean or mode — see the file comment for what is deliberately
-// absent. The Build object is buildinfo.Info itself, which is the same type
-// GET /version serializes, so the two surfaces cannot disagree about which
+// statusResponse is the wire contract of GET /status. Fields distinguish
+// configuration, effective gate state and live counts — see the file comment
+// for what is deliberately absent. The Build object is buildinfo.Info itself,
+// which is the same type GET /version serializes, so the two surfaces cannot
+// disagree about which
 // build is answering (DF-CRIER-101/127); it is nested rather than flattened so
 // the build identity stays one object on both endpoints.
 type statusResponse struct {
@@ -361,9 +363,17 @@ type statusResponse struct {
 	// (CR_FED_LINKS). FederationHoldQueue is the durability mode of the hold
 	// path in force: "none" (no links), "memory" (process-lifetime) or
 	// "file" (survives a restart).
-	FederationRequirePeer bool   `json:"federation_require_peer"`
-	FederationEnabled     bool   `json:"federation_enabled"`
-	FederationHoldQueue   string `json:"federation_hold_queue"`
+	// FederationRequirePeer is the legacy CONFIGURATION alias, retained for
+	// compatibility. The explicit pair distinguishes intent from the live gate.
+	FederationRequirePeer           bool `json:"federation_require_peer"`
+	FederationRequirePeerConfigured bool `json:"federation_require_peer_configured"`
+	FederationRequirePeerEffective  bool `json:"federation_require_peer_effective"`
+	// Count all lifecycle records, not discovery URLs or only linked peers.
+	FederationPeerCount int `json:"federation_peer_count"`
+	// Acceptance by the federation gate; deployment auth/policy may still refuse.
+	FederationTokenOnlyAccepted bool   `json:"federation_token_only_accepted"`
+	FederationEnabled           bool   `json:"federation_enabled"`
+	FederationHoldQueue         string `json:"federation_hold_queue"`
 	// MetricsEnabled and PProfEnabled report whether the opt-in inspection
 	// surfaces (DF-CRIER-142) are registered. False means the paths answer
 	// 404, which is a different posture from "registered but empty".
@@ -418,15 +428,19 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		// resolves it (registry.Presence.StaleAfter) — so an unset or
 		// malformed-shaped setting reports the window actually in force rather
 		// than a zero the derivation never uses (CR-FEAT-024).
-		PresenceStaleAfterS:   int(registry.NewPresence(cfg.PresenceStaleAfter).StaleAfter().Seconds()),
-		RegistryBackend:       registryBackend,
-		RateLimitPerMinute:    cfg.RateLimitPerMinute,
-		LogLevel:              cfg.LogLevel,
-		LogFormat:             cfg.LogFormat,
-		WebhookSigning:        cfg.Webhook.Secret != "",
-		FederationRequirePeer: cfg.Federation.RequirePeer,
-		FederationEnabled:     len(cfg.Federation.Links) > 0,
-		FederationHoldQueue:   federationHoldQueueMode(cfg),
+		PresenceStaleAfterS:             int(registry.NewPresence(cfg.PresenceStaleAfter).StaleAfter().Seconds()),
+		RegistryBackend:                 registryBackend,
+		RateLimitPerMinute:              cfg.RateLimitPerMinute,
+		LogLevel:                        cfg.LogLevel,
+		LogFormat:                       cfg.LogFormat,
+		WebhookSigning:                  cfg.Webhook.Secret != "",
+		FederationRequirePeer:           cfg.Federation.RequirePeer,
+		FederationRequirePeerConfigured: cfg.Federation.RequirePeer,
+		// No live gate is wired to this pure builder: never infer effect
+		// from config, link URLs or a file path. The handler samples it below.
+		FederationTokenOnlyAccepted: true,
+		FederationEnabled:           len(cfg.Federation.Links) > 0,
+		FederationHoldQueue:         federationHoldQueueMode(cfg),
 		// The global ingest budget (CR-FEAT-035). Read from the same
 		// configuration the handler was installed from, so a server that had
 		// no budget installed cannot advertise one.
@@ -480,9 +494,16 @@ func newQueueHistory() *queueHistory { return &queueHistory{} }
 // null history; no probe → "ok" (nothing known to be wrong); no aggregator →
 // agents_online 0 / agents_total 0 (a server that mounts no registry Handler
 // has no fleet to count — the zero figure is the true one, never a guess).
-func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator) http.HandlerFunc {
+func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator, federationPosture ...func() federation.InboundPosture) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := buildStatusResponse(cfg, registryBackend)
+		if len(federationPosture) > 0 && federationPosture[0] != nil {
+			p := federationPosture[0]()
+			resp.FederationRequirePeerConfigured = p.RequirePeerConfigured
+			resp.FederationRequirePeerEffective = p.RequirePeerEffective
+			resp.FederationPeerCount = p.Peers
+			resp.FederationTokenOnlyAccepted = p.TokenOnlyAccepted
+		}
 		if depth, ok := statusQueueDepthValue(read); ok {
 			resp.QueueDepth = depth
 			// Sample the history from the SAME measurement this response

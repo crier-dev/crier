@@ -268,7 +268,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   management_surface:
                     type: string
@@ -490,7 +490,20 @@ paths:
                     example: false
                   federation_require_peer:
                     type: boolean
-                    description: Refuse token-only inbound inbox requests when lifecycle peer records exist. CR_FED_REQUIRE_PEER defaults false; an empty peer store retains legacy auth.
+                    description: Legacy configuration alias for federation_require_peer_configured; not a claim of effective enforcement. CR_FED_REQUIRE_PEER defaults false
+                  federation_require_peer_configured:
+                    type: boolean
+                    description: Configured CR_FED_REQUIRE_PEER flag, even when lifecycle storage is disabled or empty
+                  federation_require_peer_effective:
+                    type: boolean
+                    description: True only when the live inbound lifecycle gate requires peer proof and contains at least one record. Pending and revoked records also arm the gate; empty or disabled stores never do
+                  federation_peer_count:
+                    type: integer
+                    minimum: 0
+                    description: Live lifecycle record count in the inbound gate, including pending, linked and revoked records; not discovery links or policy entries
+                  federation_token_only_accepted:
+                    type: boolean
+                    description: Token-only inbound is accepted by the federation identity gate (the inverse of federation_require_peer_effective); deployment auth, signatures and policy may still refuse the request
                   federation_hold_queue:
                     type: string
                     enum: [none, memory, file]

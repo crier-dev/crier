@@ -25,12 +25,12 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 				return
 			}
 			store := getStore()
-			configured := store != nil && len(store.List()) > 0
+			posture := store.InboundPosture()
 			peer := r.Header.Get(PeerHeader)
 			v := FedTokenOnly
 			if peer != "" && store != nil {
 				v = store.VerifyDelivery(r)
-			} else if configured && store.requiresPeer() {
+			} else if posture.RequirePeerEffective {
 				v = FedNoLink
 			}
 			// Inbox responses are finite JSON receipts, never streaming routes. Capture
@@ -43,7 +43,7 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 			completed := false
 			defer func() {
 				if completed {
-					receipt.finish(v, configured)
+					receipt.finish(v, posture.Peers > 0)
 				} else {
 					// Preserve the outer recovery middleware's authority: never flush
 					// a buffered success while unwinding a downstream panic.

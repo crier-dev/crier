@@ -131,10 +131,33 @@ func (s *PeerStore) SetRequirePeer(required bool) {
 	defer s.mu.Unlock()
 	s.requirePeer = required
 }
-func (s *PeerStore) requiresPeer() bool {
+
+// InboundPosture is a secret-free snapshot of the keyless inbox requirement.
+// Peers counts ALL lifecycle records, including pending and revoked records:
+// these arm the existing refusal just as linked records do.
+// TokenOnlyAccepted describes this gate, not downstream deployment authorization.
+type InboundPosture struct {
+	RequirePeerConfigured bool
+	RequirePeerEffective  bool
+	Peers                 int
+	TokenOnlyAccepted     bool
+}
+
+// InboundPosture derives reporting and enforcement from one locked snapshot.
+// A nil store has no refusal gate, even if the deployment requested one.
+func (s *PeerStore) InboundPosture() InboundPosture {
+	if s == nil {
+		return InboundPosture{TokenOnlyAccepted: true}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.requirePeer
+	effective := s.requirePeer && len(s.peers) > 0
+	return InboundPosture{
+		RequirePeerConfigured: s.requirePeer,
+		RequirePeerEffective:  effective,
+		Peers:                 len(s.peers),
+		TokenOnlyAccepted:     !effective,
+	}
 }
 
 func (s *PeerStore) List() []PeerRecord {
