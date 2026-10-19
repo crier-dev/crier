@@ -40,6 +40,8 @@ func Auth(authToken string) func(http.Handler) http.Handler {
 //     passed straight through so the handler answers its named 403
 //     MANAGEMENT_FORBIDDEN — a reach credential is not an admin credential —
 //     and the admin token reaches the handler, which re-checks it.
+//   - GET /status accepts either token so its viewer-specific management
+//     posture can reflect the same admin credential as the read routes.
 //   - on every other path, only the message token is accepted. Presenting the
 //     admin token there is answered 403 (the credential is recognized, it is
 //     simply not a credential for that surface) rather than 401.
@@ -95,7 +97,9 @@ func AuthTokens(authToken, managementToken string) func(http.Handler) http.Handl
 
 			if managementToken != "" &&
 				subtle.ConstantTimeCompare([]byte(token), []byte(managementToken)) == 1 {
-				if management {
+				if management || (r.Method == http.MethodGet && r.URL.Path == "/status") {
+					// The read-only status projection uses this SAME request's
+					// admin gate decision. No relay/session/registry reach granted.
 					next.ServeHTTP(w, r)
 					return
 				}

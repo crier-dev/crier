@@ -260,7 +260,10 @@ paths:
         CR_FED_QUEUE_FILE path, so no filesystem or host detail is exposed.
 
         Not auth-exempt: requires `Authorization: Bearer <CR_AUTH_TOKEN>` when
-        CR_AUTH_TOKEN is set, and answers 401 without it.
+        CR_AUTH_TOKEN is set, and answers 401 without it. GET /status also accepts
+        CR_PERMISSIONS_ADMIN_TOKEN for viewer-specific management posture only;
+        this exception grants no relay, session or registry reach. Responses are
+        Cache-Control: no-store and Vary: Authorization.
       responses:
         "200":
           description: Effective runtime posture
@@ -272,8 +275,8 @@ paths:
                 properties:
                   management_surface:
                     type: string
-                    enum: [disabled, admin-token-gated]
-                    description: Permissions management authority; admin-token-gated only when CR_PERMISSIONS_ENABLED is true and CR_PERMISSIONS_ADMIN_TOKEN is nonempty, otherwise disabled (routes remain registered but refuse management). Never exposes the token or any token-derived value
+                    enum: [disabled, enabled-unarmed, admin-token-gated]
+                    description: "Viewer-specific permissions management posture. disabled means CR_PERMISSIONS_ENABLED is off. enabled-unarmed means the delivery ACL is live but management reads refuse this viewer (CR_PERMISSIONS_ADMIN_TOKEN unset, missing or incorrect Bearer). admin-token-gated means the ACL is live and this request passes the same admin gate as management reads; store failures are still possible and remain visible in the panels. Original disabled and admin-token-gated wire values remain supported. No credential or token-derived value is exposed."
                   auth_enabled:
                     type: boolean
                     description: True when a Bearer token is enforced (CR_AUTH_TOKEN set); false is the documented development posture

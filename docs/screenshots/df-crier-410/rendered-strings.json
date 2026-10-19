@@ -1,0 +1,477 @@
+[
+  {
+    "label": "real-admin-unset-refusals-and-zero-peers",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: enabled · A2A: disabled · Management: disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "refused",
+        "text": "Refused — GET /principals (HTTP 403)\nthe permissions management surface is not armed\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-bindings": {
+        "state": "refused",
+        "text": "Refused — GET /bindings (HTTP 403)\nthe permissions management surface is not armed\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-grants": {
+        "state": "refused",
+        "text": "Refused — GET /grants (HTTP 403)\nthe permissions management surface is not armed\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-anchors": {
+        "state": "refused",
+        "text": "Refused — GET /trust/anchors (HTTP 403)\ntrust records require a distinct CR_PERMISSIONS_ADMIN_TOKEN\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-peers": {
+        "state": "empty",
+        "text": "Empty — GET /fed/peers succeeded. No federation peers returned (0 peers)."
+      },
+      "management-class": {
+        "state": "refused",
+        "text": "Refused — GET /agents/test-management-agent/class (HTTP 403)\nthe permissions management surface is not armed\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-chain": {
+        "state": "populated",
+        "text": "Populated — POST /trust/verify succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nverdict\tbasis\tanchor_id\tdepth\tlink\tmissing_capability\nTRUST_UNKNOWN_ANCHOR\tnot reported\tnot reported\t0\tnot reported\tnot reported\n\nBasis: not reported by server — No basis explanation reported; inspect the verdict and chain evidence."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: false · Token-only inbound accepted: true · Lifecycle peer records: 0"
+      }
+    }
+  },
+  {
+    "label": "enabled-no-admin-configured",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: enabled but not armed for this viewer — ACL live; management reads refused. Configure CR_PERMISSIONS_ADMIN_TOKEN and supply it as Bearer on management reads and /status. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "refused",
+        "text": "Refused — GET /principals (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-bindings": {
+        "state": "refused",
+        "text": "Refused — GET /bindings (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-grants": {
+        "state": "refused",
+        "text": "Refused — GET /grants (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-anchors": {
+        "state": "refused",
+        "text": "Refused — GET /trust/anchors (HTTP 403)\ntrust records require a distinct CR_PERMISSIONS_ADMIN_TOKEN\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-peers": {
+        "state": "refused",
+        "text": "Refused — GET /fed/peers (HTTP 403)\nHTTP 403: FED_OPERATOR_REQUIRED\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-class": {
+        "text": "No agent class query submitted."
+      },
+      "management-chain": {
+        "text": "No chain query submitted."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: false · Token-only inbound accepted: true · Lifecycle peer records: 0"
+      }
+    }
+  },
+  {
+    "label": "configured-token-not-supplied",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: enabled but not armed for this viewer — ACL live; management reads refused. Configure CR_PERMISSIONS_ADMIN_TOKEN and supply it as Bearer on management reads and /status. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "refused",
+        "text": "Refused — GET /principals (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-bindings": {
+        "state": "refused",
+        "text": "Refused — GET /bindings (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-grants": {
+        "state": "refused",
+        "text": "Refused — GET /grants (HTTP 403)\nan admin token is required (CR_PERMISSIONS_ADMIN_TOKEN)\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-anchors": {
+        "state": "refused",
+        "text": "Refused — GET /trust/anchors (HTTP 403)\ntrust records require a distinct CR_PERMISSIONS_ADMIN_TOKEN\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-peers": {
+        "state": "refused",
+        "text": "Refused — GET /fed/peers (HTTP 403)\nHTTP 403: FED_OPERATOR_REQUIRED\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-class": {
+        "text": "No agent class query submitted."
+      },
+      "management-chain": {
+        "text": "No chain query submitted."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: false · Token-only inbound accepted: true · Lifecycle peer records: 0"
+      }
+    }
+  },
+  {
+    "label": "real-armed-empty-lists",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "empty",
+        "text": "Empty — GET /principals succeeded. No principals returned."
+      },
+      "management-bindings": {
+        "state": "empty",
+        "text": "Empty — GET /bindings succeeded. No bindings returned."
+      },
+      "management-grants": {
+        "state": "empty",
+        "text": "Empty — GET /grants succeeded. No current grants returned."
+      },
+      "management-anchors": {
+        "state": "empty",
+        "text": "Empty — GET /trust/anchors succeeded. No trust anchors returned."
+      },
+      "management-peers": {
+        "state": "empty",
+        "text": "Empty — GET /fed/peers succeeded. No federation peers returned (0 peers)."
+      },
+      "management-class": {
+        "text": "No agent class query submitted."
+      },
+      "management-chain": {
+        "text": "No chain query submitted."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: false · Token-only inbound accepted: true · Lifecycle peer records: 0"
+      }
+    }
+  },
+  {
+    "label": "real-populated-and-chain-only",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "populated",
+        "text": "Populated — GET /principals succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tdisplay_name\tnamespace\trole\tstatus\tcreated_at\nprin_4353119f61b100dae24105d4\tprincipal\tBrowser test holder\ttest-realm\towner\tactive\t2026-10-19T20:28:31.633647434Z"
+      },
+      "management-bindings": {
+        "state": "populated",
+        "text": "Populated — GET /bindings succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tagent\tas_agent\tcreated_at\tcreated_by\nbind_17f9d3d31f9e856b602e951d\tbinding\tprin_4353119f61b100dae24105d4\ttest-management-agent\ttrue\t2026-10-19T20:28:31.639951549Z\tadmin"
+      },
+      "management-grants": {
+        "state": "populated",
+        "text": "Populated — GET /grants succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tsubject\tactions\tgranted_by\tgranted_at\texpires_at\ngrant_4dd13f9a8842bdae7e65a463\tgrant\tprin_4353119f61b100dae24105d4\t{\"type\":\"agent\",\"ref\":\"test-management-agent\"}\t[\"send\"]\tadmin\t2026-10-19T20:28:31.644828411Z\tnull (no value)"
+      },
+      "management-anchors": {
+        "state": "populated",
+        "text": "Populated — GET /trust/anchors succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tlabel\tscope\tcreated_at\tpublic_key\nbrowser-anchor\tBrowser test anchor\tnot reported\t2026-10-19T20:28:31.656277Z\t420eb15a92269c247622f8ca39fb40d1e727f13c024157504cf9c9a393f1db1a"
+      },
+      "management-peers": {
+        "state": "populated",
+        "text": "Populated — GET /fed/peers succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tname\tlabel\turl\tstate\tpublic_key\tkey_id\tdirection\tcreated_at\tupdated_at\nbrowser-peer\tnot reported\tBrowser test peer\thttp://127.0.0.1:1\tpending\tae399288f6411095a561c412797de2ed97e20bce80f94ee2d4768afd2b7fbed9\tfacaf64717291c47\tboth\t2026-10-19T20:28:31.657141134Z\t2026-10-19T20:28:31.657141134Z"
+      },
+      "management-class": {
+        "state": "populated",
+        "text": "Populated — GET /agents/test-management-agent/class succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tclass\towner\tnamespace\tcapabilities\tscopes\ntest-management-agent\tpersonal\tprin_4353119f61b100dae24105d4\tnot reported\tnot reported\tnot reported"
+      },
+      "management-chain": {
+        "state": "populated",
+        "text": "Populated — POST /trust/verify succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nverdict\tbasis\tanchor_id\tdepth\tlink\tmissing_capability\nTRUST_CHAIN_REACHABLE\tchain-only\tbrowser-anchor\t0\tnot reported\tnot reported\n\nBasis: chain-only — Chain reachability only; no eligible possession challenge."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "real-chain-proof-invalid-signature",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "populated",
+        "text": "Populated — GET /principals succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tdisplay_name\tnamespace\trole\tstatus\tcreated_at\nprin_4353119f61b100dae24105d4\tprincipal\tBrowser test holder\ttest-realm\towner\tactive\t2026-10-19T20:28:31.633647434Z"
+      },
+      "management-bindings": {
+        "state": "populated",
+        "text": "Populated — GET /bindings succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tagent\tas_agent\tcreated_at\tcreated_by\nbind_17f9d3d31f9e856b602e951d\tbinding\tprin_4353119f61b100dae24105d4\ttest-management-agent\ttrue\t2026-10-19T20:28:31.639951549Z\tadmin"
+      },
+      "management-grants": {
+        "state": "populated",
+        "text": "Populated — GET /grants succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tsubject\tactions\tgranted_by\tgranted_at\texpires_at\ngrant_4dd13f9a8842bdae7e65a463\tgrant\tprin_4353119f61b100dae24105d4\t{\"type\":\"agent\",\"ref\":\"test-management-agent\"}\t[\"send\"]\tadmin\t2026-10-19T20:28:31.644828411Z\tnull (no value)"
+      },
+      "management-anchors": {
+        "state": "populated",
+        "text": "Populated — GET /trust/anchors succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tlabel\tscope\tcreated_at\tpublic_key\nbrowser-anchor\tBrowser test anchor\tnot reported\t2026-10-19T20:28:31.656277Z\t420eb15a92269c247622f8ca39fb40d1e727f13c024157504cf9c9a393f1db1a"
+      },
+      "management-peers": {
+        "state": "populated",
+        "text": "Populated — GET /fed/peers succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tname\tlabel\turl\tstate\tpublic_key\tkey_id\tdirection\tcreated_at\tupdated_at\nbrowser-peer\tnot reported\tBrowser test peer\thttp://127.0.0.1:1\tpending\tae399288f6411095a561c412797de2ed97e20bce80f94ee2d4768afd2b7fbed9\tfacaf64717291c47\tboth\t2026-10-19T20:28:31.657141134Z\t2026-10-19T20:28:31.657141134Z"
+      },
+      "management-class": {
+        "state": "populated",
+        "text": "Populated — GET /agents/test-management-agent/class succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tclass\towner\tnamespace\tcapabilities\tscopes\ntest-management-agent\tpersonal\tprin_4353119f61b100dae24105d4\tnot reported\tnot reported\tnot reported"
+      },
+      "management-chain": {
+        "state": "populated",
+        "text": "Populated — POST /trust/verify succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nverdict\tbasis\tanchor_id\tdepth\tlink\tmissing_capability\nTRUST_CHAIN_REACHABLE\tproof-invalid-signature\tbrowser-anchor\t0\tnot reported\tnot reported\n\nBasis: proof-invalid-signature — Possession proof missing, stale, malformed, unbound or invalid."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "real-chain-possession-verified",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "populated",
+        "text": "Populated — GET /principals succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tdisplay_name\tnamespace\trole\tstatus\tcreated_at\nprin_4353119f61b100dae24105d4\tprincipal\tBrowser test holder\ttest-realm\towner\tactive\t2026-10-19T20:28:31.633647434Z"
+      },
+      "management-bindings": {
+        "state": "populated",
+        "text": "Populated — GET /bindings succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tagent\tas_agent\tcreated_at\tcreated_by\nbind_17f9d3d31f9e856b602e951d\tbinding\tprin_4353119f61b100dae24105d4\ttest-management-agent\ttrue\t2026-10-19T20:28:31.639951549Z\tadmin"
+      },
+      "management-grants": {
+        "state": "populated",
+        "text": "Populated — GET /grants succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tsubject\tactions\tgranted_by\tgranted_at\texpires_at\ngrant_4dd13f9a8842bdae7e65a463\tgrant\tprin_4353119f61b100dae24105d4\t{\"type\":\"agent\",\"ref\":\"test-management-agent\"}\t[\"send\"]\tadmin\t2026-10-19T20:28:31.644828411Z\tnull (no value)"
+      },
+      "management-anchors": {
+        "state": "populated",
+        "text": "Populated — GET /trust/anchors succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tlabel\tscope\tcreated_at\tpublic_key\nbrowser-anchor\tBrowser test anchor\tnot reported\t2026-10-19T20:28:31.656277Z\t420eb15a92269c247622f8ca39fb40d1e727f13c024157504cf9c9a393f1db1a"
+      },
+      "management-peers": {
+        "state": "populated",
+        "text": "Populated — GET /fed/peers succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tname\tlabel\turl\tstate\tpublic_key\tkey_id\tdirection\tcreated_at\tupdated_at\nbrowser-peer\tnot reported\tBrowser test peer\thttp://127.0.0.1:1\tpending\tae399288f6411095a561c412797de2ed97e20bce80f94ee2d4768afd2b7fbed9\tfacaf64717291c47\tboth\t2026-10-19T20:28:31.657141134Z\t2026-10-19T20:28:31.657141134Z"
+      },
+      "management-class": {
+        "state": "populated",
+        "text": "Populated — GET /agents/test-management-agent/class succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tclass\towner\tnamespace\tcapabilities\tscopes\ntest-management-agent\tpersonal\tprin_4353119f61b100dae24105d4\tnot reported\tnot reported\tnot reported"
+      },
+      "management-chain": {
+        "state": "populated",
+        "text": "Populated — POST /trust/verify succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nverdict\tbasis\tanchor_id\tdepth\tlink\tmissing_capability\nTRUST_VERIFIED\tpossession-verified\tbrowser-anchor\t0\tnot reported\tnot reported\n\nBasis: possession-verified — Leaf proof verified and current registry key matches."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "real-chain-proof-registry-key-mismatch",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "populated",
+        "text": "Populated — GET /principals succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tdisplay_name\tnamespace\trole\tstatus\tcreated_at\nprin_4353119f61b100dae24105d4\tprincipal\tBrowser test holder\ttest-realm\towner\tactive\t2026-10-19T20:28:31.633647434Z"
+      },
+      "management-bindings": {
+        "state": "populated",
+        "text": "Populated — GET /bindings succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tagent\tas_agent\tcreated_at\tcreated_by\nbind_17f9d3d31f9e856b602e951d\tbinding\tprin_4353119f61b100dae24105d4\ttest-management-agent\ttrue\t2026-10-19T20:28:31.639951549Z\tadmin"
+      },
+      "management-grants": {
+        "state": "populated",
+        "text": "Populated — GET /grants succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tkind\tprincipal\tsubject\tactions\tgranted_by\tgranted_at\texpires_at\ngrant_4dd13f9a8842bdae7e65a463\tgrant\tprin_4353119f61b100dae24105d4\t{\"type\":\"agent\",\"ref\":\"test-management-agent\"}\t[\"send\"]\tadmin\t2026-10-19T20:28:31.644828411Z\tnull (no value)"
+      },
+      "management-anchors": {
+        "state": "populated",
+        "text": "Populated — GET /trust/anchors succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tlabel\tscope\tcreated_at\tpublic_key\nbrowser-anchor\tBrowser test anchor\tnot reported\t2026-10-19T20:28:31.656277Z\t420eb15a92269c247622f8ca39fb40d1e727f13c024157504cf9c9a393f1db1a"
+      },
+      "management-peers": {
+        "state": "populated",
+        "text": "Populated — GET /fed/peers succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tname\tlabel\turl\tstate\tpublic_key\tkey_id\tdirection\tcreated_at\tupdated_at\nbrowser-peer\tnot reported\tBrowser test peer\thttp://127.0.0.1:1\tpending\tae399288f6411095a561c412797de2ed97e20bce80f94ee2d4768afd2b7fbed9\tfacaf64717291c47\tboth\t2026-10-19T20:28:31.657141134Z\t2026-10-19T20:28:31.657141134Z"
+      },
+      "management-class": {
+        "state": "populated",
+        "text": "Populated — GET /agents/test-management-agent/class succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nid\tclass\towner\tnamespace\tcapabilities\tscopes\ntest-management-agent\tpersonal\tprin_4353119f61b100dae24105d4\tnot reported\tnot reported\tnot reported"
+      },
+      "management-chain": {
+        "state": "populated",
+        "text": "Populated — POST /trust/verify succeeded. 1 record(s) returned.\nServer-returned records · omitted fields are not reported · scroll horizontally for all columns\nverdict\tbasis\tanchor_id\tdepth\tlink\tmissing_capability\nTRUST_CHAIN_REACHABLE\tproof-registry-key-mismatch\tbrowser-anchor\t0\tnot reported\tnot reported\n\nBasis: proof-registry-key-mismatch — Leaf proof verified, but the current registered key differs."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "injected-401",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "refused",
+        "text": "Refused — GET /principals (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-bindings": {
+        "state": "refused",
+        "text": "Refused — GET /bindings (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-grants": {
+        "state": "refused",
+        "text": "Refused — GET /grants (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-anchors": {
+        "state": "refused",
+        "text": "Refused — GET /trust/anchors (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-peers": {
+        "state": "refused",
+        "text": "Refused — GET /fed/peers (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-class": {
+        "state": "refused",
+        "text": "Refused — GET /agents/test-management-agent/class (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-chain": {
+        "state": "refused",
+        "text": "Refused — POST /trust/verify (HTTP 401)\nExact browser fault detail <img src=x onerror=alert(1)>.\nThis route uses ordinary deployment reach access, not CR_PERMISSIONS_ADMIN_TOKEN. Not retried automatically."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "injected-403",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "refused",
+        "text": "Refused — GET /principals (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-bindings": {
+        "state": "refused",
+        "text": "Refused — GET /bindings (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-grants": {
+        "state": "refused",
+        "text": "Refused — GET /grants (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-anchors": {
+        "state": "refused",
+        "text": "Refused — GET /trust/anchors (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-peers": {
+        "state": "refused",
+        "text": "Refused — GET /fed/peers (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-class": {
+        "state": "refused",
+        "text": "Refused — GET /agents/test-management-agent/class (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
+      },
+      "management-chain": {
+        "state": "refused",
+        "text": "Refused — POST /trust/verify (HTTP 403)\nExact browser fault detail <img src=x onerror=alert(1)>.\nThis route uses ordinary deployment reach access, not CR_PERMISSIONS_ADMIN_TOKEN. Not retried automatically."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "injected-503",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "error",
+        "text": "Error — GET /principals (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-bindings": {
+        "state": "error",
+        "text": "Error — GET /bindings (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-grants": {
+        "state": "error",
+        "text": "Error — GET /grants (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-anchors": {
+        "state": "error",
+        "text": "Error — GET /trust/anchors (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-peers": {
+        "state": "error",
+        "text": "Error — GET /fed/peers (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-class": {
+        "state": "error",
+        "text": "Error — GET /agents/test-management-agent/class (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-chain": {
+        "state": "error",
+        "text": "Error — POST /trust/verify (HTTP 503)\nExact browser fault detail <img src=x onerror=alert(1)>.\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "injected-network",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "error",
+        "text": "Error — GET /principals\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-bindings": {
+        "state": "error",
+        "text": "Error — GET /bindings\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-grants": {
+        "state": "error",
+        "text": "Error — GET /grants\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-anchors": {
+        "state": "error",
+        "text": "Error — GET /trust/anchors\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-peers": {
+        "state": "error",
+        "text": "Error — GET /fed/peers\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-class": {
+        "state": "error",
+        "text": "Error — GET /agents/test-management-agent/class\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-chain": {
+        "state": "error",
+        "text": "Error — POST /trust/verify\nFailed to fetch\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  },
+  {
+    "label": "injected-malformed",
+    "posture": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer. · Federation: require-peer configured but inert (0 peers) — token-only inbound accepted · Build: df410-working / 6863dc91 (modified)",
+    "panels": {
+      "management-principals": {
+        "state": "error",
+        "text": "Error — GET /principals\nInvalid list response from GET /principals\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-bindings": {
+        "state": "error",
+        "text": "Error — GET /bindings\nInvalid list response from GET /bindings\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-grants": {
+        "state": "error",
+        "text": "Error — GET /grants\nInvalid list response from GET /grants\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-anchors": {
+        "state": "error",
+        "text": "Error — GET /trust/anchors\nInvalid list response from GET /trust/anchors\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-peers": {
+        "state": "error",
+        "text": "Error — GET /fed/peers\nInvalid list response from GET /fed/peers\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-class": {
+        "state": "error",
+        "text": "Error — GET /agents/test-management-agent/class\nInvalid class response from /agents/test-management-agent/class\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-chain": {
+        "state": "error",
+        "text": "Error — POST /trust/verify\nInvalid verdict response from /trust/verify\nNo empty result is inferred. Refresh explicitly to try again."
+      },
+      "management-federation-posture": {
+        "text": "GET /status · Configured require-peer: true · Effective require-peer: true · Token-only inbound accepted: false · Lifecycle peer records: 1"
+      }
+    }
+  }
+]

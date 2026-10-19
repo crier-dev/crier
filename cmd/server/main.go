@@ -244,7 +244,8 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// CR_AUTH_TOKEN there made the whole surface unreachable, because one
 	// Authorization header cannot equal two secrets. Everywhere else the message
 	// token is still the only credential, and the admin token is refused with
-	// 403. middleware.AuthTokens' own predicate names the exempt routes.
+	// 403, except GET /status (read-only, viewer-specific management posture).
+	// middleware.AuthTokens' own predicate names the exempt routes.
 	var fedRecordGate *federation.PeerStore
 	r.Use(federation.DeliveryAuth(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken), func() *federation.PeerStore { return fedRecordGate }))
 	// Federation peer authentication (CR-CHAT-024): when CR_FED_AUTH_FILE is

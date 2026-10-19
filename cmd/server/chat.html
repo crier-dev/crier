@@ -645,8 +645,15 @@ function renderPosture(b) {
       ? "require-peer configured but inert (" + peerWords + ") — token-only inbound accepted"
       : b.federation_require_peer_configured === false && b.federation_token_only_accepted === true
         ? "token-only inbound accepted (" + peerWords + ")" : "unknown";
+  const management = b.management_surface === "disabled"
+    ? "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false)."
+    : b.management_surface === "enabled-unarmed"
+      ? "enabled but not armed for this viewer — ACL live; management reads refused. Configure CR_PERMISSIONS_ADMIN_TOKEN and supply it as Bearer on management reads and /status."
+      : b.management_surface === "admin-token-gated"
+        ? "admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer."
+        : "unknown";
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.registry_durable === false);
-  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + reported(b.session_backend) + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + (b.management_surface === "admin-token-gated" ? "admin-token gated" : b.management_surface === "disabled" ? "disabled" : "unknown") + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
+  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + reported(b.session_backend) + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
 }
 async function refresh() {
   if (state.sending) return;

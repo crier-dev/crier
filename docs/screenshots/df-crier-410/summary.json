@@ -1,0 +1,22 @@
+{
+  "pageErrors": [],
+  "viewports": [
+    390,
+    768,
+    1280
+  ],
+  "overflow": 0,
+  "realChecks": [
+    "three management postures: disabled, ACL-live/no-admin and unsupplied-admin refusals, authorized admin reads",
+    "admin unset: exact server refusals, zero peers, no automatic management retries",
+    "admin armed: empty then actual API-created records",
+    "real trust verdicts: all four bases, test-only signing gateway",
+    "configured true/effective false then true"
+  ],
+  "injections": [
+    "scratch admin gateway",
+    "fresh body-signature gateway for possession controls",
+    "401/403/503/network/malformed responses only in fault cells"
+  ],
+  "captures": 13
+}

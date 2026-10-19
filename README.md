@@ -1866,6 +1866,14 @@ All configuration is via environment variables (defaults shown):
 
 ### Delivery ACL — principals, roles and grants (CR-CHAT-003)
 
+The runtime `management_surface` field has three postures: `disabled` means the
+delivery ACL is off; `enabled-unarmed` means the ACL is live but this viewer
+cannot read permissions management (configure `CR_PERMISSIONS_ADMIN_TOKEN` and
+supply it as Bearer); `admin-token-gated` means this viewer passes the existing
+admin gate. Reads may still report storage errors. The chat banner uses this
+field, not route presence or sample records. The read-only status endpoint also
+accepts the admin token for this projection, without granting message reach.
+
 `CR_PERMISSIONS_ENABLED` arms the delivery ACL of
 [`specs/CHAT-PERMISSIONS.md`](specs/CHAT-PERMISSIONS.md) §6: *the permission
 model must let me talk to MY agents but NOT to YOURS* (§3.2). It is the inner
@@ -1904,8 +1912,9 @@ namespace membership is deliberately **not** blanket permission.
   who governs, so **a leaked message token cannot mint permissions**. A caller
   holding only the reach credential can deliver all day and is still refused
   `403 MANAGEMENT_FORBIDDEN` on every management write; a caller holding the
-  admin token is refused `403` on every non-management path, because the
-  credential is recognized and simply is not a credential for that surface.
+  admin token is refused `403` on every non-management path except the read-only
+  status projection (DF-CRIER-410), because the credential is recognized and
+  simply is not a credential for message reach.
   Setting the two to the same secret with `CR_PERMISSIONS_ENABLED` on is
   **refused at boot**, naming both variables — one `Authorization` header
   cannot equal two secrets, so a deployment that collapses the two roles is

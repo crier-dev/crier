@@ -13,7 +13,7 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   assert.equal(await page.locator('#posture').isVisible(),true);
   assert.match(await page.locator('#health').innerText(),/Health: ok.*agents are lost on restart/);
   const memoryLine = await page.locator('#posture').innerText();
-  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: disabled · Federation: token-only inbound accepted \(0 peers\) · Build: /);
+  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: disabled — delivery ACL off \(CR_PERMISSIONS_ENABLED=false\). · Federation: token-only inbound accepted \(0 peers\) · Build: /);
   assert.ok(memoryLine.includes(memory.build.version+' / '+memory.build.commit));
   await page.screenshot({path:path.join(evidence,'posture-memory.png'),fullPage:true});
   await page.locator('.runtime-posture').screenshot({path:path.join(evidence,'posture-memory-detail.png')});

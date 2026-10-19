@@ -280,9 +280,10 @@ type statusResponse struct {
 	// AuthEnabled reports whether a Bearer token is enforced (CR_AUTH_TOKEN
 	// non-empty). False is the documented development posture.
 	AuthEnabled bool `json:"auth_enabled"`
-	// ManagementSurface reports the permissions management authority, not
-	// mere route registration: disabled unless both the ACL and admin token
-	// are armed. No credential or token-derived value is exposed.
+	// ManagementSurface distinguishes the disabled ACL from a live ACL whose
+	// management gate refuses this viewer (enabled-unarmed). admin-token-gated
+	// means this request passes the existing admin gate, not just that a token
+	// is configured. No credential or token-derived value is exposed.
 	ManagementSurface string `json:"management_surface"`
 	// RequireAgentSignature reports whether per-agent ed25519 signing is
 	// enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true).
@@ -406,8 +407,9 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		durable = &value
 	}
 	managementSurface := "disabled"
-	if cfg.Permissions.Enabled && cfg.Permissions.AdminToken != "" {
-		managementSurface = "admin-token-gated"
+	if cfg.Permissions.Enabled {
+		// A configuration-only builder cannot vouch for a viewer's access.
+		managementSurface = "enabled-unarmed"
 	}
 	return statusResponse{
 		ManagementSurface:                      managementSurface,
@@ -495,8 +497,20 @@ func newQueueHistory() *queueHistory { return &queueHistory{} }
 // agents_online 0 / agents_total 0 (a server that mounts no registry Handler
 // has no fleet to count — the zero figure is the true one, never a guess).
 func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator, federationPosture ...func() federation.InboundPosture) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		resp := buildStatusResponse(cfg, registryBackend)
+		if cfg.Permissions.Enabled {
+			// Production passes the live registry handler as the aggregator.
+			// Reuse its actual gate; an unwired handler stays fail-closed.
+			if gate, ok := aggregator.(interface {
+				PermissionsManagementAuthorized(*http.Request) bool
+			}); ok && gate.PermissionsManagementAuthorized(r) {
+				resp.ManagementSurface = "admin-token-gated"
+			}
+		}
+		// This field is viewer-specific; never share an authorized snapshot.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Add("Vary", "Authorization")
 		if len(federationPosture) > 0 && federationPosture[0] != nil {
 			p := federationPosture[0]()
 			resp.FederationRequirePeerConfigured = p.RequirePeerConfigured

@@ -85,6 +85,12 @@ func (h *Handler) SetPermissionsStore(s permissions.Store) { h.permissionsStore 
 // (the default) keeps the gate closed even with a store wired.
 func (h *Handler) SetPermissionsAdminToken(token string) { h.permissionsAdminToken = token }
 
+// PermissionsManagementAuthorized reports the existing admin gate's decision
+// for read-only runtime posture. It grants no authority and reads no records.
+func (h *Handler) PermissionsManagementAuthorized(r *http.Request) bool {
+	return h.managementAuthorized(r)
+}
+
 // managementAuthorized is the admin gate: the request must present the armed
 // admin token as its Bearer, compared in constant time.
 func (h *Handler) managementAuthorized(r *http.Request) bool {

@@ -17,7 +17,7 @@ const routes = {'management-principals':'/principals','management-bindings':'/bi
 const adminPaths = ['/principals','/bindings','/grants','/trust/anchors'];
 const keypair = () => crypto.generateKeyPairSync('ed25519');
 const publicHex = pair => pair.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('hex');
-async function start(armed) {
+async function start(armed, tokenConfigured = armed) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'crier-management-server-'));
   const probe = net.createServer();
   await new Promise((resolve,reject) => probe.once('error',reject).listen(0,'127.0.0.1',resolve));
@@ -30,7 +30,7 @@ async function start(armed) {
   // yields the real 200/[] response rather than discovery's local-self row.
   Object.assign(env,{CR_FED_RECORDS_FILE:path.join(dir,'peers.json'),CR_FED_SELF_KEY_FILE:path.join(dir,'instance.key')});
   fs.writeFileSync(env.CR_FED_SELF_KEY_FILE,keypair().privateKey.export({format:'pem',type:'pkcs8'}),{mode:0o600});
-  if (armed) Object.assign(env,{CR_PERMISSIONS_ENABLED:'true',CR_PERMISSIONS_ADMIN_TOKEN:token,CR_PERMISSIONS_DIR:path.join(dir,'permissions')});
+  if (armed) Object.assign(env,{CR_PERMISSIONS_ENABLED:'true',CR_PERMISSIONS_ADMIN_TOKEN:tokenConfigured ? token : '',CR_PERMISSIONS_DIR:path.join(dir,'permissions')});
   else env.CR_AUTH_TOKEN = token;
   const fd = fs.openSync(path.join(dir,'server.log'),'w');
   const child = spawn(process.env.CRIER_TEST_BINARY || '/tmp/df-crier-400-server',[],{cwd:dir,env,stdio:['ignore',fd,fd]});
@@ -58,7 +58,7 @@ async function refresh(page) {
 }
 async function capture(page,label) {
   const panels = await page.evaluate(ids => Object.fromEntries(ids.map(id => [id,{state:document.getElementById(id).dataset.readState,text:document.getElementById(id).innerText} ])),[...Object.keys(routes),'management-class','management-chain','management-federation-posture']);
-  captures.push({label,panels});
+  captures.push({label,posture:await page.locator('#posture').innerText(),panels});
   fs.writeFileSync(path.join(evidence,'rendered-strings.json'),JSON.stringify(captures,null,2));
   console.log('RENDERED '+label+': '+JSON.stringify(panels));
 }
@@ -106,6 +106,10 @@ async function run() {
   assert.match(await page.locator('#management-chain').innerText(),/Basis: not reported by server/);
   assert.match(await page.locator('#management-federation-posture').innerText(),/Configured require-peer: true.*Effective require-peer: false.*Lifecycle peer records: 0/);
   await capture(page,'real-admin-unset-refusals-and-zero-peers');
+  const disabledPosture = await page.locator('#posture').innerText();
+  assert.ok(disabledPosture.includes('Management: disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false).'));
+  assert.equal((await request(off,'GET','/status')).management_surface,'disabled');
+  await page.locator('#posture').screenshot({path:path.join(evidence,'posture-disabled.png')});
   const before = {...counts};
   // Exercise the transcript refresh: it must not retry refused management reads.
   await page.locator('#refresh').click(); await idle(page);
@@ -118,14 +122,44 @@ async function run() {
   await page.locator('.management').screenshot({path:path.join(evidence,'management-refused-detail.png')});
   // Real positive/empty controls with a scratch-only gateway adding an ephemeral
   // admin header to management URLs. Product code never receives a token value.
+  // DF-CRIER-410: both unreadable ACL-live configurations, using actual API
+  // responses. A configured token that this viewer did not supply is NOT off.
+  for (const configured of [false,true]) {
+    const unarmed = await start(true,configured);
+    await page.goto(unarmed.base+'/chat'); await idle(page);
+    const wire = await fetch(unarmed.base+'/status');
+    assert.equal(wire.status,200);
+    assert.equal((await wire.json()).management_surface,'enabled-unarmed');
+    const posture = await page.locator('#posture').innerText();
+    assert.ok(posture.includes('Management: enabled but not armed for this viewer — ACL live; management reads refused.'));
+    assert.ok(posture.includes('CR_PERMISSIONS_ADMIN_TOKEN'));
+    for (const id of ['management-principals','management-bindings','management-grants']) await stateIs(page,id,'refused');
+    for (const route of ['/principals','/bindings','/grants']) {
+      const refused = await fetch(unarmed.base+route);
+      assert.equal(refused.status,403);
+      assert.match((await refused.json()).detail,/CR_PERMISSIONS_ADMIN_TOKEN/);
+    }
+    for (const width of [390,768,1280]) {
+      await page.setViewportSize({width,height:1000});
+      const overflow = await page.evaluate(() => ({page:document.documentElement.scrollWidth-innerWidth,posture:document.getElementById('posture').scrollWidth-document.getElementById('posture').clientWidth}));
+      assert.deepEqual(overflow,{page:0,posture:0},'ACL-live unreadable posture overflow at '+width);
+    }
+    const label = configured ? 'configured-token-not-supplied' : 'enabled-no-admin-configured';
+    await capture(page,label);
+    await page.screenshot({path:path.join(evidence,'posture-'+label+'-page.png'),fullPage:true});
+    await page.locator('#posture').screenshot({path:path.join(evidence,'posture-'+label+'.png')});
+  }
   const on = await start(true);
   await page.route(on.base+'/**',async route => {
     const url = new URL(route.request().url());
-    const management = adminPaths.includes(url.pathname) || /^\/agents\/[^/]+\/class$/.test(url.pathname) || url.pathname === '/fed/peers';
+    const management = url.pathname === '/status' || adminPaths.includes(url.pathname) || /^\/agents\/[^/]+\/class$/.test(url.pathname) || url.pathname === '/fed/peers';
     await route.continue({headers:{...route.request().headers(),...(management ? {authorization:'Bearer '+on.token} : {})}});
   });
   await page.goto(on.base+'/chat'); await idle(page);
   for (const id of Object.keys(routes)) { await stateIs(page,id,'empty'); assert.equal(await page.locator('#'+id+' table').count(),0); }
+  assert.equal((await request(on,'GET','/status')).management_surface,'admin-token-gated');
+  assert.ok((await page.locator('#posture').innerText()).includes('Management: admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer.'));
+  await page.locator('#posture').screenshot({path:path.join(evidence,'posture-admin-gated.png')});
   await capture(page,'real-armed-empty-lists');
   const principal = await request(on,'POST','/principals',{display_name:'Browser test holder',namespace:'test-realm',role:'owner'});
   const agent = 'test-management-agent';
@@ -203,7 +237,7 @@ async function run() {
     for (const route of [...Object.values(routes),'/agents/'+agent+'/class','/trust/verify']) await page.unroute(on.base+route,fault);
   }
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(evidence,'summary.json'),JSON.stringify({pageErrors:errors,viewports:[390,768,1280],overflow:0,realChecks:['admin unset: exact server refusals, zero peers, no automatic management retries','admin armed: empty then actual API-created records','real trust verdicts: all four bases, test-only signing gateway','configured true/effective false then true'],injections:['scratch admin gateway','fresh body-signature gateway for possession controls','401/403/503/network/malformed responses only in fault cells'],captures:captures.length},null,2));
+  fs.writeFileSync(path.join(evidence,'summary.json'),JSON.stringify({pageErrors:errors,viewports:[390,768,1280],overflow:0,realChecks:['three management postures: disabled, ACL-live/no-admin and unsupplied-admin refusals, authorized admin reads','admin unset: exact server refusals, zero peers, no automatic management retries','admin armed: empty then actual API-created records','real trust verdicts: all four bases, test-only signing gateway','configured true/effective false then true'],injections:['scratch admin gateway','fresh body-signature gateway for possession controls','401/403/503/network/malformed responses only in fault cells'],captures:captures.length},null,2));
   console.log('PASS: management browser; real refusals/empty/populated/trust bases; disclosed error cells; 390/768/1280 overflow 0. Evidence: '+evidence);
 }
 run().catch(error => {console.error(error); process.exitCode=1;}).finally(async () => {
