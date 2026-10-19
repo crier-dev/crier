@@ -219,7 +219,7 @@ paths:
         What is actually in force on this live server, as booleans and modes:
         whether a Bearer token is enforced, whether per-agent ed25519 signing is
         required, whether the LLM message guard is on, which registry backend is
-        serving (memory or postgres), the federation/webhook/inspection modes,
+        serving (memory, sqlite or postgres), the federation/webhook/inspection modes,
         and the build identity — the same object GET /version serves, nested
         under `build`. Operators read this to distinguish a locked server from
         one running wider open; a server that answers /health "ok" cannot be
