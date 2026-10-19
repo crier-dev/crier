@@ -105,13 +105,8 @@ harness_probe() { # agent-id prompt — two distinct prompts, one harness verdic
   local id="$1" text="$2" desc="round-trip $1 via crier"
   local out code body reason result data nonce started_at proof previous_digest=""
   local index harness_failed=0 first_digest=""
-  if [[ -z "$KEY" ]]; then
-    SKIP=$((SKIP+1))
-    reason="no DEEPSEEK_API_KEY — canned mode; harness execution not tested"
-    echo "SKIP  $desc ($reason)"
-    python3 -c 'import json,sys; print(json.dumps({"test":sys.argv[1],"result":"SKIP","reason":sys.argv[2],"run_nonce":sys.argv[3],"run_started_at":sys.argv[4],"nonce":None,"nonce_matched":None,"proof_not_tested":"no credentials"}))' "$desc" "$reason" "$RUN_NONCE" "$RUN_STARTED_AT" >> "$EVIDENCE" || exit 1
-    return
-  fi
+  # Ask the consumer: the battery's DeepSeek key is ONLY for the guard.
+  # Codex/Claude/Goose use other credentials, and refusals must remain visible.
   for index in 1 2; do
     nonce="$(python3 -c 'import uuid; print(uuid.uuid4())')" || exit 1
     started_at="$(date -u +%FT%TZ)"
@@ -134,7 +129,7 @@ harness_probe() { # agent-id prompt — two distinct prompts, one harness verdic
   if [[ "$harness_failed" == 0 ]]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
 }
 
-# 2. Real harness execution through the bus; no credentials => one SKIP per harness.
+# 2. Real harness execution through the bus; missing credentials => REFUSED failure.
 harness_probe pi-agent "What is the capital of France?"
 harness_probe opencode "Explain what a message bus is."
 harness_probe claude-code "What is the capital of France?"

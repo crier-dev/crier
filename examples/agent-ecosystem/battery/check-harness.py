@@ -37,16 +37,24 @@ def execution_proof(body, nonce):
 
 
 def assert_execution(status, body, nonce, previous_digest=""):
+    result = body.get("reply") if isinstance(body, dict) else None
+    result = result if isinstance(result, dict) else body
+    detail = ""
+    if isinstance(result, dict):
+        reason = result.get("reason") or result.get("error")
+        if isinstance(reason, str) and reason:
+            prefix = "REFUSED: " if result.get("status") == "REFUSED" else ""
+            detail = f"; {prefix}{reason}"
     if status != "200":
-        raise ValueError(f"HTTP {status}, want 200")
+        raise ValueError(f"HTTP {status}, want 200{detail}")
     if not isinstance(body, dict) or "error" in body:
-        raise ValueError("invalid response or delivery error")
+        raise ValueError(f"invalid response or delivery error{detail}")
     # Only unwrap the known transport envelope, never search arbitrary nested text.
     result = body["reply"] if isinstance(body.get("reply"), dict) else body
     if "error" in result:
-        raise ValueError("harness error, not a reply")
+        raise ValueError(f"harness error, not a reply{detail}")
     if result.get("live") is False:
-        raise ValueError("live=false (canned/non-executed harness)")
+        raise ValueError(f"live=false (canned/non-executed harness){detail}")
     if result.get("live") is not True or result.get("canned", False) is not False:
         raise ValueError("missing/invalid live=true execution marker")
     if not isinstance(result.get("exec"), str) or not result["exec"].strip():

@@ -21,6 +21,9 @@ const live = { reply: runtimeText, live: true, exec: "/fixture/opencode", stdout
   nonce, stdout_sha256: createHash("sha256").update(runtimeText).digest("hex") };
 const canned = { reply: "canned", live: false, canned: true };
 
+const credentialFor = { "pi-agent": "DEEPSEEK_API_KEY", opencode: "DEEPSEEK_API_KEY",
+  "claude-code": "ANTHROPIC_API_KEY", codex: "OPENAI_API_KEY", aider: "DEEPSEEK_API_KEY", goose: "OPENAI_API_KEY" };
+
 function check(body, code = "200", requestNonce = nonce, previousDigest = "") {
   return spawnSync("python3", [checker, code, requestNonce, previousDigest], { input: JSON.stringify(body), encoding: "utf8" });
 }
@@ -62,10 +65,15 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   await once(reserve, "listening");
   const port = reserve.address().port;
   await new Promise((done) => reserve.close(done));
+  const env = { ...process.env, PATH: join(dir, "bin"), AGENT_ID: harness, HARNESS: harness,
+    PORT: String(port), CRIER_URL: `http://127.0.0.1:${registry.address().port}`,
+    OPENCODE_LIVE: liveFlag, CLAUDE_CODE_LIVE: liveFlag, CODEX_LIVE: liveFlag, AIDER_LIVE: liveFlag, GOOSE_LIVE: liveFlag };
+  for (const name of ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY"]) delete env[name];
+  // Leave an unrelated key present to catch the old global DeepSeek gate.
+  if (["codex", "claude-code", "goose"].includes(harness) && !key?.trim()) env.DEEPSEEK_API_KEY = "unrelated-fixture";
+  if (key !== null) env[credentialFor[harness]] = key;
   const child = spawn(process.execPath, [join(dir, "consumer.mjs")], {
-    env: { ...process.env, PATH: join(dir, "bin"), AGENT_ID: harness, HARNESS: harness,
-      PORT: String(port), CRIER_URL: `http://127.0.0.1:${registry.address().port}`,
-      OPENCODE_LIVE: liveFlag, CLAUDE_CODE_LIVE: liveFlag, CODEX_LIVE: liveFlag, AIDER_LIVE: liveFlag, GOOSE_LIVE: liveFlag, DEEPSEEK_API_KEY: key }, stdio: ["ignore", "pipe", "pipe"],
+    env, cwd: dir, stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";
   child.stdout.on("data", (b) => { log += b; });
@@ -80,8 +88,10 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   }
   assert.ok(ready, log);
   const hook = async (text = "hello", requestNonce = nonce) => {
+    const started = performance.now();
     const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_nonce: requestNonce } }) });
-    return { status: response.status, body: await response.json() };
+    const body = await response.json();
+    return { status: response.status, body, elapsed: performance.now() - started };
   };
   return { ...await hook(), dir, hook };
 }
@@ -127,10 +137,13 @@ for (const [name, command] of [["missing executable", undefined], ["nonzero CLI 
 
 test("pi SDK execution carries the same marker after prompt succeeds", async (t) => {
   const { status, body } = await startConsumer(t, { harness: "pi-agent", sdk: `
-    export const AuthStorage = { create() { return {}; } };
-    export const ModelRegistry = { create() { return {}; } };
+    export const ModelRuntime = { async create() { return { async getAvailable() {
+      return [{ provider: "anthropic", id: "wrong-provider" }, { provider: "deepseek", id: "fixture-model" }];
+    } }; } };
     export const SessionManager = { inMemory() { return {}; } };
-    export async function createAgentSession() {
+    export async function createAgentSession(options) {
+      if (options.model.provider !== "deepseek" || !options.modelRuntime) throw new Error("wrong credential provider");
+      if (process.env.DEEPSEEK_API_KEY !== "fixture-only") throw new Error("missing SDK credential");
       let listener;
       return { session: { subscribe(fn) { listener = fn; },
         async prompt(text) { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] } }); },
@@ -149,7 +162,7 @@ test("pi SDK import failure is an error, not a reply", async (t) => {
   assert.equal(typeof body.error, "string");
 });
 
-test("whole battery skips six harnesses without key; rejects canned with key; copies evidence even on failure", async (t) => {
+test("whole battery probes every harness independently of guard key; prints refusal reasons; copies evidence even on failure", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "crier-battery-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -177,6 +190,10 @@ elif url.endswith('/inbox'):
     else:
         result = json.loads(os.environ['HARNESS_BODY'])
         mode = os.environ['HARNESS_MODE']
+        if mode == 'no-key':
+            harness = url.split('/agents/')[1].split('/')[0]
+            variable = {'codex': 'OPENAI_API_KEY', 'claude-code': 'ANTHROPIC_API_KEY', 'goose': 'OPENAI_API_KEY'}.get(harness, 'DEEPSEEK_API_KEY')
+            result.update(live=False, status='REFUSED', reason='missing ' + variable)
         if result.get('live'):
             payload = json.loads(data)['payload']
             nonce = payload['battery_nonce']
@@ -190,25 +207,30 @@ if '-o' not in args: print(json.dumps(body, separators=(',', ':')), end='')
 if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(code)).replace('\\\\n', '\\n'), end='')
 `, { mode: 0o755 });
   await writeFile(join(dir, "not-a-directory"), "copy must fail loudly");
-  for (const [name, key, fixture, expected] of [["no-key", "", canned, "5 pass / 0 fail / 7 skip"],
+  for (const [name, key, fixture, expected] of [["no-key", "", canned, "5 pass / 6 fail / 1 skip"],
     ["canned-with-key", "fixture-only", canned, "7 pass / 6 fail / 0 skip"],
     ["live-with-key", "fixture-only", live, "13 pass / 0 fail / 0 skip"],
+    ["live-without-guard-key", "", live, "11 pass / 0 fail / 1 skip"],
     ["replayed", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["missing", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
     ["same-text", "fixture-only", live, "7 pass / 6 fail / 0 skip"],
-    ["copy-failure", "", canned, "5 pass / 0 fail / 7 skip"]]) {
+    ["copy-failure", "", canned, "5 pass / 6 fail / 1 skip"]]) {
     const evidence = join(dir, `${name}.jsonl`);
     const mirror = name === "copy-failure" ? join(dir, "not-a-directory", "ecosystem.jsonl") : join(dir, `repo/${name}.jsonl`);
     const run = spawnSync("bash", [join(here, "battery.sh")], { encoding: "utf8", env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`, DEEPSEEK_API_KEY: key,
       EVIDENCE: evidence, EVIDENCE_REPO: mirror, HARNESS_BODY: JSON.stringify(fixture), HARNESS_MODE: name, STATS_FILE: join(dir, `${name}.stats`),
     } });
-    assert.equal(run.status, !["no-key", "live-with-key"].includes(name) ? 1 : 0, run.stdout + run.stderr);
+    assert.equal(run.status, !["live-with-key", "live-without-guard-key"].includes(name) ? 1 : 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes(expected), run.stdout + run.stderr);
     console.log(`fixture ${name}: ${expected}; exit ${run.status}`);
-    if (!key) {
-      assert.equal((run.stdout.match(/^SKIP  round-trip /gm) || []).length, 6);
-      assert.doesNotMatch(run.stdout, /^PASS  round-trip (pi-agent|opencode|claude-code|codex|aider|goose) /m);
+    assert.doesNotMatch(run.stdout, /^SKIP  round-trip /m);
+    if (name === "no-key") {
+      for (const [harness, variable] of Object.entries(credentialFor)) {
+        const line = run.stdout.split("\n").find((s) => s.startsWith(`FAIL  round-trip ${harness} `));
+        assert.match(line, new RegExp(`REFUSED: missing ${variable}`));
+        console.log(line);
+      }
     }
     if (name === "canned-with-key") {
       const line = run.stdout.split("\n").find((s) => s.startsWith("FAIL  round-trip opencode"));
@@ -220,13 +242,12 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     else assert.equal(await readFile(mirror, "utf8"), original);
     const rows = original.trim().split("\n").map(JSON.parse);
     const harnessRows = rows.filter((r) => r.test?.startsWith("round-trip ") && r.test !== "round-trip sink echo via crier");
-    assert.equal(harnessRows.length, key ? 12 : 6);
-    if (!key) assert.ok(harnessRows.every((r) => r.result === "SKIP" && r.nonce_matched === null));
-    else {
+    assert.equal(harnessRows.length, 12);
+    {
       assert.equal(new Set(harnessRows.map((r) => r.nonce)).size, 12, "unique nonce for EVERY request");
       assert.equal(new Set(harnessRows.map((r) => r.run_nonce)).size, 1);
       assert.ok(harnessRows.every((r) => r.run_started_at && r.request_started_at));
-      if (name === "live-with-key") {
+      if (["live-with-key", "live-without-guard-key"].includes(name)) {
         assert.ok(harnessRows.every((r) => r.result === "PASS" && r.nonce_matched === true && r.nonce_echo === r.nonce));
         for (let i = 0; i < harnessRows.length; i += 2) {
           assert.notEqual(harnessRows[i].prompt, harnessRows[i + 1].prompt);
@@ -282,4 +303,61 @@ test("replayed CLI stdout retains old nonce and fails this request", async (t) =
   const { body } = await startConsumer(t, { command: `printf 'cached answer\\n[crier-battery-nonce:${oldNonce}]'` });
   assert.equal(body.nonce, oldNonce);
   assert.equal(check(body).status, 1);
+});
+
+for (const [harness, variable] of Object.entries(credentialFor)) {
+  for (const key of [null, "", "   "]) {
+    test(`${harness} refuses ${variable} unset/empty/whitespace (${JSON.stringify(key)}) before runtime`, async (t) => {
+      const { body, dir, elapsed } = await startConsumer(t, { harness, key,
+        command: "printf attempted > runtime-attempted; printf 'should never execute'" });
+      assert.equal(body.live, false);
+      assert.equal(body.status, "REFUSED");
+      assert.equal(body.reason, `missing ${variable}`);
+      assert.ok(elapsed < 1000, `${elapsed}ms exceeds immediate-refusal budget`);
+      await assert.rejects(readFile(join(dir, "runtime-attempted")), { code: "ENOENT" });
+      assert.match(check({ reply: body }).stdout, new RegExp(`REFUSED: missing ${variable}`));
+      console.log(`${harness}: REFUSED: ${body.reason} (${elapsed.toFixed(1)}ms)`);
+    });
+  }
+  if (harness === "pi-agent") continue; // SDK has its own fixture above.
+  test(`${harness} executes with its own credential, without unrelated keys`, async (t) => {
+    const extra = harness === "codex" ? '[ "$CODEX_API_KEY" = "$OPENAI_API_KEY" ] || exit 10;' :
+      harness === "goose" ? '[ "$GOOSE_PROVIDER" = openai ] && [ "$GOOSE_MODEL" = gpt-4o-mini ] || exit 11;' : "";
+    const { body } = await startConsumer(t, { harness,
+      command: `[ "$${variable}" = fixture-only ] || exit 9; ${extra} printf 'credential-attempt-ok\\n${marker}\\n'` });
+    assert.equal(body.live, true, JSON.stringify(body));
+    assert.equal(body.reply, `credential-attempt-ok\n${marker}`);
+  });
+}
+
+test("checker carries consumer refusal/error text even on HTTP failures", () => {
+  for (const code of ["200", "500", "502"]) {
+    const refusal = { live: false, status: "REFUSED", reason: "missing OPENAI_API_KEY" };
+    assert.match(check({ reply: refusal }, code).stdout, /REFUSED: missing OPENAI_API_KEY/);
+    assert.match(check({ error: "upstream refused credential" }, code).stdout, /upstream refused credential/);
+    assert.equal(check({ reply: refusal }, code).status, 1);
+  }
+});
+
+test("compose forwards only each harness credential, with optional empty defaults", async () => {
+  const compose = resolve(here, "../docker-compose.yml");
+  const source = await readFile(compose, "utf8");
+  const variables = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
+  const clean = { PATH: process.env.PATH, HOME: process.env.HOME };
+  for (const populated of [false, true]) {
+    const env = { ...clean };
+    if (populated) for (const variable of variables) env[variable] = `fixture-${variable}`;
+    const config = spawnSync("docker", ["compose", "--env-file", "/dev/null", "-f", compose, "config", "--format", "json"], { env, encoding: "utf8" });
+    assert.equal(config.status, 0, config.stderr);
+    const services = JSON.parse(config.stdout).services;
+    for (const [harness, variable] of Object.entries(credentialFor)) {
+      const received = services[harness].environment;
+      assert.equal(received[variable], populated ? `fixture-${variable}` : "", `${harness}: ${variable}`);
+      assert.deepEqual(Object.keys(received).filter((key) => variables.includes(key)), [variable], harness);
+    }
+  }
+  for (const line of source.split("\n").filter((line) => /^ +[A-Z_]+_API_KEY:/.test(line))) {
+    const variable = line.trim().split(":")[0];
+    assert.equal(line.trim(), `${variable}: \${${variable}:-}`);
+  }
 });

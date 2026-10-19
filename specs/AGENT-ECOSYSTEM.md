@@ -69,6 +69,23 @@ Host port defaults follow one rule: **crier 18767, then 19000+ per harness** (si
 pi-agent 19101, opencode 19102, new harnesses 19103–19106). On a bunker agent the ports are
 overridden to the agent's port range (§6.3).
 
+### 2.1.1 Credential dispatch (DF-CRIER-345)
+
+This supersedes the global-DeepSeek live gate in the historical matrix above:
+pi-agent/opencode/aider require `DEEPSEEK_API_KEY`, claude-code requires
+`ANTHROPIC_API_KEY`, and codex/goose require `OPENAI_API_KEY`. Compose forwards only
+each consumer's key with `${VAR:-}`; the consumer treats unset, empty and
+whitespace-only values as missing. Before importing or starting a runtime it returns
+HTTP 200 `{live:false,canned:true,status:"REFUSED",reason:"missing VARIABLE",reply:"…"}`.
+The generic webhook envelope preserves the diagnostic. CLI opt-ins remain required;
+no new credential gate applies to sink or Hermes. The battery probes all six
+consumers regardless of its guard credential and fails execution checks with the
+consumer's reason; only the guard matrix skips without `DEEPSEEK_API_KEY`.
+Codex receives `CODEX_API_KEY` as a child-only alias of `OPENAI_API_KEY`; Goose is
+explicitly configured for `openai` / `gpt-4o-mini`; Aider explicitly selects
+`deepseek/deepseek-v4-flash`; Pi's current SDK `ModelRuntime` selects an available
+DeepSeek model instead of defaulting to another provider.
+
 ### 2.2 Shipped harnesses (CR-FEAT-018/019/020 waves)
 
 All four shipped harnesses are **thin consumers**: a small HTTP server that (a) self-registers

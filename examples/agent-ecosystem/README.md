@@ -37,8 +37,7 @@ docker compose --profile battery run --rm battery
 # 3. with real runtime execution + guard verdicts (set credentials in your shell
 #    or .env; do not commit them). CLI harnesses ALSO need their live opt-ins:
 export OPENCODE_LIVE=1 CLAUDE_CODE_LIVE=1 CODEX_LIVE=1 AIDER_LIVE=1 GOOSE_LIVE=1
-# DEEPSEEK_API_KEY must be exported / present in .env for BOTH commands.
-# Each CLI still needs its own valid provider/auth configuration.
+# Export the provider keys in the matrix below; DEEPSEEK_API_KEY also enables the guard.
 docker compose up -d
 docker compose --profile battery run --rm battery
 ```
@@ -81,28 +80,16 @@ cryptographic runtime attestation**: a malicious consumer that synthesizes fresh
 nonce-aware bodies can still lie. It proves neither answer quality nor a
 particular upstream provider/model.
 
-With no `DEEPSEEK_API_KEY`, all six harness execution checks explicitly SKIP
-(canned mode / no credentials). Health, sink and async transport checks may
-still PASS, but **none of those proves a harness ran**. A key with a missing
-`*_LIVE=1` opt-in is a misconfigured live run: `live:false` is a **FAIL**, not a
-skip. A DeepSeek key does not authenticate every vendor CLI; configure each
-runtime's provider credentials separately.
+| Harness | Runtime command / provider | Required key | Missing-key result |
+|---|---|---|---|
+| `pi-agent` | `createAgentSession` SDK, available DeepSeek model | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
+| `opencode` | `opencode run … --model deepseek/deepseek-v4-flash` | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
+| `claude-code` | `claude -p … --output-format text` | `ANTHROPIC_API_KEY` | `REFUSED: missing ANTHROPIC_API_KEY` |
+| `codex` | `codex exec --skip-git-repo-check …` (child `CODEX_API_KEY` alias) | `OPENAI_API_KEY` | `REFUSED: missing OPENAI_API_KEY` |
+| `aider` | `aider --model deepseek/deepseek-v4-flash --message …` | `DEEPSEEK_API_KEY` | `REFUSED: missing DEEPSEEK_API_KEY` |
+| `goose` | `goose run --text …` (`GOOSE_PROVIDER=openai`, `GOOSE_MODEL=gpt-4o-mini`) | `OPENAI_API_KEY` | `REFUSED: missing OPENAI_API_KEY` |
 
-Expected no-key output (not a transcript of live execution):
-
-```
-SKIP  round-trip pi-agent via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  round-trip opencode via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  round-trip claude-code via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  round-trip codex via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  round-trip aider via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  round-trip goose via crier (no DEEPSEEK_API_KEY — canned mode; harness execution not tested)
-SKIP  guard matrix (no DEEPSEEK_API_KEY — guard runs fail-open)
-== battery done: 5 pass / 0 fail / 7 skip (evidence /evidence/ecosystem.jsonl)
-```
-
-A fully configured, successful live run has `13 pass / 0 fail / 0 skip`.
-An exit code of 0 with SKIPs is **not** full execution coverage.
+Missing/empty keys return immediately as HTTP 200 `{live:false,status:"REFUSED",reason:"missing VARIABLE"}` without starting a runtime; the battery reports a FAIL carrying that reason (only the guard matrix SKIPs without DeepSeek), CLI live opt-ins remain required, and sink/Hermes gain no key requirement.
 
 ### Auditable evidence in the checkout
 
@@ -121,7 +108,7 @@ response body (including execution markers). Each attempted prompt also records
 `nonce`, `nonce_echo`, `nonce_matched`, `stdout_sha256`, `content_sha256` and
 `previous_content_sha256`. The run UUID groups records; the request UUID provides
 freshness (timestamps are audit context, not a claimed runtime clock check).
-A no-key SKIP has no request nonce and `nonce_matched: null`, explicitly untested.
+Refused harnesses retain their request nonce and `nonce_matched: false`, explicitly unexecuted.
 Evidence may contain prompt/output text; review it before committing or sharing it.
 `battery/evidence/df-crier-338-offline.jsonl` is explicitly labelled transport
 fixture evidence for all six harness ids, NOT vendor-runtime execution evidence.
@@ -159,10 +146,10 @@ python3 examples/agent-ecosystem/battery/test_binding.py
 
 All consumers (pi-agent through goose) run the **same shared consumer**
 (`consumer/consumer.mjs`) — parameterized by `AGENT_ID` / `HARNESS` / `PORT` /
-`CRIER_URL` / `DEEPSEEK_API_KEY` and the per-harness live-mode env. Each
+`CRIER_URL` / the harness's own provider key and live-mode env. Each
 Dockerfile installs the harness's real runtime; live mode is opt-in. Without
-a key or its opt-in, the consumer still returns canned text for manual transport
-demos, explicitly marked `"live": false, "canned": true`. Canned mode is not a
+its key the consumer refuses immediately; with a key but no CLI opt-in it returns
+canned transport text marked `"live": false, "canned": true`. Neither is a
 successful harness execution test.
 
 ## How the agents wire in
@@ -237,12 +224,14 @@ current harness claims.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `DEEPSEEK_API_KEY` | — | enables real guard verdicts + real harness runs (pi SDK / opencode / claude-code / codex / aider / goose) |
+| `DEEPSEEK_API_KEY` | — | enables guard verdicts and pi-agent / opencode / aider runtime credentials |
+| `OPENAI_API_KEY` | — | Codex and Goose runtime credentials |
+| `ANTHROPIC_API_KEY` | — | Claude Code runtime credential |
 | `CR_GUARD_ENABLED` | `true` | master guard switch |
 | `CR_GUARD_DEFAULT_POLICY` | — | server-wide default policy JSON (provider presets, fail-closed…) |
 | `CRIER_REQUIRE_SIG` | `false` | agent signature enforcement (demo wiring keeps it off) |
 | `CRIER_HOST_PORT` / `SINK_HOST_PORT` / `PI_HOST_PORT` / `OPENCODE_HOST_PORT` / `CLAUDE_CODE_HOST_PORT` / `CODEX_HOST_PORT` / `AIDER_HOST_PORT` / `GOOSE_HOST_PORT` | 18767/19002/19101/19102/19103/19104/19105/19106 | host port mapping |
-| `OPENCODE_LIVE` / `CLAUDE_CODE_LIVE` / `CODEX_LIVE` / `AIDER_LIVE` / `GOOSE_LIVE` | empty | `1` = the harness consumer runs the real CLI on receipt (requires `DEEPSEEK_API_KEY` too); anything else = canned reply |
+| `OPENCODE_LIVE` / `CLAUDE_CODE_LIVE` / `CODEX_LIVE` / `AIDER_LIVE` / `GOOSE_LIVE` | empty | `1` = the harness consumer runs the real CLI on receipt (requires its own provider key too); anything else = canned reply |
 
 ## Battery coverage
 

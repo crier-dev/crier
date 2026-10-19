@@ -1,13 +1,13 @@
 // Shared agent-ecosystem consumer — receives messages through crier
 // (blocking webhook) and answers with a real harness runtime when the
-// harness's live-mode env + DEEPSEEK_API_KEY are set, canned otherwise.
+// harness's live-mode opt-in and provider credential are set.
 //
 // Parameterized by env (set per service in docker-compose.yml / Dockerfile):
 //   AGENT_ID         registry id + in-cluster webhook host (default "agent")
 //   HARNESS          display name + runtime dispatch key (default AGENT_ID)
 //   PORT             in-container HTTP port (default 9100)
 //   CRIER_URL        crier base URL (default http://crier:8767)
-//   DEEPSEEK_API_KEY enables live mode (default empty)
+//   Provider key    DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
 //   <HARNESS>_LIVE   per-harness opt-in flag: "1" = run the real CLI
 //
 // Harnesses: pi-agent (SDK session — live whenever a key is present),
@@ -29,7 +29,17 @@ const AGENT_ID = process.env.AGENT_ID || "agent";
 const HARNESS = process.env.HARNESS || AGENT_ID;
 const PORT = Number(process.env.PORT || "9100");
 const CRIER = process.env.CRIER_URL || "http://crier:8767";
-const KEY = process.env.DEEPSEEK_API_KEY || "";
+// These are the providers selected by the runtime dispatch below, not a global
+// DeepSeek gate. Empty (including Compose's ${VAR:-}) is never a credential.
+const KEY_ENV = {
+  "pi-agent": "DEEPSEEK_API_KEY",
+  opencode: "DEEPSEEK_API_KEY",
+  "claude-code": "ANTHROPIC_API_KEY",
+  codex: "OPENAI_API_KEY",
+  aider: "DEEPSEEK_API_KEY",
+  goose: "OPENAI_API_KEY",
+}[HARNESS];
+const HAS_KEY = KEY_ENV && !!process.env[KEY_ENV]?.trim();
 
 // Per-harness live-mode env name (used in the canned reply + the live gate).
 const LIVE_ENV = {
@@ -40,7 +50,8 @@ const LIVE_ENV = {
   aider: "AIDER_LIVE",
   goose: "GOOSE_LIVE",
 }[HARNESS] || `${HARNESS.toUpperCase().replace(/-/g, "_")}_LIVE`;
-const LIVE = HARNESS === "pi-agent" ? !!KEY : process.env[LIVE_ENV] === "1" && !!KEY;
+const OPTED_IN = HARNESS === "pi-agent" || process.env[LIVE_ENV] === "1";
+const LIVE = OPTED_IN && HAS_KEY;
 
 let registered = false;
 let lastStatus = null;
@@ -102,12 +113,12 @@ function resolveCommand(bin) {
 }
 
 // CLI failure (including timeout/auth failure) rejects; never turn it into reply text.
-function runCli(bin, args) {
+function runCli(bin, args, extraEnv = {}) {
   const command = resolveCommand(bin);
   return new Promise((resolve, reject) => {
     execFile(
       command, args,
-      { env: { ...process.env, DEEPSEEK_API_KEY: KEY }, timeout: 60000 },
+      { env: { ...process.env, ...extraEnv }, timeout: 60000 },
       (err, stdout) => {
         if (err) return reject(err);
         try { resolve(liveReply(stdout, command)); } catch (e) { reject(e); }
@@ -117,8 +128,15 @@ function runCli(bin, args) {
 }
 
 async function answer(text, nonce) {
-  if (!LIVE) {
-    return { reply: `${HARNESS}(canned, requires ${LIVE_ENV} + DEEPSEEK_API_KEY): received "${text.slice(0, 80)}"`, live: false, canned: true };
+  // Refuse before resolving/importing/starting any runtime. Keep HTTP 200 so
+  // crier's generic webhook envelope preserves the consumer's diagnostic.
+  if (KEY_ENV && !HAS_KEY) {
+    const reason = `missing ${KEY_ENV}`;
+    return { reply: `${HARNESS}(REFUSED: ${reason})`, live: false, canned: true, status: "REFUSED", reason };
+  }
+  if (!OPTED_IN) {
+    const reason = `requires ${LIVE_ENV}=1`;
+    return { reply: `${HARNESS}(canned, ${reason}): received "${text.slice(0, 80)}"`, live: false, canned: true, reason };
   }
   // Put the challenge AFTER the bounded question; no runner may truncate it.
   // Payload (not a custom HTTP header) survives crier's generic webhook mapping.
@@ -129,14 +147,17 @@ async function answer(text, nonce) {
   if (HARNESS === "pi-agent") {
     // Real pi SDK session: minimal prompt pointing at the message
     // (discovery pattern keeps the prompt small; model resolved from env).
-    const { createAgentSession, SessionManager, ModelRegistry, AuthStorage } =
+    const { createAgentSession, SessionManager, ModelRuntime } =
       await import("@earendil-works/pi-coding-agent");
-    const auth = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(auth);
+    const modelRuntime = await ModelRuntime.create();
+    // The image installs the current SDK. Select the credential's provider
+    // explicitly rather than letting the SDK fall back to Anthropic.
+    const model = (await modelRuntime.getAvailable()).find((candidate) => candidate.provider === "deepseek");
+    if (!model) throw new Error("pi-agent: no DeepSeek model available for DEEPSEEK_API_KEY");
     const { session } = await createAgentSession({
       sessionManager: SessionManager.inMemory(),
-      authStorage: auth,
-      modelRegistry,
+      modelRuntime,
+      model,
     });
     const out = [];
     try {
@@ -157,11 +178,13 @@ async function answer(text, nonce) {
     case "claude-code":
       return runCli("claude", ["-p", prompt, "--output-format", "text"]);
     case "codex":
-      return runCli("codex", ["exec", "--skip-git-repo-check", prompt]);
+      // Noninteractive Codex reads CODEX_API_KEY; keep the public stack
+      // credential OPENAI_API_KEY and pass the alias only in the child env.
+      return runCli("codex", ["exec", "--skip-git-repo-check", prompt], { CODEX_API_KEY: process.env.OPENAI_API_KEY });
     case "aider":
-      return runCli("aider", ["--message", prompt, "--no-auto-commits", "--yes-always"]);
+      return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"]);
     case "goose":
-      return runCli("goose", ["run", "--text", prompt]);
+      return runCli("goose", ["run", "--text", prompt], { GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" });
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
@@ -205,6 +228,6 @@ createServer(async (req, res) => {
   }
   send(404, { error: "not found" });
 }).listen(PORT, async () => {
-  console.log(`${HARNESS} consumer :${PORT} (live mode: ${LIVE ? "on" : "off — " + LIVE_ENV + (HARNESS === "pi-agent" ? "" : "=1") + " + DEEPSEEK_API_KEY required"})`);
+  console.log(`${HARNESS} consumer :${PORT} (live mode: ${LIVE ? "on" : "off — " + (!HAS_KEY ? "missing " + KEY_ENV : "requires " + LIVE_ENV + "=1")})`);
   await register();
 });
