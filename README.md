@@ -1321,6 +1321,39 @@ candidate list is a named failure that starts nothing (QA-CRIER-10).
 
 Endpoints called (all declared in [`docs/openapi.yaml`](docs/openapi.yaml)): `GET /sessions`, `POST /sessions`, `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages`, `GET /sessions/{id}/permissions`. An optional `X-Agent-ID` header can be typed in for private-session access. Guard verdicts are **not** exposed by the public API on transcript records (`TranscriptMessage` in the spec carries no guard field), so each message renders an explicit "guard verdict: not exposed by API" placeholder instead of a fake verdict. The page is proven served by `TestChatClientRouteServesHTML` (`cmd/server/chatclient_test.go`).
 
+### Session webhook budgets and retries
+
+Session recipients default to a `30000` ms blocking delivery budget
+(`CR_SESSION_DELIVERY_TIMEOUT_MS`, integer `1..30000`). The ecosystem runtime
+budget is declared by `RUNTIME_TIMEOUT_MS` (default `20000`, integer `1..25000`).
+Startup refuses `runtime >= session`, reporting both numbers. Keep this runtime
+declaration identical on the server and every consumer; a server cannot discover
+a remote process's environment. The invariant is `runtime < session <= 30000` ms;
+transport/queue work consumes the remaining headroom. The session budget is not
+a whole-request deadline, and the browser's shorter wait is not a refusal.
+HTTP inbox and A2A budgets are unchanged.
+
+Retry `POST /sessions/{id}/messages` with the same `idempotency_key`:
+
+- If ALL recorded outcomes are `refused` or `failed`, a real delivery attempt
+  runs using the original payload and resolved targets, same message ID, sequence,
+  thread and operator row. Its outcomes replace the previous outcomes. The reply
+  says `replay_action: "redelivered"` (an attempt, not a promise of success).
+- Any delivered target (including mixed success), canned verdict, empty or
+  incomplete outcome set stays a side-effect-free replay:
+  `replay_action: "replayed"`. Successful recipients are never invoked twice.
+- An original send omits `replay_action`. Retrying does not create another branch.
+  A changed key means a new message; changing only the retry body does not alter
+  the recorded intent. A timeout can have reached a remote runtime before its
+  response was lost: retries guarantee one operator row, not exactly-once remote
+  execution. Use the stable message ID at the consumer if work requires deduping.
+
+The page stops waiting after 12 seconds without aborting a session-message POST;
+the server can finish and the next transcript refresh shows its answer. Other
+requests retain their existing abort deadlines. The page keeps the draft and
+request key after an all-refused/failed result.
+Click Send again unchanged to re-attempt delivery and update that same row.
+
 ## Message guard (LLM)
 
 Every inbound delivery is classified by an LLM message guard before it reaches the receiver (CR-FEAT-010..014). The guard sits at ONE choke point in `POST /agents/{id}/inbox` — after the deliver request is decoded, before BOTH downstream branches (webhook POST and inbox store) — so webhook (blocking/async/batch) and inbox deliveries get identical treatment. The verdict is computed exactly once per message; redelivery and batch flush never re-run the guard.

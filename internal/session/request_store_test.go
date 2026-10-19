@@ -82,7 +82,11 @@ func TestMessageRequestIdempotencyRefusalDetails(t *testing.T) {
 			require.NotEmpty(t, first.Outcomes)
 			second := h.postTo(t, room, req)
 			require.Equal(t, first.ID, second.ID)
-			require.Equal(t, first.Outcomes, second.Outcomes)
+			require.Equal(t, "redelivered", second.ReplayAction)
+			require.Equal(t, first.Outcomes[0].Target, second.Outcomes[0].Target)
+			require.Equal(t, first.Outcomes[0].Outcome, second.Outcomes[0].Outcome)
+			require.Equal(t, first.Outcomes[0].Detail, second.Outcomes[0].Detail)
+			require.False(t, second.Outcomes[0].UpdatedAt.Before(first.Outcomes[0].UpdatedAt))
 			require.Equal(t, first.SkippedAgents, second.SkippedAgents)
 		})
 	}

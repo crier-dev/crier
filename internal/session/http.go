@@ -219,7 +219,10 @@ type transcriptMessage struct {
 	Audience         Audience        `json:"audience"`
 	Outcomes         []outcomeView   `json:"outcomes,omitempty"`
 	IdempotencyKey   string          `json:"idempotency_key,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
+	// ReplayAction distinguishes a pure replay from a new delivery attempt of
+	// the same durable message. Omitted on an original send/transcript GET.
+	ReplayAction string    `json:"replay_action,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 	// Delivered / Skipped / SkippedAgents are the PARTIAL-SUCCESS summary of a
 	// SEND (DF-CRIER-305): a send is delivered to every target the registry
 	// holds and a target whose delivery is REFUSED (an unregistered agent, a
@@ -730,11 +733,24 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, existing := range st.Messages {
 			if existing.IdempotencyKey == req.IdempotencyKey {
+				if allRetryableOutcomes(existing.Outcomes) {
+					// The store lock spans re-delivery and outcome replacement too.
+					// Use ONLY the recorded intent: a changed retry payload/audience
+					// must not mutate or expand this message or create a branch.
+					view, ok := h.deliverMessage(w, r, sess, existing, nil, true)
+					if !ok {
+						return
+					}
+					view.ReplayAction = "redelivered"
+					writeJSON(w, http.StatusCreated, view)
+					return
+				}
 				view := h.messageViewOf(st, existing)
 				view.Outcomes = outcomeViews(existing.Outcomes)
 				summarizeFanout(&view, existing.Outcomes)
+				view.ReplayAction = "replayed"
 				writeJSON(w, http.StatusCreated, view)
-				return // no IDs, branches, appends, replies or deliveries on replay
+				return // delivered/mixed/canned/incomplete: no second delivery
 			}
 		}
 	}
@@ -856,13 +872,43 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 		return transcriptMessage{}, false
 	}
 	msg.Seq = seq
+	return h.deliverMessage(w, r, sess, msg, spawn, false)
+}
 
+// allRetryableOutcomes is deliberately fail-closed: an empty/incomplete result,
+// canned demo, or ANY received target keeps replay side-effect free. In
+// particular a partially delivered fan-out must not run its successful target twice.
+func allRetryableOutcomes(outcomes []DeliveryOutcome) bool {
+	if len(outcomes) == 0 {
+		return false
+	}
+	for _, o := range outcomes {
+		if o.Outcome != OutcomeRefused && o.Outcome != OutcomeFailed {
+			return false
+		}
+	}
+	return true
+}
+
+// deliverMessage shares the guarded delivery/reply/outcome path between the
+// initial intent and an eligible retry. A retry keeps ID, seq, thread, payload,
+// author and audience; only the outcomes are replaced on that transcript row.
+func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *Session, msg *Message, spawn *spawnedThreadView, retry bool) (transcriptMessage, bool) {
+	aud := msg.Audience
 	// The roster of every `group` target is resolved HERE, fresh, at send
 	// time (CR-CHAT-013, §1.4 consequence 1): a roster edit routes the NEXT
 	// send to the CURRENT members, never a cached set. A nil store leaves
 	// every group target a recorded skip.
 	roster := h.resolveGroupRoster(r.Context(), aud)
 	recipients, skipped := FanoutRecipients(aud, roster)
+	prior := append([]DeliveryOutcome(nil), msg.Outcomes...)
+	if retry {
+		// Retry the original resolved targets, not a group's changed roster.
+		recipients = nil
+		for _, o := range prior {
+			recipients = append(recipients, o.Target)
+		}
+	}
 	// A target that is deliberately NOT fanned out is never a silent drop
 	// (§3.2's named-error rule): a group with no roster is a delivery miss
 	// and is said out loud, while the by-design skips (a capability is a
@@ -880,10 +926,15 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm
 
-	// 1. The transcript record, as the intent.
-	if err := h.store.PostMessage(r.Context(), msg); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return transcriptMessage{}, false
+	// 1. Only a NEW send appends intent. A retry must not overwrite durable
+	// negative outcomes with an empty in-progress row (or allocate a new seq).
+	if !retry {
+		if err := h.store.PostMessage(r.Context(), msg); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return transcriptMessage{}, false
+		}
+	} else {
+		msg.Outcomes = prior
 	}
 
 	// 2. One delivery per participant through the shipped inbox path — and,
@@ -907,7 +958,7 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
-	outcomes, err := fanoutWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, r.Header.Get(namespace.HeaderNamespaceToken), func(target string, reply json.RawMessage) error {
+	outcomes, err := fanoutAttemptWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, r.Header.Get(namespace.HeaderNamespaceToken), retry, func(target string, reply json.RawMessage) error {
 		return h.recordWebhookReply(r.Context(), msg, target, reply)
 	})
 	if err != nil {

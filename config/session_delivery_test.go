@@ -12,11 +12,12 @@ func TestSessionDeliveryTimeoutConfig(t *testing.T) {
 		value string
 		want  int
 	}{
-		{"", 5000}, {"1", 1}, {"400", 400}, {"10000", 10000},
-		{"0", 0}, {"-1", 0}, {"10001", 0}, {"oops", 0}, {"1.5", 0},
+		{"", 30000}, {"2", 2}, {"400", 400}, {"10000", 10000}, {"30000", 30000},
+		{"0", 0}, {"-1", 0}, {"30001", 0}, {"oops", 0}, {"1.5", 0},
 	} {
 		t.Run("value="+tc.value, func(t *testing.T) {
 			unsetAll(t)
+			t.Setenv("RUNTIME_TIMEOUT_MS", "1")
 			t.Setenv("CR_SESSION_DELIVERY_TIMEOUT_MS", tc.value)
 			cfg, err := config.Load()
 			if tc.want == 0 {

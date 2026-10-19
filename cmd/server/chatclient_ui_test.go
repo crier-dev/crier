@@ -151,6 +151,11 @@ func TestChatClientNoParallelAuthOrExecution(t *testing.T) {
 		`generation === state.generation`,
 		`credentials:"same-origin"`,
 		`o.outcome === "refused"`,
+		`outcomes.every(o => o.outcome === "refused" || o.outcome === "failed")`,
+		`if (!task && !retryable) pendingMessageRequest = null`,
+		`result.replay_action === "redelivered"`,
+		`replayed without another delivery`,
+		`its outcomes will be replaced, not a second operator row added.`,
 		`.replace(/"/g,"&quot;").replace(/'/g,"&#39;")`,
 	} {
 		if !strings.Contains(html, marker) {

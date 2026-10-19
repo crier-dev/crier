@@ -36,10 +36,11 @@ const refresh = async () => {};
 const sessionPath = (id, kind) => '/sessions/'+id+'/'+kind;
 const requests = [];
 let timeout = true;
+let outcomes = [];
 async function call(path, options) {
   requests.push({path, body:JSON.parse(options.body)});
   if (timeout) { const e = new Error('browser wait elapsed'); e.name = 'TimeoutError'; throw e; }
-  return {id:'original', outcomes:[]};
+  return {id:'original', outcomes};
 }
 ` + source[start:end] + `
 (async () => {
@@ -66,6 +67,22 @@ async function call(path, options) {
   state.namespace='other realm';
   await send({preventDefault(){}});
   assert.notEqual(requests[4].body.idempotency_key,changedKey,'realm change must get a new key');
+  // A confirmed refusal/runtime failure must KEEP the draft and key too;
+  // otherwise the next click silently appends another operator row.
+  timeout=false; state.namespace='realm';
+  for (const outcome of ['refused','failed']) {
+    $('text').value='retry negative '+outcome;
+    outcomes=[{target:'nimbus',outcome,detail:'first attempt negative'}];
+    await send({preventDefault(){}});
+    const first=requests.at(-1).body;
+    assert.equal($('text').value,'retry negative '+outcome);
+    assert.ok(notices.at(-1)[1].includes('outcomes will be replaced'));
+    assert.equal(notices.at(-1)[2],true);
+    outcomes=[{target:'nimbus',outcome:'delivered'}];
+    await send({preventDefault(){}});
+    assert.equal(requests.at(-1).body.idempotency_key,first.idempotency_key);
+    assert.equal($('text').value,'');
+  }
   console.log('composer timeout and retry-key behavior PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});
 `)

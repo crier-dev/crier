@@ -5108,6 +5108,10 @@ components:
                 format: date-time
         idempotency_key:
           type: string
+        replay_action:
+          type: string
+          enum: [replayed, redelivered]
+          description: Same-key POST only. replayed means no delivery; redelivered means all prior outcomes were refused/failed and a new attempt replaced outcomes on the same message. Omitted on original send and transcript GET.
         created_at:
           type: string
           format: date-time

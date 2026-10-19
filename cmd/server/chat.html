@@ -241,20 +241,32 @@ function messageText(m) { return typeof m.payload?.text === "string" ? m.payload
 function stamp(value) { if (!value) return "Time unavailable"; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
 function avatar(id) { return esc(Array.from(id || "?").slice(0,2).join("").toUpperCase()); }
 function errorText(body) { const e = body?.error; return (typeof e === "string" ? e : [e?.code,e?.message,e?.detail].filter(Boolean).join(": ")) || body?.detail || "Server returned an error"; }
-async function call(path, options = {}) {
+async function call(path, options = {}, waitWithoutAbort = false) {
   const headers = { Accept:"application/json", ...options.headers };
   if (state.agent) headers["X-Agent-ID"] = state.agent;
   if (state.namespace) headers["X-Crier-Namespace"] = state.namespace;
-  const response = await fetch(path, { ...options, headers, credentials:"same-origin", signal:AbortSignal.timeout(12000) });
-  const raw = await response.text();
-  let body;
-  try { body = JSON.parse(raw); } catch { throw new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway."); }
-  if (!response.ok) {
-    const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
-    error.serverMessage = typeof body.error === "string" ? body.error : body.error?.message;
-    throw error;
-  }
-  return body;
+  const request = async () => {
+    // A session POST may legitimately outlast the browser wait. Do not abort
+    // its socket/context and kill a runtime whose server-side budget remains.
+    // The outstanding request still drains its response; only the UI wait ends.
+    const response = await fetch(path, { ...options, headers, credentials:"same-origin", signal:waitWithoutAbort ? undefined : AbortSignal.timeout(12000) });
+    const raw = await response.text();
+    let body;
+    try { body = JSON.parse(raw); } catch { throw new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway."); }
+    if (!response.ok) {
+      const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
+      error.serverMessage = typeof body.error === "string" ? body.error : body.error?.message;
+      throw error;
+    }
+    return body;
+  };
+  if (!waitWithoutAbort) return request();
+  let timer;
+  try {
+    return await Promise.race([request(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new DOMException("Browser wait elapsed; server request continues", "TimeoutError")), 12000);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 function notice(id, text, error = false) { $(id).textContent = text; $(id).className = error ? "note error" : "note"; }
 function unavailable(id, error) { notice(id, "Unavailable — " + error.message, true); }
@@ -442,20 +454,24 @@ async function send(event) {
       payload.idempotency_key = pendingMessageRequest.key;
     }
     postStarted = true;
-    const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
-    if (!task) pendingMessageRequest = null;
+    const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) }, !task);
     const outcomes = result.outcomes || [];
+    const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed");
+    if (!task && !retryable) pendingMessageRequest = null;
     const refused = outcomes.some(o => o.outcome === "refused");
+    const negative = refused || outcomes.some(o => o.outcome === "failed" || o.outcome === "canned");
     const details = outcomes.map(o => o.target + ": " + o.outcome + (o.detail ? " — " + o.detail : "")).join("\n");
-    notice("send-result", (task ? "Task recorded" : "Message recorded") + (refused ? "; delivery refused for one or more recipients." : ".") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed."), refused);
-    $("text").value = ""; state.reply = null; renderReply();
+    const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
+    notice("send-result", (task ? "Task recorded" : "Message recorded") + action + (refused ? "; delivery refused for one or more recipients." : ".") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : ""), negative);
+    if (!retryable) { $("text").value = ""; state.reply = null; renderReply(); }
   } catch(e) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
     // federation and persistence can outlast it. Do not label that uncertainty
     // a failed send or increase a guessed global budget. Keep the draft/key so
-    // a message retry reads back the original record without delivering again.
+    // retry reuses the original record. Only ALL refused/failed outcomes grant
+    // another delivery attempt; delivered/mixed/canned/incomplete is pure replay.
     if (postStarted && (e.name === "TimeoutError" || e.name === "AbortError")) {
-      notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key."));
+      notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key and operator row: all refused/failed outcomes re-attempt delivery; otherwise it only replays the record."));
     } else {
       notice("send-result", "Request failed — " + e.message + "\nDraft kept. Refresh the transcript before retrying.",true);
     }

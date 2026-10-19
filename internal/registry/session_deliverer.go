@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-// DefaultSessionDeliveryTimeoutMs bounds a session target to five seconds unless
-// session configuration explicitly supplies another budget. HTTP inbox defaults
-// are independent and unchanged.
-const DefaultSessionDeliveryTimeoutMs = 5000
+// DefaultSessionDeliveryTimeoutMs leaves headroom above the ecosystem runtime
+// default (20000ms) and maximum (25000ms). Config startup enforces runtime <
+// session delivery <= 30000ms. HTTP inbox defaults are independent and unchanged.
+const DefaultSessionDeliveryTimeoutMs = 30000
 
 // SessionDeliverer adapts fan-out to the handler's guarded dispatcher, never
 // directly to Store.Deliver. It shares the live handler (including its guard,

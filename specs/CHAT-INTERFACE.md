@@ -148,8 +148,18 @@ an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotenc
 
 `POST /sessions/{id}/messages` honours a nonempty `idempotency_key` within that session.
 The first send records the key with its message; later sends with the same key return HTTP 201
-and the existing message's `id`, `seq`, audience and persisted outcomes. They allocate no message
-or branch, append nothing and perform no further fan-out, even if the retried payload differs.
+and the existing message's `id`, `seq` and audience. Delivered/mixed-success, canned,
+empty or incomplete outcomes are a pure replay (`replay_action: "replayed"`): no
+branch, append or delivery, even if the retried payload differs. When ALL persisted
+outcomes are `refused` or `failed`, retry actually invokes the original resolved
+targets with the stored intent and replaces outcomes on that SAME operator row
+(`replay_action: "redelivered"`, whether the new attempt succeeds or not). A live
+successful answer may append its own agent reply; canned/failed answers still
+suppress bubbles (DF-CRIER-348). Original sends omit `replay_action`. Retry uses
+an attempt-specific delivery key derived from each persisted prior outcome's time,
+so an HTTP-successful runtime FAILED receipt cannot shadow the new attempt. The
+message/entry IDs remain stable; one operator row does not promise exactly-once
+execution after a timeout at a remote runtime.
 A different key appends a new message. An absent/empty key preserves the append-on-every-send
 contract. The same key in another session is independent. Realm/auth checks still precede replay.
 
@@ -163,11 +173,19 @@ after recording intent, replay returns its current incomplete outcomes rather th
 
 The page keeps its 12-second HTTP wait, but a timed-out POST is **not** reported as a failed send:
 it displays “Still delivering or awaiting confirmation”, retains the draft and refreshes the
-transcript. This is the simpler honest option: `CR_SESSION_DELIVERY_TIMEOUT_MS` is a per-target
+transcript. For session-message POSTs this is a wait-only timer, not an AbortSignal:
+the fetch remains attached and drains its eventual response, so a 12–25s runtime
+is not canceled by the page. Other calls retain their aborting timeout. This is the simpler honest option: `CR_SESSION_DELIVERY_TIMEOUT_MS` is a per-target
 budget, not a guarantee for the complete request including federation and persistence. Guessing
 a larger fixed browser timeout would recreate the mismatch. Message retries of the unchanged
-draft/author/realm/session/routing reuse one request key; a confirmed send or changed draft gets
-a new key. This does not change the server's delivery budget, fan-out concurrency or reply recording.
+draft/author/realm/session/routing reuse one request key; an all-refused/failed
+response also keeps that draft/key and explicitly offers another delivery attempt.
+A successful/nonretryable send or changed draft gets a new key. The server budget
+now defaults/caps at 30000ms and startup enforces `RUNTIME_TIMEOUT_MS` (default
+20000, range 1..25000) strictly less than `CR_SESSION_DELIVERY_TIMEOUT_MS`
+(range 1..30000), naming both numbers on contradiction. The runtime declaration
+must match on server and consumer; remote environments are not discoverable.
+Fan-out concurrency and the verdict checks before reply recording are unchanged.
 Task creation is not made idempotent by this change; after a timed-out task POST the page tells
 the operator to check for the task before retrying.
 

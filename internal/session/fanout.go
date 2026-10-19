@@ -181,6 +181,12 @@ func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 // after every target has joined and in sorted target order, because concurrent
 // transcript appends would interleave sequence ids.
 func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int, namespaceToken string, recordReply func(string, json.RawMessage) error) ([]DeliveryOutcome, error) {
+	return fanoutAttemptWithReplies(ctx, deliverer, msg, targets, spawn, timeoutMs, namespaceToken, false, recordReply)
+}
+
+// retry is granted only by the session/key lock holder after checking ALL
+// outcomes. Ordinary Fanout callers retain their existing pure-replay contract.
+func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int, namespaceToken string, retry bool, recordReply func(string, json.RawMessage) error) ([]DeliveryOutcome, error) {
 	if timeoutMs == 0 {
 		timeoutMs = registry.DefaultSessionDeliveryTimeoutMs
 	}
@@ -208,7 +214,9 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 	replies := make([]json.RawMessage, len(sorted))
 	var wg sync.WaitGroup
 	for i, target := range sorted {
-		if prev, ok := prior[target]; ok && prev.Outcome != "" {
+		prev, known := prior[target]
+		retryNegative := retry && (prev.Outcome == OutcomeRefused || prev.Outcome == OutcomeFailed)
+		if known && prev.Outcome != "" && !retryNegative {
 			outcomes[i] = prev
 			continue
 		}
@@ -232,6 +240,16 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 				// The namespace is left to the deliver path, which resolves the
 				// target's realm from its own row (the authority).
 				Location: locationOf(msg, spawn),
+			}
+			// A FAILED runtime reply is still a successful HTTP receipt in the
+			// dispatcher cache. Derive a fresh attempt key from the durable prior
+			// outcome, retaining the stable message/entry IDs. The same retry of
+			// that durable state deduplicates; a newly recorded refusal can retry
+			// again, even after restart. Never bypass guard or clear global cache.
+			if retry {
+				if prev, ok := prior[target]; ok {
+					entry.IdempotencyKey += ":retry:" + prev.UpdatedAt.UTC().Format(time.RFC3339Nano)
+				}
 			}
 			entry.PrincipalID = msg.Author.Principal
 			var deliveryErr error

@@ -1435,8 +1435,12 @@ falling back silently: a misconfiguration is named, not guessed.
 ### Session send budgets
 
 `CR_SESSION_DELIVERY_TIMEOUT_MS` sets each session recipient's blocking webhook
-budget (default `5000` milliseconds; accepted range `1..10000`). Invalid values
-fail startup. It applies to every session storage backend and is passed through
+budget (default and cap `30000` milliseconds; integer range `1..30000`).
+`RUNTIME_TIMEOUT_MS` declares the consumer's budget (default `20000`, integer
+range `1..25000`); it must be strictly less than the session budget. Invalid
+values or a contradictory pair fail startup, naming both budgets. Set the same
+runtime declaration on server and consumer; the server cannot inspect remote
+process environments. It applies to every session storage backend and is passed through
 the shared dispatcher's `DeliveryRequest.TimeoutMs`, not a second timeout path.
 Recipients dispatch concurrently; outcomes remain sorted by target id. Thus
 webhook fan-out waits for the slowest recipient budget rather than their sum,

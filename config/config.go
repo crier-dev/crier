@@ -62,8 +62,13 @@ type SessionConfig struct {
 	// (CR-CHAT-013). It defaults to DefaultGroupRoot when unset.
 	GroupRoot string
 	// DeliveryTimeoutMs is CR_SESSION_DELIVERY_TIMEOUT_MS: the per-target
-	// blocking webhook budget, including queue wait; default 5000, range 1..10000.
+	// blocking webhook budget, including queue wait; default/cap 30000ms.
+	// It must be strictly greater than RuntimeTimeoutMs.
 	DeliveryTimeoutMs int
+	// RuntimeTimeoutMs declares the consumer runtime budget (RUNTIME_TIMEOUT_MS,
+	// default 20000, range 1..25000). Use the same value on server and consumer:
+	// the server validates the declaration; it cannot inspect a remote process.
+	RuntimeTimeoutMs int
 }
 
 // ResolvedSessionBackend returns the effective backend: the explicit
@@ -577,10 +582,25 @@ func Load() (Config, error) {
 	cfg.Session.DeliveryTimeoutMs = registry.DefaultSessionDeliveryTimeoutMs
 	if v := os.Getenv("CR_SESSION_DELIVERY_TIMEOUT_MS"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 10000 {
-			return cfg, fmt.Errorf("invalid CR_SESSION_DELIVERY_TIMEOUT_MS: %q (want 1..10000 milliseconds)", v)
+		if err != nil || n < 1 || n > registry.DefaultSessionDeliveryTimeoutMs {
+			return cfg, fmt.Errorf("invalid CR_SESSION_DELIVERY_TIMEOUT_MS: %q (want 1..30000 milliseconds)", v)
 		}
 		cfg.Session.DeliveryTimeoutMs = n
+	}
+	// The consumer has its own bounded runtime. Never silently admit a server
+	// budget that guarantees refusal before that runtime may answer. Strictness
+	// reserves transport/queue headroom; this is not an end-to-end HTTP deadline.
+	cfg.Session.RuntimeTimeoutMs = 20000
+	if v := os.Getenv("RUNTIME_TIMEOUT_MS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 25000 {
+			return cfg, fmt.Errorf("invalid RUNTIME_TIMEOUT_MS: %q (want 1..25000 milliseconds)", v)
+		}
+		cfg.Session.RuntimeTimeoutMs = n
+	}
+	if cfg.Session.RuntimeTimeoutMs >= cfg.Session.DeliveryTimeoutMs {
+		return cfg, fmt.Errorf("RUNTIME_TIMEOUT_MS=%d must be strictly less than CR_SESSION_DELIVERY_TIMEOUT_MS=%d (milliseconds)",
+			cfg.Session.RuntimeTimeoutMs, cfg.Session.DeliveryTimeoutMs)
 	}
 	cfg.Session.GroupRoot = strings.TrimSpace(os.Getenv("CR_GROUP_ROOT"))
 	if cfg.Session.GroupRoot == "" {
