@@ -18,6 +18,12 @@ func TestChatClientOperatorShell(t *testing.T) {
 		`id="permissions"`,
 		`id="tasks"`,
 		`id="capabilities"`,
+		`id="capability-matrix-panel"`,
+		`id="capability-matrix-title"`,
+		`id="capability-matrix"`,
+		`id="capability-matrix-table"`,
+		`id="capability-matrix-legend"`,
+		`id="capability-matrix-more"`,
 		`@media(max-width:900px)`,
 		`@media(max-width:480px)`,
 		`grid-template-columns:260px minmax(0,1fr) 280px`,
@@ -129,6 +135,24 @@ func TestChatClientNoRecipientConfirmation(t *testing.T) {
 	write := strings.Index(send, `const result = await call(sessionPath(id,task ? "tasks" : "messages")`)
 	if arm < 0 || stop <= arm || write <= stop {
 		t.Error("first click must arm and return before the message/task POST")
+	}
+}
+
+func TestChatClientDeclaredCapabilityMatrix(t *testing.T) {
+	html := string(chatClientHTML)
+	for _, marker := range []string{
+		`Declared capabilities only — crier records declarations and has no approval state, so "ask" is not shown.`,
+		`renderCapabilityMatrix(capabilities);`,
+		`state.agents.slice(0,4)`,
+		`[...capabilities.keys()].sort()`,
+		`unavailable("capability-matrix",e)`,
+		`aria-describedby="capability-matrix-legend"`,
+		`<td aria-label="Declared">✓</td>`,
+		`<td aria-label="Not declared"></td>`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("embedded chat missing declaration-only matrix contract %q", marker)
+		}
 	}
 }
 

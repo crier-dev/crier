@@ -6,6 +6,7 @@
 // Build first: go build -o /tmp/cr-chat-038-server ./cmd/server
 // CHAT_TEST_PORT optionally pins the first scratch listener (e.g. 18874);
 // CRIER_TEST_BINARY selects the rebuilt binary, also used for both agent keygens.
+// CHAT_MATRIX_ONLY=1 runs just the DF-CRIER-360 registry/matrix browser regressions.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const {spawn,spawnSync} = require('node:child_process');
@@ -82,6 +83,8 @@ async function run() {
   await page.goto(base+'/chat'); await waitIdle(page);
   assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038');
   assert.equal(await page.locator('#send-button').isDisabled(),true);
+  await require('./chat-capability-matrix.cjs')(page,evidence);
+  if (process.env.CHAT_MATRIX_ONLY === '1') return;
   // DF-CRIER-332: no silent persistence; exactly one opted-in attribution slot.
   const storage = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));
   const attributionKey = 'crier.chat.attribution-id';

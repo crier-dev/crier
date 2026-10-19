@@ -100,6 +100,11 @@ main { min-width:0; display:flex; flex-direction:column; }
 .dot.stale { background:var(--amber); }
 .dot.offline { background:var(--red); }
 .cap { display:inline-block; padding:2px 6px; margin:5px 3px 0 0; border-radius:4px; color:var(--lav); background:var(--input); font-size:11px; }
+.capability-matrix { width:100%; table-layout:fixed; border-collapse:collapse; font-size:11px; }
+.capability-matrix th,.capability-matrix td { border-bottom:1px solid var(--border); padding:6px 2px; text-align:center; overflow-wrap:anywhere; }
+.capability-matrix tr > :first-child { width:36%; text-align:left; }
+.capability-matrix td { color:var(--mint); }
+#capability-matrix-legend,#capability-matrix-more { margin-top:8px; }
 .task-link { text-align:left; width:100%; font-weight:400; }
 .actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; font-size:11px; }
 .create { padding:12px; background:var(--panel); border-radius:10px; margin-bottom:12px; }
@@ -175,6 +180,11 @@ main { min-width:0; display:flex; flex-direction:column; }
       <datalist id="registered-agents"></datalist>
       <button id="add-participant" type="submit" aria-describedby="composer-why" disabled>Add participant</button>
     </form><p id="participant-result" role="status"></p>
+  </section>
+  <section class="panel" id="capability-matrix-panel" aria-labelledby="capability-matrix-title"><h2 id="capability-matrix-title">Declared-capability matrix</h2>
+    <div id="capability-matrix" class="note">Loading registry…</div>
+    <p id="capability-matrix-more" class="note"></p>
+    <p id="capability-matrix-legend" class="note">Declared capabilities only — crier records declarations and has no approval state, so "ask" is not shown.</p>
   </section>
   <section class="panel"><h2>Tasks in this session</h2><div id="tasks" class="note">Select a session. Tasks are read from their recorded lifecycle, never inferred from tags.</div><p id="task-result" role="status"></p></section>
   <section class="panel"><h2>Session permissions</h2><div id="permissions" class="note">Select a session.</div><p class="note">Read-only. Permission changes are unavailable here.</p></section>
@@ -367,10 +377,21 @@ async function changeTask(taskID, action) {
   } catch(e) { notice("task-result", e.serverMessage || e.message, true); }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
+function renderCapabilityMatrix(capabilities) {
+  // The row union covers the whole visible registry, not only capped columns.
+  const agents = state.agents.slice(0,4);
+  const remaining = state.agents.length - agents.length;
+  notice("capability-matrix-more", remaining ? "+" + remaining + " more agents not shown. Rows include all agents in this realm." : "");
+  notice("capability-matrix", "");
+  $("capability-matrix").innerHTML = capabilities.size
+    ? '<table id="capability-matrix-table" class="capability-matrix" aria-labelledby="capability-matrix-title" aria-describedby="capability-matrix-legend"><thead><tr><th scope="col">Capability</th>' + agents.map(a => '<th scope="col">' + esc(a.id) + '</th>').join("") + '</tr></thead><tbody>' + [...capabilities.keys()].sort().map(cap => '<tr><th scope="row">' + esc(cap) + '</th>' + agents.map(a => (a.capabilities || []).includes(cap) ? '<td aria-label="Declared">✓</td>' : '<td aria-label="Not declared"></td>').join("") + '</tr>').join("") + '</tbody></table>'
+    : '<p class="note">No capabilities declared in this realm.</p>';
+}
 function renderDirectory() {
   $("registered-agents").innerHTML = state.agents.map(a => '<option value="' + esc(a.id) + '"></option>').join("");
   const capabilities = new Map();
   for (const a of state.agents) for (const cap of a.capabilities || []) capabilities.set(cap, [...(capabilities.get(cap) || []), a.id]);
+  renderCapabilityMatrix(capabilities);
   $("capabilities").innerHTML = [...capabilities].map(([cap,ids]) => '<div class="card"><strong class="lavender">@cap:' + esc(cap) + '</strong><p class="note">Advertised by ' + esc(ids.join(", ")) + '</p></div>').join("") || '<p class="note">No capabilities advertised in this realm.</p>';
   const selected = $("recipient").value;
   $("recipient").innerHTML = '<option value="">Session audience</option>' + state.agents.map(a => '<option value="' + esc(a.id) + '">' + esc(a.id) + '</option>').join("");
@@ -388,7 +409,7 @@ async function refresh() {
   notice("refresh-state", "Refreshing recorded state…");
   const valid = () => generation === state.generation;
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
-  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); });
+  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
   const reads = [registry,
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
     read("/status", b => { notice("health", "Health: " + (b.health || "not exposed") + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown")); }, e => unavailable("health",e))];
@@ -533,6 +554,7 @@ $("identity-form").addEventListener("submit", event => {
   rememberAttribution();
   $("initial-members").innerHTML = "";
   state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
+  renderDirectory(); notice("capability-matrix","Loading registry…");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
   renderReply(); renderHeader(); renderSessions(); notice("send-result","");
   $("thread-filter").innerHTML = '<option value="">All threads</option>';
