@@ -1577,3 +1577,5 @@
 {"id":1571,"timestamp":"2026-10-19T15:09:18Z","event_type":"task_completed","task_id":"DF-CRIER-372","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1572,"timestamp":"2026-10-19T15:09:34Z","event_type":"task_updated","task_id":"DF-CRIER-376","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":1573,"timestamp":"2026-10-19T15:09:34Z","event_type":"task_updated","task_id":"DF-CRIER-379","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":1574,"timestamp":"2026-10-19T15:10:16Z","event_type":"task_updated","task_id":"DF-CRIER-375","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":1575,"timestamp":"2026-10-19T15:10:17Z","event_type":"task_completed","task_id":"DF-CRIER-375","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
