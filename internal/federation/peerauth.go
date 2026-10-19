@@ -308,6 +308,11 @@ func (a *PeerAuth) Middleware(next http.Handler) http.Handler {
 		}
 		if perr := a.VerifyPeerSignature(peer, r.Method, r.URL.Path,
 			r.Header.Get(FedAuthTsHeader), r.Header.Get(FedAuthSigHeader)); perr != nil {
+			v := FedBadSignature
+			if perr.Status == http.StatusForbidden {
+				v = FedPeerRevoked
+			}
+			w.Header().Set(VerdictHeader, string(v))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(perr.Status)
 			_, _ = fmt.Fprintf(w, `{"error":%q}`, perr.Message)

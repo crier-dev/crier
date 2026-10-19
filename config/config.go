@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -445,6 +446,10 @@ type FederationConfig struct {
 	// auth). The key is loaded from the file at startup — no secret
 	// material is ever hardcoded. Empty (default) signs nothing.
 	SelfKeyFile string
+	// RecordsFile enables operator-managed peer lifecycle + handshake state.
+	// Empty keeps legacy discovery. The explicit value "auto" resolves
+	// alongside the hold queue (or, without a hold file, the self key).
+	RecordsFile string
 }
 
 // WebhookConfig holds push-delivery tuning (CR-FEAT-001/005).
@@ -732,6 +737,14 @@ func Load() (Config, error) {
 	// CR_FED_SELF_KEY_FILE (CR-CHAT-024): path of this relay's own hex
 	// ed25519 seed, used to sign outbound forwards (mutual auth).
 	cfg.Federation.SelfKeyFile = os.Getenv("CR_FED_SELF_KEY_FILE")
+	cfg.Federation.RecordsFile = os.Getenv("CR_FED_RECORDS_FILE")
+	if cfg.Federation.RecordsFile == "auto" {
+		base := cfg.Federation.QueueFile
+		if base == "" {
+			base = cfg.Federation.SelfKeyFile
+		}
+		cfg.Federation.RecordsFile = filepath.Join(filepath.Dir(base), "federation-peers.json")
+	}
 
 	cfg.ServiceDeliveryAllowlist = os.Getenv("CR_SERVICE_DELIVERY_ALLOWLIST")
 	if _, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {

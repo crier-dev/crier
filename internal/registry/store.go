@@ -175,7 +175,8 @@ type Transferrer interface {
 
 // Handler keeps HTTP concerns separate from storage implementations.
 type Handler struct {
-	store Store
+	peerRecords *federation.PeerStore
+	store       Store
 	// serviceDeliveries is immutable after startup; nil preserves legacy delivery.
 	serviceDeliveries ServiceDeliveryPolicy
 	serviceAudience   string

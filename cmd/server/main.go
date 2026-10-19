@@ -245,7 +245,8 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// Authorization header cannot equal two secrets. Everywhere else the message
 	// token is still the only credential, and the admin token is refused with
 	// 403. middleware.AuthTokens' own predicate names the exempt routes.
-	r.Use(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken))
+	var fedRecordGate *federation.PeerStore
+	r.Use(federation.DeliveryAuth(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken), func() *federation.PeerStore { return fedRecordGate }))
 	// Federation peer authentication (CR-CHAT-024): when CR_FED_AUTH_FILE is
 	// set, requests that announce a peer identity (X-Crier-Fed-Peer) must
 	// prove it with a valid X-Fed-Ts/X-Fed-Sig signature over the request
@@ -594,9 +595,20 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		}
 		slog.Info("federation peer policies", "file", cfg.Federation.PeersFile, "peers", names)
 	}
+	peerService, peerErr := configureFederationPeers(cfg, r, registryHandler)
+	if peerErr != nil {
+		slog.Error("federation peers", "error", peerErr)
+		return 1
+	}
+	if peerService != nil {
+		fedRecordGate = peerService.Store
+	}
 	if len(cfg.Federation.Links) > 0 {
 		fedClient = federation.NewClient(cfg.Federation.Links, 0, cfg.Federation.Token)
 		fedClient.SetPeerPolicies(fedPeers)
+		if peerService != nil {
+			fedClient.SetPeerRecords(peerService.Store, federationName(cfg))
+		}
 		// Mutual auth (CR-CHAT-024): sign every outbound forward when
 		// CR_FED_SELF_KEY_FILE is set, so a destination running the peer
 		// auth gate proves this relay's identity. A missing/invalid key
@@ -659,7 +671,9 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 			Agents: agents,
 		}
 	}
-	r.HandleFunc("/fed/peers", federation.HandlePeers(fedClient, localPeer)).Methods("GET")
+	if peerService == nil {
+		r.HandleFunc("/fed/peers", federation.HandlePeers(fedClient, localPeer)).Methods("GET")
+	}
 
 	// Webhook push delivery (CR-FEAT-001) — active only for agents that
 	// register a webhook endpoint.
@@ -1457,6 +1471,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  CR_INBOX_MAX_BODY_BYTES     maximum raw body for inbox deliveries (default 1048576; invalid values fail startup; over-cap requests return 413 REQUEST_BODY_TOO_LARGE)")
 	fmt.Fprintln(out, "  CR_WS_ALLOWED_ORIGINS       comma-separated WebSocket origins, \"*\" = allow all")
 	fmt.Fprintln(out, "  CR_FED_LINKS                comma-separated base URLs of linked relays (relay federation)")
+	_, _ = fmt.Fprintln(out, "  CR_FED_RECORDS_FILE         operator peer records (auto = beside hold queue/self key; unset = legacy)")
 	fmt.Fprintln(out, "  CR_FED_NAME                 optional local relay name for the /fed/peers listing")
 	fmt.Fprintln(out, "  CR_FED_TOKEN                shared secret for link auth: sent as Bearer to linked relays; must equal the destination's CR_AUTH_TOKEN (empty = no link auth)")
 	fmt.Fprintln(out, "  CR_FED_MAX_HOLD_S           how long a delivery is held and retried when every link is down, before the sender is told FEDERATION_FAILED (default 300)")

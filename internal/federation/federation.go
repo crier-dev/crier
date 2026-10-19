@@ -153,9 +153,11 @@ func retryableStatus(status int) bool {
 // a policy behaves exactly as before this field existed — the shipped
 // outbound posture is unchanged when no peer records are configured (§1.3).
 type Client struct {
-	links []Link
-	token string
-	http  *http.Client
+	records *PeerStore
+	selfID  string
+	links   []Link
+	token   string
+	http    *http.Client
 	// peerPolicy, when non-nil, is consulted per link URL before a forward
 	// is sent. It is keyed by peer id internally; lookup here is by URL.
 	peerPolicy PeerPolicies
@@ -445,7 +447,14 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 		}
 		SignFedRequest(req, c.selfKey, clock())
 	}
-	c.authorize(req)
+	if err := c.preparePeerForward(req, link, body); err != nil {
+		return 0, nil, err
+	}
+	// A keyed peer sends no shared token. Legacy links retain the exact
+	// Authorization header they carried before keyed setup existed.
+	if req.Header.Get("X-Fed-Body-Sig") == "" {
+		c.authorize(req)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -455,6 +464,16 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return 0, nil, fmt.Errorf("federation: read response from %s: %w", link.URL, err)
+	}
+	if c.records != nil && len(c.records.List()) > 0 {
+		switch Verdict(resp.Header.Get(VerdictHeader)) {
+		case FedPeerRevoked, FedNoLink, FedBadSignature:
+			noteDecision(ctx, Verdict(resp.Header.Get(VerdictHeader)))
+		default:
+			if resp.StatusCode == http.StatusUnauthorized {
+				noteDecision(ctx, FedBadSignature)
+			}
+		}
 	}
 	return resp.StatusCode, respBody, nil
 }
@@ -476,6 +495,7 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 // carries the implicit default realm.
 func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (int, []byte, error) {
 	var (
+		lastRefusal    *DeliveryRefusal
 		lastErr        error
 		lastStatus     int
 		sawTransient   bool
@@ -501,6 +521,11 @@ func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (
 		}
 		status, respBody, err := c.ForwardDeliver(ctx, link, agentID, body)
 		if err != nil {
+			var refusal *DeliveryRefusal
+			if errors.As(err, &refusal) {
+				lastRefusal = refusal
+				continue // revoking one peer must not disable other links
+			}
 			slog.Warn("federation: link unreachable, trying next", "link", link.URL, "error", err)
 			lastErr = err
 			sawTransient = true
@@ -516,6 +541,10 @@ func (c *Client) forwardPass(ctx context.Context, agentID string, body []byte) (
 			continue
 		}
 		return status, respBody, nil
+	}
+	if lastRefusal != nil && !sawTransient {
+		noteDecision(ctx, lastRefusal.Verdict)
+		return 0, nil, lastRefusal
 	}
 	if policyBlocked && !sawTransient {
 		return 0, nil, &NamespaceNotPermittedError{}
@@ -576,6 +605,7 @@ func (c *Client) ForwardOrHold(ctx context.Context, agentID string, body []byte,
 			agentID, err)
 	}
 	item := &HoldItem{
+		Verdict:    currentDecision(ctx),
 		ID:         meta.MessageID,
 		AgentID:    agentID,
 		Body:       append(json.RawMessage(nil), body...),

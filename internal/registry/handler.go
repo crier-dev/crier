@@ -426,15 +426,16 @@ type federationHeldResponse struct {
 // unhealthy and no hold queue took the delivery. It carries the correlation
 // context of the original request and is explicitly NOT an agent-not-found.
 type federationFailureResponse struct {
-	Error     string `json:"error"` // always FEDERATION_FAILED
-	MessageID string `json:"message_id"`
-	Target    string `json:"target"`
-	Sender    string `json:"sender,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	Attempts  int    `json:"attempts"`
-	Status    int    `json:"status,omitempty"`
-	Detail    string `json:"detail,omitempty"`
+	Error     string             `json:"error"` // always FEDERATION_FAILED
+	MessageID string             `json:"message_id"`
+	Target    string             `json:"target"`
+	Sender    string             `json:"sender,omitempty"`
+	RequestID string             `json:"request_id,omitempty"`
+	SessionID string             `json:"session_id,omitempty"`
+	Attempts  int                `json:"attempts"`
+	Status    int                `json:"status,omitempty"`
+	Detail    string             `json:"detail,omitempty"`
+	Verdict   federation.Verdict `json:"verdict,omitempty"`
 }
 
 // federationFailure builds the 502 body for a transient federation failure.
@@ -1046,6 +1047,9 @@ func (h *Handler) rejectOversizedBody(w http.ResponseWriter, r *http.Request) bo
 	return false
 }
 
+// SetPeerRecords enables per-instance lifecycle checks at the delivery boundary.
+func (h *Handler) SetPeerRecords(s *federation.PeerStore) { h.peerRecords = s }
+
 func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability string) {
 	// CR-CHAT-020: the per-message delivery latency is measured from the top
 	// of the shared deliver path, so the figure covers everything this POST
@@ -1057,6 +1061,15 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 
 	if h.rejectOversizedBody(w, r) {
 		return
+	}
+	if h.peerRecords != nil &&
+		((len(h.peerRecords.List()) > 0 && r.Header.Get(federation.HopHeader) != "") || r.Header.Get(federation.PeerHeader) != "") {
+		v := h.peerRecords.VerifyDelivery(r)
+		if v != federation.FedAllowed {
+			federation.RefuseDelivery(w, v)
+			return
+		}
+		w.Header().Set(federation.VerdictHeader, string(v))
 	}
 	if !h.authorizeServiceDelivery(w, r, id, capability) {
 		return
@@ -1500,13 +1513,20 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "federation: marshal deliver request"})
 			return
 		}
-		status, respBody, held, ferr := h.fed.ForwardOrHold(r.Context(), id, reqBytes, federation.HoldMeta{
+		status, respBody, held, peerVerdict, ferr := h.fed.ForwardOrHoldVerdict(r.Context(), id, reqBytes, federation.HoldMeta{
 			MessageID: entry.ID,
 			Sender:    req.Sender,
 			RequestID: req.RequestID,
 			SessionID: req.SessionID,
 		})
+		w.Header().Set(federation.VerdictHeader, string(peerVerdict))
 		switch {
+		case isFederationRefusal(ferr):
+			var refusal *federation.DeliveryRefusal
+			errors.As(ferr, &refusal)
+			resp := federationFailure(req, entry.ID, id, ferr)
+			resp.Verdict = peerVerdict
+			writeJSON(w, refusal.Status(), resp)
 		case ferr == nil:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
@@ -1548,7 +1568,9 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 			// DF-CRIER-129). An explicit bounded failure with the
 			// correlation context, never a 404.
 			verdictOverride = VerdictFederationFailed
-			writeJSON(w, http.StatusBadGateway, federationFailure(req, entry.ID, id, ferr))
+			resp := federationFailure(req, entry.ID, id, ferr)
+			resp.Verdict = peerVerdict
+			writeJSON(w, http.StatusBadGateway, resp)
 		}
 		return
 	}

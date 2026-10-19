@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/crier-dev/crier/internal/federation"
@@ -44,16 +45,17 @@ func fedPeerRefusal(code, peer, target, detail string) fedPeerRefusalBody {
 // kind=error plus the FEDERATION_FAILED code and the correlation context of
 // the original delivery. The message body is never echoed.
 type federationFailurePayload struct {
-	Kind      string `json:"kind"` // always "error"
-	Code      string `json:"code"` // always federation.CodeFederationFailed
-	MessageID string `json:"message_id"`
-	Target    string `json:"target"`
-	Sender    string `json:"sender,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	Attempts  int    `json:"attempts"`
-	Status    int    `json:"status,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Verdict   federation.Verdict `json:"verdict,omitempty"`
+	Kind      string             `json:"kind"` // always "error"
+	Code      string             `json:"code"` // always federation.CodeFederationFailed
+	MessageID string             `json:"message_id"`
+	Target    string             `json:"target"`
+	Sender    string             `json:"sender,omitempty"`
+	RequestID string             `json:"request_id,omitempty"`
+	SessionID string             `json:"session_id,omitempty"`
+	Attempts  int                `json:"attempts"`
+	Status    int                `json:"status,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
 // FederationFailureSink returns the notifier the federation hold manager
@@ -73,6 +75,7 @@ func FederationFailureSink(store Store) func(federation.FailureReport) error {
 	return func(r federation.FailureReport) error {
 		payload, err := json.Marshal(federationFailurePayload{
 			Kind:      "error",
+			Verdict:   r.Verdict,
 			Code:      federation.CodeFederationFailed,
 			MessageID: r.MessageID,
 			Target:    r.Target,
@@ -94,4 +97,9 @@ func FederationFailureSink(store Store) func(federation.FailureReport) error {
 		}
 		return nil
 	}
+}
+
+func isFederationRefusal(err error) bool {
+	var r *federation.DeliveryRefusal
+	return errors.As(err, &r)
 }

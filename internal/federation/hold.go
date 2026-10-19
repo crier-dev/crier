@@ -55,6 +55,7 @@ const (
 // byte-for-byte and to report a terminal FEDERATION_FAILED with correlation
 // details.
 type HoldItem struct {
+	Verdict Verdict `json:"verdict,omitempty"`
 	// ID is the message id assigned to the delivery by the source relay
 	// (it is also the queue key). Reported to the sender on failure.
 	ID string `json:"id"`
@@ -258,15 +259,16 @@ type HoldMeta struct {
 // observed error/status. The message body is never included, so the report
 // is bounded.
 type FailureReport struct {
-	Code      string `json:"code"`
-	MessageID string `json:"message_id"`
-	Target    string `json:"target"`
-	Sender    string `json:"sender,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	Attempts  int    `json:"attempts"`
-	Status    int    `json:"status,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Verdict   Verdict `json:"verdict,omitempty"`
+	Code      string  `json:"code"`
+	MessageID string  `json:"message_id"`
+	Target    string  `json:"target"`
+	Sender    string  `json:"sender,omitempty"`
+	RequestID string  `json:"request_id,omitempty"`
+	SessionID string  `json:"session_id,omitempty"`
+	Attempts  int     `json:"attempts"`
+	Status    int     `json:"status,omitempty"`
+	Error     string  `json:"error,omitempty"`
 }
 
 // FailureNotifier delivers a terminal FEDERATION_FAILED report. The server
@@ -486,7 +488,10 @@ func (m *HoldManager) attempt(item *HoldItem, now time.Time) {
 	// forwardPass (not ForwardToAny) so a retry reuses the exact
 	// single-pass classification: first non-404, non-retryable answer wins,
 	// transport errors and retryable statuses mean "link still down".
+	v := item.Verdict
+	ctx = context.WithValue(ctx, decisionKey{}, &v)
 	status, body, err := m.client.forwardPass(ctx, item.AgentID, item.Body)
+	item.Verdict = v
 	switch {
 	case err == nil && status >= 200 && status < 300:
 		// Recovered: delivered exactly once, then removed so no later pass
@@ -497,6 +502,12 @@ func (m *HoldManager) attempt(item *HoldItem, now time.Time) {
 		// retrying cannot help — report the outcome instead of looping.
 		m.fail(item, status, fmt.Sprintf("linked relay answered %d", status), "definitive rejection")
 	default:
+		var refusal *DeliveryRefusal
+		if errors.As(err, &refusal) {
+			item.Verdict = refusal.Verdict
+			m.fail(item, refusal.Status(), err.Error(), "peer refused")
+			return
+		}
 		var transient *TransientError
 		if errors.As(err, &transient) {
 			item.Attempts++
@@ -540,6 +551,7 @@ func (m *HoldManager) fail(item *HoldItem, status int, lastErr, reason string) {
 	}
 	report := FailureReport{
 		Code:      CodeFederationFailed,
+		Verdict:   item.Verdict,
 		MessageID: item.ID,
 		Target:    item.AgentID,
 		Sender:    item.Sender,
