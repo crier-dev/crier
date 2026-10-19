@@ -11,6 +11,22 @@ import (
 
 type inboundDecisionKey struct{}
 
+type inboundDecision struct {
+	verdict Verdict
+	peer    string
+}
+
+// VerifiedDeliveryPeer returns only the identity authenticated by DeliveryAuth's
+// complete per-request checks, never an unverified header claim. An empty result
+// means no attributable peer (including legacy bearer-only ingress).
+func VerifiedDeliveryPeer(ctx context.Context) string {
+	decision, ok := ctx.Value(inboundDecisionKey{}).(inboundDecision)
+	if !ok || decision.verdict != FedAllowed {
+		return ""
+	}
+	return decision.peer
+}
+
 // DeliveryAuth authenticates inbox ingress before the deployment gate. Claimed
 // peer identities never downgrade to bearer auth when lifecycle records are
 // enabled. Keyless calls remain deployment-authenticated in compatibility mode.
@@ -56,7 +72,7 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 				completed = true
 				return
 			}
-			r = r.WithContext(context.WithValue(r.Context(), inboundDecisionKey{}, v))
+			r = r.WithContext(context.WithValue(r.Context(), inboundDecisionKey{}, inboundDecision{verdict: v, peer: peer}))
 			if v == FedAllowed {
 				next.ServeHTTP(receipt, r)
 			} else {

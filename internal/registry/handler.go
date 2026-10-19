@@ -1465,7 +1465,7 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 			ttl := int(*nsPolicy.RetentionSeconds)
 			entry.TTLSeconds = &ttl
 		}
-		logNamespaceDeliver(id, targetNS, req.Sender)
+		h.logNamespaceDeliver(r.Context(), id, targetNS, req.Sender, entry.ID)
 	}
 
 	// ▼ DELIVERY ACL — TARGET level (CR-CHAT-003, specs/CHAT-PERMISSIONS.md

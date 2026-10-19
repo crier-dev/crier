@@ -10,11 +10,13 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/namespace"
 )
 
@@ -165,13 +167,24 @@ func retentionFor(pol namespace.Policy) time.Duration {
 	return pol.Retention(DefaultMessageTTL)
 }
 
-// logNamespaceDeliver records the realm a delivery resolved to, at debug: it is
-// per-message evidence for the isolation property, and it carries no payload, no
-// token and no resolved secret.
-func logNamespaceDeliver(target, nsName, sender string) {
-	if nsName == "" {
-		return
+// logNamespaceDeliver runs only after the target's CheckAuth succeeds. Token
+// authorization is Info-level audit evidence, including the default realm; it
+// does not assert that downstream policy/transport accepted the delivery. Only
+// the ingress verifier's context snapshot can attribute a presenting peer.
+func (h *Handler) logNamespaceDeliver(ctx context.Context, target, nsName, sender, messageID string) {
+	if h.namespaces.Resolve(nsName).Auth == namespace.AuthToken {
+		peer := federation.VerifiedDeliveryPeer(ctx)
+		identity := "unattributed"
+		if peer != "" {
+			identity = "verified_peer"
+		}
+		slog.Info("namespace delivery authorized",
+			"target", target, "namespace", namespace.Display(nsName), "sender", sender,
+			"message_id", messageID, "namespace_auth", "bearer_per_hop",
+			"presenter_peer", peer, "presenter_identity", identity)
 	}
-	slog.Debug("inbox deliver scoped to namespace",
-		"target", target, "namespace", namespace.Display(nsName), "sender", sender)
+	if nsName != "" {
+		slog.Debug("inbox deliver scoped to namespace",
+			"target", target, "namespace", namespace.Display(nsName), "sender", sender)
+	}
 }
