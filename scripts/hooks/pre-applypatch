@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Git am's post-application, pre-commit entrypoint. Validate the resulting index.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel)" || exit 1
+checker="$root/scripts/check-board.sh"
+if [ ! -f "$checker" ]; then
+  echo "gate: pre-applypatch board arm UNAVAILABLE — $checker is missing" >&2
+  exit 1
+fi
+exec bash "$checker" --staged-index

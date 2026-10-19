@@ -20,6 +20,7 @@
 # USAGE
 # -----
 #   bash scripts/check-board.sh              # validate this repo's board
+#   bash scripts/check-board.sh --staged-index # whole index, not worktree
 #   bash scripts/check-board.sh -C DIR       # validate another board root
 #   bash scripts/check-board.sh --selftest   # prove the checker still rejects
 #
@@ -62,26 +63,35 @@ ROOT_DEFAULT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 
 # materialise_index <root> <dest>
 #
-# DF-CRIER-399: when board files are staged, what lands in the commit is the
-# INDEX blob, not the working-tree file. A worker that stages an invalid row and
-# then restores the file would otherwise be validated on a tree the commit does
-# not contain. This writes every staged board path from the index into <dest>,
-# preserving the relative path, so boardctl validates exactly what will be
-# committed.
+# DF-CRIER-399/403/408: EVERY commit carries the INDEX, including unchanged
+# HEAD blobs when only a non-board path is staged. Materialise both canonical
+# board files; absence/deletion/unmerged entries are failures, never empty scope.
 materialise_index() {
   local root="$1" dest="$2"
   local path
-  mkdir -p "$dest/.coding-hermes/board"
-  for path in .coding-hermes/board/tasks.jsonl .coding-hermes/board/events.jsonl; do
-    if git -C "$root" cat-file -e ":$path" 2>/dev/null; then
-      git -C "$root" show ":$path" > "$dest/$path" || return 1
+  local paths=(.coding-hermes/board/tasks.jsonl .coding-hermes/board/events.jsonl)
+  # Preserve topology-A metadata/fixtures when present, including unchanged
+  # HEAD blobs. Otherwise validating only tasks/events silently narrows scope.
+  for path in .coding-hermes/board/board.jsonl .coding-hermes/board/fixtures.jsonl; do
+    if git -C "$root" cat-file -e ":$path" 2>/dev/null ||
+      git -C "$root" cat-file -e "HEAD:$path" 2>/dev/null; then
+      paths+=("$path")
     fi
+  done
+  mkdir -p "$dest/.coding-hermes/board" || return 2
+  for path in "${paths[@]}"; do
+    if ! git -C "$root" cat-file -e ":$path" 2>/dev/null; then
+      _err "board: required index path $path is missing, deleted or unmerged — commit refused."
+      return 1
+    fi
+    git -C "$root" show ":$path" > "$dest/$path" || return 2
   done
   return 0
 }
 
 run_check() {
   local root="$1" staged="${2:-0}"
+  cleanup_index_root
   local validator
   validator="$(command -v boardctl 2>/dev/null || true)"
   if [ -z "$validator" ]; then
@@ -98,11 +108,13 @@ run_check() {
   if [ "$staged" -eq 1 ]; then
     # Validate the INDEX, not the tree: the commit carries these blobs.
     local idxroot
-    idxroot="$(mktemp -d "${TMPDIR:-/tmp}/check-board-index.XXXXXX")"
-    if ! materialise_index "$root" "$idxroot"; then
-      _err "board: could not read the staged board blobs from the index — refusing to validate the working tree instead."
+    idxroot="$(mktemp -d "${TMPDIR:-/tmp}/check-board-index.XXXXXX")" || return 2
+    materialise_index "$root" "$idxroot"
+    local materialise_rc=$?
+    if [ "$materialise_rc" -ne 0 ]; then
+      _err "board: could not read the required board blobs from the index — refusing to validate the working tree instead."
       rm -rf "$idxroot"
-      return 2
+      return "$materialise_rc"
     fi
     root="$idxroot"
     scope="staged index (the blobs this commit will carry)"
@@ -112,9 +124,16 @@ run_check() {
   _say "board: scope $scope"
 
   local board="$root/.coding-hermes/board"
-  if [ ! -f "$board/tasks.jsonl" ]; then
-    _say "board: no tasks.jsonl under $board — nothing to validate (not a vacuous PASS: the file is absent, not empty)"
-    return 0
+  local required
+  for required in tasks.jsonl events.jsonl; do
+    if [ ! -f "$board/$required" ]; then
+      _err "board: required path .coding-hermes/board/$required is absent under $root — refusing a vacuous PASS."
+      return 1
+    fi
+  done
+  if [ ! -s "$board/tasks.jsonl" ]; then
+    _err "board: .coding-hermes/board/tasks.jsonl is empty — no board records to validate."
+    return 1
   fi
 
   local out rc
@@ -127,7 +146,6 @@ run_check() {
     printf '%s\n' "$out"
   fi
   if [ "$rc" -ne 0 ]; then
-    printf '%s\n' "$out"
     _err "board: validation FAILED (boardctl exit $rc) — fix the rows named above; do not commit an invalid board with --no-verify."
     return 1
   fi
@@ -141,7 +159,7 @@ run_check() {
 _selftest() {
   local rc fails=0
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/check-board-selftest.XXXXXX")" || return 2
-  trap 'rm -rf "${tmp:-}"' EXIT
+  trap 'cleanup_index_root; rm -rf "${tmp:-}"' EXIT
 
   if ! command -v boardctl >/dev/null 2>&1; then
     _err "selftest cannot run: boardctl is not on PATH (that is itself the exit-2 path this script claims)"
@@ -161,21 +179,22 @@ _selftest() {
     _say "selftest: canonical board accepted (exit 0)"
   fi
 
-  # fixture 2: an off-vocabulary status, which is exactly the shape that shipped
+  # fixture 2: an unambiguously unknown status. Some boardctl releases treat
+  # 'closed' as a warning-only read alias; the fixture must remain an ERROR.
   cp -r "$tmp/ok" "$tmp/bad"
   python3 - "$tmp/bad/.coding-hermes/board/tasks.jsonl" <<'PY'
 import json, sys
 path = sys.argv[1]
 lines = [l for l in open(path) if l.strip()]
 row = json.loads(lines[-1])
-row['status'] = 'closed'
+row['status'] = '__SELFTEST_INVALID_STATUS__'
 lines[-1] = json.dumps(row) + '\n'
 open(path, 'w').writelines(lines)
 PY
   run_check "$tmp/bad" >/dev/null 2>&1
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    _err "selftest: a board carrying status 'closed' was ACCEPTED — the arm is vacuous"
+    _err "selftest: a board carrying an unknown selftest status was ACCEPTED — the arm is vacuous"
     fails=$((fails + 1))
   else
     _say "selftest: off-vocabulary row rejected (exit $rc)"
@@ -220,7 +239,7 @@ PY
     : > "$idxrepo/.coding-hermes/board/events.jsonl"
   fi
   git -C "$idxrepo" add .coding-hermes/board >/dev/null 2>&1
-  git -C "$idxrepo" -c user.email=selftest@example.invalid -c user.name=selftest commit -qm base >/dev/null 2>&1
+  git -C "$idxrepo" -c core.hooksPath=/dev/null -c user.email=selftest@example.invalid -c user.name=selftest commit -qm base >/dev/null 2>&1
   cp "$tmp/bad/.coding-hermes/board/tasks.jsonl" "$idxrepo/.coding-hermes/board/tasks.jsonl"
   git -C "$idxrepo" add .coding-hermes/board/tasks.jsonl >/dev/null 2>&1
   cp "$tmp/ok/.coding-hermes/board/tasks.jsonl" "$idxrepo/.coding-hermes/board/tasks.jsonl"
@@ -231,6 +250,13 @@ PY
     fails=$((fails + 1))
   else
     _say "selftest: staged-only invalid row rejected while the worktree is clean (index scope)"
+  fi
+
+  # Real commit/merge/applypatch entrypoints, not just direct checker calls.
+  local commit_tests
+  commit_tests="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-board-commit-selftest.py"
+  if ! python3 "$commit_tests"; then
+    fails=$((fails + 1))
   fi
 
   if [ "$fails" -ne 0 ]; then

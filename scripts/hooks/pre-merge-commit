@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Git merge's commit entrypoint. Fast-forwards have no commit hook: CI covers them.
+# --no-verify can bypass this hook; CI remains the checked-out-tree backstop.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel)" || exit 1
+checker="$root/scripts/check-board.sh"
+if [ ! -f "$checker" ]; then
+  echo "gate: pre-merge-commit board arm UNAVAILABLE — $checker is missing" >&2
+  exit 1
+fi
+exec bash "$checker" --staged-index

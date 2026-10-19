@@ -7,6 +7,35 @@ on:
     branches: [main]
 
 jobs:
+  board-validation:
+    name: Whole-board validation (fail closed)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.9"
+      # Pin the real validator source, not a warn-only hook or a skip-on-missing shim.
+      - name: Checkout pinned boardctl
+        uses: actions/checkout@v5
+        with:
+          repository: coding-hermes/boardctl
+          ref: d2c0278a8ce0a2226b32a7a7c16ebe7c3c56450a
+          path: .ci-boardctl
+          persist-credentials: false
+      - name: Build required boardctl
+        working-directory: .ci-boardctl
+        run: go build -o "$RUNNER_TEMP/boardctl" ./cmd/boardctl
+      # Covers --no-verify, hookless git am, fast-forwards and other local bypasses.
+      # No paths filter, continue-on-error, missing-tool skip or success fallback.
+      - name: Validate the whole checked-out board
+        run: |
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash scripts/check-board.sh
+          bash scripts/check-board.sh --selftest
+
   build:
     name: Build & Test
     runs-on: ubuntu-latest

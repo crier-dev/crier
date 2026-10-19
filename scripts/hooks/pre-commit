@@ -65,7 +65,7 @@
 #  (1) `gitreins guard` — unchanged, same command, same exit semantics: a
 #      nonzero guard stops the commit here, before anything else runs.
 #  (2) scope disclosure. The staged set is read once (`git diff --cached
-#      --name-only --diff-filter=ACMR`) and split into Go files, shell/workflow
+#      --name-only --diff-filter=ACDMR --no-renames`) and split into Go files, shell/workflow
 #      files, Makefile/Dockerfile files, and everything else; the line printed
 #      says which of those Tier 1 actually covers, and names the arms added here,
 #      e.g.
@@ -90,8 +90,9 @@
 #      nonzero checker exit stops the commit. It runs whenever such a file is
 #      staged, for the same reason as (4).
 #
-#  (6) the board checker (scripts/check-board.sh, DF-CRIER-387) is run whenever
-#      a staged path is under .coding-hermes/board/. This is the arm whose
+#  (6) the board checker (scripts/check-board.sh) validates the WHOLE INDEX on
+#      EVERY commit, even without a GitReins config (DF-CRIER-389/399/403/408).
+#      Deletions of either canonical board file are rejected. This is the arm whose
 #      ABSENCE let an invalid board ship: a board-only diff has no Go, no shell
 #      and no Makefile, so it used to fall through to `gate scope: nothing
 #      guardable staged — exit 0` while `boardctl validate` was printing
@@ -108,27 +109,32 @@
 # gofmt-check`, `make shell-yaml-check` and `make make-docker-check` (CI, and any
 # local run) check every tracked file of their kind regardless of what is staged.
 #
-# NOTHING HERE WEAKENS THE GUARD: `gitreins guard` is still the first and
-# blocking step, and --no-verify is still forbidden by AGENTS.md.
+# When configured, `gitreins guard` remains the first blocking step.
+# --no-verify CAN bypass local hooks. CI's whole-board job is the backstop;
+# this hook does not claim that local bypass is impossible or cite a nonexistent rule.
 
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT="$PWD"
 cd "$REPO_ROOT" || exit 1
 
-# ── (1) the guard, exactly as the generated hook ran it ───────────────────────
-if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
-  exit 0
-fi
-
-gitreins guard
-guard_rc=$?
-if [ "$guard_rc" -ne 0 ]; then
-  exit "$guard_rc"
+# ── (1) only GitReins is conditional; never disable the board gate ────────────
+if [ -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
+  gitreins guard
+  guard_rc=$?
+  if [ "$guard_rc" -ne 0 ]; then
+    exit "$guard_rc"
+  fi
+  tier1_go="Tier-1 go_build/go_vet/go_tests cover them"
+  tier1_empty="the Tier-1 PASS verified nothing about this diff"
+else
+  echo "gate: GitReins NOT RUN — .gitreins/config.yaml is absent; board validation remains mandatory"
+  tier1_go="GitReins NOT RUN (config absent); no Tier-1 coverage claimed"
+  tier1_empty="GitReins NOT RUN (config absent); no Tier-1 PASS claimed"
 fi
 
 # ── (2) derive the staged scope ───────────────────────────────────────────────
-staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+staged="$(git diff --cached --name-only --diff-filter=ACDMR --no-renames)" || exit 1
 go_count=0
 go_files=()
 shell_yaml=()
@@ -138,19 +144,18 @@ board_files=()
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    *.go)
-      # MIRRORS scripts/check-gofmt.sh (_is_go): the .go suffix is the whole rule.
-      go_files+=("$path")
-      go_count=$((go_count + 1))
+    .coding-hermes/board/*)
+      board_files+=("$path")
       continue
       ;;
   esac
+  # A deleted non-board path has no blob to syntax-check. A deleted BOARD path
+  # above is still classified and the mandatory index checker refuses it.
+  git cat-file -e ":$path" 2>/dev/null || continue
   case "$path" in
-    .coding-hermes/board/*)
-      # MIRRORS scripts/check-board.sh: board data is the whole rule. This is
-      # the shape that used to read "nothing guardable staged — exit 0", which
-      # is exactly how an invalid board shipped (DF-CRIER-387).
-      board_files+=("$path")
+    *.go)
+      go_files+=("$path")
+      go_count=$((go_count + 1))
       continue
       ;;
   esac
@@ -215,57 +220,44 @@ n_board="${#board_files[@]}"
 # CONDITION. An invalid board is a state: it survives in the tree and can arrive
 # through another lane's push or a direct write, and then every Go-only or empty
 # commit read green while `boardctl validate` printed FAIL on the same tree.
-# Like the gofmt arm (which reads the whole tracked .go set, never just staged
-# files), this arm reads the WHOLE board on every commit. It is quiet about the
-# validator's warnings and loud about its errors, and a repo with no board is
-# told so rather than skipped silently.
+# Always read both canonical board INDEX blobs: unchanged paths are HEAD's
+# contents, not an unstaged worktree repair. No config/checker/deletion skip.
 BOARD_CHECKER="$REPO_ROOT/scripts/check-board.sh"
-if [ -f "$BOARD_CHECKER" ]; then
-  # DF-CRIER-399: a staged board row is what this commit will carry, so the
-  # index is what gets validated - never the working tree that a staged-then-
-  # restored edit would leave looking clean.
-  if [ "$n_board" -gt 0 ]; then
-    bash "$BOARD_CHECKER" -q --staged-index
-  else
-    bash "$BOARD_CHECKER" -q
-  fi
-  board_rc=$?
-  if [ "$board_rc" -ne 0 ]; then
-    echo "gate: board validation FAILED (exit $board_rc) — fix the rows named above; an invalid board is a durable queue every foreman lane reads" >&2
-    exit "$board_rc"
-  fi
-  if [ "$n_board" -gt 0 ]; then
-    echo "gate: board validation PASS (whole board; $n_board board file(s) also in this diff): ${board_files[*]}"
-  else
-    echo "gate: board validation PASS (whole board; no board file in this diff)"
-  fi
+if [ ! -f "$BOARD_CHECKER" ]; then
+  echo "gate: board arm UNAVAILABLE — $BOARD_CHECKER is missing; EVERY commit requires board validation" >&2
+  exit 1
+fi
+bash "$BOARD_CHECKER" -q --staged-index
+board_rc=$?
+if [ "$board_rc" -ne 0 ]; then
+  echo "gate: board validation FAILED (exit $board_rc) — fix the rows or required index paths named above" >&2
+  exit "$board_rc"
+fi
+if [ "$n_board" -gt 0 ]; then
+  echo "gate: board validation PASS (whole index; $n_board board path(s) also in this diff): ${board_files[*]}"
 else
-  echo "gate: board arm UNAVAILABLE — $BOARD_CHECKER is missing, so this commit was NOT checked against the board canon" >&2
-  if [ "$n_board" -gt 0 ]; then
-    echo "gate: ERROR: a board change cannot be committed while the board checker is missing" >&2
-    exit 1
-  fi
+  echo "gate: board validation PASS (whole index; no board path in this diff; unchanged HEAD blobs validated)"
 fi
 
 if [ "$n_make_docker" -eq 0 ]; then
   if [ "$go_count" -eq 0 ]; then
     if [ "$n_shell_yaml" -eq 0 ]; then
-      echo "gate scope: nothing guardable staged — the Tier-1 PASS verified nothing about this diff (the board arm above still validated the whole board)"
+      echo "gate scope: nothing guardable staged — $tier1_empty (the board arm above validated the whole index)"
       exit 0
     fi
     echo "gate scope: no Go source staged (so no gofmt arm to run) — shell/YAML checks ran on $n_shell_yaml file(s): ${shell_yaml[*]}"
   else
     if [ "$n_shell_yaml" -eq 0 ]; then
-      echo "gate scope: $go_count Go file(s) staged — Tier-1 go_build/go_vet/go_tests cover them and the gofmt arm checked those $n_go Go file(s) for formatting drift; no shell/YAML file staged, so those are this gate's whole addition"
+      echo "gate scope: $go_count Go file(s) staged — $tier1_go and the gofmt arm checked those $n_go Go file(s) for formatting drift; no shell/YAML file staged, so those are this gate's whole addition"
     else
-      echo "gate scope: $go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them; the gofmt arm checked those $n_go Go file(s) too) + $n_shell_yaml shell/YAML file(s) staged — those are checked here too: ${shell_yaml[*]}"
+      echo "gate scope: $go_count Go file(s) staged ($tier1_go; the gofmt arm checked those $n_go Go file(s) too) + $n_shell_yaml shell/YAML file(s) staged — those are checked here too: ${shell_yaml[*]}"
     fi
   fi
 else
   if [ "$go_count" -eq 0 ]; then
     scope_prefix="no Go source staged (so no gofmt arm to run)"
   else
-    scope_prefix="$go_count Go file(s) staged (Tier-1 go_build/go_vet/go_tests cover them; the gofmt arm checked those $n_go Go file(s) too)"
+    scope_prefix="$go_count Go file(s) staged ($tier1_go; the gofmt arm checked those $n_go Go file(s) too)"
   fi
   if [ "$n_shell_yaml" -eq 0 ]; then
     scope_shell="no shell/YAML file staged"

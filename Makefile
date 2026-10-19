@@ -71,7 +71,7 @@ help:
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
-	@echo "  install-hooks     Install scripts/hooks/pre-commit into .git/hooks (idempotent) so a green commit states its scope (DF-CRIER-206)"
+	@echo "  install-hooks     Install commit/merge/applypatch hooks into the effective Git hook directory (idempotent) so a green commit states its scope (DF-CRIER-206)"
 	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
@@ -599,6 +599,8 @@ mcp-stdout-selftest:
 judge-diff-class-selftest:
 	bash scripts/lib/judge-diff-class-selftest.sh
 
+# DF-CRIER-403/408: install all three entrypoints, resolving core.hooksPath via
+# git rev-parse --git-path hooks. No repo-local inert twin is rewritten.
 # DF-CRIER-206: .git/hooks/pre-commit is gitreins-generated and UNTRACKED, so the
 # tracked wrapper scripts/hooks/pre-commit is the source of truth and this target
 # puts it in place. Idempotent: re-running when the installed hook is already
@@ -616,16 +618,17 @@ judge-diff-class-selftest:
 # situation worse if the prune fails.
 install-hooks:
 	@root="$$(git rev-parse --show-toplevel 2>/dev/null || echo '$(CURDIR)')"; \
-	src="$$root/scripts/hooks/pre-commit"; \
-	[ -f "$$src" ] || { echo "install-hooks: ERROR: $$src is missing"; exit 1; }; \
-	chmod +x "$$src"; \
 	hooks_dir="$$(git rev-parse --git-path hooks 2>/dev/null || echo .git/hooks)"; \
 	case "$$hooks_dir" in /*) ;; *) hooks_dir="$$root/$$hooks_dir" ;; esac; \
 	mkdir -p "$$hooks_dir" || exit 1; \
-	dst="$$hooks_dir/pre-commit"; \
+	for hook in pre-commit pre-merge-commit pre-applypatch; do \
+	src="$$root/scripts/hooks/$$hook"; \
+	[ -f "$$src" ] || { echo "install-hooks: ERROR: $$src is missing"; exit 1; }; \
+	chmod +x "$$src"; \
+	dst="$$hooks_dir/$$hook"; \
 	if [ -f "$$dst" ] && cmp -s "$$src" "$$dst"; then \
-		echo "install-hooks: already installed — $$dst is byte-identical to scripts/hooks/pre-commit"; \
-		exit 0; \
+		echo "install-hooks: already installed — $$dst is byte-identical to scripts/hooks/$$hook"; \
+		continue; \
 	fi; \
 	if [ -e "$$dst" ] && [ ! -f "$$dst" ]; then \
 		echo "install-hooks: ERROR: $$dst exists and is not a regular file"; exit 1; \
@@ -642,7 +645,8 @@ install-hooks:
 	cp "$$src" "$$dst" || exit 1; \
 	chmod +x "$$dst" || exit 1; \
 	cmp -s "$$src" "$$dst" || { echo "install-hooks: ERROR: installed hook is not byte-identical to $$src"; exit 1; }; \
-	echo "install-hooks: installed $$dst (byte-identical copy of scripts/hooks/pre-commit)"
+	echo "install-hooks: installed $$dst (byte-identical copy of scripts/hooks/$$hook)"; \
+	done
 
 # RELEASE-001: v0.1.0-rc1 was cut by hand — `git tag -a` typed directly on main,
 # the gates run ad hoc, and neither a changelog nor the procedure written down
