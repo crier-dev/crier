@@ -141,6 +141,14 @@ func (h *Handler) authorizeAgent(w http.ResponseWriter, r *http.Request, targetI
 // supplies the URL target; service delivery supplies the sender and mandates body
 // binding. Neither caller can disable freshness, key ownership, or verification.
 func (h *Handler) verifyAgentSignature(w http.ResponseWriter, r *http.Request, targetID string, requireBody bool) error {
+	return h.verifyAgentSignatureForKey(w, r, targetID, requireBody, nil)
+}
+
+// verifyAgentSignatureForKey additionally binds a trust possession check to the
+// chain's leaf. Compare the SAME registry snapshot used for signature verification
+// so another registered agent (or a concurrent re-registration) cannot substitute
+// a different key. Existing signing surfaces pass nil and retain their contract.
+func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Request, targetID string, requireBody bool, expectedKey ed25519.PublicKey) error {
 	callerID := r.Header.Get(HeaderAgentID)
 	tsRaw := r.Header.Get(HeaderAgentTS)
 	sigRaw := r.Header.Get(HeaderAgentSig)
@@ -201,6 +209,10 @@ func (h *Handler) verifyAgentSignature(w http.ResponseWriter, r *http.Request, t
 		// error: it must never 500, and never 200.
 		return h.agentSigFail(w, http.StatusUnauthorized,
 			"agent has no registered public key (registered without a key; signature verification is impossible)")
+	}
+
+	if expectedKey != nil && !bytes.Equal(rawKey, expectedKey) {
+		return h.agentSigFail(w, http.StatusUnauthorized, "registered key does not match trust leaf")
 	}
 
 	sig, err := hex.DecodeString(sigRaw)

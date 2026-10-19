@@ -93,7 +93,7 @@ func exerciseTrustHTTPRoutes(t *testing.T, backend string) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(response), &got))
 	require.Equal(t, chain[1:], got.Delegations)
-	v := verify(chain, []string{"message-signing"}, trust.TrustVerified)
+	v := verify(chain, []string{"message-signing"}, trust.TrustChainReachable)
 	require.Equal(t, a.ID, v.AnchorID)
 	require.Equal(t, 2, v.Depth)
 	v = verify(chain, []string{"admin"}, trust.TrustScopeInsufficient)

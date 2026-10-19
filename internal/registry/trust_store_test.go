@@ -52,7 +52,7 @@ func exerciseTrustStore(t *testing.T, s TrustStore) {
 	records, err := s.ListTrustDelegations(strings.ToUpper(d.SubjectKey))
 	require.NoError(t, err)
 	require.Equal(t, []trust.ChainDelegation{d}, records)
-	require.Equal(t, trust.TrustVerified, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, records).Verdict)
+	require.Equal(t, trust.TrustChainReachable, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, records).Verdict)
 	// Returned scopes must not mutate the held signature or widen its authority.
 	records[0].Scope[0] = "admin"
 	again, err := s.ListTrustDelegations(d.SubjectKey)

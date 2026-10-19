@@ -32,7 +32,7 @@ func TestPostgresTrustStore(t *testing.T) {
 	chain, err := reopened.ListTrustDelegations(d.SubjectKey)
 	require.NoError(t, err)
 	require.Equal(t, []trust.ChainDelegation{d}, chain)
-	require.Equal(t, trust.TrustVerified, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, chain).Verdict)
+	require.Equal(t, trust.TrustChainReachable, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, chain).Verdict)
 	// In particular issued_at still has nanoseconds after a pool close/reopen.
 	require.Equal(t, 123456789, chain[0].IssuedAt.Nanosecond())
 }
@@ -59,4 +59,8 @@ func TestMigration017TrustRoundTrip(t *testing.T) {
 			require.Equal(t, version == 17, exists, table)
 		}
 	}
+}
+
+func TestPostgresTrustPossession(t *testing.T) {
+	exerciseTrustPossession(t, NewAuthorityStore(newTestStore(t), nil, ""))
 }

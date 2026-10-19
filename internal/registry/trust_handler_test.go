@@ -33,7 +33,7 @@ func TestTrustHandlerMalformedAndUnavailable(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleVerify(w, r)
 	require.Equal(t, 200, w.Code)
-	require.Contains(t, w.Body.String(), trust.TrustVerified)
+	require.Contains(t, w.Body.String(), trust.TrustChainReachable)
 	require.Contains(t, w.Body.String(), `"depth":0`)
 	unsupported := NewTrustHandler(nil, "operator-secret", "message-secret")
 	w = httptest.NewRecorder()
@@ -47,7 +47,7 @@ func TestTrustHandlerMalformedAndUnavailable(t *testing.T) {
 	require.NoError(t, s.AddTrustDelegation(d))
 	held, err := s.ListTrustDelegations(d.SubjectKey)
 	require.NoError(t, err)
-	require.Equal(t, trust.TrustVerified, trust.VerifyChain([]trust.ChainAnchor{a}, d.SubjectKey, []string{}, held).Verdict)
+	require.Equal(t, trust.TrustChainReachable, trust.VerifyChain([]trust.ChainAnchor{a}, d.SubjectKey, []string{}, held).Verdict)
 	require.Equal(t, trust.TrustScopeInsufficient, trust.VerifyChain([]trust.ChainAnchor{a}, d.SubjectKey, []string{"message-signing"}, held).Verdict)
 	var decoded trust.ChainDelegation
 	raw, err := json.Marshal(held[0])

@@ -13,11 +13,14 @@ import (
 // §§3–5 (DF-CRIER-362). It does not authenticate a payload or use the library's
 // rotation/revocation state. Those remain separate, unwired capabilities.
 const (
-	TrustVerified          = "TRUST_VERIFIED"
-	TrustUnknownAnchor     = "TRUST_UNKNOWN_ANCHOR"
-	TrustDepthExceeded     = "TRUST_DEPTH_EXCEEDED"
-	TrustScopeInsufficient = "TRUST_SCOPE_INSUFFICIENT"
-	TrustBadSignature      = "TRUST_BAD_SIGNATURE"
+	TrustVerified                = "TRUST_VERIFIED"
+	TrustChainReachable          = "TRUST_CHAIN_REACHABLE"
+	TrustBasisChainOnly          = "chain-only"
+	TrustBasisPossessionVerified = "possession-verified"
+	TrustUnknownAnchor           = "TRUST_UNKNOWN_ANCHOR"
+	TrustDepthExceeded           = "TRUST_DEPTH_EXCEEDED"
+	TrustScopeInsufficient       = "TRUST_SCOPE_INSUFFICIENT"
+	TrustBadSignature            = "TRUST_BAD_SIGNATURE"
 	// TransitiveCapability is the explicit transitive purpose required by D16.
 	// max_depth alone is a budget, not permission to vouch onward.
 	TransitiveCapability = "trust-delegation"
@@ -137,10 +140,12 @@ func ValidateChainRequest(signer string, scope []string, chain []ChainDelegation
 }
 
 // ChainVerdict names every outcome. Link is ONE-BASED in anchor-to-leaf order.
-// Depth counts links used, not the root key. This is key trust, NOT proof of
-// payload possession, freshness, authorization or unrevoked status.
+// Depth counts links used, not the root key. VerifyChain only establishes chain
+// reachability. The HTTP adapter may promote it after a body-bound leaf-key proof;
+// neither verdict grants delivery authorization or asserts unrevoked status.
 type ChainVerdict struct {
 	Verdict           string `json:"verdict"`
+	Basis             string `json:"basis,omitempty"`
 	AnchorID          string `json:"anchor_id,omitempty"`
 	Depth             int    `json:"depth"`
 	Link              int    `json:"link,omitempty"`
@@ -150,6 +155,7 @@ type ChainVerdict struct {
 // VerifyChain verifies a caller-supplied PATH (not an unordered certificate set)
 // against locally held anchors. Signatures are checked each time, not trusted
 // because an import once succeeded. No peer can introduce its own anchor.
+// A successful path is only TRUST_CHAIN_REACHABLE, never proof of possession.
 func VerifyChain(anchors []ChainAnchor, signer string, scope []string, chain []ChainDelegation) ChainVerdict {
 	unknown := ChainVerdict{Verdict: TrustUnknownAnchor}
 	var anchor *ChainAnchor
@@ -208,7 +214,7 @@ func VerifyChain(anchors []ChainAnchor, signer string, scope []string, chain []C
 	if !sameChainKey(current, signer) {
 		return ChainVerdict{Verdict: TrustBadSignature, Link: len(chain)}
 	}
-	return ChainVerdict{Verdict: TrustVerified, AnchorID: anchor.ID, Depth: len(chain)}
+	return ChainVerdict{Verdict: TrustChainReachable, Basis: TrustBasisChainOnly, AnchorID: anchor.ID, Depth: len(chain)}
 }
 
 func sameChainKey(a, b string) bool { return ChainKeyID(a) != "" && strings.EqualFold(a, b) }

@@ -111,7 +111,28 @@ paths:
     post:
       operationId: trustVerifyChain
       summary: Evaluate key trust against this server's anchors
-      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict. NOT payload authentication, delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
+      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict. An intact chain without a valid possession proof is TRUST_CHAIN_REACHABLE with basis chain-only. TRUST_VERIFIED requires a nonblank caller challenge (at most 256 UTF-8 bytes), a body-bound signature by the leaf's registered agent key and basis possession-verified, independent of CR_REQUIRE_AGENT_SIG. The signature covers POST, /trust/verify, the Unix timestamp and sha256 of the exact body via the existing agent signature transcript. Timestamp freshness is +/-30s; requests may be replayed within that window (no consumed-nonce store). Missing or invalid proof preserves the weaker verdict and chain evidence, not an HTTP error. NOT delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
+      parameters:
+        - name: X-Agent-ID
+          in: header
+          required: false
+          description: Registered agent whose public key must equal signer to prove leaf possession.
+          schema: {type: string}
+        - name: X-Agent-Ts
+          in: header
+          required: false
+          description: Unix seconds within +/-30s, required for a possession proof.
+          schema: {type: integer}
+        - name: X-Agent-Sig
+          in: header
+          required: false
+          description: Hex ed25519 signature over POST\n/trust/verify\n<unix-seconds>\nsha256:<hex> using the leaf key, required for a possession proof.
+          schema: {type: string}
+        - name: X-Agent-Body-SHA256
+          in: header
+          required: false
+          description: Lowercase hex SHA-256 of the exact body including challenge, required for a possession proof.
+          schema: {type: string}
       requestBody:
         required: true
         content:
@@ -122,6 +143,9 @@ paths:
               additionalProperties: false
               properties:
                 signer: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+                challenge:
+                  type: string
+                  description: Optional caller-generated unpredictable nonce. Nonblank and at most 256 UTF-8 bytes to qualify for possession verification; absent, blank or oversized gives chain-only.
                 scope: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
                 chain:
                   type: array
@@ -137,7 +161,11 @@ paths:
                 properties:
                   verdict:
                     type: string
-                    enum: [TRUST_VERIFIED, TRUST_UNKNOWN_ANCHOR, TRUST_DEPTH_EXCEEDED, TRUST_SCOPE_INSUFFICIENT, TRUST_BAD_SIGNATURE]
+                    enum: [TRUST_CHAIN_REACHABLE, TRUST_VERIFIED, TRUST_UNKNOWN_ANCHOR, TRUST_DEPTH_EXCEEDED, TRUST_SCOPE_INSUFFICIENT, TRUST_BAD_SIGNATURE]
+                  basis:
+                    type: string
+                    enum: [chain-only, possession-verified]
+                    description: Always present for TRUST_CHAIN_REACHABLE (chain-only) and TRUST_VERIFIED (possession-verified); omitted on chain failures.
                   anchor_id: {type: string}
                   depth: {type: integer, minimum: 0}
                   link: {type: integer, minimum: 1}

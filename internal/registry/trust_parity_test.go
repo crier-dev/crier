@@ -64,7 +64,7 @@ func exerciseTrustBackendParity(t *testing.T, backend Store) {
 		scope []string
 		want  trust.ChainVerdict
 	}{
-		{"verified", chain, []string{"message-signing"}, trust.ChainVerdict{Verdict: trust.TrustVerified, AnchorID: a.ID, Depth: 2}},
+		{"verified", chain, []string{"message-signing"}, trust.ChainVerdict{Verdict: trust.TrustChainReachable, Basis: trust.TrustBasisChainOnly, AnchorID: a.ID, Depth: 2}},
 		{"unknown", unknown, []string{"message-signing"}, trust.ChainVerdict{Verdict: trust.TrustUnknownAnchor}},
 		{"depth", depth, []string{"message-signing"}, trust.ChainVerdict{Verdict: trust.TrustDepthExceeded, Link: 1}},
 		{"scope", chain, []string{"admin"}, trust.ChainVerdict{Verdict: trust.TrustScopeInsufficient, Link: 1, MissingCapability: "admin"}},
@@ -171,5 +171,5 @@ func TestSQLiteTrustReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []trust.ChainDelegation{d}, chain)
 	require.Equal(t, 123456789, chain[0].IssuedAt.Nanosecond())
-	require.Equal(t, trust.ChainVerdict{Verdict: trust.TrustVerified, AnchorID: a.ID, Depth: 1}, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, chain))
+	require.Equal(t, trust.ChainVerdict{Verdict: trust.TrustChainReachable, Basis: trust.TrustBasisChainOnly, AnchorID: a.ID, Depth: 1}, trust.VerifyChain(anchors, d.SubjectKey, d.Scope, chain))
 }

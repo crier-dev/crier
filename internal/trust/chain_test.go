@@ -40,7 +40,7 @@ func TestVerifyChainNamedVerdicts(t *testing.T) {
 		link    int
 		missing string
 	}{
-		{name: "verified", anchors: []ChainAnchor{a}, scope: []string{"message-signing"}, code: TrustVerified},
+		{name: "verified", anchors: []ChainAnchor{a}, scope: []string{"message-signing"}, code: TrustChainReachable},
 		{name: "unknown", scope: []string{"message-signing"}, code: TrustUnknownAnchor},
 		{name: "depth", anchors: []ChainAnchor{a}, mutate: func(c []ChainDelegation) {
 			c[0].MaxDepth = 0
@@ -68,16 +68,16 @@ func TestVerifyChainNamedVerdicts(t *testing.T) {
 			require.Equal(t, tt.code, got.Verdict)
 			require.Equal(t, tt.link, got.Link)
 			require.Equal(t, tt.missing, got.MissingCapability)
-			if tt.code == TrustVerified {
+			if tt.code == TrustChainReachable {
 				require.Equal(t, a.ID, got.AnchorID)
 				require.Equal(t, 2, got.Depth)
 			}
 			t.Logf("measured verdict: %s", mustChainJSON(t, got))
 		})
 	}
-	require.Equal(t, TrustVerified, VerifyChain([]ChainAnchor{a}, a.PublicKey, nil, nil).Verdict)
+	require.Equal(t, TrustChainReachable, VerifyChain([]ChainAnchor{a}, a.PublicKey, nil, nil).Verdict)
 	// A max_depth of zero permits the direct leaf, not another voucher.
-	require.Equal(t, TrustVerified, VerifyChain([]ChainAnchor{a}, chain[0].SubjectKey, []string{"message-signing"}, chain[:1]).Verdict)
+	require.Equal(t, TrustChainReachable, VerifyChain([]ChainAnchor{a}, chain[0].SubjectKey, []string{"message-signing"}, chain[:1]).Verdict)
 }
 
 func mustChainJSON(t *testing.T, v any) string {

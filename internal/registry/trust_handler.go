@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +20,7 @@ import (
 // The message/reach credential can verify trust but cannot read/write records.
 type TrustHandler struct {
 	store         TrustStore
+	verifier      *Handler
 	operatorToken string
 }
 
@@ -28,7 +31,7 @@ func NewTrustHandler(store Store, operatorToken, reachToken string) *TrustHandle
 		operatorToken = ""
 	}
 	backend, _ := store.(TrustStore)
-	return &TrustHandler{store: backend, operatorToken: operatorToken}
+	return &TrustHandler{store: backend, verifier: NewHandler(store), operatorToken: operatorToken}
 }
 func (h *TrustHandler) operator(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
@@ -141,10 +144,19 @@ func (h *TrustHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w) {
 		return
 	}
+	// Retain the exact bytes, not re-marshaled JSON: the existing agent verifier
+	// must bind the challenge AND signer/scope/chain before promoting the verdict.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "TRUST_MALFORMED", "detail": "request body could not be read within the 1 MiB limit"})
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	var req struct {
-		Signer string                  `json:"signer"`
-		Scope  []string                `json:"scope"`
-		Chain  []trust.ChainDelegation `json:"chain"`
+		Challenge string                  `json:"challenge"`
+		Signer    string                  `json:"signer"`
+		Scope     []string                `json:"scope"`
+		Chain     []trust.ChainDelegation `json:"chain"`
 	}
 	if !decodeTrustBody(w, r, &req) {
 		return
@@ -162,5 +174,27 @@ func (h *TrustHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		trustStoreError(w, err)
 		return
 	}
-	writeJSON(w, 200, trust.VerifyChain(anchors, req.Signer, req.Scope, req.Chain))
+	verdict := trust.VerifyChain(anchors, req.Signer, req.Scope, req.Chain)
+	if verdict.Verdict == trust.TrustChainReachable && strings.TrimSpace(req.Challenge) != "" && len(req.Challenge) <= 256 {
+		proof := r.Clone(r.Context())
+		proof.Body = io.NopCloser(bytes.NewReader(body))
+		leaf, _ := hex.DecodeString(req.Signer) // ValidateChainRequest checked the shape.
+		// Invalid/missing proof weakens the verdict, never hides chain evidence or
+		// breaks unsigned callers. Do not return the verifier's auth error/body.
+		sink := &trustProofResponse{header: make(http.Header)}
+		if h.verifier.verifyAgentSignatureForKey(sink, proof, proof.Header.Get(HeaderAgentID), true, ed25519.PublicKey(leaf)) == nil {
+			verdict.Verdict = trust.TrustVerified
+			verdict.Basis = trust.TrustBasisPossessionVerified
+		}
+	}
+	writeJSON(w, 200, verdict)
 }
+
+// trustProofResponse deliberately discards the existing verifier's HTTP refusal:
+// this read-only evaluation reports chain-only rather than turning optional proof
+// into a new authorization gate. No proof/key material reaches the response/log.
+type trustProofResponse struct{ header http.Header }
+
+func (w *trustProofResponse) Header() http.Header       { return w.header }
+func (*trustProofResponse) WriteHeader(int)             {}
+func (*trustProofResponse) Write(p []byte) (int, error) { return len(p), nil }

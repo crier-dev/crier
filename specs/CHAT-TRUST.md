@@ -574,13 +574,39 @@ signing leaf). D16's explicit transitive purpose is the capability
 `trust-delegation`, required in each delegation whose subject vouches onward,
 as well as a sufficient depth budget. There is also a global eight-link bound;
 cycles, disconnected vouchers and a mismatched leaf are refused. The HTTP
-response is 200 for a completed trust evaluation, with one of `TRUST_VERIFIED`
-(`anchor_id`, `depth`), `TRUST_UNKNOWN_ANCHOR`, `TRUST_DEPTH_EXCEEDED` (`link`),
+response is 200 for a completed trust evaluation, with one of `TRUST_CHAIN_REACHABLE`
+(`basis: chain-only`, `anchor_id`, `depth`), `TRUST_VERIFIED`
+(`basis: possession-verified`, `anchor_id`, `depth`), `TRUST_UNKNOWN_ANCHOR`, `TRUST_DEPTH_EXCEEDED` (`link`),
 `TRUST_SCOPE_INSUFFICIENT` (`link`, `missing_capability`) or
 `TRUST_BAD_SIGNATURE` (`link`). Links are one-based from the anchor; failure
 `depth:0` means no verified depth is asserted. Malformed requests are instead
-400 `TRUST_MALFORMED`. These are key-chain verdicts, NOT payload signatures,
-proof of leaf-key possession, replay protection or delivery-ACL grants.
+400 `TRUST_MALFORMED`. A chain failure is never promoted by a possession proof.
+
+**DF-CRIER-380 — possession, not reachability (preferred option 1, BUILT).**
+`VerifyChain` alone returns `TRUST_CHAIN_REACHABLE` with mandatory `basis: chain-only`:
+public chain records prove a path to an anchor, NOT that the caller holds its leaf key.
+An existing caller sending only `{signer, scope, chain}` still receives HTTP 200 and
+exactly the same `anchor_id`/`depth` evidence, under this weaker named verdict.
+The optional JSON string `challenge` carries a caller-generated unpredictable nonce
+(nonblank, at most 256 UTF-8 bytes). To obtain `TRUST_VERIFIED`, send `X-Agent-ID`
+(the registered leaf agent), `X-Agent-Ts`, `X-Agent-Sig` and `X-Agent-Body-SHA256`.
+Reuse `agentsig.go`'s ed25519 transcript `POST\n/trust/verify\n<unix-seconds>\nsha256:<hex>`;
+`<hex>` is the lowercase SHA-256 of the EXACT delivered body bytes, including the
+challenge, signer, scope and chain. The timestamp must be within the existing ±30s
+window. The same registered-key snapshot used to verify the signature must equal
+`signer`, the chain's leaf. A valid body-bound leaf proof yields `TRUST_VERIFIED`
+with mandatory `basis: possession-verified`; no challenge, a blank/oversized challenge,
+or any missing, stale, unbound, malformed or wrong-key proof yields HTTP 200
+`TRUST_CHAIN_REACHABLE` with `basis: chain-only` and the same chain evidence. This
+rule is enforced in Go for memory, SQLite and PostgreSQL, independent of
+`CR_REQUIRE_AGENT_SIG`; failures never return or log proof/key material. A malformed
+JSON shape (including a numeric/object/array challenge) remains `400 TRUST_MALFORMED`;
+a null challenge is treated as absent.
+This proves a fresh signature on THIS verify request, not authority for a different
+message or a delivery-ACL grant. No server-issued challenge or consumed-nonce store
+is added: signed requests CAN be replayed within the existing ±30s window. Callers
+must generate fresh unpredictable nonces and use a protected transport; the response
+does not assert single-use authentication, key non-compromise, rotation or revocation.
 
 Rotation and revocation remain **NOT BUILT on the persistent/HTTP surface**:
 no new rotation/revocation record, route, window or enforcement is supplied by

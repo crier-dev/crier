@@ -99,7 +99,7 @@ func TestSQLiteTrustProcessRestart(t *testing.T) {
 			require.JSONEq(t, string(wantRaw), string(gotRaw))
 			require.Equal(t, 123456789, held.Delegations[0].IssuedAt.Nanosecond())
 			response := call("POST", "/trust/verify", df297MessageToken, map[string]any{"signer": d.SubjectKey, "scope": d.Scope, "chain": held.Delegations}, 200)
-			require.JSONEq(t, `{"verdict":"TRUST_VERIFIED","anchor_id":"restart-anchor","depth":1}`, response)
+			require.JSONEq(t, `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"chain-only","anchor_id":"restart-anchor","depth":1}`, response)
 			status := call("GET", "/status", df297MessageToken, nil, 200)
 			require.Contains(t, status, `"registry_backend":"sqlite"`)
 			// Target the CHILD PID explicitly, never broadcast to this test
