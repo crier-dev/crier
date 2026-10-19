@@ -1683,3 +1683,8 @@
 {"id":1677,"timestamp":"2026-10-19T19:41:27Z","event_type":"task_updated","task_id":"DF-CRIER-409","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":1678,"timestamp":"2026-10-19T19:51:18Z","event_type":"task_completed","task_id":"DF-CRIER-403","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1679,"timestamp":"2026-10-19T19:51:18Z","event_type":"task_completed","task_id":"DF-CRIER-408","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1680,"timestamp":"2026-10-19T20:06:34Z","event_type":"task_created","task_id":"DF-CRIER-412","actor":"foreman","detail":"{\"id\":\"DF-CRIER-412\",\"status\":\"pending\"}","tick_number":null}
+{"id":1681,"timestamp":"2026-10-19T20:06:34Z","event_type":"task_created","task_id":"DF-CRIER-412","actor":"duckbrain-readme-lane","detail":"{\"source\":\"duckbrain-readme-2026-10-19-19-53-58\",\"kind\":\"external-filing\",\"note\":\"host-wide core.hooksPath board arm exit 1 blocked every duckbrain commit; owner crier; row left UNCOMMITTED for the crier foreman to absorb\"}","tick_number":null}
+{"id":1682,"timestamp":"2026-10-19T20:19:30Z","event_type":"task_completed","task_id":"DF-CRIER-402","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1683,"timestamp":"2026-10-19T20:19:30Z","event_type":"task_completed","task_id":"DF-CRIER-404","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1684,"timestamp":"2026-10-19T20:19:30Z","event_type":"task_completed","task_id":"DF-CRIER-409","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
