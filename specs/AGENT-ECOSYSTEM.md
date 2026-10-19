@@ -117,37 +117,57 @@ the precise blocker: DeepSeek is not wired for that consumer. Neither its wiring
 nor bounded network-disabled real-image probes constitute a paid DeepSeek success;
 current blockers and verification limits are explicit in the example README.
 
-### 2.1.3 Verifier-owned execution binding (DF-CRIER-373)
+### 2.1.3 Verifier-owned execution binding (DF-CRIER-373, DF-CRIER-392)
 
-This strengthens the historical response-only nonce/hash check. Before each of
-its two different prompts the battery's `probe-runtime.py` mints and records a
-fresh UUID, opens the consumer's `GET /battery-output/<nonce>` observation
-stream, then sends the recorded request through Crier. The stream contains only
-raw child stdout/stderr bytes, not request/response metadata or consumer logs;
-it closes on completion/refusal and expires after 35 seconds without delivery.
-The observer never starts a runtime. Pi's SDK still executes in the child process.
+Before each of its two different prompts, `probe-runtime.py` mints and records a
+fresh UUID, opens `GET /battery-output/<nonce>?stream=stdout`, then sends the
+recorded request through Crier. The shipped consumer tees only the spawned
+child's stdout pipe to this mode; stderr stays in failure diagnostics. Without
+the query, the existing combined stdout/stderr diagnostic stream is unchanged.
+An unknown `stream` value returns HTTP 400. Observing starts no runtime; streams
+close on completion/refusal and expire after 35 seconds without delivery.
+Pi's SDK still executes in the bounded child process.
 
-The consumer asks the runtime to return `[crier-battery-nonce:<uuid>]` and
+The consumer-facing request still carries `payload.battery_nonce`. The consumer
+asks the runtime to return `[crier-battery-nonce:<uuid>]` and
 `[crier-battery-request-sha256:<digest>]`. The latter hashes compact UTF-8 JSON
-with exactly `battery_nonce`, then `text`, from the sent payload. The response's
-`request_sha256` is extracted from runtime text, but the verifier recomputes its
-expected value from its recorded request, never the response. Both response
-markers and the existing metadata, trimmed reply hash and distinct-content
-checks must pass; remove BOTH markers for distinct-content comparison.
+with exactly `battery_nonce`, then `text`, from the sent payload. The verifier
+recomputes that digest from its own recorded request, never the response.
+
+The verifier reads the capture file as bytes and independently computes its
+SHA-256 and length BEFORE decoding, trimming or newline conversion. They must
+match the additive `stdout_raw_sha256` and existing `stdout_bytes` fields.
+The capture must decode as strict UTF-8 and, after ECMAScript `String.trim`
+whitespace removal, equal the delivered `reply` byte-for-byte. Its independently
+computed trimmed hash must also match the existing `stdout_sha256` (whose
+trimmed-reply meaning is unchanged). A raw hash copied from the capture cannot
+legitimize different body text. The capture and body each need exactly one
+current nonce marker. Remove BOTH challenge markers before distinct-content
+comparison; retain the live/exec/positive-byte checks. A verbatim request tee
+containing a nonce marker cannot satisfy the capture-to-reply binding.
 
 Proofs retain `result:PASS|FAIL` plus `outcome:SUPPORTED|NOT_EXECUTED|ECHOED_WITHOUT_RUN|DIGEST_MISMATCH|NONCE_REPLAY|REFUSED|TIMEOUT|FAILED`.
-Missing current nonce in separately captured runtime output is NOT_EXECUTED;
-observed runtime nonce but missing body echo is ECHOED_WITHOUT_RUN; request or
-reply digest mismatch is DIGEST_MISMATCH. Unminted/consumed challenges and a body
-containing an older nonce are NONCE_REPLAY. Consume every attempted nonce,
-including failures, in the verifier's run-wide minted/used ledger. Preserve
-explicit REFUSED/FAILED/TIMEOUT diagnostics; a successful HTTP exchange alone
-cannot earn SUPPORTED. Record sent request, expected digest, raw runtime capture,
-capture status and per-request nonce in JSONL. This proves process execution and
-challenge echoing under the shipped implementation, not model authorship, answer
-quality, provider identity, or attestation against a malicious consumer capable
-of fabricating both channels. Do not expose this diagnostic example to untrusted
-clients. No Crier server change is required.
+Missing current nonce in captured runtime output is NOT_EXECUTED; observed
+runtime nonce but missing body echo is ECHOED_WITHOUT_RUN; request, raw capture,
+byte count or reply digest mismatch is DIGEST_MISMATCH. Unminted/consumed
+challenges and an older nonce in EITHER body OR capture are NONCE_REPLAY,
+even if the other channel claims the current nonce. Consume every attempted
+nonce, including failures, in the run-wide minted/used ledger. Preserve explicit
+REFUSED/FAILED/TIMEOUT diagnostics. A successful HTTP exchange alone cannot earn
+SUPPORTED. Record sent request, expected request digest, raw-capture SHA-256 and
+byte count, decoded display copy, capture status and nonce in JSONL. The raw
+capture file, not the potentially lossy display copy, is the hash source.
+
+Limit: SUPPORTED binds a fresh single-use challenge and the delivered reply to
+independently captured stdout bytes; with the trusted shipped consumer's
+stdout-only pipe tee, it establishes that a spawned process emitted those bytes.
+The nonce remains visible in the request, and the observation endpoint is served
+by the consumer, not a verifier-owned OS pipe: a malicious consumer that
+fabricates both channels consistently can still pass without spawning a child.
+This is neither hidden-challenge proof nor hostile-consumer attestation, and it
+does not establish model authorship, answer quality, or provider/model identity.
+Do not expose this diagnostic stack to untrusted clients. No Crier server change
+is required.
 
 ### 2.2 Shipped harnesses (CR-FEAT-018/019/020 waves)
 

@@ -100,13 +100,15 @@ async function register() {
 
 // A live marker is emitted only AFTER a successful runtime call with output.
 // Pi uses an SDK rather than a CLI; stdout_bytes then counts its emitted text.
-function liveReply(stdout, command) {
+function liveReply(stdout, command, rawStdout = Buffer.from(stdout)) {
   if (!stdout.trim()) throw new Error(`${HARNESS} produced no output`);
   const reply = stdout.trim();
   // Extract only from the completed runtime's output, NEVER from the request.
   const echoes = [...reply.matchAll(/\[crier-battery-nonce:([0-9a-f-]{36})\]/g)];
   return { reply, live: true, exec: command, status: "OK", runtime: HARNESS, stdout_bytes: Buffer.byteLength(stdout),
     stdout_sha256: createHash("sha256").update(reply).digest("hex"),
+    // Additive: retain the trimmed hash protocol, bind the original pipe bytes too.
+    stdout_raw_sha256: createHash("sha256").update(rawStdout).digest("hex"),
     nonce: echoes.length === 1 ? echoes[0][1] : null,
     request_sha256: reply.match(/\[crier-battery-request-sha256:([0-9a-f]{64})\]/)?.[1] ?? null };
 }
@@ -169,7 +171,7 @@ function runCli(bin, args, extraEnv = {}, runtime = undefined, observation = und
       child.stderr.destroy();
       const out = stdout.toString("utf8"), err = stderr.subarray(0, 2048).toString("utf8");
       if (!cause && code === 0 && out.trim()) {
-        resolve(liveReply(out, runtime || command));
+        resolve(liveReply(out, runtime || command, stdout));
         return;
       }
       const excerpt = stdout.subarray(0, 2048).toString("utf8");
@@ -188,7 +190,7 @@ function runCli(bin, args, extraEnv = {}, runtime = undefined, observation = und
       if (stdout.length > 1024 * 1024) finish("stdout exceeded 1 MiB capture limit");
     });
     child.stderr.on("data", (chunk) => {
-      if (observation && !observation.destroyed) observation.write(chunk);
+      if (observation && !observation.destroyed && !observation.stdoutOnly) observation.write(chunk);
       stderr = Buffer.concat([stderr, chunk]).subarray(0, 2048);
     });
     child.once("error", (err) => finish(`could not start runtime: ${err.message}`));
@@ -289,11 +291,17 @@ if (process.argv[2] === "--pi-runtime") {
     res.end(b);
   };
   if (req.method === "GET" && req.url.startsWith("/battery-output/")) {
-    const nonce = req.url.slice("/battery-output/".length);
+    const url = new URL(req.url, "http://consumer.invalid");
+    const nonce = url.pathname.slice("/battery-output/".length);
+    const stream = url.searchParams.get("stream");
+    if (stream !== null && stream !== "stdout") return send(400, { error: "invalid observation stream" });
     if (!noncePattern.test(nonce)) return send(400, { error: "invalid battery nonce" });
     if (observations.has(nonce)) return send(409, { error: "observation already open" });
     res.writeHead(200, { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" });
     res.flushHeaders();
+    // No query keeps the historical stdout+stderr diagnostic stream unchanged.
+    // The verifier explicitly selects stdout so its raw digest is unambiguous.
+    res.stdoutOnly = stream === "stdout";
     observations.set(nonce, res);
     // Bound idle observers too; no process is started by this endpoint.
     const timer = setTimeout(() => res.end(), 35000);

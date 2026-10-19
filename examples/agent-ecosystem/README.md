@@ -67,20 +67,41 @@ output return HTTP 200 with `status:"FAILED"`, `live:false`, `error` and **no `r
 `exec: "sdk:@earendil-works/pi-coding-agent"`; its `stdout_bytes` counts emitted
 SDK text written to stdout by its bounded child process.
 
-A harness is **supported** only when both distinct prompts pass: the verifier mints and records a fresh single-use nonce before sending each request, independently captures the runtime child's stdout/stderr through a separately opened observation stream, finds that nonce in those captured bytes, and checks that the returned body echoes both the nonce and the SHA-256 digest it recomputes from the exact sent `payload.text` and `payload.battery_nonce` (compact UTF-8 JSON with keys `battery_nonce`, then `text`). Missing runtime evidence is `NOT_EXECUTED`; observed runtime nonce but missing body echo is `ECHOED_WITHOUT_RUN`; a wrong request/output digest is `DIGEST_MISMATCH`; an old, unminted or reused nonce is `NONCE_REPLAY`. `REFUSED`, `TIMEOUT` and `FAILED` remain failures with their diagnostics. The existing live/exec/byte assertions, reply hash and different-content check (both challenge markers removed) still apply. HTTP delivery success alone is not execution success. This proves process execution and challenge echoing under the shipped consumer, **not that a model produced the work**, answer quality, provider/model identity, or cryptographic attestation against a malicious consumer that fabricates both channels.
+A harness is **supported** only when both distinct prompts pass. The verifier
+mints a fresh single-use nonce, records the sent payload, and opens
+`GET /battery-output/<nonce>?stream=stdout` before delivery. It hashes the
+capture-file bytes itself (before decoding, trimming or newline conversion),
+compares that raw SHA-256 and byte count with `stdout_raw_sha256` and
+`stdout_bytes`, then requires strict UTF-8 captured text, trimmed with
+ECMAScript `String.trim` semantics, to equal `reply` and its existing trimmed
+`stdout_sha256`. Request nonce/digest echoes and different-content checks
+(both challenge markers removed) still apply. Body metadata alone never proves
+execution. Missing captured nonce is `NOT_EXECUTED`; observed nonce but missing
+body echo is `ECHOED_WITHOUT_RUN`; request/capture/reply mismatches are
+`DIGEST_MISMATCH`; an old nonce in either capture or body, or an unminted/reused
+challenge, is `NONCE_REPLAY`. `REFUSED`, `TIMEOUT` and `FAILED` remain failures.
 
-The verifier opens `GET /battery-output/<nonce>` on the runtime consumer before
-posting through crier. Only raw child pipe chunks are teed there; request metadata,
-observer headers, response fields and consumer diagnostic logs are never runtime
-output. The stream closes on completion/refusal and expires after 35 seconds if
-unused. No runtime is started by observing. This endpoint is part of the isolated
-example stack, not a Crier server API; do not expose this diagnostic stack to
-untrusted clients. `probe-runtime.py` owns the temporary nonce ledger and saves the
-sent request, capture status and captured bytes in each JSONL proof. For direct
-shell probes, `BATTERY_RUNTIME_BASE` overrides the consumer base URL; Compose
-uses the service's internal host/port. Rebuild the runtime images as well as the
-battery after updating the consumer; old consumers with no observation endpoint
+The shipped consumer's stdout-only mode tees only the runtime child's stdout;
+stderr remains in diagnostics. The existing endpoint without the query still
+tees both pipes. The additive `stdout_raw_sha256` hashes original pipe bytes;
+`stdout_sha256` still hashes the trimmed reply. Observation starts no runtime
+and closes on completion/refusal (35-second idle expiry). `probe-runtime.py`
+owns the nonce ledger and capture file; JSONL retains its independently computed
+raw digest/byte count and a decoded display copy. `BATTERY_RUNTIME_BASE` overrides
+the consumer base URL for direct probes; Compose uses the internal host/port.
+Rebuild both consumer and battery images: older consumers without the raw digest
 cannot earn supported verdicts.
+
+Limit: SUPPORTED binds a fresh single-use challenge and the delivered reply to
+independently captured stdout bytes; with the trusted shipped consumer's
+stdout-only pipe tee, it establishes that a spawned process emitted those bytes.
+The nonce remains visible in the request, and the observation endpoint is served
+by the consumer, not a verifier-owned OS pipe: a malicious consumer that
+fabricates both channels consistently can still pass without spawning a child.
+This is neither hidden-challenge proof nor hostile-consumer attestation, and it
+does not establish model authorship, answer quality, or provider/model identity.
+Do not expose this diagnostic stack to untrusted clients. No Crier server change
+is required.
 
 | Harness | Runtime command / provider | Required key | Missing-key result |
 |---|---|---|---|

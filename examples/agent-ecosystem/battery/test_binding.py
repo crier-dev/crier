@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Provider-free verifier tests, including real fake-consumer HTTP + subprocesses."""
+"""Provider-free verifier tests, including file-backed transport and real child subprocesses."""
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
-import queue
 import subprocess
 import sys
 import tempfile
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
 
 HERE = Path(__file__).parent
@@ -29,7 +26,8 @@ def live(nonce=NONCE, text="runtime answer", request=None):
     reply = f"{text}\n[crier-battery-nonce:{nonce}]\n[crier-battery-request-sha256:{digest}]"
     return {"live": True, "exec": "/fixture/runtime", "stdout_bytes": len(reply.encode()),
             "reply": reply, "nonce": nonce, "request_sha256": digest,
-            "stdout_sha256": hashlib.sha256(reply.encode()).hexdigest()}
+            "stdout_sha256": hashlib.sha256(reply.encode()).hexdigest(),
+            "stdout_raw_sha256": hashlib.sha256(reply.encode()).hexdigest()}
 
 
 def verify(body, output=None, **kwargs):
@@ -84,13 +82,14 @@ class BindingTests(unittest.TestCase):
     def test_same_content_even_with_new_digest_marker(self):
         previous = checker.execution_proof(live(OLD_NONCE), OLD_NONCE)["content_sha256"]
         self.assertIn("same runtime stdout digest", verify(live(), previous_digest=previous)["reason"])
-        self.assertEqual(verify(live(text="different"), previous_digest=previous)["result"], "PASS")
+        self.assertEqual(verify(live(text="different"), output=live(text="different")["reply"], previous_digest=previous)["result"], "PASS")
 
     def test_no_capture_cannot_pass_cli(self):
         reply = f"runtime answer\n[crier-battery-nonce:{NONCE}]"
         forged = {"live": True, "exec": "/fixture/runtime", "stdout_bytes": len(reply.encode()),
                   "reply": reply, "nonce": NONCE,
-                  "stdout_sha256": hashlib.sha256(reply.encode()).hexdigest()}
+                  "stdout_sha256": hashlib.sha256(reply.encode()).hexdigest(),
+                  "stdout_raw_sha256": hashlib.sha256(reply.encode()).hexdigest()}
         run = subprocess.run([sys.executable, str(CHECKER), "200", NONCE],
                              input=json.dumps(forged), text=True, capture_output=True)
         print("body-only control: " + run.stdout.strip(), flush=True)
@@ -103,73 +102,91 @@ class BindingTests(unittest.TestCase):
         # The observer URL/header contains the nonce, but no raw bytes do.
         self.assertEqual(verify(live(), output="")["outcome"], "NOT_EXECUTED")
 
-    def test_real_http_fake_consumers(self):
+    def test_probe_file_transport_fake_consumers(self):
         for mode, expected in (("echo-without-run", "NOT_EXECUTED"), ("run-and-echo", "SUPPORTED"),
                                ("runtime-only", "ECHOED_WITHOUT_RUN"), ("digest-mismatch", "DIGEST_MISMATCH"),
                                ("replay", "NONCE_REPLAY")):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
-                streams = {}
-                previous = []
-                runtime = Path(directory) / "runtime.py"
-                # Real fixture subprocess sees exactly the delivered request.
-                runtime.write_text('import json,sys\np=json.load(sys.stdin)["payload"]\nprint("fixture ran: "+p["text"])\nprint("[crier-battery-nonce:"+p["battery_nonce"]+"]")\n')
-                class Handler(BaseHTTPRequestHandler):
-                    def log_message(self, *_):
-                        pass
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(dir="/tmp") as directory:
+                transport = Path(directory) / "curl"
+                transport.write_text(f"#!{sys.executable}\n" + FAKE_TRANSPORT)
+                transport.chmod(0o755)
+                env = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                       "FIXTURE_DIR": directory, "FIXTURE_MODE": mode}
+                args = [sys.executable, str(HERE / "probe-runtime.py"), "http://fixture.invalid",
+                        "opencode", "hello", "", directory]
+                if mode == "replay":
+                    first = subprocess.run(args, env=env, text=True, capture_output=True, timeout=15)
+                    self.assertEqual(json.loads(first.stdout)["outcome"], "SUPPORTED", first.stdout)
+                run = subprocess.run(args, env=env, text=True, capture_output=True, timeout=15)
+                proof = json.loads(run.stdout)
+                self.assertEqual(proof["outcome"], expected, proof)
+                self.assertEqual(run.returncode, 0 if expected == "SUPPORTED" else 1)
+                ledger = json.loads((Path(directory) / "nonces.json").read_text())
+                self.assertEqual(len(ledger["minted"]), 2 if mode == "replay" else 1)
+                self.assertEqual(set(ledger["minted"]), set(ledger["used"]))
+                self.assertEqual(proof["capture_ok"], True)
+                self.assertEqual(proof["runtime_nonce_observed"], mode not in ("echo-without-run", "replay"))
+                print(f"fixture {mode}: {proof['result']} / {proof['outcome']}; exit {run.returncode}", flush=True)
 
-                    def do_GET(self):
-                        nonce = self.path.rsplit("/", 1)[-1]
-                        stream = queue.Queue()
-                        streams[nonce] = stream
-                        self.send_response(200)
-                        self.end_headers()
-                        self.wfile.flush()
-                        output = stream.get(timeout=10)
-                        self.wfile.write(output.encode())
 
-                    def do_POST(self):
-                        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                        nonce = request["payload"]["battery_nonce"]
-                        body = live(nonce, "fixture answer", request)
-                        output = ""
-                        if mode != "echo-without-run":
-                            output = subprocess.run([sys.executable, str(runtime)], input=json.dumps(request),
-                                                    text=True, capture_output=True, check=True).stdout
-                        if mode == "runtime-only":
-                            body.update(reply="answer without nonce", nonce=None)
-                        if mode == "digest-mismatch":
-                            body = live(nonce, request={"payload": {"text": "forged", "battery_nonce": nonce}})
-                        if mode == "replay" and previous:
-                            body = previous[0]
-                        previous.append(body)
-                        streams[nonce].put(output)
-                        self.send_response(200)
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"reply": body}).encode())
-                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-                thread = threading.Thread(target=server.serve_forever, daemon=True)
-                thread.start()
-                try:
-                    url = f"http://127.0.0.1:{server.server_port}"
-                    env = {**os.environ, "BATTERY_RUNTIME_BASE": url}
-                    args = [sys.executable, str(HERE / "probe-runtime.py"), url, "opencode", "hello", "", directory]
-                    if mode == "replay":
-                        first = subprocess.run(args, env=env, text=True, capture_output=True, timeout=15)
-                        self.assertEqual(json.loads(first.stdout)["outcome"], "SUPPORTED", first.stdout)
-                    run = subprocess.run(args, env=env, text=True, capture_output=True, timeout=15)
-                    proof = json.loads(run.stdout)
-                    self.assertEqual(proof["outcome"], expected, proof)
-                    self.assertEqual(run.returncode, 0 if expected == "SUPPORTED" else 1)
-                    ledger = json.loads((Path(directory) / "nonces.json").read_text())
-                    self.assertEqual(len(ledger["minted"]), 2 if mode == "replay" else 1)
-                    self.assertEqual(set(ledger["minted"]), set(ledger["used"]))
-                    self.assertEqual(proof["capture_ok"], True)
-                    self.assertEqual(proof["runtime_nonce_observed"], mode != "echo-without-run")
-                    print(f"fixture {mode}: {proof['result']} / {proof['outcome']}; runtime_nonce_observed={proof['runtime_nonce_observed']}; exit {run.returncode}", flush=True)
-                finally:
-                    server.shutdown()
-                    server.server_close()
-                    thread.join()
+FAKE_TRANSPORT = r'''import hashlib, json, os, subprocess, sys, time
+from pathlib import Path
+args = sys.argv[1:]
+root = Path(os.environ["FIXTURE_DIR"])
+mode = os.environ["FIXTURE_MODE"]
+url = next(a for a in args if a.startswith("http"))
+if "/battery-output/" in url:
+    nonce = url.split("/battery-output/", 1)[1].split("?")[0]
+    assert url.endswith("?stream=stdout")
+    Path(args[args.index("-D") + 1]).write_bytes(b"HTTP/1.1 200 OK\r\n\r\n")
+    capture = root / (nonce + ".pipe")
+    deadline = time.monotonic() + 8
+    while not capture.exists():
+        if time.monotonic() >= deadline: sys.exit(28)
+        time.sleep(.01)
+    sys.stdout.buffer.write(capture.read_bytes())
+else:
+    request = json.loads(args[args.index("-d") + 1])
+    nonce = request["payload"]["battery_nonce"]
+    digest = hashlib.sha256(json.dumps(request["payload"], ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+    text = "fixture ran: " + request["payload"]["text"] + "\n[crier-battery-nonce:" + nonce + "]\n[crier-battery-request-sha256:" + digest + "]"
+    raw = text.encode()
+    # A real child, not a network listener, supplies the good fixture capture.
+    output = b"" if mode == "echo-without-run" else subprocess.run(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+        input=raw, capture_output=True, check=True).stdout
+    body = dict(reply=text, live=True, exec=sys.executable, stdout_bytes=len(raw), nonce=nonce,
+                request_sha256=digest, stdout_sha256=hashlib.sha256(raw).hexdigest(),
+                stdout_raw_sha256=hashlib.sha256(raw).hexdigest())
+    if mode == "runtime-only": body.update(reply="answer without nonce", nonce=None)
+    if mode == "digest-mismatch": body["request_sha256"] = "0" * 64
+    cached = root / "previous.json"
+    if mode == "replay" and cached.exists():
+        body = json.loads(cached.read_text())
+        output = (root / "previous.pipe").read_bytes()
+    else:
+        cached.write_text(json.dumps(body))
+        (root / "previous.pipe").write_bytes(output)
+    # Atomic publish avoids the observer reading a half-written fixture file.
+    pending = root / (nonce + ".pending")
+    pending.write_bytes(output)
+    pending.rename(root / (nonce + ".pipe"))
+    print(json.dumps({"reply": body}) + "\n200", end="")
+'''
+
+# These are also collected by the explicitly documented test_binding.py command.
+from test_capture_binding import (
+    capture_directory,
+    test_request_body_tee_without_child,
+    test_child_spawn_with_fabricated_reply,
+    test_successful_capture_replayed_under_fresh_body,
+    test_capture_bytes_not_lossy_decoded_or_trimmed_before_raw_hash,
+    test_good_child_raw_capture_and_trimmed_reply,
+    test_capture_hash_cannot_legitimize_different_body_text,
+    test_raw_digest_and_byte_count_are_both_required,
+    test_exact_ecmascript_trim_not_python_strip,
+)
 
 
 if __name__ == "__main__":

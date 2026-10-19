@@ -21,7 +21,8 @@ const requestDigest = (text, value) => createHash("sha256").update(JSON.stringif
 const digestMarker = `[crier-battery-request-sha256:${requestDigest("hello", nonce)}]`;
 const runtimeText = `executed\n${marker}\n${digestMarker}`;
 const live = { reply: runtimeText, live: true, exec: "/fixture/opencode", stdout_bytes: Buffer.byteLength(runtimeText),
-  nonce, request_sha256: requestDigest("hello", nonce), stdout_sha256: createHash("sha256").update(runtimeText).digest("hex") };
+  nonce, request_sha256: requestDigest("hello", nonce), stdout_sha256: createHash("sha256").update(runtimeText).digest("hex"),
+  stdout_raw_sha256: createHash("sha256").update(runtimeText).digest("hex") };
 const canned = { reply: "canned", live: false, canned: true };
 
 const credentialFor = { "pi-agent": "DEEPSEEK_API_KEY", opencode: "DEEPSEEK_API_KEY",
@@ -58,7 +59,7 @@ test("execution assertion rejects canned, errored, missing and invalid markers",
   assert.equal(check({ reply: live }).status, 0, "crier generic/raw reply envelope");
 });
 
-async function startConsumer(t, { key = "fixture-only", command, harness = "opencode", sdk, liveFlag = "1", budget = "250" } = {}) {
+async function startConsumer(t, { key = "fixture-only", command, harness = "opencode", sdk, liveFlag = "1", budget = "250", observationStream = "?stream=stdout" } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "crier-execution-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await copyFile(consumer, join(dir, "consumer.mjs"));
@@ -104,7 +105,7 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   assert.ok(ready, log);
   const hook = async (text = "hello", requestNonce = nonce) => {
     const started = performance.now();
-    const observed = await fetch(`${url}/battery-output/${requestNonce}`);
+    const observed = await fetch(`${url}/battery-output/${requestNonce}${observationStream}`);
     assert.equal(observed.status,200);
     const output = observed.text();
     const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_nonce: requestNonce } }) });
@@ -195,10 +196,17 @@ args = sys.argv[1:]
 url = next(a for a in args if a.startswith('http'))
 code, body = 200, {}
 if '/battery-output/' in url:
-    nonce = url.rsplit('/', 1)[-1]
+    import time
+    from pathlib import Path
+    nonce = url.rsplit('/', 1)[-1].split('?')[0]
+    assert url.endswith('?stream=stdout')
     with open(args[args.index('-D') + 1], 'wb') as f: f.write(b'HTTP/1.1 200 OK\\r\\n\\r\\n')
-    if os.environ['HARNESS_MODE'] not in ('echo-without-run', 'no-key', 'canned-with-key', 'failed-runtime', 'copy-failure'):
-        print('[crier-battery-nonce:' + nonce + ']')
+    capture = Path(os.environ['STATS_FILE'] + '.' + nonce)
+    deadline = time.monotonic() + 8
+    while not capture.exists():
+        if time.monotonic() >= deadline: sys.exit(28)
+        time.sleep(.01)
+    sys.stdout.buffer.write(capture.read_bytes())
     sys.exit(0)
 if url.endswith('/health'): body = {'status': 'ok'}
 elif url.endswith('/stats'):
@@ -230,8 +238,15 @@ elif url.endswith('/inbox'):
             digest = hashlib.sha256(json.dumps({'battery_nonce': payload['battery_nonce'], 'text': payload['text']}, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
             text += '\\n[crier-battery-nonce:' + nonce + ']\\n[crier-battery-request-sha256:' + digest + ']'
             result['request_sha256'] = digest
-            result.update(reply=text, nonce=nonce, stdout_bytes=len(text.encode()), stdout_sha256=hashlib.sha256(text.encode()).hexdigest())
+            result.update(reply=text, nonce=nonce, stdout_bytes=len(text.encode()), stdout_sha256=hashlib.sha256(text.encode()).hexdigest(), stdout_raw_sha256=hashlib.sha256(text.encode()).hexdigest())
             if mode == 'missing': del result['nonce']
+        # Capture fixture is independently published for the GET subprocess.
+        from pathlib import Path
+        capture_nonce = json.loads(data)['payload']['battery_nonce']
+        output = result.get('reply', '') if mode not in ('echo-without-run', 'no-key', 'canned-with-key', 'failed-runtime', 'copy-failure') else ''
+        pending = Path(os.environ['STATS_FILE'] + '.' + capture_nonce + '.pending')
+        pending.write_bytes(output.encode())
+        pending.rename(Path(os.environ['STATS_FILE'] + '.' + capture_nonce))
         body = {'reply': result}
 if '-o' not in args: print(json.dumps(body, separators=(',', ':')), end='')
 if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(code)).replace('\\\\n', '\\n'), end='')
@@ -559,8 +574,27 @@ test("verifier probe captures actual runtime pipes independently of HTTP body", 
 });
 
 test("runtime stderr is independently observed but cannot replace the required body echo", async(t)=>{
-  const {body}=await startConsumer(t,{command:`printf 'answer\\n${digestMarker}'; printf '${marker}' >&2`});
+  const {body}=await startConsumer(t,{observationStream:"",command:`printf 'answer\\n${digestMarker}'; printf '${marker}' >&2`});
   const proof=JSON.parse(check(body).stdout);
   assert.equal(proof.runtime_nonce_observed,true);
   assert.equal(proof.outcome,"ECHOED_WITHOUT_RUN");
+});
+
+// DF-CRIER-392: raw stdout, rather than an HTTP body hash, is the binding source.
+test("stdout-only observer excludes stderr and binds exact UTF-8 pipe bytes", async (t) => {
+  const {body} = await startConsumer(t, { command: `printf '  héllo\\n${marker}\\n${digestMarker}\\n'; printf 'provider diagnostic' >&2` });
+  const observation = captures.get(body);
+  assert.doesNotMatch(observation.output, /provider diagnostic/);
+  assert.match(observation.output, /^  héllo/);
+  assert.ok(observation.output.endsWith("\n"));
+  assert.equal(body.stdout_raw_sha256, createHash("sha256").update(observation.output).digest("hex"));
+  const proof = JSON.parse(check(body).stdout);
+  assert.equal(proof.outcome, "SUPPORTED", JSON.stringify(proof));
+  assert.equal(proof.captured_runtime_sha256, body.stdout_raw_sha256);
+  assert.equal(proof.captured_runtime_bytes, body.stdout_bytes);
+});
+
+test("observer selector is additive and rejects unknown modes", async (t) => {
+  const {url} = await startConsumer(t, {key:""});
+  assert.equal((await fetch(`${url}/battery-output/${nonce}?stream=bogus`)).status, 400);
 });

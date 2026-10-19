@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Offline execution binding. Body metadata is never a runtime observation.
+"""Offline execution binding. Body metadata alone is never a runtime observation.
+
+The verifier hashes capture-file bytes independently and binds the body to them.
+The HTTP observer is still served by the consumer: this is not hostile-consumer
+attestation. Only the trusted shipped observer tees actual child stdout pipes.
 
 CLI: HTTP NONCE PREVIOUS_DIGEST REQUEST_JSON CAPTURE_FILE NONCE_LEDGER
 The ledger is verifier-owned {minted: [...], used: [...]}; a nonce is single use.
@@ -13,6 +17,16 @@ import uuid
 
 MARKER = re.compile(r"\[crier-battery-nonce:([0-9a-f-]{36})\]")
 DIGEST_MARKER = re.compile(r"\[crier-battery-request-sha256:([0-9a-f]{64})\]")
+
+
+# ECMAScript String.trim, matching liveReply without Python's wider whitespace
+# set (e.g. Python strips U+0085 but JavaScript does not). Raw hashing is FIRST.
+JS_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+
+def capture_bytes(output):
+    # Text callers remain useful for offline fixtures; production passes bytes.
+    return output.encode("utf-8") if isinstance(output, str) else output
 
 
 def request_digest(request):
@@ -71,10 +85,13 @@ def assert_execution(status, body, nonce, previous_digest="", *, request=None,
     echoes = MARKER.findall(text)
     if any(echo != nonce for echo in echoes) or (result.get("nonce") and result["nonce"] != nonce):
         raise ValueError("NONCE_REPLAY: response contains a nonce other than this request's fresh nonce")
-    # Only bytes on the independently opened child-output channel count. Nothing
-    # in the delivery envelope, observer URL or request metadata counts here.
-    if f"[crier-battery-nonce:{nonce}]" not in runtime_output:
-        raise ValueError("NOT_EXECUTED: no current nonce in captured runtime stdout/stderr")
+    captured = capture_bytes(runtime_output)
+    # Inspect the capture too: a fresh body must not relabel an old pipe capture.
+    observed_nonces = MARKER.findall(captured.decode("utf-8", errors="replace"))
+    if any(observed != nonce for observed in observed_nonces):
+        raise ValueError("NONCE_REPLAY: captured runtime output contains another request's nonce")
+    if nonce not in observed_nonces:
+        raise ValueError("NOT_EXECUTED: no current nonce in captured runtime stdout")
     proof = execution_proof(body, nonce)
     if not proof["nonce_matched"]:
         raise ValueError("ECHOED_WITHOUT_RUN: captured runtime nonce but body lacks the exact nonce echo")
@@ -91,6 +108,20 @@ def assert_execution(status, body, nonce, previous_digest="", *, request=None,
         raise ValueError("missing/invalid positive stdout_bytes")
     if result.get("stdout_sha256") != proof["stdout_sha256"]:
         raise ValueError("DIGEST_MISMATCH: missing/mismatched stdout_sha256 (trimmed runtime text)")
+    # Hash the ORIGINAL file bytes, before decoding, trimming or newline changes.
+    # Keep stdout_sha256's existing trimmed-reply meaning; the additive raw field
+    # binds stdout_bytes and the reply to the separate stdout-only capture.
+    captured_digest = hashlib.sha256(captured).hexdigest()
+    if (result.get("stdout_raw_sha256") != captured_digest
+            or result["stdout_bytes"] != len(captured)):
+        raise ValueError("DIGEST_MISMATCH: raw captured stdout digest/byte count differs from body")
+    try:
+        captured_text = captured.decode("utf-8").strip(JS_WHITESPACE)
+    except UnicodeDecodeError as error:
+        raise ValueError("DIGEST_MISMATCH: captured stdout is not valid UTF-8") from error
+    if (captured_text != text or len(observed_nonces) != 1
+            or hashlib.sha256(captured_text.encode()).hexdigest() != proof["stdout_sha256"]):
+        raise ValueError("DIGEST_MISMATCH: captured stdout differs from delivery reply")
     if not proof["runtime_content_bytes"]:
         raise ValueError("missing runtime text beyond nonce marker")
     if previous_digest:
@@ -103,9 +134,11 @@ def assert_execution(status, body, nonce, previous_digest="", *, request=None,
 
 def verdict(status, body, nonce, previous_digest="", **evidence):
     proof = execution_proof(body, nonce)
-    output = evidence.get("runtime_output", "")
-    proof.update(runtime_nonce_observed=f"[crier-battery-nonce:{nonce}]" in output,
-                 runtime_output=output, captured_runtime_bytes=len(output.encode()))
+    output = capture_bytes(evidence.get("runtime_output", b""))
+    proof.update(runtime_nonce_observed=f"[crier-battery-nonce:{nonce}]".encode() in output,
+                 runtime_output=output.decode("utf-8", errors="replace"),
+                 captured_runtime_bytes=len(output),
+                 captured_runtime_sha256=hashlib.sha256(output).hexdigest())
     if evidence.get("request"):
         proof["expected_request_sha256"] = request_digest(evidence["request"])
     try:
@@ -131,7 +164,7 @@ def main():
         ledger = None
         if len(sys.argv) == 7:
             evidence["request"] = json.loads(Path(sys.argv[4]).read_text())
-            evidence["runtime_output"] = Path(sys.argv[5]).read_text(errors="replace")
+            evidence["runtime_output"] = Path(sys.argv[5]).read_bytes()
             ledger = json.loads(Path(sys.argv[6]).read_text())
             evidence["minted_nonces"] = ledger["minted"]
             evidence["used_nonces"] = set(ledger["used"])

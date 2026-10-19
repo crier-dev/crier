@@ -36,11 +36,12 @@ def probe(crier, agent, prompt, previous, state):
     output_path = state / f"{nonce}.runtime"
     header_path = state / f"{nonce}.headers"
     base = os.environ.get("BATTERY_RUNTIME_BASE", f"http://{agent}:{PORTS[agent]}")
-    # The GET is opened before delivery, and only child stdout/stderr is streamed
-    # on it. Do not use a body-provided stdout, digest, log URL or capture path.
+    # Request stdout alone: stderr interleaving cannot be bound to stdout hashes.
+    # The verifier saves/hashes bytes itself, never a body-provided capture path.
+    # This HTTP stream still trusts the shipped consumer to tee real child pipes.
     with output_path.open("wb") as capture, (state / f"{nonce}.capture-errors").open("wb") as errors:
         observer = subprocess.Popen(["curl", "-s", "--no-buffer", "--max-time", "36", "-D", str(header_path),
-                                     f"{base}/battery-output/{nonce}"], stdout=capture, stderr=errors)
+                                     f"{base}/battery-output/{nonce}?stream=stdout"], stdout=capture, stderr=errors)
         try:
             deadline = time.monotonic() + 3
             while observer.poll() is None and time.monotonic() < deadline:
@@ -68,7 +69,7 @@ def probe(crier, agent, prompt, previous, state):
         body = {"error": "invalid delivery JSON: " + raw[:300]}
     headers = header_path.read_text(errors="replace") if header_path.exists() else ""
     capture_ok = observer.returncode == 0 and headers.startswith("HTTP/") and headers.splitlines()[0].split()[1:2] == ["200"]
-    output = output_path.read_text(errors="replace") if capture_ok else ""
+    output = output_path.read_bytes() if capture_ok else b""
     used = set(ledger["used"])
     proof = checker.verdict(status, body, nonce, previous, request=request,
                             runtime_output=output, minted_nonces=ledger["minted"], used_nonces=used)
