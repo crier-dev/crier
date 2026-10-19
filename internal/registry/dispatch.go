@@ -15,9 +15,10 @@ import (
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
-// DeliveryRequest is an already-authorized delivery intent. The entry owns the
-// durable message identity and payload; the remaining fields are transport
-// context, not an alternative inbox write. HTTP authorization remains at ingress.
+// DeliveryRequest carries a delivery intent and its transport context, not an
+// alternative inbox write. The entry owns the durable message identity and
+// payload. HTTP authorization remains at ingress; non-HTTP dispatch enforces
+// the target namespace's auth using NamespaceToken.
 type DeliveryRequest struct {
 	Entry        *InboxEntry
 	SessionID    string
@@ -26,7 +27,10 @@ type DeliveryRequest struct {
 	DeliveryMode string
 	TimeoutMs    int
 	Namespace    string
-	httpState    *dispatchHTTPState
+	// NamespaceToken is the caller's namespace credential, used only for
+	// authorization; it must never be persisted or forwarded to a webhook.
+	NamespaceToken string `json:"-"`
+	httpState      *dispatchHTTPState
 }
 
 // dispatchHTTPState preserves the HTTP ingress's resolved authorization and
@@ -74,8 +78,9 @@ func (r DeliveryResult) writeHTTP(w http.ResponseWriter) {
 	writeJSON(w, r.StatusCode, r.response)
 }
 
-// Dispatch is the single guard -> webhook OR durable inbox choke point. Callers
-// authorize before entering it; only this method performs transport side effects.
+// Dispatch is the single guard -> webhook OR durable inbox choke point. HTTP
+// callers authorize at ingress; non-HTTP callers are checked against the target's
+// namespace here. Only this method performs transport side effects.
 // An error always means not dispatched, including guard refusal and webhook
 // rejection. Queue acceptance is distinguished from blocking completion by mode.
 func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery DeliveryRequest) (result DeliveryResult, dispatchErr error) {
@@ -155,6 +160,11 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 		targetNS := namespaceOfAgent(target)
 		if req.Namespace != "" && namespace.Canonical(req.Namespace) != targetNS {
 			respond(http.StatusForbidden, namespaceMismatchResponse(id, targetNS, req.Namespace))
+			return
+		}
+		if err := h.namespaces.CheckAuth(targetNS, delivery.NamespaceToken); err != nil {
+			status, body := namespaceErrorResponse(err)
+			respond(status, body)
 			return
 		}
 		entry.Namespace = targetNS

@@ -1556,7 +1556,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	reqDispatch := DeliveryRequest{
 		Entry: entry, SessionID: req.SessionID, RequestID: req.RequestID,
 		Kind: kind, DeliveryMode: req.DeliveryMode, TimeoutMs: req.TimeoutMs,
-		Namespace: req.Namespace,
+		Namespace: req.Namespace, NamespaceToken: r.Header.Get(namespace.HeaderNamespaceToken),
 		httpState: &dispatchHTTPState{request: req, attempt: attempt,
 			capability: capability, authority: serviceAuthority, started: deliverStart,
 			skipGuard: nsPolicy.GuardSkipped()},

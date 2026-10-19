@@ -885,7 +885,7 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
-	outcomes, err := fanoutWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, func(target string, reply json.RawMessage) error {
+	outcomes, err := fanoutWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, r.Header.Get(namespace.HeaderNamespaceToken), func(target string, reply json.RawMessage) error {
 		return h.recordWebhookReply(r.Context(), msg, target, reply)
 	})
 	if err != nil {

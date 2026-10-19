@@ -172,7 +172,7 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 // dispatcher/driver owns timeout enforcement; no detached timeout goroutine or
 // second transport path is introduced here. Deliverers must be concurrency-safe.
 func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int) ([]DeliveryOutcome, error) {
-	return fanoutWithReplies(ctx, deliverer, msg, targets, spawn, timeoutMs, nil)
+	return fanoutWithReplies(ctx, deliverer, msg, targets, spawn, timeoutMs, "", nil)
 }
 
 // fanoutWithReplies preserves Fanout's transport contract while allowing the
@@ -180,7 +180,7 @@ func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 // only appends transcript data; it must never initiate another delivery. It runs
 // after every target has joined and in sorted target order, because concurrent
 // transcript appends would interleave sequence ids.
-func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int, recordReply func(string, json.RawMessage) error) ([]DeliveryOutcome, error) {
+func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int, namespaceToken string, recordReply func(string, json.RawMessage) error) ([]DeliveryOutcome, error) {
 	if timeoutMs == 0 {
 		timeoutMs = registry.DefaultSessionDeliveryTimeoutMs
 	}
@@ -240,6 +240,7 @@ func fanoutWithReplies(ctx context.Context, deliverer InboxDeliverer, msg *Messa
 			}); ok {
 				result, err := dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
 					Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind), TimeoutMs: timeoutMs,
+					NamespaceToken: namespaceToken,
 				})
 				deliveryErr = err
 				// Only a blocking webhook's own answer is recorded: an inbox append

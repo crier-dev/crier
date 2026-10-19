@@ -75,13 +75,19 @@ func (h *Handler) resolveRegistrationNamespace(name, token string) (string, erro
 // authenticate again), while an undeclared name is a 400 naming the problem.
 // Neither is ever answered with the default namespace.
 func writeNamespaceError(w http.ResponseWriter, err error) {
+	status, body := namespaceErrorResponse(err)
+	writeJSON(w, status, body)
+}
+
+// namespaceErrorResponse keeps HTTP ingress and session dispatch refusals identical.
+func namespaceErrorResponse(err error) (int, map[string]string) {
 	switch {
 	case errors.Is(err, namespace.ErrUnauthorized):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "NAMESPACE_UNAUTHORIZED", "detail": err.Error()})
+		return http.StatusUnauthorized, map[string]string{"error": "NAMESPACE_UNAUTHORIZED", "detail": err.Error()}
 	case errors.Is(err, namespace.ErrUnknownNamespace):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "UNKNOWN_NAMESPACE", "detail": err.Error()})
+		return http.StatusBadRequest, map[string]string{"error": "UNKNOWN_NAMESPACE", "detail": err.Error()}
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return http.StatusBadRequest, map[string]string{"error": err.Error()}
 	}
 }
 
