@@ -5606,8 +5606,37 @@ components:
           type: string
         replay_action:
           type: string
-          enum: [replayed, redelivered]
-          description: Same-key POST only. replayed means no delivery; redelivered means all prior outcomes were refused/failed/budget_cut and a new attempt replaced outcomes on the same message. Omitted on original send and transcript GET.
+          enum: [replayed, redelivered, replayed_outcome_missing, replayed_outcome_unknown]
+          description: "Same-key POST only. The single normative replay vocabulary is specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary. Omitted on original send and transcript GET."
+        outcomes_incomplete:
+          type: boolean
+          description: "See specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary. Omitted when false."
+        dispatch_evidence:
+          type: array
+          description: "Durable fan-out journal; fields and evidence limits are defined in specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary."
+          items:
+            type: object
+            required: [attempt, started_at, targets, receipts, outcomes_recorded]
+            properties:
+              attempt:
+                type: integer
+                minimum: 1
+              started_at:
+                type: string
+                format: date-time
+              completed_at:
+                type: string
+                format: date-time
+              targets:
+                type: array
+                items:
+                  type: string
+              receipts:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TranscriptMessage/properties/outcomes/items"
+              outcomes_recorded:
+                type: boolean
         created_at:
           type: string
           format: date-time

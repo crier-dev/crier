@@ -296,10 +296,11 @@ type Message struct {
 	// Task is the task lifecycle payload (CR-CHAT-030). Non-nil on `task`
 	// records; the kinds are structurally distinguishable in storage — a
 	// reader never guesses from the text (CHAT-SESSIONS.md §4.4 rule 3).
-	Task           Task              `json:"task,omitempty"`
-	Audience       Audience          `json:"audience"`
-	Outcomes       []DeliveryOutcome `json:"outcomes,omitempty"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	Task             Task               `json:"task,omitempty"`
+	Audience         Audience           `json:"audience"`
+	Outcomes         []DeliveryOutcome  `json:"outcomes,omitempty"`
+	IdempotencyKey   string             `json:"idempotency_key,omitempty"`
+	DispatchEvidence []DispatchEvidence `json:"dispatch_evidence,omitempty"`
 	// SenderIdentityBasis is server-stamped ingress assurance, never payload
 	// metadata. Empty means historical/internal provenance was not recorded.
 	SenderIdentityBasis string `json:"sender_identity_basis,omitempty"`
@@ -536,6 +537,7 @@ func (st *State) upsertMessage(rec *Record) {
 		Payload:             rec.Payload,
 		Outcomes:            rec.Outcomes,
 		IdempotencyKey:      rec.IdempotencyKey,
+		DispatchEvidence:    rec.DispatchEvidence,
 		SenderIdentityBasis: rec.SenderIdentityBasis,
 		Seq:                 rec.Seq,
 		CreatedAt:           rec.TS,

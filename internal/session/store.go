@@ -91,13 +91,14 @@ type Record struct {
 	MessageKind MessageKind `json:"message_kind,omitempty"`
 	// Task is the task lifecycle payload (CR-CHAT-030, §3.7) — present on
 	// `task`-kind message records only, and required there (§3.7 coherence).
-	Task                *Task             `json:"task,omitempty"`
-	Author              *AuthorRef        `json:"author,omitempty"`
-	Payload             json.RawMessage   `json:"payload,omitempty"`
-	Audience            *Audience         `json:"audience,omitempty"`
-	Outcomes            []DeliveryOutcome `json:"outcomes,omitempty"`
-	IdempotencyKey      string            `json:"idempotency_key,omitempty"`
-	SenderIdentityBasis string            `json:"sender_identity_basis,omitempty"`
+	Task                *Task              `json:"task,omitempty"`
+	Author              *AuthorRef         `json:"author,omitempty"`
+	Payload             json.RawMessage    `json:"payload,omitempty"`
+	Audience            *Audience          `json:"audience,omitempty"`
+	Outcomes            []DeliveryOutcome  `json:"outcomes,omitempty"`
+	IdempotencyKey      string             `json:"idempotency_key,omitempty"`
+	DispatchEvidence    []DispatchEvidence `json:"dispatch_evidence,omitempty"`
+	SenderIdentityBasis string             `json:"sender_identity_basis,omitempty"`
 
 	// --- session.thread.branch ---
 	ParentThreadID  string `json:"parent_thread_id,omitempty"`
@@ -449,6 +450,7 @@ func (m *Message) Record() *Record {
 		Audience:            &aud,
 		Outcomes:            m.Outcomes,
 		IdempotencyKey:      m.IdempotencyKey,
+		DispatchEvidence:    m.DispatchEvidence,
 		SenderIdentityBasis: m.SenderIdentityBasis,
 	}
 }
@@ -574,8 +576,8 @@ func recordContentEqual(a, b *Record) bool {
 }
 
 // writeBackEquivalent reports whether two lines are the §3.2 write-back pair:
-// the SAME message record differing only in its fan-out outcomes. Writing the
-// outcomes back onto the record is required by D1/§3.2, so it is a known,
+// the SAME message record differing only in fan-out outcomes or dispatch evidence.
+// Writing these back onto the record is required by D1/§3.2, so it is a known,
 // expected second line at the same seq — a decision the log made, not a
 // divergence to report.
 func writeBackEquivalent(a, b *Record) bool {
@@ -584,5 +586,6 @@ func writeBackEquivalent(a, b *Record) bool {
 	}
 	x, y := *a, *b
 	x.Outcomes, y.Outcomes = nil, nil
+	x.DispatchEvidence, y.DispatchEvidence = nil, nil
 	return recordContentEqual(&x, &y)
 }

@@ -31,7 +31,7 @@ func hasMessageRequestMetadata(rec *Record) bool {
 	if rec.Type != RecordMessage && rec.Type != RecordThreadReply {
 		return false
 	}
-	if rec.IdempotencyKey != "" || rec.SenderIdentityBasis != "" {
+	if rec.IdempotencyKey != "" || rec.SenderIdentityBasis != "" || len(rec.DispatchEvidence) != 0 {
 		return true
 	}
 	for _, o := range rec.Outcomes {
@@ -66,16 +66,17 @@ func (s *PostgresStore) projectMessageRequest(ctx context.Context, rec *Record) 
 	return err
 }
 
-// Preserve the legacy array encoding for old records. New identity-bearing
-// records use an envelope in the SAME metadata column: no schema migration.
+// Preserve the legacy array encoding for old records. Identity or dispatch
+// evidence uses an envelope in the SAME metadata column: no schema migration.
 func marshalMessageRequest(rec *Record) ([]byte, error) {
-	if rec.SenderIdentityBasis == "" {
+	if rec.SenderIdentityBasis == "" && len(rec.DispatchEvidence) == 0 {
 		return json.Marshal(rec.Outcomes)
 	}
 	return json.Marshal(struct {
-		Outcomes            []DeliveryOutcome `json:"outcomes"`
-		SenderIdentityBasis string            `json:"sender_identity_basis"`
-	}{rec.Outcomes, rec.SenderIdentityBasis})
+		Outcomes            []DeliveryOutcome  `json:"outcomes"`
+		SenderIdentityBasis string             `json:"sender_identity_basis"`
+		DispatchEvidence    []DispatchEvidence `json:"dispatch_evidence,omitempty"`
+	}{rec.Outcomes, rec.SenderIdentityBasis, rec.DispatchEvidence})
 }
 
 func restoreMessageRequest(messages []*Message, id, key, raw string) error {
@@ -87,14 +88,16 @@ func restoreMessageRequest(messages []*Message, id, key, raw string) error {
 		var outcomes []DeliveryOutcome
 		if strings.HasPrefix(strings.TrimSpace(raw), "{") {
 			var metadata struct {
-				Outcomes            []DeliveryOutcome `json:"outcomes"`
-				SenderIdentityBasis string            `json:"sender_identity_basis"`
+				Outcomes            []DeliveryOutcome  `json:"outcomes"`
+				SenderIdentityBasis string             `json:"sender_identity_basis"`
+				DispatchEvidence    []DispatchEvidence `json:"dispatch_evidence,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
 				return fmt.Errorf("load message request metadata: %w", err)
 			}
 			outcomes = metadata.Outcomes
 			m.SenderIdentityBasis = metadata.SenderIdentityBasis
+			m.DispatchEvidence = metadata.DispatchEvidence
 		} else if err := json.Unmarshal([]byte(raw), &outcomes); err != nil {
 			return fmt.Errorf("load message request outcomes: %w", err)
 		}

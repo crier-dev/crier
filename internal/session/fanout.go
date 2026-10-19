@@ -333,7 +333,7 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 	}
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return outcomes, err
 	}
 	// Replies are recorded after the join and in sorted target order: concurrent
 	// transcript appends would interleave sequence ids, and a failed delivery
@@ -344,7 +344,7 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				continue
 			}
 			if err := recordReply(target, replies[i]); err != nil {
-				return nil, fmt.Errorf("record webhook reply from %q: %w", target, err)
+				return outcomes, fmt.Errorf("record webhook reply from %q: %w", target, err)
 			}
 		}
 	}

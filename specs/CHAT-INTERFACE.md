@@ -256,9 +256,10 @@ crier's wrapper 502/504. All existing outcome names and retry eligibility remain
 
 `POST /sessions/{id}/messages` honours a nonempty `idempotency_key` within that session.
 The first send records the key with its message; later sends with the same key return HTTP 201
-and the existing message's `id`, `seq` and audience. Delivered/mixed-success, canned,
-empty or incomplete outcomes are a pure replay (`replay_action: "replayed"`): no
-branch, append or delivery, even if the retried payload differs. When ALL persisted
+and the existing message's `id`, `seq` and audience. Replay actions, including
+missing/unknown outcome evidence, are defined only in
+[CHAT-SESSIONS.md §3.2](CHAT-SESSIONS.md#delivery-outcome-vocabulary). Incomplete
+outcomes never authorize another delivery, even if the retried payload differs. When ALL persisted
 outcomes are `refused`, `failed` or `budget_cut`, retry actually invokes the original resolved
 targets with the stored intent and replaces outcomes on that SAME operator row
 (`replay_action: "redelivered"`, whether the new attempt succeeds or not). A live
@@ -277,7 +278,8 @@ an OS advisory file lock (released on process death); PostgreSQL uses a database
 on a dedicated connection, not a pooled data slot. In-memory SQLite uses a per-handle semaphore.
 SQL projections commit the intent and request-key metadata in one transaction. The transcript,
 not an expiring reservation, remains the durable authority after restart. If a prior attempt died
-after recording intent, replay returns its current incomplete outcomes rather than resending.
+after recording intent, replay returns its current outcomes and durable dispatch evidence
+with the state defined by that table rather than resending.
 
 The page keeps its 12-second HTTP wait, but a timed-out POST is **not** reported as a failed send:
 it displays “Still delivering or awaiting confirmation”, retains the draft and refreshes the

@@ -232,8 +232,10 @@ type transcriptMessage struct {
 	SenderIdentityBasis string          `json:"sender_identity_basis,omitempty"`
 	// ReplayAction distinguishes a pure replay from a new delivery attempt of
 	// the same durable message. Omitted on an original send/transcript GET.
-	ReplayAction string    `json:"replay_action,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ReplayAction       string             `json:"replay_action,omitempty"`
+	OutcomesIncomplete bool               `json:"outcomes_incomplete,omitempty"`
+	DispatchEvidence   []DispatchEvidence `json:"dispatch_evidence,omitempty"`
+	CreatedAt          time.Time          `json:"created_at"`
 	// Delivered / Accepted / Held / Skipped / SkippedAgents summarize ONE send.
 	// Inbox/queue admission is accepted, an explicit peer hold is held, and only
 	// a confirmed delivery is delivered. A target whose delivery is REFUSED
@@ -760,7 +762,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, existing := range st.Messages {
 			if existing.IdempotencyKey == req.IdempotencyKey {
-				if allRetryableOutcomes(existing.Outcomes) {
+				if !messageOutcomesIncomplete(existing) && allRetryableOutcomes(existing.Outcomes) {
 					// The store lock spans re-delivery and outcome replacement too.
 					// Use ONLY the recorded intent: a changed retry payload/audience
 					// must not mutate or expand this message or create a branch.
@@ -775,7 +777,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 				view := h.messageViewOf(st, existing)
 				view.Outcomes = outcomeViews(existing.Outcomes)
 				summarizeFanout(&view, existing.Outcomes)
-				view.ReplayAction = "replayed"
+				view.ReplayAction = replayAction(existing)
 				writeJSON(w, http.StatusCreated, view)
 				return // delivered/mixed/canned/incomplete: no second delivery
 			}
@@ -978,7 +980,29 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return transcriptMessage{}, false
 	}
+	// Journal the fan-out boundary before any transport can run. This append
+	// deliberately retains the prior outcomes; it is not the outcome write-back.
+	targets := append([]string{}, deliverable...)
+	for _, member := range memState.Members {
+		if member.ActiveAt(h.now()) && member.MemberType == MemberAgent && IsRemoteMember(member.MemberID) && member.MemberID != msg.Author.AgentID() && inAudience(msg.Audience, member.MemberID) {
+			targets = append(targets, member.MemberID)
+		}
+	}
+	msg.DispatchEvidence = append(msg.DispatchEvidence, DispatchEvidence{
+		Attempt: len(msg.DispatchEvidence) + 1, StartedAt: h.now(),
+		Targets: append([]string{}, dedupeSorted(targets)...), Receipts: []DeliveryOutcome{},
+	})
+	attempt := &msg.DispatchEvidence[len(msg.DispatchEvidence)-1]
+	if err := h.appendDispatchEvidence(r.Context(), msg, prior); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", "fan-out not started: "+err.Error())
+		return transcriptMessage{}, false
+	}
 	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, r.Header.Get(namespace.HeaderNamespaceToken))
+	attempt.addReceipts(remoteOutcomes)
+	if journalErr := h.appendDispatchEvidence(r.Context(), msg, prior); journalErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", journalErr.Error())
+		return transcriptMessage{}, false
+	}
 	if err != nil {
 		// A remote fan-out that cannot complete is the same visible,
 		// repairable state §3.2 already names: the record is durable,
@@ -992,6 +1016,15 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	outcomes, err := fanoutAttemptWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, r.Header.Get(namespace.HeaderNamespaceToken), retry, func(target string, reply json.RawMessage) error {
 		return h.recordWebhookReply(r.Context(), msg, target, reply)
 	})
+	attempt.addReceipts(outcomes)
+	if len(outcomes) == len(deliverable) {
+		completed := h.now()
+		attempt.CompletedAt = &completed
+	}
+	if journalErr := h.appendDispatchEvidence(r.Context(), msg, prior); journalErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", journalErr.Error())
+		return transcriptMessage{}, false
+	}
 	if err != nil {
 		// The intent is durable and the outcomes are incomplete — §3.2's
 		// visible, repairable state, not a lost message. Report it as a 502
@@ -1011,6 +1044,7 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	// (and may never see). The warning names the group the target was
 	// addressed through when it came from one.
 	warnSkippedTargets(msg.ID, msg.Outcomes, groupOfTarget(roster))
+	attempt.OutcomesRecorded = true
 
 	if err := h.store.PostMessage(r.Context(), msg); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
@@ -1343,6 +1377,8 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 		Audience:            m.Audience,
 		Outcomes:            outcomeViews(m.Outcomes),
 		IdempotencyKey:      m.IdempotencyKey,
+		DispatchEvidence:    m.DispatchEvidence,
+		OutcomesIncomplete:  messageOutcomesIncomplete(m),
 		SenderIdentityBasis: m.SenderIdentityBasis,
 		CreatedAt:           m.CreatedAt,
 		ThreadDepth:         st.ThreadDepth(m.ThreadID),

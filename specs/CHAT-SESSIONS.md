@@ -237,11 +237,11 @@ divergence.
 #### Delivery outcome vocabulary (DF-CRIER-402, DF-CRIER-404, DF-CRIER-409)
 
 This is the single normative vocabulary table for per-target transcript `outcome`
-values. Producers, API descriptions and UI summaries refer here rather than
+values and message request `replay_action` states. Producers, API descriptions and UI summaries refer here rather than
 maintaining another list of meanings. Transport admission, policy permission,
 receipt flushing, inbox consumption and an observed answer are different evidence.
 
-| Wire outcome | Meaning and evidence |
+| Wire value | Meaning and evidence |
 |---|---|
 | `delivered` | The target produced a real reply: a genuine, displayable blocking webhook answer or an observed inbox/peer reply in the allowlisted shapes in [WEBHOOK-DELIVERY.md](WEBHOOK-DELIVERY.md#peerinbox-reply-extraction). A delivery word or boolean alone never qualifies. |
 | `accepted` | The target's transport accepted the message (plain inbox `201`, async/batch queue `202`, or peer acceptance) without an observed answer. Includes an unsubstantiated peer delivery claim, exposed as `code: "PEER_CLAIMED_DELIVERY"`, `retryable: false`, and detail `peer claimed delivery but no reply observed; transport accepted, not confirmed execution`. |
@@ -255,6 +255,35 @@ receipt flushing, inbox consumption and an observed answer are different evidenc
 | `acked` | Where inbox lifecycle evidence applies, the holder acknowledged the entry. Consumption alone does not establish a reply or task completion. |
 | `expired` | Where inbox lifecycle evidence applies, the entry expired unacknowledged and was dead-lettered with reason `ttl_expired_unacked`. |
 | `in_progress` | Same-key dispatch is already running (`DELIVERY_IN_PROGRESS`), not refused or delivered. Wait and refresh; retryability is not permission to resend while pending. |
+| `replay_action: "replayed"` | Same-key HTTP 201, no new dispatch. Outcomes were recorded, or a completed fan-out with zero targets proves no dispatch was required. Never means an unknown/unfinished send completed. |
+| `replay_action: "redelivered"` | Same-key HTTP 201 after another fan-out attempt of the same intent, permitted only when all prior outcomes are retryable negatives and no dispatch evidence remains uncommitted to outcomes. |
+| `replay_action: "replayed_outcome_missing"` | Same-key HTTP 201, no new dispatch, `outcomes_incomplete: true`. The latest durable dispatch evidence has `completed_at`, but transcript outcomes are missing or its outcome write-back did not commit. Return the evidence (including per-target receipts) without promoting it to transcript outcomes or claiming execution. |
+| `replay_action: "replayed_outcome_unknown"` | Same-key HTTP 201, no new dispatch, `outcomes_incomplete: true`. An intent has no outcomes and no completed dispatch evidence, or a newer attempt has only a boundary marker. A historical empty outcome set, a crash at the boundary, and an unavailable receipt journal cannot prove whether transport ran. Never guess or automatically re-send. |
+
+`dispatch_evidence` is an ordered array of fan-out passes on the same message:
+`attempt` is its one-based journal index (not a count of HTTP transport retries),
+`started_at` records entry to the fan-out boundary, `targets` is the resolved
+planned set, `receipts` retains returned per-target evidence using the outcome
+vocabulary above, and `completed_at` is present only after the fan-out returns.
+`outcomes_recorded` becomes true only in the final outcome write-back. Old
+unjournaled attempts are not included in the index. Transcript GET also exposes
+this evidence and `outcomes_incomplete` when applicable; original sends and GET
+omit `replay_action`. A normal successful zero-target pass can have empty outcomes
+without being incomplete. Internal answer bubbles are not fan-out attempts.
+
+The intent precedes a separately durable boundary append. No transport may start
+if that append fails: HTTP 500 `STORE_ERROR` says fan-out was not started. Returned
+receipts are appended durably before the final `PostMessage` outcome write-back,
+retaining the prior outcomes until that write commits. Thus a failed final write
+leaves independently readable receipts, even after restart, and a failed negative
+retry cannot use stale negative outcomes to grant another send. The journal uses
+the existing fsynced JSONL append / transactional SQL request-metadata projection;
+it is not a process-local cache or a second delivery path. Receipt appends get a
+fresh bounded five-second context even after client cancellation. If storage also
+fails after dispatch, HTTP 500 `STORE_ERROR` explicitly says completed transport
+receipts cannot be guaranteed durable; the boundary marker remains, and replay
+uses the unknown state. A crash between transport and receipt append has the same
+uncertainty. There is no cross-system atomic commit or exactly-once guarantee.
 
 `FED_ALLOWED` authorizes crossing, not execution. `FED_TOKEN_ONLY` in a verdict
 header or receipt stays `accepted` with that code; an explicit hold keeps its
@@ -319,7 +348,8 @@ Restart, deploy, handler replacement and receipt-cache expiry do not forget it.
 This does not recover keys lost by a pre-metadata version of the SQL projection,
 restore missing storage, or promise exactly-once execution by a remote agent.
 A crash after intent persistence but before outcome persistence leaves a visible
-incomplete intent: a keyed retry replays it without speculative re-execution.
+incomplete intent: a keyed retry returns the evidence-qualified replay state from
+[§3.2’s single vocabulary table](#delivery-outcome-vocabulary), without speculative re-execution.
 The existing explicit all-negative message retry (`refused`, `failed` or
 `budget_cut` only) can re-deliver that same intent; this is not a successful-send
 replay and does not allocate a second message. Task creation retries never
