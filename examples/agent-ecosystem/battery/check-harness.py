@@ -2,8 +2,14 @@
 """Offline execution binding. Body metadata alone is never a runtime observation.
 
 The verifier hashes capture-file bytes independently and binds the body to them.
-The HTTP observer is still served by the consumer: this is not hostile-consumer
-attestation. Only the trusted shipped observer tees actual child stdout pipes.
+The challenge arrives separately via the observer, then CR_BATTERY_CHALLENGE in
+the runtime child's environment, NEVER in the delivery payload or CLI prompt.
+Harness authors must read that variable and emit [crier-battery-nonce:<value>]
+plus [crier-battery-request-sha256:<CR_BATTERY_REQUEST_SHA256>] on stdout. Merely
+reflecting a prompt cannot pass. Reading/printing the env without doing the work
+is still indistinguishable: this local battery is not execution attestation.
+The HTTP observer is still served by the consumer, not a verifier-owned OS pipe.
+Only the trusted shipped observer tees actual child stdout pipes.
 
 CLI: HTTP NONCE PREVIOUS_DIGEST REQUEST_JSON CAPTURE_FILE NONCE_LEDGER
 The ledger is verifier-owned {minted: [...], used: [...]}; a nonce is single use.
@@ -31,7 +37,7 @@ def capture_bytes(output):
 
 def request_digest(request):
     payload = request["payload"]
-    canonical = json.dumps({"battery_nonce": payload["battery_nonce"], "text": payload["text"]},
+    canonical = json.dumps(payload, sort_keys=True,
                            ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -85,18 +91,20 @@ def assert_execution(status, body, nonce, previous_digest="", *, request=None,
     echoes = MARKER.findall(text)
     if any(echo != nonce for echo in echoes) or (result.get("nonce") and result["nonce"] != nonce):
         raise ValueError("NONCE_REPLAY: response contains a nonce other than this request's fresh nonce")
+    if not request:
+        raise ValueError("DIGEST_MISMATCH: missing verifier-owned request")
+    if nonce in json.dumps(request, ensure_ascii=False):
+        raise ValueError("NOT_EXECUTED: challenge exposed in request; out-of-band provenance required (prompt/request echo can pass)")
     captured = capture_bytes(runtime_output)
     # Inspect the capture too: a fresh body must not relabel an old pipe capture.
     observed_nonces = MARKER.findall(captured.decode("utf-8", errors="replace"))
     if any(observed != nonce for observed in observed_nonces):
         raise ValueError("NONCE_REPLAY: captured runtime output contains another request's nonce")
     if nonce not in observed_nonces:
-        raise ValueError("NOT_EXECUTED: no current nonce in captured runtime stdout")
+        raise ValueError("NOT_EXECUTED: no out-of-band challenge in captured runtime stdout; prompt/request echo without reading CR_BATTERY_CHALLENGE is not execution proof")
     proof = execution_proof(body, nonce)
     if not proof["nonce_matched"]:
         raise ValueError("ECHOED_WITHOUT_RUN: captured runtime nonce but body lacks the exact nonce echo")
-    if not request or request.get("payload", {}).get("battery_nonce") != nonce:
-        raise ValueError("DIGEST_MISMATCH: missing verifier-owned request or request nonce mismatch")
     expected = request_digest(request)
     if result.get("request_sha256") != expected or DIGEST_MARKER.findall(text) != [expected]:
         raise ValueError("DIGEST_MISMATCH: body request digest differs from verifier-sent payload")

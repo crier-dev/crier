@@ -57,7 +57,7 @@ where a default is already taken. To run two stacks side by side, also give each
 its own project name — `docker compose -p lab-a up -d --build` (repeat `-p lab-a` on
 every compose command for that stack).
 
-Harness PASS means **real runtime execution**, not merely HTTP delivery: the
+Harness PASS requires **runtime-channel evidence**, not merely HTTP delivery: the
 consumer must finish its CLI (exit 0) or Pi SDK prompt and emit non-empty text,
 `"live": true`, a non-empty `exec`, and positive integer `stdout_bytes`.
 The battery parses those fields from crier's generic/raw `reply` object; a
@@ -68,13 +68,32 @@ output return HTTP 200 with `status:"FAILED"`, `live:false`, `error` and **no `r
 SDK text written to stdout by its bounded child process.
 
 A harness is **supported** only when both distinct prompts pass. The verifier
-mints a fresh single-use nonce, records the sent payload, and opens
-`GET /battery-output/<nonce>?stream=stdout` before delivery. It hashes the
-capture-file bytes itself (before decoding, trimming or newline conversion),
+mints a fresh single-use challenge and a separate random request UUID. It records
+`payload: {battery_id: <request UUID>, text: <prompt>}` and uses only that request
+UUID in `session_id`; **the challenge is absent from the entire delivery body**.
+Before delivery it opens the separate consumer channel
+`GET /battery-output/<challenge>?stream=stdout&battery_id=<request UUID>`.
+The consumer correlates the request by `battery_id`, then passes the challenge
+only as the per-child environment variable `CR_BATTERY_CHALLENGE`, alongside
+`CR_BATTERY_REQUEST_SHA256` (SHA-256 of compact UTF-8 JSON with `battery_id`, then
+`text`). Neither value is interpolated into the CLI argv or SDK prompt.
+
+Harness authors must read those environment variables and emit
+`[crier-battery-nonce:<CR_BATTERY_CHALLENGE value>]` and
+`[crier-battery-request-sha256:<CR_BATTERY_REQUEST_SHA256 value>]` on stdout.
+The battery prompt instructs agent runtimes to read their process environment
+using a tool; the non-battery one-sentence/no-tools behavior is unchanged.
+A template that merely prints its prompt or request body without reading this
+out-of-band channel must fail `NOT_EXECUTED`, with a reason naming prompt/request
+echo and the missing out-of-band challenge. The checker also rejects a request
+that leaks the challenge (including through `session_id`). The consumer never
+appends challenge markers to make an unaware runtime pass.
+
+The verifier hashes the capture-file bytes itself (before decoding, trimming or newline conversion),
 compares that raw SHA-256 and byte count with `stdout_raw_sha256` and
 `stdout_bytes`, then requires strict UTF-8 captured text, trimmed with
 ECMAScript `String.trim` semantics, to equal `reply` and its existing trimmed
-`stdout_sha256`. Request nonce/digest echoes and different-content checks
+`stdout_sha256`. Out-of-band nonce/digest echoes and different-content checks
 (both challenge markers removed) still apply. Body metadata alone never proves
 execution. Missing captured nonce is `NOT_EXECUTED`; observed nonce but missing
 body echo is `ECHOED_WITHOUT_RUN`; request/capture/reply mismatches are
@@ -89,16 +108,19 @@ and closes on completion/refusal (35-second idle expiry). `probe-runtime.py`
 owns the nonce ledger and capture file; JSONL retains its independently computed
 raw digest/byte count and a decoded display copy. `BATTERY_RUNTIME_BASE` overrides
 the consumer base URL for direct probes; Compose uses the internal host/port.
-Rebuild both consumer and battery images: older consumers without the raw digest
-cannot earn supported verdicts.
+Rebuild both consumer and battery images: older in-band templates or consumers
+without the raw digest cannot earn supported verdicts.
 
-Limit: SUPPORTED binds a fresh single-use challenge and the delivered reply to
-independently captured stdout bytes; with the trusted shipped consumer's
-stdout-only pipe tee, it establishes that a spawned process emitted those bytes.
-The nonce remains visible in the request, and the observation endpoint is served
-by the consumer, not a verifier-owned OS pipe: a malicious consumer that
-fabricates both channels consistently can still pass without spawning a child.
-This is neither hidden-challenge proof nor hostile-consumer attestation, and it
+Limit: SUPPORTED binds a fresh single-use out-of-band challenge and the delivered
+reply to independently captured stdout bytes. A harness that reads the environment
+and prints the challenge **without doing the requested work is still
+indistinguishable**: that is the honest ceiling of this local battery. With the
+trusted shipped consumer's stdout-only pipe tee, it establishes that a spawned
+process emitted those bytes, not that an agent/model answered the question.
+The observation endpoint is served by the consumer, not a verifier-owned OS pipe:
+a malicious consumer that fabricates both channels consistently can still pass
+without spawning a child. The challenge is hidden from reflected input, not from
+the process/consumer under test. This is not hostile-consumer attestation, and it
 does not establish model authorship, answer quality, or provider/model identity.
 Do not expose this diagnostic stack to untrusted clients. No Crier server change
 is required.
@@ -207,6 +229,7 @@ python3 -m json.tool --json-lines examples/agent-ecosystem/battery/evidence/ecos
 # Offline regression checks (fake CLI/SDK/transport; no real provider calls):
 node --test examples/agent-ecosystem/battery/execution.test.mjs
 python3 examples/agent-ecosystem/battery/test_binding.py
+python3 examples/agent-ecosystem/battery/test_capture_binding.py
 ```
 
 ## Services

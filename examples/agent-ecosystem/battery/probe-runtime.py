@@ -3,6 +3,8 @@
 
 Usage: probe-runtime.py CRIER AGENT PROMPT PREVIOUS_DIGEST RUN_STATE_DIR
 No provider keys needed by the verifier. The consumer owns runtime credentials.
+The observer URL supplies the challenge out of band; the independent battery_id
+only correlates delivery with that observer and cannot reveal the challenge.
 """
 import importlib.util
 import json
@@ -29,8 +31,13 @@ def probe(crier, agent, prompt, previous, state):
     ledger["minted"].append(nonce)
     # Record BEFORE any outbound call. The response cannot choose the challenge.
     ledger_path.write_text(json.dumps(ledger))
-    request = {"payload": {"text": prompt, "battery_nonce": nonce}, "sender": "battery",
-               "session_id": f"eco-{agent}-{nonce}", "delivery_mode": "blocking", "timeout_ms": 30000}
+    request_id = str(uuid.uuid4())
+    if request_id == nonce:
+        raise ValueError("request correlation must differ from the out-of-band challenge")
+    request = {"payload": {"text": prompt, "battery_id": request_id}, "sender": "battery",
+               "session_id": f"eco-{agent}-{request_id}", "delivery_mode": "blocking", "timeout_ms": 30000}
+    if nonce in json.dumps(request):
+        raise ValueError("challenge must not appear in the request body")
     data = json.dumps(request, ensure_ascii=False)
     (state / f"{nonce}.request.json").write_text(data)
     output_path = state / f"{nonce}.runtime"
@@ -41,7 +48,7 @@ def probe(crier, agent, prompt, previous, state):
     # This HTTP stream still trusts the shipped consumer to tee real child pipes.
     with output_path.open("wb") as capture, (state / f"{nonce}.capture-errors").open("wb") as errors:
         observer = subprocess.Popen(["curl", "-s", "--no-buffer", "--max-time", "36", "-D", str(header_path),
-                                     f"{base}/battery-output/{nonce}?stream=stdout"], stdout=capture, stderr=errors)
+                                     f"{base}/battery-output/{nonce}?stream=stdout&battery_id={request_id}"], stdout=capture, stderr=errors)
         try:
             deadline = time.monotonic() + 3
             while observer.poll() is None and time.monotonic() < deadline:

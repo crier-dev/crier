@@ -17,11 +17,11 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 NONCE = "4bb57a79-dd26-45be-a3ed-bf78d52e7b68"
 OLD_NONCE = "abc81347-807b-4b10-aace-9ce6030d233f"
-REQUEST = {"payload": {"text": "hello", "battery_nonce": NONCE}}
+REQUEST = {"payload": {"text": "hello", "battery_id": "request-fixture"}}
 
 
 def live(nonce=NONCE, text="runtime answer", request=None):
-    request = request or {"payload": {"text": "hello", "battery_nonce": nonce}}
+    request = request or REQUEST
     digest = checker.request_digest(request)
     reply = f"{text}\n[crier-battery-nonce:{nonce}]\n[crier-battery-request-sha256:{digest}]"
     return {"live": True, "exec": "/fixture/runtime", "stdout_bytes": len(reply.encode()),
@@ -42,6 +42,27 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(proof["outcome"], "NOT_EXECUTED", proof)
         self.assertEqual(proof["result"], "FAIL")
 
+    def test_prompt_echo_with_in_band_challenge_is_rejected(self):
+        # Reproduce the old template: merely reflecting its prompt emits both
+        # markers, with perfectly valid DF-CRIER-392 capture/body binding.
+        sent = {"payload": {"text": "hello", "battery_nonce": NONCE}}
+        digest = checker.request_digest(sent)
+        prompt = (f"hello\nEcho these markers: [crier-battery-nonce:{NONCE}]\n"
+                  f"[crier-battery-request-sha256:{digest}]")
+        output = subprocess.run(
+            [sys.executable, "-c", "import sys; print(sys.argv[1], end='')", prompt],
+            capture_output=True, check=True).stdout
+        body = {"reply": output.decode(), "nonce": NONCE, "live": True,
+                "exec": sys.executable, "stdout_bytes": len(output),
+                "request_sha256": digest,
+                "stdout_sha256": hashlib.sha256(output).hexdigest(),
+                "stdout_raw_sha256": hashlib.sha256(output).hexdigest()}
+        proof = checker.verdict("200", body, NONCE, request=sent,
+                                runtime_output=output, minted_nonces={NONCE})
+        print("prompt-echo control: " + json.dumps(proof), flush=True)
+        self.assertEqual(proof["outcome"], "NOT_EXECUTED", proof)
+        self.assertIn("out-of-band", proof["reason"])
+
     def test_genuine(self):
         self.assertEqual(verify({"reply": live()})["outcome"], "SUPPORTED")
 
@@ -52,7 +73,7 @@ class BindingTests(unittest.TestCase):
 
     def test_request_digest_not_consumer_reply_digest(self):
         # Self-consistent response hash used to pass; it cannot override sent text.
-        forged = live(request={"payload": {"text": "changed by consumer", "battery_nonce": NONCE}})
+        forged = live(request={"payload": {"text": "changed by consumer", "battery_id": "request-fixture"}})
         self.assertEqual(verify(forged, output=forged["reply"])["outcome"], "DIGEST_MISMATCH")
         self.assertEqual(verify({**live(), "stdout_sha256": "0" * 64})["outcome"], "DIGEST_MISMATCH")
 
@@ -105,6 +126,7 @@ class BindingTests(unittest.TestCase):
     def test_probe_file_transport_fake_consumers(self):
         for mode, expected in (("echo-without-run", "NOT_EXECUTED"), ("run-and-echo", "SUPPORTED"),
                                ("runtime-only", "ECHOED_WITHOUT_RUN"), ("digest-mismatch", "DIGEST_MISMATCH"),
+                               ("prompt-echo", "NOT_EXECUTED"),
                                ("replay", "NONCE_REPLAY")):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory(dir="/tmp") as directory:
                 transport = Path(directory) / "curl"
@@ -125,7 +147,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(len(ledger["minted"]), 2 if mode == "replay" else 1)
                 self.assertEqual(set(ledger["minted"]), set(ledger["used"]))
                 self.assertEqual(proof["capture_ok"], True)
-                self.assertEqual(proof["runtime_nonce_observed"], mode not in ("echo-without-run", "replay"))
+                self.assertEqual(proof["runtime_nonce_observed"], mode not in ("echo-without-run", "prompt-echo", "replay"))
                 print(f"fixture {mode}: {proof['result']} / {proof['outcome']}; exit {run.returncode}", flush=True)
 
 
@@ -137,7 +159,10 @@ mode = os.environ["FIXTURE_MODE"]
 url = next(a for a in args if a.startswith("http"))
 if "/battery-output/" in url:
     nonce = url.split("/battery-output/", 1)[1].split("?")[0]
-    assert url.endswith("?stream=stdout")
+    assert "?stream=stdout&battery_id=" in url
+    request_id = url.split("battery_id=", 1)[1]
+    assert request_id != nonce
+    (root / (request_id + ".challenge")).write_text(nonce)
     Path(args[args.index("-D") + 1]).write_bytes(b"HTTP/1.1 200 OK\r\n\r\n")
     capture = root / (nonce + ".pipe")
     deadline = time.monotonic() + 8
@@ -147,10 +172,13 @@ if "/battery-output/" in url:
     sys.stdout.buffer.write(capture.read_bytes())
 else:
     request = json.loads(args[args.index("-d") + 1])
-    nonce = request["payload"]["battery_nonce"]
+    nonce = (root / (request["payload"]["battery_id"] + ".challenge")).read_text()
+    assert nonce not in json.dumps(request), "challenge must not travel in the request"
     digest = hashlib.sha256(json.dumps(request["payload"], ensure_ascii=False,
         separators=(",", ":"), sort_keys=True).encode()).hexdigest()
     text = "fixture ran: " + request["payload"]["text"] + "\n[crier-battery-nonce:" + nonce + "]\n[crier-battery-request-sha256:" + digest + "]"
+    if mode == "prompt-echo":
+        text = request["payload"]["text"] + " Read CR_BATTERY_CHALLENGE from the environment"
     raw = text.encode()
     # A real child, not a network listener, supplies the good fixture capture.
     output = b"" if mode == "echo-without-run" else subprocess.run(

@@ -16,12 +16,13 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const consumer = resolve(here, "../consumer/consumer.mjs");
 const checker = join(here, "check-harness.py");
 const nonce = "4bb57a79-dd26-45be-a3ed-bf78d52e7b68";
+const batteryId = "a0b6f4d8-d811-4e2e-bd6c-3e793488d8c3";
 const marker = `[crier-battery-nonce:${nonce}]`;
-const requestDigest = (text, value) => createHash("sha256").update(JSON.stringify({battery_nonce:value,text})).digest("hex");
-const digestMarker = `[crier-battery-request-sha256:${requestDigest("hello", nonce)}]`;
+const requestDigest = (text, value) => createHash("sha256").update(JSON.stringify({battery_id:value,text})).digest("hex");
+const digestMarker = `[crier-battery-request-sha256:${requestDigest("hello", batteryId)}]`;
 const runtimeText = `executed\n${marker}\n${digestMarker}`;
 const live = { reply: runtimeText, live: true, exec: "/fixture/opencode", stdout_bytes: Buffer.byteLength(runtimeText),
-  nonce, request_sha256: requestDigest("hello", nonce), stdout_sha256: createHash("sha256").update(runtimeText).digest("hex"),
+  nonce, request_sha256: requestDigest("hello", batteryId), stdout_sha256: createHash("sha256").update(runtimeText).digest("hex"),
   stdout_raw_sha256: createHash("sha256").update(runtimeText).digest("hex") };
 const canned = { reply: "canned", live: false, canned: true };
 
@@ -36,7 +37,7 @@ function check(body, code = "200", requestNonce = nonce, previousDigest = "") {
   const observation = captures.get(inner) || {output:runtimeText,text:"hello"};
   const dir = mkdtempSync(join(tmpdir(), "crier-checker-"));
   try {
-    writeFileSync(join(dir,"request"),JSON.stringify({payload:{text:observation.text,battery_nonce:requestNonce}}));
+    writeFileSync(join(dir,"request"),JSON.stringify({payload:{text:observation.text,battery_id:observation.batteryId || batteryId}}));
     writeFileSync(join(dir,"output"),observation.output);
     writeFileSync(join(dir,"ledger"),JSON.stringify({minted:[requestNonce],used:[]}));
     return spawnSync("python3", [checker, code, requestNonce, previousDigest,
@@ -105,12 +106,12 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   assert.ok(ready, log);
   const hook = async (text = "hello", requestNonce = nonce) => {
     const started = performance.now();
-    const observed = await fetch(`${url}/battery-output/${requestNonce}${observationStream}`);
+    const observed = await fetch(`${url}/battery-output/${requestNonce}${observationStream}${observationStream ? "&" : "?"}battery_id=${batteryId}`);
     assert.equal(observed.status,200);
     const output = observed.text();
-    const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_nonce: requestNonce } }) });
+    const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { text, battery_id: batteryId } }) });
     const body = await response.json();
-    captures.set(body,{output:await output,text});
+    captures.set(body,{output:await output,text,batteryId});
     return { status: response.status, body, elapsed: performance.now() - started };
   };
   return { ...await hook(), dir, hook, url };
@@ -168,7 +169,10 @@ test("pi SDK execution carries the same marker after prompt succeeds", async (t)
       if (process.env.DEEPSEEK_API_KEY !== "fixture-only") throw new Error("missing SDK credential");
       let listener;
       return { session: { subscribe(fn) { listener = fn; },
-        async prompt(text) { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] + "\\n" + text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0] } }); },
+        async prompt(text) {
+          if (text.includes(process.env.CR_BATTERY_CHALLENGE)) throw new Error("challenge leaked into SDK prompt");
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "SDK executed\\n[crier-battery-nonce:" + process.env.CR_BATTERY_CHALLENGE + "]\\n[crier-battery-request-sha256:" + process.env.CR_BATTERY_REQUEST_SHA256 + "]" } });
+        },
         async dispose() {} } };
     }` });
   assert.equal(status, 200);
@@ -199,7 +203,9 @@ if '/battery-output/' in url:
     import time
     from pathlib import Path
     nonce = url.rsplit('/', 1)[-1].split('?')[0]
-    assert url.endswith('?stream=stdout')
+    assert '?stream=stdout&battery_id=' in url
+    request_id = url.split('battery_id=', 1)[1]
+    Path(os.environ['STATS_FILE'] + '.' + request_id + '.challenge').write_text(nonce)
     with open(args[args.index('-D') + 1], 'wb') as f: f.write(b'HTTP/1.1 200 OK\\r\\n\\r\\n')
     capture = Path(os.environ['STATS_FILE'] + '.' + nonce)
     deadline = time.monotonic() + 8
@@ -232,17 +238,20 @@ elif url.endswith('/inbox'):
             result.update(live=False, status='REFUSED', reason='missing ' + variable)
         if result.get('live'):
             payload = json.loads(data)['payload']
-            nonce = payload['battery_nonce']
+            challenge = open(os.environ['STATS_FILE'] + '.' + payload['battery_id'] + '.challenge').read()
+            assert challenge not in data
+            nonce = challenge
             if mode == 'replayed': nonce = 'abc81347-807b-4b10-aace-9ce6030d233f'
             text = 'one canned answer' if mode == 'same-text' else 'fixture runtime: ' + payload['text']
-            digest = hashlib.sha256(json.dumps({'battery_nonce': payload['battery_nonce'], 'text': payload['text']}, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+            digest = hashlib.sha256(json.dumps({'battery_id': payload['battery_id'], 'text': payload['text']}, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
             text += '\\n[crier-battery-nonce:' + nonce + ']\\n[crier-battery-request-sha256:' + digest + ']'
             result['request_sha256'] = digest
             result.update(reply=text, nonce=nonce, stdout_bytes=len(text.encode()), stdout_sha256=hashlib.sha256(text.encode()).hexdigest(), stdout_raw_sha256=hashlib.sha256(text.encode()).hexdigest())
             if mode == 'missing': del result['nonce']
         # Capture fixture is independently published for the GET subprocess.
         from pathlib import Path
-        capture_nonce = json.loads(data)['payload']['battery_nonce']
+        capture_id = json.loads(data)['payload']['battery_id']
+        capture_nonce = open(os.environ['STATS_FILE'] + '.' + capture_id + '.challenge').read()
         output = result.get('reply', '') if mode not in ('echo-without-run', 'no-key', 'canned-with-key', 'failed-runtime', 'copy-failure') else ''
         pending = Path(os.environ['STATS_FILE'] + '.' + capture_nonce + '.pending')
         pending.write_bytes(output.encode())
@@ -320,15 +329,24 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
 });
 
 for (const harness of ["opencode", "claude-code", "codex", "aider", "goose"]) {
-  test(`${harness} challenge reaches CLI output without truncation`, async (t) => {
-    // This fixture executable emits the argv it actually received, through stdout.
-    const { body, hook } = await startConsumer(t, { harness, command: `printf '%s\\n' "$@"` });
+  test(`${harness} rejects prompt echo that never reads the environment`, async (t) => {
+    const { body } = await startConsumer(t, { harness, command: `printf '%s\\n' "$@"` });
+    assert.equal(body.live, true, "the buggy process ran, but only reflected argv");
+    assert.equal(body.nonce, null);
+    assert.doesNotMatch(body.reply, new RegExp(nonce));
+    const proof = JSON.parse(check(body).stdout);
+    assert.equal(proof.outcome, "NOT_EXECUTED");
+    assert.match(proof.reason, /out-of-band challenge.*prompt\/request echo/);
+  });
+  test(`${harness} challenge reaches only child env and survives long questions`, async (t) => {
+    const script = 'if(process.argv.join(" ").includes(process.env.CR_BATTERY_CHALLENGE))process.exit(12);console.log("fixture ran\\n[crier-battery-nonce:"+process.env.CR_BATTERY_CHALLENGE+"]\\n[crier-battery-request-sha256:"+process.env.CR_BATTERY_REQUEST_SHA256+"]");';
+    const { body, hook } = await startConsumer(t, { harness, command: `exec ${process.execPath} -e '${script}' -- "$@"` });
     assert.equal(body.nonce, nonce);
     assert.equal(check(body).status, 0);
     const nextNonce = "abc81347-807b-4b10-aace-9ce6030d233f";
     const next = await hook("x".repeat(2000), nextNonce);
-    assert.equal(next.body.nonce, nextNonce, "challenge survives question truncation");
-    assert.ok(next.body.reply.includes(`[crier-battery-nonce:${nextNonce}]`));
+    assert.equal(next.body.nonce, nextNonce, "out-of-band challenge is independent of question truncation");
+    assert.equal(check(next.body, "200", nextNonce).status, 0);
   });
 }
 
@@ -341,7 +359,7 @@ test("consumer never copies request nonce into constant runtime output", async (
 });
 
 test("same canned answer with fresh runtime markers still fails the paired digest check", async (t) => {
-  const script = 'const text = process.argv.join(" "); console.log("one canned answer\\n" + text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0] + "\\n" + text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0]);';
+  const script = 'console.log("one canned answer\\n[crier-battery-nonce:" + process.env.CR_BATTERY_CHALLENGE + "]\\n[crier-battery-request-sha256:" + process.env.CR_BATTERY_REQUEST_SHA256 + "]");';
   const { body, hook } = await startConsumer(t, { command: `exec ${process.execPath} -e '${script}' -- "$@"` });
   const first = check(body);
   assert.equal(first.status, 0, first.stdout);
@@ -546,8 +564,9 @@ test("Goose failures name the OpenAI versus DeepSeek wiring blocker", async (t) 
 
 // Exercise the production verifier against the real shipped HTTP consumer too,
 // rather than proving only the checker and observation endpoint in isolation.
-test("verifier probe captures actual runtime pipes independently of HTTP body", async (t) => {
-  const script = 'const text=process.argv.join(" "); console.log("fixture answer\\n"+text.match(/\\[crier-battery-nonce:[0-9a-f-]+\\]/)[0]+"\\n"+text.match(/\\[crier-battery-request-sha256:[0-9a-f]+\\]/)[0]);';
+for (const echoOnly of [false, true]) {
+test(`verifier probe ${echoOnly ? "rejects actual prompt echo" : "captures actual runtime pipes"}`, async (t) => {
+  const script = echoOnly ? 'console.log(process.argv.join(" "));' : 'if(process.argv.join(" ").includes(process.env.CR_BATTERY_CHALLENGE))process.exit(12);console.log("fixture answer\\n[crier-battery-nonce:"+process.env.CR_BATTERY_CHALLENGE+"]\\n[crier-battery-request-sha256:"+process.env.CR_BATTERY_REQUEST_SHA256+"]");';
   const {url,dir} = await startConsumer(t,{command:`exec ${process.execPath} -e '${script}' -- "$@"`});
   const state=join(dir,"state"); await mkdir(state);
   // Tiny transport stand-in forwards inbox POSTs, just as generic/raw delivery
@@ -564,14 +583,19 @@ test("verifier probe captures actual runtime pipes independently of HTTP body", 
     {env:{...process.env,BATTERY_RUNTIME_BASE:url},stdio:["ignore","pipe","pipe"]});
   let output="",errors=""; child.stdout.on("data",b=>output+=b);child.stderr.on("data",b=>errors+=b);
   const [code]=await once(child,"exit");
-  assert.equal(code,0,output+errors);
+  assert.equal(code,echoOnly ? 1 : 0,output+errors);
   const proof=JSON.parse(output);
-  assert.equal(proof.outcome,"SUPPORTED"); assert.equal(proof.capture_ok,true);
-  assert.equal(proof.runtime_nonce_observed,true);
-  assert.match(proof.runtime_output,/fixture answer/);
-  assert.equal(proof.expected_request_sha256,requestDigest("héllo world",proof.nonce));
-  console.log(`actual consumer + fake runtime: ${proof.outcome}; nonce in child pipes; verifier request digest matched`);
+  assert.equal(proof.outcome,echoOnly ? "NOT_EXECUTED" : "SUPPORTED");
+  assert.equal(proof.capture_ok,true);
+  assert.equal(proof.runtime_nonce_observed,!echoOnly);
+  assert.ok(!JSON.stringify(proof.request).includes(proof.nonce), "no challenge anywhere in request body");
+  assert.equal(Object.hasOwn(proof.request.payload,"battery_nonce"),false);
+  if (echoOnly) assert.match(proof.reason,/out-of-band challenge.*prompt\/request echo/);
+  else assert.match(proof.runtime_output,/fixture answer/);
+  assert.equal(proof.expected_request_sha256,requestDigest("héllo world",proof.request.payload.battery_id));
+  console.log(`actual consumer + fake runtime: ${proof.outcome}; out-of-band challenge; verifier request digest matched`);
 });
+}
 
 test("runtime stderr is independently observed but cannot replace the required body echo", async(t)=>{
   const {body}=await startConsumer(t,{observationStream:"",command:`printf 'answer\\n${digestMarker}'; printf '${marker}' >&2`});
@@ -597,4 +621,34 @@ test("stdout-only observer excludes stderr and binds exact UTF-8 pipe bytes", as
 test("observer selector is additive and rejects unknown modes", async (t) => {
   const {url} = await startConsumer(t, {key:""});
   assert.equal((await fetch(`${url}/battery-output/${nonce}?stream=bogus`)).status, 400);
+});
+
+// DF-CRIER-407: correlation is not the secret; concurrent observers cannot swap it.
+test("out-of-band observers correlate independent challenges and reject ambiguous ids", async (t) => {
+  const script = 'console.log("env reader only\\n[crier-battery-nonce:"+process.env.CR_BATTERY_CHALLENGE+"]\\n[crier-battery-request-sha256:"+process.env.CR_BATTERY_REQUEST_SHA256+"]");';
+  const { url } = await startConsumer(t, { command: `exec ${process.execPath} -e '${script}'` });
+  const oldNonce = "abc81347-807b-4b10-aace-9ce6030d233f";
+  const secondId = "7e10b0ba-bfd3-440f-8c94-6eb57daecb37";
+  assert.equal((await fetch(`${url}/battery-output/${nonce}?stream=stdout&battery_id=${nonce}`)).status, 400);
+  assert.equal((await fetch(`${url}/battery-output/${nonce}?stream=stdout&battery_id=invalid`)).status, 400);
+  const missing = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { battery_id: secondId, text: "no observer" } }) });
+  assert.match((await missing.json()).reason, /needs its out-of-band challenge observer/);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const first = await fetch(`${url}/battery-output/${nonce}?stream=stdout&battery_id=${batteryId}`, { signal: abort.signal });
+  assert.equal(first.status, 200);
+  assert.equal((await fetch(`${url}/battery-output/${oldNonce}?stream=stdout&battery_id=${batteryId}`)).status, 409);
+  assert.equal((await fetch(`${url}/battery-output/${nonce}?stream=stdout&battery_id=${secondId}`)).status, 409);
+  const second = await fetch(`${url}/battery-output/${oldNonce}?stream=stdout&battery_id=${secondId}`, { signal: abort.signal });
+  assert.equal(second.status, 200);
+  for (const [id, challenge, stream] of [[secondId, oldNonce, second], [batteryId, nonce, first]]) {
+    const text = "question for " + id;
+    const response = await fetch(`${url}/hook`, { method: "POST", body: JSON.stringify({ payload: { battery_id: id, text } }) });
+    const body = await response.json();
+    const output = await stream.text();
+    assert.equal(body.nonce, challenge);
+    assert.equal(body.request_sha256, requestDigest(text, id));
+    captures.set(body, { output, text, batteryId: id });
+    assert.equal(check(body, "200", challenge).status, 0);
+  }
 });

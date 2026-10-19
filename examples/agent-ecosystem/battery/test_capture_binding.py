@@ -31,13 +31,12 @@ def capture_directory():
 
 
 def request(nonce):
-    # A request tee can contain the literal marker in text/metadata; neither is
-    # evidence of a child. This is deliberately stronger than an empty capture.
-    return {"payload": {"text": f"echo [crier-battery-nonce:{nonce}]", "battery_nonce": nonce}}
+    # Correlation differs from the challenge; a tee no longer carries a nonce.
+    return {"payload": {"text": "echo hello", "battery_id": "old" if nonce == OLD_NONCE else "current"}}
 
 
 def reply(sent, answer="actual child answer"):
-    nonce = sent["payload"]["battery_nonce"]
+    nonce = OLD_NONCE if sent["payload"]["battery_id"] == "old" else NONCE
     text = (f"{answer}\n[crier-battery-nonce:{nonce}]\n"
             f"[crier-battery-request-sha256:{checker.request_digest(sent)}]")
     raw = (text + "\n").encode()
@@ -57,9 +56,10 @@ def check_file(tmp_path, sent, body, captured):
     # Drive the production CLI so the file is read as bytes, not just a helper.
     (tmp_path / "request").write_text(json.dumps(sent))
     (tmp_path / "capture").write_bytes(captured)
-    (tmp_path / "ledger").write_text(json.dumps({"minted": [sent["payload"]["battery_nonce"]], "used": []}))
+    nonce = OLD_NONCE if sent["payload"]["battery_id"] == "old" else NONCE
+    (tmp_path / "ledger").write_text(json.dumps({"minted": [nonce], "used": []}))
     run = subprocess.run([sys.executable, str(Path(checker.__file__)), "200",
-                          sent["payload"]["battery_nonce"], "", str(tmp_path / "request"),
+                          nonce, "", str(tmp_path / "request"),
                           str(tmp_path / "capture"), str(tmp_path / "ledger")],
                          input=json.dumps(body), text=True, capture_output=True, check=False)
     proof = json.loads(run.stdout)
@@ -71,7 +71,8 @@ def test_request_body_tee_without_child(tmp_path):
     sent = request(NONCE)
     body, _ = reply(sent)
     proof = check_file(tmp_path, sent, body, json.dumps(sent).encode())
-    assert proof["outcome"] == "DIGEST_MISMATCH", proof
+    assert proof["outcome"] == "NOT_EXECUTED", proof
+    assert "out-of-band challenge" in proof["reason"]
     assert proof["result"] == "FAIL"
 
 
@@ -142,3 +143,7 @@ def test_exact_ecmascript_trim_not_python_strip(tmp_path):
             body["reply"] = body["reply"].removeprefix(prefix)
             body["stdout_sha256"] = hashlib.sha256(body["reply"].encode()).hexdigest()
         assert check_file(tmp_path, sent, body, raw)["outcome"] == "SUPPORTED"
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-q"]))

@@ -117,22 +117,37 @@ the precise blocker: DeepSeek is not wired for that consumer. Neither its wiring
 nor bounded network-disabled real-image probes constitute a paid DeepSeek success;
 current blockers and verification limits are explicit in the example README.
 
-### 2.1.3 Verifier-owned execution binding (DF-CRIER-373, DF-CRIER-392)
+### 2.1.3 Verifier-owned execution binding (DF-CRIER-373, DF-CRIER-392, DF-CRIER-407)
 
 Before each of its two different prompts, `probe-runtime.py` mints and records a
-fresh UUID, opens `GET /battery-output/<nonce>?stream=stdout`, then sends the
-recorded request through Crier. The shipped consumer tees only the spawned
-child's stdout pipe to this mode; stderr stays in failure diagnostics. Without
+fresh challenge UUID and a separate random correlation UUID (`battery_id`), opens
+`GET /battery-output/<nonce>?stream=stdout&battery_id=<correlation UUID>`, then sends
+the recorded request through Crier. The observer rejects a malformed correlation
+UUID or one equal to the challenge (400), and duplicate open correlation/challenge
+values (409). A request claims at most one observer; overlapping claims fail.
+The shipped consumer tees only the spawned child's stdout pipe to this mode; stderr stays in failure diagnostics. Without
 the query, the existing combined stdout/stderr diagnostic stream is unchanged.
 An unknown `stream` value returns HTTP 400. Observing starts no runtime; streams
 close on completion/refusal and expire after 35 seconds without delivery.
 Pi's SDK still executes in the bounded child process.
 
-The consumer-facing request still carries `payload.battery_nonce`. The consumer
-asks the runtime to return `[crier-battery-nonce:<uuid>]` and
-`[crier-battery-request-sha256:<digest>]`. The latter hashes compact UTF-8 JSON
-with exactly `battery_nonce`, then `text`, from the sent payload. The verifier
-recomputes that digest from its own recorded request, never the response.
+The consumer-facing request carries `payload: {battery_id, text}` and uses the
+correlation UUID, NOT the challenge, in `session_id`. No part of the request body
+may contain the challenge. The consumer associates `payload.battery_id` with the
+already-open observer and passes its challenge only through the runtime child's
+`CR_BATTERY_CHALLENGE` environment variable. `CR_BATTERY_REQUEST_SHA256` carries
+the SHA-256 of compact UTF-8 JSON with exactly `battery_id`, then `text`, from the
+sent payload. The verifier recomputes that digest from its own recorded request,
+never the response. No Crier server field/header is needed.
+
+Harness authors must read these environment variables and emit
+`[crier-battery-nonce:<uuid>]` and `[crier-battery-request-sha256:<digest>]` on stdout.
+CLI/SDK prompts contain instructions and placeholder names only, never the actual
+challenge/digest. Battery prompts permit tools to read the environment; ordinary
+non-battery prompts keep their existing no-tools behavior. The consumer MUST NOT
+append the challenge itself after runtime completion. An input/prompt-echo runtime
+that never reads the environment is rejected as NOT_EXECUTED with that reason.
+The checker also rejects an in-band challenge in the verifier-owned request.
 
 The verifier reads the capture file as bytes and independently computes its
 SHA-256 and length BEFORE decoding, trimming or newline conversion. They must
@@ -158,13 +173,15 @@ SUPPORTED. Record sent request, expected request digest, raw-capture SHA-256 and
 byte count, decoded display copy, capture status and nonce in JSONL. The raw
 capture file, not the potentially lossy display copy, is the hash source.
 
-Limit: SUPPORTED binds a fresh single-use challenge and the delivered reply to
-independently captured stdout bytes; with the trusted shipped consumer's
+Limit: SUPPORTED binds a fresh single-use out-of-band challenge and the delivered
+reply to independently captured stdout bytes. A harness that reads the environment
+and prints its challenge without doing the requested work remains indistinguishable:
+this is the honest ceiling of a local battery. With the trusted shipped consumer's
 stdout-only pipe tee, it establishes that a spawned process emitted those bytes.
-The nonce remains visible in the request, and the observation endpoint is served
-by the consumer, not a verifier-owned OS pipe: a malicious consumer that
-fabricates both channels consistently can still pass without spawning a child.
-This is neither hidden-challenge proof nor hostile-consumer attestation, and it
+The observation endpoint is served by the consumer, not a verifier-owned OS pipe:
+a malicious consumer that fabricates both channels consistently can still pass
+without spawning a child. The challenge is hidden from reflected input, not from
+the process/consumer under test. This is not hostile-consumer attestation, and it
 does not establish model authorship, answer quality, or provider/model identity.
 Do not expose this diagnostic stack to untrusted clients. No Crier server change
 is required.
