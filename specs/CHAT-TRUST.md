@@ -575,7 +575,8 @@ signing leaf). D16's explicit transitive purpose is the capability
 as well as a sufficient depth budget. There is also a global eight-link bound;
 cycles, disconnected vouchers and a mismatched leaf are refused. The HTTP
 response is 200 for a completed trust evaluation, with one of `TRUST_CHAIN_REACHABLE`
-(`basis: chain-only`, `anchor_id`, `depth`), `TRUST_VERIFIED`
+(`basis: chain-only`, `proof-registry-key-mismatch` or `proof-invalid-signature`,
+`anchor_id`, `depth`), `TRUST_VERIFIED`
 (`basis: possession-verified`, `anchor_id`, `depth`), `TRUST_UNKNOWN_ANCHOR`, `TRUST_DEPTH_EXCEEDED` (`link`),
 `TRUST_SCOPE_INSUFFICIENT` (`link`, `missing_capability`) or
 `TRUST_BAD_SIGNATURE` (`link`). Links are one-based from the anchor; failure
@@ -595,9 +596,15 @@ Reuse `agentsig.go`'s ed25519 transcript `POST\n/trust/verify\n<unix-seconds>\ns
 challenge, signer, scope and chain. The timestamp must be within the existing ±30s
 window. The same registered-key snapshot used to verify the signature must equal
 `signer`, the chain's leaf. A valid body-bound leaf proof yields `TRUST_VERIFIED`
-with mandatory `basis: possession-verified`; no challenge, a blank/oversized challenge,
-or any missing, stale, unbound, malformed or wrong-key proof yields HTTP 200
-`TRUST_CHAIN_REACHABLE` with `basis: chain-only` and the same chain evidence. This
+with mandatory `basis: possession-verified`. No challenge or a blank/oversized challenge
+still yields HTTP 200 `TRUST_CHAIN_REACHABLE` with `basis: chain-only`. DF-CRIER-395
+distinguishes eligible but unaccepted proofs: `basis: proof-registry-key-mismatch`
+means the fresh body-bound signature verified against the leaf but the SAME registered-key
+snapshot differed (for example, after unregister/re-register rotation). The verdict stays
+`TRUST_CHAIN_REACHABLE`, never `TRUST_VERIFIED` or `possession-verified`. Any missing,
+stale, unbound, malformed or wrong-key proof instead yields `basis: proof-invalid-signature`;
+a wrong-key proof cannot claim a registry mismatch even if the registry has moved.
+Every demotion preserves the same chain evidence. This
 rule is enforced in Go for memory, SQLite and PostgreSQL, independent of
 `CR_REQUIRE_AGENT_SIG`; failures never return or log proof/key material. A malformed
 JSON shape (including a numeric/object/array challenge) remains `400 TRUST_MALFORMED`;

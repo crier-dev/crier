@@ -58,7 +58,8 @@ func TestTrustPossessionHTTP(t *testing.T) {
 			}{
 				{"no-proof", nil, `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"chain-only","anchor_id":"possession-anchor","depth":1}`},
 				{"possession-proven", leaf, `{"verdict":"TRUST_VERIFIED","basis":"possession-verified","anchor_id":"possession-anchor","depth":1}`},
-				{"different-key", other, `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"chain-only","anchor_id":"possession-anchor","depth":1}`},
+				{"different-key", other, `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"proof-invalid-signature","anchor_id":"possession-anchor","depth":1}`},
+				{"registry-key-rotated", leaf, `{"verdict":"TRUST_CHAIN_REACHABLE","basis":"proof-registry-key-mismatch","anchor_id":"possession-anchor","depth":1}`},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					body := map[string]any{"signer": d.SubjectKey, "scope": d.Scope, "chain": []trust.ChainDelegation{d}}
@@ -79,6 +80,24 @@ func TestTrustPossessionHTTP(t *testing.T) {
 						r.Header.Set(registry.HeaderAgentTS, ts)
 						r.Header.Set(registry.HeaderAgentBodySHA256, digest)
 						r.Header.Set(registry.HeaderAgentSig, hex.EncodeToString(ed25519.Sign(tc.key, []byte("POST\n/trust/verify\n"+ts+"\nsha256:"+digest))))
+					}
+					if tc.name == "registry-key-rotated" {
+						before := r.Clone(r.Context())
+						before.Body = io.NopCloser(bytes.NewReader(raw))
+						response, err := client.Do(before)
+						require.NoError(t, err)
+						result, err := io.ReadAll(response.Body)
+						_ = response.Body.Close()
+						require.NoError(t, err)
+						require.Equal(t, http.StatusOK, response.StatusCode)
+						require.JSONEq(t, `{"verdict":"TRUST_VERIFIED","basis":"possession-verified","anchor_id":"possession-anchor","depth":1}`, string(result))
+						status, resultText := df297Request(t, client, "DELETE", base+"/agents/possession-leaf", df297MessageToken, "", "")
+						require.Equal(t, http.StatusNoContent, status, resultText)
+						registration, err := json.Marshal(map[string]string{"id": "possession-leaf", "public_key": hex.EncodeToString(other.Public().(ed25519.PublicKey))})
+						require.NoError(t, err)
+						status, resultText = df297Request(t, client, "POST", base+"/agents", df297MessageToken, "", string(registration))
+						require.Equal(t, http.StatusCreated, status, resultText)
+						// r retains the exact pre-rotation chain, body and signature.
 					}
 					response, err := client.Do(r)
 					require.NoError(t, err)

@@ -38,6 +38,10 @@ const (
 // for sigWindow seconds.
 const sigWindow = 30 * time.Second
 
+// Only returned after a fresh, body-bound proof verifies against the trust leaf.
+// This internal classification never promotes the caller or exposes key material.
+var errTrustRegistryKeyMismatch = errors.New("trust proof registry key mismatch")
+
 // Named outcomes of a body-binding failure (CR-CHAT-027). They are distinct
 // from "signature verification failed" because they name a different client
 // mistake: the caller opted into body binding, so the body it signed and the
@@ -145,9 +149,10 @@ func (h *Handler) verifyAgentSignature(w http.ResponseWriter, r *http.Request, t
 }
 
 // verifyAgentSignatureForKey additionally binds a trust possession check to the
-// chain's leaf. Compare the SAME registry snapshot used for signature verification
-// so another registered agent (or a concurrent re-registration) cannot substitute
-// a different key. Existing signing surfaces pass nil and retain their contract.
+// chain's leaf. Compare the SAME registry snapshot with the leaf; a matching key plus
+// valid signature is required for success. A mismatch is classified only after
+// the signature verifies against the leaf. Existing signing surfaces pass nil
+// and retain their contract.
 func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Request, targetID string, requireBody bool, expectedKey ed25519.PublicKey) error {
 	callerID := r.Header.Get(HeaderAgentID)
 	tsRaw := r.Header.Get(HeaderAgentTS)
@@ -211,10 +216,6 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 			"agent has no registered public key (registered without a key; signature verification is impossible)")
 	}
 
-	if expectedKey != nil && !bytes.Equal(rawKey, expectedKey) {
-		return h.agentSigFail(w, http.StatusUnauthorized, "registered key does not match trust leaf")
-	}
-
 	sig, err := hex.DecodeString(sigRaw)
 	if err != nil || len(sig) != ed25519.SignatureSize {
 		// Two different client bugs, two different messages (DF-CRIER-236):
@@ -260,8 +261,19 @@ func (h *Handler) verifyAgentSignatureForKey(w http.ResponseWriter, r *http.Requ
 			payload = append(payload, []byte("\naudience:"+audience)...)
 		}
 	}
-	if !ed25519.Verify(rawKey, payload, sig) {
+	verificationKey := rawKey
+	if expectedKey != nil {
+		verificationKey = expectedKey
+	}
+	if len(verificationKey) != ed25519.PublicKeySize || !ed25519.Verify(verificationKey, payload, sig) {
 		return h.agentSigFail(w, http.StatusUnauthorized, "signature verification failed")
+	}
+	if expectedKey != nil && !bytes.Equal(rawKey, expectedKey) {
+		// A valid leaf proof is not sufficient for promotion: the SAME registry
+		// snapshot must still match. Only classify mismatch after verifying the
+		// leaf proof, so a wrong-key signature cannot masquerade as rotation.
+		return errors.Join(errTrustRegistryKeyMismatch,
+			h.agentSigFail(w, http.StatusUnauthorized, "registered key does not match trust leaf"))
 	}
 
 	return nil

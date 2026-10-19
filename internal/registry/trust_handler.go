@@ -182,17 +182,24 @@ func (h *TrustHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		// Invalid/missing proof weakens the verdict, never hides chain evidence or
 		// breaks unsigned callers. Do not return the verifier's auth error/body.
 		sink := &trustProofResponse{header: make(http.Header)}
-		if h.verifier.verifyAgentSignatureForKey(sink, proof, proof.Header.Get(HeaderAgentID), true, ed25519.PublicKey(leaf)) == nil {
+		err := h.verifier.verifyAgentSignatureForKey(sink, proof, proof.Header.Get(HeaderAgentID), true, ed25519.PublicKey(leaf))
+		switch {
+		case err == nil:
 			verdict.Verdict = trust.TrustVerified
 			verdict.Basis = trust.TrustBasisPossessionVerified
+		case errors.Is(err, errTrustRegistryKeyMismatch):
+			verdict.Basis = trust.TrustBasisRegistryKeyMismatch
+		default:
+			verdict.Basis = trust.TrustBasisInvalidSignature
 		}
 	}
 	writeJSON(w, 200, verdict)
 }
 
 // trustProofResponse deliberately discards the existing verifier's HTTP refusal:
-// this read-only evaluation reports chain-only rather than turning optional proof
-// into a new authorization gate. No proof/key material reaches the response/log.
+// this read-only evaluation reports chain reachability with a named proof basis,
+// rather than turning optional proof into a new authorization gate.
+// No proof/key material reaches the response/log.
 type trustProofResponse struct{ header http.Header }
 
 func (w *trustProofResponse) Header() http.Header       { return w.header }

@@ -111,7 +111,7 @@ paths:
     post:
       operationId: trustVerifyChain
       summary: Evaluate key trust against this server's anchors
-      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict. An intact chain without a valid possession proof is TRUST_CHAIN_REACHABLE with basis chain-only. TRUST_VERIFIED requires a nonblank caller challenge (at most 256 UTF-8 bytes), a body-bound signature by the leaf's registered agent key and basis possession-verified, independent of CR_REQUIRE_AGENT_SIG. The signature covers POST, /trust/verify, the Unix timestamp and sha256 of the exact body via the existing agent signature transcript. Timestamp freshness is +/-30s; requests may be replayed within that window (no consumed-nonce store). Missing or invalid proof preserves the weaker verdict and chain evidence, not an HTTP error. NOT delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
+      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict and basis. An intact chain has three chain-reachable bases - chain-only when no eligible challenge is offered (absent, blank or oversized), proof-registry-key-mismatch when a fresh body-bound signature verifies against the leaf but the agent's current registry key differs, and proof-invalid-signature when the offered proof fails verification (including missing, stale, malformed or unbound proof). A valid proof against a moved registry key remains TRUST_CHAIN_REACHABLE with proof-registry-key-mismatch, not possession-verified. TRUST_VERIFIED with possession-verified requires BOTH a valid leaf proof and the same registered-key snapshot matching that leaf; the signature alone is insufficient. The challenge must be nonblank and at most 256 UTF-8 bytes, independent of CR_REQUIRE_AGENT_SIG. The signature covers POST, /trust/verify, the Unix timestamp and sha256 of the exact body via the existing agent signature transcript. Timestamp freshness is +/-30s; requests may be replayed within that window (no consumed-nonce store). Unaccepted proof preserves the weaker verdict and chain evidence, not an HTTP error, and never exposes verifier error bodies or key material. NOT delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
       parameters:
         - name: X-Agent-ID
           in: header
@@ -164,8 +164,8 @@ paths:
                     enum: [TRUST_CHAIN_REACHABLE, TRUST_VERIFIED, TRUST_UNKNOWN_ANCHOR, TRUST_DEPTH_EXCEEDED, TRUST_SCOPE_INSUFFICIENT, TRUST_BAD_SIGNATURE]
                   basis:
                     type: string
-                    enum: [chain-only, possession-verified]
-                    description: Always present for TRUST_CHAIN_REACHABLE (chain-only) and TRUST_VERIFIED (possession-verified); omitted on chain failures.
+                    enum: [chain-only, possession-verified, proof-registry-key-mismatch, proof-invalid-signature]
+                    description: Always present for TRUST_CHAIN_REACHABLE (chain-only, proof-registry-key-mismatch or proof-invalid-signature) and TRUST_VERIFIED (possession-verified); omitted on chain failures.
                   anchor_id: {type: string}
                   depth: {type: integer, minimum: 0}
                   link: {type: integer, minimum: 1}

@@ -13,14 +13,16 @@ import (
 // §§3–5 (DF-CRIER-362). It does not authenticate a payload or use the library's
 // rotation/revocation state. Those remain separate, unwired capabilities.
 const (
-	TrustVerified                = "TRUST_VERIFIED"
-	TrustChainReachable          = "TRUST_CHAIN_REACHABLE"
-	TrustBasisChainOnly          = "chain-only"
-	TrustBasisPossessionVerified = "possession-verified"
-	TrustUnknownAnchor           = "TRUST_UNKNOWN_ANCHOR"
-	TrustDepthExceeded           = "TRUST_DEPTH_EXCEEDED"
-	TrustScopeInsufficient       = "TRUST_SCOPE_INSUFFICIENT"
-	TrustBadSignature            = "TRUST_BAD_SIGNATURE"
+	TrustVerified                 = "TRUST_VERIFIED"
+	TrustChainReachable           = "TRUST_CHAIN_REACHABLE"
+	TrustBasisChainOnly           = "chain-only"
+	TrustBasisPossessionVerified  = "possession-verified"
+	TrustBasisRegistryKeyMismatch = "proof-registry-key-mismatch"
+	TrustBasisInvalidSignature    = "proof-invalid-signature"
+	TrustUnknownAnchor            = "TRUST_UNKNOWN_ANCHOR"
+	TrustDepthExceeded            = "TRUST_DEPTH_EXCEEDED"
+	TrustScopeInsufficient        = "TRUST_SCOPE_INSUFFICIENT"
+	TrustBadSignature             = "TRUST_BAD_SIGNATURE"
 	// TransitiveCapability is the explicit transitive purpose required by D16.
 	// max_depth alone is a budget, not permission to vouch onward.
 	TransitiveCapability = "trust-delegation"
