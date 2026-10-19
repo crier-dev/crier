@@ -13,7 +13,8 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   assert.equal(await page.locator('#posture').isVisible(),true);
   assert.match(await page.locator('#health').innerText(),/Health: ok.*agents are lost on restart/);
   const memoryLine = await page.locator('#posture').innerText();
-  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: disabled — delivery ACL off \(CR_PERMISSIONS_ENABLED=false\). · Federation: token-only inbound accepted \(0 peers\) · Build: /);
+  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl .+ \(.+\) · Auth: disabled · A2A: disabled · Management: disabled — delivery ACL off \(CR_PERMISSIONS_ENABLED=false\). · Federation: token-only inbound accepted \(0 peers\) · Build: /);
+  assert.ok(memoryLine.includes('Session store: '+memory.session_backend+' '+memory.session_store_path+' ('),memoryLine);
   assert.ok(memoryLine.includes(memory.build.version+' / '+memory.build.commit));
   await page.screenshot({path:path.join(evidence,'posture-memory.png'),fullPage:true});
   await page.locator('.runtime-posture').screenshot({path:path.join(evidence,'posture-memory-detail.png')});
@@ -25,7 +26,8 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   await sqlPage.goto(sqliteBase+'/chat');
   await sqlPage.waitForFunction(() => !state.busy);
   const sqliteLine = await sqlPage.locator('#posture').innerText();
-  assert.match(sqliteLine,/Registry: sqlite · durable · Session store: jsonl · Auth: disabled · A2A: disabled/);
+  assert.match(sqliteLine,/Registry: sqlite · durable · Session store: jsonl .+ \(.+\) · Auth: disabled · A2A: disabled/);
+  assert.ok(sqliteLine.includes('Session store: '+sqlite.session_backend+' '+sqlite.session_store_path+' ('),sqliteLine);
   assert.doesNotMatch(await sqlPage.locator('#health').innerText(),/lost on restart/);
   await sqlPage.screenshot({path:path.join(evidence,'posture-sqlite.png'),fullPage:true});
   await sqlPage.close();
@@ -43,7 +45,7 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   }
   await page.route('**/status',route => route.fulfill({contentType:'application/json',body:'{}'}));
   await refresh();
-  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown · Auth: unknown · A2A: unknown · Management: unknown · Federation: unknown · Build: unknown / unknown');
+  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown (volume vs writable layer unknown — verify the storage mount) · Auth: unknown · A2A: unknown · Management: unknown · Federation: unknown · Build: unknown / unknown');
   assert.match(await page.locator('#health').innerText(),/^Health: unknown/);
   await page.unroute('**/status');
   await page.route('**/status',route => route.fulfill({status:503,contentType:'application/json',body:'{"error":"posture unavailable"}'}));

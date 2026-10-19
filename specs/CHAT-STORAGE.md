@@ -39,7 +39,22 @@ DF-CRIER-316: database URL precedence remains `CR_DATABASE_URL` → `DATABASE_UR
 Accepted URL schemes are `postgres`, `postgresql`, `sqlite`; PostgreSQL keyword/value DSNs remain accepted.
 `sqlite:///absolute/path.db` and `sqlite://relative.db` supply the path for each selected SQLite backend;
 unset registry/session selectors resolve to SQLite for a SQLite URL. Explicit `CR_REGISTRY_SQLITE_PATH`
-and `CR_SQLITE_PATH` take precedence over the URL-derived registry and session paths respectively.
+and the session keys take precedence over the URL-derived paths respectively.
+DF-CRIER-413: session precedence is the first nonblank value of `CR_SESSION_SQLITE_PATH`
+(preferred documented alias) → legacy `CR_SQLITE_PATH` → SQLite URL path →
+`crier-sessions.sqlite`. Session keys do not change registry storage. For example,
+`CR_SESSION_BACKEND=sqlite CR_SESSION_SQLITE_PATH=/data/sessions.db` opens that file.
+`GET /status` exposes `session_store_path` (absolute local file/log directory, symlinks
+resolved when observable; `:memory:` for SQLite memory; null for external/unresolved
+storage) and `session_store_mount` (`mounted-filesystem`, `overlay-layer`, `memory`,
+`external`, `unknown`). The chat posture renders the path in words. Linux mount evidence
+is the longest path-component mount prefix from `/proc/self/mountinfo`: a non-root
+mount is observed, an overlay root is a writable layer, tmpfs/ramfs is memory-backed,
+and other root mounts or unavailable evidence are unknown. A mount does not prove
+retention across container replacement or backups; named volumes and bind mounts
+cannot be distinguished here. PostgreSQL storage is external and its URL is never
+reported. The session path is an intentional topology disclosure on the existing
+auth-protected status route, not an added anonymous diagnostic.
 Paths do not override scheme compatibility: SQLite versus PostgreSQL mismatches fail config loading with
 `DATABASE_BACKEND_MISMATCH`, naming the source variable, scheme, backend selector and corrective variable.
 Unknown schemes fail with `DATABASE_URL_SCHEME` and the accepted list before any driver opens.

@@ -652,8 +652,14 @@ function renderPosture(b) {
       : b.management_surface === "admin-token-gated"
         ? "admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer."
         : "unknown";
+  const sessionMount = b.session_store_mount === "mounted-filesystem" ? "volume/mount observed — persistence not verified"
+    : b.session_store_mount === "overlay-layer" ? "overlay writable layer — mount this path to retain sessions on container replacement"
+    : b.session_store_mount === "memory" ? "memory-backed — not persistent storage"
+    : b.session_store_mount === "external" ? "external database — storage location not observable"
+    : "volume vs writable layer unknown — verify the storage mount";
+  const sessionStore = reported(b.session_backend) + (typeof b.session_store_path === "string" && b.session_store_path ? " " + b.session_store_path : "") + " (" + sessionMount + ")";
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.registry_durable === false);
-  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + reported(b.session_backend) + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
+  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
 }
 async function refresh() {
   if (state.sending) return;

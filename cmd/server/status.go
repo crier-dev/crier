@@ -27,13 +27,15 @@ import (
 // one from the outside until a request is rejected.
 //
 // What it must never do is turn a diagnostic into a disclosure. Every field
-// below is an effective BOOLEAN or MODE, never a value: no CR_AUTH_TOKEN, no
+// below historically reported an effective BOOLEAN or MODE, never a value: no CR_AUTH_TOKEN, no
 // CR_DATABASE_URL (not even redacted — the backend name is the operational
 // fact; the connection string, including any password in it, is not), no
 // CR_WEBHOOK_SECRET, no CR_FED_TOKEN, no guard provider credentials and no
 // guard base URL. A hostname or a filesystem path can leak topology, so the
 // federation hold queue reports its durability MODE ("none"/"memory"/"file")
-// rather than CR_FED_QUEUE_FILE's path.
+// rather than CR_FED_QUEUE_FILE's path. DF-CRIER-413 intentionally adds the
+// resolved local session path so operators can verify the storage target; it
+// exposes no database URL, credential, mount source or host-side volume path.
 //
 // CR-FEAT-035 adds two fields that are not posture at all, and the distinction
 // is deliberate rather than a lapse:
@@ -319,6 +321,12 @@ type statusResponse struct {
 	RegistryDurable *bool `json:"registry_durable"`
 	// SessionBackend is resolved by the same Config method used to open it.
 	SessionBackend string `json:"session_backend"`
+	// SessionStorePath intentionally exposes the resolved local session file
+	// or log directory so operators can verify the actual persistence target.
+	// Nil for external PostgreSQL or an unresolvable location; never a DSN.
+	SessionStorePath *string `json:"session_store_path"`
+	// Mount evidence, not a claim that a volume is retained or backed up.
+	SessionStoreMount string `json:"session_store_mount"`
 	// A2AEnabled is the effective route-registration switch, not agent support.
 	A2AEnabled bool `json:"a2a_enabled"`
 	// RateLimitPerMinute is the effective relay publish budget; 0 means
@@ -411,7 +419,10 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		// A configuration-only builder cannot vouch for a viewer's access.
 		managementSurface = "enabled-unarmed"
 	}
+	sessionPath, sessionMount := sessionStoreLocation(cfg)
 	return statusResponse{
+		SessionStorePath:                       sessionPath,
+		SessionStoreMount:                      sessionMount,
 		ManagementSurface:                      managementSurface,
 		RegistryDurable:                        durable,
 		SessionBackend:                         cfg.ResolvedSessionBackend(),

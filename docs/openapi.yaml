@@ -274,7 +274,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, session_store_path, session_store_mount, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   management_surface:
                     type: string
@@ -357,6 +357,14 @@ paths:
                     type: string
                     enum: [jsonl, sqlite, postgres]
                     description: Effective session store backend, resolved from the same configuration used to open it
+                  session_store_path:
+                    type: string
+                    nullable: true
+                    description: 'Resolved absolute SQLite file or JSONL log directory, with symlinks resolved when observable. Null for external PostgreSQL or unresolved locations; never a database URL. SQLite memory stores report :memory:'
+                  session_store_mount:
+                    type: string
+                    enum: [mounted-filesystem, overlay-layer, memory, external, unknown]
+                    description: Observed local mount evidence from the process mount namespace. Mounted-filesystem means a distinct non-root mount, not proof of retained storage or backups; overlay-layer means an overlay root writable layer, memory means SQLite memory or tmpfs/ramfs, external means PostgreSQL storage is not observable, unknown means volume versus layer cannot be distinguished. No durability guarantee is inferred from a mount
                   a2a_enabled:
                     type: boolean
                     description: Whether the server registers the opt-in A2A routes (CR_A2A_ENABLED); not a claim about individual agent support

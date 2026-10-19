@@ -1425,7 +1425,7 @@ behaviour: `postgres` when `CR_DATABASE_URL` is configured, `jsonl` otherwise.
 
 | `CR_SESSION_BACKEND` | What it is | What it needs |
 |---|---|---|
-| `sqlite` | A local SQLite query view over the session records. | Nothing but the Go toolchain — the driver is pure Go, so no CGO and no server. `CR_SQLITE_PATH` names the database file and defaults to `crier-sessions.sqlite`. |
+| `sqlite` | A local SQLite query view over the session records. | Nothing but the Go toolchain — the driver is pure Go, so no CGO and no server. `CR_SESSION_SQLITE_PATH` names the database file; legacy `CR_SQLITE_PATH` is also accepted. The first nonblank session-scoped key wins over the legacy key, then the SQLite URL path, then `crier-sessions.sqlite`. |
 | `postgres` | The server-backed PostgreSQL view, for multi-user and scale. | `CR_DATABASE_URL` pointing at a running PostgreSQL. |
 | `jsonl` | The ordered append log and the transport form. | `CR_SESSION_LOG_ROOT`, a directory (default `crier-sessions`). |
 

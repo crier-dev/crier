@@ -33,9 +33,9 @@ const (
 	SessionBackendPostgres = "postgres"
 	SessionBackendJSONL    = "jsonl"
 	// DefaultSQLitePath is the SQLite database file used when the sqlite
-	// backend is selected and CR_SQLITE_PATH is unset, so a clean install can
-	// run with CR_SESSION_BACKEND=sqlite alone (a relative path resolves
-	// against the process working directory).
+	// backend is selected and neither session path key nor a SQLite URL is
+	// set, so a clean install can run with CR_SESSION_BACKEND=sqlite alone
+	// (a relative path resolves against the process working directory).
 	DefaultSQLitePath = "crier-sessions.sqlite"
 	// DefaultSessionLogRoot is the JSONL log root used when the jsonl backend
 	// is selected and CR_SESSION_LOG_ROOT is unset.
@@ -52,8 +52,9 @@ type SessionConfig struct {
 	// Backend is CR_SESSION_BACKEND: "sqlite", "postgres" or "jsonl". Empty
 	// means AUTO (resolved by ResolvedSessionBackend).
 	Backend string
-	// SQLitePath is CR_SQLITE_PATH: the SQLite database file. It defaults to
-	// DefaultSQLitePath when the sqlite backend is selected.
+	// SQLitePath is CR_SESSION_SQLITE_PATH (preferred) or its legacy alias
+	// CR_SQLITE_PATH. Explicit paths override the SQLite URL-derived path,
+	// then DefaultSQLitePath applies when the sqlite backend is selected.
 	SQLitePath string
 	// LogRoot is CR_SESSION_LOG_ROOT: the JSONL log root, which is both the
 	// ordered append log and the transport form. It defaults to
@@ -633,7 +634,12 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("invalid CR_SESSION_BACKEND: %q (want %s, %s or %s)",
 			cfg.Session.Backend, SessionBackendSQLite, SessionBackendPostgres, SessionBackendJSONL)
 	}
-	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+	// The session-scoped spelling wins; retain CR_SQLITE_PATH for existing
+	// deployments. There is no general known-key registry in this loader.
+	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SESSION_SQLITE_PATH"))
+	if cfg.Session.SQLitePath == "" {
+		cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+	}
 	if cfg.Session.SQLitePath == "" {
 		cfg.Session.SQLitePath = sqlitePath
 	}

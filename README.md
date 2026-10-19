@@ -2246,7 +2246,10 @@ CR_DATABASE_URL=sqlite://crier.sqlite ./bin/crier
 ```
 
 `CR_REGISTRY_SQLITE_PATH` wins over the URL-derived registry path;
-`CR_SQLITE_PATH` wins over the URL-derived session path. Without a SQLite URL,
+`CR_SESSION_SQLITE_PATH` is the preferred session path key; the legacy alias
+`CR_SQLITE_PATH` remains accepted. Session precedence is the first nonblank value:
+`CR_SESSION_SQLITE_PATH` → `CR_SQLITE_PATH` → SQLite URL path → default. Neither
+session key redirects the registry store. Without a SQLite URL,
 the session SQLite default remains `crier-sessions.sqlite`, while the registry
 requires `CR_REGISTRY_SQLITE_PATH`. Explicit paths override URL-derived paths,
 not the URL scheme: a PostgreSQL backend with a SQLite URL, or a SQLite backend
@@ -2254,6 +2257,17 @@ with a PostgreSQL URL, fails before opening a store with
 `DATABASE_BACKEND_MISMATCH`, naming the backend and the variable to change.
 An unknown scheme fails with `DATABASE_URL_SCHEME`, naming the source variable
 and the accepted schemes; neither error prints database credentials.
+
+For sessions, `/status` reports `session_store_path` (the resolved absolute SQLite
+file or JSONL directory) and `session_store_mount` (observed mount evidence).
+The chat posture displays that path in its Session store sentence. An overlay
+root is labeled a writable layer with a prompt to mount the path before container
+replacement. A distinct mount is labeled volume/mount observed, not guaranteed
+durable: bind versus named volume, retention, and backups cannot be verified by
+this process. Memory-backed storage is not persistent. Unknown mount evidence is
+explicitly unknown; PostgreSQL reports an external, unobservable storage location
+without exposing its database URL. Protect `/status` with deployment auth if local
+filesystem topology is sensitive.
 
 Management write bodies are strict: principals, bindings, grants and agent-class
 writes reject unknown fields with HTTP 400 and `unknown field "field" (accepted:

@@ -112,6 +112,8 @@ var statusTopLevelKeys = []string{
 	"registry_backend",
 	"registry_durable",
 	"session_backend",
+	"session_store_path",
+	"session_store_mount",
 	"a2a_enabled",
 	"require_agent_signature",
 	"webhook_signing",
