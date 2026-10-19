@@ -4593,7 +4593,7 @@ components:
       type: object
       additionalProperties: false
       required: [id, kind, created_at]
-      description: Explicit read allowlist; never a serialized stored principal or credential. Minted principals currently have no token.
+      description: Explicit read allowlist; never a serialized stored principal or credential. Descriptive fields are returned exactly as stored in the keep-LAST record, with empty optional fields omitted and no read-time defaults. Minted principals currently have no token.
       properties:
         id:
           type: string
@@ -4607,6 +4607,33 @@ components:
           type: string
           pattern: '^[0-9a-f]{8}$'
           description: Fingerprint only — first eight hex digits of SHA-256 of an optional stored token. Omitted when no token exists. Not the token or its full hash, and not an authentication credential.
+        display_name:
+          type: string
+          description: Recorded human-facing name, omitted when empty.
+        namespace:
+          type: string
+          description: Recorded realm, omitted when empty; no default realm is inserted by this read.
+        role:
+          type: string
+          enum: [owner, admin, member, viewer]
+          description: Recorded namespace role bundle, omitted when empty; no role is inferred.
+        status:
+          type: string
+          enum: [invited, active, suspended, revoked]
+          description: Recorded lifecycle state, omitted when empty; no active default is inserted by this read.
+        remote:
+          type: boolean
+          description: Recorded local shadow-principal marker, omitted when false.
+        remote_instance:
+          type: string
+          description: Recorded remote instance, omitted when empty.
+        remote_ref:
+          type: string
+          description: Recorded remote principal reference, omitted when empty.
+        last_login_at:
+          type: string
+          format: date-time
+          description: Recorded last login time, omitted when absent.
     PrincipalRecord:
       type: object
       description: |-

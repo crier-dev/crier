@@ -12,10 +12,18 @@ import (
 // principalReadView is an explicit allowlist, NOT an embedded stored Principal:
 // adding credential fields to the storage schema must never expand this wire.
 type principalReadView struct {
-	ID               string    `json:"id"`
-	Kind             string    `json:"kind"`
-	CreatedAt        time.Time `json:"created_at"`
-	TokenFingerprint string    `json:"token_fingerprint,omitempty"`
+	ID               string                      `json:"id"`
+	Kind             string                      `json:"kind"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	TokenFingerprint string                      `json:"token_fingerprint,omitempty"`
+	DisplayName      string                      `json:"display_name,omitempty"`
+	Namespace        string                      `json:"namespace,omitempty"`
+	Role             permissions.Role            `json:"role,omitempty"`
+	Status           permissions.PrincipalStatus `json:"status,omitempty"`
+	Remote           bool                        `json:"remote,omitempty"`
+	RemoteInstance   string                      `json:"remote_instance,omitempty"`
+	RemoteRef        string                      `json:"remote_ref,omitempty"`
+	LastLoginAt      *time.Time                  `json:"last_login_at,omitempty"`
 }
 
 type permissionList[T any] struct {
@@ -49,7 +57,11 @@ func (h *Handler) HandleListPrincipals(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]principalReadView, 0)
 	for _, p := range snap.Principals() {
-		view := principalReadView{ID: p.ID, Kind: p.Kind, CreatedAt: p.CreatedAt, TokenFingerprint: p.TokenFingerprint}
+		view := principalReadView{
+			ID: p.ID, Kind: p.Kind, CreatedAt: p.CreatedAt, TokenFingerprint: p.TokenFingerprint,
+			DisplayName: p.DisplayName, Namespace: p.Namespace, Role: p.Role, Status: p.Status,
+			Remote: p.Remote, RemoteInstance: p.RemoteInstance, RemoteRef: p.RemoteRef, LastLoginAt: p.LastLoginAt,
+		}
 		items = append(items, view)
 	}
 	writeJSON(w, http.StatusOK, permissionList[principalReadView]{Items: items, Count: len(items)})

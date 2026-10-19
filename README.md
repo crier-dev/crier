@@ -1925,8 +1925,11 @@ namespace membership is deliberately **not** blanket permission.
   per principal/grant/agent id and per `(principal, agent)` for bindings, in
   append order rather than by timestamp. Grants exclude revoked and expired
   rows after folding; this list is not a complete delivery-authorization verdict.
-  Principals expose only `id`, `kind`, `created_at` and, if stored token material
-  exists, `token_fingerprint` (first 8 SHA-256 hex digits) — **never a token or
+  Principals expose `id`, `kind`, `created_at` and the recorded `display_name`,
+  `namespace`, `role`, `status`, `remote`, `remote_instance`, `remote_ref` and
+  `last_login_at` (DF-CRIER-383). Empty optional fields are omitted; reads never
+  invent defaults. The explicit allowlist adds, if stored token material exists,
+  only `token_fingerprint` (first 8 SHA-256 hex digits) — **never a token or
   full hash**. Minting still creates no token, so minted principals omit the
   fingerprint. Reads never create or modify the directory or log.
 - **The management writes.** `POST /principals`, `POST /bindings`,

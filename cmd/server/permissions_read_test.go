@@ -39,8 +39,8 @@ func TestPermissionsReadRoundTrip(t *testing.T) {
 	second := post("/principals", `{"display_name":"Second"}`)
 	binding := post("/bindings", fmt.Sprintf(`{"principal":%q,"agent":"atlas"}`, first["id"]))
 	post("/agents/atlas/class", fmt.Sprintf(`{"class":"personal","owner":%q}`, first["id"]))
-	post("/agents/beacon/class", `{"class":"service"}`)
-	grant := post("/grants", fmt.Sprintf(`{"principal":%q,"subject":{"type":"agent","ref":"beacon"},"actions":["send"]}`, first["id"]))
+	beacon := post("/agents/beacon/class", fmt.Sprintf(`{"class":"service","reachable_by":[%q,%q]}`, first["id"], second["id"]))
+	grant := post("/grants", fmt.Sprintf(`{"principal":%q,"subject":{"type":"agent","ref":"beacon"},"actions":["send"],"expires_at":"2999-01-01T00:00:00Z","note":"  recorded grant note  "}`, first["id"]))
 
 	// Append later versions to the actual durable log, deliberately with OLDER
 	// envelope timestamps: order, not max(ts), decides keep-LAST. No API write
@@ -96,7 +96,11 @@ func TestPermissionsReadRoundTrip(t *testing.T) {
 		require.NotContains(t, p, "token")
 		require.NotContains(t, p, "token_hash")
 		if p["id"] == first["id"] {
-			require.Len(t, p, 4, "principal response is an explicit four-field allowlist")
+			require.Len(t, p, 6, "principal response includes recorded name and status alongside the credential-safe allowlist")
+			require.Equal(t, "Later", p["display_name"])
+			require.Equal(t, "active", p["status"])
+			require.NotContains(t, p, "namespace", "empty descriptive fields are omitted")
+			require.NotContains(t, p, "role", "an absent role is not defaulted")
 			found = true
 			sum := sha256.Sum256([]byte(token))
 			require.Equal(t, hex.EncodeToString(sum[:4]), p["token_fingerprint"])
@@ -112,13 +116,16 @@ func TestPermissionsReadRoundTrip(t *testing.T) {
 	b := bindings["items"].([]any)[0].(map[string]any)
 	require.Equal(t, "bind_later", b["id"])
 	require.Equal(t, false, b["as_agent"])
+	require.Equal(t, binding, b, "bindings preserve every recorded write field")
 	require.Equal(t, "service", get("/agents/atlas/class")["class"])
-	require.Equal(t, "service", get("/agents/beacon/class")["class"])
+	require.Equal(t, beacon, get("/agents/beacon/class"), "class reads preserve reachable_by as its stored scope reach")
 	grants := get("/grants")
 	require.EqualValues(t, 1, grants["count"])
 	g := grants["items"].([]any)[0].(map[string]any)
 	require.Equal(t, grant["id"], g["id"])
 	require.Equal(t, []any{"read"}, g["actions"])
+	grant["actions"] = []any{"read"}
+	require.Equal(t, grant, g, "live grants preserve every recorded write field, including expiry and note")
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "reads must not append or rewrite")
