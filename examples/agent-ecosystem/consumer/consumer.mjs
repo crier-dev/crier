@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { delimiter, resolve } from "node:path";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 
 const REGISTRATION_TEMPLATE = JSON.parse(
   readFileSync(new URL("./registration-payloads.json", import.meta.url), "utf8")
@@ -81,7 +82,12 @@ async function register() {
 // Pi uses an SDK rather than a CLI; stdout_bytes then counts its emitted text.
 function liveReply(stdout, command) {
   if (!stdout.trim()) throw new Error(`${HARNESS} produced no output`);
-  return { reply: stdout.trim(), live: true, exec: command, stdout_bytes: Buffer.byteLength(stdout) };
+  const reply = stdout.trim();
+  // Extract only from the completed runtime's output, NEVER from the request.
+  const echoes = [...reply.matchAll(/\[crier-battery-nonce:([0-9a-f-]{36})\]/g)];
+  return { reply, live: true, exec: command, stdout_bytes: Buffer.byteLength(stdout),
+    stdout_sha256: createHash("sha256").update(reply).digest("hex"),
+    nonce: echoes.length === 1 ? echoes[0][1] : null };
 }
 
 function resolveCommand(bin) {
@@ -110,10 +116,16 @@ function runCli(bin, args) {
   });
 }
 
-async function answer(text) {
+async function answer(text, nonce) {
   if (!LIVE) {
     return { reply: `${HARNESS}(canned, requires ${LIVE_ENV} + DEEPSEEK_API_KEY): received "${text.slice(0, 80)}"`, live: false, canned: true };
   }
+  // Put the challenge AFTER the bounded question; no runner may truncate it.
+  // Payload (not a custom HTTP header) survives crier's generic webhook mapping.
+  if (nonce !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(nonce)) {
+    throw new Error("invalid battery nonce");
+  }
+  const prompt = nonce === undefined ? text : `${text.slice(0, 350)}\nAnswer the question, then echo exactly this marker on a separate line: [crier-battery-nonce:${nonce}]`;
   if (HARNESS === "pi-agent") {
     // Real pi SDK session: minimal prompt pointing at the message
     // (discovery pattern keeps the prompt small; model resolved from env).
@@ -133,7 +145,7 @@ async function answer(text) {
           out.push(ev.assistantMessageEvent.delta);
         }
       });
-      await session.prompt(`Answer in one sentence, no tools: ${text.slice(0, 500)}`);
+      await session.prompt(`Answer in one sentence, no tools: ${nonce === undefined ? text.slice(0, 500) : prompt}`);
       return liveReply(out.join(""), "sdk:@earendil-works/pi-coding-agent");
     } finally {
       await session.dispose();
@@ -141,15 +153,15 @@ async function answer(text) {
   }
   switch (HARNESS) {
     case "opencode":
-      return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${text.slice(0, 400)}`, "--model", "deepseek/deepseek-v4-flash"]);
+      return runCli("opencode", ["run", `Answer in one sentence, no tools. Question: ${nonce === undefined ? text.slice(0, 400) : prompt}`, "--model", "deepseek/deepseek-v4-flash"]);
     case "claude-code":
-      return runCli("claude", ["-p", text, "--output-format", "text"]);
+      return runCli("claude", ["-p", prompt, "--output-format", "text"]);
     case "codex":
-      return runCli("codex", ["exec", "--skip-git-repo-check", text]);
+      return runCli("codex", ["exec", "--skip-git-repo-check", prompt]);
     case "aider":
-      return runCli("aider", ["--message", text, "--no-auto-commits", "--yes-always"]);
+      return runCli("aider", ["--message", prompt, "--no-auto-commits", "--yes-always"]);
     case "goose":
-      return runCli("goose", ["run", "--text", text]);
+      return runCli("goose", ["run", "--text", prompt]);
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
@@ -186,7 +198,7 @@ createServer(async (req, res) => {
       const msg = JSON.parse(raw);
       const payload = msg.payload || {};
       const text = typeof payload === "string" ? payload : payload.text || JSON.stringify(payload);
-      return send(200, await answer(text));
+      return send(200, await answer(text, payload.battery_nonce));
     } catch (e) {
       return send(500, { error: e.message, live: false });
     }

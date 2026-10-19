@@ -65,8 +65,21 @@ The battery parses those fields from crier's generic/raw `reply` object; a
 reply substring alone cannot pass. CLI errors, auth errors, timeouts and empty
 output return HTTP 500 with `error` and **no `reply`**. Pi uses
 `exec: "sdk:@earendil-works/pi-coding-agent"`; its `stdout_bytes` counts emitted
-SDK text, not an OS stdout stream. This proves runtime execution and returned
-text, not answer quality or a particular upstream provider/model.
+SDK text, not an OS stdout stream.
+
+Each harness now receives **two different prompts**, each with a fresh UUID in
+`payload.battery_nonce` (the payload crosses the webhook mapping; no forwarded
+custom HTTP header is assumed). The consumer asks the runtime to emit
+`[crier-battery-nonce:<uuid>]`, extracts `nonce` only from completed runtime
+output, and computes `stdout_sha256` over the trimmed UTF-8 reply. The checker
+requires both that field and the exact output marker to match this request.
+Missing/wrong/replayed nonces fail. The second answer must have a different
+`content_sha256` after removing nonce markers, so simply appending a fresh marker
+to the same canned text also fails. Both prompts must pass for one harness PASS.
+This is request-binding/replay detection under the checked-in consumer, **not
+cryptographic runtime attestation**: a malicious consumer that synthesizes fresh
+nonce-aware bodies can still lie. It proves neither answer quality nor a
+particular upstream provider/model.
 
 With no `DEEPSEEK_API_KEY`, all six harness execution checks explicitly SKIP
 (canned mode / no credentials). Health, sink and async transport checks may
@@ -103,8 +116,15 @@ the JSONL. Do not use `docker compose down -v` if you want to keep the volume.
 The file is an accumulating log, not a fresh per-run verdict: use the latest
 `["battery","start", ...]` boundary and inspect every harness `result`.
 Harness records include `PASS`/`FAIL`/`SKIP`, the reason, HTTP status and the full
-response body (including execution markers); evidence may contain prompt/output
-text, so review it before committing or sharing it.
+response body (including execution markers). Each attempted prompt also records
+`run_nonce`, `run_started_at`, `request_started_at`, `prompt_index`, `prompt`,
+`nonce`, `nonce_echo`, `nonce_matched`, `stdout_sha256`, `content_sha256` and
+`previous_content_sha256`. The run UUID groups records; the request UUID provides
+freshness (timestamps are audit context, not a claimed runtime clock check).
+A no-key SKIP has no request nonce and `nonce_matched: null`, explicitly untested.
+Evidence may contain prompt/output text; review it before committing or sharing it.
+`battery/evidence/df-crier-338-offline.jsonl` is explicitly labelled transport
+fixture evidence for all six harness ids, NOT vendor-runtime execution evidence.
 
 For a local shell run, `battery/battery.sh` defaults to
 `battery/evidence/ecosystem.jsonl`. Override `EVIDENCE` for the primary log and
@@ -119,6 +139,7 @@ docker compose --profile battery run --rm battery
 python3 -m json.tool --json-lines examples/agent-ecosystem/battery/evidence/ecosystem.jsonl
 # Offline regression checks (fake CLI/SDK/transport; no real provider calls):
 node --test examples/agent-ecosystem/battery/execution.test.mjs
+python3 examples/agent-ecosystem/battery/test_binding.py
 ```
 
 ## Services
@@ -228,7 +249,7 @@ current harness claims.
 `battery/battery.sh` (JSONL evidence → `battery-evidence` volume / `$EVIDENCE`,
 mirrored to `battery/evidence/ecosystem.jsonl` by compose on exit):
 health · sink/pi/opencode/claude-code/codex/aider/goose readiness · blocking
-runtime execution (key required, boolean `live` + exec/byte metadata asserted) ·
+request-bound runtime output (two prompts per harness; nonce + digest + live/exec/byte assertions) ·
 async fire-and-forget delivery (sink count delta) · guard matrix (clean allow
 201, injection 403 GUARD_BLOCKED) when a key is set. Exit code 0 iff zero
 failures and the evidence copy succeeded — SKIPs remain incomplete coverage.

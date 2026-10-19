@@ -256,6 +256,32 @@ probes never serialize against each other.
 `bash battery.sh`) is the stack's test suite. It runs against the compose services via
 `docker compose run --rm --build battery` (the `--build` picks up a patched battery.sh).
 
+### 4.0 Request-bound harness execution (DF-CRIER-329 / DF-CRIER-338)
+
+This section supersedes the historical substring assertions for harness rows 1–6
+and the no-key harness tally below. `harness_probe`, not `probe`, validates these
+rows. Key mode sends two distinct prompts per harness, with a new UUID in
+`payload.battery_nonce` per request and `session_id: eco-<id>-<nonce>`. Each prompt
+must return HTTP 200, `live: true`, `canned` absent/false, non-empty `exec` and
+runtime `reply`, and positive integer `stdout_bytes`. The runtime must emit exactly
+one `[crier-battery-nonce:<nonce>]` marker; the consumer extracts its `nonce` from
+runtime stdout/SDK text, never request metadata. The checker requires both echoes
+to equal the requested nonce and recomputes `stdout_sha256` over trimmed reply UTF-8.
+The second prompt's `content_sha256` (SHA-256 after removing nonce markers and
+trimming) must differ from the first; marker-only text is refused. Any failure is
+one harness FAIL; both successes are one PASS. No credentials means one SKIP per
+harness, no request, no nonce assertion; no-key totals are 5 pass / 0 fail / 7 skip.
+Canned replies in key mode remain FAIL with the original canned reason.
+
+Each attempted prompt writes full response + verdict/reason, run UUID/start time,
+request start time, prompt/index, expected `nonce`, observed `nonce_echo`, boolean
+`nonce_matched`, both digests and `previous_content_sha256`. A SKIP has null nonce
+and null match plus an untested reason. Timestamps are audit context; unpredictable
+request nonces provide freshness. The checker CLI is `check-harness.py HTTP_STATUS
+NONCE [PREVIOUS_CONTENT_SHA256]`, emits JSON proof, exits 0/1 for PASS/FAIL.
+These assertions detect replay/constant replies under the shipped consumer; they
+are not attestation against a malicious nonce-aware consumer fabricating output.
+
 ### 4.1 Probes (shipped order, battery.sh)
 
 | # | Probe | Method/path | Payload | Expect |
