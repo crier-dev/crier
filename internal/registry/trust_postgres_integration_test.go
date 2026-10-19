@@ -14,6 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPostgresTrustBackendParity(t *testing.T) {
+	exerciseTrustBackendParity(t, newTestStore(t))
+}
+
 func TestPostgresTrustStore(t *testing.T) {
 	s := newTestStore(t)
 	exerciseTrustStore(t, NewAuthorityStore(s, nil, ""))

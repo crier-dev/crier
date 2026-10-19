@@ -2191,15 +2191,22 @@ trigger is automation layered on it.
 
 2026-10-19 (DF-CRIER-364): the SQLite Store ships for the registry and inboxes, including leases, dead letters, service-delivery receipts, task observations and task outputs. Set `CR_REGISTRY_BACKEND=sqlite` and `CR_REGISTRY_SQLITE_PATH=registry.sqlite`; keep the file and its WAL on persistent local storage (not a network filesystem). SQLite uses WAL with synchronous FULL and applies versioned dialect migrations at startup. Registry selection is independent of `CR_SESSION_BACKEND`: unset keeps PostgreSQL when a database URL is configured, memory otherwise; explicit `memory`, `sqlite` or `postgres` overrides that selection. SQLite requires a path and PostgreSQL requires a URL; unknown backends fail startup. The JSONL log-first registry architecture described in [CHAT-STORAGE.md](specs/CHAT-STORAGE.md) remains NOT BUILT; this is a direct SQLite implementation of the existing Store, not a log-first projection or JSONL registry.
 
+Signing trust is available on all three registry backends: memory, SQLite and PostgreSQL. SQLite and PostgreSQL persist immutable anchors and signed delegations across restarts; memory does not. All use the same five named verification verdicts and require a distinct `CR_PERMISSIONS_ADMIN_TOKEN` for trust management (independent of whether the delivery ACL is enabled). For a durable single-box registry and signing tree without PostgreSQL:
+
+```bash
+CR_REGISTRY_BACKEND=sqlite CR_REGISTRY_SQLITE_PATH=registry.sqlite ./bin/crier
+```
+
+Keep the same SQLite file when restarting. This recipe selects registry/inbox/trust storage only; session storage is configured separately.
+
 ### Durable backend (PostgreSQL)
 
-This is the backend [Run](#run) documents: its two commands are the
-`docker compose up -d postgres` below plus the server started with
-`CR_DATABASE_URL` pointing at it. Nothing here is optional polish — it is the
-configuration in which crier's promise (an inbox that keeps a delivered message
-until it is read or expires) actually holds across a restart. Everything after
-the first block is tuning for hosts where the default host port or the compose
-project name is already taken.
+This is the server-backed durable alternative to the single-box SQLite recipe
+above: start `docker compose up -d postgres`, then start the server with
+`CR_DATABASE_URL` pointing at it. Both choices retain agents, inboxes and
+signing-trust records across a restart. Everything after the first block is
+tuning for hosts where the default host port or compose project name is
+already taken.
 
 The `postgres` service in `docker-compose.yml` (image `postgres:16-alpine`, credentials `crier`/`crier`, database `crier`) publishes the container's in-container port 5432 on host port **5437** by default:
 

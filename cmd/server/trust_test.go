@@ -17,7 +17,14 @@ import (
 // Boot production run(), with BOTH distinct credentials and ACL disabled:
 // trust is not accidentally coupled to delivery-policy enablement.
 func TestTrustHTTPRoutes(t *testing.T) {
-	base := startTestServerWithEnv(t, map[string]string{"CR_AUTH_TOKEN": df297MessageToken, "CR_PERMISSIONS_ADMIN_TOKEN": df297AdminToken, "CR_PERMISSIONS_ENABLED": "false", "CR_DATABASE_URL": ""})
+	for _, backend := range []string{"memory", "sqlite"} {
+		t.Run(backend, func(t *testing.T) { exerciseTrustHTTPRoutes(t, backend) })
+	}
+}
+
+func exerciseTrustHTTPRoutes(t *testing.T, backend string) {
+	t.Helper()
+	base := startTestServerWithEnv(t, map[string]string{"CR_REGISTRY_BACKEND": backend, "CR_REGISTRY_SQLITE_PATH": filepath.Join(t.TempDir(), "trust.db"), "CR_AUTH_TOKEN": df297MessageToken, "CR_PERMISSIONS_ADMIN_TOKEN": df297AdminToken, "CR_PERMISSIONS_ENABLED": "false", "CR_DATABASE_URL": ""})
 	client := &http.Client{Timeout: 5 * time.Second}
 	evidence := map[string]any{}
 	call := func(method, path, token string, body any, want int) string {

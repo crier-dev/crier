@@ -304,7 +304,7 @@ type statusResponse struct {
 	// environment variable that set it lives in a different place than the
 	// reading.
 	PresenceStaleAfterS int `json:"presence_stale_after_s"`
-	// RegistryBackend is "memory" or "postgres" — the backend actually
+	// RegistryBackend is "memory", "sqlite" or "postgres" — the backend actually
 	// serving this process, derived from the same input that selected it.
 	RegistryBackend string `json:"registry_backend"`
 	// RateLimitPerMinute is the effective relay publish budget; 0 means

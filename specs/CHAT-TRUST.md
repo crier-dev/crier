@@ -537,10 +537,14 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 
 ## 11. Status line
 
-2026-10-19 — DF-CRIER-362: anchors, signed capability delegations and the
-`POST /trust/verify` route ARE BUILT, backed by the existing registry's memory
-and PostgreSQL stores (migration `017_trust_tree`). This dated implementation
-slice supersedes the older “no store / no route” statements above without
+2026-10-19 — DF-CRIER-362, extended by DF-CRIER-368: anchors, signed capability
+delegations and the `POST /trust/verify` route ARE BUILT, backed by the existing
+registry's memory, SQLite and PostgreSQL stores (migration `017_trust_tree`).
+SQLite and PostgreSQL retain anchors and signed delegations across process
+restarts; memory is process-local. All three enforce the same Go record
+validation before storage, including hex shapes, nonblank fields, capability
+lists and rejection of NUL text (which PostgreSQL text/JSONB cannot represent).
+This dated implementation slice supersedes the older “no store / no route” statements above without
 changing §§3–5's design. `POST /trust/anchors` and `GET /trust/anchors`, plus
 `POST /trust/delegations` and `GET /trust/delegations?subject=<hex>`, use the
 existing operator credential (`CR_PERMISSIONS_ADMIN_TOKEN`, distinct from
@@ -559,7 +563,7 @@ delegation `{voucher, subject_key, scope, max_depth, issued_at, signature}`.
 sha256-prefix key ID (16 lowercase hex digits) of the preceding subject key.
 Canonical bytes are compact Go struct JSON in precisely that property order,
 with `signature` blanked to `""`, not omitted. Scope ordering and timestamp
-nanoseconds/offset are signed, retained through PostgreSQL reload, and never
+nanoseconds/offset are signed, retained through SQLite and PostgreSQL reload, and never
 silently rewritten. Imports require a locally held voucher and a valid ed25519
 signature; storing a record is not itself a trust grant.
 

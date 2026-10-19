@@ -71,6 +71,11 @@ func ChainKeyID(publicKey string) string {
 }
 
 func (a ChainAnchor) Validate() error {
+	// PostgreSQL text/JSONB cannot represent NUL; refuse it before storage on
+	// every backend rather than allowing SQLite/memory-only trust records.
+	if strings.ContainsRune(a.ID, 0) || strings.ContainsRune(a.Label, 0) {
+		return fmt.Errorf("anchor id and label must not contain NUL")
+	}
 	if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.Label) == "" || a.CreatedAt.IsZero() {
 		return fmt.Errorf("anchor id, label and created_at are required")
 	}
@@ -79,6 +84,9 @@ func (a ChainAnchor) Validate() error {
 }
 
 func (d ChainDelegation) Validate() error {
+	if strings.ContainsRune(d.Voucher, 0) {
+		return fmt.Errorf("voucher must not contain NUL")
+	}
 	if d.Scope == nil {
 		return fmt.Errorf("scope must be a capability list (use [] for no capabilities)")
 	}
@@ -102,6 +110,9 @@ func (d ChainDelegation) Validate() error {
 func ValidateCapabilities(scope []string) error {
 	seen := map[string]bool{}
 	for _, capability := range scope {
+		if strings.ContainsRune(capability, 0) {
+			return fmt.Errorf("scope capabilities must not contain NUL")
+		}
 		if strings.TrimSpace(capability) == "" || seen[capability] {
 			return fmt.Errorf("scope capabilities must be nonempty and unique")
 		}

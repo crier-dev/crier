@@ -741,6 +741,8 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// token on exactly these paths (middleware.AuthTokens'
 	// isManagementPath, DF-CRIER-297) — keep the two lists in step.
 	trustHandler := registry.NewTrustHandler(regStore, cfg.Permissions.AdminToken, cfg.AuthToken)
+	slog.Info("signing trust tree enabled", "registry_backend", regBackend,
+		"detail", "anchors and delegations supported on memory, sqlite and postgres; management requires a distinct CR_PERMISSIONS_ADMIN_TOKEN")
 	r.HandleFunc("/trust/anchors", trustHandler.HandleCreateAnchor).Methods("POST")
 	r.HandleFunc("/trust/anchors", trustHandler.HandleListAnchors).Methods("GET")
 	r.HandleFunc("/trust/delegations", trustHandler.HandleCreateDelegation).Methods("POST")
