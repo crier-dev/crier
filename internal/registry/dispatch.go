@@ -140,6 +140,10 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 			respond(http.StatusForbidden, map[string]string{"error": "service delivery requires signed service authority"})
 			return
 		}
+		if err := validateDeliveryTTL(req.TTLSeconds); err != nil {
+			respond(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		if err := validateDeliverPayload(&req); err != nil {
 			respond(http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -150,7 +154,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 		}
 		targetNS := namespaceOfAgent(target)
 		if req.Namespace != "" && namespace.Canonical(req.Namespace) != targetNS {
-			respond(http.StatusForbidden, map[string]string{"error": "NAMESPACE_MISMATCH"})
+			respond(http.StatusForbidden, namespaceMismatchResponse(id, targetNS, req.Namespace))
 			return
 		}
 		entry.Namespace = targetNS

@@ -41,6 +41,7 @@ func unsetAll(t *testing.T) {
 		"CR_SESSION_BACKEND",
 		"CR_SQLITE_PATH",
 		"CR_SESSION_LOG_ROOT",
+		"CR_SESSION_DELIVERY_TIMEOUT_MS",
 	} {
 		t.Setenv(k, "")
 	}

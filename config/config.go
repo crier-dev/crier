@@ -61,6 +61,9 @@ type SessionConfig struct {
 	// GroupRoot is CR_GROUP_ROOT: the named-group roster log directory
 	// (CR-CHAT-013). It defaults to DefaultGroupRoot when unset.
 	GroupRoot string
+	// DeliveryTimeoutMs is CR_SESSION_DELIVERY_TIMEOUT_MS: the per-target
+	// blocking webhook budget, including queue wait; default 5000, range 1..10000.
+	DeliveryTimeoutMs int
 }
 
 // ResolvedSessionBackend returns the effective backend: the explicit
@@ -571,6 +574,14 @@ func Load() (Config, error) {
 	}
 	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
 	cfg.Session.LogRoot = strings.TrimSpace(os.Getenv("CR_SESSION_LOG_ROOT"))
+	cfg.Session.DeliveryTimeoutMs = registry.DefaultSessionDeliveryTimeoutMs
+	if v := os.Getenv("CR_SESSION_DELIVERY_TIMEOUT_MS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 10000 {
+			return cfg, fmt.Errorf("invalid CR_SESSION_DELIVERY_TIMEOUT_MS: %q (want 1..10000 milliseconds)", v)
+		}
+		cfg.Session.DeliveryTimeoutMs = n
+	}
 	cfg.Session.GroupRoot = strings.TrimSpace(os.Getenv("CR_GROUP_ROOT"))
 	if cfg.Session.GroupRoot == "" {
 		cfg.Session.GroupRoot = DefaultGroupRoot

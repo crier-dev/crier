@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crier-dev/crier/internal/registry"
@@ -162,6 +163,17 @@ func FanoutRecipients(aud Audience, roster map[string][]string) (agents []string
 // intent, and the outcomes are written back onto that same record afterwards
 // (§3.2, D1). Fanout performs the middle step only.
 func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView) ([]DeliveryOutcome, error) {
+	return fanoutWithTimeout(ctx, deliverer, msg, targets, spawn, registry.DefaultSessionDeliveryTimeoutMs)
+}
+
+// fanoutWithTimeout joins every target before returning. Each goroutine owns one
+// sorted output slot, so completion order cannot reorder the transcript. The
+// dispatcher/driver owns timeout enforcement; no detached timeout goroutine or
+// second transport path is introduced here. Deliverers must be concurrency-safe.
+func fanoutWithTimeout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets []string, spawn *spawnedThreadView, timeoutMs int) ([]DeliveryOutcome, error) {
+	if timeoutMs == 0 {
+		timeoutMs = registry.DefaultSessionDeliveryTimeoutMs
+	}
 	if msg == nil {
 		return nil, fmt.Errorf("%w: nil message", ErrInvalidRecord)
 	}
@@ -180,59 +192,65 @@ func Fanout(ctx context.Context, deliverer InboxDeliverer, msg *Message, targets
 	}
 
 	sorted := dedupeSorted(targets)
-	outcomes := make([]DeliveryOutcome, 0, len(sorted))
-	for _, target := range sorted {
+	outcomes := make([]DeliveryOutcome, len(sorted))
+	var wg sync.WaitGroup
+	for i, target := range sorted {
 		if prev, ok := prior[target]; ok && prev.Outcome != "" {
-			outcomes = append(outcomes, prev)
+			outcomes[i] = prev
 			continue
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		entry := &registry.InboxEntry{
-			ID:             InboxEntryID(msg.ID, target),
-			Payload:        msg.Payload,
-			Sender:         msg.Author.AgentID(),
-			IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, target),
-			// The thread travels WITH the stored message (CR-CHAT-019): a
-			// thread must be reconstructable from storage alone, and the
-			// per-agent durable inbox is part of that storage.
-			ThreadID:  msg.ThreadID,
-			CreatedAt: time.Now().UTC(),
-			// The machine-readable location (CR-CHAT-029): the agent can SAY
-			// where it is — instance, realm, session (channel), thread and,
-			// when this send spawned a deliberately branched child thread
-			// (§4.5), the sub-thread — instead of inferring it from prose.
-			// The namespace is left to the deliver path, which resolves the
-			// target's realm from its own row (the authority).
-			Location: locationOf(msg, spawn),
-		}
-		entry.PrincipalID = msg.Author.Principal
-		var deliveryErr error
-		if dispatcher, ok := deliverer.(interface {
-			DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
-		}); ok {
-			_, deliveryErr = dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
-				Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind),
-			})
-		} else {
-			deliveryErr = deliverer.Deliver(target, entry)
-		}
-		if err := deliveryErr; err != nil {
-			outcomes = append(outcomes, DeliveryOutcome{
-				Target:    target,
-				Outcome:   OutcomeRefused,
-				Reason:    err.Error(),
-				UpdatedAt: time.Now().UTC(),
-			})
-			continue
-		}
-		outcomes = append(outcomes, DeliveryOutcome{
-			Target:       target,
-			Outcome:      OutcomeDelivered,
-			InboxEntryID: entry.ID,
-			UpdatedAt:    time.Now().UTC(),
-		})
+		wg.Add(1)
+		go func(i int, target string) {
+			defer wg.Done()
+			entry := &registry.InboxEntry{
+				ID:             InboxEntryID(msg.ID, target),
+				Payload:        msg.Payload,
+				Sender:         msg.Author.AgentID(),
+				IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, target),
+				// The thread travels WITH the stored message (CR-CHAT-019): a
+				// thread must be reconstructable from storage alone, and the
+				// per-agent durable inbox is part of that storage.
+				ThreadID:  msg.ThreadID,
+				CreatedAt: time.Now().UTC(),
+				// The machine-readable location (CR-CHAT-029): the agent can SAY
+				// where it is — instance, realm, session (channel), thread and,
+				// when this send spawned a deliberately branched child thread
+				// (§4.5), the sub-thread — instead of inferring it from prose.
+				// The namespace is left to the deliver path, which resolves the
+				// target's realm from its own row (the authority).
+				Location: locationOf(msg, spawn),
+			}
+			entry.PrincipalID = msg.Author.Principal
+			var deliveryErr error
+			if dispatcher, ok := deliverer.(interface {
+				DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
+			}); ok {
+				_, deliveryErr = dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
+					Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind), TimeoutMs: timeoutMs,
+				})
+			} else {
+				deliveryErr = deliverer.Deliver(target, entry)
+			}
+			if err := deliveryErr; err != nil {
+				outcomes[i] = DeliveryOutcome{
+					Target:    target,
+					Outcome:   OutcomeRefused,
+					Reason:    err.Error(),
+					UpdatedAt: time.Now().UTC(),
+				}
+				return
+			}
+			outcomes[i] = DeliveryOutcome{
+				Target:       target,
+				Outcome:      OutcomeDelivered,
+				InboxEntryID: entry.ID,
+				UpdatedAt:    time.Now().UTC(),
+			}
+		}(i, target)
+	}
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	msg.Outcomes = outcomes
 	return outcomes, nil

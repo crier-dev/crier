@@ -201,6 +201,16 @@ const defaultDeliverTimeoutMs = 30000
 // documented as the request schema's enum in openapi.yaml.
 var deliverModes = []string{"blocking", "async", "batch"}
 
+// namespaceMismatchResponse preserves the HTTP refusal body for every dispatcher
+// caller. Keep this wire-contract literal beside ingress for the docs claim gate.
+func namespaceMismatchResponse(id, targetNS, requestedNS string) map[string]string {
+	return map[string]string{
+		"error": "NAMESPACE_MISMATCH",
+		"detail": fmt.Sprintf("target %q is in namespace %q; a message cannot cross namespaces (%q requested)",
+			id, namespace.Display(targetNS), namespace.Display(requestedNS)),
+	}
+}
+
 // validateDeliverParameters rejects request-level delivery parameters this
 // handler cannot honor, before any transport or store choice is made.
 //
@@ -1090,20 +1100,9 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 		return
 	}
 
-	// Requested message lifetime (DF-CRIER-37): absent keeps the store
-	// default, 0 means never expires. Reject values that cannot be honored —
-	// a negative lifetime and a value that would overflow time.Duration.
-	if req.TTLSeconds != nil {
-		if *req.TTLSeconds < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ttl_seconds must not be negative"})
-			return
-		}
-		if int64(*req.TTLSeconds) > maxTTLSeconds {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("ttl_seconds must be <= %d", maxTTLSeconds),
-			})
-			return
-		}
+	if err := validateDeliveryTTL(req.TTLSeconds); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// The required `payload` key is part of the same contract (DF-CRIER-112):
@@ -1437,11 +1436,7 @@ func (h *Handler) deliver(w http.ResponseWriter, r *http.Request, id, capability
 	if target != nil {
 		targetNS := namespaceOfAgent(target)
 		if req.Namespace != "" && namespace.Canonical(req.Namespace) != targetNS {
-			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error": "NAMESPACE_MISMATCH",
-				"detail": fmt.Sprintf("target %q is in namespace %q; a message cannot cross namespaces (%q requested)",
-					id, namespace.Display(targetNS), namespace.Display(req.Namespace)),
-			})
+			writeJSON(w, http.StatusForbidden, namespaceMismatchResponse(id, targetNS, req.Namespace))
 			return
 		}
 		if err := h.namespaces.CheckAuth(targetNS, r.Header.Get(namespace.HeaderNamespaceToken)); err != nil {

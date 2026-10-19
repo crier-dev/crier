@@ -298,10 +298,18 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		budget = 30 * time.Second
 	}
 	rid := middleware.RequestIDFromContext(ctx)
-	release := d.gate.acquire(env.Crier.SessionID)
-	defer release()
-
 	deadline := time.Now().Add(budget)
+	gateCtx, cancelGate := context.WithDeadline(ctx, deadline)
+	defer cancelGate()
+	gateKey := ""
+	if env.Crier.SessionID != "" {
+		gateKey = fmt.Sprintf("%d:%s%s", len(agentID), agentID, env.Crier.SessionID)
+	}
+	release, err := d.gate.acquireContext(gateCtx, gateKey)
+	if err != nil {
+		return nil, fmt.Errorf("webhook: blocking delivery gate timeout/cancellation after %s: %w", budget, err)
+	}
+	defer release()
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -370,31 +378,42 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	}
 }
 
-// sessionGate serializes blocking deliveries per session (CR-FEAT-004):
-// FIFO within a session, free interleaving across sessions.
+// sessionGate serializes blocking deliveries per target/session (CR-FEAT-004):
+// FIFO for one recipient, free interleaving across recipients and sessions.
 type sessionGate struct {
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks map[string]chan struct{}
 }
 
 func newSessionGate() *sessionGate {
-	return &sessionGate{locks: make(map[string]*sync.Mutex)}
+	return &sessionGate{locks: make(map[string]chan struct{})}
 }
 
 // acquire returns a release func. Empty session ids are not gated.
 func (g *sessionGate) acquire(sessionID string) func() {
+	release, _ := g.acquireContext(context.Background(), sessionID)
+	return release
+}
+
+// acquireContext waits without launching a goroutine, so cancellation never
+// strands a waiter. Empty keys are deliberately not gated.
+func (g *sessionGate) acquireContext(ctx context.Context, sessionID string) (func(), error) {
 	if sessionID == "" {
-		return func() {}
+		return func() {}, nil
 	}
 	g.mu.Lock()
 	m, ok := g.locks[sessionID]
 	if !ok {
-		m = &sync.Mutex{}
+		m = make(chan struct{}, 1)
 		g.locks[sessionID] = m
 	}
 	g.mu.Unlock()
-	m.Lock()
-	return m.Unlock
+	select {
+	case m <- struct{}{}:
+		return func() { <-m }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // enqueue stores the item for redelivery. The guard verdict rides along

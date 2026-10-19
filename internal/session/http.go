@@ -78,6 +78,9 @@ type HTTPOptions struct {
 	// means fan-out is unconfigured and a send is refused with
 	// 503 SESSION_DELIVERY_UNCONFIGURED rather than silently dropped.
 	Deliverer InboxDeliverer
+	// DeliveryTimeoutMs is passed through DeliveryRequest.TimeoutMs to the
+	// shared dispatcher. Zero uses the five-second session default.
+	DeliveryTimeoutMs int
 	// Agents resolves a member agent's stored namespace so a fan-out cannot
 	// leave its realm. Nil skips the realm cross-check (every target is
 	// treated as in-realm) — the pre-CR-FEAT-029 posture.
@@ -882,7 +885,7 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
-	outcomes, err := Fanout(r.Context(), h.opts.Deliverer, msg, deliverable, spawn)
+	outcomes, err := fanoutWithTimeout(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs)
 	if err != nil {
 		// The intent is durable and the outcomes are incomplete — §3.2's
 		// visible, repairable state, not a lost message. Report it as a 502

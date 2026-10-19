@@ -1432,6 +1432,21 @@ behaviour: `postgres` when `CR_DATABASE_URL` is configured, `jsonl` otherwise.
 Selecting `postgres` with no `CR_DATABASE_URL` fails the boot rather than
 falling back silently: a misconfiguration is named, not guessed.
 
+### Session send budgets
+
+`CR_SESSION_DELIVERY_TIMEOUT_MS` sets each session recipient's blocking webhook
+budget (default `5000` milliseconds; accepted range `1..10000`). Invalid values
+fail startup. It applies to every session storage backend and is passed through
+the shared dispatcher's `DeliveryRequest.TimeoutMs`, not a second timeout path.
+Recipients dispatch concurrently; outcomes remain sorted by target id. Thus
+webhook fan-out waits for the slowest recipient budget rather than their sum,
+including a wait behind an earlier delivery to the same target/session.
+A timed-out recipient is `refused` with a timeout detail; successful recipients
+remain `delivered`, and the persisted transcript reports both. Normal guard
+checks and transcript persistence still run; this is a webhook budget, not an
+end-to-end HTTP deadline. HTTP inbox delivery keeps its existing modes and
+default timeout unchanged.
+
 ### A single-user deployment with no PostgreSQL service
 
 ```bash

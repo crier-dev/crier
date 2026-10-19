@@ -5,6 +5,11 @@ import (
 	"fmt"
 )
 
+// DefaultSessionDeliveryTimeoutMs bounds a session target to five seconds unless
+// session configuration explicitly supplies another budget. HTTP inbox defaults
+// are independent and unchanged.
+const DefaultSessionDeliveryTimeoutMs = 5000
+
 // SessionDeliverer adapts fan-out to the handler's guarded dispatcher, never
 // directly to Store.Deliver. It shares the live handler (including its guard,
 // webhook driver, realm policies and idempotency window) with HTTP ingress.
@@ -31,6 +36,9 @@ func (d *SessionDeliverer) DispatchDelivery(ctx context.Context, id string, req 
 	target, err := d.handler.store.Get(id)
 	if err != nil {
 		return DeliveryResult{}, fmt.Errorf("resolve delivery target %q: %w", id, err)
+	}
+	if req.TimeoutMs == 0 {
+		req.TimeoutMs = DefaultSessionDeliveryTimeoutMs
 	}
 	req.DeliveryMode = "blocking"
 	return d.handler.Dispatch(ctx, target, req)
