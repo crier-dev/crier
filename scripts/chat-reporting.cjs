@@ -8,12 +8,12 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   const refresh = async () => { await page.locator('#refresh').click(); await idle(); };
   const memory = await (await fetch(base+'/status')).json();
   assert.equal(memory.registry_backend,'memory'); assert.equal(memory.registry_durable,false);
-  assert.equal(memory.session_backend,'jsonl'); assert.equal(memory.auth_enabled,false); assert.equal(memory.a2a_enabled,false);
+  assert.equal(memory.session_backend,'jsonl'); assert.equal(memory.auth_enabled,false); assert.equal(memory.a2a_enabled,false); assert.equal(memory.management_surface,'disabled');
   await page.locator('.identity').evaluate(el => el.open=false);
   assert.equal(await page.locator('#posture').isVisible(),true);
   assert.match(await page.locator('#health').innerText(),/Health: ok.*agents are lost on restart/);
   const memoryLine = await page.locator('#posture').innerText();
-  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Build: /);
+  assert.match(memoryLine,/Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Management: disabled · Build: /);
   assert.ok(memoryLine.includes(memory.build.version+' / '+memory.build.commit));
   await page.screenshot({path:path.join(evidence,'posture-memory.png'),fullPage:true});
   await page.locator('.runtime-posture').screenshot({path:path.join(evidence,'posture-memory-detail.png')});
@@ -43,7 +43,7 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   }
   await page.route('**/status',route => route.fulfill({contentType:'application/json',body:'{}'}));
   await refresh();
-  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown · Auth: unknown · A2A: unknown · Build: unknown / unknown');
+  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown · Auth: unknown · A2A: unknown · Management: unknown · Build: unknown / unknown');
   assert.match(await page.locator('#health').innerText(),/^Health: unknown/);
   await page.unroute('**/status');
   await page.route('**/status',route => route.fulfill({status:503,contentType:'application/json',body:'{"error":"posture unavailable"}'}));

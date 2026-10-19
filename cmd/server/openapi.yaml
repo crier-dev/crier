@@ -268,8 +268,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
+                  management_surface:
+                    type: string
+                    enum: [disabled, admin-token-gated]
+                    description: Permissions management authority; admin-token-gated only when CR_PERMISSIONS_ENABLED is true and CR_PERMISSIONS_ADMIN_TOKEN is nonempty, otherwise disabled (routes remain registered but refuse management). Never exposes the token or any token-derived value
                   auth_enabled:
                     type: boolean
                     description: True when a Bearer token is enforced (CR_AUTH_TOKEN set); false is the documented development posture

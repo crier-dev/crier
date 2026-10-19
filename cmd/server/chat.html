@@ -132,7 +132,7 @@ main { min-width:0; display:flex; flex-direction:column; }
 </header>
 <section class="runtime-posture" aria-labelledby="runtime-posture-title">
   <h2 id="runtime-posture-title">Runtime posture</h2>
-  <p id="posture" class="note" role="status">Registry: unknown · durability: unknown · Session store: unknown · Auth: unknown · A2A: unknown · Build: unknown</p>
+  <p id="posture" class="note" role="status">Registry: unknown · durability: unknown · Session store: unknown · Auth: unknown · A2A: unknown · Management: unknown · Build: unknown</p>
 </section>
 <div class="layout">
 <aside class="sidebar" aria-label="Session navigation">
@@ -523,7 +523,7 @@ function renderPosture(b) {
   const durability = b.registry_durable === true ? "durable"
     : b.registry_durable === false ? "non-durable — agents are lost on restart" : "durability: unknown";
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.registry_durable === false);
-  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + reported(b.session_backend) + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
+  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + reported(b.session_backend) + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + (b.management_surface === "admin-token-gated" ? "admin-token gated" : b.management_surface === "disabled" ? "disabled" : "unknown") + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
 }
 async function refresh() {
   if (state.sending) return;

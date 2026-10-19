@@ -41,6 +41,7 @@ import (
 // decide the answer.
 var statusScrubbedEnv = []string{
 	"CR_AUTH_TOKEN",
+	"CR_PERMISSIONS_ENABLED", "CR_PERMISSIONS_ADMIN_TOKEN", "CR_PERMISSIONS_DIR",
 	"CR_DATABASE_URL", "DATABASE_URL", "CRIER_DATABASE_URL",
 	"CR_GUARD_ENABLED", "CR_GUARD_DEEPSEEK_BASE_URL", "CR_GUARD_MODEL", "CR_GUARD_KANBAN_URL",
 	"CR_REQUIRE_AGENT_SIG",
@@ -68,6 +69,7 @@ var statusScrubbedEnv = []string{
 // as an undocumented key.
 var statusTopLevelKeys = []string{
 	"auth_enabled",
+	"management_surface",
 	"service_delivery_auth_enabled",
 	"service_delivery_audience_present",
 	"service_delivery_protected_recipient_count",

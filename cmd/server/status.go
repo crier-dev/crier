@@ -278,6 +278,10 @@ type statusResponse struct {
 	// AuthEnabled reports whether a Bearer token is enforced (CR_AUTH_TOKEN
 	// non-empty). False is the documented development posture.
 	AuthEnabled bool `json:"auth_enabled"`
+	// ManagementSurface reports the permissions management authority, not
+	// mere route registration: disabled unless both the ACL and admin token
+	// are armed. No credential or token-derived value is exposed.
+	ManagementSurface string `json:"management_surface"`
 	// RequireAgentSignature reports whether per-agent ed25519 signing is
 	// enforced on agent-scoped routes (CR_REQUIRE_AGENT_SIG, default true).
 	RequireAgentSignature bool `json:"require_agent_signature"`
@@ -391,7 +395,12 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		value := true
 		durable = &value
 	}
+	managementSurface := "disabled"
+	if cfg.Permissions.Enabled && cfg.Permissions.AdminToken != "" {
+		managementSurface = "admin-token-gated"
+	}
 	return statusResponse{
+		ManagementSurface:                      managementSurface,
 		RegistryDurable:                        durable,
 		SessionBackend:                         cfg.ResolvedSessionBackend(),
 		A2AEnabled:                             cfg.A2AEnabled,
