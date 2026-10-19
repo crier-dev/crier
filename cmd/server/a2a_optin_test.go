@@ -375,8 +375,10 @@ func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
 						// INDEPENDENT server boots can never share a
 						// wall-clock sample instant, so compare the
 						// timestamp-free shapes for this route before
-						// declaring a difference.
-						if route == "GET /status" && sameJSONShape(body, on.body[route], []string{"queue_depth_history"}) {
+						// declaring a difference. DF-CRIER-377 also exposes
+						// the switch itself as a2a_enabled; that one value
+						// must differ, not the rest of the status contract.
+						if route == "GET /status" && sameJSONShape(body, on.body[route], []string{"queue_depth_history", "a2a_enabled"}) {
 							continue
 						}
 						t.Errorf("route %s answered differently with the A2A switch on:\noff = %s\n on = %s", route, body, on.body[route])

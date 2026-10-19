@@ -307,6 +307,13 @@ type statusResponse struct {
 	// RegistryBackend is "memory", "sqlite" or "postgres" — the backend actually
 	// serving this process, derived from the same input that selected it.
 	RegistryBackend string `json:"registry_backend"`
+	// RegistryDurable distinguishes answering from surviving a restart. Nil
+	// means the selected backend has no known persistence contract.
+	RegistryDurable *bool `json:"registry_durable"`
+	// SessionBackend is resolved by the same Config method used to open it.
+	SessionBackend string `json:"session_backend"`
+	// A2AEnabled is the effective route-registration switch, not agent support.
+	A2AEnabled bool `json:"a2a_enabled"`
 	// RateLimitPerMinute is the effective relay publish budget; 0 means
 	// unlimited (CR_RATE_LIMIT_PER_MINUTE).
 	RateLimitPerMinute int `json:"rate_limit_per_minute"`
@@ -373,7 +380,20 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 	for _, senders := range policy {
 		pairs += len(senders)
 	}
+	var durable *bool
+	switch registryBackend {
+	case registryBackendMemory:
+		value := false
+		durable = &value
+	case registryBackendPostgres, "sqlite":
+		// Registry SQLite only accepts file paths, never :memory: or URIs.
+		value := true
+		durable = &value
+	}
 	return statusResponse{
+		RegistryDurable:                        durable,
+		SessionBackend:                         cfg.ResolvedSessionBackend(),
+		A2AEnabled:                             cfg.A2AEnabled,
 		ServiceDeliveryAuthEnabled:             len(policy) > 0,
 		ServiceDeliveryAudiencePresent:         cfg.ServiceDeliveryAudience != "",
 		ServiceDeliveryProtectedRecipients:     len(policy),

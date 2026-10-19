@@ -240,7 +240,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   auth_enabled:
                     type: boolean
@@ -311,6 +311,17 @@ paths:
                       the same value that selected the store, so it cannot
                       advertise a backend other than the one answering.
                     example: memory
+                  registry_durable:
+                    type: boolean
+                    nullable: true
+                    description: Whether registry agents survive a process restart; false for memory, true for file-backed sqlite or postgres, null for an unknown backend. This is persistence posture, not a health or backup guarantee
+                  session_backend:
+                    type: string
+                    enum: [jsonl, sqlite, postgres]
+                    description: Effective session store backend, resolved from the same configuration used to open it
+                  a2a_enabled:
+                    type: boolean
+                    description: Whether the server registers the opt-in A2A routes (CR_A2A_ENABLED); not a claim about individual agent support
                   rate_limit_per_minute:
                     type: integer
                     description: Effective relay publish budget (CR_RATE_LIMIT_PER_MINUTE); 0 means unlimited

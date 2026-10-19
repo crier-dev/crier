@@ -1,0 +1,68 @@
+{
+  "preChangeCommit": "11b3a994a2d5c528fd5cb1344acad9ed73d635f9",
+  "rows": [
+    {
+      "outcome": "delivered",
+      "before": "Message recorded; delivered to 1 recipient(s).",
+      "after": "Message recorded; delivered: 1.",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "leased",
+      "before": "Message recorded; delivered to 1 recipient(s).",
+      "after": "Message recorded; leased: 1.",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "acked",
+      "before": "Message recorded; delivered to 1 recipient(s).",
+      "after": "Message recorded; acked: 1.",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "expired",
+      "before": "Message recorded; delivered to 1 recipient(s).",
+      "after": "Message recorded; expired: 1.",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "refused",
+      "before": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.",
+      "after": "Message recorded; refused: 1.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "failed",
+      "before": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.",
+      "after": "Message recorded; failed: 1.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "canned",
+      "before": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.",
+      "after": "Message recorded; canned: 1.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "budget_cut",
+      "before": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.",
+      "after": "Message recorded; budget_cut: 1.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "unreadable_reply",
+      "before": "Message recorded; delivered to 0 recipient(s); 1 recipient(s) not delivered.",
+      "after": "Message recorded; unreadable_reply: 1.",
+      "negative": true,
+      "draftKept": true
+    }
+  ]
+}

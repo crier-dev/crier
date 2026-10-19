@@ -30,7 +30,7 @@ async function freePort() {
   await new Promise(resolve => server.close(resolve));
   return port;
 }
-async function start(token = '') {
+async function start(token = '', registryBackend = 'memory') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-038-')); tempdirs.push(dir);
   const port = processes.length === 0 && process.env.CHAT_TEST_PORT ? Number(process.env.CHAT_TEST_PORT) : await freePort();
   // Binding must succeed before spawning, so readiness cannot measure a stranger.
@@ -40,7 +40,7 @@ async function start(token = '') {
   // Keep only host/toolchain essentials. Ambient production CR_* config must
   // never bind a test to a real database, permission log or peer.
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CR_') && !k.startsWith('CRIER_')));
-  Object.assign(env,{CRIER_PORT:String(port),CR_SESSION_BACKEND:'jsonl',CR_SESSION_LOG_ROOT:path.join(dir,'sessions'),CR_GROUP_ROOT:path.join(dir,'groups'),CR_AUTH_TOKEN:token,CR_GUARD_ENABLED:'false',CR_RATE_LIMIT_PER_MINUTE:'0'});
+  Object.assign(env,{CRIER_PORT:String(port),CR_REGISTRY_BACKEND:registryBackend,CR_REGISTRY_SQLITE_PATH:path.join(dir,'registry.sqlite'),CR_SESSION_BACKEND:'jsonl',CR_SESSION_LOG_ROOT:path.join(dir,'sessions'),CR_GROUP_ROOT:path.join(dir,'groups'),CR_AUTH_TOKEN:token,CR_GUARD_ENABLED:'false',CR_RATE_LIMIT_PER_MINUTE:'0'});
   const log = fs.openSync(path.join(dir,'server.log'),'w');
   const proc = spawn(process.env.CRIER_TEST_BINARY || '/tmp/cr-chat-038-server',[],{cwd:dir,env,stdio:['ignore',log,log]}); processes.push(proc); fs.closeSync(log);
   const url = 'http://127.0.0.1:' + port;
@@ -104,6 +104,7 @@ async function run() {
   await page.goto(base+'/chat'); await waitIdle(page);
   assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038','/chat UI revision must be CR-CHAT-038');
   assert.equal(await page.locator('#send-button').isDisabled(),true);
+  if (process.env.CHAT_MATRIX_ONLY !== '1') await require('./chat-reporting.cjs')(page,base,evidence,start,session,operator,agent);
   await require('./chat-capability-matrix.cjs')(page,evidence);
   verified(base+'/chat: revision CR-CHAT-038, identity-gated send; declared-capability matrix (intercepted registry fixtures)');
   if (process.env.CHAT_MATRIX_ONLY === '1') { console.log('PASS: MATRIX ONLY; task lifecycle and all remaining full-suite assertions NOT RUN; exit code 0'); return; }
@@ -324,7 +325,7 @@ async function run() {
   await refresh(page);
   await page.locator('#initial-members').selectOption([operator,agent]); // self is deduplicated
   await refresh(page);
-  assert.deepEqual(await page.locator('#initial-members').evaluate(el => Array.from(el.selectedOptions,o => o.value)),[operator,agent]);
+  assert.deepEqual(await page.locator('#initial-members').evaluate(el => Array.from(el.selectedOptions,o => o.value).sort()),[operator,agent].sort());
   await page.locator('#session-title').fill('Created by browser form'); await page.locator('#create-button').click(); await waitIdle(page);
   const createdID = await page.evaluate(() => state.current);
   const createdMembers = (await api(base,'GET',`/sessions/${createdID}/participants`)).participants;

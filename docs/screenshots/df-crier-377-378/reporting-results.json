@@ -1,0 +1,78 @@
+{
+  "memoryLine": "Registry: memory · non-durable — agents are lost on restart · Session store: jsonl · Auth: disabled · A2A: disabled · Build: dev / 11b3a994 (modified)",
+  "sqliteLine": "Registry: sqlite · durable · Session store: jsonl · Auth: disabled · A2A: disabled · Build: dev / 11b3a994 (modified)",
+  "measurements": [
+    {
+      "viewport": 390,
+      "overflow": 0,
+      "postureOverflow": 0
+    },
+    {
+      "viewport": 768,
+      "overflow": 0,
+      "postureOverflow": 0
+    },
+    {
+      "viewport": 1280,
+      "overflow": 0,
+      "postureOverflow": 0
+    }
+  ],
+  "outcomes": [
+    {
+      "outcome": "delivered",
+      "line": "Message recorded; delivered: 1.\nui-test-recipient: delivered",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "leased",
+      "line": "Message recorded; leased: 1.\nui-test-recipient: leased",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "acked",
+      "line": "Message recorded; acked: 1.\nui-test-recipient: acked",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "expired",
+      "line": "Message recorded; expired: 1.\nui-test-recipient: expired",
+      "negative": false,
+      "draftKept": false
+    },
+    {
+      "outcome": "refused",
+      "line": "Message recorded; refused: 1.\nui-test-recipient: delivery refused\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "failed",
+      "line": "Message recorded; failed: 1.\nui-test-recipient: failed\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "canned",
+      "line": "Message recorded; canned: 1.\nui-test-recipient: canned\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "budget_cut",
+      "line": "Message recorded; budget_cut: 1.\nui-test-recipient: budget_cut\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added.",
+      "negative": true,
+      "draftKept": true
+    },
+    {
+      "outcome": "unreadable_reply",
+      "line": "Message recorded; unreadable_reply: 1.\nui-test-recipient: unreadable_reply\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result.",
+      "negative": true,
+      "draftKept": true
+    }
+  ],
+  "method": "Real memory/sqlite status; future/missing/error status and outcome responses explicitly intercepted for reporting tests"
+}

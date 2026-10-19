@@ -103,6 +103,9 @@ var statusTopLevelKeys = []string{
 	"queue_depth_history",
 	"rate_limit_per_minute",
 	"registry_backend",
+	"registry_durable",
+	"session_backend",
+	"a2a_enabled",
 	"require_agent_signature",
 	"webhook_signing",
 }

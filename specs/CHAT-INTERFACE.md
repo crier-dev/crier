@@ -151,6 +151,31 @@ there is no separate reply store or rendering path. This implements D1 without l
 answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
 an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
 
+### Operator posture and outcome reporting (DF-CRIER-377, DF-CRIER-378)
+
+The embedded `/chat` page shows an always-visible Runtime posture block directly below its
+Health header, outside Connection & identity. It consumes `/status` fields `registry_backend`,
+`registry_durable`, `session_backend`, `auth_enabled`, `a2a_enabled` and `build.version` /
+`build.commit` (plus `build.modified`). Registry durability is reported by the server: false
+for memory, true for file-backed SQLite/PostgreSQL, null for an unknown backend. A non-durable
+registry is described beside Health as "agents are lost on restart". Session backend and
+registry durability are independent facts; durable session storage does not preserve memory
+agents. Missing fields render "unknown"; a failed status read replaces stale posture with an
+explicit unknown/error. No backend compatibility list is maintained in the client.
+
+Send notices count each exact outcome name separately (for example `leased: 1; refused: 1`),
+without changing outcomes or HTTP message shapes. Only `delivered` contributes to the server's
+existing `delivered` counter. Only `refused` contributes to `skipped` / `skipped_agents`;
+`leased`, `acked`, `expired`, `failed`, `canned`, `budget_cut` and `unreadable_reply` keep their
+own words in `outcomes` rather than being reclassified as delivered or refused.
+
+`failed`, `canned` and `unreadable_reply` are negative in both transcript and send notice and
+retain the draft and reply context, including mixed outcomes. Existing refused/budget-cut
+negative styling and all-refused/failed/budget-cut retry eligibility remain unchanged. Keeping
+a draft is not a retry grant: canned/unreadable or mixed results still clear the old request
+key, and the notice warns that sending the retained draft records a new message. Delivery,
+replay and storage rules are unchanged.
+
 ### Delivery cuts and retry evidence (DF-CRIER-354)
 
 A blocking delivery whose full response did not arrive inside its per-target budget

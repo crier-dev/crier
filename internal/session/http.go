@@ -1018,23 +1018,21 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	return view, true
 }
 
-// summarizeFanout records a send's partial-success counts on its response:
-// how many targets were delivered and which targets were SKIPPED (refused).
-// It is a projection of the outcomes the response already carries, so the
-// summary is derived, never a second source of truth — and a skipped target
-// keeps its own `refused` reason beside the count.
+// summarizeFanout projects the exact outcome vocabulary into the existing
+// response counters: delivered counts only delivered, skipped only refused.
+// Leased, acked, expired and runtime non-answers remain distinct in Outcomes;
+// they are neither relabelled as delivered nor collapsed into refused/skipped.
 func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 	seen := make(map[string]bool, len(outcomes))
 	for _, o := range outcomes {
-		// Runtime-negative verdicts are neither delivered answers nor skipped
-		// deliveries. Their per-target outcome remains visible separately.
-		if o.Outcome == OutcomeCanned || o.Outcome == OutcomeFailed || o.Outcome == OutcomeBudgetCut || o.Outcome == OutcomeUnreadableReply || o.Outcome == OutcomeInProgress {
+		// Only a delivered outcome is a delivered answer (DF-CRIER-378).
+		// leased/acked/expired/canned/failed/budget_cut/unreadable_reply/
+		// in_progress stay visible per target and are never counted here.
+		if o.Outcome == OutcomeDelivered {
+			v.Delivered++
 			continue
 		}
-		// Only a refused delivery is a skip. The remaining lifecycle states
-		// (delivered/leased/acked/expired) still count as received.
 		if o.Outcome != OutcomeRefused {
-			v.Delivered++
 			continue
 		}
 		v.Skipped++

@@ -39,7 +39,7 @@ let outcomes=[];async function call(){return {outcomes}}
   outcomes=[{target:'echo-agent',outcome:'delivered'},{target:'ghost',outcome:'refused',detail:'no such agent "ghost" (AGENT_NOT_FOUND): agent not found: "ghost"'}];
   await send({preventDefault(){}});
   const partial=notices.at(-1)[1];
-  assert.equal(partial,'Message recorded; delivered to 1 recipient(s); 1 recipient(s) not delivered.\necho-agent: delivered\nghost: no such agent (465) — no such agent "ghost" (AGENT_NOT_FOUND): agent not found: "ghost"');
+  assert.equal(partial,'Message recorded; delivered: 1; refused: 1.\necho-agent: delivered\nghost: no such agent (465) — no such agent "ghost" (AGENT_NOT_FOUND): agent not found: "ghost"');
   assert.ok(!partial.includes('delivery refused'));
   assert.equal($('text').value,'','partial success must not invite duplicate delivery');
   $('text').value='again';outcomes=[{target:'echo-agent',outcome:'refused',detail:'delivery failed (403): policy denied'}];

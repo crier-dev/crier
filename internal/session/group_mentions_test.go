@@ -169,11 +169,9 @@ func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
 		"a skipped target is SHOWN with its reason, never swallowed")
 }
 
-// TestSummarizeFanout_OnlyRefusalIsASkip: the partial-success summary counts a
-// REFUSED target as skipped and every OTHER delivery state — including the
-// leased/acked/expired lifecycle a retried send carries forward from its own
-// prior outcomes — as DELIVERED. A re-send therefore never misreports an
-// already-received target as skipped (DF-CRIER-305).
+// TestSummarizeFanout_OnlyRefusalIsASkip: refused is skipped, delivered is
+// delivered, and leased/acked/expired retain their distinct lifecycle words
+// in per-target outcomes without being counted as either (DF-CRIER-378).
 func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
 	var v transcriptMessage
 	summarizeFanout(&v, []DeliveryOutcome{
@@ -183,7 +181,7 @@ func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
 		{Target: "vega", Outcome: OutcomeExpired},
 		{Target: "ghost", Outcome: OutcomeRefused, Reason: `agent not found: "ghost"`},
 	})
-	require.Equal(t, 4, v.Delivered, "delivered + leased + acked + expired are all received")
+	require.Equal(t, 1, v.Delivered, "only delivered is delivered; lifecycle states stay distinct")
 	require.Equal(t, 1, v.Skipped, "only a refused delivery is a skip")
 	require.Equal(t, []string{"ghost"}, v.SkippedAgents)
 }

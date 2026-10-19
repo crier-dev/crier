@@ -36,6 +36,7 @@ function mutated(name, before, after) {
 try {
   // Copies require the same test helper but never rewrite the worktree.
   fs.copyFileSync(path.join(__dirname,'chat-capability-matrix.cjs'),path.join(root,'chat-capability-matrix.cjs'));
+  fs.copyFileSync(path.join(__dirname,'chat-reporting.cjs'),path.join(root,'chat-reporting.cjs'));
   const script = path.join(__dirname,'chat-ui-browser.cjs');
   const clean = run('clean',script);
   if (clean.status === 77) {
