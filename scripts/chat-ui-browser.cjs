@@ -7,7 +7,6 @@
 // CHAT_TEST_PORT optionally pins the first scratch listener (e.g. 18874);
 // CRIER_TEST_BINARY selects the rebuilt binary, also used for both agent keygens.
 // CHAT_MATRIX_ONLY=1 runs just the DF-CRIER-360 registry/matrix browser regressions.
-const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const {spawn,spawnSync} = require('node:child_process');
 const fs = require('node:fs');
@@ -15,9 +14,13 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const {randomBytes} = require('node:crypto');
-const root = path.resolve(__dirname, '..');
-const evidence = process.env.CHAT_EVIDENCE || path.join(os.tmpdir(), 'cr-chat-038-evidence');
+const {pathToFileURL} = require('node:url');
+// Unique by default: a failed repeat must not leave a previous PASS report.
+const evidence = process.env.CHAT_EVIDENCE || fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-browser-evidence-'));
 fs.mkdirSync(evidence,{recursive:true});
+const apiChecks = [], browserChecks = [];
+function verified(action) { browserChecks.push(action); console.log('BROWSER VERIFIED: '+action); }
+function skip(reason) { console.error('SKIP: '+reason+'; exit code 77 (no browser assertions ran)'); process.exitCode=77; }
 const processes = [], tempdirs = [];
 let browser;
 async function freePort() {
@@ -53,11 +56,30 @@ async function api(base, method, endpoint, body, headers = {}) {
   const raw = await response.text();
   const json = raw ? JSON.parse(raw) : null;
   assert.ok(response.ok, method+' '+endpoint+' '+response.status+' '+JSON.stringify(json));
+  apiChecks.push({method,url:base+endpoint,status:response.status});
+  console.log('API VERIFIED (not a browser action): '+method+' '+base+endpoint+' -> '+response.status);
   return json;
 }
 async function waitIdle(page) { await page.waitForFunction(() => !state.sending && !state.busy && document.getElementById('refresh-state').textContent.startsWith('Last HTTP refresh')); }
 async function refresh(page) { await page.locator('#refresh').click(); await waitIdle(page); }
 async function run() {
+  let chromium;
+  try { require.resolve('playwright'); }
+  catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') throw error;
+    skip('Playwright is not installed; npm install --prefix /tmp/crier-browser playwright and set NODE_PATH=/tmp/crier-browser/node_modules');
+    return;
+  }
+  ({chromium} = require('playwright'));
+  const executablePath = process.env.CHROME_BIN || '/usr/bin/google-chrome';
+  try { fs.accessSync(executablePath,fs.constants.X_OK); }
+  catch (error) { skip('Chromium executable unavailable at '+executablePath+' ('+error.code+'); set CHROME_BIN to an executable browser'); return; }
+  // Launch before creating any scratch records; launch crashes are FAIL, not SKIP.
+  browser = await chromium.launch({executablePath,headless:true,args:['--no-sandbox']});
+  console.log('BROWSER: real headless Chromium at '+executablePath);
+  console.log('FIXTURES: temporary JSONL sessions, in-memory registry, generated agents/messages; no production records.');
+  console.log('INJECTIONS: matrix registry/hostile data, storage denial, UI-state gates, canned HTTP faults and delayed reads are test-only, not live server behavior.');
+  console.log('LIMITATIONS: no agent runtime executes the task; completion uses explicit browser fetch, not an evidence-entry UI (none exists). Protected /chat checks are HTTP fetches, not browser sign-in.');
   const base = await start();
   // These are deliberately identified as test records, not demo product data.
   const operator = 'ui-test-operator', agent = 'ui-test-recipient';
@@ -77,14 +99,14 @@ async function run() {
   // A long unbroken body and malicious-looking markup must remain readable text.
   const long = 'UNBROKEN_'+'x'.repeat(800)+'\n<img src=x onerror="window.__injected=true">';
   await api(base,'POST',`/sessions/${session.id}/messages`,{sender:agent,parent_id:message.id,payload:{text:long},message_kind:'addressed'});
-  browser = await chromium.launch({executablePath:process.env.CHROME_BIN || '/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
   const context = await browser.newContext({viewport:{width:1280,height:1000}});
   const page = await context.newPage(); const errors = []; page.on('pageerror',e => errors.push(e.message));
   await page.goto(base+'/chat'); await waitIdle(page);
-  assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038');
+  assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038','/chat UI revision must be CR-CHAT-038');
   assert.equal(await page.locator('#send-button').isDisabled(),true);
   await require('./chat-capability-matrix.cjs')(page,evidence);
-  if (process.env.CHAT_MATRIX_ONLY === '1') return;
+  verified(base+'/chat: revision CR-CHAT-038, identity-gated send; declared-capability matrix (intercepted registry fixtures)');
+  if (process.env.CHAT_MATRIX_ONLY === '1') { console.log('PASS: MATRIX ONLY; task lifecycle and all remaining full-suite assertions NOT RUN; exit code 0'); return; }
   // DF-CRIER-332: no silent persistence; exactly one opted-in attribution slot.
   const storage = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));
   const attributionKey = 'crier.chat.attribution-id';
@@ -191,21 +213,57 @@ async function run() {
       await page.evaluate(() => { Object.assign(state,window.__gateSaved); delete window.__gateSaved; updateComposer(); });
     }
   };
+  // Act as the recipient for BOTH transitions, never spoof ownership in storage.
+  await page.locator('#agent').fill(agent); await page.locator('#apply-identity').click(); await waitIdle(page);
+  await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
+  const taskPath = `/sessions/${session.id}/tasks/${taskID}`;
+  let taskEvidence;
   for (const [action,expected] of [['claim','claimed'],['complete','done']]) {
     await assertActionGates(action);
-    const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/tasks/'+taskID+'/'+action));
+    const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith(taskPath+'/'+action));
     await page.locator('[data-task-action="'+action+'"]').click();
-    const wire = await response; assert.equal(wire.status(),201);
+    const wire = await response;
     const result = await wire.json(); await waitIdle(page);
-    assert.equal(result.state,expected); assert.equal(result.owner,operator);
-    assert.equal(JSON.parse(wire.request().postData()).actor,operator);
-    const stored = (await api(base,'GET',`/sessions/${session.id}/tasks`)).tasks.find(t => t.task_id === taskID);
-    assert.equal(stored.state,expected); assert.equal(stored.owner,operator);
-    assert.match(await page.locator('#task-result').innerText(),new RegExp(expected));
+    assert.equal(JSON.parse(wire.request().postData()).actor,agent,'task '+action+' browser actor');
+    if (action === 'claim') {
+      assert.equal(wire.status(),201,'POST '+taskPath+'/claim: '+JSON.stringify(result));
+      assert.equal(result.state,expected); assert.equal(result.owner,agent);
+      verified('UI Claim button POST '+base+taskPath+'/claim -> 201; owner '+agent);
+      await page.locator('#tasks').screenshot({path:path.join(evidence,'chat-task-claimed.png')});
+    } else {
+      // The stock UI has no evidence field. Its bare Complete button must be
+      // refused, not called a successful completion or hidden by a canned 201.
+      assert.equal(wire.status(),409,'bare UI Complete must require evidence: '+JSON.stringify(result));
+      assert.equal(result.error,'TASK_EVIDENCE_REQUIRED','bare Complete refusal code');
+      assert.match(await page.locator('#task-result').innerText(),/TASK_EVIDENCE_REQUIRED/);
+      const unchanged = await api(base,'GET',taskPath);
+      assert.equal(unchanged.state,'claimed'); assert.equal(unchanged.owner,agent);
+      verified('UI Complete button POST '+base+taskPath+'/complete -> real 409 TASK_EVIDENCE_REQUIRED; refusal rendered; API task unchanged');
+      const artifact = path.join(evidence,'task-evidence.json');
+      // Evidence is what this browser actually measured BEFORE completion, not
+      // a promised future run, invented runtime result or canned server reply.
+      const observed = {taskID,owner:agent,chatURL:base+'/chat',checks:[...browserChecks],screenshot:pathToFileURL(path.join(evidence,'chat-task-claimed.png')).href};
+      fs.writeFileSync(artifact,JSON.stringify(observed,null,2));
+      taskEvidence = {artifact:pathToFileURL(artifact).href,observed};
+      const completion = await page.evaluate(async ({endpoint,actor,payload}) => {
+        const response = await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor,actor_kind:'agent',payload})});
+        return {status:response.status,body:await response.json()};
+      },{endpoint:taskPath+'/complete',actor:agent,payload:taskEvidence});
+      assert.equal(completion.status,201,'browser fetch POST '+taskPath+'/complete: '+JSON.stringify(completion.body));
+      assert.equal(completion.body.state,expected); assert.equal(completion.body.owner,agent);
+      await refresh(page);
+      verified('BROWSER FETCH (not Complete form) POST '+base+taskPath+'/complete -> 201; same owner '+agent+'; real evidence '+taskEvidence.artifact);
+    }
+    const stored = await api(base,'GET',taskPath);
+    assert.equal(stored.state,expected); assert.equal(stored.owner,agent);
+    if (action === 'complete') assert.deepEqual(stored.evidence,taskEvidence,'GET task must retain the exact evidence sent');
+    assert.match(await page.locator('#task-result').innerText(),new RegExp(action === 'claim' ? expected : 'TASK_EVIDENCE_REQUIRED'));
     assert.match(await page.locator('#tasks').innerText(),new RegExp(expected));
-    transitions.push({state:result.state,owner:result.owner});
-    if (action === 'claim') await page.locator('#tasks').screenshot({path:path.join(evidence,'chat-task-claimed.png')});
+    transitions.push({state:stored.state,owner:stored.owner});
   }
+  verified('task open -> claimed -> done; exact stored evidence; refreshed task DOM done');
+  await page.locator('#agent').fill(operator); await page.locator('#apply-identity').click(); await waitIdle(page);
+  await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
   assert.equal(await page.locator('[data-task-action]').count(),0); // terminal, no invalid actions
   await page.locator('#tasks').screenshot({path:path.join(evidence,'chat-task-done.png')});
   // Real per-target refusal: remove a previously selected registered recipient.
@@ -216,8 +274,8 @@ async function run() {
   await refresh(page);
   assert.equal(await page.locator('#recipient').inputValue(),agent); // do not silently broadcast
   await page.locator('#text').fill('This delivery must be refused'); await page.locator('#send-button').click(); await waitIdle(page);
-  assert.match(await page.locator('#send-result').innerText(),/refused/);
-  assert.match(await page.locator('#transcript').innerText(),/refused/);
+  assert.match(await page.locator('#send-result').innerText(),/no such agent \(465\).*AGENT_NOT_FOUND/);
+  assert.match(await page.locator('#transcript').innerText(),/no such agent \(465\).*AGENT_NOT_FOUND/);
   const refusal = (await api(base,'GET',`/sessions/${session.id}/messages`)).messages.find(m => m.payload?.text === 'This delivery must be refused');
   assert.equal(refusal.outcomes[0].outcome,'refused');
   // Controlled transport faults exist only in this test browser, not product code.
@@ -307,7 +365,7 @@ async function run() {
   // The server's message is shown verbatim, not replaced by a generic failure.
   await page.route(`**/sessions/${soloID}/participants`,route => route.request().method() === 'POST' ? route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:{code:'TEST_REFUSAL',message:'Exact participant refusal from test server.'}})}) : route.continue());
   await page.locator('#participant-agent').fill(agent); await page.locator('#add-participant').click(); await waitIdle(page);
-  assert.equal(await page.locator('#participant-result').innerText(),'Exact participant refusal from test server.');
+  assert.equal(await page.locator('#participant-result').innerText(),'HTTP 403: TEST_REFUSAL: Exact participant refusal from test server.');
   await page.unroute(`**/sessions/${soloID}/participants`);
   const addResponse = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/sessions/'+soloID+'/participants'));
   await page.locator('#add-participant').click(); const addedWire = await addResponse;
@@ -323,7 +381,7 @@ async function run() {
   await page.locator('#send-button').click(); await waitIdle(page); assert.equal(messagePosts,2);
   const delivered = (await api(base,'GET',`/sessions/${soloID}/messages`)).messages.find(m => m.payload?.text === 'Now the added member receives this');
   assert.ok(delivered.outcomes.some(o => o.target === agent && o.outcome !== 'refused'));
-  const completion = {session:session.id,taskID,transitions,soloSession:soloID,warningText,firstClickPosts:0,secondClickPosts:1,noteAudience:note.audience,addedParticipant:added,storedParticipant:roster.find(p => p.member_id === agent),recipientOutcomes:delivered.outcomes};
+  const completion = {session:session.id,taskID,transitions,evidence:taskEvidence,completionMethod:'browser fetch with evidence; bare UI Complete refused 409',soloSession:soloID,warningText,firstClickPosts:0,secondClickPosts:1,noteAudience:note.audience,addedParticipant:added,storedParticipant:roster.find(p => p.member_id === agent),recipientOutcomes:delivered.outcomes};
   fs.writeFileSync(path.join(evidence,'completion-results.json'),JSON.stringify(completion,null,2));
   // Attribute escaping: inject hostile-looking values into the read response
   // only, then prove no extra element or event attribute reached the DOM.
@@ -339,13 +397,14 @@ async function run() {
   const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
   assert.match(await authorized.text(),/data-ui-revision="CR-CHAT-038"/);
   assert.deepEqual(errors,[]);
-  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},completion,checks:['participant datalist + browser POST + API roster readback; verbatim refusal','task open/claimed/done API and UI readback; both action gates use the composer reason','zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click','opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
+  verified(base+'/chat: attribution opt-in/reload/forget/storage denial; thread isolation and reply; addressing vs task intent; refusal and draft retention; stale-read isolation; no DOM XSS; create and participant forms; empty search; zero-recipient confirmation; controls and transcript reachable at 390/768/1280; no page errors');
+  const report = {apiChecks,browserChecks,protectedBase,limitations:['No runtime task execution; evidence describes harness observations only','Complete UI has no evidence entry: button refusal verified, successful completion is explicit browser fetch','Auth boundary is Node HTTP fetch, not browser login','Capability matrix, transport failures, hostile responses and storage denial use test-only fixtures','CHAT_MATRIX_ONLY=1 omits full-suite checks'],method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},completion,checks:['participant datalist + browser POST + API roster readback; verbatim refusal','task Claim UI and evidence-bearing browser fetch; bare Complete real 409; exact evidence API readback and refreshed task DOM; both action gates use the composer reason','zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click','opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
   fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify(report,null,2));
-  console.log(JSON.stringify(report,null,2)); console.log('PASS: browser behavior and 3 viewport checks. Evidence: '+evidence);
+  console.log(JSON.stringify(report,null,2)); console.log('PASS: full browser suite and 3 viewport checks; exit code 0. Evidence: '+evidence);
 }
-run().catch(error => {console.error(error); process.exitCode=1;}).finally(async () => {
+run().catch(error => {console.error('FAIL: browser harness; exit code 1'); console.error(error); process.exitCode=1;}).finally(async () => {
   if (browser) await browser.close();
   for (const proc of processes) { proc.kill('SIGTERM'); await Promise.race([new Promise(r => proc.once('exit',r)),new Promise(r => setTimeout(r,3000))]); if (proc.exitCode === null) proc.kill('SIGKILL'); }
   // Keep scratch logs on failure for attribution; never clean shared paths.
-  if (process.exitCode) console.error('Scratch server logs: '+tempdirs.join(', '));
+  if (process.exitCode === 1 && tempdirs.length) console.error('Scratch server logs: '+tempdirs.join(', '));
 });
