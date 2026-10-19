@@ -41,7 +41,7 @@ func newGroupHarness(t *testing.T, agents ...string) *apiHarness {
 	store, err := NewJSONLGroupStore(t.TempDir())
 	require.NoError(t, err)
 	reg := registryForAgents(t, agents...)
-	h := NewHTTPHandler(newJSONLSessionStore(t), HTTPOptions{Deliverer: reg, Agents: reg, Groups: store})
+	h := NewHTTPHandler(newJSONLSessionStore(t), HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg, Groups: store})
 	r := newMuxWithGroupRoutes(h)
 	srv := newTestServer(t, r)
 	return &apiHarness{srv: srv, reg: reg}

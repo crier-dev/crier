@@ -57,7 +57,7 @@ func newTaskHarness(t *testing.T, store Repository) *taskHarness {
 	for _, id := range []string{fixAgentA, fixAgentB} {
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
-	handler := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
+	handler := NewHTTPHandler(store, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 
 	// The ACL, armed: principals + the agent class rows + grants.
 	now := time.Now().UTC()

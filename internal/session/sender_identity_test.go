@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/crier-dev/crier/internal/registry"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,7 @@ func TestSignatureEnforcementWithoutVerifierFailsClosed(t *testing.T) {
 	repo := newTestSQLiteStore(t)
 	harness := newAPIHarness(t, repo)
 	room := harness.createRoom(t)
-	handler := NewHTTPHandler(repo, HTTPOptions{Deliverer: harness.reg, Agents: harness.reg, RequireAgentSignature: true})
+	handler := NewHTTPHandler(repo, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(harness.reg)), Agents: harness.reg, RequireAgentSignature: true})
 	for _, offered := range []bool{false, true} {
 		request := httptest.NewRequest(http.MethodPost, "/sessions/"+room+"/messages", bytes.NewBufferString(`{"sender":"atlas","payload":{"text":"must not record"}}`))
 		request = mux.SetURLVars(request, map[string]string{"id": room})

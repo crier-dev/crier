@@ -38,7 +38,7 @@ func newAPIHarnessWith(t *testing.T, store Repository, opts HTTPOptions) *apiHar
 	for _, id := range []string{fixAgentA, fixAgentB} {
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
-	opts.Deliverer = reg
+	opts.Deliverer = registry.NewSessionDeliverer(registry.NewHandler(reg))
 	opts.Agents = reg
 	h := NewHTTPHandler(store, opts)
 	r := mux.NewRouter()

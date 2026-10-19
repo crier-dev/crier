@@ -81,7 +81,7 @@ func newAPIHarness(t *testing.T, store Repository) *apiHarness {
 	for _, id := range []string{"atlas", "nimbus", "nimbus-2", "nimbus-3", "nimbus-4"} {
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
-	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
+	h := NewHTTPHandler(store, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 	r := mux.NewRouter()
 	registerSessionRoutes(r, h)
 	srv := httptest.NewServer(r)
@@ -98,7 +98,7 @@ func newAPIHarnessWithGrants(t *testing.T, store Repository, grants []Permission
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
 	h := NewHTTPHandler(store, HTTPOptions{
-		Deliverer: reg,
+		Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)),
 		Agents:    reg,
 		GrantEvents: func(_ context.Context, sessionID string) ([]PermissionsGrantView, error) {
 			return grants, nil
@@ -465,7 +465,7 @@ func TestSessionAPI_FanoutRefusesCrossRealmTarget(t *testing.T) {
 	require.NoError(t, reg.Register(&registry.Agent{ID: fixAgentA}))
 	require.NoError(t, reg.Register(&registry.Agent{ID: "outsider", Namespace: "other-realm"}))
 
-	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
+	h := NewHTTPHandler(store, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 	r := mux.NewRouter()
 	r.HandleFunc("/sessions", h.HandleCreateSession).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)

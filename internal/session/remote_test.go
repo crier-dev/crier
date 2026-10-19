@@ -44,7 +44,7 @@ func newInstance(t *testing.T) *fedPeerInstance {
 	store, err := NewJSONLStore(t.TempDir() + "/log")
 	require.NoError(t, err)
 	reg := registry.NewMemoryStore()
-	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
+	h := NewHTTPHandler(store, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 	r := mux.NewRouter()
 	registerSessionRoutes(r, h)
 	r.HandleFunc("/agents/{id}/inbox", func(w http.ResponseWriter, req *http.Request) {

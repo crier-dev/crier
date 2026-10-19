@@ -203,7 +203,7 @@ func newBenchEnv(b *testing.B, name string) *benchEnv {
 			b.Fatalf("register %s: %v", id, err)
 		}
 	}
-	h := NewHTTPHandler(store, HTTPOptions{Deliverer: reg, Agents: reg})
+	h := NewHTTPHandler(store, HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 	r := mux.NewRouter()
 	registerSessionRoutes(r, h)
 	srv := httptest.NewServer(r)

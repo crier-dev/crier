@@ -28,9 +28,9 @@ type requestExecutionCounter struct {
 	calls *atomic.Int32
 }
 
-func (d requestExecutionCounter) Deliver(target string, entry *registry.InboxEntry) error {
+func (d requestExecutionCounter) DispatchDelivery(ctx context.Context, target string, req registry.DeliveryRequest) (registry.DeliveryResult, error) {
 	d.calls.Add(1)
-	return d.MemoryStore.Deliver(target, entry)
+	return registry.NewSessionDeliverer(registry.NewHandler(d.MemoryStore)).DispatchDelivery(ctx, target, req)
 }
 
 func newRequestExecutionHarness(t *testing.T, store Repository, calls *atomic.Int32) *apiHarness {
@@ -134,11 +134,15 @@ type heldRequestDeliverer struct {
 	once    sync.Once
 }
 
-func (d *heldRequestDeliverer) Deliver(_ string, _ *registry.InboxEntry) error {
+func (d *heldRequestDeliverer) Deliver(string, *registry.InboxEntry) error {
+	panic("fan-out must use the guarded dispatcher")
+}
+
+func (d *heldRequestDeliverer) DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error) {
 	d.calls.Add(1)
 	d.once.Do(func() { close(d.started) })
 	<-d.release
-	return nil
+	return registry.DeliveryResult{}, nil
 }
 
 func TestMessageRequestIdempotencyConcurrent(t *testing.T) {

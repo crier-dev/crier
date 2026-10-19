@@ -17,7 +17,7 @@ func TestProtectedRecipientRejectsSessionFanoutBypass(t *testing.T) {
 	policy, _ := registry.ParseServiceDeliveryAllowlist("scheduler>router")
 	secured := registry.NewAuthorityStore(base, policy, "relay-a")
 	msg := &Message{ID: "m1", SessionID: "s1", ThreadID: "t1", Payload: json.RawMessage(`{"x":1}`)}
-	outcomes, err := Fanout(context.Background(), secured, msg, []string{"router"}, nil)
+	outcomes, err := Fanout(context.Background(), registry.NewSessionDeliverer(registry.NewHandler(secured)), msg, []string{"router"}, nil)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != OutcomeRefused {
 		t.Fatalf("outcomes=%+v err=%v", outcomes, err)
 	}

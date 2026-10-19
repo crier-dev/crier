@@ -11,7 +11,8 @@
 //     State the JSONL log and the SQL view already reduce to;
 //   - a message reaches its recipients through the SHIPPED inbox path —
 //     session.Fanout issues one delivery per participant through
-//     registry.Store.Deliver — so there is no second delivery path (D1, §3.4);
+//     registry.SessionDeliverer.DispatchDelivery — so there is no unguarded
+//     store fallback (D1, §3.4);
 //   - every surface is REALM-SCOPED (§4 row 38): a session carries the
 //     namespace it was created in, its reads and writes resolve the same
 //     X-Crier-Namespace / X-Crier-Namespace-Token convention the relay and the
@@ -80,8 +81,9 @@ type HTTPOptions struct {
 	// AuthorizeSender reuses the live registry signature verifier for every
 	// offered proof, including when enforcement is disabled.
 	AuthorizeSender func(http.ResponseWriter, *http.Request, bool) (bool, bool)
-	// Deliverer is the shipped durable-inbox write every fan-out uses. Nil
-	// means fan-out is unconfigured and a send is refused with
+	// Deliverer must expose the guarded DispatchDelivery capability; a legacy
+	// Deliver-only implementation records refused / DELIVERY_UNGUARDED_UNAVAILABLE.
+	// Nil means fan-out is unconfigured and a send is refused with
 	// 503 SESSION_DELIVERY_UNCONFIGURED rather than silently dropped.
 	Deliverer InboxDeliverer
 	// DeliveryTimeoutMs is passed through DeliveryRequest.TimeoutMs to the
@@ -1064,7 +1066,9 @@ func summarizeFanout(v *transcriptMessage, outcomes []DeliveryOutcome) {
 // the target was addressed through a named group, the warning names it.
 func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf map[string]string) {
 	for _, o := range outcomes {
-		if o.Outcome == OutcomeDelivered {
+		if o.Outcome == OutcomeDelivered || o.Code == codeDeliveryUnguardedUnavailable {
+			// The unavailable-dispatcher refusal is logged at the fan-out
+			// boundary, including for non-HTTP callers. Do not log it twice.
 			continue
 		}
 		if o.Outcome == OutcomeInProgress {

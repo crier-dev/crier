@@ -46,6 +46,17 @@ All non-HTTP dispatches reuse `logNamespaceDeliver` after target-realm auth, wit
 exactly the HTTP audit vocabulary: debug message `inbox deliver scoped to namespace`
 and fields `target`, `namespace`, `sender`. The default realm emits no such line.
 
+Session fan-out requires the `DispatchDelivery` capability (DF-CRIER-381). A
+legacy deliverer exposing only `Deliver` is refused, never called: the target's
+transcript outcome is `refused`, code `DELIVERY_UNGUARDED_UNAVAILABLE`,
+`retryable: false`, with detail `guarded delivery dispatcher unavailable; refusing
+unguarded delivery`. No inbox entry or agent answer bubble is created. The intent
+still persists and the send's existing HTTP response status is unchanged. One
+warning per attempted target names the code, target, message and session; outcome
+reporting does not duplicate that warning, and pure replay makes no attempt.
+Embedders must supply `registry.NewSessionDeliverer` over their live, configured
+registry handler, not a bare store.
+
 ## 2. Agent registration extension
 
 `POST /agents` gains an optional `webhook` object:

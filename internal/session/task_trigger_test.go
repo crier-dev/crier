@@ -34,7 +34,7 @@ func newTriggerHarness(t *testing.T) *triggerHarness {
 	for _, id := range []string{fixAgentA, fixAgentB} {
 		require.NoError(t, reg.Register(&registry.Agent{ID: id}))
 	}
-	handler := NewHTTPHandler(newLocalJSONLStore(t), HTTPOptions{Deliverer: reg, Agents: reg})
+	handler := NewHTTPHandler(newLocalJSONLStore(t), HTTPOptions{Deliverer: registry.NewSessionDeliverer(registry.NewHandler(reg)), Agents: reg})
 	r := mux.NewRouter()
 	registerSessionRoutes(r, handler)
 	srv := httptest.NewServer(r)

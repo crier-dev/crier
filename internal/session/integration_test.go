@@ -269,7 +269,7 @@ func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
 		Kind: MessagePlain, Author: *agentRef("atlas"),
 		Payload: json.RawMessage(`{"text":"three inboxes"}`),
 	}
-	outcomes, err := Fanout(ctx, reg, msg, []string{"nimbus", "kappa", "atlas", "ghost"}, nil)
+	outcomes, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(reg)), msg, []string{"nimbus", "kappa", "atlas", "ghost"}, nil)
 	require.NoError(t, err)
 	require.Len(t, outcomes, 4)
 
@@ -297,7 +297,7 @@ func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
 
 	// A retried fan-out stores nothing new.
 	before := inboxDepth(t, reg, "nimbus")
-	_, err = Fanout(ctx, reg, msg, []string{"nimbus", "kappa", "atlas", "ghost"}, nil)
+	_, err = Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(reg)), msg, []string{"nimbus", "kappa", "atlas", "ghost"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, inboxDepth(t, reg, "nimbus"))
 }

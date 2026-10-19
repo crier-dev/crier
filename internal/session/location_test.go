@@ -62,7 +62,7 @@ func TestLocation_DeliverCarriesLocationOnAccept(t *testing.T) {
 		Payload:   mustJSONRaw(map[string]any{"text": "hello"}),
 		CreatedAt: time.Now().UTC(),
 	}
-	outcomes, err := Fanout(context.Background(), reg, msg, []string{fixAgentA}, nil)
+	outcomes, err := Fanout(context.Background(), registry.NewSessionDeliverer(registry.NewHandler(reg)), msg, []string{fixAgentA}, nil)
 	require.NoError(t, err)
 	require.Len(t, outcomes, 1)
 	require.Equal(t, OutcomeDelivered, outcomes[0].Outcome)

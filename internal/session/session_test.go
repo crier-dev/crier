@@ -590,7 +590,7 @@ func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
 		Kind: MessagePlain, Author: *agentRef("atlas"),
 		Payload: json.RawMessage(`{"text":"all hands"}`),
 	}
-	outcomes, err := Fanout(ctx, store, msg, []string{"nimbus", "kappa", "atlas"}, nil)
+	outcomes, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(store)), msg, []string{"nimbus", "kappa", "atlas"}, nil)
 	require.NoError(t, err)
 	require.Len(t, outcomes, 2)
 
@@ -633,11 +633,11 @@ func TestFanout_RetryDoesNotDoubleDeliver(t *testing.T) {
 	msg := &Message{ID: "msg_one", SessionID: "s1", ThreadID: "msg_one", Kind: MessagePlain,
 		Author: *agentRef("atlas"), Payload: json.RawMessage(`{"text":"once"}`)}
 
-	_, err := Fanout(ctx, store, msg, []string{"nimbus"}, nil)
+	_, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(store)), msg, []string{"nimbus"}, nil)
 	require.NoError(t, err)
 
 	// A retried fan-out reuses the recorded outcome and issues nothing.
-	outcomes, err := Fanout(ctx, store, msg, []string{"nimbus"}, nil)
+	outcomes, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(store)), msg, []string{"nimbus"}, nil)
 	require.NoError(t, err)
 	require.Len(t, outcomes, 1)
 
@@ -653,7 +653,7 @@ func TestFanout_RefusalIsANamedOutcome(t *testing.T) {
 	msg := &Message{ID: "msg_r", SessionID: "s1", ThreadID: "msg_r", Kind: MessagePlain,
 		Author: *agentRef("speaker"), Payload: json.RawMessage(`{"text":"hi"}`)}
 
-	outcomes, err := Fanout(ctx, store, msg, []string{"atlas", "nimbus"}, nil)
+	outcomes, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(store)), msg, []string{"atlas", "nimbus"}, nil)
 	require.NoError(t, err, "a refused target is not a fan-out error")
 	require.Len(t, outcomes, 2)
 	byTarget := map[string]DeliveryOutcome{}

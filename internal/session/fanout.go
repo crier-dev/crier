@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -14,12 +15,20 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 )
 
-// InboxDeliverer is the delivery capability used by fan-out. Production uses
-// registry.SessionDeliverer, which enters the shared guarded dispatcher. Bare
-// stores implement this small interface for storage-only tests, not server wiring.
+// InboxDeliverer retains the legacy composition contract for session callers.
+// A bare store satisfies it but is NOT sufficient to send: fan-out requires
+// guardedInboxDispatcher and records a named refusal if that capability is absent.
+// Production supplies registry.SessionDeliverer over the live registry handler.
 type InboxDeliverer interface {
 	Deliver(agentID string, entry *registry.InboxEntry) error
 }
+
+// guardedInboxDispatcher is the only delivery operation fan-out may invoke.
+type guardedInboxDispatcher interface {
+	DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
+}
+
+const codeDeliveryUnguardedUnavailable = "DELIVERY_UNGUARDED_UNAVAILABLE"
 
 // idempotencyKeyPrefix tags the derived keys so a key minted by a session
 // fan-out is recognisable as one.
@@ -254,9 +263,11 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 			entry.PrincipalID = msg.Author.Principal
 			var deliveryErr error
 			outcome, reason := OutcomeDelivered, ""
-			if dispatcher, ok := deliverer.(interface {
-				DispatchDelivery(context.Context, string, registry.DeliveryRequest) (registry.DeliveryResult, error)
-			}); ok {
+			// Keep this runtime check at the legacy public composition boundary:
+			// changing InboxDeliverer would break existing embedders that pass a
+			// Store. Such wiring must produce an auditable refusal, NEVER a plain
+			// Deliver fallback. Only the narrow guarded capability may send.
+			if dispatcher, ok := deliverer.(guardedInboxDispatcher); ok {
 				result, err := dispatcher.DispatchDelivery(ctx, target, registry.DeliveryRequest{
 					Entry: entry, SessionID: msg.SessionID, RequestID: msg.ID, Kind: string(msg.Kind), TimeoutMs: timeoutMs,
 					NamespaceToken: namespaceToken,
@@ -271,7 +282,17 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 					}
 				}
 			} else {
-				deliveryErr = deliverer.Deliver(target, entry)
+				const reason = "guarded delivery dispatcher unavailable; refusing unguarded delivery"
+				outcomes[i] = DeliveryOutcome{
+					Target: target, Outcome: OutcomeRefused, Code: codeDeliveryUnguardedUnavailable,
+					Reason: reason, UpdatedAt: time.Now().UTC(),
+				}
+				// Log here so direct Fanout callers are covered too. The HTTP
+				// outcome reporter must not emit a second warning for this code.
+				slog.WarnContext(ctx, "fan-out: guarded delivery unavailable", "target", target,
+					"message_id", msg.ID, "session_id", msg.SessionID,
+					"outcome", OutcomeRefused, "code", codeDeliveryUnguardedUnavailable, "reason", reason)
+				return
 			}
 			if err := deliveryErr; err != nil {
 				outcomes[i] = deliveryFailure(target, err)
