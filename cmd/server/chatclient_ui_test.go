@@ -99,7 +99,7 @@ func TestChatClientParticipantAndTaskActions(t *testing.T) {
 		`data-task-action="claim"`, `data-task-action="complete"`,
 		`sessionPath(id,"tasks/" + encodeURIComponent(taskID) + "/" + action)`,
 		`actor:state.agent, actor_kind:"agent"`, `result.state`, `await refresh()`,
-		`function composerReason()`, `const why = composerReason()`,
+		`function composerReason()`, `function composerState()`, `const why = composer.reason`,
 		`document.querySelectorAll("[data-task-action]")`, `aria-describedby="composer-why"`,
 		`t.state === "open"`, `t.state === "claimed" || t.state === "running"`,
 	} {

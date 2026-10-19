@@ -1,0 +1,78 @@
+{
+  "observations": [
+    {
+      "label": "no identity",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "Set an acting agent ID (Connection & identity, left) to enable sending.",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "identity but no channel",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "No channel open — pick or create one.",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "ready",
+      "disabled": false,
+      "sendDisabled": false,
+      "reason": "",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "send in progress",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "Send or session operation in progress — draft kept. Wait for it to finish.",
+      "describedBy": "composer-hint composer-why",
+      "draft": "Keep this draft while recording"
+    },
+    {
+      "label": "send completed",
+      "disabled": false,
+      "sendDisabled": false,
+      "reason": "",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "send authority missing",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "Send authority: agent signatures REQUIRED. This browser cannot sign; sends are refused as SESSION_SENDER_SIGNATURE_REQUIRED and record nothing. Use an authorized signed client; browser authentication remains an open owner decision (DF-CRIER-333).",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "posture unavailable",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "Send authority: unknown — refresh runtime posture before sending. This browser cannot sign; an acting ID is attribution, not a login or verified identity.",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "posture recovered",
+      "disabled": false,
+      "sendDisabled": false,
+      "reason": "",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    },
+    {
+      "label": "closed channel (injected)",
+      "disabled": true,
+      "sendDisabled": true,
+      "reason": "This conversation is closed; sending is unavailable. Pick or create an open channel.",
+      "describedBy": "composer-hint composer-why",
+      "draft": ""
+    }
+  ],
+  "failures": [],
+  "errors": []
+}
