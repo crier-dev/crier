@@ -33,7 +33,8 @@ type PostgresStore struct {
 	// owned records whether this store opened the pool it uses. A borrowed
 	// pool (NewPostgresStoreWithPool — the shipped server already holds one for
 	// the registry) is NOT closed by Close: the caller that opened it owns it.
-	owned bool
+	owned     bool
+	requestTx pgx.Tx // keyed intent + request metadata commit atomically
 }
 
 var _ Store = (*PostgresStore)(nil)
@@ -199,8 +200,8 @@ func NewPostgresStoreWithPool(ctx context.Context, pool *pgxpool.Pool) (*Postgre
 // ApplySchema creates the §5.2 tables and indexes when they are absent. It is
 // idempotent and safe to run at every boot.
 func (s *PostgresStore) ApplySchema(ctx context.Context) error {
-	for _, stmt := range SchemaStatements {
-		if _, err := s.pool.Exec(ctx, stmt); err != nil {
+	for _, stmt := range append(SchemaStatements, messageRequestSchema) {
+		if _, err := s.requestExecutor().Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("session postgres store: apply schema: %w", err)
 		}
 	}
@@ -224,8 +225,26 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
+	if s.requestTx == nil && rec.IdempotencyKey != "" && (rec.Type == RecordMessage || rec.Type == RecordThreadReply) {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		writer := *s
+		writer.requestTx = tx
+		if err := writer.Append(ctx, rec); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	if err := s.project(ctx, rec); err != nil {
 		return err
+	}
+	if (rec.Type == RecordMessage || rec.Type == RecordThreadReply) && rec.IdempotencyKey != "" {
+		if err := s.projectMessageRequest(ctx, rec); err != nil {
+			return err
+		}
 	}
 	return s.recordSeq(ctx, rec)
 }
@@ -246,12 +265,12 @@ func (s *PostgresStore) project(ctx context.Context, rec *Record) error {
 	case RecordThreadBranch:
 		return s.projectThreadBranch(ctx, rec)
 	case RecordClose:
-		_, err := s.pool.Exec(ctx,
+		_, err := s.requestExecutor().Exec(ctx,
 			`UPDATE chat_sessions SET state = 'closed', closed_at = $2 WHERE id = $1`,
 			rec.SessionID, rec.TS.UTC())
 		return err
 	case RecordReopen:
-		_, err := s.pool.Exec(ctx,
+		_, err := s.requestExecutor().Exec(ctx,
 			`UPDATE chat_sessions SET state = 'open', closed_at = NULL WHERE id = $1`,
 			rec.SessionID)
 		return err
@@ -264,7 +283,7 @@ func (s *PostgresStore) project(ctx context.Context, rec *Record) error {
 // record's seq — the one place this backend remembers how far a session's
 // record stream has run (CR-CHAT-019).
 func (s *PostgresStore) recordSeq(ctx context.Context, rec *Record) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_seq (session_id, last_seq) VALUES ($1, $2)
 		ON CONFLICT (session_id) DO UPDATE SET last_seq =
 			CASE WHEN EXCLUDED.last_seq > chat_seq.last_seq THEN EXCLUDED.last_seq ELSE chat_seq.last_seq END`,
@@ -332,7 +351,7 @@ func (s *PostgresStore) projectSessionCreate(ctx context.Context, rec *Record) e
 	if kind == "" {
 		kind = DefaultKind
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_sessions
 			(id, namespace, kind, title, created_by, created_at, state, closed_at, retention_seconds, group_id, visibility)
 		VALUES ($1,$2,$3,$4,$5,$6,'open',NULL,$7,$8,$9)
@@ -353,7 +372,7 @@ func (s *PostgresStore) projectSessionCreate(ctx context.Context, rec *Record) e
 }
 
 func (s *PostgresStore) projectMemberAdd(ctx context.Context, rec *Record) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_session_members
 			(session_id, member_type, member_id, role, added_at, removed_at, added_by, removed_by)
 		VALUES ($1,$2,$3,$4,$5,NULL,$6,'')
@@ -381,7 +400,7 @@ func (s *PostgresStore) projectMemberContext(ctx context.Context, rec *Record) e
 }
 
 func (s *PostgresStore) projectContextShare(ctx context.Context, rec *Record, cs *ContextShare) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_context_shares
 			(session_id, member_type, member_id, mode, boundary_message_id, set_by, set_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -399,7 +418,7 @@ func (s *PostgresStore) projectContextShare(ctx context.Context, rec *Record, cs
 }
 
 func (s *PostgresStore) projectMemberRemove(ctx context.Context, rec *Record) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.requestExecutor().Exec(ctx, `
 		UPDATE chat_session_members
 		SET removed_at = $4, removed_by = $5
 		WHERE session_id = $1 AND member_type = $2 AND member_id = $3`,
@@ -423,7 +442,7 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 		}
 	}
 	authorType, authorID, principalID := splitAuthor(rec.Author)
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_transcript
 			(session_id, seq, message_id, thread_id, parent_id, message_kind,
 			 author_type, author_id, principal_id, payload, guard, audience, created_at)
@@ -449,7 +468,7 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 	// version per (session, message) — every state transition is a new
 	// record-version over the same message id (keep-LAST on projection).
 	if rec.Task != nil {
-		if _, err := s.pool.Exec(ctx, `
+		if _, err := s.requestExecutor().Exec(ctx, `
 			INSERT INTO chat_tasks (session_id, message_id, task_id, state, owner, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6)
 			ON CONFLICT (session_id, message_id) DO UPDATE SET
@@ -473,7 +492,7 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 				return fmt.Errorf("marshal thread created_by: %w", err)
 			}
 		}
-		if _, err := s.pool.Exec(ctx, `
+		if _, err := s.requestExecutor().Exec(ctx, `
 			INSERT INTO chat_threads
 				(thread_id, session_id, parent_thread_id, root_message_id, anchor_message_id, created_by, created_at)
 			VALUES ($1,$2,NULL,$3,NULL,$4,$5)
@@ -487,7 +506,7 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 	// replace this message's rows so the view matches the record exactly on
 	// every re-projection (the "outcomes written back onto the same record"
 	// case in §3.2).
-	if _, err := s.pool.Exec(ctx,
+	if _, err := s.requestExecutor().Exec(ctx,
 		`DELETE FROM chat_deliveries WHERE session_id = $1 AND message_id = $2`,
 		rec.SessionID, rec.MessageID); err != nil {
 		return fmt.Errorf("project message deliveries: %w", err)
@@ -497,7 +516,7 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 		if updated.IsZero() {
 			updated = rec.TS
 		}
-		if _, err := s.pool.Exec(ctx, `
+		if _, err := s.requestExecutor().Exec(ctx, `
 			INSERT INTO chat_deliveries
 				(session_id, message_id, target_agent_id, inbox_entry_id, outcome, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6)
@@ -517,7 +536,7 @@ func (s *PostgresStore) projectThreadBranch(ctx context.Context, rec *Record) er
 	if err != nil {
 		return fmt.Errorf("marshal thread created_by: %w", err)
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_threads
 			(thread_id, session_id, parent_thread_id, root_message_id, anchor_message_id, created_by, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -715,6 +734,9 @@ func (s *PostgresStore) loadMessages(ctx context.Context, sessionID string) ([]*
 		if t, ok := tasks[out[i].ID]; ok {
 			out[i].Task = *t
 		}
+	}
+	if err := s.loadMessageRequests(ctx, sessionID, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

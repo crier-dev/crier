@@ -1,0 +1,125 @@
+package session
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// An additive projection reaches already-created databases without rewriting
+// their transcript schema. JSONL already retains these fields in the record.
+// No reservation is stored here: the message record itself owns the key.
+const messageRequestSchema = `CREATE TABLE IF NOT EXISTS chat_message_requests (
+	session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+	message_id TEXT NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	outcomes TEXT NOT NULL,
+	PRIMARY KEY (session_id, message_id)
+)`
+
+func (s *SQLStore) projectMessageRequest(ctx context.Context, rec *Record) error {
+	outcomes, err := json.Marshal(rec.Outcomes)
+	if err != nil {
+		return err
+	}
+	_, err = s.exec(ctx, `INSERT INTO chat_message_requests (session_id, message_id, idempotency_key, outcomes)
+		VALUES (?, ?, ?, ?) ON CONFLICT (session_id, message_id) DO UPDATE SET
+		idempotency_key = excluded.idempotency_key, outcomes = excluded.outcomes`,
+		rec.SessionID, rec.MessageID, rec.IdempotencyKey, string(outcomes))
+	return err
+}
+
+func (s *PostgresStore) projectMessageRequest(ctx context.Context, rec *Record) error {
+	outcomes, err := json.Marshal(rec.Outcomes)
+	if err != nil {
+		return err
+	}
+	_, err = s.requestExecutor().Exec(ctx, `INSERT INTO chat_message_requests (session_id, message_id, idempotency_key, outcomes)
+		VALUES ($1, $2, $3, $4) ON CONFLICT (session_id, message_id) DO UPDATE SET
+		idempotency_key = excluded.idempotency_key, outcomes = excluded.outcomes`,
+		rec.SessionID, rec.MessageID, rec.IdempotencyKey, string(outcomes))
+	return err
+}
+
+func restoreMessageRequest(messages []*Message, id, key, raw string) error {
+	for _, m := range messages {
+		if m.ID != id {
+			continue
+		}
+		m.IdempotencyKey = key
+		var outcomes []DeliveryOutcome
+		if err := json.Unmarshal([]byte(raw), &outcomes); err != nil {
+			return fmt.Errorf("load message request outcomes: %w", err)
+		}
+		// Keep the delivery projection authoritative for lifecycle changes;
+		// restore only its missing refusal detail from the durable record.
+		for i := range m.Outcomes {
+			for _, recorded := range outcomes {
+				if recorded.Target == m.Outcomes[i].Target {
+					m.Outcomes[i].Reason = recorded.Reason
+					// PostgreSQL timestamptz rounds to microseconds. Preserve the
+					// original wire timestamp while this is still the same outcome;
+					// a later leased/acked state keeps its own projection timestamp.
+					if recorded.Outcome == m.Outcomes[i].Outcome && recorded.InboxEntryID == m.Outcomes[i].InboxEntryID {
+						m.Outcomes[i].UpdatedAt = recorded.UpdatedAt
+					}
+				}
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
+func (s *SQLStore) loadMessageRequests(ctx context.Context, id string, messages []*Message) error {
+	rows, err := s.query(ctx, `SELECT message_id, idempotency_key, outcomes FROM chat_message_requests WHERE session_id = ?`, id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var mid, key, raw string
+		if err := rows.Scan(&mid, &key, &raw); err != nil {
+			return err
+		}
+		if err := restoreMessageRequest(messages, mid, key, raw); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *PostgresStore) loadMessageRequests(ctx context.Context, id string, messages []*Message) error {
+	rows, err := s.requestExecutor().Query(ctx, `SELECT message_id, idempotency_key, outcomes FROM chat_message_requests WHERE session_id = $1`, id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var mid, key, raw string
+		if err := rows.Scan(&mid, &key, &raw); err != nil {
+			return err
+		}
+		if err := restoreMessageRequest(messages, mid, key, raw); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// pgx's pool and transaction expose the same projection operations.
+type requestPGExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (s *PostgresStore) requestExecutor() requestPGExecutor {
+	if s.requestTx != nil {
+		return s.requestTx
+	}
+	return s.pool
+}

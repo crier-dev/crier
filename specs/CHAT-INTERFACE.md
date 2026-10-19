@@ -129,6 +129,33 @@ there is no separate reply store or rendering path. This implements D1 without l
 answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
 an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
 
+### 1.3.3 Retried message sends and browser waiting (DF-CRIER-343)
+
+`POST /sessions/{id}/messages` honours a nonempty `idempotency_key` within that session.
+The first send records the key with its message; later sends with the same key return HTTP 201
+and the existing message's `id`, `seq`, audience and persisted outcomes. They allocate no message
+or branch, append nothing and perform no further fan-out, even if the retried payload differs.
+A different key appends a new message. An absent/empty key preserves the append-on-every-send
+contract. The same key in another session is independent. Realm/auth checks still precede replay.
+
+The repository locks the session/key before looking up the transcript and holds it through the
+intent, fan-out and final outcome update. Independent SQLite/JSONL handles and processes share
+an OS advisory file lock (released on process death); PostgreSQL uses a database advisory lock
+on a dedicated connection, not a pooled data slot. In-memory SQLite uses a per-handle semaphore.
+SQL projections commit the intent and request-key metadata in one transaction. The transcript,
+not an expiring reservation, remains the durable authority after restart. If a prior attempt died
+after recording intent, replay returns its current incomplete outcomes rather than resending.
+
+The page keeps its 12-second HTTP wait, but a timed-out POST is **not** reported as a failed send:
+it displays “Still delivering or awaiting confirmation”, retains the draft and refreshes the
+transcript. This is the simpler honest option: `CR_SESSION_DELIVERY_TIMEOUT_MS` is a per-target
+budget, not a guarantee for the complete request including federation and persistence. Guessing
+a larger fixed browser timeout would recreate the mismatch. Message retries of the unchanged
+draft/author/realm/session/routing reuse one request key; a confirmed send or changed draft gets
+a new key. This does not change the server's delivery budget, fan-out concurrency or reply recording.
+Task creation is not made idempotent by this change; after a timed-out task POST the page tells
+the operator to check for the task before retrying.
+
 ### 1.4 The acceptance test this interface is judged against (CR-CHAT-015)
 
 This is the whole interface's acceptance, in Bane's own terms (2026-10-03), because it is the problem the

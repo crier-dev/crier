@@ -715,6 +715,31 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.IdempotencyKey != "" {
+		// The store lock, not a handler-local check, makes this lookup and the
+		// complete send one critical section even across independent servers.
+		release, err := h.store.LockMessage(r.Context(), sess.ID, req.IdempotencyKey)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return
+		}
+		defer release()
+		st, err := h.store.Load(r.Context(), sess.ID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
+			return
+		}
+		for _, existing := range st.Messages {
+			if existing.IdempotencyKey == req.IdempotencyKey {
+				view := h.messageViewOf(st, existing)
+				view.Outcomes = outcomeViews(existing.Outcomes)
+				summarizeFanout(&view, existing.Outcomes)
+				writeJSON(w, http.StatusCreated, view)
+				return // no IDs, branches, appends, replies or deliveries on replay
+			}
+		}
+	}
+
 	msgID, err := h.newID()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "ID_ERROR", err.Error())
@@ -804,11 +829,9 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The DURABLE record keeps the outcome vocabulary (the §5.2
-	// chat_deliveries projection has no reason column), so the immediate
-	// REFUSAL reason is carried on the response — this is the caller's
-	// explanation, and §3.2 requires a refused outcome to be shown, never
-	// swallowed.
+	// Keep the immediate response and keyed replay on the same outcome
+	// vocabulary and refusal detail. The SQL request projection preserves
+	// detail without changing chat_deliveries' schema.
 	view.Outcomes = outcomeViews(msg.Outcomes)
 	if spawn != nil {
 		view.SpawnedThread = spawn

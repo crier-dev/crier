@@ -255,10 +255,10 @@ type DeliveryOutcome struct {
 	InboxEntryID string    `json:"inbox_entry_id,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	// Reason names why a `refused` delivery was refused (an unknown agent, a
-	// namespace mismatch, ...). It is deliberately NOT persisted: §5.2's
-	// chat_deliveries has no such column and the durable record keeps the
-	// vocabulary value; this is the caller's immediate explanation.
-	Reason string `json:"-"`
+	// namespace mismatch, ...). Keep it in the record so an idempotent retry
+	// can return the same explanation; SQL stores retain it in the additive
+	// request projection rather than changing chat_deliveries' schema.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Message is one transcript record (§4.2, §5.2 chat_transcript).

@@ -399,6 +399,9 @@ function openSession(id) {
   for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Loading…");
   refresh();
 }
+// Retain a request key after a lost response, but only for the identical draft,
+// author, realm, session and routing. A deliberate new message gets a new key.
+let pendingMessageRequest = null;
 async function send(event) {
   event.preventDefault();
   if (composerReason() || !$("text").value.trim()) return;
@@ -410,6 +413,7 @@ async function send(event) {
   if (!task) payload.message_kind = recipient || /(^|\s)[@#]\S+/.test(draft) ? "addressed" : "plain";
   state.sending = true; ++state.generation; updateComposer();
   notice("send-result", task ? "Requesting explicit task…" : "Recording message…");
+  let postStarted = false;
   try {
     // Re-read membership rather than trust a potentially stale 15-second poll.
     // Session audience excludes the sender; explicit agent routing overrides it.
@@ -429,13 +433,33 @@ async function send(event) {
       }
     }
     resetAudienceWarning();
+    if (!task) {
+      const fingerprint = JSON.stringify({id, namespace:state.namespace, payload});
+      if (pendingMessageRequest?.fingerprint !== fingerprint) {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        pendingMessageRequest = {fingerprint, key:Array.from(bytes, b => b.toString(16).padStart(2,"0")).join("")};
+      }
+      payload.idempotency_key = pendingMessageRequest.key;
+    }
+    postStarted = true;
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    if (!task) pendingMessageRequest = null;
     const outcomes = result.outcomes || [];
     const refused = outcomes.some(o => o.outcome === "refused");
     const details = outcomes.map(o => o.target + ": " + o.outcome + (o.detail ? " — " + o.detail : "")).join("\n");
     notice("send-result", (task ? "Task recorded" : "Message recorded") + (refused ? "; delivery refused for one or more recipients." : ".") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed."), refused);
     $("text").value = ""; state.reply = null; renderReply();
-  } catch(e) { notice("send-result", "Request failed — " + e.message + "\nDraft kept. If the response was lost, refresh the transcript before retrying to avoid duplicates.",true); }
+  } catch(e) {
+    // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
+    // federation and persistence can outlast it. Do not label that uncertainty
+    // a failed send or increase a guessed global budget. Keep the draft/key so
+    // a message retry reads back the original record without delivering again.
+    if (postStarted && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key."));
+    } else {
+      notice("send-result", "Request failed — " + e.message + "\nDraft kept. Refresh the transcript before retrying.",true);
+    }
+  }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
 $("add-participant-form").addEventListener("submit", async event => {

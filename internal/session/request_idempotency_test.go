@@ -1,0 +1,173 @@
+package session
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/require"
+
+	"github.com/crier-dev/crier/internal/registry"
+)
+
+func TestMessageRequestIdempotency(t *testing.T) {
+	runMessageRequestIdempotency(t, localBackends())
+}
+
+func runMessageRequestIdempotency(t *testing.T, backends []localBackend) {
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, first, second string
+				want                int
+			}{
+				{"same_key", "retry", "retry", 1},
+				{"different_keys", "first", "second", 2},
+				{"no_key", "", "", 2},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					path := backend.pathFn(t)
+					store := backend.open(t, path)
+					h := newAPIHarness(t, store)
+					room := h.createRoom(t)
+					req := postMessageRequest{Sender: "atlas", Payload: json.RawMessage(`{"text":"hello"}`), IdempotencyKey: tc.first}
+					first := h.postTo(t, room, req)
+					require.NoError(t, store.Close())
+					// A fresh store AND handler must recover the key and outcomes.
+					reopened := backend.open(t, path)
+					t.Cleanup(func() { _ = reopened.Close() })
+					h2 := newAPIHarness(t, reopened)
+					req.IdempotencyKey = tc.second
+					second := h2.postTo(t, room, req)
+					st, err := reopened.Load(context.Background(), room)
+					require.NoError(t, err)
+					require.Len(t, st.Messages, tc.want)
+					if tc.want == 1 {
+						require.Equal(t, first.ID, second.ID)
+						require.Equal(t, first.Seq, second.Seq)
+						require.Equal(t, first.Outcomes, second.Outcomes)
+						entries, _, err := h2.reg.Retrieve("nimbus", time.Minute, 100)
+						require.NoError(t, err)
+						require.Empty(t, entries, "replay must not fan out into the fresh registry")
+					} else {
+						require.NotEqual(t, first.ID, second.ID)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestMessageRequestIdempotencySessionScope(t *testing.T) {
+	runMessageRequestIdempotencySessionScope(t, localBackends())
+}
+
+func runMessageRequestIdempotencySessionScope(t *testing.T, backends []localBackend) {
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			store := backend.open(t, backend.pathFn(t))
+			t.Cleanup(func() { _ = store.Close() })
+			h := newAPIHarness(t, store)
+			var ids []string
+			for range 2 {
+				room := h.createRoom(t)
+				req := postMessageRequest{Sender: "atlas", Payload: json.RawMessage(`{"text":"hello"}`), IdempotencyKey: "shared"}
+				first := h.postTo(t, room, req)
+				second := h.postTo(t, room, req)
+				require.Equal(t, first.ID, second.ID)
+				st, err := store.Load(context.Background(), room)
+				require.NoError(t, err)
+				require.Len(t, st.Messages, 1)
+				ids = append(ids, first.ID)
+			}
+			require.NotEqual(t, ids[0], ids[1])
+		})
+	}
+}
+
+type heldRequestDeliverer struct {
+	calls   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (d *heldRequestDeliverer) Deliver(_ string, _ *registry.InboxEntry) error {
+	d.calls.Add(1)
+	d.once.Do(func() { close(d.started) })
+	<-d.release
+	return nil
+}
+
+func TestMessageRequestIdempotencyConcurrent(t *testing.T) {
+	runMessageRequestIdempotencyConcurrent(t, localBackends())
+}
+
+func runMessageRequestIdempotencyConcurrent(t *testing.T, backends []localBackend) {
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			path := backend.pathFn(t)
+			firstStore := backend.open(t, path)
+			t.Cleanup(func() { _ = firstStore.Close() })
+			h := newAPIHarness(t, firstStore)
+			room := h.createRoom(t)
+			// Independent handles/handlers rule out a handler-local mutex.
+			secondStore := backend.open(t, path)
+			t.Cleanup(func() { _ = secondStore.Close() })
+			d := &heldRequestDeliverer{started: make(chan struct{}), release: make(chan struct{})}
+			var release sync.Once
+			t.Cleanup(func() { release.Do(func() { close(d.release) }) })
+			routers := make([]*mux.Router, 2)
+			for i, store := range []Repository{firstStore, secondStore} {
+				routers[i] = mux.NewRouter()
+				registerSessionRoutes(routers[i], NewHTTPHandler(store, HTTPOptions{Deliverer: d}))
+			}
+			responses := make(chan *httptest.ResponseRecorder, 2)
+			post := func(router *mux.Router) {
+				r := httptest.NewRequest(http.MethodPost, "/sessions/"+room+"/messages", strings.NewReader(`{"sender":"atlas","payload":{"text":"hello"},"idempotency_key":"simultaneous"}`))
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, r)
+				responses <- w
+			}
+			go post(routers[0])
+			select {
+			case <-d.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first send never reached delivery")
+			}
+			go post(routers[1])
+			select {
+			case w := <-responses:
+				t.Fatalf("send completed before delivery was released: %s", w.Body.String())
+			case <-time.After(100 * time.Millisecond):
+			}
+			release.Do(func() { close(d.release) })
+			var messages []transcriptMessage
+			for range 2 {
+				select {
+				case w := <-responses:
+					require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+					var m transcriptMessage
+					require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
+					messages = append(messages, m)
+				case <-time.After(5 * time.Second):
+					t.Fatal("send did not finish")
+				}
+			}
+			require.Equal(t, messages[0].ID, messages[1].ID)
+			require.Equal(t, messages[0].Seq, messages[1].Seq)
+			require.Equal(t, messages[0].Outcomes, messages[1].Outcomes)
+			require.Equal(t, int32(1), d.calls.Load())
+			st, err := firstStore.Load(context.Background(), room)
+			require.NoError(t, err)
+			require.Len(t, st.Messages, 1)
+		})
+	}
+}

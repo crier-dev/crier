@@ -58,9 +58,10 @@ type Dialect interface {
 // serve both engines, and the transcript's ordering authority is `seq`, never
 // `ts` (§3.1) — so no engine's native timestamp type is relied upon here.
 type SQLStore struct {
-	db      *sql.DB
-	dialect Dialect
-	owned   bool
+	db        *sql.DB
+	dialect   Dialect
+	owned     bool
+	requestTx *sql.Tx // keyed intent + request metadata commit atomically
 }
 
 var _ Store = (*SQLStore)(nil)
@@ -103,7 +104,7 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 			return fmt.Errorf("session %s store: init: %w", s.dialect.Name(), err)
 		}
 	}
-	for _, stmt := range s.dialect.SchemaStatements() {
+	for _, stmt := range append(s.dialect.SchemaStatements(), messageRequestSchema) {
 		if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(stmt)); err != nil {
 			return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
 		}
@@ -114,14 +115,23 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 // exec / query / queryRow are the ONE place the canonical `?` query text meets
 // the engine's placeholder syntax.
 func (s *SQLStore) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if s.requestTx != nil {
+		return s.requestTx.ExecContext(ctx, s.dialect.Rebind(query), args...)
+	}
 	return s.db.ExecContext(ctx, s.dialect.Rebind(query), args...)
 }
 
 func (s *SQLStore) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if s.requestTx != nil {
+		return s.requestTx.QueryContext(ctx, s.dialect.Rebind(query), args...)
+	}
 	return s.db.QueryContext(ctx, s.dialect.Rebind(query), args...)
 }
 
 func (s *SQLStore) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
+	if s.requestTx != nil {
+		return s.requestTx.QueryRowContext(ctx, s.dialect.Rebind(query), args...)
+	}
 	return s.db.QueryRowContext(ctx, s.dialect.Rebind(query), args...)
 }
 
@@ -132,8 +142,26 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
+	if s.requestTx == nil && rec.IdempotencyKey != "" && (rec.Type == RecordMessage || rec.Type == RecordThreadReply) {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		writer := *s
+		writer.requestTx = tx
+		if err := writer.Append(ctx, rec); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if err := s.project(ctx, rec); err != nil {
 		return err
+	}
+	if (rec.Type == RecordMessage || rec.Type == RecordThreadReply) && rec.IdempotencyKey != "" {
+		if err := s.projectMessageRequest(ctx, rec); err != nil {
+			return err
+		}
 	}
 	return s.recordSeq(ctx, rec)
 }
@@ -633,6 +661,9 @@ func (s *SQLStore) loadMessages(ctx context.Context, sessionID string) ([]*Messa
 		if t, ok := tasks[out[i].ID]; ok {
 			out[i].Task = *t
 		}
+	}
+	if err := s.loadMessageRequests(ctx, sessionID, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
