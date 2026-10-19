@@ -25,6 +25,10 @@ func TestChatClientOperatorShell(t *testing.T) {
 		`A tag addresses; it never executes.`,
 		`There is no browser login or cookie exchange in the current API`,
 		`No per-recipient delivery outcomes returned; delivery is unconfirmed.`,
+		`id="identity-gate"`,
+		`id="use-suggested"`,
+		`id="composer-why"`,
+		`Set an acting agent ID (Connection & identity, left) to enable sending.`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("embedded chat missing contract marker %q", marker)

@@ -23,6 +23,10 @@ h1 { font-size:18px; line-height:1.35; }
 h2 { font-size:14px; }
 h3 { font-size:13px; }
 small,.note { font-size:12px; color:var(--dim); }
+.gate { margin:0 0 10px; padding:9px 11px; border:1px solid var(--amber); border-radius:8px; background:rgba(245,176,74,.10); color:var(--text); font-size:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.gate[hidden] { display:none; }
+.gate button { padding:4px 8px; font-size:12px; }
+.req { color:var(--amber); font-weight:600; }
 code { font-family:ui-monospace,monospace; font-size:12px; }
 [hidden] { display:none !important; }
 .topbar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--raised); }
@@ -126,7 +130,8 @@ main { min-width:0; display:flex; flex-direction:column; }
   <details class="identity" open>
     <summary>Connection &amp; identity</summary>
     <form id="identity-form" class="stack">
-      <label>Acting agent ID<input id="agent" placeholder="Your existing agent ID" autocomplete="off"></label>
+      <label>Acting agent ID <span class="req">(required to send)</span><input id="agent" placeholder="Your existing agent ID" autocomplete="off"></label>
+      <p id="identity-gate" class="gate" role="status">Sending and channel creation need an acting agent ID. It is attribution, not a login. <button type="button" id="use-suggested" class="ghost">Use <span id="suggested-id"></span></button></p>
       <label>Namespace<input id="namespace" placeholder="Default realm" autocomplete="off"></label>
       <button id="apply-identity" class="ghost">Apply &amp; refresh</button>
     </form>
@@ -150,6 +155,7 @@ main { min-width:0; display:flex; flex-direction:column; }
       </div>
     </form>
     <p id="composer-hint" class="note composer-hint">A tag addresses; it never executes. Recipient selects delivery. Only “Explicit task” requests work. Replies stay in their recorded thread. Ctrl/⌘ + Enter sends.</p>
+    <p id="composer-why" class="gate" role="status" hidden></p>
     <p id="send-result" role="status" aria-live="polite"></p>
     <p class="note">Guard verdict, lease/ack details, task progress percentages and attachments are unavailable in this transcript UI; no status is inferred from message text.</p>
   </div>
@@ -201,6 +207,17 @@ function updateComposer() {
   $("thread-filter").disabled = !state.session || state.sending;
   for (const id of ["new-session","apply-identity","create-button"]) $(id).disabled = state.sending;
   $("send-button").textContent = state.sending ? "Recording…" : $("intent").value === "task" ? "Create task" : "Send message";
+  // CR-CHAT-039: a disabled composer with no stated reason reads as a broken page.
+  // The hint names the ONE unmet precondition instead of leaving the user guessing.
+  const why = !state.agent ? "Set an acting agent ID (Connection & identity, left) to enable sending."
+    : !state.session ? "Select a conversation to send into."
+    : state.session.state !== "open" ? "This conversation is " + state.session.state + "; sending is unavailable."
+    : state.sending ? "Recording…" : "";
+  const w = $("composer-why");
+  if (w) { w.textContent = why; w.hidden = !why; }
+  $("send-button").title = why;
+  const g = $("identity-gate");
+  if (g) g.hidden = !!state.agent;
 }
 function renderHeader() {
   const s = state.session;
@@ -320,6 +337,9 @@ $("create-form").addEventListener("submit", async event => {
   } catch(e) { unavailable("create-result",e); }
   finally { state.sending = false; state.busy = false; updateComposer(); }
 });
+const SUGGESTED_ID = "browser-" + Math.random().toString(36).slice(2, 8);
+$("suggested-id").textContent = SUGGESTED_ID;
+$("use-suggested").addEventListener("click", () => { if (state.sending) return; $("agent").value = SUGGESTED_ID; $("identity-form").requestSubmit(); });
 $("identity-form").addEventListener("submit", event => {
   event.preventDefault(); if (state.sending) return;
   if ($("text").value && !window.confirm("Discard the unsent draft and change identity or realm?")) return;
