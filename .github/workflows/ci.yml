@@ -58,11 +58,18 @@ jobs:
       - name: Agent-ecosystem registration contract
         run: go test -count=1 ./internal/ci
 
+      # INT-CI-012: test_binding imports pytest-backed capture controls. Keep the
+      # dependency explicit and isolated from runner-global Python packages.
+      - name: Provision Agent-ecosystem Python battery dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/agent-ecosystem-battery-venv"
+          "$RUNNER_TEMP/agent-ecosystem-battery-venv/bin/python" -m pip install --disable-pip-version-check --requirement examples/agent-ecosystem/battery/requirements-ci.txt
+
       # DF-CRIER-373: real fake-consumer subprocess/HTTP observations, nonce
       # replay and body-only forgery controls; no provider credentials or calls.
       - name: Agent-ecosystem offline execution binding
         run: |
-          python3 examples/agent-ecosystem/battery/test_binding.py
+          "$RUNNER_TEMP/agent-ecosystem-battery-venv/bin/python" examples/agent-ecosystem/battery/test_binding.py
           node --test examples/agent-ecosystem/battery/execution.test.mjs
 
       - name: Build

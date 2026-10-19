@@ -1,0 +1,2 @@
+# Python dependencies for the provider-free Agent-ecosystem CI battery.
+pytest==9.1.1
