@@ -5089,7 +5089,7 @@ components:
                     type: string
         outcomes:
           type: array
-          description: The per-target fan-out result (§3.2). Budget_cut means no complete answer arrived before the blocking delivery budget (or the upstream reported a timeout), with partial/late answers discarded. Refused means a target refusal or transport failure, even when retry backoff consumed the budget; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles.
+          description: The per-target fan-out result (§3.2). Budget_cut means no complete answer arrived before the blocking delivery budget (or the upstream reported a timeout), with partial/late answers discarded. Refused means a target refusal or transport failure, even when retry backoff consumed the budget; canned and failed report the blocking webhook runtime's negative verdict after HTTP acceptance and never produce agent answer bubbles. Unreadable_reply means a received blocking webhook body has no displayable text; its detail names the sorted top-level keys, with no invented answer bubble.
           items:
             type: object
             properties:
@@ -5097,12 +5097,12 @@ components:
                 type: string
               outcome:
                 type: string
-                enum: [delivered, budget_cut, canned, failed, leased, acked, expired, refused]
+                enum: [delivered, budget_cut, canned, failed, unreadable_reply, leased, acked, expired, refused]
               inbox_entry_id:
                 type: string
               detail:
                 type: string
-                description: Refusal, budget cut or canned/failed runtime diagnostic, retained on transcript re-reads as well as the send response. Blocking failures include attempts and the delivery budget; exhausted budgets say so. A cut names the discarded partial/late answer policy and runtime/session timeout knobs.
+                description: Refusal, budget cut, unreadable reply shape or canned/failed runtime diagnostic, retained on transcript re-reads as well as the send response. Blocking failures include attempts and the delivery budget; exhausted budgets say so. A cut names the discarded partial/late answer policy and runtime/session timeout knobs.
               updated_at:
                 type: string
                 format: date-time

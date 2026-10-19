@@ -113,7 +113,9 @@ func TestSessionFanoutPostsWebhook(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("session fan-out never posted to the registered webhook")
 	}
-	require.Equal(t, "delivered", msg.Outcomes[0].Outcome)
+	require.Equal(t, "unreadable_reply", msg.Outcomes[0].Outcome)
+	require.Equal(t, "reply body had no displayable text field; keys: ok", msg.Outcomes[0].Reason)
+	require.Zero(t, msg.Delivered)
 }
 
 func TestSessionFanoutConsultsTargetGuard(t *testing.T) {
@@ -217,7 +219,10 @@ func TestSessionFanoutWebhookEmptyReplyWritesNothing(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}), "allow", root)
 			msg := sendDispatchMessage(t, base, room)
-			require.Equal(t, "delivered", msg.Outcomes[0].Outcome)
+			require.Equal(t, "unreadable_reply", msg.Outcomes[0].Outcome)
+			require.Contains(t, msg.Outcomes[0].Reason, "reply body had no displayable text field; keys:")
+			require.Zero(t, msg.Delivered)
+			require.Zero(t, msg.Skipped)
 			stored := storedDispatchTranscript(t, root, room)
 			require.Len(t, stored.Messages, 1, "empty/unmappable content must not produce an empty bubble")
 		})

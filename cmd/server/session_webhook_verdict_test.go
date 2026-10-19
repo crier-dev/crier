@@ -28,11 +28,18 @@ func TestSessionFanoutWebhookBodyVerdict(t *testing.T) {
 		{name: "failed overrides canned", body: `{"status":"FAILED","live":false,"canned":true,"reason":"runtime stopped","error":"exit code 3","text":"not an answer"}`, outcome: "failed", reasons: []string{"runtime stopped", "exit code 3"}},
 		{name: "failed without diagnostics", body: `{"status":"FAILED"}`, outcome: "failed", reasons: []string{"FAILED"}},
 		{name: "error without status", body: `{"error":"runtime crashed","reply":"not an answer"}`, outcome: "failed", reasons: []string{"runtime crashed"}},
+		{name: "textless canned", body: `{"result":{},"canned":true}`, outcome: "canned", reasons: []string{"canned/demo"}},
+		{name: "textless failed", body: `{"result":{},"status":"FAILED"}`, outcome: "failed", reasons: []string{"webhook reported FAILED"}},
+		{name: "result without text", body: `{"result":{"ok":true}}`, outcome: "unreadable_reply", reasons: []string{"reply body had no displayable text field; keys: result"}},
+		{name: "messages without text", body: `{"messages":[{"role":"assistant"}]}`, outcome: "unreadable_reply", reasons: []string{"reply body had no displayable text field; keys: messages"}},
+		{name: "multiple keys without text", body: `{"result":{"ok":true},"messages":[],"data":{}}`, outcome: "unreadable_reply", reasons: []string{"keys: data, messages, result"}},
+		{name: "nested reply is not speech", body: `{"reply":{"text":"not top-level speech"}}`, outcome: "unreadable_reply", reasons: []string{"keys: reply"}},
+		{name: "real text regression", body: `{"reply":"real text"}`, outcome: "delivered", answer: "real text"},
 		{name: "genuine reply only", body: `{"reply":"ATLAS-ANSWER"}`, outcome: "delivered", answer: "ATLAS-ANSWER"},
 		{name: "explicit live", body: `{"text":"LIVE-ANSWER","live":true,"canned":false,"status":"OK"}`, outcome: "delivered", answer: "LIVE-ANSWER"},
 		{name: "null live is not false", body: `{"reply":"ATLAS-ANSWER","live":null}`, outcome: "delivered", answer: "ATLAS-ANSWER"},
-		{name: "empty reply", body: `{"reply":""}`, outcome: "delivered"},
-		{name: "blank live reply", body: `{"reply":"  ","live":true}`, outcome: "delivered"},
+		{name: "empty reply", body: `{"reply":""}`, outcome: "unreadable_reply", reasons: []string{"keys: reply"}},
+		{name: "blank live reply", body: `{"reply":"  ","live":true}`, outcome: "unreadable_reply", reasons: []string{"keys: live, reply"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -46,6 +53,7 @@ func TestSessionFanoutWebhookBodyVerdict(t *testing.T) {
 				wantMessages++
 			}
 			require.Len(t, stored.Messages, wantMessages, "non-live or empty replies must not become agent answers")
+			require.Len(t, msg.Outcomes, 1, "exactly one outcome per target")
 			require.Equal(t, tc.outcome, msg.Outcomes[0].Outcome)
 			require.Len(t, stored.Messages[0].Outcomes, 1)
 			require.Equal(t, session.Outcome(tc.outcome), stored.Messages[0].Outcomes[0].Outcome)

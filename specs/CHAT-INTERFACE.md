@@ -133,7 +133,14 @@ Before recording text, the session path checks the blocking reply's runtime verd
   existing `delivered` behavior. Missing or null flags are not treated as `live: false`.
 
 Failed/refused deliveries, empty/whitespace-only answers, and other JSON shapes append **nothing**.
-An empty successful reply without negative markers still has outcome `delivered`, not `failed`.
+A received blocking reply body without displayable text has outcome `unreadable_reply`
+(DF-CRIER-356), not `delivered`. This includes missing, empty, non-string or whitespace-only
+`text` / `reply` fields and unsupported JSON shapes. Its `detail` is
+`reply body had no displayable text field; keys: <sorted top-level keys>`; the key list is
+comma-separated, or `(none)` when no object keys exist. No body values are stringified into
+an answer bubble. Existing `failed` and `canned` verdicts take precedence. Unreadable replies
+are excluded from both delivered and skipped counts and logged as non-answers, with exactly
+one outcome per target. This does not change async delivery or other transports.
 The reply has an **explicit empty audience** and no delivery outcomes; appending it is not another
 send, so it cannot fan out to session members. Runtime diagnostics persist in the original message's
 outcomes and are exposed as `detail` on both send and transcript reads; a delivery outcome does not

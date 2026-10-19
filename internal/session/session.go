@@ -102,12 +102,14 @@ const (
 	OutcomeBudgetCut Outcome = "budget_cut"
 	// Canned and failed are runtime verdicts after HTTP acceptance, not
 	// delivery refusals. Neither permits an agent-authored answer bubble.
-	OutcomeCanned  Outcome = "canned"
-	OutcomeFailed  Outcome = "failed"
-	OutcomeLeased  Outcome = "leased"
-	OutcomeAcked   Outcome = "acked"
-	OutcomeExpired Outcome = "expired"
-	OutcomeRefused Outcome = "refused"
+	OutcomeCanned Outcome = "canned"
+	OutcomeFailed Outcome = "failed"
+	// UnreadableReply means a received body has no displayable answer text.
+	OutcomeUnreadableReply Outcome = "unreadable_reply"
+	OutcomeLeased          Outcome = "leased"
+	OutcomeAcked           Outcome = "acked"
+	OutcomeExpired         Outcome = "expired"
+	OutcomeRefused         Outcome = "refused"
 )
 
 // ContextShareMode is the late-join context decision (§4.6, D10). `summary`
@@ -260,7 +262,7 @@ type DeliveryOutcome struct {
 	Outcome      Outcome   `json:"outcome"`
 	InboxEntryID string    `json:"inbox_entry_id,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
-	// Reason carries a refusal explanation or the webhook runtime's canned/
+	// Reason carries a refusal explanation, unreadable reply shape or the webhook runtime's canned/
 	// failed diagnostic. Keep it in the record so an idempotent retry
 	// can return the same explanation; SQL stores retain it in the additive
 	// request projection rather than changing chat_deliveries' schema.

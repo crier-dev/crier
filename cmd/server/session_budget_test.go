@@ -51,7 +51,8 @@ func testSessionFanoutBudget(t *testing.T, allHang bool) {
 			}
 			return
 		}
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		// A successful target supplies real speech, not a metadata-only receipt.
+		_, _ = w.Write([]byte(`{"reply":"fast answer"}`))
 	}))
 	// Stop is closed before Close, even on the pre-fix path whose 30s budget
 	// otherwise survives a failed assertion. No fixture goroutine can leak.
@@ -132,7 +133,7 @@ func testSessionFanoutBudget(t *testing.T, allHang bool) {
 	}
 	code, raw = sessionDo(t, http.DefaultClient, http.MethodGet, base+"/sessions/"+room.ID+"/messages", nil, &transcript)
 	require.Equal(t, http.StatusOK, code, "%s", raw)
-	require.Len(t, transcript.Messages, 1)
+	require.Len(t, transcript.Messages, 1+wantDelivered, "only complete fast answers append bubbles")
 	// Cut detail persists in the transcript and must match the POST response.
 	durableDelivered, durableCut := 0, 0
 	for i, outcome := range transcript.Messages[0].Outcomes {

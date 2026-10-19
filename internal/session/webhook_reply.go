@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -32,7 +33,7 @@ func webhookReplyText(reply json.RawMessage) string {
 func webhookReplyVerdict(reply json.RawMessage) (Outcome, string) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(reply, &fields) != nil {
-		return OutcomeDelivered, ""
+		fields = nil
 	}
 	readText := func(key string) string {
 		var value string
@@ -63,6 +64,20 @@ func webhookReplyVerdict(reply json.RawMessage) (Outcome, string) {
 			reason = "webhook reported a canned/demo reply (live:false or canned:true)"
 		}
 		return OutcomeCanned, reason
+	}
+	if strings.TrimSpace(webhookReplyText(reply)) == "" {
+		// Report shape, not content: transport JSON is not agent speech. Sort
+		// the keys so persisted diagnostics do not depend on map iteration.
+		keys := make([]string, 0, len(fields))
+		for key := range fields {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		keyList := "(none)"
+		if len(keys) > 0 {
+			keyList = strings.Join(keys, ", ")
+		}
+		return OutcomeUnreadableReply, "reply body had no displayable text field; keys: " + keyList
 	}
 	return OutcomeDelivered, ""
 }
