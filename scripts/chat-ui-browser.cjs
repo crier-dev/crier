@@ -69,7 +69,55 @@ async function run() {
   await page.goto(base+'/chat'); await waitIdle(page);
   assert.equal(await page.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038');
   assert.equal(await page.locator('#send-button').isDisabled(),true);
-  await page.locator('#agent').fill(operator); await page.locator('#namespace').fill('default'); await page.locator('#apply-identity').click(); await waitIdle(page);
+  // DF-CRIER-332: no silent persistence; exactly one opted-in attribution slot.
+  const storage = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));
+  const attributionKey = 'crier.chat.attribution-id';
+  assert.equal(await page.locator('#identity-gate').isVisible(),true);
+  assert.equal(await page.locator('#remember-agent').isChecked(),false);
+  assert.deepEqual(await storage(),{});
+  await page.locator('#agent').fill(operator); await page.locator('#apply-identity').click(); await waitIdle(page);
+  assert.deepEqual(await storage(),{});
+  await page.reload(); await waitIdle(page);
+  assert.equal(await page.locator('#identity-gate').isVisible(),true);
+  await page.locator('#remember-agent').check();
+  assert.equal(await page.locator('#remember-agent').isChecked(),true);
+  assert.deepEqual(await storage(),{}); // checking alone never saves a draft ID
+  await page.locator('#agent').fill('  '+operator+'  '); await page.locator('#namespace').fill('default'); await page.locator('#apply-identity').click(); await waitIdle(page);
+  assert.deepEqual(await storage(),{[attributionKey]:operator});
+  await page.reload(); await waitIdle(page);
+  assert.equal(await page.locator('#agent').inputValue(),operator);
+  assert.equal(await page.locator('#namespace').inputValue(),''); // no realm persisted
+  assert.equal(await page.locator('#identity-gate').isVisible(),false);
+  assert.equal(await page.locator('#remember-agent').isChecked(),true);
+  assert.match(await page.locator('#remember-status').innerText(),/Attribution ID restored/);
+  assert.equal(await page.evaluate(() => state.agent),operator);
+  await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
+  assert.equal(await page.locator('#text').isDisabled(),false);
+  await page.screenshot({path:path.join(evidence,'chat-attribution-restored.png'),fullPage:true});
+  await page.locator('.identity').screenshot({path:path.join(evidence,'chat-attribution-detail.png')});
+  // Independent tab has no opt-in (browser opener/duplicate-tab copying is outside this guarantee).
+  const freshTab = await context.newPage(); await freshTab.goto(base+'/chat'); await waitIdle(freshTab);
+  assert.equal(await freshTab.locator('#identity-gate').isVisible(),true); await freshTab.close();
+  await page.locator('#forget-agent').click();
+  assert.deepEqual(await storage(),{});
+  assert.equal(await page.locator('#remember-agent').isChecked(),false);
+  assert.equal(await page.evaluate(() => state.agent),operator); // forget is not logout
+  await page.reload(); await waitIdle(page);
+  assert.equal(await page.locator('#identity-gate').isVisible(),true);
+  await page.locator('#agent').fill(operator); await page.locator('#apply-identity').click(); await waitIdle(page);
+  await page.locator('#remember-agent').check(); assert.deepEqual(await storage(),{[attributionKey]:operator});
+  await page.locator('#remember-agent').uncheck(); assert.deepEqual(await storage(),{});
+  // Storage denial is a disclosed degradation, not a broken composer or login.
+  const denied = await browser.newContext();
+  await denied.addInitScript(() => Object.defineProperty(window,'sessionStorage',{get(){throw new DOMException('test denied','SecurityError');}}));
+  const blocked = await denied.newPage(); const storageErrors = []; blocked.on('pageerror',e => storageErrors.push(e.message));
+  await blocked.goto(base+'/chat'); await waitIdle(blocked);
+  assert.match(await blocked.locator('#remember-status').innerText(),/Tab storage unavailable/);
+  await blocked.locator('#agent').fill(operator); await blocked.locator('#apply-identity').click(); await waitIdle(blocked);
+  await blocked.locator('#remember-agent').click();
+  assert.equal(await blocked.locator('#remember-agent').isChecked(),false);
+  assert.equal(await blocked.evaluate(() => state.agent),operator);
+  assert.deepEqual(storageErrors,[]); await denied.close();
   await page.locator(`[data-session="${session.id}"]`).click(); await waitIdle(page);
   assert.equal(await page.locator('.msg').count(),3);
   assert.match(await page.locator('#participants').innerText(),/ui-test-recipient/);
@@ -160,7 +208,21 @@ async function run() {
   // Empty states and creation through the actual browser form.
   await page.locator('#session-search').fill('no-such-session'); assert.match(await page.locator('#sessions').innerText(),/No matching/);
   await page.locator('#session-search').fill(''); await page.locator('#new-session').click();
+  // Re-register the deliberately removed fixture, then choose it in the real form.
+  await api(base,'POST','/agents',{id:agent,public_key,capabilities:['ui-test-analysis']});
+  await refresh(page);
+  await page.locator('#initial-members').selectOption([operator,agent]); // self is deduplicated
+  await refresh(page);
+  assert.deepEqual(await page.locator('#initial-members').evaluate(el => Array.from(el.selectedOptions,o => o.value)),[operator,agent]);
   await page.locator('#session-title').fill('Created by browser form'); await page.locator('#create-button').click(); await waitIdle(page);
+  const createdID = await page.evaluate(() => state.current);
+  const createdMembers = (await api(base,'GET',`/sessions/${createdID}/participants`)).participants;
+  assert.deepEqual(createdMembers.map(p => p.member_id).sort(),[operator,agent].sort());
+  await page.locator('#text').fill('Plain send to the initial members'); await page.locator('#send-button').click(); await waitIdle(page);
+  const createdMessages = (await api(base,'GET',`/sessions/${createdID}/messages`)).messages;
+  const plain = createdMessages.find(m => m.payload?.text === 'Plain send to the initial members');
+  assert.ok(plain); assert.equal(plain.message_kind,'plain');
+  assert.ok(plain.outcomes.some(o => o.target === agent && o.outcome !== 'refused'),JSON.stringify(plain.outcomes));
   assert.equal(await page.locator('#conversation-title').innerText(),'Created by browser form');
   assert.ok((await api(base,'GET','/sessions')).sessions.some(s => s.title === 'Created by browser form'));
   // Attribute escaping: inject hostile-looking values into the read response
@@ -177,7 +239,7 @@ async function run() {
   const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
   assert.match(await authorized.text(),/data-ui-revision="CR-CHAT-038"/);
   assert.deepEqual(errors,[]);
-  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},checks:['rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
+  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},checks:['opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
   fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2)); console.log('PASS: browser behavior and 3 viewport checks. Evidence: '+evidence);
 }

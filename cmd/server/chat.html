@@ -54,6 +54,8 @@ input,textarea,select { width:100%; }
 .s-preview { display:block; color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .s-meta { display:block; font-size:11px; color:var(--dim); }
 .identity { border-top:1px solid var(--border); padding-top:16px; }
+.remember-choice { display:flex; align-items:flex-start; gap:8px; }
+.remember-choice input { width:auto; margin-top:3px; }
 .identity summary { cursor:pointer; margin-bottom:12px; font-weight:650; }
 main { min-width:0; display:flex; flex-direction:column; }
 .thread-header { padding:18px 20px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
@@ -123,7 +125,9 @@ main { min-width:0; display:flex; flex-direction:column; }
   <form id="create-form" class="create" hidden>
     <h3>New channel</h3>
     <div class="stack"><label>Channel title<input id="session-title" required maxlength="200" placeholder="Name this conversation"></label>
-    <button class="primary" id="create-button" type="submit">Create channel</button><p class="note">Creates a channel with your agent identity as its initial member. No agent is registered automatically.</p><p id="create-result" role="status"></p></div>
+    <label>Additional registered agents (optional)<select id="initial-members" multiple size="4" aria-describedby="initial-members-hint"></select></label>
+    <p id="initial-members-hint" class="note">Select agents to include alongside your acting ID. Leave empty for a channel with only you.</p>
+    <button class="primary" id="create-button" type="submit">Create channel</button><p class="note">Creates a channel with your acting ID and any selected agents as initial members. No agent is registered automatically.</p><p id="create-result" role="status"></p></div>
   </form>
   <label>Find a conversation<input id="session-search" type="search" placeholder="Filter loaded sessions"></label>
   <nav id="sessions" class="sessions" aria-label="Sessions"><p class="note">Loading sessions…</p></nav>
@@ -132,10 +136,13 @@ main { min-width:0; display:flex; flex-direction:column; }
     <form id="identity-form" class="stack">
       <label>Acting agent ID <span class="req">(required to send)</span><input id="agent" placeholder="Your existing agent ID" autocomplete="off"></label>
       <p id="identity-gate" class="gate" role="status">Sending and channel creation need an acting agent ID. It is attribution, not a login. <button type="button" id="use-suggested" class="ghost">Use <span id="suggested-id"></span></button></p>
+      <label class="remember-choice"><input id="remember-agent" type="checkbox" aria-describedby="remember-disclosure">Remember this attribution ID on this device</label>
+      <p id="remember-disclosure" class="note">Stored only in this browser tab; attribution, not a login. Only the ID is saved, never credentials, a namespace or a conversation. Reloads keep it; closing the tab ends this opt-in.</p>
+      <div id="remember-note" hidden><p id="remember-status" class="note" role="status"></p><button type="button" id="forget-agent" class="ghost">Forget</button></div>
       <label>Namespace<input id="namespace" placeholder="Default realm" autocomplete="off"></label>
       <button id="apply-identity" class="ghost">Apply &amp; refresh</button>
     </form>
-    <p class="note" style="margin-top:10px">Agent ID is an attribution header, not a login. Nothing is saved in browser storage.</p>
+    <p class="note" style="margin-top:10px">Agent ID is an attribution header, not a login. Remembering is off by default. Forget removes the saved ID, not the currently applied attribution.</p>
     <details style="margin-top:10px"><summary>Authentication boundary</summary><p class="note">This server uses Bearer headers when authentication is enabled. There is no browser login or cookie exchange in the current API; even GET /chat requires that header. A trusted deployment must supply access outside this page. Do not paste shared message or admin tokens here. A 401/403 is a real refusal, not an empty conversation.</p></details>
   </details>
 </aside>
@@ -177,6 +184,50 @@ const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" 
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
 const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", generation:0, busy:false, sending:false, agent:"", namespace:"" };
+// This single tab-scoped slot contains only an explicitly opted-in attribution ID.
+const ATTRIBUTION_KEY = "crier.chat.attribution-id";
+function forgetAttribution() {
+  try {
+    sessionStorage.removeItem(ATTRIBUTION_KEY);
+    $("remember-agent").checked = false;
+    $("remember-note").hidden = true;
+  } catch {
+    $("remember-note").hidden = false;
+    notice("remember-status", "Could not clear tab storage. Close this tab to forget the saved ID.", true);
+  }
+}
+function rememberAttribution() {
+  if ($("remember-agent").checked && state.agent) {
+    try {
+      sessionStorage.setItem(ATTRIBUTION_KEY, state.agent);
+      $("remember-note").hidden = false;
+      notice("remember-status", "Attribution ID remembered for this browser tab.");
+    } catch {
+      $("remember-agent").checked = false;
+      $("remember-note").hidden = false;
+      notice("remember-status", "Tab storage unavailable; attribution still applies for this page only.", true);
+    }
+  } else {
+    // Checking before Apply opts in to the next applied ID, not the field draft.
+    const pendingOptIn = $("remember-agent").checked;
+    forgetAttribution();
+    $("remember-agent").checked = pendingOptIn;
+  }
+}
+function restoreAttribution() {
+  try {
+    const saved = sessionStorage.getItem(ATTRIBUTION_KEY);
+    if (!saved || !saved.trim()) return;
+    $("agent").value = saved.trim();
+    state.agent = saved.trim();
+    $("remember-agent").checked = true;
+    $("remember-note").hidden = false;
+    notice("remember-status", "Attribution ID restored for this browser tab.");
+  } catch {
+    $("remember-note").hidden = false;
+    notice("remember-status", "Tab storage unavailable; apply an attribution ID for this page only.", true);
+  }
+}
 function esc(value) { const el = document.createElement("span"); el.textContent = String(value ?? ""); return el.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function author(ref) { return ref && (ref.principal ? ref.principal + (ref.as_agent ? " as " + ref.as_agent : "") : ref.agent || ref.system) || "Unknown author"; }
 function messageText(m) { return typeof m.payload?.text === "string" ? m.payload.text : JSON.stringify(m.payload ?? null, null, 2); }
@@ -271,6 +322,9 @@ function renderDirectory() {
   // Preserve an explicit recipient if a registry read loses it; never silently broadcast.
   if (selected && !state.agents.some(a => a.id === selected)) { const o = document.createElement("option"); o.value = selected; o.textContent = selected + " (not in current registry)"; $("recipient").append(o); }
   $("recipient").value = selected;
+  const members = new Set(Array.from($("initial-members").selectedOptions, o => o.value));
+  $("initial-members").innerHTML = state.agents.map(a => '<option value="' + esc(a.id) + '">' + esc(a.id) + '</option>').join("");
+  for (const option of $("initial-members").options) option.selected = members.has(option.value);
 }
 async function refresh() {
   if (state.sending) return;
@@ -279,7 +333,7 @@ async function refresh() {
   notice("refresh-state", "Refreshing recorded state…");
   const valid = () => generation === state.generation;
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
-  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; unavailable("capabilities",e); });
+  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); });
   const reads = [registry,
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
     read("/status", b => { notice("health", "Health: " + (b.health || "not exposed") + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown")); }, e => unavailable("health",e))];
@@ -331,8 +385,9 @@ $("create-form").addEventListener("submit", async event => {
   if (!state.agent) { notice("create-result","Apply an existing agent ID first. This is attribution, not authentication.",true); return; }
   state.sending = true; ++state.generation; updateComposer();
   try {
-    const s = await call("/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title:$("session-title").value.trim(), kind:"channel", created_by:{agent:state.agent}, members:[{member_type:"agent",member_id:state.agent}]}) });
-    state.sending = false; $("create-form").hidden = true; $("new-session").setAttribute("aria-expanded","false"); $("session-title").value = "";
+    const initialMembers = [...new Set([state.agent, ...Array.from($("initial-members").selectedOptions, o => o.value)])].map(id => ({member_type:"agent",member_id:id}));
+    const s = await call("/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title:$("session-title").value.trim(), kind:"channel", created_by:{agent:state.agent}, members:initialMembers}) });
+    state.sending = false; $("create-form").hidden = true; $("new-session").setAttribute("aria-expanded","false"); $("session-title").value = ""; $("initial-members").selectedIndex = -1;
     openSession(s.id);
   } catch(e) { unavailable("create-result",e); }
   finally { state.sending = false; state.busy = false; updateComposer(); }
@@ -344,6 +399,8 @@ $("identity-form").addEventListener("submit", event => {
   event.preventDefault(); if (state.sending) return;
   if ($("text").value && !window.confirm("Discard the unsent draft and change identity or realm?")) return;
   state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
+  rememberAttribution();
+  $("initial-members").innerHTML = "";
   state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
   renderReply(); renderHeader(); renderSessions(); notice("send-result","");
@@ -351,6 +408,8 @@ $("identity-form").addEventListener("submit", event => {
   for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Select a session in this realm.");
   refresh();
 });
+$("remember-agent").addEventListener("change",rememberAttribution);
+$("forget-agent").addEventListener("click",forgetAttribution);
 $("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; renderReply(); renderMessages(); });
 $("transcript").addEventListener("click", e => {
   const row = e.target.closest("[data-reply]"); if (!row || state.sending) return;
@@ -363,6 +422,8 @@ $("intent").addEventListener("change",updateComposer);
 $("composer").addEventListener("submit",send);
 $("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
 setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refresh(); },15000);
+restoreAttribution();
+updateComposer();
 refresh();
 </script>
 </body>
