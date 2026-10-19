@@ -15,6 +15,7 @@ import (
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/ratelimit"
+	"github.com/crier-dev/crier/internal/trust"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -561,6 +562,8 @@ type MemoryStore struct {
 	deliveryMs       map[string]int64
 	serviceReceipts  map[string]ServiceDeliveryReceipt
 	taskObservations map[inboxAckKey]TaskObservation
+	trustAnchors     []trust.ChainAnchor
+	trustDelegations []trust.ChainDelegation
 	taskOutputs      map[inboxAckKey]TaskOutput
 }
 

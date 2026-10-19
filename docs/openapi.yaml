@@ -32,6 +32,118 @@ tags:
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
 paths:
+  /trust/anchors:
+    post:
+      operationId: trustCreateAnchor
+      summary: Accept a verifier-local trust anchor (operator only)
+      description: Requires the existing CR_PERMISSIONS_ADMIN_TOKEN, distinct from CR_AUTH_TOKEN, even when delivery ACLs are disabled. created_at is server-stamped. IDs and keys cannot be overwritten.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TrustAnchor'}
+      responses:
+        "201":
+          description: Anchor accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TrustAnchor'}
+        "403": {description: MANAGEMENT_FORBIDDEN}
+        "409": {description: TRUST_EXISTS (immutable record)}
+    get:
+      operationId: trustListAnchors
+      summary: List locally accepted anchors (operator only)
+      responses:
+        "200":
+          description: Current local anchors, sorted by id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [anchors]
+                properties:
+                  anchors:
+                    type: array
+                    items: {$ref: '#/components/schemas/TrustAnchor'}
+        "403": {description: MANAGEMENT_FORBIDDEN}
+  /trust/delegations:
+    post:
+      operationId: trustCreateDelegation
+      summary: Import a voucher-signed delegation (operator only)
+      description: Requires CR_PERMISSIONS_ADMIN_TOKEN. The voucher must already be locally held and its signature must verify. Records are immutable. Import is not a trust verdict; scope and depth are checked per use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TrustDelegation'}
+      responses:
+        "201":
+          description: Delegation stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TrustDelegation'}
+        "400": {description: TRUST_MALFORMED (includes invalid voucher or signature on import)}
+        "403": {description: MANAGEMENT_FORBIDDEN}
+        "409": {description: TRUST_EXISTS}
+    get:
+      operationId: trustListDelegations
+      summary: List delegations for a subject public key (operator only)
+      parameters:
+        - name: subject
+          in: query
+          required: true
+          schema: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+      responses:
+        "200":
+          description: Delegations sorted by signature, or an empty list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delegations]
+                properties:
+                  delegations:
+                    type: array
+                    items: {$ref: '#/components/schemas/TrustDelegation'}
+        "400": {description: TRUST_MALFORMED}
+        "403": {description: MANAGEMENT_FORBIDDEN}
+  /trust/verify:
+    post:
+      operationId: trustVerifyChain
+      summary: Evaluate key trust against this server's anchors
+      description: Uses the ordinary reach credential. Chain order is anchor to leaf. A decision is HTTP 200 even when untrusted; inspect verdict. NOT payload authentication, delivery authorization, rotation or revocation. D16 requires trust-delegation plus a sufficient max_depth for onward vouching.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signer, scope, chain]
+              additionalProperties: false
+              properties:
+                signer: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+                scope: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
+                chain:
+                  type: array
+                  items: {$ref: '#/components/schemas/TrustDelegation'}
+      responses:
+        "200":
+          description: Named verdict (link is one-based in anchor-to-leaf order)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verdict, depth]
+                properties:
+                  verdict:
+                    type: string
+                    enum: [TRUST_VERIFIED, TRUST_UNKNOWN_ANCHOR, TRUST_DEPTH_EXCEEDED, TRUST_SCOPE_INSUFFICIENT, TRUST_BAD_SIGNATURE]
+                  anchor_id: {type: string}
+                  depth: {type: integer, minimum: 0}
+                  link: {type: integer, minimum: 1}
+                  missing_capability: {type: string}
+        "400": {description: TRUST_MALFORMED}
+        "501": {description: TRUST_UNSUPPORTED (backend has no trust capability)}
   # ── Health ──
   # /health exempt — middleware.Auth exempts it from the bearer check
   /health:
@@ -4025,6 +4137,27 @@ components:
         is refused with 401 "body digest mismatch". Absent the header, the
         3-line contract above is unchanged.
   schemas:
+    TrustAnchor:
+      type: object
+      required: [id, public_key, label]
+      additionalProperties: false
+      properties:
+        id: {type: string, minLength: 1}
+        public_key: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+        label: {type: string, minLength: 1}
+        created_at: {type: string, format: date-time, readOnly: true}
+    TrustDelegation:
+      type: object
+      required: [voucher, subject_key, scope, issued_at, signature]
+      additionalProperties: false
+      description: Canonical bytes are compact JSON in this property order, with signature an empty string. Scope order and timestamp precision/offset are signed. Voucher is an anchor id on the first link, then the first 16 hex digits of SHA256 of the preceding subject's decoded public key. max_depth counts further links (zero permits a signing leaf); the global limit is 8 links. Empty scope grants no capabilities.
+      properties:
+        voucher: {type: string, minLength: 1}
+        subject_key: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+        scope: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
+        max_depth: {type: integer, minimum: 0, maximum: 8, default: 0}
+        issued_at: {type: string, format: date-time}
+        signature: {type: string, pattern: '^[0-9a-fA-F]{128}$'}
     Group:
       type: object
       required: [name, members, created_at, updated_at]

@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 16, version, "should reflect migration 016 for retained A2A outputs")
+	assert.Equal(t, 17, version, "should reflect migration 017 for persistent trust records")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 
@@ -263,7 +263,7 @@ func openTestDB(ctx context.Context, t *testing.T) *sql.DB {
 func clearSchema(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.ExecContext(ctx, `
-		DROP TABLE IF EXISTS a2a_task_outputs, a2a_task_observations, service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;
+		DROP TABLE IF EXISTS trust_delegations, trust_anchors, a2a_task_outputs, a2a_task_observations, service_delivery_receipts, dead_letters, inbox_entries, agents, schema_migrations CASCADE;
 	`)
 	require.NoError(t, err)
 }

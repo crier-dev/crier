@@ -118,7 +118,7 @@ func AuthTokens(authToken, managementToken string) func(http.Handler) http.Handl
 // cmd/server/principals_auth_test.go fails if the two ever drift apart.
 func isManagementPath(path string) bool {
 	switch path {
-	case "/principals", "/bindings", "/grants":
+	case "/principals", "/bindings", "/grants", "/trust/anchors", "/trust/delegations":
 		return true
 	}
 	// /grants/{grantid}/revoke and /agents/{agentid}/class are the two

@@ -537,6 +537,58 @@ all. The D14 shadow principal itself is owed to CHAT-PERMISSIONS.md (its §8.1 i
 
 ## 11. Status line
 
+2026-10-19 — DF-CRIER-362: anchors, signed capability delegations and the
+`POST /trust/verify` route ARE BUILT, backed by the existing registry's memory
+and PostgreSQL stores (migration `017_trust_tree`). This dated implementation
+slice supersedes the older “no store / no route” statements above without
+changing §§3–5's design. `POST /trust/anchors` and `GET /trust/anchors`, plus
+`POST /trust/delegations` and `GET /trust/delegations?subject=<hex>`, use the
+existing operator credential (`CR_PERMISSIONS_ADMIN_TOKEN`, distinct from
+`CR_AUTH_TOKEN`), even with delivery ACLs disabled. Empty or colliding credentials
+keep this new management gate CLOSED. No existing authentication, delivery-log,
+A2A or session semantics change; the middleware's management-path list only grows
+the two new management paths. `POST /trust/verify` uses the ordinary reach gate.
+Records are immutable; duplicate anchor IDs/keys or delegation signatures answer
+409, malformed/import-invalid records answer 400, unarmed/non-operator management
+answers 403, and a backend lacking the optional trust capability answers 501.
+
+The deliberately small wire projection is documented in `docs/openapi.yaml`:
+anchor `{id, public_key, label, created_at}` (creation time is server-stamped);
+delegation `{voucher, subject_key, scope, max_depth, issued_at, signature}`.
+`voucher` is the locally accepted anchor ID at the root, then the existing
+sha256-prefix key ID (16 lowercase hex digits) of the preceding subject key.
+Canonical bytes are compact Go struct JSON in precisely that property order,
+with `signature` blanked to `""`, not omitted. Scope ordering and timestamp
+nanoseconds/offset are signed, retained through PostgreSQL reload, and never
+silently rewritten. Imports require a locally held voucher and a valid ed25519
+signature; storing a record is not itself a trust grant.
+
+Verification takes `{signer, scope, chain:[...]}` with the path in anchor-to-leaf
+order. Each hop must cover every claimed capability; an empty scope grants none.
+A delegation's `max_depth` counts FURTHER links after it (zero permits a direct
+signing leaf). D16's explicit transitive purpose is the capability
+`trust-delegation`, required in each delegation whose subject vouches onward,
+as well as a sufficient depth budget. There is also a global eight-link bound;
+cycles, disconnected vouchers and a mismatched leaf are refused. The HTTP
+response is 200 for a completed trust evaluation, with one of `TRUST_VERIFIED`
+(`anchor_id`, `depth`), `TRUST_UNKNOWN_ANCHOR`, `TRUST_DEPTH_EXCEEDED` (`link`),
+`TRUST_SCOPE_INSUFFICIENT` (`link`, `missing_capability`) or
+`TRUST_BAD_SIGNATURE` (`link`). Links are one-based from the anchor; failure
+`depth:0` means no verified depth is asserted. Malformed requests are instead
+400 `TRUST_MALFORMED`. These are key-chain verdicts, NOT payload signatures,
+proof of leaf-key possession, replay protection or delivery-ACL grants.
+
+Rotation and revocation remain **NOT BUILT on the persistent/HTTP surface**:
+no new rotation/revocation record, route, window or enforcement is supplied by
+this slice. The pre-existing CR-CHAT-025 in-memory library helpers are retained,
+not rewritten or wired here; the older §9 library-built notes do not imply
+persistent rotation/revocation. Full structured namespace/direction/purpose
+records, expiry windows, accepted-by principals, the federated message transcript,
+peer/shadow wiring and delivery-log annotations remain outside this first slice.
+The normative rotation/revocation designs in §§6–7 and the outstanding surface
+work in §§9–10 remain owed.
+
+
 `DRAFT v1 · 2026-10-03 · CR-CHAT-024 + CR-CHAT-025 + CR-CHAT-027` · 2026-10-07 (CR-CHAT-025): the trust
 PRIMITIVE landed as a library — `internal/trust` (anchors, signed delegations, bounded chain walk with
 the `TRUST_*` named outcomes, rotation certificates, tombstoned revocation with the

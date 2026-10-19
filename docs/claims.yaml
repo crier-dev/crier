@@ -404,8 +404,8 @@ claims:
     # router has served since the tick-451 phase-1 salvage: POST
     # /agents/{agentid}/class was registered and counted by COUNT-ROUTER-PATHS
     # but absent from this document, so the pair is 54 / 64.
-    quote: "54 paths"
-    expect: 54
+    quote: "57 paths"
+    expect: 57
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -442,8 +442,8 @@ claims:
     # registration (registryRegisterAgentByID — a new METHOD on the
     # already-declared /agents/{id} path, so the PATH count is unchanged at 54
     # while this one moves), so the count is 65.
-    quote: "65 operations"
-    expect: 65
+    quote: "70 operations"
+    expect: 70
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -508,8 +508,8 @@ claims:
     # registered-but-undeclared paths are the 5 opt-in detection routes and the
     # 4 non-API routes /chat + /openapi.json + /openapi.yaml + /docs). This
     # number is a measurement of main.go, which the document edit does not move.
-    quote: "51 router paths"
-    expect: 51
+    quote: "54 router paths"
+    expect: 54
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

@@ -726,6 +726,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// The shared auth middleware accepts either the message token or the admin
 	// token on exactly these paths (middleware.AuthTokens'
 	// isManagementPath, DF-CRIER-297) — keep the two lists in step.
+	trustHandler := registry.NewTrustHandler(regStore, cfg.Permissions.AdminToken, cfg.AuthToken)
+	r.HandleFunc("/trust/anchors", trustHandler.HandleCreateAnchor).Methods("POST")
+	r.HandleFunc("/trust/anchors", trustHandler.HandleListAnchors).Methods("GET")
+	r.HandleFunc("/trust/delegations", trustHandler.HandleCreateDelegation).Methods("POST")
+	r.HandleFunc("/trust/delegations", trustHandler.HandleListDelegations).Methods("GET")
+	r.HandleFunc("/trust/verify", trustHandler.HandleVerify).Methods("POST")
+
 	r.HandleFunc("/principals", registryHandler.HandleMintPrincipal).Methods("POST")
 	r.HandleFunc("/bindings", registryHandler.HandleCreateBinding).Methods("POST")
 	r.HandleFunc("/grants", registryHandler.HandleCreateGrant).Methods("POST")

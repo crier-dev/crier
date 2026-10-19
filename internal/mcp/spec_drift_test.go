@@ -94,6 +94,12 @@ var toolCoverage = map[string][]string{
 // Each justification is grounded in the repo (the operation's own summary/tag
 // description in docs/openapi.yaml, or the bridge's own comments), never invented.
 var excludedOperations = map[string]string{
+	"trustCreateAnchor":     "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
+	"trustListAnchors":      "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
+	"trustCreateDelegation": "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
+	"trustListDelegations":  "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
+	"trustVerifyChain":      "Verifier-local signing-trust REST surface; no remote TrustStore or MCP management verb (DF-CRIER-362).",
+
 	// CR-CHAT-007 phase 1 — the permission MANAGEMENT surfaces. Every write is
 	// gated on the deployment's CR_PERMISSIONS_ADMIN_TOKEN (a second,
 	// constant-time-checked secret distinct from CR_AUTH_TOKEN) precisely
