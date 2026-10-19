@@ -1085,7 +1085,15 @@ func warnSkippedTargets(messageID string, outcomes []DeliveryOutcome, groupOf ma
 			slog.Warn("fan-out: webhook runtime reported a non-answer", append(attrs, "outcome", o.Outcome)...)
 			continue
 		}
-		slog.Warn("fan-out: skipping target (delivery refused) — other targets retain their own outcomes", attrs...)
+		// DF-CRIER-398: name the outcome instead of calling every non-delivery a
+		// refusal. leased/acked/expired are not refusals, and a log line that
+		// says "refused" for a lease makes an operator hunt a policy that never
+		// fired.
+		line := "fan-out: target not delivered — other targets retain their own outcomes"
+		if o.Outcome == OutcomeRefused {
+			line = "fan-out: target refused delivery — other targets retain their own outcomes"
+		}
+		slog.Warn(line, append(attrs, "outcome", o.Outcome)...)
 	}
 }
 
