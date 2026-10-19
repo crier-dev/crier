@@ -4,9 +4,11 @@
 // Usage: NODE_PATH=/tmp/crier-browser/node_modules node scripts/chat-ui-browser.cjs
 // Install the harness dependency outside the repo: npm install --prefix /tmp/crier-browser playwright
 // Build first: go build -o /tmp/cr-chat-038-server ./cmd/server
+// CHAT_TEST_PORT optionally pins the first scratch listener (e.g. 18874);
+// CRIER_TEST_BINARY selects the rebuilt binary, also used for both agent keygens.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
-const {spawn} = require('node:child_process');
+const {spawn,spawnSync} = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -26,11 +28,15 @@ async function freePort() {
 }
 async function start(token = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-038-')); tempdirs.push(dir);
-  const port = await freePort();
+  const port = processes.length === 0 && process.env.CHAT_TEST_PORT ? Number(process.env.CHAT_TEST_PORT) : await freePort();
+  // Binding must succeed before spawning, so readiness cannot measure a stranger.
+  const probe = net.createServer();
+  await new Promise((resolve,reject) => probe.once('error',reject).listen(port,'127.0.0.1',resolve));
+  await new Promise(resolve => probe.close(resolve));
   // Keep only host/toolchain essentials. Ambient production CR_* config must
   // never bind a test to a real database, permission log or peer.
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CR_') && !k.startsWith('CRIER_')));
-  Object.assign(env,{CRIER_PORT:String(port),CR_SESSION_BACKEND:'jsonl',CR_SESSION_LOG_ROOT:path.join(dir,'sessions'),CR_GROUP_ROOT:path.join(dir,'groups'),CR_AUTH_TOKEN:token,CR_RATE_LIMIT_PER_MINUTE:'0'});
+  Object.assign(env,{CRIER_PORT:String(port),CR_SESSION_BACKEND:'jsonl',CR_SESSION_LOG_ROOT:path.join(dir,'sessions'),CR_GROUP_ROOT:path.join(dir,'groups'),CR_AUTH_TOKEN:token,CR_GUARD_ENABLED:'false',CR_RATE_LIMIT_PER_MINUTE:'0'});
   const log = fs.openSync(path.join(dir,'server.log'),'w');
   const proc = spawn(process.env.CRIER_TEST_BINARY || '/tmp/cr-chat-038-server',[],{cwd:dir,env,stdio:['ignore',log,log]}); processes.push(proc); fs.closeSync(log);
   const url = 'http://127.0.0.1:' + port;
@@ -54,9 +60,16 @@ async function run() {
   const base = await start();
   // These are deliberately identified as test records, not demo product data.
   const operator = 'ui-test-operator', agent = 'ui-test-recipient';
-  const keypair = require('node:crypto').generateKeyPairSync('ed25519');
-  const public_key = keypair.publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('hex');
-  for (const id of [operator,agent]) await api(base,'POST','/agents',{id,public_key,capabilities:['ui-test-analysis']});
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-keys-')); tempdirs.push(keyDir);
+  let keypair, public_key;
+  for (const id of [operator,agent]) {
+    const keyFile = path.join(keyDir,id+'.pem');
+    const generated = spawnSync(process.env.CRIER_TEST_BINARY || '/tmp/cr-chat-038-server',['keygen','-out',keyFile,'-id',id,'-server',base,'-json'],{encoding:'utf8'});
+    assert.equal(generated.status,0,generated.stderr || generated.stdout);
+    const config = JSON.parse(generated.stdout);
+    await api(base,'POST','/agents',{...JSON.parse(config.registration),capabilities:['ui-test-analysis']});
+    if (id === agent) { public_key = config.public_key; keypair = {privateKey:require('node:crypto').createPrivateKey(fs.readFileSync(keyFile))}; }
+  }
   const session = await api(base,'POST','/sessions',{title:'Browser verification channel',kind:'channel',created_by:{agent:operator},members:[{member_type:'agent',member_id:operator},{member_type:'agent',member_id:agent}]});
   const message = await api(base,'POST',`/sessions/${session.id}/messages`,{sender:operator,payload:{text:'Initial request for the browser test'},message_kind:'plain'});
   const other = await api(base,'POST',`/sessions/${session.id}/messages`,{sender:operator,payload:{text:'Independent second thread'},message_kind:'plain'});
@@ -155,6 +168,43 @@ async function run() {
   assert.match(await page.locator('.msg.task').innerText(),/Explicit task/);
   await page.locator('#tasks [data-thread]').click(); assert.equal(await page.locator('#thread-filter').inputValue(),tasks.tasks[0].thread_id);
   await page.locator('#thread-filter').selectOption('');
+  // DF-CRIER-331: real claim/complete writes, not just task-source markers.
+  const taskID = tasks.tasks[0].task_id;
+  const transitions = [{state:tasks.tasks[0].state,owner:tasks.tasks[0].owner || ''}];
+  assert.equal(transitions[0].state,'open');
+  // Test-only UI-state changes exercise the SAME reason gate, without changing
+  // the server's session lifecycle or inventing a close route.
+  const assertActionGates = async action => {
+    for (const precondition of ['identity','session','closed']) {
+      await page.evaluate(precondition => {
+        window.__gateSaved = {agent:state.agent,session:state.session};
+        if (precondition === 'identity') state.agent = '';
+        if (precondition === 'session') state.session = null;
+        if (precondition === 'closed') state.session = {...state.session,state:'closed'};
+        updateComposer();
+      },precondition);
+      assert.equal(await page.locator('[data-task-action="'+action+'"]').isDisabled(),true);
+      assert.equal(await page.locator('[data-task-action="'+action+'"]').getAttribute('title'),await page.locator('#composer-why').innerText());
+      await page.evaluate(() => { Object.assign(state,window.__gateSaved); delete window.__gateSaved; updateComposer(); });
+    }
+  };
+  for (const [action,expected] of [['claim','claimed'],['complete','done']]) {
+    await assertActionGates(action);
+    const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/tasks/'+taskID+'/'+action));
+    await page.locator('[data-task-action="'+action+'"]').click();
+    const wire = await response; assert.equal(wire.status(),201);
+    const result = await wire.json(); await waitIdle(page);
+    assert.equal(result.state,expected); assert.equal(result.owner,operator);
+    assert.equal(JSON.parse(wire.request().postData()).actor,operator);
+    const stored = (await api(base,'GET',`/sessions/${session.id}/tasks`)).tasks.find(t => t.task_id === taskID);
+    assert.equal(stored.state,expected); assert.equal(stored.owner,operator);
+    assert.match(await page.locator('#task-result').innerText(),new RegExp(expected));
+    assert.match(await page.locator('#tasks').innerText(),new RegExp(expected));
+    transitions.push({state:result.state,owner:result.owner});
+    if (action === 'claim') await page.locator('#tasks').screenshot({path:path.join(evidence,'chat-task-claimed.png')});
+  }
+  assert.equal(await page.locator('[data-task-action]').count(),0); // terminal, no invalid actions
+  await page.locator('#tasks').screenshot({path:path.join(evidence,'chat-task-done.png')});
   // Real per-target refusal: remove a previously selected registered recipient.
   await page.locator('#intent').selectOption('message'); await page.locator('#recipient').selectOption(agent);
   const deletePath = '/agents/'+agent, ts = String(Math.floor(Date.now()/1000));
@@ -225,6 +275,53 @@ async function run() {
   assert.ok(plain.outcomes.some(o => o.target === agent && o.outcome !== 'refused'),JSON.stringify(plain.outcomes));
   assert.equal(await page.locator('#conversation-title').innerText(),'Created by browser form');
   assert.ok((await api(base,'GET','/sessions')).sessions.some(s => s.title === 'Created by browser form'));
+  // DF-CRIER-331: operator-only channel, fresh audience, first click NEVER POSTs.
+  await page.locator('#new-session').click();
+  await page.locator('#initial-members').selectOption([]);
+  await page.locator('#session-title').fill('DF-CRIER-331 note to self');
+  await page.locator('#create-button').click(); await waitIdle(page);
+  const soloID = await page.evaluate(() => state.current);
+  let messagePosts = 0;
+  page.on('request',request => { if (request.method() === 'POST' && request.url().endsWith('/sessions/'+soloID+'/messages')) messagePosts++; });
+  await page.locator('#text').fill('Note to self with no receiving agent');
+  await page.locator('#send-button').click(); await waitIdle(page);
+  assert.equal(await page.locator('#audience-warning').isVisible(),true);
+  const warningText = await page.locator('#audience-warning').innerText();
+  assert.match(warningText,/no agent will receive this — the session has no agent member/);
+  assert.equal(messagePosts,0);
+  assert.equal((await api(base,'GET',`/sessions/${soloID}/messages`)).messages.length,0);
+  await page.screenshot({path:path.join(evidence,'chat-no-agent-warning.png'),fullPage:true});
+  await page.locator('.composer-wrap').screenshot({path:path.join(evidence,'chat-no-agent-detail.png')});
+  // Changing the draft must disarm the first confirmation; the next click arms again.
+  await page.locator('#text').fill('Revised note to self');
+  assert.equal(await page.locator('#audience-warning').isVisible(),false);
+  await page.locator('#send-button').click(); await waitIdle(page); assert.equal(messagePosts,0);
+  await page.locator('#send-button').click(); await waitIdle(page); assert.equal(messagePosts,1);
+  const note = (await api(base,'GET',`/sessions/${soloID}/messages`)).messages[0];
+  assert.equal(note.payload.text,'Revised note to self'); assert.deepEqual(note.audience.targets || [],[]);
+  assert.deepEqual(note.outcomes || [],[]); assert.equal(await page.locator('#audience-warning').isVisible(),false);
+  assert.equal((await page.locator('#registered-agents option').evaluateAll(options => options.map(o => o.value))).includes(agent),true);
+  // The server's message is shown verbatim, not replaced by a generic failure.
+  await page.route(`**/sessions/${soloID}/participants`,route => route.request().method() === 'POST' ? route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:{code:'TEST_REFUSAL',message:'Exact participant refusal from test server.'}})}) : route.continue());
+  await page.locator('#participant-agent').fill(agent); await page.locator('#add-participant').click(); await waitIdle(page);
+  assert.equal(await page.locator('#participant-result').innerText(),'Exact participant refusal from test server.');
+  await page.unroute(`**/sessions/${soloID}/participants`);
+  const addResponse = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/sessions/'+soloID+'/participants'));
+  await page.locator('#add-participant').click(); const addedWire = await addResponse;
+  assert.equal(addedWire.status(),201); const added = await addedWire.json(); await waitIdle(page);
+  const roster = (await api(base,'GET',`/sessions/${soloID}/participants`)).participants;
+  assert.ok(roster.some(p => p.member_id === agent && p.member_type === 'agent' && p.role === 'member' && p.active));
+  assert.match(await page.locator('#participants').innerText(),/ui-test-recipient/);
+  assert.match(await page.locator('#participants').innerText(),/agent · member/);
+  await page.screenshot({path:path.join(evidence,'chat-participant-added.png'),fullPage:true});
+  await page.locator('#participants').screenshot({path:path.join(evidence,'chat-participant-detail.png')});
+  // Populated audience sends on FIRST click, without a leftover warning.
+  await page.locator('#text').fill('Now the added member receives this');
+  await page.locator('#send-button').click(); await waitIdle(page); assert.equal(messagePosts,2);
+  const delivered = (await api(base,'GET',`/sessions/${soloID}/messages`)).messages.find(m => m.payload?.text === 'Now the added member receives this');
+  assert.ok(delivered.outcomes.some(o => o.target === agent && o.outcome !== 'refused'));
+  const completion = {session:session.id,taskID,transitions,soloSession:soloID,warningText,firstClickPosts:0,secondClickPosts:1,noteAudience:note.audience,addedParticipant:added,storedParticipant:roster.find(p => p.member_id === agent),recipientOutcomes:delivered.outcomes};
+  fs.writeFileSync(path.join(evidence,'completion-results.json'),JSON.stringify(completion,null,2));
   // Attribute escaping: inject hostile-looking values into the read response
   // only, then prove no extra element or event attribute reached the DOM.
   await page.route('**/sessions',route => route.request().method() === 'GET' ? route.fulfill({contentType:'application/json',body:JSON.stringify({sessions:[{id:'\" onmouseover=\"window.__injected=true',title:'<img src=x onerror=window.__injected=true>',kind:'channel',state:'open',message_count:0}]})}) : route.continue());
@@ -239,7 +336,7 @@ async function run() {
   const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
   assert.match(await authorized.text(),/data-ui-revision="CR-CHAT-038"/);
   assert.deepEqual(errors,[]);
-  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},checks:['opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
+  const report = {method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},completion,checks:['participant datalist + browser POST + API roster readback; verbatim refusal','task open/claimed/done API and UI readback; both action gates use the composer reason','zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click','opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
   fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2)); console.log('PASS: browser behavior and 3 viewport checks. Evidence: '+evidence);
 }

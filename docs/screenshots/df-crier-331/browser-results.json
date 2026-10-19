@@ -1,0 +1,117 @@
+{
+  "method": "Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.",
+  "base": "http://127.0.0.1:18874",
+  "measurements": [
+    {
+      "viewport": 390,
+      "scrollWidth": 390,
+      "bodyWidth": 390,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 0,
+        "visible": true
+      }
+    },
+    {
+      "viewport": 768,
+      "scrollWidth": 768,
+      "bodyWidth": 768,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 0,
+        "visible": true
+      }
+    },
+    {
+      "viewport": 1280,
+      "scrollWidth": 1280,
+      "bodyWidth": 1280,
+      "overflows": [],
+      "lastMessage": {
+        "scrollTop": 1218,
+        "visible": true
+      }
+    }
+  ],
+  "pageErrors": [],
+  "authBoundary": {
+    "noHeader": 401,
+    "bearerHeader": 200
+  },
+  "completion": {
+    "session": "115899c563071528a79089f1",
+    "taskID": "23785688d8b05c048b649a24",
+    "transitions": [
+      {
+        "state": "open",
+        "owner": ""
+      },
+      {
+        "state": "claimed",
+        "owner": "ui-test-operator"
+      },
+      {
+        "state": "done",
+        "owner": "ui-test-operator"
+      }
+    ],
+    "soloSession": "2f57561ba54e657f0be37523",
+    "warningText": "no agent will receive this — the session has no agent member (other than the sender). Click Send again to record a note-to-self.",
+    "firstClickPosts": 0,
+    "secondClickPosts": 1,
+    "noteAudience": {
+      "rule": "session",
+      "targets": null
+    },
+    "addedParticipant": {
+      "member_type": "agent",
+      "member_id": "ui-test-recipient",
+      "role": "member",
+      "added_at": "2026-10-19T08:36:18.279458883Z",
+      "active": true,
+      "context_share": {
+        "mode": "summary"
+      }
+    },
+    "storedParticipant": {
+      "member_type": "agent",
+      "member_id": "ui-test-recipient",
+      "role": "member",
+      "added_at": "2026-10-19T08:36:18.279458883Z",
+      "active": true,
+      "context_share": {
+        "mode": "summary"
+      }
+    },
+    "recipientOutcomes": [
+      {
+        "target": "ui-test-recipient",
+        "outcome": "delivered",
+        "inbox_entry_id": "e49741273a56c534dd88c050.ui-test-recipient",
+        "updated_at": "2026-10-19T08:36:18.534162413Z"
+      }
+    ]
+  },
+  "checks": [
+    "participant datalist + browser POST + API roster readback; verbatim refusal",
+    "task open/claimed/done API and UI readback; both action gates use the composer reason",
+    "zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click",
+    "opt-in off by default; unsaved reload re-gates",
+    "one attribution-only tab key; reload applies it; selected-session composer enabled",
+    "Forget and uncheck clear immediately; independent tab forgets",
+    "storage denial keeps attribution usable",
+    "initial members and plain-send outcome read back from API",
+    "rendered server data",
+    "thread isolation and reply API readback",
+    "addressing creates no task",
+    "explicit task API readback",
+    "real delivery refusal",
+    "401/403/500 retain draft",
+    "read failure disables send",
+    "stale request isolation",
+    "no DOM XSS",
+    "create form readback",
+    "empty search",
+    "controls fit all three widths"
+  ]
+}

@@ -78,6 +78,60 @@ func TestChatClientAttributionOptIn(t *testing.T) {
 	}
 }
 
+func TestChatClientParticipantAndTaskActions(t *testing.T) {
+	html := string(chatClientHTML)
+	for _, marker := range []string{
+		`id="add-participant-form"`, `id="participant-agent" list="registered-agents"`,
+		`id="registered-agents"`, `id="add-participant"`, `id="participant-result"`,
+		`sessionPath(id,"participants")`, `member_type:"agent", member_id:memberID, role:"member"`,
+		`esc(p.member_type)`, `esc(p.role)`, `e.serverMessage || e.message`,
+		`data-task-action="claim"`, `data-task-action="complete"`,
+		`sessionPath(id,"tasks/" + encodeURIComponent(taskID) + "/" + action)`,
+		`actor:state.agent, actor_kind:"agent"`, `result.state`, `await refresh()`,
+		`function composerReason()`, `const why = composerReason()`,
+		`document.querySelectorAll("[data-task-action]")`, `aria-describedby="composer-why"`,
+		`t.state === "open"`, `t.state === "claimed" || t.state === "running"`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("embedded chat missing participant/task action contract %q", marker)
+		}
+	}
+}
+
+func TestChatClientNoRecipientConfirmation(t *testing.T) {
+	html := string(chatClientHTML)
+	for _, marker := range []string{
+		`id="audience-warning"`, `no agent will receive this — the session has no agent member`,
+		`p.active && p.member_type === "agent" && p.member_id !== state.agent`,
+		`const roster = await call(sessionPath(id,"participants"))`,
+		`const confirmation = JSON.stringify(`, `state.noAgentConfirmation !== confirmation`,
+		`state.noAgentConfirmation = confirmation`, `Click Send again to record a note-to-self.`,
+		`function resetAudienceWarning()`, `$("text").addEventListener("input",resetAudienceWarning)`,
+		`$("recipient").addEventListener("change",resetAudienceWarning)`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("embedded chat missing no-recipient confirmation contract %q", marker)
+		}
+	}
+	// The first click returns without recording. Arming must precede the write,
+	// inside send itself, not merely appear in an unused helper or comment.
+	sendStart := strings.Index(html, "async function send(event)")
+	if sendStart < 0 {
+		t.Fatal("send handler missing")
+	}
+	sendEnd := strings.Index(html[sendStart:], `$("sessions").addEventListener`)
+	if sendEnd < 0 {
+		t.Fatal("send handler boundary missing")
+	}
+	send := strings.Join(strings.Fields(html[sendStart:sendStart+sendEnd]), " ")
+	arm := strings.Index(send, "state.noAgentConfirmation = confirmation")
+	stop := strings.Index(send, `$("audience-warning").hidden = false; return;`)
+	write := strings.Index(send, `const result = await call(sessionPath(id,task ? "tasks" : "messages")`)
+	if arm < 0 || stop <= arm || write <= stop {
+		t.Error("first click must arm and return before the message/task POST")
+	}
+}
+
 func TestChatClientNoParallelAuthOrExecution(t *testing.T) {
 	html := string(chatClientHTML)
 	for _, forbidden := range []string{

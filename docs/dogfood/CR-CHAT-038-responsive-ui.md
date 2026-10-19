@@ -56,6 +56,10 @@ unavailable,” not a fabricated offline/online badge. Permission maps use the
 server's false-by-absence boolean-map semantics; missing response structures do
 not grant permissions.
 
+The mock's Pinned zone has no data source and is therefore not rendered; its named
+follow-up is a pin API. Participant removal is also unavailable because the server
+has no DELETE participant route; adding members does not imply a removal capability.
+
 ## Authentication blocker (unchanged)
 
 `internal/middleware/auth.go` exempts only `/health`, `/version`, `/openapi.json`,

@@ -163,13 +163,20 @@ main { min-width:0; display:flex; flex-direction:column; }
     </form>
     <p id="composer-hint" class="note composer-hint">A tag addresses; it never executes. Recipient selects delivery. Only “Explicit task” requests work. Replies stay in their recorded thread. Ctrl/⌘ + Enter sends.</p>
     <p id="composer-why" class="gate" role="status" hidden></p>
+    <p id="audience-warning" class="gate" role="status" hidden></p>
     <p id="send-result" role="status" aria-live="polite"></p>
     <p class="note">Guard verdict, lease/ack details, task progress percentages and attachments are unavailable in this transcript UI; no status is inferred from message text.</p>
   </div>
 </main>
 <aside class="rail" aria-label="Conversation context">
-  <section class="panel"><h2>Participants &amp; presence</h2><div id="participants" class="note">Select a session.</div></section>
-  <section class="panel"><h2>Tasks in this session</h2><div id="tasks" class="note">Select a session. Tasks are read from their recorded lifecycle, never inferred from tags.</div></section>
+  <section class="panel"><h2>Participants &amp; presence</h2><div id="participants" class="note">Select a session.</div>
+    <form id="add-participant-form" class="stack">
+      <label>Agent ID to add<input id="participant-agent" list="registered-agents" required autocomplete="off" disabled></label>
+      <datalist id="registered-agents"></datalist>
+      <button id="add-participant" type="submit" aria-describedby="composer-why" disabled>Add participant</button>
+    </form><p id="participant-result" role="status"></p>
+  </section>
+  <section class="panel"><h2>Tasks in this session</h2><div id="tasks" class="note">Select a session. Tasks are read from their recorded lifecycle, never inferred from tags.</div><p id="task-result" role="status"></p></section>
   <section class="panel"><h2>Session permissions</h2><div id="permissions" class="note">Select a session.</div><p class="note">Read-only. Permission changes are unavailable here.</p></section>
   <section class="panel"><h2>Capability directory</h2><div id="capabilities" class="note">Loading registry…</div><p class="note">Registry advertisements, not an execution grant. Capability delivery selects one holder per delivery; it is not a broadcast. Capability routing is unavailable in this session composer.</p></section>
 </aside>
@@ -183,7 +190,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", generation:0, busy:false, sending:false, agent:"", namespace:"" };
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, agent:"", namespace:"" };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const ATTRIBUTION_KEY = "crier.chat.attribution-id";
 function forgetAttribution() {
@@ -242,7 +249,11 @@ async function call(path, options = {}) {
   const raw = await response.text();
   let body;
   try { body = JSON.parse(raw); } catch { throw new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway."); }
-  if (!response.ok) throw new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
+  if (!response.ok) {
+    const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
+    error.serverMessage = typeof body.error === "string" ? body.error : body.error?.message;
+    throw error;
+  }
   return body;
 }
 function notice(id, text, error = false) { $(id).textContent = text; $(id).className = error ? "note error" : "note"; }
@@ -252,6 +263,17 @@ function renderSessions() {
   const sessions = state.sessions.filter(s => [s.title,s.id,s.preview].join(" ").toLowerCase().includes(q));
   $("sessions").innerHTML = sessions.map(s => '<button type="button" class="session' + (state.current === s.id ? ' active' : '') + '" data-session="' + esc(s.id) + '" aria-current="' + (state.current === s.id ? 'page' : 'false') + '"><span class="avatar" aria-hidden="true">' + avatar(s.title || s.id) + '</span><span class="s-body"><span class="s-name">' + esc(s.title || s.id) + '</span><span class="s-preview">' + esc(s.preview || "No message preview") + '</span><span class="s-meta">' + esc(s.kind) + ' · ' + esc(s.state) + ' · ' + esc(s.message_count) + ' messages<br>' + esc(stamp(s.last_message_at || s.created_at)) + '</span></span></button>').join("") || '<p class="note">' + (q ? "No matching loaded sessions." : "No sessions returned. Create a channel to begin.") + '</p>';
 }
+function composerReason() {
+  return !state.agent ? "Set an acting agent ID (Connection & identity, left) to enable sending."
+    : !state.session ? "Select a conversation to send into."
+    : state.session.state !== "open" ? "This conversation is " + state.session.state + "; sending is unavailable."
+    : state.sending ? "Recording…" : "";
+}
+function resetAudienceWarning() {
+  state.noAgentConfirmation = null;
+  $("audience-warning").hidden = true;
+  $("audience-warning").textContent = "";
+}
 function updateComposer() {
   const enabled = !!state.session && state.session.state === "open" && !!state.agent && !state.sending;
   for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
@@ -260,13 +282,12 @@ function updateComposer() {
   $("send-button").textContent = state.sending ? "Recording…" : $("intent").value === "task" ? "Create task" : "Send message";
   // CR-CHAT-039: a disabled composer with no stated reason reads as a broken page.
   // The hint names the ONE unmet precondition instead of leaving the user guessing.
-  const why = !state.agent ? "Set an acting agent ID (Connection & identity, left) to enable sending."
-    : !state.session ? "Select a conversation to send into."
-    : state.session.state !== "open" ? "This conversation is " + state.session.state + "; sending is unavailable."
-    : state.sending ? "Recording…" : "";
+  const why = composerReason();
   const w = $("composer-why");
   if (w) { w.textContent = why; w.hidden = !why; }
   $("send-button").title = why;
+  for (const id of ["participant-agent","add-participant"]) { $(id).disabled = !enabled; $(id).title = why; }
+  for (const button of document.querySelectorAll("[data-task-action]")) { button.disabled = !enabled; button.title = why; }
   const g = $("identity-gate");
   if (g) g.hidden = !!state.agent;
 }
@@ -280,6 +301,7 @@ function renderHeader() {
   updateComposer();
 }
 function renderReply() {
+  resetAudienceWarning();
   $("replying").hidden = !state.reply;
   $("replying").innerHTML = state.reply ? 'Reply to <code>' + esc(state.reply) + '</code><button type="button" id="cancel-reply">Cancel reply</button>' : "";
 }
@@ -301,6 +323,10 @@ function renderMessages(findings = []) {
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
 }
 function renderParticipants(body) {
+  const participants = body.participants || [];
+  const audience = members => members.filter(p => p.active && p.member_type === "agent" && p.member_id !== state.agent).map(p => p.member_id).sort();
+  if (JSON.stringify(audience(participants)) !== JSON.stringify(audience(state.participants))) resetAudienceWarning();
+  state.participants = participants;
   $("participants").innerHTML = (body.participants || []).map(p => {
     const a = p.member_type === "agent" ? state.agents.find(a => a.id === p.member_id) : null;
     const status = a && ["online","stale","offline"].includes(a.status) ? a.status : "presence unavailable";
@@ -311,9 +337,26 @@ function renderPermissions(body) {
   $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + (body.actions || Object.keys(r.allowed || {})).map(a => '<span class="pill ' + (r.allowed?.[a] === true ? 'mint' : '') + '">' + esc(a) + ': ' + (r.allowed?.[a] === true ? 'allowed' : r.allowed && typeof r.allowed === 'object' ? 'denied' : 'unknown') + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
 }
 function renderTasks(body) {
-  $("tasks").innerHTML = (body.tasks || []).map(t => '<button type="button" class="card task-link" data-thread="' + esc(t.thread_id) + '"><span class="pill warning">' + esc(t.state) + '</span><p><strong>' + esc(t.task_id) + '</strong></p><p class="note">Owner: ' + esc(t.owner || "unassigned") + '</p><p class="note">Updated ' + esc(stamp(t.updated_at)) + '</p><p class="note">Open task thread</p></button>').join("") || '<p class="note">No tasks recorded. Addressing an agent does not create a task.</p>';
+  $("tasks").innerHTML = (body.tasks || []).map(t => {
+    const action = t.state === "open" ? '<button type="button" data-task-action="claim"'
+      : t.state === "claimed" || t.state === "running" ? '<button type="button" data-task-action="complete"' : "";
+    const control = action ? action + ' data-task-id="' + esc(t.task_id) + '" aria-describedby="composer-why">' + (t.state === "open" ? 'Claim' : 'Complete') + '</button>' : "";
+    return '<div class="card"><button type="button" class="task-link ghost" data-thread="' + esc(t.thread_id) + '"><span class="pill warning">' + esc(t.state) + '</span><p><strong>' + esc(t.task_id) + '</strong></p><p class="note">Owner: ' + esc(t.owner || "unassigned") + '</p><p class="note">Updated ' + esc(stamp(t.updated_at)) + '</p><p class="note">Open task thread</p></button><div class="actions">' + control + '</div></div>';
+  }).join("") || '<p class="note">No tasks recorded. Addressing an agent does not create a task.</p>';
+  updateComposer();
+}
+async function changeTask(taskID, action) {
+  if (composerReason() || !["claim","complete"].includes(action)) return;
+  const id = state.current;
+  state.sending = true; ++state.generation; updateComposer();
+  try {
+    const result = await call(sessionPath(id,"tasks/" + encodeURIComponent(taskID) + "/" + action), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({actor:state.agent, actor_kind:"agent"}) });
+    notice("task-result", "Task " + result.task_id + ": " + result.state + (result.owner ? " · Owner: " + result.owner : ""));
+  } catch(e) { notice("task-result", e.serverMessage || e.message, true); }
+  finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
 function renderDirectory() {
+  $("registered-agents").innerHTML = state.agents.map(a => '<option value="' + esc(a.id) + '"></option>').join("");
   const capabilities = new Map();
   for (const a of state.agents) for (const cap of a.capabilities || []) capabilities.set(cap, [...(capabilities.get(cap) || []), a.id]);
   $("capabilities").innerHTML = [...capabilities].map(([cap,ids]) => '<div class="card"><strong class="lavender">@cap:' + esc(cap) + '</strong><p class="note">Advertised by ' + esc(ids.join(", ")) + '</p></div>').join("") || '<p class="note">No capabilities advertised in this realm.</p>';
@@ -349,6 +392,7 @@ async function refresh() {
 function openSession(id) {
   if (state.sending) return;
   if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
+  resetAudienceWarning(); state.participants = []; $("participant-agent").value = ""; notice("participant-result",""); notice("task-result","");
   state.current = id; state.session = null; state.messages = []; state.reply = null; state.thread = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
@@ -357,7 +401,7 @@ function openSession(id) {
 }
 async function send(event) {
   event.preventDefault();
-  if (state.sending || !state.session || !state.agent || !$("text").value.trim()) return;
+  if (composerReason() || !$("text").value.trim()) return;
   const id = state.current, draft = $("text").value.trim(), recipient = $("recipient").value, task = $("intent").value === "task";
   if (task && !recipient) { notice("send-result","Choose an explicit agent recipient before requesting work.",true); return; }
   const payload = { payload:{text:draft}, sender:state.agent };
@@ -367,6 +411,24 @@ async function send(event) {
   state.sending = true; ++state.generation; updateComposer();
   notice("send-result", task ? "Requesting explicit task…" : "Recording message…");
   try {
+    // Re-read membership rather than trust a potentially stale 15-second poll.
+    // Session audience excludes the sender; explicit agent routing overrides it.
+    if (!recipient) {
+      const roster = await call(sessionPath(id,"participants"));
+      renderParticipants(roster);
+      const audience = state.participants.filter(p => p.active && p.member_type === "agent" && p.member_id !== state.agent).map(p => p.member_id).sort();
+      if (!audience.length) {
+        const confirmation = JSON.stringify({id, draft, recipient, task, reply:state.reply, agent:state.agent, namespace:state.namespace, audience});
+        if (state.noAgentConfirmation !== confirmation) {
+          state.noAgentConfirmation = confirmation;
+          notice("send-result", "");
+          $("audience-warning").textContent = "no agent will receive this — the session has no agent member (other than the sender). Click Send again to record a note-to-self.";
+          $("audience-warning").hidden = false;
+          return;
+        }
+      }
+    }
+    resetAudienceWarning();
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     const outcomes = result.outcomes || [];
     const refused = outcomes.some(o => o.outcome === "refused");
@@ -376,6 +438,19 @@ async function send(event) {
   } catch(e) { notice("send-result", "Request failed — " + e.message + "\nDraft kept. If the response was lost, refresh the transcript before retrying to avoid duplicates.",true); }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
+$("add-participant-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const memberID = $("participant-agent").value.trim();
+  if (composerReason() || !memberID) return;
+  const id = state.current;
+  state.sending = true; ++state.generation; updateComposer();
+  try {
+    const member = await call(sessionPath(id,"participants"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({member_type:"agent", member_id:memberID, role:"member"}) });
+    notice("participant-result", "Added " + member.member_id + " · " + member.member_type + " · " + member.role);
+    $("participant-agent").value = "";
+  } catch(e) { notice("participant-result", e.serverMessage || e.message, true); }
+  finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
+});
 $("sessions").addEventListener("click", e => { const row = e.target.closest("[data-session]"); if (row) openSession(row.dataset.session); });
 $("session-search").addEventListener("input",renderSessions);
 $("refresh").addEventListener("click",refresh);
@@ -398,6 +473,7 @@ $("use-suggested").addEventListener("click", () => { if (state.sending) return; 
 $("identity-form").addEventListener("submit", event => {
   event.preventDefault(); if (state.sending) return;
   if ($("text").value && !window.confirm("Discard the unsent draft and change identity or realm?")) return;
+  resetAudienceWarning(); state.participants = []; notice("participant-result",""); notice("task-result",""); $("participant-agent").value = "";
   state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
   rememberAttribution();
   $("initial-members").innerHTML = "";
@@ -417,8 +493,10 @@ $("transcript").addEventListener("click", e => {
   state.reply = m.id; state.thread = m.thread_id; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("text").focus();
 });
 $("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; renderReply(); } });
-$("tasks").addEventListener("click", e => { const row = e.target.closest("[data-thread]"); if (row && !state.sending) { state.thread = row.dataset.thread; state.reply = null; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("transcript").scrollIntoView({block:"start"}); } });
-$("intent").addEventListener("change",updateComposer);
+$("tasks").addEventListener("click", e => { const action = e.target.closest("[data-task-action]"); if (action) { changeTask(action.dataset.taskId, action.dataset.taskAction); return; } const row = e.target.closest("[data-thread]"); if (row && !state.sending) { state.thread = row.dataset.thread; state.reply = null; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("transcript").scrollIntoView({block:"start"}); } });
+$("text").addEventListener("input",resetAudienceWarning);
+$("recipient").addEventListener("change",resetAudienceWarning);
+$("intent").addEventListener("change", () => { resetAudienceWarning(); updateComposer(); });
 $("composer").addEventListener("submit",send);
 $("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
 setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refresh(); },15000);
