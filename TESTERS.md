@@ -290,7 +290,9 @@ curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
   -d '{"payload":{"job":"build"},"sender":"alice","idempotency_key":"job-1"}'
 # -> 201 {"id":"<the SAME ID>","transport":"inbox","idempotent_replay":true}
 # (a different key, or a different target agent, is a new message: the key is
-#  scoped per (agent, key) and inside CR_IDEMPOTENCY_WINDOW_S, default 24h)
+#  scoped per (agent, key) and inside CR_IDEMPOTENCY_WINDOW_S, default 24h.
+#  This window is process-local: a restart closes it early — a retry after
+#  deploy must deduplicate on the consumer side or use the durable inbox path)
 
 # B. An expired message produces exactly ONE receipt for its sender. Deliver
 #    with the smallest TTL, wait for the sweep (it runs every 30s) and read
