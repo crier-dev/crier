@@ -1276,7 +1276,11 @@ rules, a verified Python round-trip — see
 ### Test
 
 ```bash
-# Full test suite
+# Full test suite. The Makefile pins a 60s per-package timeout; when the
+# whole suite runs in parallel on a busy host, cmd/server and
+# internal/session can exceed it and report "panic: test timed out after
+# 1m0s" even though every package passes. Give the same suite headroom:
+#   go test ./... -count=1 -timeout 300s
 make test
 
 # Short (no integration tests)
