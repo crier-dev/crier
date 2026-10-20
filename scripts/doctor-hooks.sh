@@ -59,14 +59,56 @@
 #       ${TMPDIR:-/tmp}: `.coding-hermes/board/{tasks,events}.jsonl` seeded with
 #       PROBE_ROWS rows each, the tracked `scripts/check-board.sh` copied in, a
 #       committed baseline, and the INSTALLED hook copied to that repository's
-#       `.git/hooks/<hook>`. Then, exactly as Git runs these three entrypoints
-#       (cwd = repository root, no arguments, inherited environment):
+#       `.git/hooks/<hook>`. Then, as Git runs these three entrypoints — cwd =
+#       repository root, no arguments, stdin from /dev/null, and the Git-provided
+#       environment SET FROM THE FIXTURE (DF-CRIER-437, below):
 #         * healthy run — nothing staged: the hook must exit 0;
 #         * shrink run  — a 5→1 shrink of tasks.jsonl staged: the hook must exit
 #           NON-ZERO and its stderr must name the shrink for that file.
 #       A hook that accepts the shrink is refused as a board arm that cannot run,
 #       whatever its text says. This is reachability end to end: the lines above
 #       the marker, `set -e`/`set -u` interactions, quoting, early returns.
+#
+# WHY THE PROBE'S ENVIRONMENT IS THE GIT-PROVIDED ONE (DF-CRIER-437)
+# ------------------------------------------------------------------
+# The probe used to run the hook under `env -u GIT_DIR -u GIT_INDEX_FILE …`, i.e.
+# with the Git-provided variables REMOVED, while the header above claimed env
+# fidelity. That is not what Git does, and it FALSELY REFUSED a hook that arms only
+# under the environment Git really provides:
+#
+#   hook prefixed with: if [ -z "${GIT_INDEX_FILE:-}" ]; then exit 0; fi
+#   -> doctor: "installed pre-commit does not reach its board arm: a staged 5->1
+#      shrink … was ACCEPTED (exit 0)" — while that hook does arm in a real commit.
+#
+# MEASURED (git 2.53.0 — a hook dumping `env | grep ^GIT_` as the real entrypoint
+# ran it; the hook's cwd is the worktree root in every row):
+#
+#   entrypoint            GIT_DIR      GIT_INDEX_FILE   GIT_PREFIX
+#   pre-commit (root)     — absent     .git/index       "" (set, empty)
+#   pre-commit (subdir)   — absent     .git/index       "sub/"
+#   pre-merge-commit      — absent     .git/index       ""
+#   pre-applypatch        — absent     — absent        ""
+#
+# GIT_DIR is passed through ONLY when the caller's environment already had one
+# (`git commit` with GIT_DIR=.git in the environment yields GIT_DIR=.git in the
+# hook) — but githooks(5) documents GIT_DIR among the "environment variables …
+# exported so that Git commands run by the hook can correctly locate the
+# repository", so the probe sets the DOCUMENTED set: GIT_DIR, GIT_INDEX_FILE and
+# GIT_PREFIX. The two path variables are spelled RELATIVE (`.git`, `.git/index`)
+# exactly as Git spells the index path it exports, and they are always DERIVED
+# FROM THE FIXTURE — never inherited, because a caller's GIT_DIR/GIT_INDEX_FILE
+# points at the caller's repository and would make the fixture measure (and
+# STAGE INTO) the wrong index. The probe therefore presents a SUPERSET of the
+# root-level `git commit` environment, and a hook keyed on any of the three arms
+# here. Stdin is /dev/null for the same reason: Git sets no_stdin for these
+# entrypoints (measured: fd0=/dev/null, `read` returns EOF, no tty), so a hook
+# keyed on an interactive terminal cannot be reported armed.
+# Everything else that points at a repository is REMOVED — the rest of Git's own
+# list, `git rev-parse --local-env-vars` (GIT_WORK_TREE, GIT_COMMON_DIR,
+# GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_CONFIG*,
+# GIT_IMPLICIT_WORK_TREE, …) — and the probe's own Git calls ABOUT the fixture run
+# under that same stripped environment, so an inherited variable cannot aim the
+# fixture's init/add/commit/reset/status at the caller's repository either.
 #
 # WHAT THE PROBE DOES NOT COVER (stated, not implied)
 # ---------------------------------------------------
@@ -86,6 +128,14 @@
 #   * `BOARD_ALLOW_SHRINK` is REMOVED from the probe's environment. It is the
 #     documented declaration for an intended deletion, and inheriting it would let
 #     a shrink pass and turn this probe into a false refusal.
+#   * The Git-provided environment is the SET the probe SYNTHESIZES, not everything
+#     a commit carries: GIT_PREFIX is always EMPTY (the probe runs from the
+#     repository root and never from a subdirectory, so a hook keyed on a
+#     subdirectory prefix is not exercised), GIT_DIR is set even where Git merely
+#     passes a caller's value through, and Git's non-repository variables
+#     (GIT_EDITOR, GIT_PAGER, GIT_REFLOG_ACTION, GIT_AUTHOR_*/GIT_COMMITTER_*,
+#     GIT_EXEC_PATH) are not synthesized at all. A hook keyed on one of those is
+#     refused — fail-closed, the same asymmetry in the other direction.
 #   * Each hook invocation is bounded (`DOCTOR_PROBE_TIMEOUT`, default 20s) and the
 #     bound is printed; a run that hits it is refused, never counted as a pass.
 #
@@ -102,6 +152,25 @@ PROBE_TIMEOUT="${DOCTOR_PROBE_TIMEOUT:-20}"
 # the fixture's refusal must report PROBE_ROWS-1 lost rows.
 PROBE_ROWS=5
 PROBE_DIR=""
+
+# ── the probe's environment (DF-CRIER-437) ────────────────────────────────────
+# `git rev-parse --local-env-vars` is Git's own definition of the environment
+# variables that point at a repository (measured set, git 2.53.0). Kept literal
+# here rather than read from a subprocess, so the strip list is reviewable in the
+# diff. Every one of them is REMOVED from the probe's child environment before the
+# Git-provided three (GIT_DIR, GIT_INDEX_FILE, GIT_PREFIX) are set FROM THE
+# FIXTURE — an inherited value points at the caller's repository and would make
+# the probe measure and STAGE INTO the wrong index.
+GIT_LOCAL_ENV_VARS=(
+  GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_IMPLICIT_WORK_TREE
+  GIT_GRAFT_FILE GIT_SHALLOW_FILE GIT_REPLACE_REF_BASE GIT_NO_REPLACE_OBJECTS
+  GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+)
+PROBE_UNSET_ARGS=()
+for _probe_var in "${GIT_LOCAL_ENV_VARS[@]}" BOARD_ALLOW_SHRINK; do
+  PROBE_UNSET_ARGS+=(-u "$_probe_var")
+done
 
 cleanup_probe() {
   local rc=$?
@@ -190,6 +259,16 @@ probe_seed_board() {
   return 0
 }
 
+# probe_git <fixture> <git-args…> — a Git call the probe makes ABOUT its own
+# fixture (DF-CRIER-437). The caller's repository-pointing environment is removed
+# first: with an inherited GIT_DIR/GIT_INDEX_FILE these calls would reset, stage
+# and read the CALLER's repository instead of the fixture.
+probe_git() {
+  local fx="$1"
+  shift
+  env "${PROBE_UNSET_ARGS[@]}" git -C "$fx" "$@"
+}
+
 # probe_build <root> <fixture> — seed, wire and COMMIT the fixture repository.
 # Every Git call is pinned (`core.hooksPath=/dev/null` so no host hook can run,
 # `commit.gpgsign=false`, explicit identity, no init template) so the fixture
@@ -217,29 +296,31 @@ PROBE_BOARDCTL_STUB
   chmod +x "$fx/bin/boardctl" || return 1
   git_id=(-c user.name=doctor-hooks-probe -c user.email=doctor-hooks-probe@example.invalid
     -c core.hooksPath=/dev/null -c commit.gpgsign=false)
-  git -c init.templateDir= -c init.defaultBranch=probe init -q "$fx" || return 1
-  git -C "$fx" "${git_id[@]}" add .coding-hermes/board scripts bin || return 1
-  git -C "$fx" "${git_id[@]}" commit -qm 'doctor-hooks execution probe fixture base' || return 1
+  env "${PROBE_UNSET_ARGS[@]}" git -c init.templateDir= -c init.defaultBranch=probe init -q "$fx" || return 1
+  probe_git "$fx" "${git_id[@]}" add .coding-hermes/board scripts bin || return 1
+  probe_git "$fx" "${git_id[@]}" commit -qm 'doctor-hooks execution probe fixture base' || return 1
   return 0
 }
 
 # probe_run <fixture> <hook-path> <stderr-file> -> hook stdout; exit status is the
-# hook's. cwd is the fixture root, no arguments: how Git runs these entrypoints.
-# GIT_DIR and friends are removed so the hook cannot be aimed at the doctor's own
-# repository; BOARD_ALLOW_SHRINK is removed because honouring it would let the
-# staged shrink through and turn this probe into a false refusal.
+# hook's. cwd is the fixture root, no arguments, stdin /dev/null: how Git runs
+# these entrypoints. BOARD_ALLOW_SHRINK and every repository-pointing variable the
+# caller may have set are removed (honouring the first would let the staged shrink
+# through and turn this probe into a false refusal; inheriting the second would aim
+# the hook at the caller's repository), then the Git-provided ones are SET FROM THE
+# FIXTURE (DF-CRIER-437): relative spellings, resolved against the cwd below.
 probe_run() {
   local fx="$1" hookpath="$2" errfile="$3"
+  local -a env_args
+  env_args=("${PROBE_UNSET_ARGS[@]}"
+    "GIT_DIR=.git" "GIT_INDEX_FILE=.git/index" "GIT_PREFIX="
+    "PATH=$fx/bin:$PATH")
   (
     cd "$fx" || exit 1
     if command -v timeout >/dev/null 2>&1; then
-      env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
-        -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u BOARD_ALLOW_SHRINK \
-        PATH="$fx/bin:$PATH" timeout "$PROBE_TIMEOUT" "$hookpath"
+      env "${env_args[@]}" timeout "$PROBE_TIMEOUT" "$hookpath" </dev/null
     else
-      env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
-        -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u BOARD_ALLOW_SHRINK \
-        PATH="$fx/bin:$PATH" "$hookpath"
+      env "${env_args[@]}" "$hookpath" </dev/null
     fi
   ) 2>"$errfile"
 }
@@ -271,8 +352,8 @@ probe_hook() {
   # or worktree change left by a previous hook's run would make this arm measure
   # something else, and the healthy run is only meaningful over an untouched board.
   probe_seed_board "$fx" || { refuse "probe fixture could not seed its board under $fx"; return 1; }
-  git -C "$fx" reset -q || { refuse "probe fixture could not reset its index under $fx"; return 1; }
-  if [ -n "$(git -C "$fx" status --porcelain)" ]; then
+  probe_git "$fx" reset -q || { refuse "probe fixture could not reset its index under $fx"; return 1; }
+  if [ -n "$(probe_git "$fx" status --porcelain)" ]; then
     refuse "probe fixture $fx is not clean before the healthy run — the fixture is not the shape this probe assumes"
     return 1
   fi
@@ -294,7 +375,7 @@ probe_hook() {
     { refuse "probe fixture could not build the shrink under $fx"; return 1; }
   mv "$fx/.coding-hermes/board/tasks.jsonl.shrink" "$fx/.coding-hermes/board/tasks.jsonl" ||
     { refuse "probe fixture could not stage the shrink under $fx"; return 1; }
-  git -C "$fx" add .coding-hermes/board/tasks.jsonl ||
+  probe_git "$fx" add .coding-hermes/board/tasks.jsonl ||
     { refuse "probe fixture could not stage tasks.jsonl under $fx"; return 1; }
   shrink_out="$(probe_run "$fx" "$fx/.git/hooks/$hook" "$errfile")"
   shrink_rc=$?
@@ -331,7 +412,7 @@ probe_hook() {
   esac
   printf 'doctor-hooks: probe %s: EXECUTED — healthy fixture exit 0; staged %s->1 board shrink REFUSED exit %s: "%s"; fixture validator %s/bin/boardctl (stand-in); %s\n' \
     "$hook" "$PROBE_ROWS" "$shrink_rc" "$first_line" "$fx" "$bound"
-  git -C "$fx" reset -q || { refuse "probe fixture could not unstage under $fx"; return 1; }
+  probe_git "$fx" reset -q || { refuse "probe fixture could not unstage under $fx"; return 1; }
   return 0
 }
 
@@ -429,7 +510,7 @@ doctor_hooks() {
   done
 
   # Print success only after ALL checks, never a partial green before a refusal.
-  printf 'doctor-hooks: probe scope: all three entrypoints ran the installed hook in one staged-index fixture under %s (healthy board -> exit 0; staged %s->1 tasks.jsonl shrink -> non-zero naming the shrink); a real merge in progress or a real `git am` patch is NOT simulated, and the fixture boardctl is a stand-in. Each hook invocation is bounded (%ss, DOCTOR_PROBE_TIMEOUT to change); an unprobeable hook is REFUSED, never reported on presence alone.\n' \
+  printf 'doctor-hooks: probe scope: all three entrypoints ran the installed hook in one staged-index fixture under %s (healthy board -> exit 0; staged %s->1 tasks.jsonl shrink -> non-zero naming the shrink); a real merge in progress or a real `git am` patch is NOT simulated, and the fixture boardctl is a stand-in. The hook ran with the Git-provided environment SET FROM THE FIXTURE (GIT_DIR=.git, GIT_INDEX_FILE=.git/index, GIT_PREFIX=; measured on git 2.53.0 — a real pre-commit/pre-merge-commit exports GIT_INDEX_FILE=.git/index and GIT_PREFIX=, pre-applypatch exports neither) with stdin at /dev/null, and every other repository-pointing Git variable plus BOARD_ALLOW_SHRINK REMOVED. Each hook invocation is bounded (%ss, DOCTOR_PROBE_TIMEOUT to change); an unprobeable hook is REFUSED, never reported on presence alone.\n' \
     "$PROBE_DIR" "$PROBE_ROWS" "$PROBE_TIMEOUT"
   local i=0
   for hook in pre-commit pre-merge-commit pre-applypatch; do

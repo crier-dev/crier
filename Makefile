@@ -609,6 +609,13 @@ judge-diff-class-selftest:
 # present but unreachable is a refusal, not a green. That fixture is its own
 # repository and its commit is pinned against host hooks and gpg signing, so
 # this target stays read-only with respect to THIS checkout.
+# DF-CRIER-437: that fixture is also where the hook's Git-provided environment
+# comes from. GIT_DIR/GIT_INDEX_FILE/GIT_PREFIX are SET FROM THE FIXTURE
+# (measured, git 2.53.0: a real pre-commit/pre-merge-commit exports
+# GIT_INDEX_FILE=.git/index plus GIT_PREFIX=) instead of being stripped, so a hook
+# that arms under the environment Git really gives a hook is no longer falsely
+# refused as a board arm that cannot run — while every other repository-pointing
+# GIT_* variable, and BOARD_ALLOW_SHRINK, stay removed.
 doctor-hooks:
 	@bash scripts/doctor-hooks.sh
 

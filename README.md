@@ -2442,7 +2442,13 @@ alone (DF-CRIER-430). It does not stop at presence: it also refuses an unconditi
 repository under ${TMPDIR:-/tmp} — a healthy board must exit 0 and a staged 5→1 shrink of
 .coding-hermes/board/tasks.jsonl must exit non-zero naming the shrink, so a hook that
 accepts it is reported as a board arm that cannot run and a hook that cannot be probed is
-refused, never reported armed on presence alone (DF-CRIER-433). It accepts only a matching
+refused, never reported armed on presence alone (DF-CRIER-433). It runs each hook under the
+Git-provided environment it SYNTHESIZES from its own fixture — GIT_DIR, GIT_INDEX_FILE and
+GIT_PREFIX, with stdin at /dev/null (measured on git 2.53.0: a real pre-commit and
+pre-merge-commit export GIT_INDEX_FILE=.git/index and GIT_PREFIX=, while pre-applypatch
+exports neither) — and strips every other repository-pointing Git variable, so a hook that
+arms under the environment Git really gives a hook is treated as armed rather than reported
+disarmed (DF-CRIER-437). It accepts only a matching
 executable install in this repository's common Git hooks directory.
 It works in linked worktrees and prints one OK line per hook, plus that hook's own probe
 evidence, only after all checks pass: an exit code alone is never the evidence that the

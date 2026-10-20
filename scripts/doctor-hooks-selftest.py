@@ -18,6 +18,16 @@ DF-CRIER-433: presence is not reachability, and this file now pins BOTH halves.
     the probe, and a NEUTER control that forces the probe's verdict to success must
     ACCEPT that same fixture the real doctor rejects — so the probe, not an
     unrelated exit path, is what refused it.
+
+DF-CRIER-437: the probe presents the Git-provided hook environment instead of
+deleting it. A hook keyed on `GIT_INDEX_FILE` — which real Git exports to these
+entrypoints (measured on git 2.53.0: `.git/index` plus `GIT_PREFIX` for
+pre-commit/pre-merge-commit) — was FALSELY REFUSED as a board arm that cannot run.
+Now the probe SYNTHESIZES GIT_DIR/GIT_INDEX_FILE/GIT_PREFIX from its fixture, and a
+case below pins the acceptance; the BOARD_ALLOW_SHRINK acceptance case additionally
+carries THIS repository's GIT_DIR/GIT_INDEX_FILE, pinning that the caller's Git
+environment never reaches the fixture (with it inherited, the probe would stage its
+shrink into the caller's index and measure the wrong repository).
 """
 import os
 from pathlib import Path
@@ -69,6 +79,11 @@ PREPEND_DISARM = "exit 0 # DISARMED\n"
 # DF-CRIER-433 (b): a success exit the static arm CANNOT see — the statement does
 # not begin with the keyword, so only the execution probe can catch it.
 PROBE_ONLY_DISARM = '[ -n "${CRIER_SKIP_BOARD_GATE:-}" ] || exit 0\n'
+# DF-CRIER-437: a hook that is CORRECT under the environment Git gives a hook —
+# it arms only when GIT_INDEX_FILE is set, and real Git exports it (measured on git
+# 2.53.0: `.git/index`). The probe must therefore ACCEPT this hook; it used to run
+# the hook under `env -u GIT_INDEX_FILE …` and refuse a healthy install.
+GIT_ENV_KEYED_PREFIX = 'if [ -z "${GIT_INDEX_FILE:-}" ]; then exit 0; fi\n'
 
 
 def main():
@@ -153,8 +168,27 @@ def main():
         # variable check-board.sh honours as "this deletion is intended". Inheriting
         # it would let the probe's staged shrink through and turn a healthy install
         # into a FALSE refusal — so the probe strips it from the hook's environment.
-        check("correct install with BOARD_ALLOW_SHRINK=1 in the environment", good, True,
-              "arm REACHES", env_extra={"BOARD_ALLOW_SHRINK": "1"})
+        # DF-CRIER-437: this same case carries THIS repository's Git environment, which
+        # must not reach the fixture either. With an inherited GIT_DIR/GIT_INDEX_FILE
+        # the probe's own reset/stage would act on the CALLER's index (the shrink would
+        # never be staged in the fixture) and the hook would read the wrong repository —
+        # so those are stripped and re-set from the fixture, and the install stays green.
+        check("correct install with BOARD_ALLOW_SHRINK=1 and this repository's "
+              "GIT_DIR/GIT_INDEX_FILE in the environment", good, True, "arm REACHES",
+              env_extra={"BOARD_ALLOW_SHRINK": "1",
+                         "GIT_DIR": str(good / ".git"),
+                         "GIT_INDEX_FILE": str(good / ".git" / "index")})
+        # DF-CRIER-437: and a hook keyed on the Git-provided environment is ACCEPTED,
+        # because real Git exports GIT_INDEX_FILE to these entrypoints (measured, git
+        # 2.53.0). Before the fix the probe ran the hook under `env -u GIT_INDEX_FILE …`,
+        # so this correct hook exited 0 before its board arm and a healthy install was
+        # refused: "a staged 5->1 shrink … was ACCEPTED (exit 0)". The prepended guard
+        # is DATA for the probe, not a static-arm shape: it opens a block the static arm
+        # cannot see into, so only the probe can decide this case.
+        git_env_keyed = fixture("git-env-keyed-pre-commit")
+        disarm(git_env_keyed, "pre-commit", GIT_ENV_KEYED_PREFIX)
+        check("hook keyed on the Git-provided GIT_INDEX_FILE (probe sets it)",
+              git_env_keyed, True, "arm REACHES")
 
         unset = fixture("unset")
         require(unset, "git", "config", "--local", "--unset", "core.hooksPath")
