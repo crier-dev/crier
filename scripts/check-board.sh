@@ -96,6 +96,12 @@
 #   * boardctl's OWN vocabulary. A status the validator rejects and the repo
 #     considers legitimate is a boardctl bug, not something this arm can fix;
 #     the fix belongs in the boardctl source (DF-CRIER-387 names that half).
+#     What this arm DOES own is proving the deployed validator accepts the
+#     vocabulary the fleet relies on: --selftest (DF-CRIER-388) feeds rows
+#     carrying the plausible status words 'closed'/'completed'/'done' through
+#     the same run_check path and fails loudly if the deployed boardctl
+#     rejects any of them — a stale deploy (boardctl < v0.1.11) is caught by
+#     the selftest, not rediscovered as a wall of failed commits.
 #   * `.coding-hermes/` files that are not board data (lock files, notes).
 #   * the semantic truth of a row: a well-formed row that lies about its own
 #     verification is not detectable here.
@@ -471,8 +477,40 @@ _selftest() {
     _say "selftest: canonical board accepted (exit 0)"
   fi
 
-  # fixture 2: an unambiguously unknown status. Some boardctl releases treat
-  # 'closed' as a warning-only read alias; the fixture must remain an ERROR.
+  # fixture 1b (DF-CRIER-388): the plausible status words the fleet actually
+  # writes — 'closed' alongside the long-accepted aliases 'completed'/'done' —
+  # must each be ACCEPTED (warn-only), exactly like fixture 1's canonical
+  # vocabulary. The status vocabulary lives in the boardctl binary, not here
+  # (DF-CRIER-387), so this fixture is the pin that holds across deploys: a
+  # boardctl that predates v0.1.11 / DF-BOARDCTL-41 ('closed' -> 'complete'
+  # read alias) or a later alias-table regression fails the selftest loudly
+  # instead of silently re-breaking every commit that closes a row.
+  for word in closed completed done; do
+    rm -rf "$tmp/alias-$word"
+    cp -r "$tmp/ok" "$tmp/alias-$word"
+    python3 - "$tmp/alias-$word/.coding-hermes/board/tasks.jsonl" "$word" <<'PY'
+import json, sys
+path, word = sys.argv[1], sys.argv[2]
+lines = [l for l in open(path) if l.strip()]
+row = json.loads(lines[-1])
+row['status'] = word
+lines[-1] = json.dumps(row) + '\n'
+open(path, 'w').writelines(lines)
+PY
+    run_check "$tmp/alias-$word" >/dev/null 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      _err "selftest: a board carrying status '$word' was REJECTED (exit $rc) — the deployed boardctl predates v0.1.11/DF-BOARDCTL-41 or the alias table regressed"
+      fails=$((fails + 1))
+    else
+      _say "selftest: status '$word' accepted"
+    fi
+  done
+
+  # fixture 2: an unambiguously unknown status. Since boardctl v0.1.11
+  # (DF-BOARDCTL-41) 'closed' IS a warning-only read alias — fixture 1b pins
+  # that acceptance — so the rejection fixture must use a word NO boardctl
+  # release accepts; the fixture must remain an ERROR on every release.
   cp -r "$tmp/ok" "$tmp/bad"
   python3 - "$tmp/bad/.coding-hermes/board/tasks.jsonl" <<'PY'
 import json, sys
