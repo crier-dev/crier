@@ -1,0 +1,112 @@
+[
+  {
+    "width": 390,
+    "basis": "proof-stale-timestamp",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-stale-timestamp",
+      "anchor_id": "browser-anchor",
+      "depth": 0,
+      "timestamp_skew_seconds": 120.719532246
+    },
+    "sentence": "Basis: proof-stale-timestamp — The proof timestamp is outside the allowed freshness window.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-stale-timestamp-390.png",
+    "detail": "proof-stale-timestamp-390-detail.png"
+  },
+  {
+    "width": 390,
+    "basis": "proof-no-registry-key",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-no-registry-key",
+      "anchor_id": "browser-anchor",
+      "depth": 0
+    },
+    "sentence": "Basis: proof-no-registry-key — The identified agent is unknown or has no usable registered signing key.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-no-registry-key-390.png",
+    "detail": "proof-no-registry-key-390-detail.png"
+  },
+  {
+    "width": 390,
+    "basis": "proof-invalid-signature",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-invalid-signature",
+      "anchor_id": "browser-anchor",
+      "depth": 0
+    },
+    "sentence": "Basis: proof-invalid-signature — A well-formed possession proof failed leaf-key signature verification.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-invalid-signature-390.png",
+    "detail": "proof-invalid-signature-390-detail.png"
+  },
+  {
+    "width": 1280,
+    "basis": "proof-stale-timestamp",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-stale-timestamp",
+      "anchor_id": "browser-anchor",
+      "depth": 0,
+      "timestamp_skew_seconds": 120.943673135
+    },
+    "sentence": "Basis: proof-stale-timestamp — The proof timestamp is outside the allowed freshness window.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-stale-timestamp-1280.png",
+    "detail": "proof-stale-timestamp-1280-detail.png"
+  },
+  {
+    "width": 1280,
+    "basis": "proof-no-registry-key",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-no-registry-key",
+      "anchor_id": "browser-anchor",
+      "depth": 0
+    },
+    "sentence": "Basis: proof-no-registry-key — The identified agent is unknown or has no usable registered signing key.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-no-registry-key-1280.png",
+    "detail": "proof-no-registry-key-1280-detail.png"
+  },
+  {
+    "width": 1280,
+    "basis": "proof-invalid-signature",
+    "source": "real server response; test-only proof gateway",
+    "response": {
+      "verdict": "TRUST_CHAIN_REACHABLE",
+      "basis": "proof-invalid-signature",
+      "anchor_id": "browser-anchor",
+      "depth": 0
+    },
+    "sentence": "Basis: proof-invalid-signature — A well-formed possession proof failed leaf-key signature verification.",
+    "overflow": {
+      "page": 0,
+      "sentence": 0
+    },
+    "screenshot": "proof-invalid-signature-1280.png",
+    "detail": "proof-invalid-signature-1280-detail.png"
+  }
+]

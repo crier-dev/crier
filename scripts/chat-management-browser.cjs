@@ -190,7 +190,9 @@ async function run() {
     await route.continue({headers:{...route.request().headers(),...(proof === 'missing' ? {} : {'x-agent-id':agent,'x-agent-ts':ts,'x-agent-sig':signature,'x-agent-body-sha256':digest})}});
   });
   query.challenge = 'browser-public-challenge';
-  for (const basis of ['proof-invalid-signature','possession-verified','proof-registry-key-mismatch']) {
+  // An absent proof is proof-missing, not a cryptographic signature failure.
+  // The separate trust-bases browser battery exercises an actual bad signature.
+  for (const basis of ['proof-missing','possession-verified','proof-registry-key-mismatch']) {
     if (basis === 'possession-verified') proof = 'leaf';
     if (basis === 'proof-registry-key-mismatch') {
       await request(on,'DELETE','/agents/'+agent);

@@ -1,0 +1,64 @@
+DF-CRIER-423 verification evidence
+
+Worktree branch: wt/DF-CRIER-423; no deployment, push, merge or board changes.
+Origin/main negative control pinned to dc1c90a78dbe37392e2f13e28dcaee412a1cb29c.
+Historical Go overlay substituted cmd/server/chat.html and chatclient.go only.
+New tests and the explanation table were retained as the regression harness.
+Both TestChatTrustBasisServedMap and TestChatTrustBasisRenderer failed (exit 1).
+Actual old renderer output:
+  Basis: proof-body-mismatch — No basis explanation reported; inspect the verdict and chain evidence.
+
+Unexplained producer-basis negative control (temporary Go constant; removed after run):
+  proof-df423-canary has no explanation sentence
+  TestChatTrustBasisVocabulary failed (exit 1); real source restored, all three new tests passed.
+
+Verification commands:
+  go build -p 4 ./...
+  go vet -p 4 ./...
+  go test -p 4 ./cmd/server -count=1 -timeout 1500s
+All exited 0; server suite result:
+ok  	github.com/crier-dev/crier/cmd/server	111.160s
+
+Full vocabulary, captured from TestChatTrustBasisRenderer (not copied into another source list):
+Basis: chain-only — Chain reachability only; no eligible possession challenge.
+Basis: possession-verified — Leaf proof verified and current registry key matches.
+Basis: proof-body-mismatch — The supplied digest does not match the exact request-body bytes.
+Basis: proof-body-unbound — The required request-body digest is missing or empty.
+Basis: proof-challenge-oversized — The possession challenge exceeds the allowed byte limit.
+Basis: proof-invalid-signature — A well-formed possession proof failed leaf-key signature verification.
+Basis: proof-malformed — The possession proof could not be parsed or read in the required format.
+Basis: proof-missing — A required proof identity, timestamp or signature is missing or empty.
+Basis: proof-no-registry-key — The identified agent is unknown or has no usable registered signing key.
+Basis: proof-registry-key-mismatch — Leaf proof verified, but the current registered key differs.
+Basis: proof-registry-unavailable — The registry lookup failed; this does not establish forgery or a missing key.
+Basis: proof-stale-timestamp — The proof timestamp is outside the allowed freshness window.
+
+Browser reproduction (requires Playwright and Chromium):
+  go build -p 4 -o /tmp/df-crier-423-server ./cmd/server
+  NODE_PATH=/tmp/crier-browser/node_modules CRIER_TEST_BINARY=/tmp/df-crier-423-server node scripts/chat-trust-bases-browser.cjs
+
+All six browser cases used real /trust/verify responses from a fresh scratch server.
+The test-only gateway supplies proof headers; the product browser still cannot sign.
+proof-stale-timestamp: a signed proof 120 seconds old.
+proof-no-registry-key: an unknown agent identity.
+proof-invalid-signature: a well-formed zero signature over the correct body digest.
+Fresh pages at widths 390 and 1280; page and explanation horizontal overflow = 0px in all six cases.
+Existing result-table scrolling is intentionally contained; no claim that every table column fits at once.
+Browser pageerror events: 0. See rendered-bases.json for exact responses and DOM sentences.
+
+Supplemental management harness: its absent-proof case previously expected proof-invalid-signature.
+It failed with real proof-missing; that stale expectation is corrected, not server behavior.
+
+Captured PNG paths and measured byte sizes:
+docs/screenshots/df-crier-423/proof-invalid-signature-1280-detail.png  102324 bytes
+docs/screenshots/df-crier-423/proof-invalid-signature-1280.png  560460 bytes
+docs/screenshots/df-crier-423/proof-invalid-signature-390-detail.png  93532 bytes
+docs/screenshots/df-crier-423/proof-invalid-signature-390.png  522398 bytes
+docs/screenshots/df-crier-423/proof-no-registry-key-1280-detail.png  101869 bytes
+docs/screenshots/df-crier-423/proof-no-registry-key-1280.png  560572 bytes
+docs/screenshots/df-crier-423/proof-no-registry-key-390-detail.png  94073 bytes
+docs/screenshots/df-crier-423/proof-no-registry-key-390.png  522961 bytes
+docs/screenshots/df-crier-423/proof-stale-timestamp-1280-detail.png  101226 bytes
+docs/screenshots/df-crier-423/proof-stale-timestamp-1280.png  559681 bytes
+docs/screenshots/df-crier-423/proof-stale-timestamp-390-detail.png  93231 bytes
+docs/screenshots/df-crier-423/proof-stale-timestamp-390.png  522110 bytes

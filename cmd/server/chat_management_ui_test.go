@@ -30,8 +30,7 @@ func TestChatManagementRoutesInServedScript(t *testing.T) {
 		`"/principals"`, `"/bindings"`, `"/grants"`, `"/fed/peers"`,
 		`"/trust/anchors"`, `"/trust/verify"`, `"/agents/" + encodeURIComponent`,
 		`"/class"`, `refreshManagement();`, `"refused"`, `"empty"`, `"populated"`,
-		`"error"`, `CR_PERMISSIONS_ADMIN_TOKEN`, `proof-registry-key-mismatch`,
-		`proof-invalid-signature`, `error.detail = body.detail`,
+		`"error"`, `CR_PERMISSIONS_ADMIN_TOKEN`, `error.detail = body.detail`,
 	} {
 		if !strings.Contains(script[1], marker) {
 			t.Errorf("served management script missing %q", marker)
