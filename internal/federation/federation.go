@@ -442,9 +442,21 @@ func (c *Client) ForwardDeliver(ctx context.Context, link Link, agentID string, 
 // ForwardReceipt retains the finite peer receipt without interpreting policy
 // authorization as delivery. No request credentials are retained here.
 type ForwardReceipt struct {
-	StatusCode     int
-	Body           []byte
-	Verdict        string
+	StatusCode int
+	Body       []byte
+	// Verdict is the peer-facing header (VerdictHeader): the peer's local
+	// ingress classification, unless that peer's handler authored an onward
+	// verdict, in which case this is the handler's value (DF-CRIER-371).
+	Verdict string
+	// IngressVerdict is the peer's LOCAL ingress classification, read from the
+	// unshadowable ingress header (IngressVerdictHeader, DF-CRIER-432). Read
+	// this field when the local decision is what is wanted: Verdict above is
+	// the handler's as soon as a handler authors one.
+	IngressVerdict string
+	// InboundVerdict is that same classification as reported by the retained
+	// alias (InboundVerdictHeader). A peer that emits both writes them from one
+	// captured decision, so they agree; a peer predating DF-CRIER-432 emits
+	// only the alias, which is why it is still read (DF-CRIER-440).
 	InboundVerdict string
 }
 
@@ -512,7 +524,11 @@ func (c *Client) forwardDeliverReceipt(ctx context.Context, link Link, agentID s
 		}
 	}
 	receipt.Verdict = resp.Header.Get(VerdictHeader)
-	receipt.InboundVerdict = resp.Header.Get("X-Crier-Fed-Inbound-Verdict")
+	// The peer's local ingress classification travels in two headers: the
+	// authoritative one (DF-CRIER-432) and the alias an older peer writes
+	// instead (DF-CRIER-440). Both are read — the alias is not decoration.
+	receipt.IngressVerdict = resp.Header.Get(IngressVerdictHeader)
+	receipt.InboundVerdict = resp.Header.Get(InboundVerdictHeader)
 	return resp.StatusCode, respBody, nil
 }
 

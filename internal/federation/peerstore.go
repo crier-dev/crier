@@ -34,12 +34,19 @@ const (
 	// IngressVerdictHeader is the AUTHORITATIVE local ingress classification
 	// (DF-CRIER-432). DeliveryAuth writes it from state captured before the
 	// handler ran and re-asserts it after the handler returns, so a handler that
-	// writes the same header cannot shadow the ingress decision.
+	// writes the same header cannot shadow the ingress decision. A peer's reply
+	// is read back from this header into ForwardReceipt.IngressVerdict
+	// (DF-CRIER-440), so this is the name a reader reaches for when the LOCAL
+	// ingress decision is what it wants.
 	IngressVerdictHeader = "X-Crier-Fed-Ingress-Verdict"
 
 	// InboundVerdictHeader is the retained alias of the same ingress
 	// classification (DF-CRIER-369/DF-CRIER-371). It is written from the same
-	// captured state, so it can never disagree with IngressVerdictHeader.
+	// captured state, so on a peer that emits both it can never disagree with
+	// IngressVerdictHeader. It is still emitted and still read back
+	// (ForwardReceipt.InboundVerdict) because it is the OLDER spelling: a peer
+	// built before DF-CRIER-432 writes this header alone, so a reader that
+	// insisted on the authoritative one would go empty against it.
 	InboundVerdictHeader = "X-Crier-Fed-Inbound-Verdict"
 )
 

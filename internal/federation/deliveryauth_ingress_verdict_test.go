@@ -183,6 +183,9 @@ func TestIngressVerdictPrecedenceIsDocumented(t *testing.T) {
 	federation, err := os.ReadFile("../../specs/CHAT-FEDERATION.md")
 	require.NoError(t, err)
 	require.Contains(t, string(federation), "X-Crier-Fed-Ingress-Verdict")
+	// DF-CRIER-440: the spec must name the field that reads the authoritative
+	// header, so the prose cannot drift from what the code reads back.
+	require.Contains(t, string(federation), "ForwardReceipt.IngressVerdict")
 
 	openapi, err := os.ReadFile("../../docs/openapi.yaml")
 	require.NoError(t, err)

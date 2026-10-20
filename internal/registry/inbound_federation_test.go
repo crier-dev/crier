@@ -64,6 +64,10 @@ func TestInbound371RegistryReceiptsAndSingleAudit(t *testing.T) {
 			require.Equal(t, tc.status, receipt.StatusCode, string(receipt.Body))
 			require.Equal(t, string(tc.want), receipt.Verdict)
 			require.Equal(t, string(tc.want), receipt.InboundVerdict)
+			// DF-CRIER-440: the receipt names the peer's ingress decision from
+			// BOTH headers — the unshadowable one and its older alias.
+			require.Equal(t, string(tc.want), receipt.IngressVerdict)
+			require.Equal(t, receipt.IngressVerdict, receipt.InboundVerdict)
 			var body map[string]any
 			require.NoError(t, json.Unmarshal(receipt.Body, &body))
 			if tc.revoke {

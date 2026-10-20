@@ -321,6 +321,14 @@ including a named refusal receipt written by `RefuseDelivery`, and is not an
 ingress annotation; that refusal's own verdict is also the ingress verdict, so
 all three headers agree on the refusal path.
 
+The peer side of that channel is read back by name (DF-CRIER-440). A forwarded
+reply's `ForwardReceipt` carries `IngressVerdict` for the unshadowable header and
+`InboundVerdict` for the alias, and a peer that emits both writes them from one
+captured decision, so they cannot disagree; the alias is still read because a
+peer predating DF-CRIER-432 sends only the alias. `ForwardReceipt.Verdict`
+remains the peer-facing header, which a handler may have authored, so an onward
+verdict is never read as the local ingress decision.
+
 `FED_ALLOWED` authorizes crossing, not execution. `FED_TOKEN_ONLY` in a verdict
 header or receipt stays `accepted` with that code; an explicit hold keeps its
 precedence and that code. A no-reply delivery claim instead exposes
