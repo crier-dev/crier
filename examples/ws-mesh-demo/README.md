@@ -22,7 +22,7 @@ Everything is asserted: the script exits 0 only when all of it holds.
 
 ## Requirements
 
-- Go toolchain only (the repo's `go.mod` requires go 1.26.6; `GOTOOLCHAIN=auto`
+- Go toolchain only (the repo's `go.mod` requires go 1.26.9; `GOTOOLCHAIN=auto`
   resolves it from the module cache).
 - `curl` (health/register/peers/publish probes), `sha256sum` (coreutils —
   derives each agent's 64-hex registry `public_key` from its id) and `ss`
