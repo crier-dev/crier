@@ -1,0 +1,14 @@
+{
+  "tick_id": "crier-foreman-2026-10-20-11-57-37",
+  "block": "DF-CRIER-444",
+  "mode": "serial-fallback",
+  "wave_budget": 2,
+  "wave_size": 0,
+  "reason": "Recovery completed first. DF-CRIER-444 has two ready rows, but DF-CRIER-333 is owner-blocked and DF-CRIER-335 is the completion-loop coordinator row, not an implementation task. No new worker dispatched this tick; serial fallback is not applicable without an eligible implementation row.",
+  "workers": [],
+  "deferred": [
+    {"task_id": "DF-CRIER-333", "reason": "owner decision required: reverse proxy vs per-user token mint; no mechanism may be chosen by the foreman"},
+    {"task_id": "DF-CRIER-335", "reason": "loop contract remains open pending owner-gated DF-CRIER-333 and final browser/quorum acceptance"}
+  ],
+  "finished_at": "2026-10-20T12:40:00Z"
+}
