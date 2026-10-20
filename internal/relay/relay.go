@@ -58,6 +58,13 @@ type Relay struct {
 	// every pong. 0 means defaultPongWait. SetPongWait scales it for tests.
 	pongWait time.Duration
 
+	// reaps is a bounded ledger of the most recent subscription reaps, each
+	// carrying the reaper's own reason and the liveness counters that were in
+	// force (QA-CRIER-43, see keepalive.go). It exists so a reap is explained
+	// rather than merely counted: a bounded subscriber count cannot tell a
+	// genuinely silent peer from a read pump the host never scheduled.
+	reaps []KeepaliveReap
+
 	// publishObserver is optional write-through for accepted HTTP publishes.
 	// It runs outside mu, before fanout, and is absent on a plain relay.
 	publishObserver   func(namespace, agentID, topic string, event json.RawMessage, identityVerified bool) error

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -357,21 +358,61 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	// refused, not parked forever.
 	pongWait := r.PongWait()
 	pingPeriod := pongWait / 2
+	liveness := &keepaliveCounters{}
+	subscribedAt := time.Now()
 	if err := conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
 		slog.Warn("relay: set subscribe read deadline", "topic", topic,
 			"agent_id", subscriber, "error", err, "request_id", rid)
 		return
 	}
 	conn.SetPongHandler(func(string) error {
+		liveness.pongsSeen.Add(1)
 		return conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
 
 	// Detect client disconnect via read pump.
+	//
+	// The pump is also the reaper: whatever ends it is the reason this
+	// subscription is unregistered, so the reason and the liveness counters in
+	// force are recorded (QA-CRIER-43). A subscriber that vanished while
+	// answering every ping then has an explanation on the record instead of a
+	// bare count moving to zero.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		var cause error
+		defer func() {
+			rec := KeepaliveReap{
+				Topic:     topic,
+				AgentID:   subscriber,
+				Namespace: namespace.Display(nsName),
+				Reason:    classifyReapReason(cause),
+				Detail:    reapDetail(cause),
+				PongWait:  pongWait,
+				PingsSent: liveness.pingsSent.Load(),
+				PongsSeen: liveness.pongsSeen.Load(),
+				Lifetime:  time.Since(subscribedAt),
+				At:        time.Now(),
+			}
+			r.recordReap(rec)
+			// A silence reap on a peer that had been receiving pings is the
+			// shape only a descheduled read pump produces, so it is logged at
+			// warn with the counters; a peer that simply hung up is routine at
+			// debug. Either way the reason is on the record — never swallowed.
+			level := slog.LevelDebug
+			if rec.Reason == ReapSilence && rec.PingsSent > 0 {
+				level = slog.LevelWarn
+			}
+			slog.Log(context.Background(), level, "relay: subscriber reaped",
+				"reason", string(rec.Reason), "topic", topic,
+				"agent_id", subscriber, "detail", rec.Detail,
+				"pong_wait", rec.PongWait, "pings_sent", rec.PingsSent,
+				"pongs_seen", rec.PongsSeen, "lived", rec.Lifetime,
+				"request_id", rid)
+		}()
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				cause = err
 				return
 			}
 		}
@@ -395,6 +436,7 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 					time.Now().Add(10*time.Second)); err != nil {
 					return
 				}
+				liveness.pingsSent.Add(1)
 			}
 		}
 	}()
