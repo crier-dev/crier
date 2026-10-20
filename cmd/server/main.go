@@ -261,6 +261,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// middleware.AuthTokens' own predicate names the exempt routes.
 	var fedRecordGate *federation.PeerStore
 	r.Use(federation.DeliveryAuth(middleware.AuthTokens(cfg.AuthToken, cfg.Permissions.AdminToken), func() *federation.PeerStore { return fedRecordGate }))
+	// DF-CRIER-444: arm the human-readable 401 page for browser navigations.
+	// The page is authored inside the embedded chat.html (inert template,
+	// extracted once in chatclient.go) and the middleware decides when it is
+	// served: only a missing-header refusal on an Accept header advertising
+	// text/html, only while CR_AUTH_TOKEN is set. Status and every JSON
+	// refusal are unchanged.
+	middleware.SetBrowserRefusalPage("/chat", chatBrowserRefusalTemplate)
 	// Federation peer authentication (CR-CHAT-024): when CR_FED_AUTH_FILE is
 	// set, requests that announce a peer identity (X-Crier-Fed-Peer) must
 	// prove it with a valid X-Fed-Ts/X-Fed-Sig signature over the request
