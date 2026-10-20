@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""DF-CRIER-421: exercise the real doctor/installer in isolated Git repositories."""
+"""DF-CRIER-421: exercise the real doctor/installer in isolated Git repositories.
+
+DF-CRIER-430: every hook is disarmed in turn and must be refused. A stale
+GENERATION — the tracked source edited down to `exit 0 # DISARMED` and reinstalled
+— is byte-identical to the source it was made from, so the byte comparison passes
+and only the marker check can see it. Each declared marker is also dropped on its
+own, so a marker that is not load-bearing cannot hide behind its siblings.
+"""
 import os
 from pathlib import Path
 import shutil
@@ -9,7 +16,40 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ("pre-commit", "pre-merge-commit", "pre-applypatch")
-MARKER = 'bash "$BOARD_CHECKER" -q --staged-index'
+
+# The explicit contract: the lines each tracked hook carries, as the doctor
+# requires them. Hooks are re-worded only together with this table (the premise
+# assertion below fails loudly otherwise) and with scripts/doctor-hooks.sh.
+HOOK_ARM_MARKER = 'bash "$BOARD_CHECKER" -q --staged-index'
+CHECKER_INVOCATION = 'exec bash "$checker" --staged-index'
+MERGE_DISCLOSURE = (
+    r"printf '%s\n' 'gate scope: pre-merge-commit: this entrypoint validates the board"
+    r" only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and"
+    r" Makefile/Dockerfile checks are NOT RUN here).'"
+)
+APPLYPATCH_DISCLOSURE = (
+    r"printf '%s\n' 'gate scope: pre-applypatch: this entrypoint validates the board"
+    r" only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and"
+    r" Makefile/Dockerfile checks are NOT RUN here).'"
+)
+# hook -> [(marker line, label)] in the order the doctor checks them.
+MARKERS = {
+    "pre-commit": [(HOOK_ARM_MARKER, "board arm marker")],
+    "pre-merge-commit": [
+        (CHECKER_INVOCATION, "board arm marker"),
+        (MERGE_DISCLOSURE, "gate-scope disclosure line"),
+    ],
+    "pre-applypatch": [
+        (CHECKER_INVOCATION, "board arm marker"),
+        (APPLYPATCH_DISCLOSURE, "gate-scope disclosure line"),
+    ],
+}
+# The disarmed generation the row measured: the hook's whole function is gone.
+DISARM = (
+    "#!/usr/bin/env bash\n"
+    "# DF-CRIER-430 staleness probe: this generation has no board arm at all\n"
+    "exit 0 # DISARMED\n"
+)
 
 
 def main():
@@ -88,19 +128,42 @@ def main():
             require(noexec, "make", "install-hooks")
             check(f"repair non-executable {hook}", noexec, True)
 
-        stale = fixture("stale-generation")
-        source = stale / "scripts/hooks/pre-commit"
-        original = source.read_text()
-        assert MARKER in original, "board-arm marker changed: update the explicit contract"
-        source.write_text(original.replace(MARKER, ": # stale generation: board arm absent"))
-        shutil.copy2(source, stale / ".git/hooks/pre-commit")
-        # Matching stale source AND installed bytes isolates the marker check
-        # from cmp; a byte-different stale hook is also tested independently.
-        check("matching stale generation", stale, False, "pre-commit lacks board arm marker")
-        installed_stale = fixture("installed-stale-generation")
-        dst = installed_stale / ".git/hooks/pre-commit"
-        dst.write_text(dst.read_text().replace(MARKER, ": # stale"))
-        check("installed stale generation", installed_stale, False, "pre-commit lacks board arm marker")
+        # DF-CRIER-430: pin the marker contract against the tracked sources before
+        # using it, so a re-worded hook fails HERE (loudly) instead of quietly
+        # turning a refusal into a pass.
+        for hook, markers in MARKERS.items():
+            source = (ROOT / "scripts/hooks" / hook).read_text()
+            for marker, label in markers:
+                assert f"{marker}\n" in source, (
+                    f"{hook}: the tracked hook no longer carries its {label}: {marker!r} — "
+                    "update MARKERS here and scripts/doctor-hooks.sh together with it")
+
+        for hook in HOOKS:
+            invocation, label = MARKERS[hook][0]
+            stale_diagnostic = f"installed {hook} lacks {label} ({invocation})"
+            # (a) matching stale generation: tracked source AND installed copy are the
+            # same disarmed text, so cmp passes and the marker check is the only thing
+            # between this repository and a dead gate.
+            matching = fixture(f"stale-generation-{hook}")
+            (matching / "scripts/hooks" / hook).write_text(DISARM)
+            (matching / ".git/hooks" / hook).write_text(DISARM)
+            check(f"matching stale generation ({hook})", matching, False, stale_diagnostic)
+            # (b) installed-only stale generation: the tracked source is intact, so
+            # the refusal is attributed to the missing marker, never to byte drift.
+            installed_stale = fixture(f"installed-stale-generation-{hook}")
+            (installed_stale / ".git/hooks" / hook).write_text(DISARM)
+            check(f"installed stale generation ({hook})", installed_stale, False, stale_diagnostic)
+            # (c) every marker is load-bearing: drop ONE line at a time from the
+            # installed copy (tracked source intact) and require the refusal to name
+            # that exact line.
+            for marker, marker_label in MARKERS[hook]:
+                hole = fixture(f"marker-hole-{hook}-{marker_label.replace(' ', '-')}")
+                dst = hole / ".git/hooks" / hook
+                text = dst.read_text()
+                assert f"{marker}\n" in text, (hook, marker_label, marker)
+                dst.write_text(text.replace(f"{marker}\n", "", 1))
+                check(f"dropped {marker_label} ({hook})", hole, False,
+                      f"installed {hook} lacks {marker_label} ({marker})")
 
         foreign = fixture("foreign-repo")
         (foreign / "scripts/hooks/pre-commit").unlink()
@@ -137,6 +200,14 @@ def main():
         neutered.write_text(text.replace(call, 'doctor_hooks "$@"\nexit 0 # NEUTER: verdict forced to success\n'))
         assert neutered.read_bytes() != (ROOT / "scripts/doctor-hooks.sh").read_bytes()
         check("NEUTER accepts unset fixture rejected by real doctor", unset, True, doctor=neutered)
+        # DF-CRIER-430: the same control over the NEW refusal. The disarmed fixture is
+        # refused by the real doctor and accepted once the verdict is forced, so the
+        # refusal above is the marker check rather than some unrelated exit path.
+        disarmed = fixture("neuter-disarmed-pre-merge-commit")
+        (disarmed / ".git/hooks/pre-merge-commit").write_text(DISARM)
+        check("NEUTER fixture rejected by the real doctor", disarmed, False, "lacks board arm marker")
+        check("NEUTER accepts a disarmed fixture the real doctor rejects", disarmed, True,
+              "installed pre-merge-commit lacks board arm marker", doctor=neutered)
         print(f"doctor-hooks selftest: PASS ({count} cases, including NEUTER)")
 
 

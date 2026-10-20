@@ -2426,8 +2426,12 @@ Fast-forwards run no commit hook; `--no-verify` can bypass `pre-commit` and
 `pre-merge-commit`, so CI remains the checked-out-tree backstop.
 
 `make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,
-non-executable or stale-generation hooks, and missing tracked hook sources; it accepts
-only a matching executable install in this repository's common Git hooks directory.
+non-executable or stale-generation hooks, and missing tracked hook sources; a stale
+generation is one whose board-arm markers are gone, and those markers are checked on all
+three entrypoints — the board-checker invocation each tracked source runs, plus the
+gate-scope disclosure line on pre-merge-commit and pre-applypatch — not by hook bytes
+alone (DF-CRIER-430). It accepts only a matching executable install in this repository's
+common Git hooks directory.
 It works in linked worktrees and prints one OK line per hook only after all checks pass.
 Repair: `make install-hooks`.
 

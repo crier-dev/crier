@@ -1709,6 +1709,6 @@ claims:
   - id: BEHAVIOR-HOOK-DOCTOR
     kind: behavior
     doc: README.md
-    quote: "`make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,\nnon-executable or stale-generation hooks, and missing tracked hook sources; it accepts\nonly a matching executable install in this repository's common Git hooks directory."
+    quote: "`make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,\nnon-executable or stale-generation hooks, and missing tracked hook sources; a stale\ngeneration is one whose board-arm markers are gone, and those markers are checked on all\nthree entrypoints — the board-checker invocation each tracked source runs, plus the\ngate-scope disclosure line on pre-merge-commit and pre-applypatch — not by hook bytes\nalone (DF-CRIER-430). It accepts only a matching executable install in this repository's\ncommon Git hooks directory."
     expect: doctor-hooks-selftest
     xfail: null
