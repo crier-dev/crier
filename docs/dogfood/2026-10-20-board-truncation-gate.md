@@ -197,3 +197,50 @@ Artifacts left behind: this report, `diagnostics-2026-10-20-board-truncation.md`
 a `skills/crier-usage/SKILL.md` section on the gate and the shrink contract, and
 the `.coding-hermes/dogfood-log.md` entry. No code was changed by this lane; the
 finding is a board row for the owning foreman.
+
+---
+
+## Run 2 addendum (same tick, second angle) — the hooks as a REAL gate
+
+Run 1 drove the checker directly. Run 2 drove **git itself**: the documented
+`make install-hooks` / `make doctor-hooks` pair (the arming contract of
+DF-CRIER-421) and the `pre-merge-commit` / `pre-applypatch` entrypoints
+(DF-CRIER-417) — in a scratch clone of `2ada84c` (`git clone` + `make install-hooks`;
+the live tree was not touched). Neither surface had ever been driven by a dogfood
+run.
+
+| leg | what was driven | result |
+|---|---|---|
+| D | `make doctor-hooks` with the checkout's **local** `core.hooksPath` unset | **exit 2** — `ERROR: local core.hooksPath is unset (global hooksPath is not sufficient); repair: make install-hooks`; re-armed → exit 0 |
+| A | **real `git commit`** with the wipe blob staged | **refused, exit 1, no commit created** (HEAD unmoved): `shrank: HEAD=693, index=1; 692 row(s) lost` |
+| E2 | real `git commit`, same-count legitimate board edit | **committed** (exit 0); `validation PASS — 693 row(s) accepted` — no false positive |
+| B | real `git merge --no-ff` of a branch dropping 692 rows | **refused, exit 1, no merge commit**; `pre-merge-commit` printed its board-only scope, then the shrink refusal |
+| C | real `git am` of a patch dropping 692 rows | **refused, exit 1**; `.git/rebase-apply` was created and the probe aborted it |
+| G | the documented hatch: `BOARD_ALLOW_SHRINK=1 git commit …` | **committed** with `shrink explicitly allowed by BOARD_ALLOW_SHRINK=1; required paths and row validation still apply` |
+
+The arm is therefore not a checker that happens to be wired: it stops the three
+git entrypoints that can land a board, and the arming contract fails closed when
+the hooks are disarmed — DF-CRIER-421's symptom, reproduced positively.
+
+Tester notes (this run's own mistakes, kept because they bite the next repairer):
+
+- **`git checkout -- <path>` restores from the INDEX, not HEAD.** After a refused
+  commit the truncation is still staged, so that "undo" gives a one-row worktree
+  and a bogus control failure. Use `git reset --hard HEAD`.
+- **A leg that changes the baseline invalidates the next leg.** Leg G (the hatch)
+  deliberately landed a 1-row HEAD, so leg H's "truncation without the hatch" was
+  a same-count change against that HEAD and correctly committed. The real A/B pair
+  is leg A (refused) vs leg E2 (committed), both at the same 693-row HEAD.
+- The board now carries **mixed serialization** — 685 spaced rows from the restore
+  plus later compact rows — because the restore re-serialized the file while newer
+  writers emit compact JSON. Nothing shipped matches a board row by byte shape
+  (the compact literals in `scripts/` are HTTP bodies; `check-board.sh` counts with
+  `grep -c '"id"'`), so this is cosmetic: recorded, not filed.
+
+Perf (Step 2b): a real commit through the full gate costs **0.7–1.0 s wall**
+(board-only diff, warm; `gitreins` startup dominates the rest). No PERF row.
+
+Result: **no new defect** — the retention arm and the arming contract hold under
+real use. Recorded as row DF-CRIER-429. Separately, DF-CRIER-427 (run 1) was
+consumed by the owning lane in `596825f`: DF-CRIER-426's evidence was corrected,
+427 closed, 428 filed — the fix direction landed in the record it was aimed at.
