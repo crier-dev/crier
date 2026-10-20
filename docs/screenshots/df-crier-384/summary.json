@@ -1,0 +1,21 @@
+{
+  "assertions": 88,
+  "failures": 0,
+  "captures": [
+    "populated",
+    "empty",
+    "refused",
+    "disabled-startup"
+  ],
+  "viewports": [
+    1280,
+    390
+  ],
+  "fixture": {
+    "principal": "prin_fixture_owner",
+    "agent": "atlas",
+    "fingerprint": "87052d16",
+    "tokenRendered": false
+  },
+  "pageErrors": []
+}

@@ -224,11 +224,13 @@ main { min-width:0; display:flex; flex-direction:column; }
 </aside>
 </div>
 <section class="management" aria-labelledby="management-title">
-  <div class="section-head"><h2 id="management-title">Operator management · read-only</h2><button id="management-refresh" type="button" class="ghost">Refresh management reads</button></div>
-  <p class="note">Fetched once on page load, then only on request. Refusals are not empty lists and are not automatically retried. Records are deployment-wide, not filtered to the selected conversation. No credential entry, minting or permission changes here.</p>
+  <details id="authority-view" open>
+  <summary class="section-head"><h2 id="management-title">Authority view · read-only</h2><span class="note">Principals, bindings, grants and agent class — the ACL this server serves. Collapse this fold and nothing is read.</span></summary>
+  <div class="section-head"><button id="management-refresh" type="button" class="ghost">Refresh management reads</button></div>
+  <p class="note">Fetched once on page load (the fold opens by default), when the fold is reopened, and on request. While the fold is closed no management read is issued, and a refused read is reported once, not retried. Records are deployment-wide, not filtered to the selected conversation. No credential entry, minting or permission changes here.</p>
   <p class="note">Permissions reads require CR_PERMISSIONS_ENABLED=true and a distinct CR_PERMISSIONS_ADMIN_TOKEN. Trust records require that distinct token even with delivery ACLs off. An authorized deployment gateway must supply access; this page does not collect or store tokens.</p>
   <div class="management-grid">
-    <section class="panel" aria-labelledby="principals-title"><h2 id="principals-title">Principals</h2><div id="management-principals" class="management-read note" role="status">Loading GET /principals…</div><p class="note">ID identifies the credential holder; kind is the record type; display_name is the human label; namespace is the recorded realm; role and status are stored authority/lifecycle values; created_at is creation time. An omitted field is not reported, not an inferred default. Only a server-provided token_fingerprint is shown, never a credential.</p></section>
+    <section class="panel" aria-labelledby="principals-title"><h2 id="principals-title">Principals</h2><div id="management-principals" class="management-read note" role="status">Loading GET /principals…</div><p class="note">ID identifies the credential holder; kind is the record type; display_name is the human label; namespace is the recorded realm; role and status are stored authority/lifecycle values; created_at is creation time. An omitted field is not reported, not an inferred default. A token fingerprint is shown only as a short prefix, labelled as such in the column header; a token or a full hash is refused in words, never rendered.</p></section>
     <section class="panel" aria-labelledby="bindings-title"><h2 id="bindings-title">Bindings</h2><div id="management-bindings" class="management-read note" role="status">Loading GET /bindings…</div><p class="note">id is the binding record; kind is its type; principal is the credential holder; agent is the bound agent; as_agent permits acting as that agent; created_at is creation time; created_by names the author. The endpoint returns the effective record per principal/agent pair.</p></section>
     <section class="panel" aria-labelledby="grants-title"><h2 id="grants-title">Grants</h2><div id="management-grants" class="management-read note" role="status">Loading GET /grants…</div><p class="note">id identifies the grant; kind is its type; principal is the grantee; subject.type/ref identify the target; actions are permitted operations; granted_by/at record who and when; expires_at is the expiry (null means no expiry); revoked_at/by record revocation; note is the author's explanation. Only current, unexpired, unrevoked grants are returned.</p></section>
     <section class="panel" aria-labelledby="federation-title"><h2 id="federation-title">Federation</h2><p id="management-federation-posture" class="note" role="status">Loading GET /status…</p><div id="management-peers" class="management-read note" role="status">Loading GET /fed/peers…</div><p class="note">id/name/label identify the peer; url is its relay address; state is the lifecycle link state, not a connectivity probe; direction is permitted link direction; key_id/public_key identify its public signing key; created_at/updated_at/linked_at/revoked_at are lifecycle timestamps. Discovery responses expose name/url/agents but no link state: those rows say not reported, never live by inference. The status lifecycle-record count and this list may describe different inventories.</p></section>
@@ -239,6 +241,7 @@ main { min-width:0; display:flex; flex-direction:column; }
     </section>
     <section class="panel" aria-labelledby="agent-class-title"><h2 id="agent-class-title">Agent class &amp; scope</h2><form id="agent-class-form" class="stack"><label>Agent ID<input id="class-agent" list="registered-agents" required autocomplete="off"></label><button id="class-query-submit" type="submit" class="ghost">Read agent class</button></form><div id="management-class" class="management-read note" role="status">No agent class query submitted.</div><p class="note">id is the agent; class is personal/service; owner is the recorded principal; namespace is its realm; capabilities are declarations; scopes list the reach rules the ACL actually reads. A missing class record is an error, not an inferred class.</p></section>
   </div>
+  </details>
 </section>
 <script>
 "use strict";
@@ -352,13 +355,31 @@ function managementFailure(id, route, error, admin = true) {
     : "\nNo empty result is inferred. Refresh explicitly to try again."));
 }
 const managementValue = value => value === undefined ? "not reported" : value === null ? "null (no value)" : typeof value === "object" ? JSON.stringify(value) : String(value);
+// DF-CRIER-384: a column that prints whatever the server sends is one server
+// change away from putting a credential into an operator's screenshot. A field
+// that NAMES token material is never rendered verbatim: a fingerprint is shown
+// only when it is a SHORT prefix (the API's own four-byte hex projection) and
+// its column says so, and anything longer — a token, a 64-hex digest — is
+// refused in words instead of printed.
+const TOKEN_FIELD = /(^|[-_.])(token|secret|password|credential|bearer)/i;
+const FINGERPRINT_FIELD = /fingerprint/i;
+const SHORT_FINGERPRINT = /^[0-9a-f]{4,16}$/i;
+const TOKEN_WITHHELD = "not shown — token material is never rendered";
+function managementFieldLabel(field) {
+  return TOKEN_FIELD.test(field) && FINGERPRINT_FIELD.test(field) ? field + " (short prefix)" : field;
+}
+function managementCell(field, value) {
+  if (!TOKEN_FIELD.test(field)) return managementValue(value);
+  if (FINGERPRINT_FIELD.test(field) && typeof value === "string" && SHORT_FINGERPRINT.test(value)) return value;
+  return value === undefined ? managementValue(value) : TOKEN_WITHHELD + "; a fingerprint is shown only as a short prefix, never a full hash or a credential";
+}
 function managementRows(id, route, rows, columns, empty) {
   if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== "object" || Array.isArray(row))) throw new Error("Invalid list response from " + route);
   if (!rows.length) { managementState(id,"empty","Empty — " + route + " succeeded. " + empty); return; }
   const fields = [...new Set([...columns,...rows.flatMap(row => Object.keys(row))])];
   managementState(id,"populated","Populated — " + route + " succeeded. " + rows.length + " record(s) returned.");
   const wrap = document.createElement("div"); wrap.className = "management-table-wrap"; wrap.tabIndex = 0; wrap.setAttribute("role","region"); wrap.setAttribute("aria-label",route + " records; scroll horizontally for all columns");
-  wrap.innerHTML = '<table class="management-table"><caption>Server-returned records · omitted fields are not reported · scroll horizontally for all columns</caption><thead><tr>' + fields.map(field => '<th scope="col">' + esc(field) + '</th>').join("") + '</tr></thead><tbody>' + rows.map(row => '<tr>' + fields.map(field => '<td>' + esc(managementValue(row[field])) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
+  wrap.innerHTML = '<table class="management-table"><caption>Server-returned records · omitted fields are not reported · scroll horizontally for all columns</caption><thead><tr>' + fields.map(field => '<th scope="col">' + esc(managementFieldLabel(field)) + '</th>').join("") + '</tr></thead><tbody>' + rows.map(row => '<tr>' + fields.map(field => '<td>' + esc(managementCell(field, row[field])) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
   $(id).append(wrap);
 }
 async function managementList(id, route, key, columns, empty) {
@@ -368,7 +389,14 @@ async function managementList(id, route, key, columns, empty) {
     managementRows(id,"GET " + route,body[key],columns,empty);
   } catch(error) { managementFailure(id,"GET " + route,error); }
 }
+// DF-CRIER-384: the Authority view is a fold. While it is closed NOTHING here
+// reads the ACL — no read fires on a timer, and a read that was refused is
+// reported where it happened and left alone. The reads happen on page load (the
+// fold opens by default), when the fold is reopened, and when the operator asks
+// for them explicitly.
+function authorityOpen() { const view = $("authority-view"); return !!view && view.open; }
 async function refreshManagement() {
+  if (!authorityOpen()) return;
   $("management-refresh").disabled = true;
   await Promise.all([
     managementList("management-principals","/principals","items",["id","kind","display_name","namespace","role","status","created_at"],"No principals returned."),
@@ -387,6 +415,7 @@ async function refreshManagement() {
   $("management-refresh").disabled = false;
 }
 $("management-refresh").addEventListener("click",refreshManagement);
+$("authority-view").addEventListener("toggle",() => { if (authorityOpen()) refreshManagement(); });
 $("agent-class-form").addEventListener("submit",async event => {
   event.preventDefault();
   const route = "/agents/" + encodeURIComponent($("class-agent").value.trim()) + "/class";
