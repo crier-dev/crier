@@ -130,7 +130,8 @@ func TestInbound371EveryDoorHasReceiptAndAudit(t *testing.T) {
 		// for it. It must say the receipt was abandoned instead - an operator or
 		// an alert reading this line must not see a classified delivery.
 		require.NotContains(t, logs.String(), `"status":`, "no status is claimed for a receipt that was never sent")
-		require.Contains(t, logs.String(), `"delivered":false`)
+		require.Contains(t, logs.String(), `"flushed":false`)
+		require.NotContains(t, logs.String(), `"delivered":`)
 		require.Contains(t, logs.String(), `"abandoned":true`)
 		require.NotContains(t, logs.String(), `"receipt_flushed":`)
 		require.Equal(t, 1, strings.Count(logs.String(), `"msg":"federation inbound delivery"`))
@@ -164,7 +165,13 @@ func TestInboundRefusalAuditNamesReceiptNotDelivery(t *testing.T) {
 			require.Equal(t, float64(w.Code), audit["status"])
 			require.Equal(t, true, audit["receipt_flushed"])
 			require.NotContains(t, audit, "delivered")
-			require.NotContains(t, audit, "abandoned")
+			delete(audit, "time")
+			require.Equal(t, map[string]any{
+				"level": "INFO", "msg": "federation inbound delivery",
+				"peer": "", "path": "/agents/target/inbox",
+				"verdict": string(FedNoLink), "status": float64(http.StatusForbidden),
+				"receipt_flushed": true,
+			}, audit, "the refusal audit contract is unchanged")
 			t.Logf("refusal audit: %s", logs.String())
 		})
 	}

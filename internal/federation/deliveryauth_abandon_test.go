@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -48,12 +49,21 @@ func TestInboundAuditLineMarksAbandonedReceipt(t *testing.T) {
 		"the verdict header still reaches the client")
 
 	line := lastInboundAudit(t, logs.String())
-	require.Equal(t, false, line["delivered"], "an unflushed receipt must not read as delivered")
+	t.Logf("abandonment audit: %s", strings.TrimSpace(logs.String()))
+	require.Equal(t, false, line["flushed"], "an abandoned receipt was not flushed")
+	require.NotContains(t, line, "delivered", "abandonment must not use the reserved delivery key")
 	require.Equal(t, string(federation.FedTokenOnly), line["verdict"])
 	_, hasStatus := line["status"]
 	require.False(t, hasStatus, "no status is claimed for a receipt this middleware never sent")
 	require.Equal(t, true, line["abandoned"])
 	require.NotContains(t, line, "receipt_flushed")
+
+	// Pin the spec's exact JSON field quotation to the emitted audit line.
+	const abandonmentFields = `"flushed":false,"abandoned":true`
+	require.Contains(t, logs.String(), abandonmentFields)
+	spec, err := os.ReadFile("../../specs/CHAT-SESSIONS.md")
+	require.NoError(t, err)
+	require.Contains(t, string(spec), "JSON fields `"+abandonmentFields+"`")
 
 	// Control: a normal receipt reports flushing + status, not target execution.
 	logs.Reset()
@@ -65,11 +75,14 @@ func TestInboundAuditLineMarksAbandonedReceipt(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/agents/atlas/inbox", strings.NewReader(`{"message":"x"}`)))
 	line = lastInboundAudit(t, logs.String())
-	require.Equal(t, true, line["receipt_flushed"])
-	require.NotContains(t, line, "delivered")
-	require.EqualValues(t, http.StatusAccepted, line["status"])
-	_, abandoned := line["abandoned"]
-	require.False(t, abandoned)
+	t.Logf("completed audit: %s", strings.TrimSpace(logs.String()))
+	delete(line, "time")
+	require.Equal(t, map[string]any{
+		"level": "INFO", "msg": "federation inbound delivery",
+		"peer": "", "path": "/agents/atlas/inbox",
+		"verdict": string(federation.FedTokenOnly), "status": float64(http.StatusAccepted),
+		"receipt_flushed": true,
+	}, line, "the completed audit contract is unchanged")
 }
 
 func lastInboundAudit(t *testing.T, raw string) map[string]any {

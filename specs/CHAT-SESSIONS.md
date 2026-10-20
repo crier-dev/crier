@@ -344,7 +344,7 @@ Detector verdicts are transport-specific names, not transcript outcomes:
 webhook handoff. Their log contract is [DETECTION.md §3.2](DETECTION.md#32-verdicts).
 Federation's completed audit uses `receipt_flushed: true` with `status` and
 `verdict`, even for a refusal such as `FED_NO_LINK`; this proves only that the
-receipt was flushed. Panic abandonment retains `delivered: false, abandoned: true` with no status and no receipt-flushed claim (DF-CRIER-394).
+receipt was flushed. Panic abandonment logs `"verdict", v, "flushed", false, "abandoned", true` (JSON fields `"flushed":false,"abandoned":true`) with no `delivered` key, no status and no receipt-flushed claim (DF-CRIER-394, DF-CRIER-420).
 
 ### 3.2.1 Request-key replay across restart (DF-CRIER-357)
 

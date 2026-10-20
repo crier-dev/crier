@@ -69,7 +69,7 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 				// delivery the client received. The verdict header above still goes
 				// out with the recovery middleware's own response.
 				slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
-					"verdict", v, "delivered", false, "abandoned", true)
+					"verdict", v, "flushed", false, "abandoned", true)
 			}()
 			if v != FedAllowed && v != FedTokenOnly {
 				RefuseDelivery(receipt, v)
