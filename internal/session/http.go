@@ -956,7 +956,7 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	// Explicit targets, group expansion and pre-change retry outcomes must not
 	// reintroduce the sender before realm checks can produce a false refusal.
 	recipients = withoutAuthor(recipients, msg.Author.AgentID())
-	crossRealm, deliverable := h.partitionRealm(recipients, sess.Namespace, h.now())
+	crossRealm, deliverable, remoteTargets := h.partitionRealm(recipients, sess.Namespace, h.now())
 	msg.Outcomes = crossRealm
 
 	// 1. Only a NEW send appends intent. A retry must not overwrite durable
@@ -982,12 +982,10 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	}
 	// Journal the fan-out boundary before any transport can run. This append
 	// deliberately retains the prior outcomes; it is not the outcome write-back.
-	targets := append([]string{}, deliverable...)
-	for _, member := range memState.Members {
-		if member.ActiveAt(h.now()) && member.MemberType == MemberAgent && IsRemoteMember(member.MemberID) && member.MemberID != msg.Author.AgentID() && inAudience(msg.Audience, member.MemberID) {
-			targets = append(targets, member.MemberID)
-		}
-	}
+	// Both legs consume the SAME roster-expanded recipients above. Remote
+	// identities never enter local dispatch, even when they have no active
+	// membership or federation route; the remote leg records that refusal.
+	targets := append(append([]string{}, deliverable...), remoteTargets...)
 	msg.DispatchEvidence = append(msg.DispatchEvidence, DispatchEvidence{
 		Attempt: len(msg.DispatchEvidence) + 1, StartedAt: h.now(),
 		Targets: append([]string{}, dedupeSorted(targets)...), Receipts: []DeliveryOutcome{},
@@ -997,7 +995,7 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", "fan-out not started: "+err.Error())
 		return transcriptMessage{}, false
 	}
-	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, r.Header.Get(namespace.HeaderNamespaceToken))
+	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, remoteTargets, r.Header.Get(namespace.HeaderNamespaceToken))
 	attempt.addReceipts(remoteOutcomes)
 	if journalErr := h.appendDispatchEvidence(r.Context(), msg, prior); journalErr != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", journalErr.Error())
@@ -1011,13 +1009,12 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 			fmt.Sprintf("the transcript record is durable (message %q) but the remote fan-out did not complete: %v", msg.ID, err))
 		return transcriptMessage{}, false
 	}
-	msg.Outcomes = append(msg.Outcomes, remoteOutcomes...)
 
 	outcomes, err := fanoutAttemptWithReplies(r.Context(), h.opts.Deliverer, msg, deliverable, spawn, h.opts.DeliveryTimeoutMs, r.Header.Get(namespace.HeaderNamespaceToken), retry, func(target string, reply json.RawMessage) error {
 		return h.recordWebhookReply(r.Context(), msg, target, reply)
 	})
 	attempt.addReceipts(outcomes)
-	if len(outcomes) == len(deliverable) {
+	if len(outcomes) == len(deliverable) && len(remoteOutcomes) == len(remoteTargets) {
 		completed := h.now()
 		attempt.CompletedAt = &completed
 	}
@@ -1035,6 +1032,10 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	}
 
 	// 3. Write the outcomes back onto the same record (same seq, keep-LAST).
+	// Local Fanout returns only local outcomes; merge the disjoint remote
+	// results explicitly instead of relying on its prior-outcome replay map.
+	outcomes = append(outcomes, remoteOutcomes...)
+	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].Target < outcomes[j].Target })
 	msg.Outcomes = append(crossRealm, outcomes...)
 
 	// A refused target is a SKIP, never fatal: the message is durable and
@@ -1163,58 +1164,48 @@ func groupOfTarget(roster map[string][]string) map[string]string {
 // policy, is recorded as a REFUSED outcome with the named reason, and the
 // message is never forwarded to it. A transport failure on an admitted peer
 // is an error (the caller's FANOUT_INCOMPLETE), matching the local leg's
-// contract. Remote members are resolved from the membership passed in — the
-// caller loads the session state, so the join-time admission already
-// guarantees every remote member's peer policy admitted the namespace; the
-// re-check here is the wall applied per SEND, not per JOIN (a policy can be
-// tightened between the two).
-func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, msg *Message, namespaceToken string) ([]DeliveryOutcome, error) {
+// contract. Targets are the caller's single roster-expanded recipient snapshot
+// (or the durable original targets on retry), not a second audience resolution.
+// The membership passed in still gates participation: group addressing cannot
+// admit a remote member or bypass peer policy. The policy re-check is applied
+// per SEND, not per JOIN (a policy can be tightened between the two).
+func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, msg *Message, targets []string, namespaceToken string) ([]DeliveryOutcome, error) {
 	outcomes := []DeliveryOutcome{}
 	now := h.now()
-	if h.opts.Fed == nil {
-		// No federation client wired: a remote member is recorded as
-		// refused with the named reason rather than silently skipped —
-		// a refused outcome is shown, never swallowed (§3.2).
-		for _, m := range st.Members {
-			if !m.ActiveAt(now) || m.MemberType != MemberAgent || m.MemberID == msg.Author.AgentID() || !IsRemoteMember(m.MemberID) {
-				continue
-			}
-			if !inAudience(audienceOf(msg), m.MemberID) {
-				continue
-			}
-			outcomes = append(outcomes, DeliveryOutcome{
-				Target:    m.MemberID,
-				Outcome:   OutcomeRefused,
-				Reason:    "remote participant: no federation client is wired (FEDERATION_UNCONFIGURED)",
-				UpdatedAt: now,
-			})
-		}
-		return outcomes, nil
-	}
+	active := make(map[string]bool, len(st.Members))
 	for _, m := range st.Members {
-		if !m.ActiveAt(now) || m.MemberType != MemberAgent || m.MemberID == msg.Author.AgentID() || !IsRemoteMember(m.MemberID) {
-			continue
+		if m.ActiveAt(now) && m.MemberType == MemberAgent {
+			active[m.MemberID] = true
 		}
-		if !inAudience(audienceOf(msg), m.MemberID) {
-			continue
-		}
-		peer, subject, ok := ParseRemoteMemberID(m.MemberID)
+	}
+	for _, target := range withoutAuthor(dedupeSorted(targets), msg.Author.AgentID()) {
+		peer, subject, ok := ParseRemoteMemberID(target)
 		if !ok {
-			continue // unreachable: IsRemoteMember passed
+			outcomes = append(outcomes, refusedOutcome(target, "invalid remote participant identity", now))
+			continue
+		}
+		if !active[target] {
+			outcomes = append(outcomes, refusedOutcome(target, "remote target is not an active session participant", now))
+			continue
+		}
+		if h.opts.Fed == nil {
+			outcomes = append(outcomes, refusedOutcome(target,
+				"remote participant: no federation client is wired (FEDERATION_UNCONFIGURED)", now))
+			continue
 		}
 		policy := h.opts.Fed.PolicyFor(peer)
 		if policy == nil {
-			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+			outcomes = append(outcomes, refusedOutcome(target,
 				fmt.Sprintf("peer %q is not known to this instance (no policy record)", peer), now))
 			continue
 		}
 		if !policy.AdmitsNamespace(sess.Namespace) {
-			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+			outcomes = append(outcomes, refusedOutcome(target,
 				fmt.Sprintf("peer %q is not permitted to reach namespace %q (namespaces_allow)", peer, namespace.Display(sess.Namespace)), now))
 			continue
 		}
 		if policy.URL == "" {
-			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+			outcomes = append(outcomes, refusedOutcome(target,
 				fmt.Sprintf("peer %q is inbound-only (no url): the message cannot cross to it", peer), now))
 			continue
 		}
@@ -1225,11 +1216,11 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 			Sender:         msg.Author.AgentID(),
 			Namespace:      sess.Namespace,
 			Kind:           string(msg.Kind),
-			IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, m.MemberID),
+			IdempotencyKey: IdempotencyKey(msg.SessionID, msg.ThreadID, msg.ID, target),
 			Payload:        msg.Payload,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("marshal remote delivery for %q: %w", m.MemberID, err)
+			return nil, fmt.Errorf("marshal remote delivery for %q: %w", target, err)
 		}
 		receipt, ferr := h.opts.Fed.ForwardToURLReceiptWithNamespaceToken(ctx, policy.URL, subject, envelope, namespaceToken)
 		status, response := receipt.StatusCode, receipt.Body
@@ -1241,28 +1232,28 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 			// definitive refused outcome carrying the remote's own answer.
 			var refusal *federation.DeliveryRefusal
 			if errors.As(ferr, &refusal) {
-				o := refusedOutcome(m.MemberID, string(refusal.Verdict), now)
+				o := refusedOutcome(target, string(refusal.Verdict), now)
 				o.Code = string(refusal.Verdict)
 				outcomes = append(outcomes, o)
 				continue
 			}
 			var nsnp *federation.NamespaceNotPermittedError
 			if errors.As(ferr, &nsnp) {
-				outcomes = append(outcomes, refusedOutcome(m.MemberID,
+				outcomes = append(outcomes, refusedOutcome(target,
 					"the destination's peer policy refused the namespace (FED_NAMESPACE_NOT_PERMITTED)", now))
 				continue
 			}
-			return nil, fmt.Errorf("forward to peer %q for %q: %w", peer, m.MemberID, ferr)
+			return nil, fmt.Errorf("forward to peer %q for %q: %w", peer, target, ferr)
 		}
 		if status >= 200 && status < 300 {
 			outcome, code := transportReceiptOutcome(response, receipt.Verdict, receipt.InboundVerdict)
 			if outcome == OutcomeDelivered {
-				if err := h.recordAnswerText(ctx, msg, m.MemberID, transportReplyText(response)); err != nil {
-					return nil, fmt.Errorf("record peer reply from %q: %w", m.MemberID, err)
+				if err := h.recordAnswerText(ctx, msg, target, transportReplyText(response)); err != nil {
+					return nil, fmt.Errorf("record peer reply from %q: %w", target, err)
 				}
 			}
 			outcomes = append(outcomes, DeliveryOutcome{
-				Target:    m.MemberID,
+				Target:    target,
 				Outcome:   outcome,
 				Code:      code,
 				Reason:    transportReceiptReason(code),
@@ -1280,7 +1271,7 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 			case "NAMESPACE_UNAUTHORIZED", "UNKNOWN_NAMESPACE", "NAMESPACE_MISMATCH",
 				"FED_NO_LINK", "FED_BAD_SIGNATURE", "FED_PEER_REVOKED", "FED_NAMESPACE_NOT_PERMITTED",
 				"FED_AGENT_NOT_PERMITTED", "FED_DIRECTION_NOT_PERMITTED", "FED_SESSION_NOT_PERMITTED", "DELIVERY_FORBIDDEN":
-				o := refusedOutcome(m.MemberID, fmt.Sprintf("the destination refused the delivery (status %d, %s)", status, remoteRefusal.Error), now)
+				o := refusedOutcome(target, fmt.Sprintf("the destination refused the delivery (status %d, %s)", status, remoteRefusal.Error), now)
 				o.Code = remoteRefusal.Error
 				outcomes = append(outcomes, o)
 				continue
@@ -1290,13 +1281,13 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 			// The destination refused the crossing (its own per-peer
 			// policy or its auth): a definitive, named refusal — never a
 			// silent drop, never a retryable outage.
-			outcomes = append(outcomes, refusedOutcome(m.MemberID,
+			outcomes = append(outcomes, refusedOutcome(target,
 				fmt.Sprintf("the destination refused the delivery (status %d)", status), now))
 			continue
 		}
 		// Any other non-2xx answer from the home instance: also definitive
 		// for this send, recorded with the status.
-		outcomes = append(outcomes, refusedOutcome(m.MemberID,
+		outcomes = append(outcomes, refusedOutcome(target,
 			fmt.Sprintf("the destination answered %d for the delivery", status), now))
 	}
 	return outcomes, nil
@@ -1306,23 +1297,6 @@ func (h *Handler) deliverRemote(ctx context.Context, sess *Session, st *State, m
 // carries the real reason, never a swallowed error.
 func refusedOutcome(target, reason string, at time.Time) DeliveryOutcome {
 	return DeliveryOutcome{Target: target, Outcome: OutcomeRefused, Reason: reason, UpdatedAt: at}
-}
-
-// audienceOf returns the message's recorded audience; a message always
-// carries one by the time fan-out runs (resolveAudience precedes it).
-func audienceOf(msg *Message) Audience { return msg.Audience }
-
-// inAudience reports whether the member id appears as an agent target of the
-// audience. The local fan-out (Fanout) consumes FanoutRecipients' agent list;
-// the remote leg re-derives membership from the SAME audience so the two legs
-// can never disagree about who was addressed.
-func inAudience(aud Audience, memberID string) bool {
-	for _, t := range aud.Targets {
-		if t.Kind == TargetAgent && t.ID == memberID {
-			return true
-		}
-	}
-	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -1456,11 +1430,16 @@ func (h *Handler) resolveAudience(ctx context.Context, sess *Session, req *postM
 }
 
 // partitionRealm splits the fan-out recipients into those whose stored agent
-// row is in another realm (refused, never delivered — §4 row 38) and those that
-// may receive the message. An unknown agent is left to the deliver path, which
-// reports it as a refused outcome with its own reason.
-func (h *Handler) partitionRealm(recipients []string, realm string, now time.Time) (crossRealm []DeliveryOutcome, deliverable []string) {
+// row is in another realm (refused, never delivered — §4 row 38), local
+// deliverable targets, and remote-qualified targets owned by the federation leg.
+// Even a malformed remote: ID must not fall through to local registry lookup.
+// An unknown LOCAL agent is left to the local deliver path for its named refusal.
+func (h *Handler) partitionRealm(recipients []string, realm string, now time.Time) (crossRealm []DeliveryOutcome, deliverable, remote []string) {
 	for _, id := range recipients {
+		if strings.HasPrefix(id, RemotePrefix) {
+			remote = append(remote, id)
+			continue
+		}
 		if h.opts.Agents != nil {
 			ag, err := h.opts.Agents.Get(id)
 			if err == nil && ag != nil && namespace.Canonical(ag.Namespace) != realm {
@@ -1475,7 +1454,7 @@ func (h *Handler) partitionRealm(recipients []string, realm string, now time.Tim
 		}
 		deliverable = append(deliverable, id)
 	}
-	return crossRealm, deliverable
+	return crossRealm, deliverable, remote
 }
 
 // checkMemberAgent validates local agent admission against the registry. Remote

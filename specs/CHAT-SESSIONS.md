@@ -265,6 +265,19 @@ receipt flushing, inbox consumption and an observed answer are different evidenc
 | `replay_action: "replayed_outcome_missing"` | Same-key HTTP 201, no new dispatch, `outcomes_incomplete: true`. The latest durable dispatch evidence has `completed_at`, but transcript outcomes are missing or its outcome write-back did not commit. Return the evidence (including per-target receipts) without promoting it to transcript outcomes or claiming execution. |
 | `replay_action: "replayed_outcome_unknown"` | Same-key HTTP 201, no new dispatch, `outcomes_incomplete: true`. An intent has no outcomes and no completed dispatch evidence, or a newer attempt has only a boundary marker. A historical empty outcome set, a crash at the boundary, and an unavailable receipt journal cannot prove whether transport ran. Never guess or automatically re-send. |
 
+For a remote-qualified target (`remote:<peer>:<subject>`), direct addressing and
+membership in a resolved group roster use the same recipient expansion
+(DF-CRIER-422). Resolve each group's roster once per send with `FanoutRecipients`;
+an unknown roster remains an `AudienceSkip`, never a guessed member. Partition the
+resolved set before dispatch: a `remote:` target must never reach local agent
+lookup or local inbox fan-out. The remote leg retains active session membership
+and per-peer namespace/policy checks. Missing active membership, malformed remote
+identity or unavailable federation produces `refused` with the actual reason,
+not local `AGENT_NOT_FOUND`. Merge the disjoint legs explicitly into one outcome
+per target; direct-plus-group overlap and request-key replay do not double-send.
+This routing rule does not broaden the built-in group write API's ident-only
+member validation; it also applies to rosters supplied through `GroupStore`.
+
 `dispatch_evidence` is an ordered array of fan-out passes on the same message:
 `attempt` is its one-based journal index (not a count of HTTP transport retries),
 `started_at` records entry to the fan-out boundary, `targets` is the resolved
