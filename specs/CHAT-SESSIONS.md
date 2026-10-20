@@ -303,6 +303,16 @@ receipts cannot be guaranteed durable; the boundary marker remains, and replay
 uses the unknown state. A crash between transport and receipt append has the same
 uncertainty. There is no cross-system atomic commit or exactly-once guarantee.
 
+Inbox ingress classification is **header-only** (DF-CRIER-418):
+`X-Crier-Fed-Inbound-Verdict` carries the local ingress verdict, and
+`X-Crier-Fed-Verdict` initially carries the same value. If the handler forwards
+onward, its outward verdict replaces only `X-Crier-Fed-Verdict`; the inbound
+header retains the local decision. The middleware flushes the handler's body
+byte-for-byte in every peer-store posture: it never adds or overwrites `verdict`
+or `inbound_verdict`, parses/re-encodes JSON, or changes whitespace. An existing
+body verdict belongs to the handler/peer, including a named refusal receipt
+written by `RefuseDelivery`, and is not an ingress annotation.
+
 `FED_ALLOWED` authorizes crossing, not execution. `FED_TOKEN_ONLY` in a verdict
 header or receipt stays `accepted` with that code; an explicit hold keeps its
 precedence and that code. A no-reply delivery claim instead exposes

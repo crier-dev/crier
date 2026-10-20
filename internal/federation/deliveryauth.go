@@ -3,7 +3,6 @@ package federation
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -49,17 +48,16 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 			} else if posture.RequirePeerEffective {
 				v = FedNoLink
 			}
-			// Inbox responses are finite JSON receipts, never streaming routes. Capture
-			// once so all handler exits (including auth refusals) carry the same verdict.
-			// Empty/no records preserve the legacy response bytes; its header and audit
-			// still expose the degraded crossing without breaking legacy consumers.
+			// Inbox responses are finite receipts, never streaming routes. Capture
+			// once so all handler exits (including auth refusals) carry verdict
+			// headers while preserving the handler's exact body bytes in every posture.
 			receipt := &inboundReceipt{ResponseWriter: w}
 			receipt.Header().Set(VerdictHeader, string(v))
 			receipt.Header().Set("X-Crier-Fed-Inbound-Verdict", string(v))
 			completed := false
 			defer func() {
 				if completed {
-					receipt.finish(v, posture.Peers > 0)
+					receipt.finish()
 					slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
 						"verdict", v, "status", receipt.status, "receipt_flushed", true)
 					return
@@ -106,31 +104,16 @@ func (w *inboundReceipt) Write(p []byte) (int, error) {
 	}
 	return w.body.Write(p)
 }
-func (w *inboundReceipt) finish(v Verdict, annotate bool) {
+
+// finish flushes the handler's bytes verbatim. Ingress classification is carried
+// only in response headers; handler-owned verdict fields (including an onward
+// peer's receipt) must never be added, overwritten or re-encoded here.
+func (w *inboundReceipt) finish() {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
-	body := w.body.Bytes()
-	if annotate {
-		var object map[string]json.RawMessage
-		if json.Unmarshal(body, &object) == nil && object != nil {
-			encodedVerdict, _ := json.Marshal(v)
-			if outgoing, exists := object["verdict"]; exists && !bytes.Equal(outgoing, encodedVerdict) {
-				// A local caller can enter here then forward to another instance. Keep
-				// the existing outbound verdict and expose ingress separately, never
-				// relabel an outbound key refusal as successful token authentication.
-				object["inbound_verdict"] = encodedVerdict
-			} else {
-				object["verdict"] = encodedVerdict
-			}
-			if encoded, err := json.Marshal(object); err == nil {
-				body = append(encoded, '\n')
-			}
-		}
-	}
-	w.Header().Del("Content-Length")
 	w.ResponseWriter.WriteHeader(w.status)
-	_, _ = w.ResponseWriter.Write(body)
+	_, _ = w.ResponseWriter.Write(w.body.Bytes())
 }
 
 func keyedInboxRoute(r *http.Request) bool {

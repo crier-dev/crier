@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,18 +60,32 @@ func TestInbound371ProductionPolicyStatusAndReceipt(t *testing.T) {
 			require.Equal(t, tc.required == "true", posture["federation_require_peer"], "live posture does not match enforcement")
 			for _, hop := range []string{"", "1"} {
 				headers[federation.HopHeader] = hop
-				status, body = s.do(t, "POST", "/agents/target/inbox", `{"payload":{"text":"inbound"}}`, headers)
-				require.Equal(t, tc.want, status, body)
-				if tc.configured {
-					var receipt map[string]any
-					require.NoError(t, json.Unmarshal([]byte(body), &receipt))
-					want := string(federation.FedTokenOnly)
-					if tc.want == 403 {
-						want = string(federation.FedNoLink)
-					}
-					require.Equal(t, want, receipt["verdict"])
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, s.baseURL+"/agents/target/inbox", strings.NewReader(`{"payload":{"text":"inbound"}}`))
+				require.NoError(t, err)
+				for name, value := range headers {
+					req.Header.Set(name, value)
 				}
-				t.Logf("posture=%s hop=%q status=%d receipt=%s", tc.name, hop, status, body)
+				resp, err := s.client.Do(req)
+				require.NoError(t, err)
+				raw, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				status, body = resp.StatusCode, string(raw)
+				require.Equal(t, tc.want, status, body)
+				want := string(federation.FedTokenOnly)
+				if tc.want == 403 {
+					want = string(federation.FedNoLink)
+				}
+				require.Equal(t, want, resp.Header.Get(federation.VerdictHeader))
+				require.Equal(t, want, resp.Header.Get("X-Crier-Fed-Inbound-Verdict"))
+				var receipt map[string]any
+				require.NoError(t, json.Unmarshal(raw, &receipt))
+				if tc.want == 403 {
+					require.Equal(t, want, receipt["verdict"], "RefuseDelivery owns the refusal body")
+				} else {
+					require.NotContains(t, receipt, "verdict", "ingress verdict is header-only")
+				}
+				t.Logf("posture=%s hop=%q status=%d receipt=%s verdict_header=%s", tc.name, hop, status, body, resp.Header.Get(federation.VerdictHeader))
 			}
 			if tc.want == 403 {
 				status, body = s.do(t, "GET", "/agents/target/inbox", "", headers)

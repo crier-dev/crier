@@ -78,9 +78,18 @@ func TestInbound371EveryDoorHasReceiptAndAudit(t *testing.T) {
 			gate.ServeHTTP(w, r)
 			require.Equal(t, tc.status, w.Code, w.Body.String())
 			require.Equal(t, string(tc.want), w.Header().Get(VerdictHeader))
+			require.Equal(t, string(tc.want), w.Header().Get("X-Crier-Fed-Inbound-Verdict"))
 			var receipt map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &receipt))
-			require.Equal(t, string(tc.want), receipt["verdict"])
+			if tc.status == http.StatusCreated {
+				require.Equal(t, `{"id":"receipt"}`, w.Body.String())
+				require.NotContains(t, receipt, "verdict")
+			} else if tc.want != FedTokenOnly {
+				// RefuseDelivery authors its own error receipt, unchanged by ingress.
+				require.Equal(t, string(tc.want), receipt["verdict"])
+			} else {
+				require.NotContains(t, receipt, "verdict", "deployment auth owns this refusal body")
+			}
 			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"federation inbound delivery"`), logs.String())
 			require.Contains(t, logs.String(), `"verdict":"`+string(tc.want)+`"`)
 			require.Contains(t, logs.String(), `"receipt_flushed":true`)

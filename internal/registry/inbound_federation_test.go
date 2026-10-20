@@ -27,7 +27,8 @@ func TestInbound371RegistryReceiptsAndSingleAudit(t *testing.T) {
 		logs.Reset()
 		rec := deliverTo(t, b.router, "target", []byte(`{"payload":{"text":"compatibility"}}`), nil)
 		assertFedVerdict(t, rec, 201, federation.FedTokenOnly)
-		require.Contains(t, rec.Body.String(), `"verdict":"FED_TOKEN_ONLY"`)
+		require.NotContains(t, rec.Body.String(), `"verdict"`)
+		require.Equal(t, "FED_TOKEN_ONLY", rec.Header().Get("X-Crier-Fed-Inbound-Verdict"))
 		require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte(`"msg":"federation inbound delivery"`)), logs.String())
 	})
 	t.Run("forward_preserves_both_decisions", func(t *testing.T) {
@@ -37,8 +38,8 @@ func TestInbound371RegistryReceiptsAndSingleAudit(t *testing.T) {
 		require.Equal(t, "FED_TOKEN_ONLY", rec.Header().Get("X-Crier-Fed-Inbound-Verdict"))
 		var receipt map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &receipt))
-		require.Equal(t, "FED_ALLOWED", receipt["verdict"])
-		require.Equal(t, "FED_TOKEN_ONLY", receipt["inbound_verdict"])
+		require.NotContains(t, receipt, "verdict")
+		require.NotContains(t, receipt, "inbound_verdict")
 		require.Equal(t, 2, bytes.Count(logs.Bytes(), []byte(`"msg":"federation inbound delivery"`)), logs.String())
 	})
 	for _, tc := range []struct {
@@ -58,12 +59,18 @@ func TestInbound371RegistryReceiptsAndSingleAudit(t *testing.T) {
 			}
 			before := fedQueueDepth(t, b.store, "target")
 			logs.Reset()
-			status, body, err := c.ForwardToURL(t.Context(), b.server.URL, "target", []byte(`{"payload":{"text":"signed"}}`))
+			receipt, err := c.ForwardToURLReceiptWithNamespaceToken(t.Context(), b.server.URL, "target", []byte(`{"payload":{"text":"signed"}}`), "")
 			require.NoError(t, err)
-			require.Equal(t, tc.status, status, string(body))
-			var receipt map[string]any
-			require.NoError(t, json.Unmarshal(body, &receipt))
-			require.Equal(t, string(tc.want), receipt["verdict"])
+			require.Equal(t, tc.status, receipt.StatusCode, string(receipt.Body))
+			require.Equal(t, string(tc.want), receipt.Verdict)
+			require.Equal(t, string(tc.want), receipt.InboundVerdict)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(receipt.Body, &body))
+			if tc.revoke {
+				require.Equal(t, string(tc.want), body["verdict"], "RefuseDelivery authors the refusal body")
+			} else {
+				require.NotContains(t, body, "verdict", "successful handler receipt is not annotated")
+			}
 			require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte(`"msg":"federation inbound delivery"`)), logs.String())
 			require.Contains(t, logs.String(), `"verdict":"`+string(tc.want)+`"`)
 			if tc.revoke {
