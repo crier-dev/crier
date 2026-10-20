@@ -181,6 +181,42 @@ main { min-width:0; display:flex; flex-direction:column; }
     <details style="margin-top:10px"><summary>Authentication boundary</summary><p class="note">This server uses Bearer headers when authentication is enabled. There is no browser login or cookie exchange in the current API; even GET /chat requires that header. A trusted deployment must supply access outside this page. Do not paste shared message or admin tokens here. A 401/403 is a real refusal, not an empty conversation.</p></details>
   </details>
 </aside>
+<!-- DF-CRIER-444: the refusal page served to a browser navigating here while
+     CR_AUTH_TOKEN is set. It is INERT inside this document — it lives in a
+     <template> the chat client never instantiates and carries no script — and
+     cmd/server extracts it byte-exact at boot (chatBrowserRefusalTemplate) to
+     hand to internal/middleware. The 401 that carries it names the fronting
+     requirement; the mechanism decision stays with DF-CRIER-333. -->
+<template id="df444-browser-refusal"><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Crier — authentication required</title>
+<style>
+body { margin:0; min-height:100dvh; display:grid; place-items:center; background:#0b0d12; color:#e6e9f0; font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { max-width:640px; padding:48px 28px; }
+h1 { font-size:20px; margin:0 0 14px; }
+p { margin:0 0 14px; }
+code { font-family:ui-monospace,monospace; font-size:13px; background:#1b202c; border:1px solid #303747; border-radius:6px; padding:2px 6px; }
+.note { color:#a7b0c2; font-size:13px; }
+hr { border:0; border-top:1px solid #303747; margin:22px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Authentication required — this deployment is closed to direct browser access</h1>
+<p>This Crier deployment runs with <code>CR_AUTH_TOKEN</code> set: every request must carry a <code>Bearer</code> credential, and answering <code>401</code> here is the server working as configured.</p>
+<p>A browser cannot attach a <code>Bearer</code> header on ordinary navigation, so opening this page directly will always be refused. Reading the conversations UI requires a <strong>fronting arrangement</strong> — an authenticating layer in front of the server that vouches for your browser. That mechanism is a deliberate, still-open decision (<code>DF-CRIER-333</code>); nothing on this page is a workaround and no credential belongs in a browser.</p>
+<p>Agents and API clients are unaffected: they send the header themselves and keep the same JSON refusal contract. The five public paths (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) stay reachable without a credential.</p>
+<hr>
+<p class="note">If you operate this deployment: choose the fronting mechanism through the DF-CRIER-333 decision and front this server with it. If you are a visitor: the deployment is private; there is nothing to sign into here.</p>
+</main>
+</body>
+</html>
+</template>
 <main id="main" tabindex="-1">
   <header class="thread-header"><div class="thread-heading"><h1 id="conversation-title">Your agents. One conversation.</h1><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><span id="session-state" class="pill">No session</span></header>
   <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button></div>

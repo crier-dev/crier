@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 )
 
 // Auth returns middleware that validates Bearer tokens against the configured
@@ -19,8 +20,77 @@ import (
 //
 // Auth is AuthTokens with no permissions-management token: presenting a single
 // secret to every non-exempt path (DF-CRIER-297 added the second one).
+//
+// Browser refusals (DF-CRIER-444): when SetBrowserRefusalPage has armed a
+// page, a request with NO Authorization header whose Accept header advertises
+// text/html (a human pointing a browser at the deployment) is answered with
+// that page instead of the bare JSON — same 401, same Content-Length honesty,
+// same accept/refuse decision. The page explains that the deployment needs a
+// fronting arrangement (mechanism decision: DF-CRIER-333) because a browser
+// cannot attach a Bearer header on navigation. No other refusal changes: a
+// wrong scheme and a wrong token keep their exact JSON bodies, and a nil page
+// (the default everywhere) reproduces the pre-DF-CRIER-444 bytes exactly.
 func Auth(authToken string) func(http.Handler) http.Handler {
 	return AuthTokens(authToken, "")
+}
+
+// browserRefusalPage holds the human-readable 401 page cmd/server installs at
+// boot, and browserRefusalPath the single path it serves on (cmd/server binds
+// the chat client page). They live in this package ONLY as inert bytes plus a
+// path: the middleware has no import path into cmd/server (the page is
+// authored in the embedded chat.html), so main.go hands it over through
+// SetBrowserRefusalPage. An empty path means the feature is disarmed and every
+// refusal is byte-identical to the pre-DF-CRIER-444 middleware.
+var (
+	browserRefusalPage atomic.Value // string
+	browserRefusalPath atomic.Value // string
+)
+
+// SetBrowserRefusalPage arms (or, with an empty path, disarms) the
+// human-readable 401 page served to browser navigations that carry no
+// Authorization header. The page is served ONLY on the given path — the
+// middleware stays route-agnostic; cmd/server binds it to the chat client
+// page (DF-CRIER-444), so an API path answers the bare JSON even with a
+// browser Accept header.
+func SetBrowserRefusalPage(path, page string) {
+	browserRefusalPath.Store(path)
+	browserRefusalPage.Store(page)
+}
+
+// browserRefusal returns the armed page, its path, and whether one is armed.
+func browserRefusal() (path, page string, armed bool) {
+	path, _ = browserRefusalPath.Load().(string)
+	page, _ = browserRefusalPage.Load().(string)
+	return path, page, path != "" && page != ""
+}
+
+// wantsHTMLRefusal reports whether this request looks like a BROWSER
+// NAVIGATION — an Accept header that advertises text/html. Deliberately
+// narrow, so no API client changes what it reads:
+//
+//   - no Accept header at all (curl, every agent HTTP client) → false;
+//   - "application/json" (the chat page's own fetch calls) → false;
+//   - "*/*" alone (a client that accepts anything, i.e. not choosing HTML)
+//     → false;
+//   - "text/event-stream", "text/plain", any other non-HTML Accept → false;
+//   - any Accept CONTAINING a "text/html" token (browsers send
+//     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+//     → true.
+//
+// The browser's own sub-request fetching (XHR/fetch from JS) prefers
+// application/json or */* FIRST in its Accept list, so those calls keep
+// reading the JSON refusal even from the same origin.
+func wantsHTMLRefusal(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+	for _, part := range strings.Split(accept, ",") {
+		if strings.TrimSpace(strings.SplitN(part, ";", 2)[0]) == "text/html" {
+			return true
+		}
+	}
+	return false
 }
 
 // AuthTokens is Auth plus the permissions-management admin token.
@@ -75,6 +145,16 @@ func AuthTokens(authToken, managementToken string) func(http.Handler) http.Handl
 
 			header := r.Header.Get("Authorization")
 			if header == "" {
+				// DF-CRIER-444: a browser navigation (Accept advertises
+				// text/html) on the one armed path gets the human-readable
+				// refusal page instead of the bare JSON — SAME status, same
+				// Content-Type honesty discipline. Every other path, every
+				// other refusal, and every request when no page is armed is
+				// the pre-DF-CRIER-444 JSON, byte-identical.
+				if path, page, armed := browserRefusal(); armed && r.URL.Path == path && wantsHTMLRefusal(r) {
+					writeAuthHTML(w, http.StatusUnauthorized, page)
+					return
+				}
 				writeAuthJSON(w, http.StatusUnauthorized, `{"error":"missing Authorization header"}`)
 				return
 			}
@@ -140,6 +220,15 @@ func isManagementPath(path string) bool {
 // writeAuthJSON writes one of the middleware's JSON refusals.
 func writeAuthJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+}
+
+// writeAuthHTML writes the browser refusal page (DF-CRIER-444). The body is
+// the exact bytes cmd/server extracted from the embedded chat.html at boot —
+// this function never edits, wraps or re-encodes them.
+func writeAuthHTML(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(body))
 }

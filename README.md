@@ -714,6 +714,16 @@ what the docs gate executes on every build, so they stay true. If you are here t
 *use* crier rather than to inspect it, use `crier keygen` and a client and read
 the rest later.
 
+A note for humans, not clients: a browser cannot attach a Bearer header on
+ordinary navigation, so when `CR_AUTH_TOKEN` is set, opening `GET /chat` (or any
+non-exempt path) directly in a browser is refused `401` — `/chat` answers with a
+readable page explaining the refusal, everything else with the bare JSON. That is
+the server working as configured, not a bug: an unauthenticated browser
+deployment must be **fronted** by an authenticating layer that supplies the
+credential for it. The fronting mechanism itself is a deliberate, still-open
+decision (DF-CRIER-333); until it lands, drive crier from its API clients, which
+send the header themselves.
+
 A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except the **five exempt paths** — `/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` (the list is the switch in `internal/middleware/auth.go`) — needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped. Measured on a running server: all five answer `200` with no token, and `GET /agents` answers `401`:
 
 ```bash
