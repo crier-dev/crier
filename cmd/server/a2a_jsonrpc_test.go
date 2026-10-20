@@ -875,57 +875,245 @@ func TestA2AJSONRPCStreaming_RefusesBeforeItStreams(t *testing.T) {
 	}
 }
 
+// relayFrameProbe is the retry strategy shared by the relay non-regression test
+// and its withheld-frame fixture (QA-CRIER-42).
+//
+// A gorilla *websocket.Conn is SINGLE-USE once a read fails: the first error is
+// cached in c.readErr, every later ReadMessage returns it IMMEDIATELY, and the
+// 1000th one PANICS ("repeated read on failed websocket connection", gorilla
+// v1.5.3 conn.go:1025-1031). So the previous shape — publish, read with a
+// 300ms deadline, and on a miss loop back and read the SAME conn again — was
+// not a retry: one missed frame produced ~1000 instant reads in ~300ms and took
+// the whole cmd/server package down, inside a 5s window that never got to
+// report anything.
+//
+// A probe therefore makes each attempt a FRESH connection and performs exactly
+// ONE bounded read per connection. Retrying is still required — a subscription
+// is not instantaneous with respect to a publish on another connection, and the
+// relay is a live fan-out bus with no replay — but the retry re-DIALS instead of
+// re-reading. Exhausting the window returns a NAMED error: a lagging subscriber
+// is reported, never panicked on.
+type relayFrameProbe struct {
+	base        string                                                             // http base URL of the test server
+	pattern     string                                                             // subscription path segment (topic or wildcard)
+	body        string                                                             // exact POST /relay/publish body
+	readTimeout time.Duration                                                      // bound on an attempt's single read
+	window      time.Duration                                                      // total budget across attempts
+	dial        func(string, http.Header) (*websocket.Conn, *http.Response, error) // nil = websocket.DefaultDialer.Dial
+	dials       int                                                                // connections opened: one per attempt
+}
+
+// relayFrameProbeMaxAttempts is a hard ceiling on attempts, so a failing DIAL
+// cannot spin up connections for the whole window.
+const relayFrameProbeMaxAttempts = 60
+
+// relayFailedConnReadCeiling bounds the reads TestRelaySocket_ReadingAFailed-
+// ConnectionPanics makes while pinning gorilla's sticky-read guard (which fires
+// at 1000).
+const relayFailedConnReadCeiling = 2000
+
+// attempt opens a fresh subscription, publishes once and reads once, bounded by
+// readTimeout and by the probe's remaining window. It always closes the
+// connection before returning, so no caller can read it a second time.
+func (p *relayFrameProbe) attempt(deadline time.Time) ([]byte, error) {
+	dial := p.dial
+	if dial == nil {
+		dial = websocket.DefaultDialer.Dial
+	}
+	wsURL := "ws" + strings.TrimPrefix(p.base, "http") + "/relay/subscribe/" + p.pattern
+	p.dials++
+	conn, _, err := dial(wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial the relay socket: %w", err)
+	}
+	// Close is deliberate and its error is not actionable in a test: the next
+	// attempt re-dials, and a close failure cannot mask a frame that was
+	// already read or a read error that was already reported.
+	defer func() { _ = conn.Close() }()
+
+	// Publish once, on this connection's own attempt: a frame published before
+	// this subscription was registered is lost (fan-out, no replay), which is
+	// exactly what the next fresh-dial attempt makes good on.
+	resp, err := publishToRelay(p.base, p.body)
+	if err != nil {
+		return nil, fmt.Errorf("POST /relay/publish: %w", err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		// A shed publish (429) inside the window is a retryable timing
+		// artifact, not a protocol failure (CI-017).
+		return nil, fmt.Errorf("POST /relay/publish = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	readBy := time.Now().Add(p.readTimeout)
+	if readBy.After(deadline) {
+		readBy = deadline
+	}
+	if err := conn.SetReadDeadline(readBy); err != nil {
+		return nil, fmt.Errorf("arm the read deadline: %w", err)
+	}
+	// Exactly one read on this connection. This is the invariant that keeps
+	// gorilla's sticky read error from ever being read twice.
+	_, frame, err := conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("read the relay frame: %w", err)
+	}
+	return frame, nil
+}
+
+// waitFor performs fresh-dial attempts until one delivers a frame or the window
+// is exhausted. A failure is returned as a named error carrying the topic, the
+// attempt count and the last attempt's own error, so a red run says what
+// happened instead of dying in a gorilla panic.
+func (p *relayFrameProbe) waitFor() ([]byte, error) {
+	deadline := time.Now().Add(p.window)
+	attempts := 0
+	var lastErr error
+	for {
+		attempts++
+		frame, err := p.attempt(deadline)
+		if err == nil {
+			return frame, nil
+		}
+		lastErr = err
+		if attempts >= relayFrameProbeMaxAttempts || !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("no relay frame arrived on the WebSocket subscriber for %q within %s: gave up after %d fresh-dial attempt(s) (read deadline %s per attempt), last error: %w",
+				p.pattern, p.window, attempts, p.readTimeout, lastErr)
+		}
+		// A bounded pause between attempts keeps this a retry loop rather than
+		// a spin — the shape that used to burn ~1000 reads in 300ms.
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn is the explicit
 // non-regression statement about the relay's own protocol: with the A2A option
 // ON, a WebSocket subscriber still receives exactly the frame
 // POST /relay/publish fans out (the SSE adapter subscribes through the same
 // Relay.Subscribe; it does not alter what a WebSocket subscriber sees).
+//
+// The server runs with CR_RATE_LIMIT_PER_MINUTE=0 (cap 0 = that namespace is
+// not rate limited at all) so the retry cannot burn the default 100/min
+// per-agent publish budget under full-suite contention (CI-017: a lagging WS
+// subscribe used to shed a late retry as 429).
 func TestA2AJSONRPC_RelayWebSocketIsUnchangedWithTheOptionOn(t *testing.T) {
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED":           "true",
 		"CR_RATE_LIMIT_PER_MINUTE": "0",
 	})
 
-	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/relay/subscribe/a2a.regression.topic"
+	want := `{"topic":"a2a.regression.topic","event":{"hello":"world"}}`
+	probe := &relayFrameProbe{
+		base:        base,
+		pattern:     "a2a.regression.topic",
+		body:        want,
+		readTimeout: 300 * time.Millisecond,
+		window:      5 * time.Second,
+	}
+
+	frame, err := probe.waitFor()
+	if err != nil {
+		// A lagging subscriber is a NAMED failure, never a package panic.
+		t.Fatal(err)
+	}
+	if string(frame) != want {
+		t.Errorf("relay frame = %s, want %s", frame, want)
+	}
+}
+
+// TestRelayFrameProbe_WithheldFirstFrameIsANamedFailure is the fixture
+// QA-CRIER-42 asks for: a subscriber whose FIRST frame is withheld past the read
+// deadline. The old shape panicked this package at the 1000th read on the failed
+// connection; the probe must instead report a named failure after RE-DIALING,
+// never a second read on a connection that already failed.
+func TestRelayFrameProbe_WithheldFirstFrameIsANamedFailure(t *testing.T) {
+	base := startTestServerWithEnv(t, map[string]string{
+		"CR_A2A_ENABLED":           "true",
+		"CR_RATE_LIMIT_PER_MINUTE": "0",
+	})
+	probe := &relayFrameProbe{
+		base:    base,
+		pattern: "a2a.withheld.topic",
+		// Published on a DIFFERENT topic, so this subscriber's first frame is
+		// withheld for the whole window and every attempt's read misses its
+		// deadline — the exact condition that used to panic.
+		body:        `{"topic":"a2a.other.topic","event":{"hello":"world"}}`,
+		readTimeout: 50 * time.Millisecond,
+		window:      600 * time.Millisecond,
+	}
+
+	var (
+		panicked any
+		frame    []byte
+		err      error
+	)
+	func() {
+		defer func() { panicked = recover() }()
+		frame, err = probe.waitFor()
+	}()
+
+	if panicked != nil {
+		t.Fatalf("a lagging subscriber PANICKED the package (want a named failure): %v", panicked)
+	}
+	if err == nil {
+		t.Fatalf("probe returned frame %q for a subscriber whose frame was withheld", frame)
+	}
+	// The refusal must NAME the failure: the topic, how the window was spent
+	// and what the last attempt actually hit.
+	for _, wantPart := range []string{
+		"no relay frame arrived",
+		"a2a.withheld.topic",
+		"fresh-dial attempt",
+		"read the relay frame",
+	} {
+		if !strings.Contains(err.Error(), wantPart) {
+			t.Errorf("failure = %q, want it to name %q", err, wantPart)
+		}
+	}
+	// A retry must RE-DIAL: one read per fresh connection, so the socket that
+	// timed out was never read a second time.
+	if probe.dials < 2 {
+		t.Errorf("probe opened %d connection(s), want >= 2 (a retry must re-dial, never re-read a failed connection)", probe.dials)
+	}
+}
+
+// TestRelaySocket_ReadingAFailedConnectionPanics is the evidence for why the
+// probe re-dials: it pins gorilla v1.5.3's own behaviour (conn.go:1025-1031 — a
+// cached read error plus 1000 reads panics). It is deliberately a
+// dependency-behaviour pin: if a gorilla bump ever makes this stop panicking,
+// re-derive relayFrameProbe's rationale rather than deleting this test.
+func TestRelaySocket_ReadingAFailedConnectionPanics(t *testing.T) {
+	base := startTestServerWithEnv(t, map[string]string{"CR_RATE_LIMIT_PER_MINUTE": "0"})
+	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/relay/subscribe/a2a.panic.shape.topic"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial the relay socket: %v", err)
 	}
-	defer conn.Close()
+	// Close is deliberate and its error is not actionable in a test: the next
+	// attempt re-dials, and a close failure cannot mask a frame that was
+	// already read or a read error that was already reported.
+	defer func() { _ = conn.Close() }()
 
-	// Subscribing is not instantaneous with respect to a publish on another
-	// connection, so the publish is retried until the frame arrives — the
-	// relay is a live fan-out bus with no replay, exactly as it was before this
-	// row. The server runs with CR_RATE_LIMIT_PER_MINUTE=0 (cap 0 = that
-	// namespace is not rate limited at all) so the retry loop cannot burn the
-	// default 100/min per-agent publish budget under full-suite contention
-	// (CI-017: a lagging WS subscribe used to shed a late retry as 429).
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		resp, err := publishToRelay(base, `{"topic":"a2a.regression.topic","event":{"hello":"world"}}`)
-		if err != nil {
-			t.Fatalf("POST /relay/publish: %v", err)
-		}
-		if resp.StatusCode != http.StatusAccepted {
-			// A shed publish (429) inside the window is a retryable
-			// timing artifact, not a protocol failure.
-			if time.Now().After(deadline) {
-				t.Fatalf("POST /relay/publish = %d, want 202 (still shed after the retry window)", resp.StatusCode)
+	// No publish: the first read misses its deadline and poisons the conn.
+	if err := conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatalf("arm the read deadline: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatalf("first read on a silent subscriber returned no error")
+	}
+
+	var panicked any
+	func() {
+		defer func() { panicked = recover() }()
+		for i := 0; i < relayFailedConnReadCeiling; i++ {
+			if _, _, err := conn.ReadMessage(); err == nil {
+				t.Fatalf("read %d on a failed connection returned no error", i)
 			}
-			time.Sleep(50 * time.Millisecond)
-			continue
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-		_, frame, err := conn.ReadMessage()
-		if err == nil {
-			want := `{"topic":"a2a.regression.topic","event":{"hello":"world"}}`
-			if string(frame) != want {
-				t.Errorf("relay frame = %s, want %s", frame, want)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no relay frame arrived on the WebSocket subscriber: %v", err)
-		}
+	}()
+	if panicked == nil {
+		t.Fatalf("no panic within %d reads on a failed connection: gorilla's sticky-read guard changed — re-derive relayFrameProbe's rationale", relayFailedConnReadCeiling)
+	}
+	if msg := fmt.Sprint(panicked); !strings.Contains(msg, "repeated read on failed websocket connection") {
+		t.Errorf("panic = %v, want gorilla's repeated-read guard", msg)
 	}
 }
