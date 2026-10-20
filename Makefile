@@ -72,8 +72,8 @@ help:
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
 	@echo "  install-hooks     Install commit/merge/applypatch hooks in this repository's common Git hooks directory (idempotent)"
-	@echo "  doctor-hooks      Fail closed unless repository-local hooksPath and all three installed hooks match the tracked gate"
-	@echo "  doctor-hooks-selftest  Prove hook-health refusals and acceptance on scratch repositories, including a NEUTER control"
+	@echo "  doctor-hooks      Fail closed unless repository-local hooksPath and all three installed hooks match the tracked gate by bytes AND markers AND their board arm is proven to EXECUTE (DF-CRIER-433)"
+	@echo "  doctor-hooks-selftest  Prove hook-health refusals and acceptance on scratch repositories, including probe-verdict and whole-verdict NEUTER controls (DF-CRIER-421/430/433)"
 	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
@@ -603,6 +603,12 @@ judge-diff-class-selftest:
 
 # DF-CRIER-421: prove installed state without changing it. The selftest runs
 # real installer/doctor fixtures in temporary repositories, never in this one.
+# DF-CRIER-433: the doctor also RUNS each installed hook in a scratch Git
+# repository under ${TMPDIR:-/tmp} — a healthy board must exit 0 and a staged
+# 5->1 shrink must exit non-zero naming the shrink — so a board arm that is
+# present but unreachable is a refusal, not a green. That fixture is its own
+# repository and its commit is pinned against host hooks and gpg signing, so
+# this target stays read-only with respect to THIS checkout.
 doctor-hooks:
 	@bash scripts/doctor-hooks.sh
 

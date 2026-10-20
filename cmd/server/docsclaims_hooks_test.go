@@ -17,7 +17,12 @@ func liveBehavior(repoRoot, id string) (string, error) {
 	if id != "BEHAVIOR-HOOK-DOCTOR" {
 		return "", fmt.Errorf("no behavior probe configured for %s", id)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// DF-CRIER-433 raised this budget: the selftest's acceptance cases now RUN the
+	// installed hooks in scratch repositories (a healthy board and a staged shrink
+	// per fixture), so the fixture battery costs seconds, not milliseconds. The
+	// bound stays generous relative to the measured wall clock (~20-30s on a
+	// loaded box) — it exists to stop a hang, not to time the battery.
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "make", "--no-print-directory", "doctor-hooks-selftest")
 	cmd.Dir = repoRoot
@@ -26,9 +31,20 @@ func liveBehavior(repoRoot, id string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("doctor-hooks-selftest: %w\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "doctor-hooks selftest: PASS (") ||
-		!strings.Contains(string(out), "NEUTER accepts unset fixture rejected by real doctor: exit 0") {
-		return "", fmt.Errorf("doctor-hooks-selftest did not report its behavior/NEUTER evidence:\n%s", out)
+	// The evidence the claim stands on: the refusals, the marker NEUTER control,
+	// and (DF-CRIER-433) the EXECUTION probe actually running and its own NEUTER
+	// control accepting a fixture the real doctor refuses.
+	for _, want := range []string{
+		"doctor-hooks selftest: PASS (",
+		"NEUTER accepts unset fixture rejected by real doctor: exit 0",
+		"NEUTER probe verdict accepts what the real doctor rejects: exit 0",
+		"doctor-hooks: probe pre-commit: EXECUTED",
+		"unconditional `exit 0` above the board arm (pre-commit): exit 1",
+		"probe-only disarm (guard the static arm cannot see): exit 1",
+	} {
+		if !strings.Contains(string(out), want) {
+			return "", fmt.Errorf("doctor-hooks-selftest did not report its behavior/NEUTER/probe evidence (%q):\n%s", want, out)
+		}
 	}
 	return "doctor-hooks-selftest", nil
 }

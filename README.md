@@ -2437,10 +2437,17 @@ non-executable or stale-generation hooks, and missing tracked hook sources; a st
 generation is one whose board-arm markers are gone, and those markers are checked on all
 three entrypoints — the board-checker invocation each tracked source runs, plus the
 gate-scope disclosure line on pre-merge-commit and pre-applypatch — not by hook bytes
-alone (DF-CRIER-430). It accepts only a matching executable install in this repository's
-common Git hooks directory.
-It works in linked worktrees and prints one OK line per hook only after all checks pass.
-Repair: `make install-hooks`.
+alone (DF-CRIER-430). It does not stop at presence: it also refuses an unconditional
+`exit 0`/`return 0` above a hook's board arm, and RUNS the installed hook in a scratch
+repository under ${TMPDIR:-/tmp} — a healthy board must exit 0 and a staged 5→1 shrink of
+.coding-hermes/board/tasks.jsonl must exit non-zero naming the shrink, so a hook that
+accepts it is reported as a board arm that cannot run and a hook that cannot be probed is
+refused, never reported armed on presence alone (DF-CRIER-433). It accepts only a matching
+executable install in this repository's common Git hooks directory.
+It works in linked worktrees and prints one OK line per hook, plus that hook's own probe
+evidence, only after all checks pass: an exit code alone is never the evidence that the
+probe ran, and a hook whose probe cannot be built is refused rather than reported on
+presence alone. Repair: `make install-hooks`.
 
 `make doctor-hooks-selftest` proves those refusals and acceptance on isolated temporary
 repositories, including a NEUTER control that accepts a fixture the real doctor rejects.
