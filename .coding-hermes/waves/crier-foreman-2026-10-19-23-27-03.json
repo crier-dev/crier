@@ -1,0 +1,19 @@
+{
+  "tick_id": "crier-foreman-2026-10-19-23-27-03",
+  "block": "README-008",
+  "mode": "serial-fallback",
+  "reason": "The selected README block had four ready rows, but all four touch README.md and the same documentation seam; no pair was mutually independent under the wave rule. Live box had 16 CPUs and loadavg 6.88, so capacity was available; serial was required by file/seam coupling.",
+  "workers": [
+    {
+      "task_id": "README-004",
+      "worktree": "/home/kara/worktrees/crier-README-004",
+      "branch": "wt/README-004",
+      "base_sha": "99ba6d99e4a3de80b18403de275daca8aa925545",
+      "implementation_commit": "d011bcf1cb43369245579340020bae9d0c08bd63",
+      "rework_commit": "fee6df8130f23bee5136a9fa4761c7c287bdd66a",
+      "canonical_merge": "703b073101d1880489f639760e5f14d48d4bcdaa",
+      "worker_model": "gpt-5.6-sol@openai-codex",
+      "status": "complete"
+    }
+  ]
+}
