@@ -1,0 +1,75 @@
+{
+  "tick_id": "crier-foreman-2026-10-20-10-24-48",
+  "block": "DF-CRIER-444",
+  "block_progress": "97% (98/100 done after closing 438/439/441)",
+  "dispatched_at": "2026-10-20T10:38:00Z",
+  "slots": 5,
+  "wave_size": 4,
+  "reason": "Block 444 has 4 independent ready rows. 438/439/441 already merged as cfe9f0a. Load avg 8.97/16 cores. WAVE_BUDGET=10.",
+  "completed_in_wave": [
+    "DF-CRIER-438",
+    "DF-CRIER-439",
+    "DF-CRIER-441"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "task_id": "DF-CRIER-444",
+      "priority": "P1",
+      "title": "browser 401 readable refusal",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-444",
+      "branch": "wt/DF-CRIER-444",
+      "brief_file": "/tmp/brief-DF-CRIER-444.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm"
+    },
+    {
+      "step": 2,
+      "task_id": "DF-CRIER-443",
+      "priority": "P2",
+      "title": "load-aware fanout deadline",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-443",
+      "branch": "wt/DF-CRIER-443",
+      "brief_file": "/tmp/brief-DF-CRIER-443.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm"
+    },
+    {
+      "step": 3,
+      "task_id": "DF-CRIER-388",
+      "priority": "P3",
+      "title": "boardctl accept 'closed' status word",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-388",
+      "branch": "wt/DF-CRIER-388",
+      "brief_file": "/tmp/brief-DF-CRIER-388.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm"
+    },
+    {
+      "step": 4,
+      "task_id": "DF-CRIER-425",
+      "priority": "P3",
+      "title": "A2A restart test load-awareness",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-425",
+      "branch": "wt/DF-CRIER-425",
+      "brief_file": "/tmp/brief-DF-CRIER-425.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm"
+    }
+  ],
+  "deferred": [
+    {
+      "task_id": "DF-CRIER-435",
+      "reason": "doc-only, foreman-direct after wave"
+    },
+    {
+      "task_id": "DF-CRIER-335",
+      "reason": "P0 complex control-panel, serial after wave"
+    },
+    {
+      "task_id": "DF-CRIER-333",
+      "reason": "owner-blocked (CR-CHAT-038)"
+    }
+  ],
+  "finished_at": "2026-10-20T12:27:53Z"
+}
