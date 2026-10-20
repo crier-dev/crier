@@ -504,7 +504,14 @@ and the total printed.
   pass on validation alone.
 - An intended deletion must be declared: `BOARD_ALLOW_SHRINK=1 git commit …`
   (or `BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh` in CI). It never
-  bypasses required paths, the empty-board refusal, or row validation.
+  bypasses required paths, the empty-board refusal, or row validation. A declared
+  shrink is also announced as one of two things — `declared, still populated
+  (5 -> 1 row(s))` or `declared, but the file is now EMPTY (5 -> 0 row(s))` — and
+  only the first is a commit that can land: an emptied half of the queue is not a
+  valid board, so **both** canonical files are refused when empty, hatch or no
+  hatch (DF-CRIER-442; before it the empty refusal named `tasks.jsonl` only, and
+  an `events.jsonl` truncated to 0 bytes under the hatch passed with
+  `validation PASS` and exit 0).
 - A **same-count** replacement is NOT detected — retention is not identity.
 - A shallow checkout fails closed (exit 2, naming `git fetch --deepen=1`);
   do not "fix" it by treating the missing parent as a first board.

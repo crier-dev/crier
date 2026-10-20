@@ -33,7 +33,7 @@
 # --staged-index compares `retention: index vs HEAD` instead.
 #
 # SHRINK POLICY (DF-CRIER-426 tasks.jsonl; DF-CRIER-429 events.jsonl;
-# DF-CRIER-434 the default run)
+# DF-CRIER-434 the default run; DF-CRIER-442 the emptied file)
 # ---------------------------------------------------------------------------
 # BOTH canonical board files' nonblank record counts must not decrease. Which
 # baseline is measured against depends on what the run validated, and each
@@ -59,13 +59,32 @@
 # named by its `id`; a row without an id — or an unparseable line — is named by
 # its line number instead of being silently skipped.
 # Only exact BOARD_ALLOW_SHRINK=1 permits a shrink, with a visible diagnostic
-# naming the file; it never permits missing/empty files or invalid rows. Set it on
-# the intended command only, including CI's checker command for an intentional
-# deletion, and row validation still runs on a declared shrink.
+# naming the file AND which declared outcome it is — `declared, still populated
+# (5 -> 1 row(s))` or `declared, but the file is now EMPTY (5 -> 0 row(s))`. The
+# hatch permits a declared REDUCTION, never the disappearance of a board file: an
+# empty `tasks.jsonl` and an empty `events.jsonl` are refused ALIKE, whatever the
+# hatch says (DF-CRIER-442). Before that fix the empty-file refusal named
+# `tasks.jsonl` only, so — measured with the real boardctl — `events.jsonl`
+# truncated to 0 bytes under BOARD_ALLOW_SHRINK=1 printed `shrink explicitly
+# allowed` and then `validation PASS — 5 row(s) accepted` with exit 0, while the
+# same truncation of `tasks.jsonl` exited 1. The hatch also never permits missing
+# files or invalid rows. A board FILE with no records is not a valid board:
+# boardctl writes one event per mutation (`create`, `update`, `event` — `init`
+# itself writes none), so a board's first row brings its first event, and a board
+# that exists only as `boardctl init` left it (tasks template rows, zero events)
+# is refused until its first row is created. Set the hatch on the intended
+# command only, including CI's checker command for an intentional deletion, and
+# row validation still runs on a declared shrink.
 # Same-count replacements are not a shrink; this is not an identity/history audit.
 #
 # WHAT IS CHECKED
 # ---------------
+#   empty board file             BOTH canonical files must carry at least one
+#                                 nonblank record: an empty `tasks.jsonl` or an
+#                                 empty `events.jsonl` is refused (exit 1) in
+#                                 every mode and whatever BOARD_ALLOW_SHRINK
+#                                 says (DF-CRIER-442). A board file with no
+#                                 records is not a valid board.
 #   boardctl validate -C <root>   the board's own canon: status vocabulary, key
 #                                 shapes, event ids. ERRORS are fatal (exit 1);
 #                                 WARNINGS are printed and NOT fatal, because the
@@ -291,7 +310,7 @@ for label, base, target, source in comparisons(mode):
               f'total; first {limit}): '
               + ', '.join(labels[key] for key in lost[:limit]) + suffix,
               file=sys.stderr)
-        shrunken.append((label, path))
+        shrunken.append((label, path, len(before), len(after)))
         shrank = True
     if not shrank:
         # State what WAS compared even when nothing shrank: a default run that
@@ -310,13 +329,25 @@ if not shrunken:
              'fetch at least two commits (git fetch --deepen=1) and rerun.')
     raise SystemExit(0)
 if os.environ.get('BOARD_ALLOW_SHRINK') == '1':
-    for label, path in shrunken:
+    for label, path, before_count, after_count in shrunken:
+        # DF-CRIER-442: the diagnostic must say WHICH declared outcome this is.
+        # "still populated" and "now EMPTY" are different verdicts — the hatch
+        # permits a declared reduction, never the disappearance of a board file —
+        # and the emptied case is refused by the empty-board-file check that runs
+        # when this helper returns 0, whatever this notice just said.
+        state = (('declared, still populated (%d -> %d row(s))'
+                  % (before_count, after_count)) if after_count else
+                 ('declared, but the file is now EMPTY (%d -> %d row(s)) — an '
+                  'empty board file is not a valid board'
+                  % (before_count, after_count)))
         print('check-board.sh: board: ' + path + ' (retention: ' + label
-              + '): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1; required paths '
-              'and row validation still apply.', file=sys.stderr)
+              + '): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: '
+              + state + '; required paths and row validation still apply.',
+              file=sys.stderr)
     raise SystemExit(0)
 fail('shrink refused: '
-     + ', '.join(path + ' (retention: ' + label + ')' for label, path in shrunken)
+     + ', '.join(path + ' (retention: ' + label + ')'
+                 for label, path, _, _ in shrunken)
      + '; if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... '
      '(hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).', 1)
 PY
@@ -364,8 +395,8 @@ run_check() {
       return 1
     fi
   done
-  # Only the shrink verdict is overridable; missing paths above and empty
-  # files/boardctl validation below remain mandatory for declared deletions.
+  # Only the shrink verdict is overridable; missing paths above and empty files /
+  # boardctl validation below remain mandatory for declared deletions.
   # DF-CRIER-429: the whole board directory is passed, and the helper checks BOTH
   # canonical files with the one implementation above.
   # DF-CRIER-434: the MODE, not a staged flag, picks the comparisons. The
@@ -379,10 +410,23 @@ run_check() {
   local retention_rc=$?
   [ "$retention_rc" -eq 0 ] || return "$retention_rc"
 
-  if [ ! -s "$board/tasks.jsonl" ]; then
-    _err "board: .coding-hermes/board/tasks.jsonl is empty — no board records to validate."
-    return 1
-  fi
+  # DF-CRIER-442: an empty board FILE is refused here, for BOTH canonical files.
+  # This test used to name `tasks.jsonl` alone, so with the retention arm's
+  # declared-shrink notice printed first, an `events.jsonl` truncated to 0 bytes
+  # under BOARD_ALLOW_SHRINK=1 validated 5 tasks and exited 0 — the declared
+  # reduction the hatch permits had become the disappearance of half the durable
+  # queue. The hatch permits a declared REDUCTION (the notice above says which of
+  # the two it declared); it never permits an empty file. Unconditional on
+  # purpose: this is the same refusal an empty `tasks.jsonl` always got, and it
+  # also covers a file that is empty with no baseline to shrink from.
+  local canonical
+  for canonical in "${BOARD_RETENTION_FILES[@]}"; do
+    if [ ! -s "$board/$canonical" ]; then
+      _err "board: .coding-hermes/board/$canonical is empty — no board records to validate."
+      _err "board: an empty board file is not a valid board; BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the disappearance of a board file."
+      return 1
+    fi
+  done
 
   local out rc
   out="$("$validator" validate -C "$root" 2>&1)"
@@ -498,6 +542,31 @@ PY
     fails=$((fails + 1))
   else
     _say "selftest: staged-only invalid row rejected while the worktree is clean (index scope)"
+  fi
+
+  # fixture 6 (DF-CRIER-442): an emptied half of the queue is not a valid board.
+  # An empty `events.jsonl` now gets exactly the refusal an empty `tasks.jsonl`
+  # always got, in every mode and whatever the hatch says. A scratch root has no
+  # baseline, so here the shrink arm cannot be the thing refusing it — this pins
+  # the empty-file rule itself, not the shrink rule.
+  noevents="$tmp/noevents"
+  cp -r "$tmp/ok" "$noevents"
+  : > "$noevents/.coding-hermes/board/events.jsonl"
+  run_check "$noevents" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 1 ]; then
+    _err "selftest: an empty events.jsonl produced exit $rc, expected 1"
+    fails=$((fails + 1))
+  else
+    _say "selftest: empty events.jsonl refused (exit 1)"
+  fi
+  env BOARD_ALLOW_SHRINK=1 /bin/bash "$0" -C "$noevents" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 1 ]; then
+    _err "selftest: BOARD_ALLOW_SHRINK=1 let an empty events.jsonl through (exit $rc, expected 1)"
+    fails=$((fails + 1))
+  else
+    _say "selftest: the hatch does not permit an empty events.jsonl (exit 1)"
   fi
 
   # Real commit/merge/applypatch entrypoints, not just direct checker calls.

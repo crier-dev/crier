@@ -240,11 +240,14 @@ def main():
         expect('declared events deletion accepted',
                run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
                    'intentional event deletion'), 0, 'shrink explicitly allowed')
+        # DF-CRIER-442: a declared shrink that still carries records must SAY so
+        # — that distinction is what the emptied case does not get.
         expect('CI rejects a committed events shrink against the first parent',
                run(repo, 'bash', 'scripts/check-board.sh'), 1, 'HEAD^1=3')
-        expect('CI accepts an explicitly declared events deletion',
+        expect('CI accepts an explicitly declared events deletion, saying it is still populated',
                run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash',
-                   'scripts/check-board.sh'), 0, 'shrink explicitly allowed')
+                   'scripts/check-board.sh'), 0,
+               'declared, still populated (3 -> 1 row(s))')
 
         # DF-CRIER-434: the DEFAULT run prints `board: scope working tree` and
         # validates the working tree, but its retention arm compared two COMMITS
@@ -417,6 +420,72 @@ def main():
         expect('hatch does not permit whole-file deletion',
                run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
                    'remove whole board'), 1, 'required index path')
+
+        # DF-CRIER-442: an emptied half of the queue is not a valid board. The
+        # empty-file refusal ran for `tasks.jsonl` only, so with the retention
+        # arm's declared-shrink notice printed first, an events.jsonl truncated to
+        # 0 bytes under BOARD_ALLOW_SHRINK=1 validated the tasks half and exited 0.
+        # Measured with the real boardctl before this change:
+        #   events.jsonl shrank: HEAD=5, worktree=0
+        #   … shrink explicitly allowed by BOARD_ALLOW_SHRINK=1
+        #   board: validation PASS — 5 row(s) accepted            (exit 0)
+        # while the same truncation of tasks.jsonl exited 1. The hatch permits a
+        # DECLARED REDUCTION, never the disappearance of a board file: the notice
+        # now names which of the two was declared, and an emptied file is refused
+        # in every mode, hatch or no hatch.
+        repo = fixture('empty-half')
+        board = board_rows(repo, 5)
+        events = event_rows(repo, 5)
+        seed_commit(repo, 'five tasks, five events (hooks disabled for setup)')
+        good_events = events.read_text()
+        good_board = board.read_text()
+        events.write_text('')
+        git(repo, 'add', '.coding-hermes/board/events.jsonl')
+        undone = staged_check(repo)
+        show_stderr('events 5 -> 0, no hatch (staged)', undone)
+        expect('events 5 -> 0 without the hatch is still refused as a shrink',
+               undone, 1, 'events.jsonl shrank: HEAD=5, index=0')
+        declared_empty = subprocess.run(
+            ('bash', 'scripts/check-board.sh', '--staged-index'), cwd=repo,
+            env=dict(env, BOARD_ALLOW_SHRINK='1'), text=True, capture_output=True)
+        show_stderr('events 5 -> 0 with the hatch (staged)', declared_empty)
+        expect('declared events 5 -> 0 refused: the hatch is not a licence to empty a board file',
+               declared_empty, 1, 'events.jsonl is empty')
+        expect_stderr('declared events 5 -> 0 says which outcome was declared',
+                      declared_empty,
+                      ['.coding-hermes/board/events.jsonl (retention: index vs HEAD): '
+                       'shrink explicitly allowed by BOARD_ALLOW_SHRINK=1: declared, '
+                       'but the file is now EMPTY (5 -> 0 row(s))',
+                       'an empty board file is not a valid board; '
+                       'BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the '
+                       'disappearance of a board file'])
+        expect('real commit refuses a declared events 5 -> 0',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'empty the event log'), 1, 'events.jsonl is empty')
+        # The other half of the same fixture keeps the refusal it always had …
+        events.write_text(good_events)
+        git(repo, 'add', '.coding-hermes/board/events.jsonl')
+        board.write_text('')
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('tasks 5 -> 0 without the hatch is still refused as a shrink',
+               run(repo, 'bash', 'scripts/check-board.sh', '--staged-index'), 1,
+               'tasks.jsonl shrank: HEAD=5, index=0')
+        expect('tasks 5 -> 0 with the hatch keeps its own refusal',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash',
+                   'scripts/check-board.sh', '--staged-index'), 1,
+               'tasks.jsonl is empty')
+        expect('the default run refuses it too, not just the hook form',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash',
+                   'scripts/check-board.sh'), 1, 'tasks.jsonl is empty')
+        # … and a declared reduction that leaves BOTH halves populated still lands.
+        board.write_text(good_board.splitlines(keepends=True)[0])
+        events.write_text(good_events.splitlines(keepends=True)[0])
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        git(repo, 'add', '.coding-hermes/board/events.jsonl')
+        expect('declared reduction with both halves still populated is accepted',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'declared reduction to one row each'), 0,
+               'declared, still populated (5 -> 1 row(s))')
 
         repo = fixture('new-board')
         board = repo / '.coding-hermes/board/tasks.jsonl'
