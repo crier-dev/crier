@@ -26,16 +26,25 @@
 #   BOARD_ALLOW_SHRINK=1 git commit ...      # explicitly intended row deletion
 #   BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh # same declaration in CI
 #
-# SHRINK POLICY (DF-CRIER-426)
-# --------------------------
-# tasks.jsonl nonblank record counts must not decrease: index vs HEAD in hooks,
-# committed HEAD vs HEAD^1 in CI (first parent for merges; fetch depth >= 2).
-# Missing baseline board/root commit is allowed; unavailable shallow history
-# fails closed. Standalone non-Git roots have no baseline and get validation only.
-# Loss diagnostics name both counts and the first 20 lost ids, with their total.
-# Only exact BOARD_ALLOW_SHRINK=1 permits a shrink, with a visible diagnostic;
-# it never permits missing/empty files or invalid rows. Set it on the intended
-# command only, including CI's checker command for an intentional deletion.
+# SHRINK POLICY (DF-CRIER-426 tasks.jsonl; DF-CRIER-429 events.jsonl)
+# ---------------------------------------------------------------------
+# BOTH canonical board files' nonblank record counts must not decrease: index vs
+# HEAD in hooks, committed HEAD vs HEAD^1 in CI (first parent for merges; fetch
+# depth >= 2). events.jsonl sat outside this gate until DF-CRIER-429: measured on
+# a scratch repo, a staged events.jsonl cut from 5 rows to 1 passed with exit 0
+# while the same shrink of tasks.jsonl was refused, so a 1750-row event log had no
+# retention gate at all.
+# Missing baseline board/root commit is allowed, decided per file; unavailable
+# shallow history fails closed. Standalone non-Git roots have no baseline and get
+# validation only.
+# Loss diagnostics name the FILE that shrank, both counts and the lost records,
+# with their total and a bounded list. A lost row is named by its `id`; a row
+# without an id — or an unparseable line — is named by its line number instead of
+# being silently skipped.
+# Only exact BOARD_ALLOW_SHRINK=1 permits a shrink, with a visible diagnostic
+# naming the file; it never permits missing/empty files or invalid rows. Set it on
+# the intended command only, including CI's checker command for an intentional
+# deletion, and row validation still runs on a declared shrink.
 # Same-count replacements are not a shrink; this is not an identity/history audit.
 #
 # WHAT IS CHECKED
@@ -62,6 +71,8 @@
 set -uo pipefail
 
 PROG="check-board.sh"
+# DF-CRIER-429: both canonical board files are retention-gated, not just tasks.
+BOARD_RETENTION_FILES=(tasks.jsonl events.jsonl)
 tmp=""
 INDEX_ROOT=""
 QUIET=0
@@ -103,7 +114,9 @@ materialise_index() {
   return 0
 }
 
-# DF-CRIER-426: validate row retention separately from row validity. Hooks
+# DF-CRIER-426 (tasks.jsonl) / DF-CRIER-429 (events.jsonl): validate row
+# retention separately from row validity over BOTH canonical board files, with
+# ONE implementation, so neither file can sit outside the gate again. Hooks
 # compare the materialised index with HEAD (the first parent of a pending
 # merge); CI compares committed HEAD with HEAD^1, never an unstaged repair.
 check_row_retention() {
@@ -111,7 +124,7 @@ check_row_retention() {
     _err "board: python3 is required for the shrink check — refusing a silent skip."
     return 2
   fi
-  python3 - "$1" "$2" "$3" <<'PY'
+  python3 - "$1" "$2" "$3" "${BOARD_RETENTION_FILES[@]}" <<'PY'
 from collections import Counter
 from pathlib import Path
 import json
@@ -119,8 +132,9 @@ import os
 import subprocess
 import sys
 
-root, candidate_path, staged = sys.argv[1:]
-path = '.coding-hermes/board/tasks.jsonl'
+root, board_dir, staged = sys.argv[1:4]
+names = sys.argv[4:]
+PREFIX = '.coding-hermes/board/'
 
 
 def git(*args):
@@ -130,6 +144,30 @@ def git(*args):
 def fail(message, code=2):
     print('check-board.sh: board: ' + message, file=sys.stderr)
     raise SystemExit(code)
+
+
+def records(text):
+    # Nonblank records with their 1-based line numbers, duplicates included;
+    # trailing newlines and formatting are not rows.
+    return [(number, line) for number, line in enumerate(text.splitlines(), 1)
+            if line.strip()]
+
+
+def identity(number, line):
+    """(label, key) for one row: its id when it has one, else its line number.
+
+    A row without an id is NAMED rather than skipped, so a loss report can always
+    account for every removed record. The key is content-based for id-less rows,
+    so an identical row is not reported as lost merely for moving lines.
+    """
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return 'line %d (unparseable record)' % number, ('raw', line.strip())
+    if isinstance(row, dict) and row.get('id') is not None:
+        return json.dumps(str(row['id']), ensure_ascii=True)[1:-1], ('id', str(row['id']))
+    return 'line %d (no id)' % number, ('no-id', json.dumps(row, sort_keys=True,
+                                                           ensure_ascii=True))
 
 
 # Standalone board roots and unborn repositories have no historical baseline.
@@ -143,50 +181,65 @@ if git('rev-parse', '--verify', base + '^{commit}').returncode:
     # A genuine root commit, not a missing parent concealed by shallow checkout.
     raise SystemExit(0)
 
-# Missing board at the baseline is the first-board case, not a shrink. Use
-# ls-tree so a read error cannot masquerade as an absent board.
-entry = git('ls-tree', base, '--', path)
-if entry.returncode:
-    fail('cannot inspect shrink baseline ' + base + ': ' + entry.stderr.strip())
-if not entry.stdout.strip():
-    raise SystemExit(0)
-old = git('show', base + ':' + path)
-if old.returncode:
-    fail('cannot read shrink baseline ' + base + ': ' + old.stderr.strip())
-try:
-    if staged == '1':
-        new_text = Path(candidate_path).read_text()
-    else:
-        new = git('show', 'HEAD:' + path)
-        if new.returncode:
-            fail('required committed path ' + path + ' is missing — commit refused.', 1)
-        new_text = new.stdout
-    # Count nonblank records, including duplicates; trailing newlines/formatting
-    # are not rows. Counter subtraction names duplicate occurrences lost too.
-    before = [line for line in old.stdout.splitlines() if line.strip()]
-    after = [line for line in new_text.splitlines() if line.strip()]
+# Missing board at the baseline is the first-board case, not a shrink, and that
+# is decided per file. Use ls-tree so a read error cannot masquerade as an
+# absent board.
+shrunken = []
+for name in names:
+    path = PREFIX + name
+    entry = git('ls-tree', base, '--', path)
+    if entry.returncode:
+        fail('cannot inspect shrink baseline ' + base + ' for ' + path + ': '
+             + entry.stderr.strip())
+    if not entry.stdout.strip():
+        continue
+    old = git('show', base + ':' + path)
+    if old.returncode:
+        fail('cannot read shrink baseline ' + base + ' for ' + path + ': '
+             + old.stderr.strip())
+    try:
+        if staged == '1':
+            new_text = (Path(board_dir) / name).read_text()
+        else:
+            new = git('show', 'HEAD:' + path)
+            if new.returncode:
+                fail('required committed path ' + path + ' is missing — commit refused.', 1)
+            new_text = new.stdout
+        before = records(old.stdout)
+        after = records(new_text)
+    except OSError as error:
+        fail('cannot compute shrink counts for ' + path + ': ' + str(error))
     if len(after) >= len(before):
-        raise SystemExit(0)
-    old_ids = Counter(str(json.loads(line)['id']) for line in before)
-    new_ids = Counter(str(json.loads(line)['id']) for line in after)
-except (OSError, ValueError, KeyError, TypeError) as error:
-    fail('cannot compute shrink counts/lost ids: ' + str(error))
-lost = list((old_ids - new_ids).elements())
-summary = (f'{path} shrank: {base}={len(before)}, {target}={len(after)}; '
-           f'{len(before) - len(after)} row(s) lost')
-print('check-board.sh: board: ' + summary, file=sys.stderr)
-limit = 20
-suffix = f' ... ({len(lost) - limit} more)' if len(lost) > limit else ''
-print(f'check-board.sh: board: lost ids ({len(lost)} total; first {limit}): '
-      + ', '.join(json.dumps(item, ensure_ascii=True)[1:-1] for item in lost[:limit])
-      + suffix, file=sys.stderr)
+        # Growth, or a same-count replacement: not a shrink, not in scope.
+        continue
+    # Counter subtraction names duplicate occurrences lost too; a row without an
+    # id is named by its line number instead of being skipped.
+    old_rows = [identity(number, line) for number, line in before]
+    new_keys = Counter(key for _, key in (identity(number, line) for number, line in after))
+    lost = list((Counter(key for _, key in old_rows) - new_keys).elements())
+    labels = {}
+    for label, key in old_rows:
+        labels.setdefault(key, label)
+    summary = (f'{path} shrank: {base}={len(before)}, {target}={len(after)}; '
+               f'{len(before) - len(after)} row(s) lost')
+    print('check-board.sh: board: ' + summary, file=sys.stderr)
+    limit = 20
+    suffix = f' ... ({len(lost) - limit} more)' if len(lost) > limit else ''
+    print(f'check-board.sh: board: lost ids ({len(lost)} total; first {limit}): '
+          + ', '.join(labels[key] for key in lost[:limit]) + suffix, file=sys.stderr)
+    shrunken.append(path)
+
+if not shrunken:
+    raise SystemExit(0)
 if os.environ.get('BOARD_ALLOW_SHRINK') == '1':
-    print('check-board.sh: board: shrink explicitly allowed by BOARD_ALLOW_SHRINK=1; '
-          'required paths and row validation still apply.', file=sys.stderr)
-else:
-    fail('shrink refused; if this deletion is intended, rerun with '
-         'BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or '
-         'BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).', 1)
+    for path in shrunken:
+        print('check-board.sh: board: ' + path + ': shrink explicitly allowed by '
+              'BOARD_ALLOW_SHRINK=1; required paths and row validation still apply.',
+              file=sys.stderr)
+    raise SystemExit(0)
+fail('shrink refused: ' + ', '.join(shrunken) + '; if this deletion is intended, '
+     'rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or '
+     'BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).', 1)
 PY
 }
 
@@ -234,7 +287,9 @@ run_check() {
   done
   # Only the shrink verdict is overridable; missing paths above and empty
   # files/boardctl validation below remain mandatory for declared deletions.
-  check_row_retention "$repo_root" "$board/tasks.jsonl" "$staged"
+  # DF-CRIER-429: the whole board directory is passed, and the helper checks BOTH
+  # canonical files with the one implementation above.
+  check_row_retention "$repo_root" "$board" "$staged"
   local retention_rc=$?
   [ "$retention_rc" -eq 0 ] || return "$retention_rc"
 

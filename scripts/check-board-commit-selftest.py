@@ -112,7 +112,11 @@ def main():
             nonlocal failures
             ok = result.returncode == expected
             if diagnostic:
-                ok = ok and diagnostic in result.stdout
+                # Merged-output helpers (run/git) put the checker's lines on
+                # stdout; a capture_output=True caller keeps them on stderr, and
+                # stderr is None whenever the helper merged the two streams.
+                output = (result.stdout or '') + (result.stderr or '')
+                ok = ok and diagnostic in output
             print(f'commit selftest: {name}: exit {result.returncode}, expected {expected}: '
                   + ('PASS' if ok else 'FAIL'))
             if not ok:
@@ -126,6 +130,49 @@ def main():
                     for i in range(1, count + 1)]
             path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
             return path
+
+        def event_rows(repo, count, no_id_at=0):
+            path = repo / '.coding-hermes/board/events.jsonl'
+            template = json.loads(path.read_text().splitlines()[0])
+            rows = []
+            for number in range(1, count + 1):
+                row = dict(template, id=number, detail=f'fixture event {number}')
+                if number == no_id_at:
+                    row.pop('id')
+                rows.append(json.dumps(row))
+            path.write_text(''.join(row + '\n' for row in rows))
+            return path
+
+        def keep_rows(path, numbers):
+            lines = path.read_text().splitlines(keepends=True)
+            path.write_text(''.join(lines[number - 1] for number in numbers))
+            return path
+
+        def staged_check(repo):
+            """The checker's staged-index verdict, stderr captured for assertions."""
+            return subprocess.run(
+                ('bash', 'scripts/check-board.sh', '--staged-index'), cwd=repo,
+                env=env, text=True, capture_output=True,
+            )
+
+        def show_stderr(label, result):
+            print(f'commit selftest: {label} exact checker stderr BEGIN')
+            print(result.stderr, end='')
+            print(f'commit selftest: {label} exact checker stderr END')
+
+        def expect_stderr(label, result, required, forbidden=()):
+            nonlocal failures
+            missing = [text for text in required if text not in result.stderr]
+            present = [text for text in forbidden if text in result.stderr]
+            ok = not missing and not present
+            print(f'commit selftest: {label}: ' + ('PASS' if ok else 'FAIL'))
+            if not ok:
+                if missing:
+                    print(f'  missing from stderr: {missing}')
+                if present:
+                    print(f'  unexpectedly present: {present}')
+                print(result.stderr, end='')
+                failures += 1
 
         repo = fixture('shrink-691-to-1')
         board = board_rows(repo, 691)
@@ -157,6 +204,79 @@ def main():
         expect('hatch requires exact 1, not a truthy string',
                run(repo, 'env', 'BOARD_ALLOW_SHRINK=true', 'bash',
                    'scripts/check-board.sh', '--staged-index'), 1, '690 row(s) lost')
+
+        # DF-CRIER-429: events.jsonl is the unguarded half of the board. Before
+        # this change a staged events.jsonl cut 5 -> 1 passed with exit 0 while
+        # the same shrink of tasks.jsonl was refused, so the durable event log
+        # (1750 live rows in the repo) had no retention gate at all.
+        repo = fixture('events-shrink')
+        board_rows(repo, 2)
+        events = event_rows(repo, 3)
+        seed_commit(repo, 'baseline: 2 tasks, 3 events (hooks disabled for setup)')
+        keep_rows(events, [1])
+        git(repo, 'add', '.coding-hermes/board/events.jsonl')
+        rejected = staged_check(repo)
+        show_stderr('events 3 -> 1', rejected)
+        expect('events-only shrink 3 -> 1 rejected', rejected, 1, 'events.jsonl shrank')
+        expect_stderr('events shrink names the file, both counts and the lost ids',
+                      rejected,
+                      ['.coding-hermes/board/events.jsonl shrank: HEAD=3, index=1; '
+                       '2 row(s) lost', 'lost ids (2 total; first 20): 2, 3',
+                       'shrink refused: .coding-hermes/board/events.jsonl'],
+                      forbidden=['.coding-hermes/board/tasks.jsonl shrank'])
+        expect('real commit rejects a staged events-only shrink',
+               git(repo, 'commit', '-qm', 'truncated events', check=False), 1,
+               'events.jsonl shrank')
+        expect('events hatch requires exact 1, not a truthy string',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=true', 'bash',
+                   'scripts/check-board.sh', '--staged-index'), 1, '2 row(s) lost')
+        expect('declared events deletion accepted',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'intentional event deletion'), 0, 'shrink explicitly allowed')
+        expect('CI rejects a committed events shrink against the first parent',
+               run(repo, 'bash', 'scripts/check-board.sh'), 1, 'HEAD^1=3')
+        expect('CI accepts an explicitly declared events deletion',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash',
+                   'scripts/check-board.sh'), 0, 'shrink explicitly allowed')
+
+        repo = fixture('events-shrink-no-id')
+        board_rows(repo, 2)
+        events = event_rows(repo, 3, no_id_at=2)
+        seed_commit(repo, 'baseline: 3 events, row 2 has no id (hooks disabled)')
+        keep_rows(events, [1, 3])
+        git(repo, 'add', '.coding-hermes/board/events.jsonl')
+        rejected = staged_check(repo)
+        expect('lost event row without an id is refused, not skipped', rejected, 1,
+               'events.jsonl shrank')
+        expect_stderr('id-less lost row is named by its line number', rejected,
+                      ['1 row(s) lost', 'lost ids (1 total; first 20): line 2 (no id)'])
+
+        repo = fixture('tasks-only-shrink-scope')
+        board_rows(repo, 3)
+        event_rows(repo, 3)
+        seed_commit(repo, 'baseline: 3 tasks, 3 events (hooks disabled for setup)')
+        board_rows(repo, 1)
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        rejected = staged_check(repo)
+        expect('tasks-only shrink still rejected', rejected, 1, 'tasks.jsonl shrank')
+        expect_stderr('tasks-only shrink names tasks.jsonl and only tasks.jsonl',
+                      rejected,
+                      ['tasks.jsonl shrank: HEAD=3, index=1; 2 row(s) lost',
+                       'shrink refused: .coding-hermes/board/tasks.jsonl'],
+                      forbidden=['events.jsonl shrank'])
+
+        repo = fixture('both-board-files-grow')
+        board_rows(repo, 1)
+        event_rows(repo, 1)
+        seed_commit(repo, 'baseline: 1 task, 1 event (hooks disabled for setup)')
+        board_rows(repo, 3)
+        event_rows(repo, 4)
+        git(repo, 'add', '.coding-hermes/board')
+        expect('both board files growing accepted',
+               git(repo, 'commit', '-qm', 'both grow', check=False), 0,
+               'validation PASS')
+        expect('CI accepts both board files growing',
+               run(repo, 'bash', 'scripts/check-board.sh'), 0, 'validation PASS')
 
         repo = fixture('same-count-edit')
         board = board_rows(repo, 2)
