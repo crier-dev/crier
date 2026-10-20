@@ -1227,9 +1227,17 @@ paths:
         its alias X-Crier-Fed-Inbound-Verdict carries the same value.
         X-Crier-Fed-Verdict is the hop's peer-facing verdict: the handler's
         onward verdict when the handler sets one, otherwise the ingress
-        decision, and a handler that removes it leaves it absent. When the two
-        differ the audit line names both (peer_verdict and
-        peer_verdict_source). The ingress middleware preserves the handler's
+        decision, and a handler that removes it leaves it absent. The audit
+        line reads that header the way a client does — every value, in wire
+        order (DF-CRIER-436). When the peer-facing verdict differs from the
+        ingress decision the line names both (peer_verdict for a single value,
+        peer_verdict_source); when a handler leaves more than one value on the
+        wire, by appending one or by writing a differently cased key, the line
+        names the full ordered set in peer_verdict_values instead of one chosen
+        value, and names a duplicate or non-canonically spelled key in
+        peer_verdict_keys. Neither shape is repaired on the wire: the
+        peer-facing header stays the handler's to author. The ingress
+        middleware preserves the handler's
         body bytes exactly, including any handler-owned verdict fields.
 
         Federation (CR-FEAT-006, DF-CRIER-7): when the target agent is not
@@ -2243,7 +2251,10 @@ paths:
         X-Crier-Fed-Ingress-Verdict — and its alias X-Crier-Fed-Inbound-Verdict —
         records the local ingress decision and cannot be shadowed by the handler,
         while X-Crier-Fed-Verdict is the hop's peer-facing verdict and can retain
-        an onward decision. The middleware never annotates or re-encodes the
+        an onward decision — every value the peer can read, in wire order, is what
+        the audit line names (peer_verdict for one value, peer_verdict_values for
+        several, peer_verdict_keys for a duplicate or non-canonically spelled key
+        — DF-CRIER-436). The middleware never annotates or re-encodes the
         handler's response body.
 
         Stated limit: the cursor lives in the serving process and is not

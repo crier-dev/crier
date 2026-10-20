@@ -365,7 +365,14 @@ proves only that the receipt was flushed. When the peer-facing header carries a
 different value, because the handler replaced it with an onward receipt, the
 line names BOTH: `peer_verdict` (the value the peer received) and
 `peer_verdict_source: "handler"`. Absent `peer_verdict` therefore means the two
-verdicts agreed, never that the field was forgotten (DF-CRIER-432).
+verdicts agreed, never that the field was forgotten (DF-CRIER-432). The line reads
+that header the way a client does — every value, in wire order (DF-CRIER-436). A
+handler can leave more than one value on the wire, by appending one or by writing
+the header under a differently cased key; the line then names the full ordered set
+in `peer_verdict_values` rather than one chosen value, and `peer_verdict` is then
+absent. A verdict key that reaches the wire under a duplicate or non-canonically
+spelled key is named in `peer_verdict_keys`. Neither shape is repaired on the wire:
+the peer-facing header stays the handler's to author.
 Panic abandonment logs `"verdict", v, "flushed", false, "abandoned", true` (JSON fields `"flushed":false,"abandoned":true`) with no `delivered` key, no status and no receipt-flushed claim (DF-CRIER-394, DF-CRIER-420).
 
 ### 3.2.1 Request-key replay across restart (DF-CRIER-357)

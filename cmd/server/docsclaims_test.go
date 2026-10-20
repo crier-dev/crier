@@ -21,7 +21,11 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -415,6 +419,27 @@ func loadClaimsFile(t *testing.T, repoRoot string) claimsFile {
 
 // ---------- booting the real server (mirrors TestOpenAPIServed exactly) ----------
 
+// docsClaimsInstanceKey writes a fresh ed25519 instance key in the PEM form the
+// opt-in federation peer store requires (registry.LoadEd25519PrivateKeyFile), and
+// returns its path. The key is this test's own, under its temp dir — the gate
+// never reads or writes a real relay's instance key.
+func docsClaimsInstanceKey(t *testing.T) string {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate instance key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal instance key: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "self.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write instance key: %v", err)
+	}
+	return path
+}
+
 func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Helper()
 
@@ -470,6 +495,19 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Setenv("CR_DAGGER_URL", daggerStub.URL)
 	t.Setenv("CR_DAGGER_STORE_DIR", t.TempDir())
 	t.Setenv("CR_DAGGER_POLL_S", "0")
+
+	// DF-CRIER-436: same rule for the opt-in instance peer store. The federation
+	// spec documents GET/POST /fed/peers, PATCH /fed/peers/{id} and
+	// POST /fed/handshake/start|finish, which exist ONLY when
+	// CR_FED_RECORDS_FILE is set — unset keeps legacy signing/discovery and those
+	// paths answer the router's 404, so the tokens scanned out of
+	// specs/CHAT-FEDERATION.md could not be measured live. Both the record file
+	// and this relay's own instance key stay in the test's own temp dir (never a
+	// real one), and the store starts EMPTY with CR_FED_REQUIRE_PEER unset, so
+	// the inbound posture every other claim observes is unchanged: peers=0,
+	// token_only_accepted=true, and a keyless inbox POST is still FED_TOKEN_ONLY.
+	t.Setenv("CR_FED_SELF_KEY_FILE", docsClaimsInstanceKey(t))
+	t.Setenv("CR_FED_RECORDS_FILE", filepath.Join(t.TempDir(), "federation-peers.json"))
 
 	port := freePort(t)
 	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))

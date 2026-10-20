@@ -29,6 +29,12 @@ const (
 	// verdict before routing, and a handler that forwards onward legitimately
 	// replaces it with the onward peer's verdict (DF-CRIER-371). Read the local
 	// ingress decision from IngressVerdictHeader.
+	//
+	// It is also the one verdict header a handler can leave with more than one
+	// value: Add appends beside the seeded value, and a raw map write under a
+	// differently cased key is a separate entry (DF-CRIER-436). The wire is not
+	// repaired — the audit reports every value and every key spelling — so a
+	// reader that must agree with the audit should read Values, not Get.
 	VerdictHeader = "X-Crier-Fed-Verdict"
 
 	// IngressVerdictHeader is the AUTHORITATIVE local ingress classification

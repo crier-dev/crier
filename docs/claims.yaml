@@ -127,6 +127,17 @@ ignore_paths:
   # ANCHOR-A2A-* claims.
   - /tasks/{id}/pushNotificationConfigs
 
+  # DF-CRIER-436: specs/CHAT-FEDERATION.md is now scanned (the DF-CRIER-436 entry
+  # is its own claim below). The one path-looking token in it that is NOT a crier
+  # route is the `/fed/*` GLOB in the DF-CRIER-363 NOT BUILT paragraph — prose,
+  # same class as /mesh/connect/ above; the scanner probes the literal `/fed/`,
+  # which no route answers. The concrete lifecycle routes the same spec documents
+  # (GET/POST /fed/peers, PATCH /fed/peers/{id}, POST /fed/handshake/start|finish)
+  # ARE crier routes and are probed live: the docs gate boots with the opt-in peer
+  # store enabled so they exist, and those four tokens are therefore NOT ignored
+  # here.
+  - /fed/
+
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
   - id: ROUTE-README-RELAY-PUBLISH
@@ -1711,4 +1722,15 @@ claims:
     doc: README.md
     quote: "`make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,\nnon-executable or stale-generation hooks, and missing tracked hook sources; a stale\ngeneration is one whose board-arm markers are gone, and those markers are checked on all\nthree entrypoints — the board-checker invocation each tracked source runs, plus the\ngate-scope disclosure line on pre-merge-commit and pre-applypatch — not by hook bytes\nalone (DF-CRIER-430). It does not stop at presence: it also refuses an unconditional\n`exit 0`/`return 0` above a hook's board arm, and RUNS the installed hook in a scratch\nrepository under ${TMPDIR:-/tmp} — a healthy board must exit 0 and a staged 5→1 shrink of\n.coding-hermes/board/tasks.jsonl must exit non-zero naming the shrink, so a hook that\naccepts it is reported as a board arm that cannot run and a hook that cannot be probed is\nrefused, never reported armed on presence alone (DF-CRIER-433). It runs each hook under the\nGit-provided environment it SYNTHESIZES from its own fixture — GIT_DIR, GIT_INDEX_FILE and\nGIT_PREFIX, with stdin at /dev/null (measured on git 2.53.0: a real pre-commit and\npre-merge-commit export GIT_INDEX_FILE=.git/index and GIT_PREFIX=, while pre-applypatch\nexports neither) — and strips every other repository-pointing Git variable, so a hook that\narms under the environment Git really gives a hook is treated as armed rather than reported\ndisarmed (DF-CRIER-437). It accepts only a matching\nexecutable install in this repository's common Git hooks directory."
     expect: doctor-hooks-selftest
+    xfail: null
+
+  # DF-CRIER-436: the ingress audit must name every verdict the peer can read.
+  # The spec is the design authority for the audit line, so its DF-CRIER-436
+  # entry is gated here (and listing the spec makes the path scanner walk it —
+  # every path-looking token in specs/CHAT-FEDERATION.md must be a live route or
+  # a deliberate entry in ignore_paths).
+  - id: ANCHOR-FED-INGRESS-AUDIT-EVERY-WIRE-VALUE
+    kind: anchor
+    doc: specs/CHAT-FEDERATION.md
+    quote: "`peer_verdict_values` — the full ordered value set, never one arbitrarily chosen value — when two or more do. A key that reaches the wire under more than one spelling, or under a single spelling that is not the canonical `X-Crier-Fed-Verdict`, is named in `peer_verdict_keys`"
     xfail: null

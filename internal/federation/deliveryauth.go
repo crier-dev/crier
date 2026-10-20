@@ -5,6 +5,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/textproto"
+	"sort"
 	"strings"
 )
 
@@ -72,13 +74,33 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 			receipt.Header().Set(IngressVerdictHeader, string(v))
 			completed := false
 			defer func() {
-				peerVerdict, peerSource := receipt.peerVerdict()
+				delta := receipt.peerVerdict()
 				attrs := []any{"peer", peer, "path", r.URL.Path, "verdict", v}
-				if peerSource == verdictSourceHandler {
+				if delta.source == verdictSourceHandler {
 					// The wire and the audit line must not disagree silently: when the
-					// handler replaced the peer-facing verdict, name both values and
-					// which one the peer received.
-					attrs = append(attrs, "peer_verdict", string(peerVerdict), "peer_verdict_source", peerSource)
+					// handler replaced the peer-facing verdict, name what the peer will
+					// actually read. Clients differ on which of several values they
+					// honour, so two or more values are reported as the full set rather
+					// than one arbitrarily chosen value (DF-CRIER-436). A single value
+					// keeps the DF-CRIER-432 `peer_verdict` field, and a removed header
+					// keeps naming it as the empty verdict so an absent `peer_verdict`
+					// goes on meaning "the two agreed".
+					attrs = append(attrs, "peer_verdict_source", delta.source)
+					switch {
+					case len(delta.values) > 1:
+						attrs = append(attrs, "peer_verdict_values", delta.values)
+					case len(delta.values) == 1:
+						attrs = append(attrs, "peer_verdict", delta.values[0])
+					default:
+						attrs = append(attrs, "peer_verdict", "")
+					}
+				}
+				if delta.anomalous() {
+					// Duplicate and non-canonically spelled verdict keys are REPORTED
+					// here, not sanitized in finish(): the peer-facing header stays the
+					// handler's to author (DF-CRIER-371) and finish() does not rewrite
+					// it, so the audit is what makes the shape visible (DF-CRIER-436).
+					attrs = append(attrs, "peer_verdict_keys", delta.keys)
 				}
 				if completed {
 					receipt.finish()
@@ -128,16 +150,64 @@ func (w *inboundReceipt) Write(p []byte) (int, error) {
 	return w.body.Write(p)
 }
 
-// peerVerdict reports the value the peer reads in the peer-facing verdict
-// header, and who authored it: the handler when it replaced the ingress
-// classification this middleware wrote before routing (removing it counts — the
-// header then reads back as the empty verdict), otherwise the ingress
-// classification itself.
-func (w *inboundReceipt) peerVerdict() (Verdict, string) {
-	if v := w.Header().Get(VerdictHeader); v != string(w.ingress) {
-		return Verdict(v), verdictSourceHandler
+// peerVerdictDelta is one reading of the peer-facing verdict header: every value
+// the peer will read, in the order it will read them, the exact key spellings
+// carrying them, and who authored the header.
+type peerVerdictDelta struct {
+	values []string // every value on the wire, in the order net/http writes them
+	keys   []string // every key spelling present, in the same order
+	source string   // verdictSourceIngress or verdictSourceHandler
+}
+
+// anomalous reports whether the verdict header reached the wire under more than
+// one key spelling, or under a single spelling that is not the canonical one.
+// http.Header is a plain map keyed by exact string, so a handler writing
+// hd["X-CRIER-FED-VERDICT"] rather than hd.Set(VerdictHeader, …) adds a SECOND
+// entry beside the canonical one — net/http writes both, and a client that folds
+// spellings (any conforming parser does) reads two verdicts (DF-CRIER-436).
+func (d peerVerdictDelta) anomalous() bool {
+	if len(d.keys) > 1 {
+		return true
 	}
-	return w.ingress, verdictSourceIngress
+	return len(d.keys) == 1 && d.keys[0] != VerdictHeader
+}
+
+// peerVerdict reports every value the peer reads in the peer-facing verdict
+// header, and who authored it: the handler when the header does not carry exactly
+// one value equal to the ingress classification this middleware wrote before
+// routing — a replaced single value, an appended second value, a differently
+// cased key and removal (no value at all) are all handler decisions — otherwise
+// the ingress classification itself.
+//
+// Header.Get and Header.Values resolve ONE map entry, the canonical spelling, so
+// neither can see the two shapes that carry more than one verdict: Add appends
+// beside the seeded value, and a raw map write under a differently cased key is a
+// separate entry both accessors skip while net/http still puts it on the wire. A
+// client that reads the last value then acts on a handler-authored verdict the
+// audit named as ingress — the exact wire/audit disagreement DF-CRIER-432's
+// precedence forbids (DF-CRIER-436). So this reads EVERY entry whose canonical
+// spelling is VerdictHeader and rebuilds the wire order: key spellings sorted
+// bytewise, each key's values in the order that key holds them — the order
+// net/http writes response headers (Header.sortedKeyValues), which is therefore
+// the order a client reads them in.
+func (w *inboundReceipt) peerVerdict() peerVerdictDelta {
+	canonical := textproto.CanonicalMIMEHeaderKey(VerdictHeader)
+	var keys []string
+	for k := range w.Header() {
+		if textproto.CanonicalMIMEHeaderKey(k) == canonical {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var values []string
+	for _, k := range keys {
+		values = append(values, w.Header()[k]...)
+	}
+	source := verdictSourceHandler
+	if len(values) == 1 && values[0] == string(w.ingress) {
+		source = verdictSourceIngress
+	}
+	return peerVerdictDelta{values: values, keys: keys, source: source}
 }
 
 // finish flushes the handler's bytes verbatim. The peer-facing verdict header is
