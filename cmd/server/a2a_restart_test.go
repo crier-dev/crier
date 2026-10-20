@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -131,6 +133,86 @@ func assertReplayLabel(t *testing.T, task map[string]any, durability, replay str
 	}
 }
 
+// The child boots the production server from a cold start (exec + test-binary
+// startup + run()); MEASURED on this host (16 CPUs) at one-minute loadavg
+// 13-15, GET /health first answers ~0.3-0.4 s after exec, so a healthy boot
+// costs a few hundred milliseconds. A FIXED 25 s Eventually window failed on
+// 2026-10-19 (DF-CRIER-425) at one-minute loadavg 19-25: the child's boot
+// exceeded the window under host contention and a scheduling delay presented
+// exactly like a behavioural regression, with only "Condition never satisfied"
+// and none of the child's output.
+//
+// The window is therefore DERIVED from the measurement instead of picked: 10x
+// the measured boot cost, scaled by the host's runnable queue per CPU above
+// one queue per CPU (a cold process boot is mostly scheduling, and its wall
+// clock grows with the queue), floored at 5 s so an idle host keeps real
+// headroom, and capped at 50 s to stay clear of the child's own
+// -test.timeout=55s, after which the child would die under us and the poll
+// would report a harness limit as a boot failure. The derivation is logged and
+// a timeout failure carries the child's log tail, so a future failure states
+// its own conditions instead of repeating an unexplained number.
+const (
+	a2aBootMeasuredCost   = 400 * time.Millisecond // measured healthy child boot on this host
+	a2aBootBudgetMultiple = 10                     // headroom over that measurement (=> 4s unloaded)
+	a2aBootFloor          = 5 * time.Second        // idle-host headroom
+	a2aBootCeiling        = 50 * time.Second       // under the child's own -test.timeout=55s
+)
+
+// a2aBootWindow derives this run's child-boot window from the measured cost
+// and the host's current load, and LOGS the derivation.
+func a2aBootWindow(t *testing.T) time.Duration {
+	t.Helper()
+	load, factor := -1.0, 1.0
+	cpus := runtime.NumCPU()
+	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
+		if fields := strings.Fields(string(raw)); len(fields) > 0 {
+			if parsed, perr := strconv.ParseFloat(fields[0], 64); perr == nil {
+				load = parsed
+			}
+		}
+	}
+	// A boot whose wall clock is mostly scheduling grows with the runnable
+	// queue per CPU; at or below one queue per CPU the host is not contended
+	// and the factor stays 1.
+	if load >= 0 && cpus > 0 && load > float64(cpus) {
+		factor = load / float64(cpus)
+	}
+	window := time.Duration(float64(a2aBootMeasuredCost) * float64(a2aBootBudgetMultiple) * factor)
+	if window < a2aBootFloor {
+		window = a2aBootFloor
+	}
+	if window > a2aBootCeiling {
+		window = a2aBootCeiling
+	}
+	if load >= 0 {
+		t.Logf("a2a child boot window: %s = measured %s x%d, loadavg=%.2f over %d CPUs (factor %.2f, floor %s, ceiling %s)",
+			window, a2aBootMeasuredCost, a2aBootBudgetMultiple, load, cpus, factor, a2aBootFloor, a2aBootCeiling)
+	} else {
+		t.Logf("a2a child boot window: %s = measured %s x%d (loadavg unavailable, factor 1.00, floor %s, ceiling %s)",
+			window, a2aBootMeasuredCost, a2aBootBudgetMultiple, a2aBootFloor, a2aBootCeiling)
+	}
+	return window
+}
+
+// a2aChildLogTail returns the last ~2KB of the child's combined stdout/stderr
+// log, so a boot failure names what the child actually printed instead of
+// "Condition never satisfied".
+func a2aChildLogTail(t *testing.T, logPath string) string {
+	t.Helper()
+	logs, err := os.ReadFile(logPath)
+	if err != nil {
+		return fmt.Sprintf("(child log %s unreadable: %v)", logPath, err)
+	}
+	s := string(logs)
+	if len(s) > 2048 {
+		s = s[len(s)-2048:]
+	}
+	if strings.TrimSpace(s) == "" {
+		return "(child log empty — the child produced no output before the window expired)"
+	}
+	return s
+}
+
 func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (string, int, func()) {
 	t.Helper()
 	port := freePort(t)
@@ -153,14 +235,28 @@ func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (stri
 	})
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 5 * time.Second}
-	require.Eventually(t, func() bool {
+	bootWindow := a2aBootWindow(t)
+	bootStart := time.Now()
+	// Poll manually instead of require.Eventually so the timeout failure can
+	// carry the child's log tail, read at failure time.
+	booted := false
+	for deadline := time.Now().Add(bootWindow); time.Now().Before(deadline); {
 		resp, err := client.Get(base + "/health")
-		if err != nil {
-			return false
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				booted = true
+				break
+			}
 		}
-		_ = resp.Body.Close()
-		return resp.StatusCode == 200
-	}, 25*time.Second, 25*time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !booted {
+		t.Fatalf("child did not boot within %s (backend=%s phase=%s); child log tail:\n%s",
+			bootWindow, backend, phase, a2aChildLogTail(t, logPath))
+	}
+	t.Logf("backend=%s %s phase: child booted (pid %d) in %s of the %s window",
+		backend, phase, cmd.Process.Pid, time.Since(bootStart), bootWindow)
 	return base, cmd.Process.Pid, func() {
 		if stopped {
 			return
