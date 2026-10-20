@@ -280,6 +280,13 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     assert.equal(run.status, !["live-with-key", "live-without-guard-key"].includes(name) ? 1 : 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes(expected), run.stdout + run.stderr);
     console.log(`fixture ${name}: ${expected}; exit ${run.status}`);
+    if (["live-with-key", "live-without-guard-key"].includes(name)) {
+      const qualifier = "SUPPORTED means the capture bytes reported by the consumer equal its reply, hashed before decode; it is not attestation against a consumer fabricating both channels.";
+      const lines = run.stdout.split("\n").filter((line) => line.startsWith("PASS  round-trip ") && line.includes(" prompt "));
+      assert.equal(lines.length, 12, "every supported prompt must declare the ceiling");
+      for (const line of lines) assert.ok(line.includes(qualifier), line);
+      console.log(lines[0]); // Actual battery rendering, not a reconstructed line.
+    }
     assert.doesNotMatch(run.stdout, /^SKIP  round-trip /m);
     if (name === "no-key") {
       for (const [harness, variable] of Object.entries(credentialFor)) {

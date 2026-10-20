@@ -21,6 +21,11 @@ import re
 import sys
 import uuid
 
+SUPPORTED_QUALIFIER = (
+    "SUPPORTED means the capture bytes reported by the consumer equal its reply, "
+    "hashed before decode; it is not attestation against a consumer fabricating both channels."
+)
+
 MARKER = re.compile(r"\[crier-battery-nonce:([0-9a-f-]{36})\]")
 DIGEST_MARKER = re.compile(r"\[crier-battery-request-sha256:([0-9a-f]{64})\]")
 
@@ -137,7 +142,7 @@ def assert_execution(status, body, nonce, previous_digest="", *, request=None,
             raise ValueError("invalid previous runtime stdout digest")
         if proof["content_sha256"] == previous_digest:
             raise ValueError("same runtime stdout digest for different prompts (nonce markers removed)")
-    return f"live=true exec={result['exec']} stdout_bytes={result['stdout_bytes']}"
+    return f"{SUPPORTED_QUALIFIER} live=true exec={result['exec']} stdout_bytes={result['stdout_bytes']}"
 
 
 def verdict(status, body, nonce, previous_digest="", **evidence):

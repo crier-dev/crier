@@ -57,8 +57,9 @@ where a default is already taken. To run two stacks side by side, also give each
 its own project name — `docker compose -p lab-a up -d --build` (repeat `-p lab-a` on
 every compose command for that stack).
 
-Harness PASS requires **runtime-channel evidence**, not merely HTTP delivery: the
-consumer must finish its CLI (exit 0) or Pi SDK prompt and emit non-empty text,
+Harness PASS requires **consumer-reported runtime-channel consistency**, not merely
+HTTP delivery. The shipped consumer finishes its CLI (exit 0) or Pi SDK prompt
+and reports non-empty text,
 `"live": true`, a non-empty `exec`, and positive integer `stdout_bytes`.
 The battery parses those fields from crier's generic/raw `reply` object; a
 reply substring alone cannot pass. CLI errors, auth errors, timeouts and empty
@@ -111,17 +112,23 @@ the consumer base URL for direct probes; Compose uses the internal host/port.
 Rebuild both consumer and battery images: older in-band templates or consumers
 without the raw digest cannot earn supported verdicts.
 
-Limit: SUPPORTED binds a fresh single-use out-of-band challenge and the delivered
-reply to independently captured stdout bytes. A harness that reads the environment
-and prints the challenge **without doing the requested work is still
-indistinguishable**: that is the honest ceiling of this local battery. With the
-trusted shipped consumer's stdout-only pipe tee, it establishes that a spawned
-process emitted those bytes, not that an agent/model answered the question.
-The observation endpoint is served by the consumer, not a verifier-owned OS pipe:
-a malicious consumer that fabricates both channels consistently can still pass
-without spawning a child. The challenge is hidden from reflected input, not from
-the process/consumer under test. This is not hostile-consumer attestation, and it
-does not establish model authorship, answer quality, or provider/model identity.
+SUPPORTED means the capture bytes reported by the consumer equal its reply, hashed before decode; it is not attestation against a consumer fabricating both channels.
+
+The fresh single-use out-of-band challenge binds the delivered reply to a separate
+consumer-reported capture, not to a verifier-owned OS pipe. A harness that reads
+the environment and prints the challenge without doing the requested work is
+still indistinguishable. With the trusted shipped consumer's stdout-only pipe
+tee, the bytes come from a spawned process; SUPPORTED alone does not establish
+that provenance. A malicious consumer can fabricate both channels consistently
+and pass without spawning a child. This does not establish model authorship,
+answer quality, or provider/model identity.
+
+Named future gap: **verifier-owned child stdout capture**. The verifier/observer
+must own the child's stdout pipe and tee its raw bytes into a capture file the
+consumer cannot write or substitute; the checker must read that capture, not the
+consumer's HTTP observation endpoint. That would establish that the observed
+child emitted the bytes even against a fabricating consumer, still not that the
+requested work was performed correctly. This capture is not implemented here.
 Do not expose this diagnostic stack to untrusted clients. No Crier server change
 is required.
 

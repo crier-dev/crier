@@ -115,6 +115,20 @@ def test_good_child_raw_capture_and_trimmed_reply(tmp_path):
     assert proof["captured_runtime_bytes"] == len(captured)
 
 
+def test_fabricated_channels_render_supported_ceiling(tmp_path):
+    # No runtime child is spawned: the same consumer can fabricate capture and
+    # reply. Option B declares this ceiling; it does not pretend to close it.
+    sent = request(NONCE)
+    body, raw = reply(sent, "fabricated in both consumer channels")
+    proof = check_file(tmp_path, sent, body, raw)
+    assert proof["outcome"] == "SUPPORTED", proof
+    qualifier = (
+        "SUPPORTED means the capture bytes reported by the consumer equal its reply, "
+        "hashed before decode; it is not attestation against a consumer fabricating both channels."
+    )
+    assert proof["reason"].startswith(qualifier), proof
+
+
 def test_capture_hash_cannot_legitimize_different_body_text(tmp_path):
     sent = request(NONCE)
     _, raw = reply(sent)

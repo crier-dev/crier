@@ -66,6 +66,18 @@ class BindingTests(unittest.TestCase):
     def test_genuine(self):
         self.assertEqual(verify({"reply": live()})["outcome"], "SUPPORTED")
 
+    def test_supported_qualifier_matches_operator_docs(self):
+        qualifier = (
+            "SUPPORTED means the capture bytes reported by the consumer equal its reply, "
+            "hashed before decode; it is not attestation against a consumer fabricating both channels."
+        )
+        proof = verify({"reply": live()})
+        self.assertEqual(proof["outcome"], "SUPPORTED", proof)
+        self.assertTrue(proof["reason"].startswith(qualifier), proof)
+        self.assertIn(qualifier, (HERE.parent / "README.md").read_text())
+        spec = (HERE.parents[2] / "specs" / "AGENT-ECOSYSTEM.md").read_text()
+        self.assertIn(qualifier, spec.split("## 4. Battery contract", 1)[1])
+
     def test_body_missing_nonce(self):
         for body in ({**live(), "reply": "runtime answer", "nonce": None},
                      {k: v for k, v in live().items() if k != "nonce"}):
@@ -211,6 +223,7 @@ from test_capture_binding import (
     test_successful_capture_replayed_under_fresh_body,
     test_capture_bytes_not_lossy_decoded_or_trimmed_before_raw_hash,
     test_good_child_raw_capture_and_trimmed_reply,
+    test_fabricated_channels_render_supported_ceiling,
     test_capture_hash_cannot_legitimize_different_body_text,
     test_raw_digest_and_byte_count_are_both_required,
     test_exact_ecmascript_trim_not_python_strip,

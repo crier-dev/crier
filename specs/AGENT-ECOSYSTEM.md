@@ -117,7 +117,7 @@ the precise blocker: DeepSeek is not wired for that consumer. Neither its wiring
 nor bounded network-disabled real-image probes constitute a paid DeepSeek success;
 current blockers and verification limits are explicit in the example README.
 
-### 2.1.3 Verifier-owned execution binding (DF-CRIER-373, DF-CRIER-392, DF-CRIER-407)
+### 2.1.3 Verifier-owned challenge and consumer-reported capture binding (DF-CRIER-373, DF-CRIER-392, DF-CRIER-407, DF-CRIER-419)
 
 Before each of its two different prompts, `probe-runtime.py` mints and records a
 fresh challenge UUID and a separate random correlation UUID (`battery_id`), opens
@@ -174,15 +174,16 @@ byte count, decoded display copy, capture status and nonce in JSONL. The raw
 capture file, not the potentially lossy display copy, is the hash source.
 
 Limit: SUPPORTED binds a fresh single-use out-of-band challenge and the delivered
-reply to independently captured stdout bytes. A harness that reads the environment
-and prints its challenge without doing the requested work remains indistinguishable:
-this is the honest ceiling of a local battery. With the trusted shipped consumer's
-stdout-only pipe tee, it establishes that a spawned process emitted those bytes.
-The observation endpoint is served by the consumer, not a verifier-owned OS pipe:
-a malicious consumer that fabricates both channels consistently can still pass
-without spawning a child. The challenge is hidden from reflected input, not from
-the process/consumer under test. This is not hostile-consumer attestation, and it
-does not establish model authorship, answer quality, or provider/model identity.
+reply to a separate consumer-reported capture, not a verifier-owned OS pipe.
+A harness that reads the environment and prints its challenge without doing the
+requested work remains indistinguishable. With the trusted shipped consumer's
+stdout-only tee, the bytes come from a spawned process, but SUPPORTED alone does
+not establish that provenance. A malicious consumer can fabricate both channels
+consistently and pass without spawning a child. The challenge is hidden from
+reflected input, not from the process/consumer under test. This is not
+hostile-consumer attestation and does not establish model authorship, answer
+quality, or provider/model identity. Section 4 defines the exact operator-facing
+qualifier and names the future verifier-owned capture gap (DF-CRIER-419).
 Do not expose this diagnostic stack to untrusted clients. No Crier server change
 is required.
 
@@ -368,6 +369,24 @@ uses distinct session ids (`eco-pi`, `eco-oc`, `eco-sink`, `eco-async`, `eco-gua
 probes never serialize against each other.
 
 ## 4. Battery contract
+
+SUPPORTED means the capture bytes reported by the consumer equal its reply, hashed before decode; it is not attestation against a consumer fabricating both channels.
+
+This exact qualifier MUST prefix every SUPPORTED proof's `reason`; `battery.sh`
+renders that reason on each successful harness prompt line and retains it in
+JSONL. Neither the outcome nor a PASS is proof that the requested work ran.
+The nonce ledger and hash calculation belong to the verifier, but both HTTP
+channels belong to the consumer, which can fabricate matching text without a
+runtime child. Section 2.1.3 defines the current challenge/capture checks; it
+supersedes the historical in-band nonce mechanics in section 4.0 below.
+
+Named future gap (DF-CRIER-419): **verifier-owned child stdout capture**. To prove
+child emission against a fabricating consumer, the verifier/observer must own the
+child's stdout pipe, tee raw bytes into a capture file the consumer cannot write
+or substitute, and make the checker read that capture instead of the consumer's
+HTTP observation endpoint. This is NOT implemented by the current battery.
+Even that pipe would prove byte emission, not correct completion of the requested
+work, model authorship, answer quality or provider/model identity.
 
 `battery/battery.sh` (image `python:3.12-alpine` + `apk add curl bash`, entrypoint
 `bash battery.sh`) is the stack's test suite. It runs against the compose services via

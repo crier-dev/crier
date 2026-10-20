@@ -67,7 +67,13 @@ The test exited 1 because the old battery accepted every fake harness; the new b
 
 ## Assurance limit
 
-SUPPORTED proves that the configured process ran and echoed the challenge under the checked-in consumer and observation wiring. It does not prove model authorship, answer quality, provider/model identity, or cryptographic runtime attestation: malicious replacement consumer code capable of forging both channels remains outside this check's trust boundary. HTTP transport success alone is never sufficient. The observation endpoint is a diagnostic surface for an isolated example stack, not a public Crier API.
+Current assurance clarification (DF-CRIER-419; the historical run transcripts above are unchanged):
+SUPPORTED means the capture bytes reported by the consumer equal its reply, hashed before decode; it is not attestation against a consumer fabricating both channels.
+Under the trusted shipped observer, those bytes are teed from child stdout, but
+SUPPORTED alone does not prove that the requested work ran. The consumer serves
+both channels and can fabricate them without a child. HTTP transport success
+alone is never sufficient. The observation endpoint is a diagnostic surface for
+an isolated example stack, not a public Crier API.
 
 ## Direct gates
 
