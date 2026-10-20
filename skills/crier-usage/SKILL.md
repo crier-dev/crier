@@ -489,3 +489,35 @@ register the agents first or the panels show nobody. Task state is live only
 in the side Tasks panel; the message bubble's "task state" is send-time text.
 No failed fetches observed across the whole walkthrough; zero horizontal
 overflow at 390px.
+
+## Board row retention — the gate refuses a shrinking board (DF-CRIER-426, re-proved 2026-10-20 @ 7ad8f9b)
+
+`scripts/check-board.sh` is the board arm of the commit gate (hook form:
+`check-board.sh -q --staged-index`; CI form: bare, i.e. `HEAD` vs `HEAD^1`, in a
+job that must check out with `fetch-depth: 2`). Beyond validating the index
+through `boardctl validate`, it now compares **row counts**: fewer nonblank
+records than the baseline is a refusal, with both counts, the first 20 lost ids
+and the total printed.
+
+- Hooks baseline = `HEAD`; CI baseline = `HEAD^1` (first parent of a merge).
+  Root/first-board commits and standalone non-git roots have no baseline and
+  pass on validation alone.
+- An intended deletion must be declared: `BOARD_ALLOW_SHRINK=1 git commit …`
+  (or `BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh` in CI). It never
+  bypasses required paths, the empty-board refusal, or row validation.
+- A **same-count** replacement is NOT detected — retention is not identity.
+- A shallow checkout fails closed (exit 2, naming `git fetch --deepen=1`);
+  do not "fix" it by treating the missing parent as a first board.
+
+Reader rules this gate assumes, and you should keep:
+
+1. Rows move by **rewrite in place**, so a duplicate id means history — take the
+   LAST line for an id, never the first (`grep '"id": "<ID>"' | tail -1`).
+2. `board.db` is a dead 12 KB DuckDB file with zero tables. The JSONL files are
+   the store.
+3. boardctl writes compact JSON with alphabetically sorted keys. If a board blob
+   has spaced separators (`": "`) and insertion-order keys, it was NOT written by
+   boardctl — that is how the 2026-10-20 truncation (`3b2d857`, 691 rows → 1) was
+   attributed. Repair recipe and the full evidence trail:
+   `docs/dogfood/diagnostics-2026-10-20-board-truncation.md` and
+   `docs/dogfood/2026-10-20-board-truncation-gate.md`.
