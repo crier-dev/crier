@@ -15,6 +15,14 @@ type inboundDecision struct {
 	peer    string
 }
 
+// Audit vocabulary for the peer-facing verdict header. DeliveryAuth writes the
+// ingress classification before routing, so a different value afterwards was
+// authored by the handler (DF-CRIER-432).
+const (
+	verdictSourceIngress = "ingress"
+	verdictSourceHandler = "handler"
+)
+
 // VerifiedDeliveryPeer returns only the identity authenticated by DeliveryAuth's
 // complete per-request checks, never an unverified header claim. An empty result
 // means no attributable peer (including legacy bearer-only ingress).
@@ -51,25 +59,39 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 			// Inbox responses are finite receipts, never streaming routes. Capture
 			// once so all handler exits (including auth refusals) carry verdict
 			// headers while preserving the handler's exact body bytes in every posture.
-			receipt := &inboundReceipt{ResponseWriter: w}
+			receipt := &inboundReceipt{ResponseWriter: w, ingress: v}
+			// The peer-facing header is seeded here so the DF-CRIER-418 default still
+			// holds — with no handler verdict, the peer reads the ingress
+			// classification — while a handler that forwards onward can REPLACE it
+			// with the onward verdict (DF-CRIER-371). The two ingress classification
+			// headers are re-asserted from captured state in finish(), after the
+			// handler returns, so no handler write can shadow the local decision
+			// (DF-CRIER-432).
 			receipt.Header().Set(VerdictHeader, string(v))
-			receipt.Header().Set("X-Crier-Fed-Inbound-Verdict", string(v))
+			receipt.Header().Set(InboundVerdictHeader, string(v))
+			receipt.Header().Set(IngressVerdictHeader, string(v))
 			completed := false
 			defer func() {
+				peerVerdict, peerSource := receipt.peerVerdict()
+				attrs := []any{"peer", peer, "path", r.URL.Path, "verdict", v}
+				if peerSource == verdictSourceHandler {
+					// The wire and the audit line must not disagree silently: when the
+					// handler replaced the peer-facing verdict, name both values and
+					// which one the peer received.
+					attrs = append(attrs, "peer_verdict", string(peerVerdict), "peer_verdict_source", peerSource)
+				}
 				if completed {
 					receipt.finish()
-					slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
-						"verdict", v, "status", receipt.status, "receipt_flushed", true)
+					slog.Info("federation inbound delivery", append(attrs, "status", receipt.status, "receipt_flushed", true)...)
 					return
 				}
 				// Preserve the outer recovery middleware's authority: never flush
 				// a buffered success while unwinding a downstream panic. DF-CRIER-394:
 				// the receipt was ABANDONED, so the audit line must not carry a status
 				// or a verdict-shaped success an operator could read as a classified
-				// delivery the client received. The verdict header above still goes
+				// delivery the client received. The verdict headers above still go
 				// out with the recovery middleware's own response.
-				slog.Info("federation inbound delivery", "peer", peer, "path", r.URL.Path,
-					"verdict", v, "flushed", false, "abandoned", true)
+				slog.Info("federation inbound delivery", append(attrs, "flushed", false, "abandoned", true)...)
 			}()
 			if v != FedAllowed && v != FedTokenOnly {
 				RefuseDelivery(receipt, v)
@@ -89,8 +111,9 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 
 type inboundReceipt struct {
 	http.ResponseWriter
-	body   bytes.Buffer
-	status int
+	body    bytes.Buffer
+	status  int
+	ingress Verdict
 }
 
 func (w *inboundReceipt) WriteHeader(status int) {
@@ -105,13 +128,31 @@ func (w *inboundReceipt) Write(p []byte) (int, error) {
 	return w.body.Write(p)
 }
 
-// finish flushes the handler's bytes verbatim. Ingress classification is carried
-// only in response headers; handler-owned verdict fields (including an onward
-// peer's receipt) must never be added, overwritten or re-encoded here.
+// peerVerdict reports the value the peer reads in the peer-facing verdict
+// header, and who authored it: the handler when it replaced the ingress
+// classification this middleware wrote before routing (removing it counts — the
+// header then reads back as the empty verdict), otherwise the ingress
+// classification itself.
+func (w *inboundReceipt) peerVerdict() (Verdict, string) {
+	if v := w.Header().Get(VerdictHeader); v != string(w.ingress) {
+		return Verdict(v), verdictSourceHandler
+	}
+	return w.ingress, verdictSourceIngress
+}
+
+// finish flushes the handler's bytes verbatim. The peer-facing verdict header is
+// the handler's to author — an onward peer's receipt replaces it legitimately
+// (DF-CRIER-371) — but the two ingress classification headers are re-asserted
+// here from captured state, after the handler returned, so a handler write cannot
+// shadow or contradict the local ingress decision (DF-CRIER-432). Handler-owned
+// verdict fields (including an onward peer's receipt) must never be added,
+// overwritten or re-encoded in the body.
 func (w *inboundReceipt) finish() {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
+	w.Header().Set(IngressVerdictHeader, string(w.ingress))
+	w.Header().Set(InboundVerdictHeader, string(w.ingress))
 	w.ResponseWriter.WriteHeader(w.status)
 	_, _ = w.ResponseWriter.Write(w.body.Bytes())
 }

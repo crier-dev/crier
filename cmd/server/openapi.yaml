@@ -1220,11 +1220,17 @@ paths:
         inner envelope's crier.guard metadata. Redelivery and batch flush
         never re-run the guard — the verdict rides with the message.
 
-        Federation ingress verdicts are response-header-only (CHAT-SESSIONS.md
-        section 3.2): X-Crier-Fed-Inbound-Verdict carries the local ingress
-        decision; X-Crier-Fed-Verdict carries that decision unless the handler
-        supplies an onward verdict. The ingress middleware preserves the
-        handler's body bytes exactly, including any handler-owned verdict fields.
+        Federation ingress verdicts are response-header-only and carry a
+        stated precedence (CHAT-SESSIONS.md section 3.2): X-Crier-Fed-Ingress-Verdict carries the local ingress
+        decision — written from state captured before the handler ran and
+        re-asserted after it returns, so a handler write cannot shadow it — and
+        its alias X-Crier-Fed-Inbound-Verdict carries the same value.
+        X-Crier-Fed-Verdict is the hop's peer-facing verdict: the handler's
+        onward verdict when the handler sets one, otherwise the ingress
+        decision, and a handler that removes it leaves it absent. When the two
+        differ the audit line names both (peer_verdict and
+        peer_verdict_source). The ingress middleware preserves the handler's
+        body bytes exactly, including any handler-owned verdict fields.
 
         Federation (CR-FEAT-006, DF-CRIER-7): when the target agent is not
         registered here and relay links are configured (CR_FED_LINKS), the
@@ -2234,9 +2240,11 @@ paths:
         by-id accept plus those two routing fields. Delivery by agent id is
         unchanged in every respect. Federation ingress uses the same header-only
         verdict channel as by-id delivery (CHAT-SESSIONS.md section 3.2):
-        X-Crier-Fed-Inbound-Verdict records the local decision, while
-        X-Crier-Fed-Verdict can retain an onward decision. The middleware never
-        annotates or re-encodes the handler's response body.
+        X-Crier-Fed-Ingress-Verdict — and its alias X-Crier-Fed-Inbound-Verdict —
+        records the local ingress decision and cannot be shadowed by the handler,
+        while X-Crier-Fed-Verdict is the hop's peer-facing verdict and can retain
+        an onward decision. The middleware never annotates or re-encodes the
+        handler's response body.
 
         Stated limit: the cursor lives in the serving process and is not
         persisted, so a restart, a second process on the same store, or two

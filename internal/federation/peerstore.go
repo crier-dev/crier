@@ -23,7 +23,24 @@ const (
 	FedPeerRevoked  Verdict = "FED_PEER_REVOKED"
 	FedBadSignature Verdict = "FED_BAD_SIGNATURE"
 	FedTokenOnly    Verdict = "FED_TOKEN_ONLY"
-	VerdictHeader           = "X-Crier-Fed-Verdict"
+
+	// VerdictHeader is the HOP's peer-facing verdict, not the authoritative
+	// ingress classification: DeliveryAuth seeds it with the local ingress
+	// verdict before routing, and a handler that forwards onward legitimately
+	// replaces it with the onward peer's verdict (DF-CRIER-371). Read the local
+	// ingress decision from IngressVerdictHeader.
+	VerdictHeader = "X-Crier-Fed-Verdict"
+
+	// IngressVerdictHeader is the AUTHORITATIVE local ingress classification
+	// (DF-CRIER-432). DeliveryAuth writes it from state captured before the
+	// handler ran and re-asserts it after the handler returns, so a handler that
+	// writes the same header cannot shadow the ingress decision.
+	IngressVerdictHeader = "X-Crier-Fed-Ingress-Verdict"
+
+	// InboundVerdictHeader is the retained alias of the same ingress
+	// classification (DF-CRIER-369/DF-CRIER-371). It is written from the same
+	// captured state, so it can never disagree with IngressVerdictHeader.
+	InboundVerdictHeader = "X-Crier-Fed-Inbound-Verdict"
 )
 
 // PeerRecord is an instance identity, not an agent or a policy. PublicKey and

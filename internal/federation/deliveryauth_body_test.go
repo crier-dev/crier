@@ -84,13 +84,24 @@ func TestDeliveryAuthPreservesHandlerBodyBytes(t *testing.T) {
 					wantVerdict = tc.outbound
 				}
 				require.Equal(t, wantVerdict, resp.Header.Get(VerdictHeader))
-				require.Equal(t, string(FedTokenOnly), resp.Header.Get("X-Crier-Fed-Inbound-Verdict"))
+				require.Equal(t, string(FedTokenOnly), resp.Header.Get(InboundVerdictHeader))
+				// DF-CRIER-432: the ingress verdict always has an unshadowable home,
+				// so a handler verdict on the peer-facing header loses nothing.
+				require.Equal(t, string(FedTokenOnly), resp.Header.Get(IngressVerdictHeader))
 				var audit map[string]any
 				require.NoError(t, json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &audit), "exactly one audit line")
 				require.Equal(t, "federation inbound delivery", audit["msg"])
 				require.Equal(t, string(FedTokenOnly), audit["verdict"])
 				require.Equal(t, true, audit["receipt_flushed"])
 				require.EqualValues(t, resp.StatusCode, audit["status"])
+				if tc.outbound == "" {
+					require.NotContains(t, audit, "peer_verdict",
+						"no handler verdict: the ingress value IS what the peer received, named once")
+				} else {
+					require.Equal(t, tc.outbound, audit["peer_verdict"],
+						"the line names the value the peer received on the peer-facing header")
+					require.Equal(t, "handler", audit["peer_verdict_source"])
+				}
 			})
 		}
 	}

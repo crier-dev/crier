@@ -303,15 +303,23 @@ receipts cannot be guaranteed durable; the boundary marker remains, and replay
 uses the unknown state. A crash between transport and receipt append has the same
 uncertainty. There is no cross-system atomic commit or exactly-once guarantee.
 
-Inbox ingress classification is **header-only** (DF-CRIER-418):
-`X-Crier-Fed-Inbound-Verdict` carries the local ingress verdict, and
-`X-Crier-Fed-Verdict` initially carries the same value. If the handler forwards
-onward, its outward verdict replaces only `X-Crier-Fed-Verdict`; the inbound
-header retains the local decision. The middleware flushes the handler's body
-byte-for-byte in every peer-store posture: it never adds or overwrites `verdict`
-or `inbound_verdict`, parses/re-encodes JSON, or changes whitespace. An existing
-body verdict belongs to the handler/peer, including a named refusal receipt
-written by `RefuseDelivery`, and is not an ingress annotation.
+Inbox ingress classification is **header-only** and carries a stated
+precedence (DF-CRIER-418, DF-CRIER-432). `X-Crier-Fed-Ingress-Verdict` carries the local ingress verdict:
+it is written from the decision captured before the handler ran and re-asserted
+after the handler returns, so a handler that writes the same header cannot shadow
+or contradict it. `X-Crier-Fed-Inbound-Verdict` is the retained alias of that
+same captured value, so it can never disagree with it. `X-Crier-Fed-Verdict` is the hop's peer-facing verdict:
+the handler's onward verdict when the handler sets one (an onward peer's
+receipt), otherwise the ingress verdict. A handler that removes it leaves it
+absent — the middleware never restores a value the handler did not author — and
+the ingress decision stays readable from `X-Crier-Fed-Ingress-Verdict` regardless
+of what the handler wrote to the peer-facing header. The middleware flushes the
+handler's body byte-for-byte in every peer-store posture: it never adds or
+overwrites `verdict` or `inbound_verdict`, parses/re-encodes JSON, or changes
+whitespace. An existing body verdict belongs to the handler/peer,
+including a named refusal receipt written by `RefuseDelivery`, and is not an
+ingress annotation; that refusal's own verdict is also the ingress verdict, so
+all three headers agree on the refusal path.
 
 `FED_ALLOWED` authorizes crossing, not execution. `FED_TOKEN_ONLY` in a verdict
 header or receipt stays `accepted` with that code; an explicit hold keeps its
@@ -343,8 +351,14 @@ Detector verdicts are transport-specific names, not transcript outcomes:
 `inbox_accepted` records inbox storage (201), while `webhook_accepted` records
 webhook handoff. Their log contract is [DETECTION.md §3.2](DETECTION.md#32-verdicts).
 Federation's completed audit uses `receipt_flushed: true` with `status` and
-`verdict`, even for a refusal such as `FED_NO_LINK`; this proves only that the
-receipt was flushed. Panic abandonment logs `"verdict", v, "flushed", false, "abandoned", true` (JSON fields `"flushed":false,"abandoned":true`) with no `delivered` key, no status and no receipt-flushed claim (DF-CRIER-394, DF-CRIER-420).
+`verdict` — always the ingress classification, named once when the peer-facing
+header carries that same value — even for a refusal such as `FED_NO_LINK`; this
+proves only that the receipt was flushed. When the peer-facing header carries a
+different value, because the handler replaced it with an onward receipt, the
+line names BOTH: `peer_verdict` (the value the peer received) and
+`peer_verdict_source: "handler"`. Absent `peer_verdict` therefore means the two
+verdicts agreed, never that the field was forgotten (DF-CRIER-432).
+Panic abandonment logs `"verdict", v, "flushed", false, "abandoned", true` (JSON fields `"flushed":false,"abandoned":true`) with no `delivered` key, no status and no receipt-flushed claim (DF-CRIER-394, DF-CRIER-420).
 
 ### 3.2.1 Request-key replay across restart (DF-CRIER-357)
 
