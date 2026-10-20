@@ -155,6 +155,13 @@ def main():
                 env=env, text=True, capture_output=True,
             )
 
+        def default_check(repo):
+            """The checker's no-flag verdict — the command CI and a human run."""
+            return subprocess.run(
+                ('bash', 'scripts/check-board.sh'), cwd=repo, env=env, text=True,
+                capture_output=True,
+            )
+
         def show_stderr(label, result):
             print(f'commit selftest: {label} exact checker stderr BEGIN')
             print(result.stderr, end='')
@@ -238,6 +245,90 @@ def main():
         expect('CI accepts an explicitly declared events deletion',
                run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash',
                    'scripts/check-board.sh'), 0, 'shrink explicitly allowed')
+
+        # DF-CRIER-434: the DEFAULT run prints `board: scope working tree` and
+        # validates the working tree, but its retention arm compared two COMMITS
+        # (HEAD^1 vs HEAD). Measured pre-fix on the first fixture below: 5 rows
+        # in HEAD and the index, the worktree cut to 1 row, and the default
+        # command printed `board: validation PASS — 1 row(s) accepted` with exit
+        # 0 — a green over the tree it named, checked against something else.
+        # Default mode must retain BOTH comparisons and label which one fired.
+        repo = fixture('worktree-shrink')
+        board = board_rows(repo, 5)
+        event_rows(repo, 2)
+        seed_commit(repo, 'five-row baseline (hooks disabled for setup)')
+        keep_rows(board, [1])
+        index_rows = git(repo, 'show', ':.coding-hermes/board/tasks.jsonl').stdout.splitlines()
+        head_rows = git(repo, 'show', 'HEAD:.coding-hermes/board/tasks.jsonl').stdout.splitlines()
+        worktree_rows = board.read_text().splitlines()
+        if (len(head_rows), len(index_rows), len(worktree_rows)) != (5, 5, 1):
+            print('commit selftest: worktree-shrink fixture premise (HEAD 5, index 5, '
+                  'worktree 1 — index untouched): FAIL')
+            failures += 1
+        else:
+            print('commit selftest: worktree-shrink fixture premise (HEAD 5, index 5, '
+                  'worktree 1 — index untouched): PASS')
+        refused = default_check(repo)
+        show_stderr('unstaged worktree shrink, default (no-flag) command', refused)
+        expect('default mode refuses a worktree shrink with an untouched index',
+               refused, 1, 'worktree vs HEAD')
+        expect_stderr('worktree shrink names worktree vs HEAD, the file, both counts '
+                      'and the bounded lost-id list', refused,
+                      ['retention: worktree vs HEAD',
+                       '.coding-hermes/board/tasks.jsonl shrank: HEAD=5, worktree=1; '
+                       '4 row(s) lost',
+                       'lost ids (4 total; first 20): SELFTEST-2, SELFTEST-3, '
+                       'SELFTEST-4, SELFTEST-5',
+                       'shrink refused: .coding-hermes/board/tasks.jsonl '
+                       '(retention: worktree vs HEAD)'],
+                      forbidden=['validation PASS'])
+        expect('the same tree under --staged-index still validates the 5-row index',
+               staged_check(repo), 0, '5 row(s) accepted')
+
+        # The CI case: the shrink is COMMITTED and the checkout is clean, so
+        # worktree == HEAD and only the HEAD vs HEAD^1 comparison can fire.
+        repo = fixture('committed-shrink-clean-tree')
+        board = board_rows(repo, 5)
+        event_rows(repo, 2)
+        seed_commit(repo, 'five-row baseline (hooks disabled for setup)')
+        keep_rows(board, [1])
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        seed_commit(repo, 'shrink committed without hooks (the CI case)')
+        if git(repo, 'status', '--porcelain', '--',
+               '.coding-hermes/board').stdout.strip():
+            print('commit selftest: committed-shrink fixture premise (clean checkout, '
+                  'worktree == HEAD): FAIL')
+            failures += 1
+        else:
+            print('commit selftest: committed-shrink fixture premise (clean checkout, '
+                  'worktree == HEAD): PASS')
+        refused = default_check(repo)
+        show_stderr('committed shrink on a clean checkout, default (CI) command', refused)
+        expect('default mode (the CI command) refuses a committed shrink',
+               refused, 1, 'HEAD vs HEAD^1')
+        expect_stderr('committed shrink names HEAD vs HEAD^1, the file, both counts and '
+                      'the bounded lost-id list', refused,
+                      ['retention: HEAD vs HEAD^1',
+                       '.coding-hermes/board/tasks.jsonl shrank: HEAD^1=5, HEAD=1; '
+                       '4 row(s) lost',
+                       'lost ids (4 total; first 20): SELFTEST-2, SELFTEST-3, '
+                       'SELFTEST-4, SELFTEST-5',
+                       'shrink refused: .coding-hermes/board/tasks.jsonl '
+                       '(retention: HEAD vs HEAD^1)',
+                       'retention: worktree vs HEAD — 2 file(s) compared, no shrink'],
+                      forbidden=['shrank: HEAD=5, worktree=1'])
+
+        repo = fixture('retention-healthy')
+        board_rows(repo, 3)
+        event_rows(repo, 2)
+        seed_commit(repo, 'healthy baseline (hooks disabled for setup)')
+        accepted = default_check(repo)
+        show_stderr('healthy tree (worktree == HEAD == HEAD^1), default command', accepted)
+        expect('healthy tree accepted by the default command',
+               accepted, 0, 'validation PASS')
+        expect_stderr('healthy default run states both comparisons it made', accepted,
+                      ['retention: worktree vs HEAD — 2 file(s) compared, no shrink',
+                       'retention: HEAD vs HEAD^1 — 2 file(s) compared, no shrink'])
 
         repo = fixture('events-shrink-no-id')
         board_rows(repo, 2)

@@ -26,21 +26,38 @@
 #   BOARD_ALLOW_SHRINK=1 git commit ...      # explicitly intended row deletion
 #   BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh # same declaration in CI
 #
-# SHRINK POLICY (DF-CRIER-426 tasks.jsonl; DF-CRIER-429 events.jsonl)
-# ---------------------------------------------------------------------
-# BOTH canonical board files' nonblank record counts must not decrease: index vs
-# HEAD in hooks, committed HEAD vs HEAD^1 in CI (first parent for merges; fetch
-# depth >= 2). events.jsonl sat outside this gate until DF-CRIER-429: measured on
+# The DEFAULT run validates the WORKING TREE, so it compares that tree with the
+# committed baseline it names — `retention: worktree vs HEAD` — and keeps the
+# committed-shrink comparison CI depends on, `retention: HEAD vs HEAD^1`. Every
+# comparison that ran is printed, including the ones that found no shrink.
+# --staged-index compares `retention: index vs HEAD` instead.
+#
+# SHRINK POLICY (DF-CRIER-426 tasks.jsonl; DF-CRIER-429 events.jsonl;
+# DF-CRIER-434 the default run)
+# ---------------------------------------------------------------------------
+# BOTH canonical board files' nonblank record counts must not decrease. Which
+# baseline is measured against depends on what the run validated, and each
+# comparison says so in its own output line:
+#   * default (no flag): `worktree vs HEAD` AND `HEAD vs HEAD^1`. CI runs this
+#     command, and on a clean checkout worktree == HEAD, so the committed-shrink
+#     comparison is the one that fires there (first parent for merges; fetch
+#     depth >= 2). DF-CRIER-434: this command printed `scope working tree` while
+#     comparing two COMMITS, so a worktree cut from 5 rows to 1 with the index
+#     untouched validated 1 row and exited 0; the same tree under
+#     --staged-index reported 5, and only a COMMITTED shrink was refused.
+#   * --staged-index (the commit hooks): `index vs HEAD` — the blobs the commit
+#     will carry, never an unstaged worktree repair.
+# events.jsonl sat outside this gate until DF-CRIER-429: measured on
 # a scratch repo, a staged events.jsonl cut from 5 rows to 1 passed with exit 0
 # while the same shrink of tasks.jsonl was refused, so a 1750-row event log had no
 # retention gate at all.
 # Missing baseline board/root commit is allowed, decided per file; unavailable
 # shallow history fails closed. Standalone non-Git roots have no baseline and get
 # validation only.
-# Loss diagnostics name the FILE that shrank, both counts and the lost records,
-# with their total and a bounded list. A lost row is named by its `id`; a row
-# without an id — or an unparseable line — is named by its line number instead of
-# being silently skipped.
+# Loss diagnostics name the COMPARISON that fired and the FILE that shrank, both
+# counts and the lost records, with their total and a bounded list. A lost row is
+# named by its `id`; a row without an id — or an unparseable line — is named by
+# its line number instead of being silently skipped.
 # Only exact BOARD_ALLOW_SHRINK=1 permits a shrink, with a visible diagnostic
 # naming the file; it never permits missing/empty files or invalid rows. Set it on
 # the intended command only, including CI's checker command for an intentional
@@ -114,11 +131,17 @@ materialise_index() {
   return 0
 }
 
-# DF-CRIER-426 (tasks.jsonl) / DF-CRIER-429 (events.jsonl): validate row
-# retention separately from row validity over BOTH canonical board files, with
-# ONE implementation, so neither file can sit outside the gate again. Hooks
-# compare the materialised index with HEAD (the first parent of a pending
-# merge); CI compares committed HEAD with HEAD^1, never an unstaged repair.
+# DF-CRIER-426 (tasks.jsonl) / DF-CRIER-429 (events.jsonl) / DF-CRIER-434 (the
+# default run): validate row retention separately from row validity over BOTH
+# canonical board files, with ONE implementation, so neither file can sit
+# outside the gate again, and so the default run cannot compare a different pair
+# of things than the one it says it validated. The mode decides the comparisons
+# and every one of them is labelled in the output:
+#   index    — index vs HEAD (the blobs a commit will carry);
+#   worktree — worktree vs HEAD (the tree this run validated) AND HEAD vs HEAD^1
+#              (the committed-shrink check CI depends on; on a clean checkout
+#              worktree == HEAD, so only the second one can fire there).
+# The first parent is used for a pending merge's HEAD^1.
 check_row_retention() {
   if ! command -v python3 >/dev/null 2>&1; then
     _err "board: python3 is required for the shrink check — refusing a silent skip."
@@ -132,7 +155,7 @@ import os
 import subprocess
 import sys
 
-root, board_dir, staged = sys.argv[1:4]
+root, board_dir, mode = sys.argv[1:4]
 names = sys.argv[4:]
 PREFIX = '.coding-hermes/board/'
 
@@ -173,73 +196,129 @@ def identity(number, line):
 # Standalone board roots and unborn repositories have no historical baseline.
 if git('rev-parse', '--verify', 'HEAD^{commit}').returncode:
     raise SystemExit(0)
-base, target = ('HEAD', 'index') if staged == '1' else ('HEAD^1', 'HEAD')
-if git('rev-parse', '--verify', base + '^{commit}').returncode:
-    if git('rev-parse', '--is-shallow-repository').stdout.strip() == 'true':
-        fail('shrink baseline HEAD^1 unavailable in shallow history; fetch at least '
-             'two commits (git fetch --deepen=1) and rerun.')
-    # A genuine root commit, not a missing parent concealed by shallow checkout.
-    raise SystemExit(0)
 
-# Missing board at the baseline is the first-board case, not a shrink, and that
-# is decided per file. Use ls-tree so a read error cannot masquerade as an
-# absent board.
+
+def comparisons(mode):
+    """The (label, baseline, target-label, target-source) tuples to compare.
+
+    DF-CRIER-434: the no-flag run prints `scope working tree` and validates the
+    WORKING TREE, but it used to compare two COMMITS (HEAD^1 vs HEAD), so a
+    worktree truncation with an untouched index passed with exit 0 while the
+    scope line claimed the tree it named had been checked. Default mode now
+    retains BOTH comparisons: the tree it validated against the committed
+    baseline it was compared with, AND the committed-shrink check CI depends on
+    (on a clean checkout worktree == HEAD, so only the second one can fire).
+    --staged-index keeps its single index-vs-HEAD comparison.
+    """
+    if mode == 'index':
+        return (('index vs HEAD', 'HEAD', 'index', 'workdir'),)
+    if mode == 'worktree':
+        return (('worktree vs HEAD', 'HEAD', 'worktree', 'workdir'),
+                ('HEAD vs HEAD^1', 'HEAD^1', 'HEAD', 'commit'))
+    fail('unknown retention mode ' + repr(mode) + ' — refusing to guess which '
+         'baseline to compare against.')
+
+
+def target_text(source, name, path):
+    """The rows under test: the tree on disk, or the committed HEAD blob."""
+    if source == 'workdir':
+        try:
+            return (Path(board_dir) / name).read_text()
+        except OSError as error:
+            fail('cannot read the tree under test for ' + path + ': ' + str(error))
+    committed = git('show', 'HEAD:' + path)
+    if committed.returncode:
+        fail('required committed path ' + path + ' is missing — commit refused.', 1)
+    return committed.stdout
+
+
+shallow = git('rev-parse', '--is-shallow-repository').stdout.strip() == 'true'
 shrunken = []
-for name in names:
-    path = PREFIX + name
-    entry = git('ls-tree', base, '--', path)
-    if entry.returncode:
-        fail('cannot inspect shrink baseline ' + base + ' for ' + path + ': '
-             + entry.stderr.strip())
-    if not entry.stdout.strip():
+unavailable = []
+for label, base, target, source in comparisons(mode):
+    if git('rev-parse', '--verify', base + '^{commit}').returncode:
+        if shallow:
+            # A shallow checkout is NOT a root commit: the baseline must be
+            # fetched, never silently accepted as the very loss being measured.
+            unavailable.append(base)
+            continue
+        # A genuine root commit, not a missing parent concealed by a shallow
+        # checkout. The other comparison still runs.
+        print('check-board.sh: board: retention: ' + label + ' — baseline ' + base
+              + ' unavailable (root commit); comparison skipped', file=sys.stderr)
         continue
-    old = git('show', base + ':' + path)
-    if old.returncode:
-        fail('cannot read shrink baseline ' + base + ' for ' + path + ': '
-             + old.stderr.strip())
-    try:
-        if staged == '1':
-            new_text = (Path(board_dir) / name).read_text()
-        else:
-            new = git('show', 'HEAD:' + path)
-            if new.returncode:
-                fail('required committed path ' + path + ' is missing — commit refused.', 1)
-            new_text = new.stdout
+    compared = 0
+    shrank = False
+    for name in names:
+        path = PREFIX + name
+        # Missing board at the baseline is the first-board case, not a shrink,
+        # and that is decided per file. Use ls-tree so a read error cannot
+        # masquerade as an absent board.
+        entry = git('ls-tree', base, '--', path)
+        if entry.returncode:
+            fail('cannot inspect shrink baseline ' + base + ' for ' + path + ': '
+                 + entry.stderr.strip())
+        if not entry.stdout.strip():
+            continue
+        old = git('show', base + ':' + path)
+        if old.returncode:
+            fail('cannot read shrink baseline ' + base + ' for ' + path + ': '
+                 + old.stderr.strip())
         before = records(old.stdout)
-        after = records(new_text)
-    except OSError as error:
-        fail('cannot compute shrink counts for ' + path + ': ' + str(error))
-    if len(after) >= len(before):
-        # Growth, or a same-count replacement: not a shrink, not in scope.
-        continue
-    # Counter subtraction names duplicate occurrences lost too; a row without an
-    # id is named by its line number instead of being skipped.
-    old_rows = [identity(number, line) for number, line in before]
-    new_keys = Counter(key for _, key in (identity(number, line) for number, line in after))
-    lost = list((Counter(key for _, key in old_rows) - new_keys).elements())
-    labels = {}
-    for label, key in old_rows:
-        labels.setdefault(key, label)
-    summary = (f'{path} shrank: {base}={len(before)}, {target}={len(after)}; '
-               f'{len(before) - len(after)} row(s) lost')
-    print('check-board.sh: board: ' + summary, file=sys.stderr)
-    limit = 20
-    suffix = f' ... ({len(lost) - limit} more)' if len(lost) > limit else ''
-    print(f'check-board.sh: board: lost ids ({len(lost)} total; first {limit}): '
-          + ', '.join(labels[key] for key in lost[:limit]) + suffix, file=sys.stderr)
-    shrunken.append(path)
+        after = records(target_text(source, name, path))
+        compared += 1
+        if len(after) >= len(before):
+            # Growth, or a same-count replacement: not a shrink, not in scope.
+            continue
+        # Counter subtraction names duplicate occurrences lost too; a row
+        # without an id is named by its line number instead of being skipped.
+        old_rows = [identity(number, line) for number, line in before]
+        new_keys = Counter(key for _, key in (identity(number, line)
+                                              for number, line in after))
+        lost = list((Counter(key for _, key in old_rows) - new_keys).elements())
+        labels = {}
+        for row_label, key in old_rows:
+            labels.setdefault(key, row_label)
+        # The comparison is part of every line: the same file can shrink in
+        # both directions at once, and a refusal must say which baseline it
+        # measured against.
+        summary = (f'{label} — {path} shrank: {base}={len(before)}, '
+                   f'{target}={len(after)}; {len(before) - len(after)} row(s) lost')
+        print(f'check-board.sh: board: retention: {summary}', file=sys.stderr)
+        limit = 20
+        suffix = f' ... ({len(lost) - limit} more)' if len(lost) > limit else ''
+        print(f'check-board.sh: board: retention: {label} — lost ids ({len(lost)} '
+              f'total; first {limit}): '
+              + ', '.join(labels[key] for key in lost[:limit]) + suffix,
+              file=sys.stderr)
+        shrunken.append((label, path))
+        shrank = True
+    if not shrank:
+        # State what WAS compared even when nothing shrank: a default run that
+        # silently compared nothing is the defect this ticket measures.
+        if compared:
+            print(f'check-board.sh: board: retention: {label} — {compared} file(s) '
+                  'compared, no shrink', file=sys.stderr)
+        else:
+            print(f'check-board.sh: board: retention: {label} — baseline {base} '
+                  'carries no board file (first board); nothing to compare',
+                  file=sys.stderr)
 
 if not shrunken:
+    if unavailable:
+        fail('shrink baseline ' + unavailable[0] + ' unavailable in shallow history; '
+             'fetch at least two commits (git fetch --deepen=1) and rerun.')
     raise SystemExit(0)
 if os.environ.get('BOARD_ALLOW_SHRINK') == '1':
-    for path in shrunken:
-        print('check-board.sh: board: ' + path + ': shrink explicitly allowed by '
-              'BOARD_ALLOW_SHRINK=1; required paths and row validation still apply.',
-              file=sys.stderr)
+    for label, path in shrunken:
+        print('check-board.sh: board: ' + path + ' (retention: ' + label
+              + '): shrink explicitly allowed by BOARD_ALLOW_SHRINK=1; required paths '
+              'and row validation still apply.', file=sys.stderr)
     raise SystemExit(0)
-fail('shrink refused: ' + ', '.join(shrunken) + '; if this deletion is intended, '
-     'rerun with BOARD_ALLOW_SHRINK=1 git commit ... (hooks) or '
-     'BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).', 1)
+fail('shrink refused: '
+     + ', '.join(path + ' (retention: ' + label + ')' for label, path in shrunken)
+     + '; if this deletion is intended, rerun with BOARD_ALLOW_SHRINK=1 git commit ... '
+     '(hooks) or BOARD_ALLOW_SHRINK=1 bash scripts/check-board.sh (CI).', 1)
 PY
 }
 
@@ -289,7 +368,14 @@ run_check() {
   # files/boardctl validation below remain mandatory for declared deletions.
   # DF-CRIER-429: the whole board directory is passed, and the helper checks BOTH
   # canonical files with the one implementation above.
-  check_row_retention "$repo_root" "$board" "$staged"
+  # DF-CRIER-434: the MODE, not a staged flag, picks the comparisons. The
+  # default run validates the working tree and must therefore compare the
+  # working tree with HEAD as well as HEAD with HEAD^1.
+  local retention_mode="worktree"
+  if [ "$staged" -eq 1 ]; then
+    retention_mode="index"
+  fi
+  check_row_retention "$repo_root" "$board" "$retention_mode"
   local retention_rc=$?
   [ "$retention_rc" -eq 0 ] || return "$retention_rc"
 
@@ -450,7 +536,10 @@ main() {
         shift
         ;;
       -h | --help)
-        sed -n '2,40p' "$0"
+        # Print the header summary block: from line 2 up to (not including) the
+        # first detailed section. A hardcoded line range drifts silently every
+        # time the header grows.
+        sed -n '2,/^# WHAT IS CHECKED/p' "$0" | sed '$d'
         return 0
         ;;
       *)
