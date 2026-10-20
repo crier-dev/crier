@@ -5,6 +5,7 @@
 Only gitreins is stubbed: its unrelated Go checks must not mask board failures.
 """
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -37,6 +38,8 @@ def main():
         stub.write_text('#!/bin/sh\nprintf "stub gitreins guard (board-only test)\\n"\nexit 0\n')
         stub.chmod(0o755)
         env = os.environ.copy()
+        # A caller's intentional-deletion declaration must not neuter RED fixtures.
+        env.pop('BOARD_ALLOW_SHRINK', None)
         # Do not inherit a caller's alternate index/worktree or host Git hooks.
         for key in list(env):
             if key.startswith('GIT_'):
@@ -115,6 +118,163 @@ def main():
             if not ok:
                 print(result.stdout)
                 failures += 1
+
+        def board_rows(repo, count):
+            path = repo / '.coding-hermes/board/tasks.jsonl'
+            template = json.loads(path.read_text().splitlines()[0])
+            rows = [dict(template, id=f'SELFTEST-{i}', title=f'fixture row {i}')
+                    for i in range(1, count + 1)]
+            path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+            return path
+
+        repo = fixture('shrink-691-to-1')
+        board = board_rows(repo, 691)
+        seed_commit(repo, '691-row baseline (hooks disabled for setup)')
+        good = board.read_bytes()
+        board.write_bytes(good.splitlines(keepends=True)[0])
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        # The worktree is deliberately repaired: only the staged blob lost rows.
+        board.write_bytes(good)
+        rejected = subprocess.run(
+            ('bash', 'scripts/check-board.sh', '--staged-index'), cwd=repo,
+            env=env, text=True, capture_output=True,
+        )
+        print('commit selftest: 691 -> 1 exact checker stderr BEGIN')
+        print(rejected.stderr, end='')
+        print('commit selftest: 691 -> 1 exact checker stderr END')
+        expect('691 -> 1 truncation', rejected, 1)
+        expected_ids = ', '.join(f'SELFTEST-{i}' for i in range(2, 22))
+        if not all(text in rejected.stderr for text in (
+                'HEAD=691', 'index=1', '690 row(s) lost',
+                f'lost ids (690 total; first 20): {expected_ids}',
+                '670 more', 'BOARD_ALLOW_SHRINK=1')) or 'SELFTEST-22' in rejected.stderr:
+            print('commit selftest: shrink counts, lost-id total and bounded list: FAIL')
+            failures += 1
+        else:
+            print('commit selftest: shrink counts, lost-id total and bounded list: PASS')
+        expect('real commit rejects staged shrink despite repaired worktree',
+               git(repo, 'commit', '-qm', 'truncated board', check=False), 1, 'HEAD=691')
+        expect('hatch requires exact 1, not a truthy string',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=true', 'bash',
+                   'scripts/check-board.sh', '--staged-index'), 1, '690 row(s) lost')
+
+        repo = fixture('same-count-edit')
+        board = board_rows(repo, 2)
+        seed_commit(repo, 'two-row baseline (hooks disabled for setup)')
+        rows = [json.loads(line) for line in board.read_text().splitlines()]
+        rows[0]['title'] = 'ordinary row edit'
+        board.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('normal row edit (same count) accepted',
+               git(repo, 'commit', '-qm', 'normal edit', check=False), 0, 'validation PASS')
+
+        repo = fixture('declared-deletion')
+        board = board_rows(repo, 2)
+        seed_commit(repo, 'two-row baseline (hooks disabled for setup)')
+        board.write_text(board.read_text().splitlines()[0] + '\n')
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('undeclared deletion of one row rejected',
+               git(repo, 'commit', '-qm', 'delete row', check=False), 1, '1 row(s) lost')
+        expect('declared deletion of one row accepted',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'intentional deletion'), 0, 'shrink explicitly allowed')
+        expect('CI rejects committed shrink against first parent',
+               run(repo, 'bash', 'scripts/check-board.sh'), 1, 'HEAD^1=2')
+        expect('CI accepts explicitly declared deletion',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash', 'scripts/check-board.sh'),
+               0, 'shrink explicitly allowed')
+        board_rows(repo, 2)
+        expect('CI cannot borrow an unstaged repair to hide committed shrink',
+               run(repo, 'bash', 'scripts/check-board.sh'), 1, 'HEAD=1')
+        seed_commit(repo, 'restored two-row baseline (hooks disabled for setup)')
+        poison(repo)
+        invalid = board.read_text().splitlines()[-1]
+        board.write_text(invalid + '\n')
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('hatch does not bypass row validation on a shrink',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash', 'scripts/check-board.sh',
+                   '--staged-index'), 1, 'INVALID-1')
+        board.write_text('')
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('empty candidate reports both counts before refusal',
+               run(repo, 'bash', 'scripts/check-board.sh', '--staged-index'),
+               1, 'HEAD=2, index=0')
+        expect('hatch does not permit empty board',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'bash', 'scripts/check-board.sh',
+                   '--staged-index'), 1, 'is empty')
+        git(repo, 'rm', '-f', '.coding-hermes/board/tasks.jsonl')
+        expect('hatch does not permit whole-file deletion',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'remove whole board'), 1, 'required index path')
+
+        repo = fixture('new-board')
+        board = repo / '.coding-hermes/board/tasks.jsonl'
+        good = board.read_bytes()
+        git(repo, 'rm', '.coding-hermes/board/tasks.jsonl')
+        seed_commit(repo, 'HEAD without board (hooks disabled for setup)')
+        board.write_bytes(good)
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('brand-new board with no HEAD board accepted',
+               git(repo, 'commit', '-qm', 'first board', check=False), 0, 'validation PASS')
+        expect('CI accepts first board when parent has none',
+               run(repo, 'bash', 'scripts/check-board.sh'), 0, 'validation PASS')
+
+        repo = fixture('root-commit')
+        git(repo, 'checkout', '--orphan', 'first-board')
+        expect('unborn HEAD accepts staged first board',
+               run(repo, 'bash', 'scripts/check-board.sh', '--staged-index'),
+               0, 'validation PASS')
+        seed_commit(repo, 'root board (hooks disabled for setup)')
+        expect('CI accepts genuine root board commit without parent',
+               run(repo, 'bash', 'scripts/check-board.sh'), 0, 'validation PASS')
+
+        # A shallow checkout is NOT a root commit. CI must fetch the baseline,
+        # not silently accept the very loss it was asked to measure.
+        repo = fixture('shallow-source')
+        probe(repo)
+        seed_commit(repo, 'second commit (hooks disabled for setup)')
+        shallow = root / 'shallow-clone'
+        run(root, 'git', 'clone', '-q', '--depth=1', repo.as_uri(), str(shallow), check=True)
+        expect('CI refuses unavailable shallow baseline',
+               run(shallow, 'bash', 'scripts/check-board.sh'), 2, 'shallow history')
+        git(shallow, 'fetch', '-q', '--deepen=1')
+        expect('CI accepts depth-two checkout with available baseline',
+               run(shallow, 'bash', 'scripts/check-board.sh'), 0, 'validation PASS')
+
+        repo = fixture('dedupe')
+        board = board_rows(repo, 1)
+        good = board.read_text()
+        board.write_text(good + good + '\n')
+        seed_commit(repo, 'duplicate fixture (hooks disabled for setup)')
+        board.write_text(good.rstrip() + '\n\n')
+        git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+        expect('dedupe counts records, not unique ids or blank lines',
+               git(repo, 'commit', '-qm', 'dedupe', check=False), 1,
+               'lost ids (1 total; first 20): SELFTEST-1')
+        expect('explicitly declared dedupe accepted',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'intentional dedupe'), 0, 'shrink explicitly allowed')
+
+        # A real merge's pre-commit HEAD is the eventual first parent. The
+        # feature was seeded without hooks only to construct the hostile input.
+        repo = fixture('merge-shrink')
+        board = board_rows(repo, 3)
+        seed_commit(repo, 'three-row baseline (hooks disabled for setup)')
+        git(repo, 'checkout', '-qb', 'feature')
+        board.write_text(board.read_text().splitlines()[0] + '\n')
+        seed_commit(repo, 'shrunk feature (hooks disabled for setup)')
+        git(repo, 'checkout', '-q', 'main')
+        probe(repo)
+        seed_commit(repo, 'divergence (hooks disabled for setup)')
+        result = git(repo, 'merge', '--no-ff', '--no-edit', 'feature', check=False)
+        expect('real merge rejects shrink against its first parent', result, 1, 'HEAD=3')
+        expect('merge shrink retains board-only scope disclosure', result, 1,
+               'pre-merge-commit: this entrypoint validates the board only')
+        expect('explicitly declared merge deletion accepted',
+               run(repo, 'env', 'BOARD_ALLOW_SHRINK=1', 'git', 'commit', '-qm',
+                   'intentional merge deletion'), 0, 'shrink explicitly allowed')
+        expect('CI merge check uses first parent, not shrunk second parent',
+               run(repo, 'bash', 'scripts/check-board.sh'), 1, 'HEAD^1=3')
 
         for board_file in ('tasks.jsonl', 'events.jsonl', 'board.jsonl', 'fixtures.jsonl'):
             repo = fixture('delete-' + board_file)

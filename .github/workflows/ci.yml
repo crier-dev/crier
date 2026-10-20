@@ -13,6 +13,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # The shrink gate compares HEAD with its first parent (DF-CRIER-426).
+          fetch-depth: 2
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
