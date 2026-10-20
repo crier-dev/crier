@@ -2960,3 +2960,38 @@ tasks:
   status: complete
   created_at: '2026-10-19T22:18:02.654423+00:00'
   completed_at: '2026-10-19T22:22:18.919434+00:00'
+- id: INT-CI-012
+  title: Install pytest for agent-ecosystem offline binding CI
+  criteria:
+  - The Agent-ecosystem offline execution binding job installs or otherwise provisions
+    pytest before python3 examples/agent-ecosystem/battery/test_binding.py; focused
+    local verification passes; the exact workflow job passes on the resulting commit;
+    include ch:trace row/spec/test/evidence/commit links.
+  status: complete
+  created_at: '2026-10-19T22:33:37.602432+00:00'
+  completed_at: '2026-10-19T23:15:12.674977+00:00'
+- id: README-004
+  title: Update stale Go version documentation
+  criteria:
+  - Update README.md, INSTALL.md, and docs/architecture.md to match go.mod Go 1.26.9
+    and current stable go1.27.2; remove stale 1.26.6 claims; run docs-check; include
+    ch:trace row/spec/test/evidence/commit links.
+  status: in_progress
+  created_at: '2026-10-19T23:30:52.843070+00:00'
+- id: README-008
+  title: Fix README make test documentation
+  criteria:
+  - README.md documents 'make test' as the full suite but the command fails; either
+    make it pass in a clean checkout or update README to document the prerequisite/alternate
+    passing command. INT-CI-013 owns the testsupport half; this row is the README-facing
+    remainder only.
+  status: in_progress
+  created_at: '2026-10-20T00:43:32.409004+00:00'
+- id: README-006
+  title: Fix stale coverage numbers in Project Status
+  criteria:
+  - README.md:2441 claims 94.1% coverage for Relay but measured 90.1%; README.md:2443
+    claims 77.5% for Registry but measured 78.3%; update both to match go test -short
+    -count=1 -cover output
+  status: in_progress
+  created_at: '2026-10-20T00:44:22.823589+00:00'

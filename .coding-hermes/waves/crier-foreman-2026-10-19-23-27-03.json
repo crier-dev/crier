@@ -15,5 +15,7 @@
       "worker_model": "gpt-5.6-sol@openai-codex",
       "status": "complete"
     }
-  ]
+  ],
+  "finished_at": "2026-10-20T00:31:21Z",
+  "recovery_note": "Recovered tick 2026-10-20-00-28-44: worker already complete, branch fully merged, manifest closed."
 }
