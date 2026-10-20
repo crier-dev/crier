@@ -111,9 +111,14 @@ var statusTopLevelKeys = []string{
 	"rate_limit_per_minute",
 	"registry_backend",
 	"registry_durable",
+	// DF-CRIER-428: the registry path actually in use, and the key an operator
+	// set that the reported backend never opens (empty when nothing ignored).
+	"registry_store_path",
+	"registry_store_ignored",
 	"session_backend",
 	"session_store_path",
 	"session_store_mount",
+	"session_store_ignored",
 	"a2a_enabled",
 	"require_agent_signature",
 	"webhook_signing",

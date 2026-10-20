@@ -327,6 +327,20 @@ type statusResponse struct {
 	SessionStorePath *string `json:"session_store_path"`
 	// Mount evidence, not a claim that a volume is retained or backed up.
 	SessionStoreMount string `json:"session_store_mount"`
+	// SessionStoreIgnored names the configuration key an operator set that the
+	// ACTIVE session backend does not open, e.g. "ignored:
+	// CR_SESSION_SQLITE_PATH (backend is jsonl)". Empty when nothing is
+	// ignored. It is printed beside session_store_path because a path the
+	// process never opens must never read as the live store (DF-CRIER-428).
+	SessionStoreIgnored string `json:"session_store_ignored"`
+	// RegistryStorePath is the resolved absolute SQLite registry file actually
+	// in use. Null for the in-memory store (no file exists) and for external
+	// PostgreSQL (its URL is configuration, never posture).
+	RegistryStorePath *string `json:"registry_store_path"`
+	// RegistryStoreIgnored is SessionStoreIgnored for the registry: the memory
+	// and postgres backends never open CR_REGISTRY_SQLITE_PATH, so a path set
+	// alongside them is named as ignored instead of implied durable.
+	RegistryStoreIgnored string `json:"registry_store_ignored"`
 	// A2AEnabled is the effective route-registration switch, not agent support.
 	A2AEnabled bool `json:"a2a_enabled"`
 	// RateLimitPerMinute is the effective relay publish budget; 0 means
@@ -420,9 +434,13 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		managementSurface = "enabled-unarmed"
 	}
 	sessionPath, sessionMount := sessionStoreLocation(cfg)
+	registryPath := registryStoreLocation(cfg)
 	return statusResponse{
 		SessionStorePath:                       sessionPath,
 		SessionStoreMount:                      sessionMount,
+		SessionStoreIgnored:                    cfg.SessionSQLitePathIgnored(),
+		RegistryStorePath:                      registryPath,
+		RegistryStoreIgnored:                   cfg.RegistrySQLitePathIgnored(),
 		ManagementSurface:                      managementSurface,
 		RegistryDurable:                        durable,
 		SessionBackend:                         cfg.ResolvedSessionBackend(),

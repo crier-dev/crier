@@ -56,6 +56,14 @@ type SessionConfig struct {
 	// CR_SQLITE_PATH. Explicit paths override the SQLite URL-derived path,
 	// then DefaultSQLitePath applies when the sqlite backend is selected.
 	SQLitePath string
+	// SQLitePathSource names the environment variable that supplied
+	// SQLitePath — "CR_SESSION_SQLITE_PATH", its legacy alias
+	// "CR_SQLITE_PATH", or empty when the value came from a SQLite database
+	// URL (nothing an operator can be told to unset). It exists so /status can
+	// name the exact key that is being ignored when the resolved backend does
+	// not open the file (DF-CRIER-428), instead of guessing which spelling an
+	// operator used.
+	SQLitePathSource string
 	// LogRoot is CR_SESSION_LOG_ROOT: the JSONL log root, which is both the
 	// ordered append log and the transport form. It defaults to
 	// DefaultSessionLogRoot when the jsonl backend is selected.
@@ -93,6 +101,12 @@ func (c Config) ResolvedSessionBackend() string {
 type RegistryConfig struct {
 	Backend    string // CR_REGISTRY_BACKEND: empty preserves URL-based selection.
 	SQLitePath string // CR_REGISTRY_SQLITE_PATH overrides a sqlite URL path.
+	// SQLitePathSource names the environment variable that supplied
+	// SQLitePath — "CR_REGISTRY_SQLITE_PATH" — or is empty when the value came
+	// from a SQLite database URL. Reported beside the resolved backend so an
+	// operator who set only the path can be told, by name, that no store reads
+	// it (DF-CRIER-428).
+	SQLitePathSource string
 }
 
 func (c Config) ResolvedRegistryBackend() string {
@@ -106,6 +120,48 @@ func (c Config) ResolvedRegistryBackend() string {
 		return "postgres"
 	}
 	return "memory"
+}
+
+// SessionSQLitePathIgnored names the configuration key that set a SQLite file
+// the RESOLVED session backend never opens, e.g.
+// "ignored: CR_SESSION_SQLITE_PATH (backend is jsonl)". Empty when the file is
+// the live store.
+//
+// It exists because setting the path alone is not a backend selection: with
+// CR_SESSION_BACKEND unset and no database URL, sessions stay on the JSONL log
+// while the operator-supplied file is never opened. That is legitimate
+// precedence (a default must not silently relocate existing sessions), but it
+// must never be SILENT — /status prints this string beside the path actually
+// in use and the boot log warns with the same words (DF-CRIER-428).
+func (c Config) SessionSQLitePathIgnored() string {
+	backend := c.ResolvedSessionBackend()
+	if c.Session.SQLitePath == "" || backend == SessionBackendSQLite {
+		return ""
+	}
+	return fmt.Sprintf("ignored: %s (backend is %s)", c.sqlitePathKey(c.Session.SQLitePathSource, "CR_SESSION_SQLITE_PATH"), backend)
+}
+
+// RegistrySQLitePathIgnored is SessionSQLitePathIgnored for the registry: the
+// memory (DEMO-ONLY) and postgres backends never open the configured file, so
+// naming it without naming that fact reads as durable storage that does not
+// exist (DF-CRIER-428).
+func (c Config) RegistrySQLitePathIgnored() string {
+	backend := c.ResolvedRegistryBackend()
+	if c.Registry.SQLitePath == "" || backend == "sqlite" {
+		return ""
+	}
+	return fmt.Sprintf("ignored: %s (backend is %s)", c.sqlitePathKey(c.Registry.SQLitePathSource, "CR_REGISTRY_SQLITE_PATH"), backend)
+}
+
+// sqlitePathKey reports the key to name for an ignored path: the env var that
+// supplied it when known, else the documented key for that store. A
+// hand-built Config (tests, embedders) carries no source, and the documented
+// key is the only honest spelling to name then.
+func (c Config) sqlitePathKey(source, documented string) string {
+	if source != "" {
+		return source
+	}
+	return documented
 }
 
 // Config holds all Crier configuration.
@@ -560,6 +616,9 @@ func Load() (Config, error) {
 	cfg.Database.URL = dbURL
 	cfg.Registry.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_REGISTRY_BACKEND")))
 	cfg.Registry.SQLitePath = strings.TrimSpace(os.Getenv("CR_REGISTRY_SQLITE_PATH"))
+	if cfg.Registry.SQLitePath != "" {
+		cfg.Registry.SQLitePathSource = "CR_REGISTRY_SQLITE_PATH"
+	}
 	if cfg.Registry.SQLitePath == "" {
 		cfg.Registry.SQLitePath = sqlitePath
 	}
@@ -637,8 +696,13 @@ func Load() (Config, error) {
 	// The session-scoped spelling wins; retain CR_SQLITE_PATH for existing
 	// deployments. There is no general known-key registry in this loader.
 	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SESSION_SQLITE_PATH"))
-	if cfg.Session.SQLitePath == "" {
+	if cfg.Session.SQLitePath != "" {
+		cfg.Session.SQLitePathSource = "CR_SESSION_SQLITE_PATH"
+	} else {
 		cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+		if cfg.Session.SQLitePath != "" {
+			cfg.Session.SQLitePathSource = "CR_SQLITE_PATH"
+		}
 	}
 	if cfg.Session.SQLitePath == "" {
 		cfg.Session.SQLitePath = sqlitePath

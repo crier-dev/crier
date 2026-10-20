@@ -2264,6 +2264,13 @@ and the accepted schemes; neither error prints database credentials.
 
 For sessions, `/status` reports `session_store_path` (the resolved absolute SQLite
 file or JSONL directory) and `session_store_mount` (observed mount evidence).
+When a store's path key is set while the ACTIVE backend does not open it, the
+response names the key instead of presenting the file as the live store:
+`session_store_ignored` carries e.g. `ignored: CR_SESSION_SQLITE_PATH (backend is
+jsonl)` and `registry_store_ignored` the registry equivalent, with
+`registry_store_path` reported only for the sqlite registry that opens it. A path
+key is configuration, not a backend selection — the boot log warns with the same
+words — so `CR_SESSION_SQLITE_PATH` alone never reads as durable storage.
 The chat posture displays that path in its Session store sentence. An overlay
 root is labeled a writable layer with a prompt to mount the path before container
 replacement. A distinct mount is labeled volume/mount observed, not guaranteed

@@ -69,6 +69,29 @@ func sessionStoreLocation(cfg config.Config) (*string, string) {
 	return &resolved, sessionMountKind(resolved, string(mountinfo))
 }
 
+// registryStoreLocation reports the registry path actually in use, or nil when
+// the active backend keeps no local file: the in-memory store has none, and
+// PostgreSQL's location is not observable from this process (and its URL is
+// configuration, never posture). The path is reported only for the backend that
+// opens it, so /status cannot name a file the store never touches (DF-CRIER-428).
+func registryStoreLocation(cfg config.Config) *string {
+	if cfg.ResolvedRegistryBackend() != "sqlite" || cfg.Registry.SQLitePath == "" {
+		return nil
+	}
+	// Registry SQLite accepts file paths only — never :memory: or a URI — so
+	// there is no DSN to unwrap here (see buildStatusResponse's durability note).
+	absolute, err := filepath.Abs(cfg.Registry.SQLitePath)
+	if err != nil {
+		return nil
+	}
+	// The store has already opened the file in production; resolving symlinks
+	// reports the file the process is really writing.
+	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
+		return &resolved
+	}
+	return &absolute
+}
+
 // sessionMountKind selects the longest path-component mount prefix, not a
 // string prefix (/data is not /database). A root disk mount is deliberately
 // unknown: it may be bare metal OR a container without an overlay root.

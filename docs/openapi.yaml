@@ -274,7 +274,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, session_backend, session_store_path, session_store_mount, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, registry_store_path, registry_store_ignored, session_backend, session_store_path, session_store_mount, session_store_ignored, a2a_enabled, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   management_surface:
                     type: string
@@ -353,6 +353,25 @@ paths:
                     type: boolean
                     nullable: true
                     description: Whether registry agents survive a process restart; false for memory, true for file-backed sqlite or postgres, null for an unknown backend. This is persistence posture, not a health or backup guarantee
+                  registry_store_path:
+                    type: string
+                    nullable: true
+                    description: >-
+                      The resolved absolute SQLite registry file actually open in
+                      this process. Null for the in-memory store (no file exists)
+                      and for external PostgreSQL (its URL is configuration, never
+                      posture). Printed beside registry_backend so a file is
+                      reported only for the backend that reads it (DF-CRIER-428).
+                  registry_store_ignored:
+                    type: string
+                    description: >-
+                      Names the configuration key an operator set that the
+                      REPORTED registry_backend never opens, e.g. "ignored:
+                      CR_REGISTRY_SQLITE_PATH (backend is memory)" — the precise
+                      trap DF-CRIER-428 measured, where setting only the path left
+                      the in-memory DEMO-ONLY store serving. Empty when nothing is
+                      ignored. A path is not a backend selection; this field says
+                      so instead of implying durable storage that does not exist.
                   session_backend:
                     type: string
                     enum: [jsonl, sqlite, postgres]
@@ -361,6 +380,16 @@ paths:
                     type: string
                     nullable: true
                     description: 'Resolved absolute SQLite file or JSONL log directory, with symlinks resolved when observable. Null for external PostgreSQL or unresolved locations; never a database URL. SQLite memory stores report :memory:'
+                  session_store_ignored:
+                    type: string
+                    description: >-
+                      Names the configuration key an operator set that the
+                      ACTIVE session backend never opens, e.g. "ignored:
+                      CR_SESSION_SQLITE_PATH (backend is jsonl)". Setting
+                      CR_SESSION_SQLITE_PATH alone selects nothing — the jsonl log
+                      stays the store — so the key is named beside the path in
+                      use, and the boot log warns with the same words. Empty when
+                      nothing is ignored (DF-CRIER-428).
                   session_store_mount:
                     type: string
                     enum: [mounted-filesystem, overlay-layer, memory, external, unknown]

@@ -218,6 +218,18 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// cannot drift from the store that actually answers.
 	regBackend := cfg.ResolvedRegistryBackend()
 
+	// A SQLite path is not a backend selection. Naming a file the resolved
+	// backend never opens is the durability trap DF-CRIER-428 measured: the
+	// operator set CR_REGISTRY_SQLITE_PATH, the process kept the in-memory
+	// store, and nothing said so. The same sentence /status reports is warned
+	// here, so a log-only reader is told too.
+	if ignored := cfg.RegistrySQLitePathIgnored(); ignored != "" {
+		slog.Warn("registry SQLite path is ignored — the resolved backend does not open it",
+			"ignored", ignored,
+			"registry_backend", regBackend,
+			"hint", "set CR_REGISTRY_BACKEND=sqlite to use the configured file, or unset CR_REGISTRY_SQLITE_PATH")
+	}
+
 	// Configure the WebSocket origin check PER LANE (DF-CRIER-287). They are
 	// different clients: the relay is subscribed to from browsers (whose
 	// allowlist may reasonably require an Origin), while every mesh client is
@@ -864,6 +876,15 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	slog.Info("session api enabled",
 		"backend", cfg.ResolvedSessionBackend(),
 		"detail", "GET/POST /sessions, GET/POST /sessions/{id}/messages, POST /sessions/{id}/tasks, POST /sessions/{id}/tasks/{task_id}/claim|complete, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand")
+	// Same trap as the registry path above, on the session pair. The path is
+	// legitimate to set (CR_SESSION_SQLITE_PATH), but it selects nothing on its
+	// own: without CR_SESSION_BACKEND=sqlite the jsonl log stays the store.
+	if ignored := cfg.SessionSQLitePathIgnored(); ignored != "" {
+		slog.Warn("session SQLite path is ignored — the resolved backend does not open it",
+			"ignored", ignored,
+			"session_backend", cfg.ResolvedSessionBackend(),
+			"hint", "set CR_SESSION_BACKEND=sqlite to use the configured file, or unset CR_SESSION_SQLITE_PATH")
+	}
 	slog.Info("named group api enabled",
 		"store_dir", cfg.Session.GroupRoot,
 		"detail", "POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)")
