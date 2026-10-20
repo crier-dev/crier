@@ -19,10 +19,18 @@ func liveBehavior(repoRoot, id string) (string, error) {
 	}
 	// DF-CRIER-433 raised this budget: the selftest's acceptance cases now RUN the
 	// installed hooks in scratch repositories (a healthy board and a staged shrink
-	// per fixture), so the fixture battery costs seconds, not milliseconds. The
-	// bound stays generous relative to the measured wall clock (~20-30s on a
-	// loaded box) — it exists to stop a hang, not to time the battery.
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	// per fixture), so the fixture battery costs seconds, not milliseconds.
+	// DF-CRIER-438 raised it again, and by construction rather than by guesswork: the
+	// probe drives a REAL Git entrypoint per hook per scenario (six fixture
+	// repositories, each with its own `git init`/config/history, plus a real merge and
+	// a real `git am`), and the selftest runs the doctor once per case — measured at
+	// ~50s wall clock on an idle box (and ~80s while a case that has since been
+	// folded into a premise measurement was still in the battery) before this
+	// constant was changed.
+	// The bound stays an anti-HANG bound, not a performance assertion: it must clear
+	// the measured battery on a loaded CI runner, where git subprocesses are slower
+	// than local ones, and still fail in minutes rather than never.
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "make", "--no-print-directory", "doctor-hooks-selftest")
 	cmd.Dir = repoRoot

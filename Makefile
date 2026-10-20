@@ -609,13 +609,21 @@ judge-diff-class-selftest:
 # present but unreachable is a refusal, not a green. That fixture is its own
 # repository and its commit is pinned against host hooks and gpg signing, so
 # this target stays read-only with respect to THIS checkout.
-# DF-CRIER-437: that fixture is also where the hook's Git-provided environment
-# comes from. GIT_DIR/GIT_INDEX_FILE/GIT_PREFIX are SET FROM THE FIXTURE
-# (measured, git 2.53.0: a real pre-commit/pre-merge-commit exports
-# GIT_INDEX_FILE=.git/index plus GIT_PREFIX=) instead of being stripped, so a hook
-# that arms under the environment Git really gives a hook is no longer falsely
-# refused as a board arm that cannot run — while every other repository-pointing
-# GIT_* variable, and BOARD_ALLOW_SHRINK, stay removed.
+# DF-CRIER-437: the hook is given the Git-provided environment rather than a
+# stripped one, so a hook that arms under the environment Git really supplies is
+# no longer falsely refused as a board arm that cannot run — and every other
+# repository-pointing GIT_* variable, plus BOARD_ALLOW_SHRINK, stays out of the
+# fixture's way.
+# DF-CRIER-438: that environment is now obtained by CONSTRUCTION — the probe runs
+# the entrypoint Git itself runs for each hook (`git commit` / `git merge --no-ff`
+# / `git am`) and lets Git invoke the hook, in a fixture whose directory name is
+# random and whose stand-in validator lives outside the fixture root, so the probe
+# no longer presents a surface a hook can gate on. No hook is executed directly.
+# DF-CRIER-439: `timeout` is required, not optional — without it the doctor is
+# exit 2 naming the tool instead of running the probe unbounded.
+# DF-CRIER-441: the bound is `timeout --kill-after=1s`, exit 124/137 are refusals
+# naming it, and the probe's process group is killed and reaped, so a hook that
+# traps SIGTERM is refused within the bound rather than waited for.
 doctor-hooks:
 	@bash scripts/doctor-hooks.sh
 

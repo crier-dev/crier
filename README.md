@@ -2448,17 +2448,28 @@ generation is one whose board-arm markers are gone, and those markers are checke
 three entrypoints — the board-checker invocation each tracked source runs, plus the
 gate-scope disclosure line on pre-merge-commit and pre-applypatch — not by hook bytes
 alone (DF-CRIER-430). It does not stop at presence: it also refuses an unconditional
-`exit 0`/`return 0` above a hook's board arm, and RUNS the installed hook in a scratch
-repository under ${TMPDIR:-/tmp} — a healthy board must exit 0 and a staged 5→1 shrink of
-.coding-hermes/board/tasks.jsonl must exit non-zero naming the shrink, so a hook that
-accepts it is reported as a board arm that cannot run and a hook that cannot be probed is
-refused, never reported armed on presence alone (DF-CRIER-433). It runs each hook under the
-Git-provided environment it SYNTHESIZES from its own fixture — GIT_DIR, GIT_INDEX_FILE and
-GIT_PREFIX, with stdin at /dev/null (measured on git 2.53.0: a real pre-commit and
-pre-merge-commit export GIT_INDEX_FILE=.git/index and GIT_PREFIX=, while pre-applypatch
-exports neither) — and strips every other repository-pointing Git variable, so a hook that
-arms under the environment Git really gives a hook is treated as armed rather than reported
-disarmed (DF-CRIER-437). It accepts only a matching
+`exit 0`/`return 0` above a hook's board arm, and RUNS the entrypoint Git itself runs for
+each hook inside its own scratch repository under ${TMPDIR:-/tmp} — `git commit` for
+pre-commit, `git merge --no-ff` for pre-merge-commit, `git am` for pre-applypatch — where a
+healthy board must commit exit 0 with the board intact and a staged 5→1 shrink of
+.coding-hermes/board/tasks.jsonl must exit non-zero naming the shrink with the un-shrunk
+board still in HEAD, so a hook that accepts it is reported as a board arm that cannot run
+and a hook that cannot be probed is refused, never reported armed on presence alone
+(DF-CRIER-433). No hook is executed directly any more, and the fixture no longer names
+the probe anywhere: its directory name is random, no path under the fixture root is on
+PATH, its commit identity is this repository's own, and its branches, commit messages,
+file names and board rows are ordinary text — so a hook gated on the probe's old scratch
+prefix or on the fixture's `bin/` on PATH is refused rather than reported armed
+(DF-CRIER-438). The hook's Git environment, cwd and stdin are Git's, because
+Git is what invokes it (measured on git 2.53.0: a real pre-commit and pre-merge-commit
+export GIT_INDEX_FILE=.git/index and GIT_PREFIX=, while pre-applypatch exports neither), so
+a hook that arms under the environment Git really gives a hook is treated as armed rather
+than reported disarmed (DF-CRIER-437). Each invocation is bounded by `timeout
+--kill-after=1s`, exit 124 and 137 are refusals naming the bound, and the probe's whole
+process group is killed and reaped, so a hook that traps SIGTERM is refused within roughly
+the bound and does not outlive it (DF-CRIER-441); `timeout` is a REQUIRED tool, and a host
+without it is exit 2 naming the tool rather than an unbounded run (DF-CRIER-439). It
+accepts only a matching
 executable install in this repository's common Git hooks directory.
 It works in linked worktrees and prints one OK line per hook, plus that hook's own probe
 evidence, only after all checks pass: an exit code alone is never the evidence that the
