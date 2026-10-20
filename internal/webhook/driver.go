@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crier-dev/crier/internal/dispatchlive"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 )
@@ -71,17 +72,20 @@ type Driver struct {
 	cfg           DriverConfig
 	resolveConf   func(agentID string) (*Config, error)
 	notifyFailure func(FailureNotification) error
-	gate          *sessionGate
-	mu            sync.Mutex
-	degraded      map[string]time.Time // agentID -> degraded-since
-	failures      map[string]int       // agentID -> consecutive failures
-	batches       map[string]*batchBuffer
-	paused        map[string]bool // agentID -> outbound lane paused by the kill-switch (CR-FEAT-030)
-	drainWakeCh   chan struct{}   // nudges redeliverLoop (async enqueues)
-	flushWakeCh   chan struct{}   // nudges batchLoop (batch enqueues)
-	stopCh        chan struct{}
-	stopped       bool
-	wg            sync.WaitGroup
+	// observeAttempt reports each blocking attempt as soon as its result is
+	// known (DF-CRIER-414); nil disables observation.
+	observeAttempt func(AttemptObservation)
+	gate           *sessionGate
+	mu             sync.Mutex
+	degraded       map[string]time.Time // agentID -> degraded-since
+	failures       map[string]int       // agentID -> consecutive failures
+	batches        map[string]*batchBuffer
+	paused         map[string]bool // agentID -> outbound lane paused by the kill-switch (CR-FEAT-030)
+	drainWakeCh    chan struct{}   // nudges redeliverLoop (async enqueues)
+	flushWakeCh    chan struct{}   // nudges batchLoop (batch enqueues)
+	stopCh         chan struct{}
+	stopped        bool
+	wg             sync.WaitGroup
 }
 
 // DriverConfig holds env-driven tuning (spec §9).
@@ -364,6 +368,12 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		var timeout net.Error
 		cut = errors.Is(res.Err, context.DeadlineExceeded) || (errors.As(res.Err, &timeout) && timeout.Timeout()) || res.StatusCode == http.StatusRequestTimeout || res.StatusCode == http.StatusGatewayTimeout
 		cancel()
+		// DF-CRIER-414: report this attempt once its result is FINAL — after
+		// the late-2xx downgrade above, so the observation can never claim an
+		// answer the driver itself refuses. Observation only: the attempt, its
+		// classification and the retry schedule below are untouched, and a
+		// driver with no observer behaves exactly as before.
+		d.observe(agentID, env, attempts, res, time.Now().UTC())
 		d.logOutcome(agentID, cfg, env, attempt, res, rid)
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			reply, err := d.client.ExtractReply(cfg, res.Body)
@@ -696,6 +706,84 @@ func (d *Driver) SetConfigResolver(fn func(agentID string) (*Config, error)) {
 // are log-only, the pre-DF-CRIER-8 behavior).
 func (d *Driver) SetFailureNotifier(fn func(FailureNotification) error) {
 	d.notifyFailure = fn
+}
+
+// AttemptObservation is one outbound attempt of a blocking delivery, reported
+// as soon as its result is known (DF-CRIER-414). It is OBSERVATION ONLY: it
+// carries no outcome, changes no retry, backoff or classification, and a
+// receiver that ignores it (or a nil observer) leaves delivery byte-identical.
+//
+// SessionID and MessageID are the envelope's own correlation fields — the
+// session the delivery belongs to and `crier.request_id`, which the session
+// fan-out sets to the message being delivered (session.deliverMessage) — so
+// an observer can attribute an attempt to the fan-out pass that caused it
+// without a new identifier.
+type AttemptObservation struct {
+	AgentID   string
+	SessionID string
+	MessageID string
+	// Attempt is the one-based ordinal for this target, counted by this driver.
+	Attempt int
+	At      time.Time
+	// Status is the endpoint's HTTP status, 0 when no response was received.
+	Status int
+	// Class names why the attempt produced no answer; empty means the endpoint
+	// answered (the outcome classification owns what that reply means).
+	Class dispatchlive.Class
+	// Reason is the transport's own diagnostic, retained verbatim.
+	Reason string
+}
+
+// SetAttemptObserver installs the per-attempt observer for BLOCKING deliveries
+// (DF-CRIER-414). Nil (the default) disables observation entirely.
+func (d *Driver) SetAttemptObserver(fn func(AttemptObservation)) {
+	d.observeAttempt = fn
+}
+
+// attemptClass names WHY one blocking attempt produced no answer, from the
+// runtime's own error value. The classes are the closed set dispatchlive
+// publishes; anything the runtime cannot name stays ClassError with the
+// transport's own message, which is still an honest "this attempt failed".
+//
+// A dial that never reached the endpoint (refused, no route, name resolution)
+// is ClassUnreachable — the early signal an operator needs, because a dead host
+// is knowable in milliseconds while the budget is 30 seconds. A dial that hit
+// its own deadline is ClassTimeout: also early, and its reason names the host.
+func attemptClass(res Result) (dispatchlive.Class, string) {
+	if res.Err == nil {
+		if res.StatusCode >= 200 && res.StatusCode < 300 {
+			return "", ""
+		}
+		return dispatchlive.ClassRejected, fmt.Sprintf("status %d", res.StatusCode)
+	}
+	var timeout net.Error
+	if errors.Is(res.Err, context.DeadlineExceeded) || (errors.As(res.Err, &timeout) && timeout.Timeout()) {
+		return dispatchlive.ClassTimeout, res.Err.Error()
+	}
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	if errors.As(res.Err, &dnsErr) || (errors.As(res.Err, &opErr) && opErr.Op == "dial") {
+		return dispatchlive.ClassUnreachable, res.Err.Error()
+	}
+	return dispatchlive.ClassError, res.Err.Error()
+}
+
+// observe reports one attempt to the installed observer, if any.
+func (d *Driver) observe(agentID string, env *Envelope, attempt int, res Result, at time.Time) {
+	if d.observeAttempt == nil || env == nil {
+		return
+	}
+	class, reason := attemptClass(res)
+	d.observeAttempt(AttemptObservation{
+		AgentID:   agentID,
+		SessionID: env.Crier.SessionID,
+		MessageID: env.Crier.RequestID,
+		Attempt:   attempt,
+		At:        at,
+		Status:    res.StatusCode,
+		Class:     class,
+		Reason:    reason,
+	})
 }
 
 // agentConfig is the internal accessor used by the loops.

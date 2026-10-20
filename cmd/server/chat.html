@@ -90,6 +90,14 @@ main { min-width:0; display:flex; flex-direction:column; }
 .composer-controls label:nth-child(2) { flex:0 1 135px; }
 .composer-hint { margin-top:8px; }
 #send-result { margin:10px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+/* DF-CRIER-414: the composer's in-flight line. Every value it shows is the
+   server's (elapsed, budget, per-target attempt + failure reason); the spinner
+   is decoration and stops when the panel leaves the in-flight state. */
+#send-progress { margin:10px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+#send-progress .spinner { display:inline-block; width:9px; height:9px; margin-right:7px; flex:none; border:2px solid var(--amber); border-top-color:transparent; border-radius:50%; animation:chat-send-spin .9s linear infinite; vertical-align:middle; }
+#send-progress .spinner[hidden] { display:none; }
+@keyframes chat-send-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { #send-progress .spinner { animation:none; } }
 .panel { margin-bottom:22px; overflow-wrap:anywhere; }
 .panel h2 { margin-bottom:10px; }
 .card { padding:12px; border:1px solid var(--border); background:var(--panel); border-radius:10px; margin-bottom:8px; min-width:0; }
@@ -192,6 +200,7 @@ main { min-width:0; display:flex; flex-direction:column; }
     <p id="sender-authority" class="note composer-hint" role="status">Send authority: unknown until runtime posture is read. This browser cannot sign agent requests. Acting ID is attribution, not key verification; browser authentication is an open owner decision (DF-CRIER-333).</p>
     <p id="composer-why" class="gate" role="status"><span id="composer-reason">Set an acting agent ID (Connection &amp; identity, left) to enable sending.</span> <button id="composer-identity" type="button" class="ghost">Set acting ID</button> <button id="composer-pick" type="button" class="ghost" hidden>Pick a channel</button> <button id="composer-create" type="button" class="ghost" hidden>Create channel</button> <button id="composer-refresh" type="button" class="ghost" hidden>Refresh runtime posture</button></p>
     <p id="audience-warning" class="gate" role="status" hidden></p>
+    <p id="send-progress" class="gate" role="status" aria-live="polite" hidden><span id="send-progress-spinner" class="spinner" aria-hidden="true"></span><span id="send-progress-text"></span></p>
     <p id="send-result" role="status" aria-live="polite"></p>
     <p class="note">Guard verdict, lease/ack details, task progress percentages and attachments are unavailable in this transcript UI; no status is inferred from message text.</p>
   </div>
@@ -689,6 +698,12 @@ function openSession(id) {
   state.current = id; state.session = null; state.messages = []; state.reply = null; state.thread = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
+  // DF-CRIER-414: the in-flight panel belongs to the conversation that was open
+  // when the send started, so a switch stops watching it rather than reporting
+  // another room's delivery inside this composer. The delivery itself continues
+  // server-side; the message keeps its recorded outcome.
+  if (state.sendWatch) state.sendWatch.done = true;
+  clearSendProgress();
   for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Loading…");
   refresh();
 }
@@ -760,6 +775,12 @@ async function send(event) {
       payload.idempotency_key = pendingMessageRequest.key;
     }
     postStarted = true;
+    // DF-CRIER-414: hand this send to the composer's in-flight watcher. This
+    // line publishes the TICKET only; the watcher itself lives further down and
+    // reads the server's live dispatch record for this session. The key is the
+    // one this send already sends as payload.idempotency_key, so the watcher
+    // attaches to exactly this message and never to another operator's send.
+    state.sendWatch = { session:id, key:payload.idempotency_key || "", startedAt:Date.now(), settled:false, done:false, budgetMs:null, pendingPolls:0 };
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) }, !task);
     const outcomes = result.outcomes || [];
     const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut");
@@ -786,7 +807,13 @@ async function send(event) {
       notice("send-result", "Request failed — " + e.message + "\nDraft kept. Refresh the transcript before retrying.",true);
     }
   }
-  finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
+  finally {
+    // The browser's wait is not the server's: this marks the SEND as settled so
+    // the in-flight watcher stops waiting for a record that will never exist,
+    // while a delivery still running past the 12s browser wait keeps reporting.
+    if (state.sendWatch) state.sendWatch.settled = true;
+    state.sending = false; state.busy = false; updateComposer(); await refresh();
+  }
 }
 $("add-participant-form").addEventListener("submit", async event => {
   event.preventDefault();
@@ -857,6 +884,101 @@ $("intent").addEventListener("change", () => { resetAudienceWarning(); updateCom
 $("composer").addEventListener("submit",send);
 $("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
 setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refresh(); },15000);
+// DF-CRIER-414 — the composer's in-flight line.
+//
+// The defect this answers: a blocking fan-out can spend the whole per-target
+// budget (30s by default) before it has anything to report, so the operator saw
+// "Recording message…" and nothing else until the terminal outcome — a control
+// that looks like it accepted input and then went silent is indistinguishable
+// from one that wedged.
+//
+// Every value rendered here is the SERVER's, read from the message's own
+// `dispatch_live` field: the elapsed time, the budget it is bounded by, the
+// per-target attempt count the runtime reported and that attempt's own failure
+// reason (a refused dial names the endpoint). This tick SCHEDULES that read; it
+// never counts down, never estimates and never claims a fact the server has not
+// measured. When the pass ends the server stops publishing `dispatch_live` and
+// this panel shows the recorded outcome instead — so the indicator cannot be
+// left spinning after the budget.
+const PROGRESS_READ_GRACE_MS = 15000; // past budget+browser wait: stop watching, say so
+const PROGRESS_PENDING_LIMIT = 15;    // write-back not yet readable: bounded wait
+function progressSeconds(ms) { return (Math.max(0, Number(ms) || 0) / 1000).toFixed(1) + "s"; }
+function progressTargetLine(t) {
+  // Values are written with textContent (see showSendProgress), so server text
+  // is displayed VERBATIM: escaping here would show the operator `&quot;`
+  // instead of the transport's own quoting.
+  const target = String(t.target);
+  if (!t.attempts) return target + ": no attempt has returned yet";
+  const attempts = t.attempts + (t.attempts === 1 ? " attempt" : " attempts");
+  const last = t.last_attempt_at ? " · last attempt " + stamp(t.last_attempt_at) : "";
+  if (!t.class) return target + ": the endpoint answered; its recorded outcome is still pending (" + attempts + last + ")";
+  return target + ": " + String(t.class) + " — " + (t.reason ? String(t.reason) : "the runtime reported no reason") + " (" + attempts + last + ")";
+}
+function showSendProgress(text, error, spinning) {
+  const panel = $("send-progress");
+  if (!panel) return;
+  // Written through the panel's own children: notice() replaces textContent,
+  // which would destroy the spinner and the text slot it is meant to keep.
+  panel.hidden = false;
+  panel.className = error ? "note error" : "gate";
+  $("send-progress-text").textContent = text;
+  $("send-progress-spinner").hidden = !spinning;
+}
+function clearSendProgress() {
+  const panel = $("send-progress");
+  if (!panel) return;
+  panel.hidden = true;
+  $("send-progress-spinner").hidden = true;
+  $("send-progress-text").textContent = "";
+}
+let sendProgressBusy = false;
+async function watchSendProgress() {
+  const ticket = state.sendWatch;
+  if (!ticket || ticket.done || sendProgressBusy) return;
+  const budget = ticket.budgetMs || 30000;
+  if (Date.now() - ticket.startedAt > budget + PROGRESS_READ_GRACE_MS) {
+    ticket.done = true;
+    showSendProgress("Delivery still in flight past its budget and this panel stopped watching. The recorded outcome appears in the transcript when it arrives.", true, false);
+    return;
+  }
+  sendProgressBusy = true;
+  try {
+    const body = await call(sessionPath(ticket.session, "messages"));
+    if (state.sendWatch !== ticket) return; // superseded by a newer send
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const recorded = ticket.key ? messages.find(m => m.idempotency_key === ticket.key) : messages[messages.length - 1];
+    if (!recorded) { if (ticket.settled) { ticket.done = true; clearSendProgress(); } return; }
+    if (recorded.dispatch_live) {
+      ticket.budgetMs = recorded.dispatch_live.budget_ms || ticket.budgetMs;
+      ticket.pendingPolls = 0;
+      const pass = recorded.dispatch_live;
+      showSendProgress(["Delivery in flight — " + progressSeconds(pass.elapsed_ms) + " of the " + progressSeconds(pass.budget_ms) + " delivery budget", ...(pass.targets || []).map(progressTargetLine)].join("\n"), false, true);
+      return;
+    }
+    const outcomes = recorded.outcomes || [];
+    if (outcomes.length) {
+      ticket.done = true;
+      showSendProgress("Delivery finished — " + outcomes.map(outcomeLine).join("; ") + ". Recorded outcome; the transcript row keeps it.", outcomes.some(negativeOutcome), false);
+      await refresh();
+      return;
+    }
+    if (recorded.outcomes_incomplete) {
+      if (++ticket.pendingPolls > PROGRESS_PENDING_LIMIT) {
+        ticket.done = true;
+        showSendProgress("Delivery finished; the recorded outcome is not readable yet — refresh the transcript.", true, false);
+        return;
+      }
+      showSendProgress("Delivery finished; the recorded outcome is still being written.", false, true);
+      return;
+    }
+    ticket.done = true;
+    showSendProgress("No in-flight pass and no per-recipient outcome recorded for this message.", false, false);
+  } catch (error) {
+    // A failed progress read is not a delivery verdict: keep the last server
+    // reading and let the result line own the failure.
+  } finally { sendProgressBusy = false; }
+}
+setInterval(watchSendProgress, 1000);
 restoreAttribution();
 updateComposer();
 refresh();

@@ -230,6 +230,32 @@ answer or replace the cut with success. Retrying all-negative outcomes includes
 `budget_cut`, retaining the original intent and operator row (DF-CRIER-349).
 The existing `canned` / `failed` verdict handling (DF-CRIER-348) is unchanged.
 
+### In-flight delivery feedback (DF-CRIER-414)
+
+Outcomes are recorded when a fan-out RETURNS, so a blocking delivery can spend
+its whole per-target budget with nothing on the wire to show for it. The composer
+therefore carries an explicit in-flight line, and the only values it may render
+are the ones the server publishes for the message it is delivering —
+`dispatch_live` on the transcript read
+([CHAT-SESSIONS.md §3.2](CHAT-SESSIONS.md#in-flight-window)): the elapsed
+milliseconds measured server-side, the per-target budget, each target's attempt
+count, and that attempt's own failure class and reason.
+
+1. The line reports PER TARGET, and every value is the server's own reading. A
+   client may not render a countdown, an estimate, or an elapsed time it computed
+   itself, and may not report a target unreachable unless the runtime said so.
+2. A dial the runtime already knows failed (refused, no route, name resolution)
+   is named while the budget is still running — the target and the transport's
+   own reason — instead of being deferred to the terminal outcome.
+3. It refreshes at least once a second while a pass is in flight.
+4. The terminal outcome is unchanged and still comes from the recorded
+   `outcomes`. `dispatch_live` disappearing IS the end of the pass: the in-flight
+   line is REPLACED by the recorded outcome in the existing vocabulary (with its
+   `detail`), and nothing is left spinning after the budget.
+5. A target that has produced no attempt is reported as having produced none —
+   never as a failure. A slow endpoint is not an unreachable one, and the budget
+   is not shortened to make the panel lively.
+
 ### Busy dispatch and diagnostic ordering (DF-CRIER-353, DF-CRIER-358)
 
 A held registry delivery idempotency key yields `in_progress`, with
@@ -733,6 +759,7 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 47 | **Late-join context-share prompt** — none / summary / since / full, recorded as a system event naming the mode **and the boundary message id** (§3.8.4) | none | **NOT BUILT**. Owed: the recorded share mode + boundary on the thread-membership event (CR-CHAT-016; the record shape is `CHAT-SESSIONS.md` §4.6). |
 | 48 | **Message-kind rendering** — plain vs addressed vs **TASK/ACTION**, visibly distinct (§3.8.3) | none | **NOT BUILT**. Owed: the three kinds distinguishable **on the wire, in storage and in the transcript** (CR-CHAT-018; the record field is `CHAT-SESSIONS.md` §4.4, and it must **not** overload the shipped deliver-body `kind`, which is the envelope kind — `message`/`configure`/`configure_ack`). |
 | 49 | **Compile / merge a context bundle** — gather N messages (across threads or sessions) into ONE payload, hand it to an agent by tagging it, and expand a part back to its source (§4.8 of `CHAT-SESSIONS.md`) | `POST /sessions/{id}/compile` (merge + fan-out), `GET /sessions/{id}/messages/{mid}/expand` (citation → original) | **SHIPPED** (CR-CHAT-028) — the merged message is a **NEW** message whose every part carries a `{source_session_id, source_message_id}` **provenance citation**; a source the compiler could not read is omitted **with a named gap** (never silently included, never silently dropped) and a merge with nothing readable is **refused**; the compiled message rides the shipped inbox fan-out (§5.1, no second delivery path). Distinct from a quote/reply, which is an id pointer — both are needed. |
+| 50 | **Composer in-flight line** — per target: elapsed vs the delivery budget, the attempts made, and an early unreachable/timeout signal naming the target and the transport's own reason (DF-CRIER-414) | `GET /sessions/{id}/messages` → `dispatch_live` on the message being delivered (DF-CRIER-414; the same read as rows 14 and 31) | **SHIPPED** (DF-CRIER-414) — process-local and never persisted: present only while THIS process is running the pass, absent after a restart, and gone the moment the pass's outcomes are durable. It carries no outcome; the terminal outcome is still the recorded `outcomes`. |
 
 ---
 

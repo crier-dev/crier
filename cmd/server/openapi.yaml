@@ -5695,6 +5695,73 @@ components:
                   $ref: "#/components/schemas/TranscriptMessage/properties/outcomes/items"
               outcomes_recorded:
                 type: boolean
+        dispatch_live:
+          type: object
+          description: |-
+            The fan-out pass THIS PROCESS is running for this message right now
+            (DF-CRIER-414). Present only while a pass is in flight: its presence
+            is the in-flight state and its absence is the terminal record, so a
+            reader never infers progress from a timer. It carries NO outcome and
+            is never persisted — every value is the server's own reading
+            (elapsed_ms is measured at the moment of the read), which is why a
+            client can display it without claiming knowledge it does not have.
+            It is absent in a restarted process, and it disappears the moment
+            the pass's outcomes are durable.
+          required: [attempt, started_at, elapsed_ms, budget_ms, targets]
+          properties:
+            attempt:
+              type: integer
+              minimum: 1
+              description: The same one-based journal index dispatch_evidence records for this pass, so the live view and the durable journal can be joined.
+            started_at:
+              type: string
+              format: date-time
+              description: When dispatch entered the fan-out boundary (the same value the boundary append carries).
+            elapsed_ms:
+              type: integer
+              format: int64
+              description: Milliseconds since started_at, measured by the server at read time. A client never computes this.
+            budget_ms:
+              type: integer
+              description: "The per-target delivery budget this pass is bounded by (CR_SESSION_DELIVERY_TIMEOUT_MS, default 30000)."
+            targets:
+              type: array
+              description: Every PLANNED target of the pass. A target with no attempt evidence yet has produced no reported attempt — that is not a skip.
+              items:
+                type: object
+                required: [target]
+                properties:
+                  target:
+                    type: string
+                  attempts:
+                    type: integer
+                    description: How many attempts the runtime has made for this target.
+                  last_attempt_at:
+                    type: string
+                    format: date-time
+                  status:
+                    type: integer
+                    description: "The endpoint's last HTTP status; 0 (omitted) means no response was received."
+                  class:
+                    type: string
+                    enum: [unreachable, timeout, rejected, error]
+                    description: |-
+                      Why the last attempt produced no answer, from the runtime's
+                      own observation. `unreachable` is a dial that never reached
+                      the endpoint (refused, no route, name resolution),
+                      `timeout` an attempt that hit its own deadline, `rejected`
+                      an HTTP status the runtime cannot treat as a delivery,
+                      `error` any other transport failure. Omitted when the
+                      endpoint ANSWERED — what that reply means is the terminal
+                      outcome's judgement, not the attempt's. An attempt class
+                      never names a delivery outcome, and a slow endpoint is
+                      never reported unreachable.
+                  reason:
+                    type: string
+                    description: |-
+                      The last attempt's own transport diagnostic, retained
+                      verbatim so an operator reads the endpoint and the cause
+                      itself (a refused dial names both), never a paraphrase.
         created_at:
           type: string
           format: date-time

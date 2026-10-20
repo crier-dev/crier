@@ -21,6 +21,7 @@ import (
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/detect"
+	"github.com/crier-dev/crier/internal/dispatchlive"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/mesh"
@@ -809,6 +810,19 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	}
 	defer func() { _ = sessStore.Close() }()
 
+	// DF-CRIER-414: feed the session handler's in-flight view from the webhook
+	// driver's own per-attempt observations, so a composer can say "delivery in
+	// flight, 2s of the 30s budget, target unreachable" instead of looking
+	// frozen for the whole budget. The driver reports the attempt it made (with
+	// the envelope's session and request/message id); the registry keeps only
+	// attempts belonging to a fan-out pass THIS process is running, so a plain
+	// inbox delivery to the same agent is never attributed to a session send.
+	whDriver.SetAttemptObserver(func(o webhook.AttemptObservation) {
+		sessHandler.LiveDispatch().Observe(dispatchlive.Attempt{
+			SessionID: o.SessionID, MessageID: o.MessageID, AgentID: o.AgentID,
+			Attempt: o.Attempt, At: o.At, Status: o.Status, Class: o.Class, Reason: o.Reason,
+		})
+	})
 	// CR-CHAT-023: with peer policies configured, the session surface gains
 	// the remote-participant behavior — a remote-qualified member joins only
 	// through its peer's policy, and a message fanned out to it crosses to

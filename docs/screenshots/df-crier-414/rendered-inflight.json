@@ -1,0 +1,70 @@
+{
+  "room": "fd2bfe96c5eefbb9c3d357ca",
+  "budget_seconds": 30,
+  "dead_port": 33049,
+  "hang_port": 41263,
+  "samples": [
+    {
+      "at": "2s",
+      "panel": "Delivery in flight — 1.4s of the 30.0s delivery budget\nblackhole-bot: no attempt has returned yet\ndead-bot: unreachable — post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused (2 attempts · last attempt 10/19/2026, 10:05:11 PM)",
+      "server": {
+        "elapsed_ms": 1974,
+        "budget_ms": 30000,
+        "targets": [
+          {
+            "target": "blackhole-bot",
+            "attempts": 0
+          },
+          {
+            "target": "dead-bot",
+            "attempts": 2,
+            "last_attempt_at": "2026-10-20T03:05:11.196748562Z",
+            "class": "unreachable",
+            "reason": "post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused"
+          }
+        ]
+      }
+    },
+    {
+      "at": "5s",
+      "panel": "Delivery in flight — 5.4s of the 30.0s delivery budget\nblackhole-bot: no attempt has returned yet\ndead-bot: unreachable — post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused (3 attempts · last attempt 10/19/2026, 10:05:13 PM)",
+      "server": {
+        "elapsed_ms": 5523,
+        "budget_ms": 30000
+      }
+    },
+    {
+      "at": "terminal",
+      "wall_ms": 30554,
+      "panel": "Delivery finished — blackhole-bot: budget_cut — answer did not arrive inside the budget: 1 attempt, 30s delivery budget exhausted; answer cut, partial or late answer discarded. Raise RUNTIME_TIMEOUT_MS / CR_SESSION_DELIVERY_TIMEOUT_MS (runtime must remain strictly less than session) or retry. webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:41263/hook: Post \"http://127.0.0.1:41263/hook\": context deadline exceeded); dead-bot: delivery refused — 5 attempts, 30s delivery budget exhausted: webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused). Recorded outcome; the transcript row keeps it.",
+      "outcomes": [
+        {
+          "target": "blackhole-bot",
+          "outcome": "budget_cut",
+          "detail": "answer did not arrive inside the budget: 1 attempt, 30s delivery budget exhausted; answer cut, partial or late answer discarded. Raise RUNTIME_TIMEOUT_MS / CR_SESSION_DELIVERY_TIMEOUT_MS (runtime must remain strictly less than session) or retry. webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:41263/hook: Post \"http://127.0.0.1:41263/hook\": context deadline exceeded)",
+          "code": "DELIVERY_BUDGET_CUT",
+          "retryable": true,
+          "updated_at": "2026-10-20T03:05:40.196194535Z"
+        },
+        {
+          "target": "dead-bot",
+          "outcome": "refused",
+          "detail": "5 attempts, 30s delivery budget exhausted: webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused)",
+          "code": "DELIVERY_REFUSED",
+          "retryable": true,
+          "updated_at": "2026-10-20T03:05:40.196154171Z"
+        }
+      ]
+    }
+  ],
+  "transcript": "DF\ndf414-operator\nplain\n10/19/2026, 10:05:10 PM\nare you there?\n#5 · sender-identity-claimed · thread 6dcc71f13bfb01403c332fbf · thread root\nblackhole-bot: budget_cut — answer did not arrive inside the budget: 1 attempt, 30s delivery budget exhausted; answer cut, partial or late answer discarded. Raise RUNTIME_TIMEOUT_MS / CR_SESSION_DELIVERY_TIMEOUT_MS (runtime must remain strictly less than session) or retry. webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:41263/hook: Post \"http://127.0.0.1:41263/hook\": context deadline exceeded)\ndead-bot: delivery refused — 5 attempts, 30s delivery budget exhausted: webhook: blocking delivery timed out after 30s (last: post http://127.0.0.1:33049/hook: Post \"http://127.0.0.1:33049/hook\": dial tcp 127.0.0.1:33049: connect: connection refused)\nReply in thread",
+  "screenshots": [
+    "inflight-1280.png",
+    "inflight-1280-full.png",
+    "inflight-390.png",
+    "terminal-1280.png",
+    "terminal-1280-full.png",
+    "terminal-390.png"
+  ],
+  "errors": []
+}

@@ -303,6 +303,51 @@ receipts cannot be guaranteed durable; the boundary marker remains, and replay
 uses the unknown state. A crash between transport and receipt append has the same
 uncertainty. There is no cross-system atomic commit or exactly-once guarantee.
 
+<a id="in-flight-window"></a>
+#### The in-flight window (DF-CRIER-414)
+
+Everything above describes what is recorded **once a pass returns**. Between the
+intent and that return there is the fan-out's own window — for a blocking target
+its whole delivery budget (30s by default) — and during it the durable record
+says only what it said before dispatch began. That gap is a truthful-feedback
+defect: a composer that shows nothing for 30s is indistinguishable from one that
+wedged, and the first evidence of a dead endpoint becomes the terminal outcome.
+
+The transcript read therefore carries one ADDITIVE field per message,
+`dispatch_live`, present **only while the reading process is running a pass for
+that message**:
+
+- `attempt`, `started_at` — the same pass boundaries `dispatch_evidence` records,
+  so the live view and the durable journal are joinable;
+- `elapsed_ms` — measured by the server at read time; a client never computes it;
+- `budget_ms` — the per-target budget the pass is bounded by;
+- `targets[]` — every **planned** target, with `attempts`, `last_attempt_at`,
+  the endpoint's last `status`, and the last attempt's `class` + `reason`.
+
+`class` is a closed set describing WHY an attempt produced no answer:
+`unreachable` (a dial that never reached the endpoint — refused, no route, name
+resolution), `timeout` (the attempt hit its own deadline), `rejected` (an HTTP
+status the runtime cannot treat as a delivery) or `error` (any other transport
+failure). An attempt class is **not** an outcome and must never be read as one:
+it is omitted when the endpoint answered, and a target that is merely slow is
+never reported unreachable. `reason` is the transport's own diagnostic, retained
+verbatim, so the endpoint and the cause are read rather than paraphrased.
+
+What `dispatch_live` is NOT: it is not an outcome, not durable, not a second
+source of truth about delivery. It is process-local — absent after a restart and
+never written to storage — and it disappears the moment the pass's outcomes are
+durable, so a reader sees either the live pass or the terminal record and the
+in-flight state can never outlive the work it describes. It changes no outcome
+above and no retry rule: it exists only so that the interval before an outcome is
+observable, per target, from the server's own measurements.
+
+Attempt evidence is reported where the runtime makes an observable attempt (the
+local blocking delivery lane); a target whose attempts are not reported carries
+no attempt fields, which is stated as "no attempt has returned yet" and never as
+a failure. `reason` is the same class of transport diagnostic the recorded
+outcome `detail` already carries, and the field is subject to the same read
+visibility as the transcript it rides on.
+
 Inbox ingress classification is **header-only** and carries a stated
 precedence (DF-CRIER-418, DF-CRIER-432). `X-Crier-Fed-Ingress-Verdict` carries the local ingress verdict:
 it is written from the decision captured before the handler ran and re-asserted

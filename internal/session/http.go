@@ -41,6 +41,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/crier-dev/crier/internal/dispatchlive"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
@@ -149,6 +150,10 @@ type Handler struct {
 	opts  HTTPOptions
 	now   func() time.Time
 	newID func() (string, error)
+	// live is this process's in-flight fan-out view (DF-CRIER-414). It is
+	// process-local, never persisted, and never consulted for an outcome: it
+	// exists so a reader can tell "dispatch in flight" from "no evidence".
+	live *dispatchlive.Registry
 	// taskTrigger is the optional task-created hook (CR-CHAT-034), set by
 	// SetTaskTrigger after construction. Nil fires nothing.
 	taskTrigger TaskTriggerHook
@@ -161,7 +166,24 @@ func NewHTTPHandler(store Repository, opts HTTPOptions) *Handler {
 		opts:  opts,
 		now:   func() time.Time { return time.Now().UTC() },
 		newID: newHexID,
+		live:  dispatchlive.NewRegistry(),
 	}
+}
+
+// LiveDispatch exposes this handler's in-flight fan-out view so the server
+// wiring can feed it the runtime's own per-attempt observations (DF-CRIER-414,
+// see webhook.Driver.SetAttemptObserver). It is always non-nil.
+func (h *Handler) LiveDispatch() *dispatchlive.Registry { return h.live }
+
+// deliveryBudgetMs is the per-target delivery budget this handler applies: the
+// configured CR_SESSION_DELIVERY_TIMEOUT_MS, else the registry default — the
+// same value fanoutAttemptWithReplies resolves, so the in-flight view can never
+// publish a denominator the delivery is not actually bounded by.
+func (h *Handler) deliveryBudgetMs() int {
+	if h.opts.DeliveryTimeoutMs > 0 {
+		return h.opts.DeliveryTimeoutMs
+	}
+	return registry.DefaultSessionDeliveryTimeoutMs
 }
 
 // newHexID mints a path-safe opaque id (the JSONL store refuses anything but
@@ -235,7 +257,16 @@ type transcriptMessage struct {
 	ReplayAction       string             `json:"replay_action,omitempty"`
 	OutcomesIncomplete bool               `json:"outcomes_incomplete,omitempty"`
 	DispatchEvidence   []DispatchEvidence `json:"dispatch_evidence,omitempty"`
-	CreatedAt          time.Time          `json:"created_at"`
+	// DispatchLive is the fan-out pass THIS PROCESS is running for this message
+	// right now (DF-CRIER-414): the pass boundaries the durable journal already
+	// recorded (start, planned targets, budget) plus the attempts the runtime
+	// has reported so far. It is present only while a pass is in flight, so its
+	// presence is the in-flight state and its absence is the terminal record —
+	// a reader never has to guess from a timer, and no client computes an
+	// elapsed time or a countdown the server has not measured. It is never
+	// persisted, never carries an outcome, and is gone after a restart.
+	DispatchLive *dispatchlive.Pass `json:"dispatch_live,omitempty"`
+	CreatedAt    time.Time          `json:"created_at"`
 	// Delivered / Accepted / Held / Skipped / SkippedAgents summarize ONE send.
 	// Inbox/queue admission is accepted, an explicit peer hold is held, and only
 	// a confirmed delivery is delivered. A target whose delivery is REFUSED
@@ -995,6 +1026,20 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", "fan-out not started: "+err.Error())
 		return transcriptMessage{}, false
 	}
+	// DF-CRIER-414: register the in-flight window that the durable journal
+	// cannot describe. Between this boundary append and the outcome write-back
+	// below, the transcript has an intent and NO results — a 30s blocking
+	// budget in which an operator could not tell "working" from "wedged", and
+	// the first evidence of an unreachable endpoint was the terminal
+	// budget_cut. The pass is ended explicitly once the outcomes are durable
+	// (below), with this deferred End as the early-return safety net, so a
+	// reader that polls past the budget sees the terminal record and never a
+	// stale indicator. Targets are the same resolved planned set the journal
+	// just recorded — the live view plans nothing of its own.
+	if len(attempt.Targets) > 0 {
+		h.live.Begin(sess.ID, msg.ID, attempt.Attempt, attempt.Targets, h.deliveryBudgetMs(), attempt.StartedAt)
+		defer h.live.End(sess.ID, msg.ID)
+	}
 	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, remoteTargets, r.Header.Get(namespace.HeaderNamespaceToken))
 	attempt.addReceipts(remoteOutcomes)
 	if journalErr := h.appendDispatchEvidence(r.Context(), msg, prior); journalErr != nil {
@@ -1051,6 +1096,11 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return transcriptMessage{}, false
 	}
+	// The pass is over the moment its outcomes are durable: from here a reader
+	// sees the TERMINAL record, so the in-flight view must not survive into the
+	// send response or a later transcript GET (DF-CRIER-414 requirement 5). The
+	// deferred End above stays as the early-return safety net; End is idempotent.
+	h.live.End(sess.ID, msg.ID)
 
 	st, err := h.store.Load(r.Context(), sess.ID)
 	if err != nil {
@@ -1358,6 +1408,11 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 		ThreadDepth:         st.ThreadDepth(m.ThreadID),
 	}
 	v.ParentResolvable = m.ParentID == "" || st.Message(m.ParentID) != nil
+	// A live pass is attached ONLY to the message it belongs to, and only
+	// while this process is delivering it (DF-CRIER-414). Because every read
+	// surface builds its view here, the send response, the transcript GET, the
+	// thread reads and the output modes all agree on what "in flight" means.
+	v.DispatchLive = h.live.Live(m.SessionID, m.ID)
 	if t := st.Thread(m.ThreadID); t != nil {
 		v.RootID = t.RootMessageID
 	}
