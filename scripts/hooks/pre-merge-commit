@@ -3,6 +3,7 @@
 # --no-verify can bypass this hook; CI remains the checked-out-tree backstop.
 set -uo pipefail
 root="$(git rev-parse --show-toplevel)" || exit 1
+printf '%s\n' 'gate scope: pre-merge-commit: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).'
 checker="$root/scripts/check-board.sh"
 if [ ! -f "$checker" ]; then
   echo "gate: pre-merge-commit board arm UNAVAILABLE — $checker is missing" >&2

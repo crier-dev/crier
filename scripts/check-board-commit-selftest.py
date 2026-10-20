@@ -265,6 +265,20 @@ def main():
         expect('missing checker on non-board commit',
                git(repo, 'commit', '-qm', 'missing checker', check=False), 1, 'UNAVAILABLE')
 
+        def expect_board_only_scope(hook, result, expected):
+            nonlocal failures
+            scope = (f'gate scope: {hook}: this entrypoint validates the board only; '
+                     'content checks reach it through CI (Tier-1, gofmt, shell/YAML '
+                     'and Makefile/Dockerfile checks are NOT RUN here).')
+            expect(hook + ' discloses board-only scope', result, expected, scope)
+            if 'stub gitreins' in result.stdout:
+                print(f'commit selftest: {hook} unexpectedly ran Tier-1: FAIL')
+                failures += 1
+            # Keep real Git hook output visible as reproducible scope evidence.
+            for line in result.stdout.splitlines():
+                if line == scope:
+                    print(line)
+
         for invalid in (True, False):
             repo = fixture('merge-' + str(invalid))
             git(repo, 'checkout', '-qb', 'feature')
@@ -275,9 +289,11 @@ def main():
             git(repo, 'checkout', '-q', 'main')
             probe(repo)
             seed_commit(repo, 'divergence fixture (hooks disabled for setup)')
-            expect('real merge invalid board ' + str(invalid),
-                   git(repo, 'merge', '--no-ff', '--no-edit', 'feature', check=False),
-                   1 if invalid else 0, 'INVALID-1' if invalid else 'scope staged index')
+            result = git(repo, 'merge', '--no-ff', '--no-edit', 'feature', check=False)
+            expected = 1 if invalid else 0
+            expect('real merge invalid board ' + str(invalid), result, expected,
+                   'INVALID-1' if invalid else 'scope staged index')
+            expect_board_only_scope('pre-merge-commit', result, expected)
 
         for invalid in (True, False):
             repo = fixture('am-' + str(invalid))
@@ -290,9 +306,11 @@ def main():
             patch = root / ('patch-' + str(invalid) + '.mbox')
             patch.write_text(git(repo, 'format-patch', '-1', '--stdout').stdout)
             git(repo, 'checkout', '-qb', 'apply-target', base)
-            expect('real git am invalid board ' + str(invalid),
-                   git(repo, 'am', str(patch), check=False),
-                   1 if invalid else 0, 'INVALID-1' if invalid else 'scope staged index')
+            result = git(repo, 'am', str(patch), check=False)
+            expected = 1 if invalid else 0
+            expect('real git am invalid board ' + str(invalid), result, expected,
+                   'INVALID-1' if invalid else 'scope staged index')
+            expect_board_only_scope('pre-applypatch', result, expected)
 
         repo = fixture('no-verify')
         poison(repo)

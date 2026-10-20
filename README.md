@@ -2413,6 +2413,14 @@ Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default*
 
 ## Contributor hook health
 
+For automatic merge commits (`pre-merge-commit`) and `git am` (`pre-applypatch`), the hook reports: this entrypoint validates the board only; content checks reach it through CI (Tier-1, gofmt, shell/YAML and Makefile/Dockerfile checks are NOT RUN here).
+Unlike these board-only entrypoints, an ordinary `git commit` runs `pre-commit`:
+GitReins when configured, whole-index board validation, and the applicable gofmt,
+shell/YAML and Makefile/Dockerfile arms; see [the gate section in AGENTS.md](AGENTS.md#the-commit-gate--what-it-covers-and-what-it-does-not)
+for their limits.
+Fast-forwards run no commit hook; `--no-verify` can bypass `pre-commit` and
+`pre-merge-commit`, so CI remains the checked-out-tree backstop.
+
 `make doctor-hooks` rejects an unset or wrong local hooksPath, missing, byte-different,
 non-executable or stale-generation hooks, and missing tracked hook sources; it accepts
 only a matching executable install in this repository's common Git hooks directory.
