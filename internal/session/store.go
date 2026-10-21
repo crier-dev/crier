@@ -224,8 +224,18 @@ func validMessageKind(k MessageKind) bool {
 	return k == MessagePlain || k == MessageAddressed || k == MessageTask
 }
 
-// validateContextShare checks the §4.6 share answer: a known mode, and a
-// boundary message id exactly when the mode names one.
+// validateContextShare checks the §4.6 share answer's SHAPE: a known mode, and
+// a boundary message id required for `since`. It deliberately does not judge a
+// boundary on `summary`/`full`: the boundary is an upper edge those modes honour
+// (materializedShare), so one is meaningful there, and this validator sees only
+// a record — it has no session transcript and could not tell a real message id
+// from an invented one even if it wanted to. EXISTENCE is therefore the write
+// path's job, and it is enforced in exactly one place (shareBoundaryProblem,
+// join_context.go) which both the add path and the later-change path call —
+// DF-CRIER-472 was the PUT path skipping that check for non-`since` modes.
+// Tightening this validator instead would be wrong twice over: it would reject
+// already-recorded, verified boundaries on replay, and it would still not know
+// whether an id exists.
 func validateContextShare(cs *ContextShare) error {
 	switch cs.Mode {
 	case ShareNone, ShareSummary, ShareFull:

@@ -1627,9 +1627,10 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 	}
 	// Validate the boundary BEFORE the empty-session override: since must
 	// never silently become summary or none, even when there is no history.
-	if share.BoundaryMessageID != "" && st.Message(share.BoundaryMessageID) == nil {
-		return &memberError{status: http.StatusBadRequest, code: "CONTEXT_BOUNDARY_NOT_FOUND",
-			msg: fmt.Sprintf("context boundary message %q does not exist in session %q", share.BoundaryMessageID, sess.ID)}
+	// The predicate is shared with the later-change path (shareBoundaryProblem)
+	// so the two write paths of this one field cannot disagree (DF-CRIER-472).
+	if detail := shareBoundaryProblem(st, sess.ID, &share); detail != "" {
+		return &memberError{status: http.StatusBadRequest, code: "CONTEXT_BOUNDARY_NOT_FOUND", msg: detail}
 	}
 	reason := resolveJoinShare(st, &share)
 	seq, err := h.store.NextSeq(ctx, sess.ID)

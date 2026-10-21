@@ -61,6 +61,29 @@ func (req *addParticipantRequest) UnmarshalJSON(data []byte) error {
 	return decoder.Decode((*plain)(req))
 }
 
+// shareBoundaryProblem reports, for the ONE field both write paths record, why
+// a carried boundary cannot be stored — or "" when it can. A boundary is a
+// citation of a message of THIS session: an id the session does not hold is
+// refused whatever the mode says, because `summary` and `full` also honour the
+// recorded boundary as the upper edge of what the joiner was given
+// (materializedShare), so an unverified id there is asserted as history just as
+// surely as under `since` (DF-CRIER-472).
+//
+// Both the add path (http.go) and the later-change path
+// (HandleSetMemberContext) call this and it is the ONLY boundary-existence
+// check in the package: one predicate, so the two write paths of the same field
+// cannot drift apart again — which is exactly how the defect got in (the PUT
+// path validated only `since` while the add path validated any non-empty id).
+func shareBoundaryProblem(st *State, sessID string, cs *ContextShare) string {
+	if cs == nil || cs.BoundaryMessageID == "" {
+		return ""
+	}
+	if st.Message(cs.BoundaryMessageID) != nil {
+		return ""
+	}
+	return fmt.Sprintf("context boundary message %q does not exist in session %q", cs.BoundaryMessageID, sessID)
+}
+
 // resolveJoinShare pins the upper edge of a generated summary/full history so
 // its substance stays citable. No messages is a recorded none, with a reason.
 func resolveJoinShare(st *State, cs *ContextShare) string {
@@ -287,12 +310,15 @@ func (h *Handler) HandleSetMemberContext(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return
 	}
-	if cs.Mode == ShareSince {
-		if bm := st.Message(cs.BoundaryMessageID); bm == nil {
-			writeAPIError(w, http.StatusBadRequest, "CONTEXT_BOUNDARY_NOT_FOUND",
-				fmt.Sprintf("boundary message %q does not exist in session %q", cs.BoundaryMessageID, sess.ID))
-			return
-		}
+	// Validate the boundary for EVERY mode that can carry one — not just
+	// `since` (DF-CRIER-472). The recorded event must never assert a boundary
+	// id the session does not hold, and `summary`/`full` honour the boundary as
+	// the upper edge of what the joiner was given, so an unverified id there is
+	// asserted as history exactly as it is under `since`. Same predicate and
+	// same error as the add path (shareBoundaryProblem).
+	if detail := shareBoundaryProblem(st, sess.ID, cs); detail != "" {
+		writeAPIError(w, http.StatusBadRequest, "CONTEXT_BOUNDARY_NOT_FOUND", detail)
+		return
 	}
 	resolveJoinShare(st, cs)
 	actor := strings.TrimSpace(req.Actor)

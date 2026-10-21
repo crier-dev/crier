@@ -272,3 +272,154 @@ func TestSessionAPI_ContextShareUndecidedDistinctFromNone(t *testing.T) {
 	require.Nil(t, view.Share)
 	require.Contains(t, view.Explanation, "never decided")
 }
+
+// TestSessionAPI_ContextShareBoundaryValidatedAllModes pins DF-CRIER-472: a
+// boundary is validated on EVERY write path that can carry one, in EVERY mode.
+// Before the fix the PUT path validated only `since`, so
+// mode=summary boundary=boundary-from-nowhere answered 200 and the
+// session.member.context event recorded the id as fact ("context summary ·
+// boundary message boundary-from-nowhere") while the add path refused the very
+// same id.
+//
+// The negative arms are PAIRED with a positive arm (a boundary that IS a
+// message of the session is still accepted under summary and full), so a
+// blanket refusal of the capability cannot pass this test — the fix must
+// validate, not forbid.
+func TestSessionAPI_ContextShareBoundaryValidatedAllModes(t *testing.T) {
+	const bogus = "boundary-from-nowhere"
+	putPath := func(id string) string {
+		return "/sessions/" + id + "/participants/agent/nimbus-2/context"
+	}
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			h := newAPIHarness(t, store)
+			id := h.createRoom(t)
+
+			postText(t, h, id, fixAgentA, "root")
+			postText(t, h, id, fixAgentB, "reply")
+
+			// The add path (http.go) is the template: capture the exact refusal
+			// it returns for an unknown boundary so every PUT arm is held to the
+			// SAME error, not merely the same status (AC 1).
+			var addErr map[string]string
+			require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPost,
+				"/sessions/"+id+"/participants",
+				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2",
+					ContextShare: &ContextShare{Mode: ShareSummary, BoundaryMessageID: bogus}},
+				&addErr, nil), "the add path already refuses an unknown boundary")
+			require.Equal(t, "CONTEXT_BOUNDARY_NOT_FOUND", addErr["error"])
+			require.NotEmpty(t, addErr["detail"])
+
+			// The refused add recorded nothing; add the member for real with the
+			// default answer so the PUT arms have a decided member to change.
+			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
+				"/sessions/"+id+"/participants",
+				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				&struct{}{}, nil))
+
+			// (AC 3) PUT with the unknown boundary under `summary` and `full`:
+			// refused with the add path's own error.
+			for _, mode := range []ContextShareMode{ShareSummary, ShareFull} {
+				var putErr map[string]string
+				require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPut, putPath(id),
+					setMemberContextRequest{Mode: mode, BoundaryMessageID: bogus},
+					&putErr, nil),
+					"PUT mode=%s must refuse a boundary that is not a message of the session", mode)
+				require.Equal(t, addErr["error"], putErr["error"],
+					"PUT mode=%s must return the add path's error code", mode)
+				require.Equal(t, addErr["detail"], putErr["detail"],
+					"PUT mode=%s must return the add path's error — the two write paths of the same field agree", mode)
+			}
+
+			// (AC 2) Nothing was recorded as fact: neither the read view nor the
+			// lifecycle event text (the surface the defect was PROVEN on) names
+			// an unverified boundary, and the recorded answer is untouched.
+			view := getContextView(t, h, id, string(MemberAgent), "nimbus-2")
+			require.NotNil(t, view.Share)
+			require.Equal(t, ShareSummary, view.Share.Mode, "a refused write must not change the recorded answer")
+			require.NotEqual(t, bogus, view.Share.BoundaryMessageID)
+			require.NotContains(t, view.Explanation, bogus)
+
+			st, err := store.Load(bgCtx, id)
+			require.NoError(t, err)
+			for _, ev := range systemEvents(st) {
+				require.NotContains(t, ev.Text, bogus,
+					"lifecycle event %q must not assert an unverified boundary", ev.Text)
+				if ev.ContextShare != nil {
+					require.NotEqual(t, bogus, ev.ContextShare.BoundaryMessageID,
+						"recorded event %q carries an unverified boundary", ev.Type)
+				}
+			}
+		})
+	}
+}
+
+// TestSessionAPI_ContextShareBoundaryUnchangedForSince is (AC 4): the `since`
+// path's existing refusal is unchanged by the DF-CRIER-472 fix — still 400
+// CONTEXT_BOUNDARY_NOT_FOUND, still naming the boundary and the session. The
+// fix routes `since` through the same helper as the other modes, so its DETAIL
+// text becomes the add path's wording ("context boundary message …"); what the
+// refusal IS (status + code) is pinned here as unchanged.
+func TestSessionAPI_ContextShareBoundaryUnchangedForSince(t *testing.T) {
+	const bogus = "boundary-from-nowhere"
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			h := newAPIHarness(t, store)
+			id := h.createRoom(t)
+			postText(t, h, id, fixAgentA, "root")
+			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
+				"/sessions/"+id+"/participants",
+				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				&struct{}{}, nil))
+
+			var sinceErr map[string]string
+			require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPut,
+				"/sessions/"+id+"/participants/agent/nimbus-2/context",
+				setMemberContextRequest{Mode: ShareSince, BoundaryMessageID: bogus, Actor: fixAgentA},
+				&sinceErr, nil), "the since refusal is unchanged")
+			require.Equal(t, "CONTEXT_BOUNDARY_NOT_FOUND", sinceErr["error"])
+			require.Contains(t, sinceErr["detail"], bogus,
+				"the refusal names the boundary that was not found")
+			require.Contains(t, sinceErr["detail"], id,
+				"the refusal names the session it was looked for in")
+
+			// The refusal records nothing: the member keeps its summary answer.
+			view := getContextView(t, h, id, string(MemberAgent), "nimbus-2")
+			require.Equal(t, ShareSummary, view.Share.Mode)
+			require.NotEqual(t, bogus, view.Share.BoundaryMessageID)
+		})
+	}
+}
+
+// TestSessionAPI_ContextShareBoundaryVerifiedAccepted is the positive arm
+// paired with the refusals above: a boundary that IS a message of the session
+// is still accepted under summary and full and is recorded. Without this arm a
+// fix that blanket-refused every boundary for those modes would go green.
+func TestSessionAPI_ContextShareBoundaryVerifiedAccepted(t *testing.T) {
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			h := newAPIHarness(t, store)
+			id := h.createRoom(t)
+			root := postText(t, h, id, fixAgentA, "root")
+			postText(t, h, id, fixAgentB, "reply")
+			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
+				"/sessions/"+id+"/participants",
+				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				&struct{}{}, nil))
+
+			for _, mode := range []ContextShareMode{ShareSummary, ShareFull} {
+				require.Equal(t, http.StatusOK, h.do(t, http.MethodPut,
+					"/sessions/"+id+"/participants/agent/nimbus-2/context",
+					setMemberContextRequest{Mode: mode, BoundaryMessageID: root, Actor: fixAgentA},
+					&struct{}{}, nil), "a verified boundary must still be accepted under %s", mode)
+				view := getContextView(t, h, id, string(MemberAgent), "nimbus-2")
+				require.Equal(t, mode, view.Share.Mode)
+				require.Equal(t, root, view.Share.BoundaryMessageID, "the verified boundary is recorded")
+				require.Equal(t, 1, view.GivenCount, "the boundary is honoured as the upper edge")
+			}
+		})
+	}
+}
