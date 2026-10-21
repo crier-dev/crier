@@ -89,3 +89,5 @@ dagger.db*
 __pycache__/
 *.pyc
 .worktrees/
+.coding-hermes/board/*.jsonl.new
+.coding-hermes/board/*.jsonl.lock
