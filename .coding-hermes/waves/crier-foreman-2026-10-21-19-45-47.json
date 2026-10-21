@@ -1,0 +1,33 @@
+{
+  "tick": "crier-foreman-2026-10-21-19-45-47",
+  "mode": "wave",
+  "block": "DF-CRIER-474",
+  "block_drive_score": 0.97,
+  "slots": 6,
+  "workers": [
+    {
+      "task_id": "DF-CRIER-463",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-463",
+      "branch": "wt/DF-CRIER-463",
+      "base_sha": "72c0356",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "foreman-direct",
+      "commit_hash": "29c3c49",
+      "commit_subject": "docs: document termination source investigation for DF-CRIER-463"
+    },
+    {
+      "task_id": "DF-CRIER-472",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-472",
+      "branch": "wt/DF-CRIER-472",
+      "base_sha": "72c0356",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "complete",
+      "commit_hash": "ff9a445",
+      "commit_subject": "fix: validate context boundary on all write paths for summary/full modes"
+    }
+  ],
+  "wave_size": 2,
+  "selection": "block_drive selected DF-CRIER-474 as top block (97% complete); dispatched DF-CRIER-463 (P1) and DF-CRIER-472 (P2) — 2 independent rows, no depends_on edges between them"
+}
