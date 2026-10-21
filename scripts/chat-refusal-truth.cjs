@@ -13,8 +13,11 @@ function extract(start, end) {
 }
 class Element {
   constructor() { this.hidden = false; this.className = ''; this.dataset = {}; this.children = []; this._text = ''; this.open = true; }
-  set textContent(value) { this._text = String(value); this.children = []; }
+  set textContent(value) { this._text = String(value); this._html = undefined; this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
+  // Match the browser's textContent -> innerHTML escaping used by shipped esc().
+  get innerHTML() { return this._html ?? this.textContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  set innerHTML(value) { this._html = String(value); this._text = ''; this.children = []; }
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this._text = ''; this.children = nodes; }
   setAttribute() {}
@@ -33,7 +36,8 @@ function client(responses = {}) {
       return new Response(typeof r.body === 'string' ? r.body : JSON.stringify(r.body), {status: r.status});
     },
   });
-  vm.runInContext(extract('function errorText(', '// DF-CRIER-384: the Authority view') +
+  vm.runInContext(extract('function esc(', 'function author(') +
+    extract('function errorText(', '// DF-CRIER-384: the Authority view') +
     extract('function authorityOpen(', '$("management-refresh").addEventListener') +
     extract('function renderPosture(', 'async function refresh()'), context);
   const run = expression => vm.runInContext(expression, context);
@@ -51,7 +55,47 @@ const routes = ['/principals', '/bindings', '/grants', '/trust/anchors'];
 const disabled = {status: 403, body: {error: 'MANAGEMENT_FORBIDDEN', detail: 'the permissions management surface is not armed'}};
 const refused = detail => ({status: 403, body: {error: 'MANAGEMENT_FORBIDDEN', detail}});
 const posture = {auth_enabled: false, registry_durable: false, management_surface: 'disabled'};
+// DF-CRIER-461: configuration cannot predict any particular route's read result.
+const managementPostures = [
+  ['disabled', 'disabled', 'disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here.'],
+  ['enabled-unarmed', 'enabled-unarmed', 'enabled — delivery ACL not armed. Configuration reported by /status; read results are shown per route.'],
+  ['admin-token-gated', 'admin-token-gated', 'enabled and admin-token gated — management gate present. Configuration reported by /status; read results are shown per route.'],
+  ['absent', undefined, 'unknown'],
+];
+const postureBody = surface => surface === undefined ? {} : {management_surface: surface};
+const managementText = c => c.$('posture').textContent.split(' · Management: ')[1].split(' · Federation: ')[0];
+const postureCases = managementPostures.flatMap(([name, surface, expected]) => [
+  [`${name}: rendered management configuration is exact`, async () => {
+    const c = client(); c.posture(postureBody(surface));
+    assert.equal(managementText(c), expected);
+    assert.doesNotMatch(c.$('posture').className, /\berror\b/);
+  }],
+  ...['refused', 'succeeded', 'authorized for this viewer'].map(word =>
+    [`${name}: posture contains no ${JSON.stringify(word)}`, async () => {
+      const c = client(); c.posture(postureBody(surface));
+      assert.ok(!c.$('posture').textContent.toLowerCase().includes(word), c.$('posture').textContent);
+    }]),
+  ...[
+    ['populated', {status: 200, body: {items: [{id: 'fixture-record'}]}}, /^Populated — GET \/(principals|bindings) succeeded\. 1 record\(s\) returned\./],
+    ['refused', refused('actor lacks the manage grant'), /^Refused/],
+    ['failed', {status: 500, body: {error: 'permission store unavailable'}}, /^Failed/],
+  ].map(([outcome, response, label]) =>
+    [`${name}: ${outcome} reads belong to route panels, not posture`, async () => {
+      const c = client({'/principals': response, '/bindings': response});
+      c.posture(postureBody(surface));
+      const before = c.$('posture').textContent;
+      for (const route of ['/principals', '/bindings']) {
+        const id = 'test-' + route.slice(1);
+        await c.list(id, route);
+        const item = c.visible().find(e => e.textContent.includes('GET ' + route));
+        assert.ok(item, 'visible read evidence for GET ' + route);
+        assert.match(item.textContent, label);
+      }
+      assert.equal(c.$('posture').textContent, before, 'read results must not rewrite configuration');
+    }]),
+]);
 const cases = [
+  ...postureCases,
   ['disabled posture is not red and names its configuration', async () => {
     const c = client(); c.posture(posture);
     assert.equal(c.red(), 0, 'N=0 failing facts: configured auth/durability must not be red');

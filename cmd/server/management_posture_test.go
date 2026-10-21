@@ -18,8 +18,8 @@ import (
 const managementTestToken = "management-posture-test-only-secret"
 
 const managementDisabledSentence = "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here."
-const managementUnarmedSentence = "not authorized for this viewer — ACL live; management reads refused. CR_PERMISSIONS_ADMIN_TOKEN must be configured and supplied as Bearer by an authorized deployment gateway; /status alone does not identify an unset token versus a missing or rejected viewer credential."
-const managementGatedSentence = "admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer."
+const managementUnarmedSentence = "enabled — delivery ACL not armed. Configuration reported by /status; read results are shown per route."
+const managementGatedSentence = "enabled and admin-token gated — management gate present. Configuration reported by /status; read results are shown per route."
 
 // Exercise the production config, router, admin gate and embedded renderer.
 // Every posture comes from /status and is checked against actual GET reads.
@@ -117,6 +117,7 @@ const notice = (id, text) => notices.set(id, text);
 ` + source[start:end] + `
 renderPosture(` + string(body) + `);
 const line = notices.get('posture');
+assert.doesNotMatch(line, /refused|succeeded|authorized for this viewer/i, 'posture must state configuration only');
 assert.ok(line.includes(` + string(encodedWant) + `), 'posture must state '+` + string(encodedWant) + `+'; got: '+line);
 assert.ok(!line.includes('management-posture-test-only-secret'));
 assert.doesNotMatch(line, /[0-9a-f]{64}/i);
