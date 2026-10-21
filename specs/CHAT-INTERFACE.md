@@ -357,11 +357,10 @@ channel/thread structure owes (CR-CHAT-013/015); test 4 is bounded by the depth 
 Seven terms from v1, plus three added in v2 (Channel, Direct Message, Named Group), each one paragraph.
 `Status` names what exists on the bus today.
 
-**Principal** — a HUMAN user, distinct from an agent. A Principal can **speak AS a bound agent**, so the
-bus only ever sees agents while permissions and audit stay per-human. *Web / storage status:* **NOT
-BUILT.** Today the bus has one deployment-level credential (`CR_AUTH_TOKEN`, Bearer) and per-namespace
-posture (`shared` | `token`, with `X-Crier-Namespace-Token`); the registry stores agents only. Owed:
-CR-CHAT-003 (principal, roles, grants) and CR-CHAT-007 (identity, login, audit).
+**Principal** — a HUMAN user, distinct from an agent. A Principal can **speak AS a bound agent**.
+*Status:* stored principal/role/status records, binding/grant management and admin-gated reads ship
+(`internal/permissions`, `internal/registry/principals_api.go`, `permissions_read.go`; §7).
+Browser login does not ship (DF-CRIER-333); an acting agent ID is not a principal credential.
 
 **Agent** — a registered crier agent; it has a **CLASS** (`personal` = owned by one human, carries a
 private context about its owner, default reach is its owner plus explicit grants; | `service` = shared /
@@ -390,9 +389,10 @@ grammar and parser are **NOT BUILT** (CR-CHAT-004); the *agent* and *capability*
 server-side (`GET /agents`, `GET /agents?capability=`, `POST /capabilities/{capability}/inbox`). The UI
 draws the popover; the tags it offers must be resolvable tokens, never display-only strings (§4).
 
-**Grant** — an **ACL entry** binding a principal to an agent / group / session / capability. *Status:*
-**NOT BUILT** (CR-CHAT-003). Everything the four images draw as a *permission* indicator (role badges, a
-permission matrix, a permission chip) is therefore rendered from a source that does not exist yet.
+**Grant** — an **ACL entry** binding a principal to an agent / group / session / capability.
+*Status:* **SHIPPED** in `internal/permissions`; `POST /grants` creates, `GET /grants` lists current
+unexpired/unrevoked grants and `POST /grants/{grantid}/revoke` revokes. Session permission/role reads
+and a read-only browser rendering also ship (§4 rows 22–23, §7); browser sign-in and a grant editor do not.
 
 **Namespace** — the **realm / tenant wall**, already shipped: auth posture (`shared` | `token` with
 `token_ref`), rate limits (`rate_limit_per_minute`), guard settings (`guard_enabled`, `guard_policy`) and
@@ -712,16 +712,16 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 |---|---|---|---|
 | 1 | Z2 index of **agents** (`B`; the roster header "AGENTS (12)" + "+ New") | `GET /agents` (list), `GET /agents?capability=` (filter), `POST /agents` (register), `DELETE /agents/{id}` (unregister) | **SHIPPED** |
 | 2 | Index row **capability chip** (`B`: routing / summarize / research / vision / memory / planning / data / execution / image / guardrails / tools / analysis) | the agent's `capabilities[]` on its registry row | **SHIPPED** |
-| 3 | Agent **presence dot + status word** (`B` online / idle / degraded; `A`, `C`, `D` dots only) | derived status `online` \| `stale` \| `offline` from `last_seen` vs `CR_PRESENCE_STALE_AFTER_S` (CR-FEAT-024), read via `GET /agents`; the connection table via `GET /mesh/peers`; the window is published in `GET /status.presence_stale_after_s` | **RESOLVED (CR-CHAT-020)** — the bus's real enum is `online` \| `stale` \| `offline` and there is no honest `degraded` signal, so the word is **DROPPED** from the interface; the client renders the three shipped words, mapping the mock's `idle` to `stale`. No UI element may render a status the API cannot produce. |
-| 4 | **Queue depth** figure + trend glyph (`B`) | `GET /status.queue_depth` + `GET /status.queue_depth_history` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — the trend/sparkline is a client projection of `queue_depth_history`: a timestamped, oldest-first ring of up to 60 samples of the SAME measurement `queue_depth` reports (process-lifetime; null until the first sample). |
-| 5 | **Health** word + dot + chevron (`B` "System Healthy"; `A`'s status card "All systems operational") | `GET /health`, `GET /status.health` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — `GET /status.health` carries the graded word `ok` \| `degraded` \| `down`: `ok` while the serving registry backend answers its probe, `degraded` when it does not, `down` reserved for the process itself failing to answer (GET /health's word — the process cannot honestly say it about itself). A chevron that reveals detail remains a client composition over the status card's existing fields. |
-| 6 | **"6/6 agents online"** aggregate (`A`) | `GET /status.agents_online` + `GET /status.agents_total` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — the aggregate is THE count: `agents_online` / `agents_total`, counted with the SAME presence derivation `GET /agents` reports every row's status with (one instant, one rule — no client-side recount that could compute the figure two ways). |
+| 3 | Agent **presence dot + status word** (`B` online / idle / degraded; `A`, `C`, `D` dots only) | derived status `online` \| `stale` \| `offline` from `last_seen` vs `CR_PRESENCE_STALE_AFTER_S` (CR-FEAT-024), read via `GET /agents`; the connection table via `GET /mesh/peers`; the window is published in `GET /status` field `presence_stale_after_s` | **RESOLVED (CR-CHAT-020)** — the bus's real enum is `online` \| `stale` \| `offline` and there is no honest `degraded` signal, so the word is **DROPPED** from the interface; the client renders the three shipped words, mapping the mock's `idle` to `stale`. No UI element may render a status the API cannot produce. |
+| 4 | **Queue depth** figure + trend glyph (`B`) | `GET /status` field `queue_depth` + `GET /status` field `queue_depth_history` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — the trend/sparkline is a client projection of `queue_depth_history`: a timestamped, oldest-first ring of up to 60 samples of the SAME measurement `queue_depth` reports (process-lifetime; null until the first sample). |
+| 5 | **Health** word + dot + chevron (`B` "System Healthy"; `A`'s status card "All systems operational") | `GET /health`, `GET /status` field `health` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — `GET /status` field `health` carries the graded word `ok` \| `degraded` \| `down`: `ok` while the serving registry backend answers its probe, `degraded` when it does not, `down` reserved for the process itself failing to answer (GET /health's word — the process cannot honestly say it about itself). A chevron that reveals detail remains a client composition over the status card's existing fields. |
+| 6 | **"6/6 agents online"** aggregate (`A`) | `GET /status` field `agents_online` + `GET /status` field `agents_total` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — the aggregate is THE count: `agents_online` / `agents_total`, counted with the SAME presence derivation `GET /agents` reports every row's status with (one instant, one rule — no client-side recount that could compute the figure two ways). |
 | 7 | Z1 **breadcrumb** namespace → … → session (`B`) | `GET /namespaces` for the realm half; `GET /sessions` + `GET /sessions/{id}/messages` for the session half | **SHIPPED** (CR-CHAT-019) — both halves resolve; the trail is a client composition over two documented reads. |
 | 8 | **Session list row** (title, preview, relative time) (`A`) | `GET /sessions` | **SHIPPED** (CR-CHAT-019). A *view* over the same session objects; a row carries the title, the last message's `payload.text` preview and its time. |
 | 9 | **Conversation card** + filter chips with counts (`C`) | `GET /sessions` with `state`, `kind`, `min_messages`, `min_participants` filters | **SHIPPED** (CR-CHAT-019) — a *view* over the same objects, narrowed; not a new object. |
 | 10 | **Floating compose** action (`C`), compose icons (`A`), `+ New` (`B`) | `POST /sessions` (CR-CHAT-019); `POST /agents` exists for agents | **SHIPPED** for sessions/rooms. |
 | 11 | **Session header** — title, id, start timestamp, audience count, view selector, overflow | the session object (`GET /sessions`, `GET /sessions/{id}/messages`) | **SHIPPED** (CR-CHAT-019). The object carries title, id, `created_at` (start), `audience_count`, `participant_count`, `state` and `visibility`; `session_id` is no longer a wire tag only. |
-| 12 | **State badge** `ACTIVE` (`B`), `Live` (`D`), the "Session … marked complete" event (`B`) | `POST /sessions/{id}/state`; the session object's `state` / `closed_at` and transcript `system_events`; the existing closed-session send refusal | **SHIPPED (DF-CRIER-446)** — `POST /sessions/{id}/state` closes/reopens with attributed durable system events; the badge reads the server state, and send-since-closed retains its existing refusal. Contract: CHAT-SESSIONS.md §4.5a. |
+| 12 | **State badge** and close/reopen system events | `POST /sessions/{id}/state`; session `state` / `closed_at` and transcript `system_events` | **SHIPPED backend (DF-CRIER-446)**; the page reads server state, but its `{state, sender}` request cannot satisfy session admin on an armed ACL (**OPEN DF-CRIER-460**). Contract: CHAT-SESSIONS.md §4.5a. |
 | 13 | **Privacy indicator** — the padlock beside `A`'s title | the session object's `visibility` field + the `403 VISIBILITY_FORBIDDEN` refusal on the reads | **SHIPPED** (CR-CHAT-019) — a `private` session is readable only by a member or by a principal holding a CR-CHAT-003 read grant. |
 | 14 | **Transcript message** — author, body, timestamp | `GET /sessions/{id}/messages` (the ordered cross-agent transcript); `GET /agents/{id}/inbox` returns `InboxEntry` (id, agent_id, sender, payload, created_at, expires_at, priority, namespace, thread_id, guard); the deliver body carries `payload`, `sender`, `session_id`, `thread_id`, `request_id`, `kind` | **SHIPPED** (CR-CHAT-019) — an ordered, cross-agent transcript read exists (seq order, each with a resolvable parent), and the per-agent durable read is unchanged; the body is still `payload` (`payload.text`). |
 | 15 | **Thread reply-count pill + rail/elbows + indentation** (`A`, `D`) | `thread_id` on `POST /agents/{id}/inbox` and now persisted on the stored record (`InboxEntry.thread_id` + the session backends); `GET /sessions/{id}/messages` serves `thread_id`, `parent_id`, `root_id`, `thread_depth`, `reply_depth`; guard policy key (`thread:<id>`) | **SHIPPED** (CR-CHAT-019) — a thread is reconstructable from storage ALONE (no `InboxEntry` field was stored before this row). |
@@ -730,13 +730,13 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 18 | **Per-message latency** (`B` "⚡ 86ms") | `InboxEntry.delivery_ms` on `GET /agents/{id}/inbox` (CR-CHAT-020) | **SHIPPED (CR-CHAT-020)** — the deliver path records its whole milliseconds per message; a timed delivery carries `delivery_ms` on the stored entry and the durable read. An untimed entry omits the field (not measured ≠ zero). |
 | 19 | **SYSTEM EVENT** rows — "Lease renewed … (+5m)" (`B`) | leases are taken per retrieve with `lease` / `lease_seconds` and released by ack | **RESOLVED (CR-CHAT-020)** — no lease **renewal** operation exists and none is built (it would change lease semantics broadly for one UI element). The element is **DROPPED**: the UI vocabulary for lease state is **lease-taken / lease-expired / acked** only. |
 | 20 | **SYSTEM EVENT** rows — expiry and unacknowledged loss | `GET /agents/{id}/inbox/dead-letters` (reason `ttl_expired_unacked`, 7-day retention) plus the `MESSAGE_EXPIRED` receipt written into the **sender's** inbox | **SHIPPED** — this is the real "something terminal happened to a message" surface, and it is a **dead letter, not a moderation flag**. |
-| 21 | **Audit trail** panel (`B`: Time / Principal / Event / Details) | `GET /delivery-log` + `GET /delivery-log/verify` — the OPT-IN, hash-chained ed25519 delivery log (`CR_DETECT_ENABLED`, default false), scoped to agents and delivery verdicts | **PARTIAL / NOT BUILT** — a delivery log exists but is opt-in, agent-scoped and about deliveries, not about sessions and permissions. A session-and-principal audit (`session.start`, `permission.grant`, `agent.degraded`…) is **NOT BUILT** (owed: CR-CHAT-007). |
-| 22 | **Permission badge / role pill** (`A` ADMIN / MEMBER / VIEWER; `C` role pill; `D` `admin` / `invoke` / `read`) | none. Today: one deployment Bearer (`CR_AUTH_TOKEN`), per-namespace posture (`shared` \| `token` + `X-Crier-Namespace-Token`), per-agent ed25519 signatures (`CR_REQUIRE_AGENT_SIG`) | **NOT BUILT** — none of the shipped auth surfaces is a *per-principal role*. Owed: CR-CHAT-003. |
-| 23 | **Permission matrix** (`B`) — columns send / read / invite / admin / mint, tick / dash cells | none | **NOT BUILT**. Owed: the grant model + a read surface (CR-CHAT-003). The column names are the image's; their semantics are the permission spec's. |
+| 21 | **Audit trail** panel (`B`: Time / Principal / Event / Details) | `GET /sessions/{id}/audit` (`internal/session/audit_http.go`); separate opt-in delivery log at `GET /delivery-log` / `GET /delivery-log/verify` | **SHIPPED read API (CR-CHAT-021)** over session events plus session-subject grant events when wired. JSONL retains the full membership log; SQL projects membership facts and retains lifecycle events (`audit.go`). The embedded page is not the full reference-image audit panel. |
+| 22 | **Permission badge / role pill** | `GET /sessions/{id}/roles`; stored principal role/status from `GET /principals`; `internal/session/audit_http.go` / `internal/registry/permissions_read.go` | **SHIPPED read data**. Session membership roles and principal namespace roles are distinct records. The browser shows session-role rows in Session permissions and stored principal fields in Authority; this is not browser authentication or an editor. |
+| 23 | **Permission matrix** (`B`) | `GET /sessions/{id}/permissions`; `internal/session/audit_http.go` and `BuildPermissionMatrix` in `audit.go` | **SHIPPED read-only session matrix (CR-CHAT-021)**: active participant roles plus session grants, `send` / `read` / `invite` / `admin`, allowed cells labelled `role` or `grant`. `chat.html` renders the rows. No per-session mint column, deployment-wide effective-authority evaluator or matrix editor is claimed (§7). |
 | 24 | **Participants list** + count + "Add participants" search (`A`; `D`'s audience counts) | `GET`/`POST /sessions/{id}/participants` (CR-CHAT-019); `GET /agents` (the roster) | **SHIPPED** — membership of a conversation is a recorded event, returned with its active flag and count. |
-| 25 | **Group rows** with counts (`A` Engineering 4 / Operations 3 / Research 2 / Design 2 / Security 2; `D` "Capability Group • 3 agents") | the capability index: `GET /agents?capability=` (exact match on advertised capabilities) | **PARTIAL** — capability *membership* is real; a **group** object with a name and a count is **NOT BUILT** (owed: the group/team concept, CR-CHAT-003 / CR-CHAT-010). `A`'s counts are placeholder. |
+| 25 | **Group rows** with counts | `GET /groups`, `GET /groups/{name}` for curated rosters; `GET /agents?capability=` for a different, dynamic capability pool | **SHIPPED roster API**, not the embedded group UI: console count/roster/picker remains **OPEN DF-CRIER-449**. Reference-image counts are placeholders, not live measurements. |
 | 26 | **Mention popover** — agent-group rows with counts (`A`) | `GET /agents?capability=` (or `GET /agents` for the full roster) | **PARTIAL** — resolvable today only if a "group" is in fact a capability name. The parser that turns a typed token into a resolution is CR-CHAT-004. |
-| 27 | **Mention popover** — typed rows: Team / Capability Group / Agent, with presence dots (`D`) | agent rows SHIPPED (`GET /agents`); capability rows SHIPPED via the capability index; **Team** rows | **PARTIAL** — a Team is NOT BUILT (row 25). |
+| 27 | **Mention popover** — typed Team / Capability Group / Agent rows | agent/capability reads and named-group roster API (`GET /groups`) exist | **PARTIAL** — backend groups are not absent; the embedded named-group picker/roster workflow remains **OPEN DF-CRIER-449**. |
 | 28 | **Capability tag delivery** — the map's halo and "One tag. Many agents." (`D`), and any `@cap:y` send | `POST /capabilities/{capability}/inbox` — resolves to **ONE** holder, round-robin over live holders (pool = the live holders when any exist, else all holders), `404 NO_CAPABLE_AGENT` when nobody advertises it, same guard / lease / ack / TTL / federation path as a by-id delivery | **SHIPPED** — and it is a **selector, not a fan-out** (§3.7 item 4). The UI must present it that way. |
 | 29 | **Capability map** — nodes, solid / dashed links, halo geometry, legend, callout (`D`) | none (the index is data; the topology is not computed) | **NOT BUILT**. Owed: a topology read (which holders exist, which links are live) — arguably a client-side projection of `GET /agents` + `GET /mesh/peers`, which is a decision for CR-CHAT-009/010. |
 | 30 | **Guard flag** — `A`'s amber shield + `Flagged` pill, `C`'s amber shield `!` | `guard.Meta` on the entry: `decision` (allow / block / sanitize), `risk_level`, `reason`, `matched_patterns`, `policy`, `provider`, `model`, `errored`, `quarantined`, `sanitized`, `quarantined_payload` — surfaced on `GET /agents/{id}/inbox`, on the deliver response, and as the uniform notice on a block | **SHIPPED** — this is the one "badge on a message" that is real, and CR-CHAT-009 requires it to be **visible, not silent**. |
@@ -750,7 +750,7 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 38 | **Namespace / realm wall** behind every element above | `GET /namespaces`; realm decided at registration, delivery, transfer, relay publish + subscribe; per-realm auth posture, rate limit, guard settings, retention | **SHIPPED** (CR-FEAT-029) — and every session-scoped surface owed above must be realm-scoped on arrival. |
 | 39 | **Channel list** — the Z2 index of **channels** (project rooms) (§3.8.1) | `GET /sessions?kind=channel` (CR-CHAT-019) | **SHIPPED** as the `kind` filter on the session list (CR-CHAT-019); a `/channels` alias is not built and is not owed. |
 | 40 | **Direct-message entry point** — a 1:1 with one agent (§3.8.1) | the session `kind: direct` on `POST`/`GET /sessions` (CR-CHAT-019) | **PARTIAL** — the object, the create and the list ship as one room model with a `kind`; what a DM implies for GRANTS is still CR-CHAT-003. |
-| 41 | **Named-group row / picker**, and "send one message to a curated set at once" (§3.8.1) | none — the capability route (`POST /capabilities/{capability}/inbox`, row 28) is a **different, dynamic** target and is **not** this | **NOT BUILT**. Owed: the named-group object and roster (`POST`/`GET /groups`) and the group fan-out (CR-CHAT-013 / CR-CHAT-022); the `@team:x` grammar is CR-CHAT-004. |
+| 41 | **Named-group row / picker**, and curated-set fan-out | `POST`/`GET /groups`, `GET /groups/{name}`, `PATCH /groups/{name}/members`; `internal/session/groups_http.go` and session fan-out | **SHIPPED API and roster fan-out (CR-CHAT-013 / CR-CHAT-022)**. Console create/list/count/roster controls remain **OPEN DF-CRIER-449**. A group is not an agent credential; capability delivery remains a selector, not this fan-out. |
 | 42 | **Depth collapse** below a configurable depth (**default 3**) into an expandable summary card (§3.8.2) | `GET /sessions/{id}/messages` carries `thread_depth` and `reply_depth` (CR-CHAT-019) | **PARTIAL** — the ancestry the collapse rule reads now ships; the client collapse rule (default depth 3) and the generated summary card are still owed (CR-CHAT-017). |
 | 43 | **Timeline rail** — branch structure + current position (§3.8.2) | `GET /sessions/{id}/messages` serves `thread_id` / `parent_id` / `root_id` / `thread_depth` (CR-CHAT-019) | **PARTIAL** — the branch data the rail renders now ships (the same read as row 42); the rail's current-position presentation is client-side. |
 | 44 | **Per-thread / per-sub-thread summary card** — generated, marked generated, raw messages one click under (§3.8.2) | none | **NOT BUILT**. Owed: a summary surface + a generated marker + the raw-message link (CR-CHAT-017). Who generates it and where it is stored is undecided (§6). |
@@ -864,63 +864,101 @@ Added with the v2 detail pass — open, and deliberately not answered here:
 
 ## 7. Status
 
-**Status: DRAFT v2 · 2026-10-03 · CR-CHAT-001 (+ CR-CHAT-009 for the MVP).**
+**Status: implemented in part · verified 2026-10-21 · DF-CRIER-445.** The DRAFT v2 label
+at the top describes the design revision, not an absent implementation. This section is the current
+implementation inventory; it supersedes the older build-status annotations elsewhere in the design.
+A registered API, a stored object, a rendered browser control and authenticated authority are separate
+claims. None implies the others.
 
-This document is a **specification of an interface that does not exist yet**. Concretely, **not built**:
+### Shipped surfaces
 
-- **The core session object surfaces ARE BUILT (CR-CHAT-019)** — `GET`/`POST /sessions`, the session
-  object (title, id, start, audience/participant counts, state, visibility), the ordered cross-agent
-  transcript read (`GET /sessions/{id}/messages`), membership (`GET`/`POST /sessions/{id}/participants`)
-  and fan-out into a session (`POST /sessions/{id}/messages`) all ship. What is still **not built**: the
-  unrelated surfaces §4 rows 16-30 name below. The close/reopen route and recorded
-  system event SHIP (DF-CRIER-446, CHAT-SESSIONS.md §4.5a); `session_id` remains a wire tag on the deliver
-  body and the webhook envelope, a guard policy key, and in the federation hold record — but it is now
-  also the key of a stored session object.
-- **`thread_id` IS stored (CR-CHAT-019)** — it rides the stored record (`InboxEntry.thread_id` plus the
-  session backends' `thread_id` column/line), so a thread is reconstructable from storage alone. It
-  remains a guard policy key (`thread:<id>`) as before.
-- **No Principal, no Grant, no role, no permission matrix** — permissions and identity are CR-CHAT-003 and
-  CR-CHAT-007; the shipped auth surfaces (deployment Bearer, namespace posture, per-agent ed25519) are not
-  per-principal roles.
-- **No address grammar or parser** — CR-CHAT-004. The agent and capability halves resolve today; the
-  `@team:` / `@ns/*` / `#session` halves do not.
-- **No group/team objects** — capability *membership* is real; a named group with a count is not.
-- **No audit trail scoped to sessions and principals** — the opt-in delivery log is agent- and
-  delivery-scoped and off by default.
-- **No queue-depth history / trend, no graded health severity, no fleet presence aggregate, no per-message
-  latency, no lease renewal, no file
-  attachments, no tag/label field on a message.**
-- **Nothing added in v2 is built.** No channel, no direct message, no named-group object or roster
-  (CR-CHAT-013 — `@team:x` is grammar, not a group); no message kind on the wire, in storage or in the
-  transcript, and the shipped envelope `kind` (`message` | `configure` | `configure_ack`) is a **different
-  field** and is not the message kind (CR-CHAT-018); no sub-thread branch operation, no `parent_thread_id`,
-  no anchor, so the depth rule (D11) is a rule with nothing behind it yet (CR-CHAT-017); no recorded
-  late-join context share (CR-CHAT-016); no depth collapse, no timeline rail, no generated summary and no
-  location-returning search (CR-CHAT-017); no attachment upload/fetch surface (CR-CHAT-014 — the reference
-  is the shipped opaque payload, the bytes are not, and the design is not this document's).
-- **UI and session surface — status as of 2026-10-19, superseding the CR-CHAT-011 / -013 / -017 / -018
-  statements in the two bullets above.** An embedded HTML client now ships at `GET /chat`
-  (`cmd/server/chat.html`, CR-CHAT-038): one file, no build step, no socket — it polls the REST API
-  and holds no state the server does not have. Sessions carry a `kind` of `channel` or `direct`
-  (`internal/session/session.go:43-48`) and channel creation accepts an initial member list; a
-  message carries `parent_id` for same-level replies (`internal/session/http.go:203`) and the
-  composer distinguishes a plain message from an explicit task. Still genuinely unbuilt: named-group
-  objects and rosters, sub-thread branching and anchors, recorded late-join context share, depth
-  collapse, generated summaries, location-returning search, attachment bytes, and any per-principal
-  permission matrix. The four reference images below remain layout references with placeholder
-  lettering (CR-CHAT-011).
+- **Principal, binding and grant management ships.** `cmd/server/main.go` registers
+  `GET /principals`, `GET /bindings` and `GET /grants` to `HandleListPrincipals`,
+  `HandleListBindings` and `HandleListGrants` in `internal/registry/permissions_read.go`.
+  `POST /principals`, `POST /bindings` and `POST /grants` call `HandleMintPrincipal`,
+  `HandleCreateBinding` and `HandleCreateGrant` in `internal/registry/principals_api.go`;
+  `POST /grants/{grantid}/revoke` appends a revocation. These use the same
+  `internal/permissions` store/fold the delivery ACL reads, not a second identity database.
+  Principal records include stored role/status data; binding reads return the effective pair;
+  grant reads exclude expired and revoked grants. This is management, **not browser sign-in**.
+- **Registration is unconditional; authorization is not.** Permission management requires
+  `CR_PERMISSIONS_ENABLED=true` and the distinct `CR_PERMISSIONS_ADMIN_TOKEN` Bearer credential.
+  An unarmed or unauthorized handler returns `403 MANAGEMENT_FORBIDDEN`, not an absent route;
+  shared middleware can first refuse a missing/invalid deployment credential with 401.
+  `GET /trust/anchors` and `POST /trust/anchors` also ship (`cmd/server/main.go`,
+  `internal/registry/trust_handler.go`), with their own management gate; trust storage does not require
+  the delivery ACL switch. The middleware accepts the admin credential on management paths without
+  treating a message credential as permission-minting authority.
+- **The browser reads the authority records (DF-CRIER-384).** `GET /chat` serves
+  `cmd/server/chat.html`. Its read-only Authority view calls `GET /principals`, `GET /bindings`,
+  `GET /grants`, `GET /fed/peers` and `GET /trust/anchors`, plus `GET /status` for posture.
+  Each inventory names its source route and labels the server-returned field columns; missing fields
+  say not reported. Empty, populated, refused and failed reads are distinct states. A collapsed fold
+  issues no management reads. No credential entry, principal minting, binding or grant editor is
+  provided by this view, and a refused read is not presented as an empty inventory.
+- **A session permission matrix and roles read already ship**, not just grant records:
+  `GET /sessions/{id}/permissions`, `GET /sessions/{id}/roles` and `GET /sessions/{id}/audit`
+  are registered by `session.RegisterAuditRoutes` from `cmd/server/main.go` and handled by
+  `internal/session/audit_http.go`. The matrix derives active membership roles and overlays session
+  grants; it exposes `send`, `read`, `invite`, `admin` and each allowed cell's `role`/`grant` source
+  (`internal/session/audit.go`). `chat.html` renders the Session permissions rows read-only. This is
+  **not** a deployment-wide effective-authority evaluator or the reference image's five-column
+  send/read/invite/admin/mint editor; there is no per-session mint operation. The matrix is not proof
+  that a browser can present a principal credential or satisfy an armed delivery/lifecycle ACL.
+- **Sessions, transcripts and lifecycle ship.** `cmd/server/main.go` registers `GET`/`POST /sessions`,
+  `GET`/`POST /sessions/{id}/messages` and `GET`/`POST /sessions/{id}/participants`.
+  `internal/session` stores the session, membership, message kinds, `thread_id` and same-level reply
+  `parent_id`; the browser lists channels/direct conversations and exposes plain sends and explicit
+  tasks. `POST /sessions/{id}/state` closes/reopens with durable attributed system events
+  (`internal/session/lifecycle.go`, DF-CRIER-446; `CHAT-SESSIONS.md` §4.5a). Its armed-ACL browser
+  limitation is listed below, not hidden by this backend claim.
+- **Named-group APIs ship; the browser roster surface does not.** `POST`/`GET /groups`,
+  `GET /groups/{name}` and `PATCH /groups/{name}/members` are registered in `cmd/server/main.go`
+  and served by `internal/session/groups_http.go`. They store curated rosters and fan out via the
+  existing session delivery path, unlike a capability selector. DF-CRIER-449 remains open for the
+  console create/list/count/roster experience; it must not be read as proof that the API is absent.
+- **Backend navigation is not browser navigation.** The server registers thread messages, timeline,
+  summary and session search reads (`internal/session/threading.go`), plus recorded participant
+  context GET/PUT and compile/expand routes. Stored branch records and parent/anchor fields exist in
+  `internal/session/threading.go` and the stores. The embedded page does not expose the complete
+  nested-thread, return-to-anchor, depth-collapse or late-join context workflows below.
 
-What **is** shipped and reusable, and must not be reinvented: the relay (publish / subscribe / topics),
-the durable inbox with lease / ack / TTL and dead letters, capability delivery
-(`POST /capabilities/{capability}/inbox`, selector semantics), the agent registry with derived presence,
-per-namespace policy (auth posture, rate limits, guard settings, retention), the guard verdict metadata,
-and `GET /status` / `GET /health`.
+### Still missing or limited
 
-Not claimed, and not to be claimed in `docs/claims.yaml`, until they exist: session reads and writes,
-membership, transcripts, threading, principals, grants, roles, the address grammar, and the web client —
-nor any of the v2 additions: channels, direct messages, the named-group object and its fan-out, the
-message kinds, sub-thread branching, the late-join context record, depth collapse, timeline rails,
-generated summaries, location-returning search, or attachment upload/fetch.
+- **Browser sign-in is unresolved (DF-CRIER-333).** The page has no login/cookie exchange and cannot
+  attach a Bearer header on plain navigation. `CR_AUTH_TOKEN` protects the page and API; a trusted
+  fronting arrangement remains an owner decision. The page cannot sign agent requests either:
+  signature-enforced session sends are refused, not silently exempted (§1, DF-CRIER-379).
+- **Close/Reopen cannot satisfy an armed ACL from this page (DF-CRIER-460).**
+  `chat.html` sends `{state, sender}`; `internal/session/lifecycle.go` requires session admin authority
+  resolved through a bound principal. A visible enabled control is therefore not evidence of usable
+  authority. The unarmed case can work; the armed browser request is refused. This is not fixed here.
+- **The embedded transcript has one-level reply presentation (DF-CRIER-448).** It has no complete
+  deliberate sub-thread branch workflow, return-to-exact-anchor control or expandable depth collapse.
+  Backend branch storage and navigation reads do not close that UI row. D11 still forbids branching
+  merely because someone replies or addresses a non-member.
+- **Named-group rosters are not manageable in the console (DF-CRIER-449).** No group picker or
+  create/list/read-membership control ships in `chat.html`; the shipped HTTP roster operations above
+  and ident-only member rule do not turn a group name into an authenticated agent identity.
+- **No accessibility audit is recorded (DF-CRIER-450).** Existing status roles and ARIA attributes are
+  not a keyboard/focus, contrast, reduced-motion or announced-error audit; no accessibility compliance
+  is claimed.
+- **The design still exceeds the embedded page.** Generated summary cards, a timeline rail,
+  location-returning transcript search and a recorded late-join context-share prompt are not complete
+  browser workflows. Attachment upload/fetch and byte handling are not provided by this interface;
+  an opaque payload or asset reference is not an attachment service. Lease renewal remains deliberately
+  absent (§4 row 19). The four reference images remain layout references with placeholder lettering,
+  not screenshots of a fully implemented control panel.
+
+### Executable scope of this inventory
+
+`docs/claims.yaml` anchors the shipped authority statements and probes their registered paths using
+`make docs-check`'s existing `kind: route` language (GET, non-404). A named 403 proves registration,
+**not** a populated read, permission to manage records, browser access or POST semantics. The
+`TestDocsClaimsInterfaceAuthorityFixture` fixture additionally boots the real in-process server with
+test-owned stores and armed permissions, creates a principal/binding/grant, reads each back with
+`count=1`, and checks that the message credential is refused. It runs under the same `make docs-check`
+test-name selection. No claim here asserts that the open browser rows are complete.
 
 ---
 

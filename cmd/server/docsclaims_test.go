@@ -447,6 +447,11 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	t.Setenv("CR_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CRIER_DATABASE_URL", "")
+	// DF-CRIER-445 fixture: scanner resource seeds are test-owned, never a
+	// real session/group store inherited from the process environment.
+	t.Setenv("CR_SESSION_BACKEND", "jsonl")
+	t.Setenv("CR_SESSION_LOG_ROOT", t.TempDir())
+	t.Setenv("CR_GROUP_ROOT", t.TempDir())
 	// DF-CRIER-142: the README documents live paths GET /metrics and
 	// GET /debug/pprof/ (both opt-in via CR_ENABLE_METRICS /
 	// CR_ENABLE_PPROF, off by default). The docs claim these paths, so the
@@ -692,6 +697,7 @@ func TestDocsClaims(t *testing.T) {
 	// the template with the probe agent substituted — the same pattern
 	// seedDaggerProbeRun uses for the dagger run records above.
 	seedProbeChatSession(t, client, baseURL)
+	seedDocsClaimsInterfaceResources(t, client, baseURL)
 	// Identity the CR-GAP-062 ttl_seconds xfail probe drives. The webhook
 	// default-mode probe registers its OWN identity with the webhook attached
 	// (an update would need a signed request; the default is only observable

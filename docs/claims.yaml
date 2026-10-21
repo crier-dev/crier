@@ -137,6 +137,9 @@ ignore_paths:
   # store enabled so they exist, and those four tokens are therefore NOT ignored
   # here.
   - /fed/
+  # DF-CRIER-445: CHAT-INTERFACE explicitly says this alias is NOT built and
+  # NOT owed; channels use /sessions?kind=channel. Not a claimed API route.
+  - /channels
 
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
@@ -1733,4 +1736,89 @@ claims:
     kind: anchor
     doc: specs/CHAT-FEDERATION.md
     quote: "`peer_verdict_values` — the full ordered value set, never one arbitrarily chosen value — when two or more do. A key that reaches the wire under more than one spelling, or under a single spelling that is not the canonical `X-Crier-Fed-Verdict`, is named in `peer_verdict_keys`"
+    xfail: null
+
+  # DF-CRIER-445: §7 is a build inventory, not an absent-interface disclaimer.
+  # Existing route probes GET each path on the real in-process server; only 404
+  # fails. A 403 proves registration, NOT authorized access or POST semantics.
+  # TestDocsClaimsInterfaceAuthorityFixture supplies the armed populated-read /
+  # write and denied-message-credential arms under the same docs-check selection.
+  - id: ROUTE-CHAT-INTERFACE-PRINCIPALS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Principal, binding and grant management ships.**"
+    expect: "/principals"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-BINDINGS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Principal, binding and grant management ships.**"
+    expect: "/bindings"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-GRANTS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Principal, binding and grant management ships.**"
+    expect: "/grants"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-TRUST-ANCHORS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "`GET /trust/anchors` and `POST /trust/anchors` also ship"
+    expect: "/trust/anchors"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-AUTHORITY-PEERS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**The browser reads the authority records (DF-CRIER-384).**"
+    expect: "/fed/peers"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-SESSION-MATRIX
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**A session permission matrix and roles read already ship**"
+    expect: "/sessions/{id}/permissions"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-SESSION-ROLES
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**A session permission matrix and roles read already ship**"
+    expect: "/sessions/{id}/roles"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-SESSION-AUDIT
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**A session permission matrix and roles read already ship**"
+    expect: "/sessions/{id}/audit"
+    xfail: null
+  - id: ROUTE-CHAT-INTERFACE-GROUPS
+    kind: route
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Named-group APIs ship; the browser roster surface does not.**"
+    expect: "/groups"
+    xfail: null
+  - id: ANCHOR-CHAT-INTERFACE-SIGN-IN-OPEN
+    kind: anchor
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Browser sign-in is unresolved (DF-CRIER-333).**"
+    xfail: null
+  - id: ANCHOR-CHAT-INTERFACE-LIFECYCLE-ACL-OPEN
+    kind: anchor
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Close/Reopen cannot satisfy an armed ACL from this page (DF-CRIER-460).**"
+    xfail: null
+  - id: ANCHOR-CHAT-INTERFACE-DEPTH-OPEN
+    kind: anchor
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**The embedded transcript has one-level reply presentation (DF-CRIER-448).**"
+    xfail: null
+  - id: ANCHOR-CHAT-INTERFACE-GROUP-UI-OPEN
+    kind: anchor
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**Named-group rosters are not manageable in the console (DF-CRIER-449).**"
+    xfail: null
+  - id: ANCHOR-CHAT-INTERFACE-ACCESSIBILITY-OPEN
+    kind: anchor
+    doc: specs/CHAT-INTERFACE.md
+    quote: "**No accessibility audit is recorded (DF-CRIER-450).**"
     xfail: null
