@@ -1830,3 +1830,5 @@
 {"id": 1828, "event_type": "task_updated", "actor": "foreman", "detail": "{\"status\":\"in_progress\"}", "task_id": "DF-CRIER-445", "timestamp": "2026-10-21T06:21:43Z", "tick_number": null}
 {"id": 1829, "event_type": "task_created", "actor": "foreman", "detail": "{\"id\":\"DF-CRIER-461\",\"status\":\"pending\"}", "task_id": "DF-CRIER-461", "timestamp": "2026-10-21T07:00:02Z", "tick_number": null}
 {"id": 1830, "event_type": "task_updated", "actor": "foreman", "detail": "{\"status\":\"in_progress\"}", "task_id": "DF-CRIER-461", "timestamp": "2026-10-21T07:00:11Z", "tick_number": null}
+{"id": 1831, "event_type": "task_completed", "actor": "foreman", "detail": "{\"status\":\"complete\"}", "task_id": "DF-CRIER-445", "timestamp": "2026-10-21T07:03:12Z", "tick_number": null}
+{"id": 1832, "event_type": "task_completed", "actor": "foreman", "detail": "{\"status\":\"complete\"}", "task_id": "DF-CRIER-459", "timestamp": "2026-10-21T07:03:12Z", "tick_number": null}
