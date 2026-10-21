@@ -440,24 +440,71 @@ function managementFailure(id, route, error) {
   managementFailures.set(id, {kind, route, detail, status:error.status, code:error.serverCode});
   renderManagementFailures();
 }
-const managementValue = value => value === undefined ? "not reported" : value === null ? "null (no value)" : typeof value === "object" ? JSON.stringify(value) : String(value);
-// DF-CRIER-384: a column that prints whatever the server sends is one server
-// change away from putting a credential into an operator's screenshot. A field
-// that NAMES token material is never rendered verbatim: a fingerprint is shown
-// only when it is a SHORT prefix (the API's own four-byte hex projection) and
-// its column says so, and anything longer — a token, a 64-hex digest — is
-// refused in words instead of printed.
-const TOKEN_FIELD = /(^|[-_.])(token|secret|password|credential|bearer)/i;
-const FINGERPRINT_FIELD = /fingerprint/i;
+const managementValue = value => value === undefined ? "not reported" : value === null ? "null (no value)" : value === "" ? "empty string (no characters)" : typeof value === "object" ? JSON.stringify(value) : String(value);
+// DF-CRIER-384/454: names are a first-pass signal, not permission to print.
+// Inspect values and nested shapes before serialization. A secret marker wins
+// over every publication hint; withholding never includes a sample of the value.
+const TOKEN_FIELD = /(^|[-_.])(token|secret|password|credential|bearer|auth|apikey|api[-_.]?key)/i;
+const FINGERPRINT_FIELD = /(^|[-_.])(fingerprint|digest|sha256)(?:$|[-_.])/i;
 const SHORT_FINGERPRINT = /^[0-9a-f]{4,16}$/i;
-const TOKEN_WITHHELD = "not shown — token material is never rendered";
-function managementFieldLabel(field) {
-  return TOKEN_FIELD.test(field) && FINGERPRINT_FIELD.test(field) ? field + " (short prefix)" : field;
+const PUBLISHED_FINGERPRINT = /^[0-9a-f]{64}$/i;
+const TOKEN_WITHHELD = "withheld — ";
+function managementFieldLabel(field) { return field; }
+function managementSecretShape(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  if (value.secret === true || value.sensitive === true || value.is_secret === true) return "record marked secret";
+  // Typed credential envelopes are secret even under a neutral field name.
+  if ([value.type, value.kind, value.scheme].some(kind => typeof kind === "string" && /^(auth|api[-_]?key|credential|secret|token|bearer|password)$/i.test(kind))) return "credential object shape";
+  return "";
 }
-function managementCell(field, value) {
-  if (!TOKEN_FIELD.test(field)) return managementValue(value);
-  if (FINGERPRINT_FIELD.test(field) && typeof value === "string" && SHORT_FINGERPRINT.test(value)) return value;
-  return value === undefined ? managementValue(value) : TOKEN_WITHHELD + "; a fingerprint is shown only as a short prefix, never a full hash or a credential";
+function managementKeyMaterial(value) {
+  if (/-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(value)) return "looks like key material: PRIVATE KEY envelope";
+  for (const [pattern, prefix] of [
+    [/(?:^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}/, "sk-"],
+    [/(?:^|[^A-Za-z0-9])ghp_[A-Za-z0-9_]{8,}/, "ghp_"],
+    [/(?:^|[^A-Za-z0-9])xox[A-Za-z0-9_-]{8,}/, "xox"],
+    [/(?:^|[^A-Za-z0-9])AKIA[A-Z0-9]{16}/, "AKIA"],
+    [/(?:^|[^A-Za-z0-9])eyJ[A-Za-z0-9_-]{8,}/, "eyJ"],
+  ]) if (pattern.test(value)) return "looks like key material: prefix `" + prefix + "`";
+  if (/(?:^|[^A-Za-z0-9])[0-9a-f]{32,}(?:$|[^A-Za-z0-9])/i.test(value)) return "looks like key material: long hex blob (32+ characters)";
+  if (/[A-Za-z0-9_+/-]{32,}={0,2}/.test(value)) return "looks like key material: long base64/base64url blob (32+ characters)";
+  return "";
+}
+function managementWithholdingReason(field, value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (["secret", "sensitive", "is_secret"].includes(field) && typeof value === "boolean") return "";
+  const shape = managementSecretShape(value);
+  if (shape) return shape;
+  if (typeof value === "string") {
+    const material = managementKeyMaterial(value);
+    if (material) return material;
+  }
+  if (TOKEN_FIELD.test(field)) return "credential field signal (token/secret/auth material)";
+  if (value && typeof value === "object") {
+    // Withhold the entire container if any descendant is secret, rather than
+    // JSON.stringify leaking a nested credential or silently deleting its key.
+    for (const [key, item] of Object.entries(value)) {
+      const reason = managementWithholdingReason(key, item);
+      if (reason) return "nested value — " + reason;
+    }
+  }
+  return "";
+}
+function managementCell(field, value, record = {}) {
+  // Absence and empty values remain observable, even on credential columns.
+  if (value === undefined || value === null || value === "") return managementValue(value);
+  if (["secret", "sensitive", "is_secret"].includes(field) && typeof value === "boolean") return managementValue(value);
+  const marked = managementSecretShape(record) || managementSecretShape(value);
+  if (marked) return TOKEN_WITHHELD + marked;
+  // Publication is explicit in both field semantics AND exact value shape.
+  // Unlike 384's short-only policy, a published 64-hex fingerprint is labelled
+  // in its own cell, never mistaken for a generic hex credential or truncated.
+  if (FINGERPRINT_FIELD.test(field) && typeof value === "string") {
+    if (PUBLISHED_FINGERPRINT.test(value)) return value + " (published fingerprint)";
+    if (SHORT_FINGERPRINT.test(value)) return value + " (published fingerprint) (short prefix)";
+  }
+  const reason = managementWithholdingReason(field, value);
+  return reason ? TOKEN_WITHHELD + reason : managementValue(value);
 }
 function managementRows(id, route, rows, columns, empty) {
   if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== "object" || Array.isArray(row))) throw new Error("Invalid list response from " + route);
@@ -465,7 +512,7 @@ function managementRows(id, route, rows, columns, empty) {
   const fields = [...new Set([...columns,...rows.flatMap(row => Object.keys(row))])];
   managementState(id,"populated","Populated — " + route + " succeeded. " + rows.length + " record(s) returned.");
   const wrap = document.createElement("div"); wrap.className = "management-table-wrap"; wrap.tabIndex = 0; wrap.setAttribute("role","region"); wrap.setAttribute("aria-label",route + " records; scroll horizontally for all columns");
-  wrap.innerHTML = '<table class="management-table"><caption>Server-returned records · omitted fields are not reported · scroll horizontally for all columns</caption><thead><tr>' + fields.map(field => '<th scope="col">' + esc(managementFieldLabel(field)) + '</th>').join("") + '</tr></thead><tbody>' + rows.map(row => '<tr>' + fields.map(field => '<td>' + esc(managementCell(field, row[field])) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
+  wrap.innerHTML = '<table class="management-table"><caption>Server-returned records · omitted fields are not reported · scroll horizontally for all columns</caption><thead><tr>' + fields.map(field => '<th scope="col">' + esc(managementFieldLabel(field)) + '</th>').join("") + '</tr></thead><tbody>' + rows.map(row => '<tr>' + fields.map(field => '<td>' + esc(managementCell(field, row[field], row)) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
   $(id).append(wrap);
 }
 async function managementList(id, route, key, columns, empty) {
