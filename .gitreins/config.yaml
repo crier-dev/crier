@@ -90,7 +90,12 @@ evaluator:
   # multi-package diff (19 files: envelope+PG store+OpenAPI+docs, verdict 2c2061e2)
   # — tier1 PASS, no merits finding, time cap the only line, no queue binding
   # (judge CPU nonzero, single judge in flight). One-raise rule.
-  max_time: 75m
+  # max_time 75m -> 120m (tick 753, DF-CRIER-453): the 75m rung starved TWICE on
+  # the same row — verdicts b6998ed7 (3 criteria) and 00364b43 (2 criteria, so
+  # criteria count was not the binding knob) both ended tier1 PASS, tier2
+  # INCOMPLETE, "Time cap (1h15m) exceeded (1h15m elapsed)". A cap that repeats
+  # is a missing rung, not a slow row. One-raise rule.
+  max_time: 120m
   # max_input_tokens 6M -> 9M (tick 278, CR-GAP-058): the CR-GAP-058 judge
   # (verdict 4e647851) collected a full tier1 PASS and then consumed the whole
   # configured budget — "Eval cap exceeded: Input token budget (6.0M) exceeded
