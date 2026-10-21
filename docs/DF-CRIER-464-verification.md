@@ -62,14 +62,46 @@ criterion stayed open until the script itself wrote `CR_REGISTRY_BACKEND=sqlite`
 `CR_REGISTRY_SQLITE_PATH=/data/registry.db` and compared the pre-removal agent count against the
 post-start one.
 
+## Run 3 — PROMOTED from the DEFECT STATE (the measured proof that the gate enforces, not inherits)
+
+The first promotion kept its agents because the container it replaced had been corrected by hand.
+So the gate was re-run from the opposite starting point: the live container was deliberately
+recreated **without** `CR_REGISTRY_BACKEND` / `CR_REGISTRY_SQLITE_PATH` on the same volume, which
+reproduces the original defect exactly —
+
+```
+DEFECT-STATE agents: {"agents":[]}
+```
+
+— and then the gate was pointed at it:
+
+```
+$ scripts/deploy-ui-test.sh --image crier-ui-test:8adbf50-clean --commit 8adbf50 \
+      --admin-token-file /tmp/crier-admin-token.txt --container crier-ui-test-8adbf50c
+expected commit=8adbf50; reported commit=8adbf50d; dirty=false
+pre-removal agents before=0
+verified /version read 1/3 … 2/3 … 3/3: commit=8adbf50d; dirty=false
+registry agents before=0; after=6
+PASS: registry durability; agents before=0; after=6
+PROMOTED: … ; three live provenance reads agree; registry durability PASS (agents before=0; after=6)
+RC=0
+```
+
+Six agents reappeared from a container that had none, on a build the gate itself refused to
+describe as anything other than `8adbf50d`, clean. That is the property: the promotion writes the
+registry posture, it does not hope the previous container had it.
+
 ## What the selftest covers (fixtures, not the instance)
 
-`python3 scripts/deploy-ui-test-selftest.py` → `RESULT 19/19 passed`, including: a `-dirty` image is
+`python3 scripts/deploy-ui-test-selftest.py` → `RESULT 39/39 passed`, including: a `-dirty` image is
 refused with all three values printed; a mismatched commit is refused; unreadable provenance is
 refused rather than treated as clean; a later disagreement cannot be hidden by an earlier clean
 read; a JSON `dirty` marker refuses even when `modified` is false; removal failure never starts a
-replacement; a start failure never reports success; and a NEUTER copy — with only the dirty
-decision disabled — ACCEPTS the fixture the real script refuses, so the green cannot be vacuous.
+replacement; a start failure never reports success; inherited `CR_REGISTRY_*` / `CR_DATABASE_URL`
+lines are stripped and the registry posture is written explicitly; fewer agents after start than
+before is a FAIL; equal or more is a PASS; and a malformed / missing / null / object / multi-document
+`/agents` body is reported **unverified**, never zero. A NEUTER copy — with only the dirty decision
+disabled — ACCEPTS the fixture the real script refuses, so the green cannot be vacuous.
 
 ## Limits, stated
 
