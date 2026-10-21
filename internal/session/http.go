@@ -175,6 +175,30 @@ func NewHTTPHandler(store Repository, opts HTTPOptions) *Handler {
 // see webhook.Driver.SetAttemptObserver). It is always non-nil.
 func (h *Handler) LiveDispatch() *dispatchlive.Registry { return h.live }
 
+// deliveryClasses snapshots dispatch-path evidence, never a delivery verdict.
+// Federation bypasses the webhook attempt observer. Unknown registry rows stay
+// unclassified instead of implying that zero attempts means waiting.
+func (h *Handler) deliveryClasses(local, remote []string) map[string]string {
+	classes := make(map[string]string, len(local)+len(remote))
+	for _, target := range remote {
+		classes[target] = "federated"
+	}
+	if h.opts.Agents != nil {
+		for _, target := range local {
+			agent, err := h.opts.Agents.Get(target)
+			if err != nil || agent == nil {
+				continue
+			}
+			if agent.Webhook == nil {
+				classes[target] = "inbox"
+			} else if agent.Webhook.DeliveryMode == "blocking" {
+				classes[target] = "blocking_webhook"
+			}
+		}
+	}
+	return classes
+}
+
 // deliveryBudgetMs is the per-target delivery budget this handler applies: the
 // configured CR_SESSION_DELIVERY_TIMEOUT_MS, else the registry default — the
 // same value fanoutAttemptWithReplies resolves, so the in-flight view can never
@@ -1039,7 +1063,7 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	// stale indicator. Targets are the same resolved planned set the journal
 	// just recorded — the live view plans nothing of its own.
 	if len(attempt.Targets) > 0 {
-		h.live.Begin(sess.ID, msg.ID, attempt.Attempt, attempt.Targets, h.deliveryBudgetMs(), attempt.StartedAt)
+		h.live.BeginWithClasses(sess.ID, msg.ID, attempt.Attempt, attempt.Targets, h.deliveryBudgetMs(), attempt.StartedAt, h.deliveryClasses(deliverable, remoteTargets))
 		defer h.live.End(sess.ID, msg.ID)
 	}
 	remoteOutcomes, err := h.deliverRemote(r.Context(), sess, memState, msg, remoteTargets, r.Header.Get(namespace.HeaderNamespaceToken))

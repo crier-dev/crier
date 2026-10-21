@@ -78,10 +78,15 @@ type Attempt struct {
 }
 
 // Target is one planned target of a live pass, with the last attempt the
-// runtime reported for it. Absent attempt evidence means the runtime has not
-// reported an attempt yet — never that the target was skipped.
+// runtime reported for it. DeliveryClass distinguishes paths that publish
+// webhook attempts from federation/inbox paths that do not. Missing evidence
+// alone says nothing about whether a target is waiting or was skipped.
 type Target struct {
 	Target string `json:"target"`
+	// DeliveryClass describes the dispatch path selected by the session handler.
+	// It is separate from Class (one returned attempt's diagnostic). Federation
+	// and inbox admission do not publish webhook attempt evidence.
+	DeliveryClass string `json:"delivery_class,omitempty"`
 	// Attempts is how many attempts the runtime has made for this target.
 	Attempts int `json:"attempts"`
 	// LastAttemptAt is when the last reported attempt returned.
@@ -131,6 +136,7 @@ type passState struct {
 	budgetMs  int
 	targets   []string
 	ordinal   map[string]int
+	classes   map[string]string
 	attempts  map[string]Attempt
 }
 
@@ -145,6 +151,12 @@ func NewRegistry() *Registry {
 // have. Targets are the resolved planned set (deduplicated, sorted), and
 // budget is the per-target delivery budget in milliseconds.
 func (r *Registry) Begin(sessionID, messageID string, attempt int, targets []string, budgetMs int, startedAt time.Time) {
+	r.BeginWithClasses(sessionID, messageID, attempt, targets, budgetMs, startedAt, nil)
+}
+
+// BeginWithClasses retains a snapshot of the caller's dispatch-path evidence.
+// Missing classification stays unknown; it is never inferred from zero attempts.
+func (r *Registry) BeginWithClasses(sessionID, messageID string, attempt int, targets []string, budgetMs int, startedAt time.Time, classes map[string]string) {
 	if r == nil || sessionID == "" || messageID == "" {
 		return
 	}
@@ -153,8 +165,10 @@ func (r *Registry) Begin(sessionID, messageID string, attempt int, targets []str
 	}
 	planned := dedupeSorted(targets)
 	ordinal := make(map[string]int, len(planned))
+	classSnapshot := make(map[string]string, len(planned))
 	for i, t := range planned {
 		ordinal[t] = i
+		classSnapshot[t] = classes[t]
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -164,6 +178,7 @@ func (r *Registry) Begin(sessionID, messageID string, attempt int, targets []str
 		budgetMs:  budgetMs,
 		targets:   planned,
 		ordinal:   ordinal,
+		classes:   classSnapshot,
 		attempts:  map[string]Attempt{},
 	}
 }
@@ -238,7 +253,7 @@ func (r *Registry) viewLocked(pass *passState) *Pass {
 		Targets:   make([]Target, 0, len(pass.targets)),
 	}
 	for _, name := range pass.targets {
-		target := Target{Target: name}
+		target := Target{Target: name, DeliveryClass: pass.classes[name]}
 		if attempt, ok := pass.attempts[name]; ok {
 			at := attempt.At
 			target.Attempts = attempt.Attempt

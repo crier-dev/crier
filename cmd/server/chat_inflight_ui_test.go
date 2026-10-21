@@ -139,14 +139,14 @@ const ticket = () => (state.sendWatch = { session:'room', key:'k', startedAt:Dat
     attempt:1, started_at:'2026-10-19T12:00:00Z', elapsed_ms:2100, budget_ms:30000,
     targets:[
       {target:'dead-bot', attempts:2, last_attempt_at:'2026-10-19T12:00:02Z', class:'unreachable', reason:'dial tcp 127.0.0.1:39999: connect: connection refused'},
-      {target:'slow-bot'}
+      {target:'slow-bot', delivery_class:'blocking_webhook', attempts:0}
     ]}}]};
   ticket(); await watchSendProgress();
   assert.equal(panel().hidden, false, 'in flight: the panel is visible');
   assert.equal(text(),
     'Delivery in flight — 2.1s of the 30.0s delivery budget\n' +
     'dead-bot: unreachable — dial tcp 127.0.0.1:39999: connect: connection refused (2 attempts · last attempt 2026-10-19T12:00:02Z)\n' +
-    'slow-bot: no attempt has returned yet',
+    'slow-bot: no attempt has returned yet (server reported 0; blocking_webhook delivery)',
     'in flight: elapsed/budget and the per-target reason come from the server reading');
   assert.equal(spinning(), true, 'in flight: the spinner is running');
 
@@ -161,7 +161,8 @@ const ticket = () => (state.sendWatch = { session:'room', key:'k', startedAt:Dat
   assert.equal(spinning(), false, 'terminal: nothing is left spinning');
   assert.equal(text(),
     'Delivery finished — dead-bot: delivery refused — 2 attempts, 30s delivery budget exhausted: dial tcp 127.0.0.1:39999: connect: connection refused; ' +
-    'blackhole-bot: budget_cut — answer did not arrive inside the budget: 1 attempt, 30s delivery budget exhausted. Recorded outcome; the transcript row keeps it.',
+    'blackhole-bot: budget_cut — answer did not arrive inside the budget: 1 attempt, 30s delivery budget exhausted. Recorded outcome; the transcript row keeps it.\n' +
+    'dead-bot: retry state not reported; blackhole-bot: retry state not reported',
     'terminal: the recorded outcome, in the existing vocabulary');
   assert.ok(panel().className.includes('error'), 'terminal: a negative outcome is not styled as progress');
   assert.equal(state.sendWatch.done, true, 'terminal: watching stops');
@@ -177,7 +178,7 @@ const ticket = () => (state.sendWatch = { session:'room', key:'k', startedAt:Dat
   state.sendWatch = { session:'room', key:'k', startedAt:Date.now(), settled:true, done:false, budgetMs:1000, pendingPolls:0 };
   scripted = {messages:[{idempotency_key:'k', outcomes_incomplete:true}]};
   await watchSendProgress();
-  assert.match(text(), /recorded outcome is still being written/);
+  assert.match(text(), /server reports incomplete outcomes/);
   assert.equal(spinning(), true, 'write-back pending: state is still moving');
   state.sendWatch.pendingPolls = 99;
   await watchSendProgress();

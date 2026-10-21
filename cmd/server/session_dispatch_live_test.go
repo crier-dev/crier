@@ -39,6 +39,7 @@ type dispatchLiveView struct {
 	BudgetMs  int    `json:"budget_ms"`
 	Targets   []struct {
 		Target        string `json:"target"`
+		DeliveryClass string `json:"delivery_class"`
 		Attempts      int    `json:"attempts"`
 		LastAttemptAt string `json:"last_attempt_at"`
 		Status        int    `json:"status"`
@@ -174,6 +175,7 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 	require.Len(t, live.Targets, 1)
 	target := live.Targets[0]
 	require.Equal(t, "dead-bot", target.Target)
+	require.Equal(t, "blocking_webhook", target.DeliveryClass, "the production handler identifies where attempt evidence is expected")
 	require.GreaterOrEqual(t, target.Attempts, 1, "the runtime reported the attempt it made")
 	require.NotEmpty(t, target.LastAttemptAt)
 	require.Equal(t, "unreachable", target.Class, "a refused dial is named, not waited out")

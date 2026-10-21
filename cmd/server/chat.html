@@ -354,7 +354,7 @@ async function call(path, options = {}, waitWithoutAbort = false) {
     let body;
     try { body = JSON.parse(raw); } catch {
       const error = new Error("HTTP " + response.status + ": expected JSON from " + path + ". Check the server or access gateway.");
-      error.status = response.status; throw error;
+      error.status = response.status; error.parseFailure = true; throw error;
     }
     if (!response.ok) {
       const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
@@ -896,6 +896,7 @@ async function send(event) {
     // retry reuses the original record. Only ALL refused/failed/budget_cut outcomes grant
     // another delivery attempt; delivered/mixed/canned/incomplete is pure replay.
     if (postStarted && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      if (state.sendWatch) state.sendWatch.browserWaitEnded = true;
       notice("send-result", "Still delivering or awaiting confirmation — the browser stopped waiting, not the server.\nDraft kept. Refresh the transcript to check delivery." + (task ? " Check for the task before retrying." : " Retrying this unchanged message uses the same request key and operator row: all refused/failed/budget_cut outcomes re-attempt delivery; otherwise it only replays the record."));
     } else {
       notice("send-result", "Request failed — " + e.message + "\nDraft kept. Refresh the transcript before retrying.",true);
@@ -994,19 +995,54 @@ setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refre
 // measured. When the pass ends the server stops publishing `dispatch_live` and
 // this panel shows the recorded outcome instead — so the indicator cannot be
 // left spinning after the budget.
-const PROGRESS_READ_GRACE_MS = 15000; // past budget+browser wait: stop watching, say so
+const PROGRESS_READ_GRACE_MS = 15000; // server-reported elapsed beyond its budget
+const PROGRESS_WATCH_LIMIT_MS = 180000; // browser observation window, NOT a delivery budget
 const PROGRESS_PENDING_LIMIT = 15;    // write-back not yet readable: bounded wait
 function progressSeconds(ms) { return (Math.max(0, Number(ms) || 0) / 1000).toFixed(1) + "s"; }
 function progressTargetLine(t) {
-  // Values are written with textContent (see showSendProgress), so server text
-  // is displayed VERBATIM: escaping here would show the operator `&quot;`
-  // instead of the transport's own quoting.
+  // These fields have different meanings: delivery_class identifies the path;
+  // class is the last attempt's transport diagnostic, not a delivery verdict.
   const target = String(t.target);
-  if (!t.attempts) return target + ": no attempt has returned yet";
+  const deliveryClass = t.delivery_class || (t.class === "federated" ? t.class : "");
+  if (deliveryClass === "federated" || deliveryClass === "inbox") {
+    return target + ": " + deliveryClass + " delivery — no attempt evidence is produced by this delivery class; consult the recorded outcome";
+  }
+  const knownCount = Number.isInteger(t.attempts) && t.attempts >= 0;
+  if (!knownCount) return target + ": attempt evidence not reported; delivery class " + (deliveryClass || "not reported") + "; outcome unknown from this reading";
+  if (t.attempts === 0) return target + (deliveryClass === "blocking_webhook"
+    ? ": no attempt has returned yet (server reported 0; blocking_webhook delivery)"
+    : ": server reported 0 returned attempts; delivery class " + (deliveryClass || "not reported") + "; attempt evidence availability unknown");
   const attempts = t.attempts + (t.attempts === 1 ? " attempt" : " attempts");
   const last = t.last_attempt_at ? " · last attempt " + stamp(t.last_attempt_at) : "";
-  if (!t.class) return target + ": the endpoint answered; its recorded outcome is still pending (" + attempts + last + ")";
-  return target + ": " + String(t.class) + " — " + (t.reason ? String(t.reason) : "the runtime reported no reason") + " (" + attempts + last + ")";
+  const status = Number.isInteger(t.status) && t.status > 0 ? " · HTTP " + t.status : "";
+  if (!t.class) return target + ": " + attempts + " reported" + status + last + "; no delivery outcome is reported by this attempt evidence";
+  return target + ": " + String(t.class) + " — " + (t.reason ? String(t.reason) : "the runtime reported no reason") + " (" + attempts + status + last + ")";
+}
+function progressRetryLine(outcomes) {
+  return outcomes.map(o => o.target + ": " + (o.outcome === "in_progress" ? "server reports in_progress; do not send again while it is in progress"
+    : typeof o.retryable === "boolean" ? "server reports retryable=" + o.retryable : "retry state not reported")).join("; ");
+}
+function progressCurrentOutcomes(recorded) {
+  const outcomes = Array.isArray(recorded.outcomes) ? recorded.outcomes : [];
+  if (!recorded.dispatch_live) return outcomes;
+  // A retry exposes the prior pass's durable failures until replacement. They
+  // remain facts about the PRIOR pass, not a verdict on this live retry.
+  const started = Date.parse(recorded.dispatch_live.started_at);
+  return outcomes.filter(o => !Number.isFinite(started) || !Number.isFinite(Date.parse(o.updated_at)) || Date.parse(o.updated_at) >= started);
+}
+function progressRecordedOutcome(recorded, readFailure = "") {
+  const outcomes = progressCurrentOutcomes(recorded);
+  if (!outcomes.length) return false;
+  const moving = recorded.outcomes_incomplete || outcomes.some(o => o.outcome === "in_progress");
+  state.sendWatch.done = !moving;
+  showSendProgress((moving ? "Recorded delivery evidence — " : "Delivery finished — ") + outcomes.map(outcomeLine).join("; ") + ". Recorded outcome; the transcript row keeps it.\n" + progressRetryLine(outcomes) + (readFailure ? "\n" + readFailure : ""), outcomes.some(negativeOutcome) || !!readFailure, moving && !readFailure);
+  if (!moving && state.sendWatch.browserWaitEnded) {
+    // The earlier browser timeout was uncertainty, not a second verdict. Do
+    // not leave its reassurance beside a terminal server-recorded failure.
+    $("send-result").textContent = "Recorded delivery outcome — " + outcomes.map(outcomeLine).join("; ") + ".\nDraft kept. Refresh the transcript before retrying.";
+    $("send-result").className = outcomes.some(negativeOutcome) ? "note error" : "note";
+  }
+  return true;
 }
 function showSendProgress(text, error, spinning) {
   const panel = $("send-progress");
@@ -1029,47 +1065,60 @@ let sendProgressBusy = false;
 async function watchSendProgress() {
   const ticket = state.sendWatch;
   if (!ticket || ticket.done || sendProgressBusy) return;
-  const budget = ticket.budgetMs || 30000;
-  if (Date.now() - ticket.startedAt > budget + PROGRESS_READ_GRACE_MS) {
-    ticket.done = true;
-    showSendProgress("Delivery still in flight past its budget and this panel stopped watching. The recorded outcome appears in the transcript when it arrives.", true, false);
-    return;
-  }
   sendProgressBusy = true;
+  const observationEnded = () => Date.now() - ticket.startedAt > PROGRESS_WATCH_LIMIT_MS;
+  const stopWatching = (reason = "its browser observation window ended") => {
+    ticket.done = true;
+    showSendProgress($("send-progress-text").textContent + "\nThis panel stopped watching: " + reason + ". The text above is the last reading, not a current delivery verdict. Refresh the transcript.", true, false);
+  };
   try {
+    // Always read before deciding to stop: a browser clock cannot say whether
+    // a server budget expired, and a terminal fact wins over old live evidence.
     const body = await call(sessionPath(ticket.session, "messages"));
-    if (state.sendWatch !== ticket) return; // superseded by a newer send
+    if (state.sendWatch !== ticket) return;
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const recorded = ticket.key ? messages.find(m => m.idempotency_key === ticket.key) : messages[messages.length - 1];
-    if (!recorded) { if (ticket.settled) { ticket.done = true; clearSendProgress(); } return; }
-    if (recorded.dispatch_live) {
-      ticket.budgetMs = recorded.dispatch_live.budget_ms || ticket.budgetMs;
-      ticket.pendingPolls = 0;
-      const pass = recorded.dispatch_live;
-      showSendProgress(["Delivery in flight — " + progressSeconds(pass.elapsed_ms) + " of the " + progressSeconds(pass.budget_ms) + " delivery budget", ...(pass.targets || []).map(progressTargetLine)].join("\n"), false, true);
+    if (!recorded) { if (ticket.settled) { ticket.done = true; clearSendProgress(); } else if (observationEnded()) stopWatching(); return; }
+    ticket.lastRecord = recorded;
+    if (progressRecordedOutcome(recorded)) {
+      if (ticket.done) await refresh();
+      else if (observationEnded()) stopWatching();
       return;
     }
-    const outcomes = recorded.outcomes || [];
-    if (outcomes.length) {
-      ticket.done = true;
-      showSendProgress("Delivery finished — " + outcomes.map(outcomeLine).join("; ") + ". Recorded outcome; the transcript row keeps it.", outcomes.some(negativeOutcome), false);
-      await refresh();
+    if (recorded.dispatch_live) {
+      const pass = recorded.dispatch_live;
+      const knownBudget = Number.isFinite(pass.budget_ms) && pass.budget_ms > 0;
+      ticket.budgetMs = knownBudget ? pass.budget_ms : null;
+      ticket.pendingPolls = 0;
+      const elapsed = Number.isFinite(pass.elapsed_ms) && pass.elapsed_ms >= 0 ? progressSeconds(pass.elapsed_ms) : "elapsed not reported";
+      const budget = knownBudget ? " of the " + progressSeconds(pass.budget_ms) + " delivery budget" : "; delivery budget not reported — budget unknown";
+      showSendProgress(["Delivery in flight — " + elapsed + budget, ...(pass.targets || []).map(progressTargetLine)].join("\n"), false, true);
+      if (observationEnded()) stopWatching();
+      else if (knownBudget && pass.elapsed_ms > pass.budget_ms + PROGRESS_READ_GRACE_MS) stopWatching("the server-reported elapsed exceeds its reported budget plus this panel's read grace");
       return;
     }
     if (recorded.outcomes_incomplete) {
-      if (++ticket.pendingPolls > PROGRESS_PENDING_LIMIT) {
+      if (++ticket.pendingPolls > PROGRESS_PENDING_LIMIT || observationEnded()) {
         ticket.done = true;
-        showSendProgress("Delivery finished; the recorded outcome is not readable yet — refresh the transcript.", true, false);
+        showSendProgress("The server reports incomplete outcomes; the recorded outcome is not readable yet — refresh the transcript. Delivery outcome and retry state are unknown.", true, false);
         return;
       }
-      showSendProgress("Delivery finished; the recorded outcome is still being written.", false, true);
+      showSendProgress("The server reports incomplete outcomes; this panel is checking for the recorded outcome. Delivery outcome and retry state are unknown.", false, true);
       return;
     }
     ticket.done = true;
-    showSendProgress("No in-flight pass and no per-recipient outcome recorded for this message.", false, false);
+    showSendProgress("No in-flight pass and no per-recipient outcome recorded for this message. Delivery outcome and retry state are unknown.", false, false);
   } catch (error) {
-    // A failed progress read is not a delivery verdict: keep the last server
-    // reading and let the result line own the failure.
+    if (state.sendWatch !== ticket) return;
+    const diagnostic = error.parseFailure ? "Could not parse the server's answer (HTTP " + error.status + ")." : "Could not read delivery progress — " + error.message;
+    const cachedRecord = (ticket.key ? state.messages.find(m => m.idempotency_key === ticket.key) : null) || ticket.lastRecord;
+    const cached = cachedRecord && ticket.lastRecord?.dispatch_live ? {...cachedRecord, dispatch_live:ticket.lastRecord.dispatch_live} : cachedRecord;
+    // A parse error is a read failure, not a pending or failed delivery. Keep
+    // the exact server-recorded failure if another transcript read obtained it.
+    if (!cached || !progressRecordedOutcome(cached, diagnostic)) {
+      showSendProgress(diagnostic + " Delivery outcome and retry state are unknown from this read; refresh the transcript.", true, false);
+    }
+    if (!ticket.done && observationEnded()) stopWatching();
   } finally { sendProgressBusy = false; }
 }
 setInterval(watchSendProgress, 1000);

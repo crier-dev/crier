@@ -5804,6 +5804,10 @@ components:
                 properties:
                   target:
                     type: string
+                  delivery_class:
+                    type: string
+                    enum: [blocking_webhook, inbox, federated]
+                    description: "Dispatch-path snapshot, separate from the attempt failure class. Federation and inbox admission produce no webhook attempt evidence. Omitted when the server cannot classify the path."
                   attempts:
                     type: integer
                     description: How many attempts the runtime has made for this target.
