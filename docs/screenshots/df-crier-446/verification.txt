@@ -1,0 +1,251 @@
+DF-CRIER-446 verification (scratch-only, no production writes)
+
+Route: POST /sessions/{id}/state; body {"state":"closed"|"open","sender":"<acting-agent>"}.
+Normative contract: specs/CHAT-SESSIONS.md section 4.5a; UI mapping row 12.
+State and event retention share one SQL transaction; JSONL uses its existing lifecycle records.
+The memory registry is not a fourth session backend. SQLite :memory: is tested but ephemeral.
+
+go build ./... && go vet ./...
+Exit 0 (FINAL_BUILD_AND_VET_PASS in terminal).
+
+go test -p 4 ./... -count=1 -short -parallel 4 -timeout 240s
+Exit 1: independent run hit the mesh timeout below (not a green run).
+ok  	github.com/crier-dev/crier/cmd/crier-mcp	2.945s
+ok  	github.com/crier-dev/crier/cmd/server	160.637s
+ok  	github.com/crier-dev/crier/config	1.524s
+?   	github.com/crier-dev/crier/examples/sqlite-quickstart	[no test files]
+ok  	github.com/crier-dev/crier/examples/ws-mesh-demo	10.656s
+ok  	github.com/crier-dev/crier/internal/a2a	0.009s
+ok  	github.com/crier-dev/crier/internal/addressing	0.004s
+ok  	github.com/crier-dev/crier/internal/buildinfo	0.003s
+ok  	github.com/crier-dev/crier/internal/chat	0.003s
+ok  	github.com/crier-dev/crier/internal/ci	0.005s
+ok  	github.com/crier-dev/crier/internal/daggerctl	8.811s
+ok  	github.com/crier-dev/crier/internal/detect	11.141s
+ok  	github.com/crier-dev/crier/internal/dispatchlive	0.004s
+ok  	github.com/crier-dev/crier/internal/federation	9.614s
+ok  	github.com/crier-dev/crier/internal/guard	15.278s
+ok  	github.com/crier-dev/crier/internal/httperr	0.003s
+ok  	github.com/crier-dev/crier/internal/mcp	6.785s
+2026/10/20 23:55:04 WARN mesh: authentication refused (no valid AUTH_RESPONSE) agent_id=agent-a error="websocket: close 1006 (abnormal closure): unexpected EOF"
+2026/10/20 23:55:04 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:04 INFO mesh: peer authenticated agent_id=agent-a auth=ed25519-challenge
+2026/10/20 23:55:04 INFO mesh peer connected agent_id=agent-a authenticated=true inbox_notify=false request_id=""
+2026/10/20 23:55:04 WARN mesh: authentication refused code=AUTH_FAILED reason="signature verification failed: the AUTH_RESPONSE signature does not verify against the public key registered for \"agent-a\""
+2026/10/20 23:55:04 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:04 WARN mesh: authentication refused code=AUTH_FAILED reason="AUTH_RESPONSE names agent_id \"agent-b\" but this connection claimed \"agent-a\" — an agent may only authenticate as itself"
+2026/10/20 23:55:04 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:04 WARN mesh: authentication refused code=AUTH_FAILED reason="AUTH_RESPONSE nonce does not match the challenge this connection was issued"
+2026/10/20 23:55:04 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:04 WARN mesh: authentication refused code=AUTH_FAILED reason="mesh authentication failed for \"agent-nobody\": no registered ed25519 public key (agent \"agent-nobody\" not found) — register the agent with its public key (POST /agents) first"
+2026/10/20 23:55:04 WARN mesh peer refused (authentication failed) agent_id=agent-nobody request_id=""
+2026/10/20 23:55:05 WARN mesh: authentication refused code=AUTH_FAILED reason="no AUTH_RESPONSE within 300ms: the challenge expired before this connection proved it holds \"agent-a\"'s registered key"
+2026/10/20 23:55:05 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:05 INFO mesh: peer authenticated agent_id=agent-a auth=ed25519-challenge
+2026/10/20 23:55:05 INFO mesh peer connected agent_id=agent-a authenticated=true inbox_notify=false request_id=""
+2026/10/20 23:55:05 WARN mesh: authentication refused code=AUTH_FAILED reason="AUTH_RESPONSE signature is malformed: expected the hex encoding of a 64-byte ed25519 signature, got 4 character(s)"
+2026/10/20 23:55:05 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:05 INFO mesh: peer authenticated agent_id=agent-a auth=ed25519-challenge
+2026/10/20 23:55:05 INFO mesh peer connected agent_id=agent-a authenticated=true inbox_notify=false request_id=""
+2026/10/20 23:55:05 WARN mesh: authentication refused code=AUTH_FAILED reason="mesh authentication is required but this server has no agent key provider configured"
+2026/10/20 23:55:05 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:05 INFO mesh: peer authenticated agent_id=agent-a auth=ed25519-challenge
+2026/10/20 23:55:05 INFO mesh peer connected agent_id=agent-a authenticated=true inbox_notify=false request_id=""
+2026/10/20 23:55:05 INFO mesh: REGISTER received agent_id=agent-a peer=agent-a message_id=ce8f4b9053ae73a47ccb4498
+2026/10/20 23:55:05 WARN mesh auth: challenge unanswered peer=crier-under-test error="mesh auth: crier-under-test requires authentication but no signing key is configured (set MeshAuthConfig.SigningKey to the ed25519 key whose public half is registered for \"agent-a\")"
+2026/10/20 23:55:05 WARN mesh: authentication refused (no valid AUTH_RESPONSE) agent_id=agent-a error="websocket: close 1000 (normal): shutdown"
+2026/10/20 23:55:05 WARN mesh peer refused (authentication failed) agent_id=agent-a request_id=""
+2026/10/20 23:55:05 WARN mesh: REQUEST refused (source is not the authenticated peer) requester=attacker claimed_source=victim target=target message_id=spoof-1
+2026/10/20 23:55:05 WARN mesh: reply refused (sender is not the request's target) sender=intruder target=target request_id=pair-1
+2026/10/20 23:55:06 WARN mesh: malformed frame refused peer=target message_id=late-auth reason="malformed frame: AUTH_OK is only valid during the mesh connect handshake (CR_REQUIRE_MESH_AUTH on the server), and this connection is already admitted"
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=agent-a authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=agent-B authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=bob authenticated=false inbox_notify=true request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=carol authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=bob authenticated=false inbox_notify=true request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=bob authenticated=false inbox_notify=true request_id=""
+2026/10/20 23:55:06 INFO mesh peer connected agent_id=bob authenticated=false inbox_notify=true request_id=""
+2026/10/20 23:55:07 INFO mesh peer connected agent_id=bob authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:07 WARN mesh: malformed frame refused peer=bob message_id=bogus-1 reason="malformed frame: unknown message type \"NOT_A_FRAME_TYPE\""
+2026/10/20 23:55:07 INFO mesh peer connected agent_id=walker authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:07 INFO mesh peer connected agent_id=quiet authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:07 INFO mesh peer connected agent_id=agent-one authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:07 INFO mesh peer connected agent_id=agent-two authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (invalid character 'h' in literal true (expecting 'r'))"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (unexpected end of JSON input)"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (json: cannot unmarshal array into Go value of type mesh.Envelope)"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (json: cannot unmarshal string into Go value of type mesh.Envelope)"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=no-type-1 reason="malformed frame: unknown message type \"\""
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=typo-1 reason="malformed frame: unknown message type \"MESSAGE\""
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=reg-bad-1 reason="malformed REGISTER frame: json: cannot unmarshal string into Go struct field Register.lease_ttl_ms of type int"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=ack-bad-1 reason="malformed REGISTER_ACK frame: json: unknown field \"lease_ttl_ms\""
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=req-bad-1 reason="malformed REQUEST frame: json: cannot unmarshal string into Go struct field Request.source of type mesh.PeerRef"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=resp-bad-1 reason="malformed RESPONSE frame: json: cannot unmarshal number into Go struct field Response.request_id of type string"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id=err-bad-1 reason="malformed ERROR frame: json: cannot unmarshal string into Go struct field ErrorMessage.error of type mesh.ErrorDetail"
+2026/10/20 23:55:08 INFO mesh: REGISTER received agent_id=agent-a peer=agent-a message_id=reg-1
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (invalid character 'd' looking for beginning of value)"
+2026/10/20 23:55:08 WARN mesh: malformed frame refused peer=agent-a message_id="" reason="malformed frame: not a JSON envelope (unexpected end of JSON input)"
+2026/10/20 23:55:09 WARN mesh: malformed frame refused peer=agent-B message_id="" reason="malformed frame: not a JSON envelope (invalid character 'o' in literal null (expecting 'u'))"
+2026/10/20 23:55:09 INFO mesh peer connected agent_id=agent-a authenticated=false inbox_notify=false request_id=""
+--- FAIL: TestMeshRegisterIsAnsweredWithARegisterAckEchoingItsMessageID (5.00s)
+    register_ack_test.go:87: REGISTER: no frame arrived (read: read tcp 127.0.0.1:40798->127.0.0.1:36845: i/o timeout)
+2026/10/20 23:55:14 INFO mesh peer connected agent_id=agent-double authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:14 INFO mesh: REGISTER received agent_id=agent-double peer=agent-double message_id=1111111111111111111111aa
+2026/10/20 23:55:14 INFO mesh: REGISTER received agent_id=agent-double peer=agent-double message_id=2222222222222222222222bb
+2026/10/20 23:55:14 INFO mesh peer connected agent_id=agent-quiet authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:15 INFO mesh peer connected agent_id=agent-echo authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:15 WARN mesh: malformed frame refused peer=agent-a message_id=reg-unreadable reason="malformed REGISTER frame: json: cannot unmarshal string into Go struct field Register.lease_ttl_ms of type int"
+2026/10/20 23:55:15 WARN mesh: malformed frame refused peer=agent-a message_id=ack-bad-shape reason="malformed REGISTER_ACK frame: json: unknown field \"lease_ttl_ms\""
+2026/10/20 23:55:15 INFO mesh peer connected agent_id=alice authenticated=false inbox_notify=false request_id=""
+2026/10/20 23:55:15 INFO mesh peer connected agent_id=alice authenticated=false inbox_notify=true request_id=""
+FAIL
+FAIL	github.com/crier-dev/crier/internal/mesh	12.440s
+ok  	github.com/crier-dev/crier/internal/metrics	0.008s
+ok  	github.com/crier-dev/crier/internal/middleware	0.007s
+ok  	github.com/crier-dev/crier/internal/namespace	0.004s
+ok  	github.com/crier-dev/crier/internal/permissions	0.594s
+ok  	github.com/crier-dev/crier/internal/pidfile	0.108s
+ok  	github.com/crier-dev/crier/internal/ratelimit	0.605s
+ok  	github.com/crier-dev/crier/internal/registry	60.310s
+ok  	github.com/crier-dev/crier/internal/relay	7.028s
+ok  	github.com/crier-dev/crier/internal/session	78.249s
+ok  	github.com/crier-dev/crier/internal/strictjson	0.004s
+ok  	github.com/crier-dev/crier/internal/testsupport	0.683s
+ok  	github.com/crier-dev/crier/internal/trust	0.011s
+ok  	github.com/crier-dev/crier/internal/webhook	16.677s
+FAIL
+
+go test -p 4 -race ./internal/session -run TestSessionLifecycle -count=1 -v -parallel 4 -timeout 180s
+=== RUN   TestSessionLifecycleDurable
+=== RUN   TestSessionLifecycleDurable/jsonl
+    lifecycle_test.go:112: TestSessionLifecycleDurable/jsonl: closed+reopened with durable attributed event rows; illegal transitions and exact send refusal verified
+=== RUN   TestSessionLifecycleDurable/sqlite
+    lifecycle_test.go:112: TestSessionLifecycleDurable/sqlite: closed+reopened with durable attributed event rows; illegal transitions and exact send refusal verified
+--- PASS: TestSessionLifecycleDurable (1.05s)
+    --- PASS: TestSessionLifecycleDurable/jsonl (0.14s)
+    --- PASS: TestSessionLifecycleDurable/sqlite (0.91s)
+=== RUN   TestSessionLifecyclePostgres
+    lifecycle_test.go:120: PostgreSQL lifecycle integration skipped: CRIER_TEST_POSTGRES_DSN is not configured (must name an isolated test database)
+--- SKIP: TestSessionLifecyclePostgres (0.00s)
+=== RUN   TestSessionLifecycleMemorySQLite
+--- PASS: TestSessionLifecycleMemorySQLite (0.10s)
+=== RUN   TestSessionLifecycleConcurrentClose
+=== RUN   TestSessionLifecycleConcurrentClose/jsonl
+=== RUN   TestSessionLifecycleConcurrentClose/sqlite
+--- PASS: TestSessionLifecycleConcurrentClose (1.21s)
+    --- PASS: TestSessionLifecycleConcurrentClose/jsonl (0.07s)
+    --- PASS: TestSessionLifecycleConcurrentClose/sqlite (1.14s)
+=== RUN   TestSessionLifecycleSQLAtomicRollback
+--- PASS: TestSessionLifecycleSQLAtomicRollback (1.26s)
+=== RUN   TestSessionLifecycleIngressProof
+=== RUN   TestSessionLifecycleIngressProof/required
+=== RUN   TestSessionLifecycleIngressProof/mismatched
+=== RUN   TestSessionLifecycleIngressProof/principal_not_authenticated_by_agent_key
+=== RUN   TestSessionLifecycleIngressProof/no_actor
+=== RUN   TestSessionLifecycleIngressProof/forged_basis
+=== RUN   TestSessionLifecycleIngressProof/verified
+--- PASS: TestSessionLifecycleIngressProof (0.83s)
+    --- PASS: TestSessionLifecycleIngressProof/required (0.02s)
+    --- PASS: TestSessionLifecycleIngressProof/mismatched (0.02s)
+    --- PASS: TestSessionLifecycleIngressProof/principal_not_authenticated_by_agent_key (0.02s)
+    --- PASS: TestSessionLifecycleIngressProof/no_actor (0.01s)
+    --- PASS: TestSessionLifecycleIngressProof/forged_basis (0.01s)
+    --- PASS: TestSessionLifecycleIngressProof/verified (0.05s)
+=== RUN   TestSessionLifecycleAdminRequired
+=== RUN   TestSessionLifecycleAdminRequired/jsonl
+=== RUN   TestSessionLifecycleAdminRequired/sqlite
+--- PASS: TestSessionLifecycleAdminRequired (0.77s)
+    --- PASS: TestSessionLifecycleAdminRequired/jsonl (0.10s)
+    --- PASS: TestSessionLifecycleAdminRequired/sqlite (0.67s)
+PASS
+ok  	github.com/crier-dev/crier/internal/session	6.249s
+
+go test -p 4 ./cmd/server -run 'TestSessionLifecycleProductionRoute|TestDocsClaims|TestOpenAPI' -count=1 -v -parallel 4 -timeout 180s
+Selected actual result lines (real registry verifier, no verifier stub):
+--- PASS: TestDocsClaimsBehaviors (27.03s)
+--- PASS: TestDocsClaimsBehaviorNegativeControl (0.00s)
+--- PASS: TestDocsClaims (11.53s)
+--- PASS: TestDocsClaimsDetectorNegativeControl (0.03s)
+--- PASS: TestOpenAPIServed (0.04s)
+--- PASS: TestOpenAPIDocsSpec (0.01s)
+--- PASS: TestOpenAPIDocumentsAgentClassRoute (0.01s)
+--- PASS: TestOpenAPIDocsIndexesEveryPath (0.00s)
+    session_lifecycle_test.go:61: jsonl: production route persisted verified close and reopen events through the real registry verifier
+    session_lifecycle_test.go:61: sqlite: production route persisted verified close and reopen events through the real registry verifier
+--- PASS: TestSessionLifecycleProductionRoute (0.29s)
+ok  	github.com/crier-dev/crier/cmd/server	38.974s
+
+gitreins guard --full
+Tier 1 Guards: PASS  (test mode: full, whole tree)
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ✓ go_build — ok; scanners: nice=nice -n 10
+  ✓ go_lint — ok; scanners: nice=nice -n 10
+  ✓ go_tests — passed
+  guard log: /home/kara/worktrees/crier-DF-CRIER-446/.gitreins/logs/guard-20261021T045721.799813Z.log
+
+NODE_PATH=/tmp/crier-browser/node_modules CRIER_TEST_BINARY=/tmp/df446-server-final CHAT_EVIDENCE=/tmp/df446-browser-verified node scripts/session-lifecycle-browser.cjs
+Real Chromium; scratch storage; signature-disabled deployment records claimed identity, not verified login.
+CURL POST /sessions -> 201
+{"id":"df446-jsonl","kind":"channel","title":"DF-CRIER-446 jsonl","created_at":"2026-10-21T04:55:52.795524232Z","created_by":{"agent":"operator"},"state":"open","audience_count":0,"participant_count":0,"message_count":0,"thread_count":0}
+CURL POST /sessions/df446-jsonl/state -> 200
+{"id":"df446-jsonl","kind":"channel","title":"DF-CRIER-446 jsonl","created_at":"2026-10-21T04:55:52.795524232Z","created_by":{"agent":"operator"},"state":"closed","closed_at":"2026-10-21T04:55:53.3291Z","audience_count":0,"participant_count":0,"message_count":0,"thread_count":0}
+STORE READ jsonl (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":2,"ts":"2026-10-21T04:55:53.3291Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+CURL POST /sessions/df446-jsonl/messages -> 409
+{"detail":"session \"df446-jsonl\" is closed and admits no new message (§1.3)","error":"SESSION_CLOSED"}
+STORE READ jsonl (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":2,"ts":"2026-10-21T04:55:53.3291Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-jsonl","seq":3,"ts":"2026-10-21T04:55:54.113746Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl reopened","sender_identity_basis":"sender-identity-claimed"}
+STORE READ jsonl (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":2,"ts":"2026-10-21T04:55:53.3291Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-jsonl","seq":3,"ts":"2026-10-21T04:55:54.113746Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl reopened","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":4,"ts":"2026-10-21T04:55:54.757856Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+STORE READ jsonl (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":2,"ts":"2026-10-21T04:55:53.3291Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-jsonl","seq":3,"ts":"2026-10-21T04:55:54.113746Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl reopened","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.close","session_id":"df446-jsonl","seq":4,"ts":"2026-10-21T04:55:54.757856Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-jsonl","seq":5,"ts":"2026-10-21T04:55:54.890862Z","actor":{"agent":"operator"},"reason":"Session df446-jsonl reopened","sender_identity_basis":"sender-identity-claimed"}
+BROWSER PASS jsonl: reload+process restart badge, illegal control visibility, stale-transition refusal, actual legal Close/Reopen clicks, retained events, unknown/failed read (test injection), no page errors.
+CURL POST /sessions -> 201
+{"id":"df446-sqlite","kind":"channel","title":"DF-CRIER-446 sqlite","created_at":"2026-10-21T04:55:56.225365774Z","created_by":{"agent":"operator"},"state":"open","audience_count":0,"participant_count":0,"message_count":0,"thread_count":0}
+CURL POST /sessions/df446-sqlite/state -> 200
+{"id":"df446-sqlite","kind":"channel","title":"DF-CRIER-446 sqlite","created_at":"2026-10-21T04:55:56.225365774Z","created_by":{"agent":"operator"},"state":"closed","closed_at":"2026-10-21T04:55:56.91092Z","audience_count":0,"participant_count":0,"message_count":0,"thread_count":0}
+STORE READ sqlite (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":2,"ts":"2026-10-21T04:55:56.91092Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+CURL POST /sessions/df446-sqlite/messages -> 409
+{"detail":"session \"df446-sqlite\" is closed and admits no new message (§1.3)","error":"SESSION_CLOSED"}
+STORE READ sqlite (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":2,"ts":"2026-10-21T04:55:56.91092Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-sqlite","seq":3,"ts":"2026-10-21T04:55:58.385387Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite reopened","sender_identity_basis":"sender-identity-claimed"}
+STORE READ sqlite (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":2,"ts":"2026-10-21T04:55:56.91092Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-sqlite","seq":3,"ts":"2026-10-21T04:55:58.385387Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite reopened","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":4,"ts":"2026-10-21T04:55:59.031381Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+STORE READ sqlite (direct disk read, not HTTP response):
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":2,"ts":"2026-10-21T04:55:56.91092Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-sqlite","seq":3,"ts":"2026-10-21T04:55:58.385387Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite reopened","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.close","session_id":"df446-sqlite","seq":4,"ts":"2026-10-21T04:55:59.031381Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite marked complete","sender_identity_basis":"sender-identity-claimed"}
+{"v":1,"type":"session.reopen","session_id":"df446-sqlite","seq":5,"ts":"2026-10-21T04:55:59.148937Z","actor":{"agent":"operator"},"reason":"Session df446-sqlite reopened","sender_identity_basis":"sender-identity-claimed"}
+BROWSER PASS sqlite: reload+process restart badge, illegal control visibility, stale-transition refusal, actual legal Close/Reopen clicks, retained events, unknown/failed read (test injection), no page errors.
+EVIDENCE /tmp/df446-browser-verified
+
+NODE_PATH=/tmp/crier-browser/node_modules CRIER_TEST_BINARY=/tmp/df446-server-final CHAT_EVIDENCE=/tmp/df446-existing-chat node scripts/chat-ui-browser.cjs
+BROWSER VERIFIED: runtime posture memory/sqlite, unknown/error fields, 390/768/1280 overflow=0; exact outcome vocabulary, negative styling, draft retention (intercepted outcomes)
+PASS: declared-capability matrix {"legend":"Declared capabilities only — crier records declarations and has no approval state, so \"ask\" is not shown.","agentColumns":10,"addedCapability":"ui-test-new-capability","measurements":[{"width":390,"pageOverflow":0,"panelOverflow":0,"matrixOverflow":510,"tableOverflow":0},{"width":768,"pageOverflow":0,"panelOverflow":0,"matrixOverflow":539,"tableOverflow":0},{"width":1280,"pageOverflow":0,"panelOverflow":0,"matrixOverflow":200,"tableOverflow":0}]}
+BROWSER VERIFIED: http://127.0.0.1:40491/chat: revision CR-CHAT-038, identity-gated send; declared-capability matrix (intercepted registry fixtures)
+BROWSER VERIFIED: UI Claim button POST http://127.0.0.1:40491/sessions/3706f1814cb9e2c42e0f5fe4/tasks/1d81c4210c4f8d9e2d87c1fa/claim -> 201; owner ui-test-recipient
+BROWSER VERIFIED: UI Complete with empty evidence -> real 409 TASK_EVIDENCE_REQUIRED; row refusal retained after refresh; task unchanged
+BROWSER VERIFIED: non-owner Complete disabled; stale enabled control -> real 409 TASK_OWNER_MISMATCH rendered in task row
+BROWSER VERIFIED: UI evidence input + Complete button POST http://127.0.0.1:40491/sessions/3706f1814cb9e2c42e0f5fe4/tasks/1d81c4210c4f8d9e2d87c1fa/complete -> 201; same owner ui-test-recipient; exact evidence retained: Browser-verified claim, empty-evidence and owner-refusal checks: file:///tmp/df446-existing-chat/task-evidence.json
+BROWSER VERIFIED: task open -> claimed -> done; exact stored evidence; refreshed task DOM done
+BROWSER VERIFIED: signature enforcement ON: browser composer disabled with visible matching reason; separate Node HTTP POST -> 401 SESSION_SENDER_SIGNATURE_REQUIRED, no transcript recorded; explicit deployment permission OFF: sender-identity-claimed disclosed
+BROWSER VERIFIED: http://127.0.0.1:40491/chat: attribution opt-in/reload/forget/storage denial; thread isolation and reply; addressing vs task intent; refusal and draft retention; stale-read isolation; no DOM XSS; create and participant forms; empty search; zero-recipient confirmation; controls and transcript reachable at 390/768/1280; no page errors
+PASS: full browser suite and 3 viewport checks; exit code 0. Evidence: /tmp/df446-existing-chat
+
+Negative controls (Go overlays only; no source reversion):
+Removing the production route registration: both production-backend cases fail, expected 401 / actual 404.
+Removing only the SQL lifecycle event write: persisted event count is 0 instead of 1; injected insert-failure test returns 200 instead of 500. Both controls exited 1.
+
+Earlier failures, not hidden: two minimal DOM fixtures initially lacked systemEvents; the renderer now treats an absent event list as empty and both tests pass. Editing the OpenAPI source while a test binary was already compiled produced a source-vs-embedded mismatch; regenerated and rerun against frozen source. One full run timed out in the untouched mesh REGISTER_ACK test (5s); ten isolated repetitions passed. A later p4 run also exceeded its 240s package timeout, with a 20s SQLite-child startup timeout and a stalled-process example failure. Host load was measured at 25.80 (16 logical CPUs). A low-concurrency attempt (GOMAXPROCS=2 go test -p 1 ./... -count=1 -short -parallel 2 -timeout 600s) also hit the 600s server-package timeout, with existing A2A replay, federation and dispatch-timing failures. These are not counted as passes. Raw run logs: /tmp/df446-suite-verified.log, /tmp/df446-suite-clean.log, /tmp/df446-suite-serial.log. No mesh/example source or test was changed.
+
+Not implemented: a new memory session backend (none exists), new browser authentication/signing, alternate delivery, paused/archived/deleted states, retrospective actor attribution for old SQL state-only rows. PostgreSQL adapters are implemented but their real-DB test is skipped, with the printed no-DSN reason above; no PostgreSQL behavior is claimed as executed. No push, merge, or board edits.

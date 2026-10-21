@@ -331,9 +331,10 @@ func outcomeViews(outcomes []DeliveryOutcome) []outcomeView {
 
 // transcriptResponse is the GET /sessions/{id}/messages body.
 type transcriptResponse struct {
-	Session  sessionView         `json:"session"`
-	Messages []transcriptMessage `json:"messages"`
-	Count    int                 `json:"count"`
+	Session      sessionView         `json:"session"`
+	Messages     []transcriptMessage `json:"messages"`
+	SystemEvents []LifecycleEvent    `json:"system_events"`
+	Count        int                 `json:"count"`
 	// Findings is what the reconstruction had to decide about a thread key —
 	// a derived or broken thread is reported, never hidden (§4.3).
 	Findings []ThreadFinding `json:"findings,omitempty"`
@@ -625,9 +626,10 @@ func (h *Handler) HandleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := transcriptResponse{
-		Session:  h.viewOf(st),
-		Messages: make([]transcriptMessage, 0, len(st.Messages)),
-		Findings: st.Findings,
+		Session:      h.viewOf(st),
+		Messages:     make([]transcriptMessage, 0, len(st.Messages)),
+		SystemEvents: lifecycleEvents(st.Lifecycle),
+		Findings:     st.Findings,
 	}
 	for _, m := range st.Messages {
 		out.Messages = append(out.Messages, h.messageViewOf(st, m))

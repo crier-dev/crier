@@ -57,7 +57,7 @@ share; it is **not** a bus primitive and **not** a new transport (§4, D1).
 | `created_at` | timestamp | yes | When the session was created. |
 | `created_by` | Principal | yes | Who created it. Recorded as an **event** (§2.3), so it is auditable; a session whose creator cannot be named is invalid. |
 | `state` | enum `open` \| `closed` | yes | See §1.3. |
-| `closed_at` | timestamp | no | Set exactly once, by the `close` event. |
+| `closed_at` | timestamp | no | Set by each `close` event; cleared by `reopen` (§4.5a). |
 | `retention_seconds` | integer | no | The session's message-lifetime default. Bounded by the realm's `retention_seconds`: a session may declare a **shorter** lifetime, never a longer one (§3.5). |
 | `group` | string | no | A session-group / project handle, for the multi-team mapping (CR-CHAT-010: project/team ↔ namespace / session-group). **NOT BUILT** — the field is reserved here so adding a team is data, not schema surgery. |
 | `visibility` | enum | no | Whether the session is discoverable and by whom. Drawn only as a **privacy indicator**: `A` draws a padlock glyph beside the title, with no label. **NOT BUILT**; its semantics belong to CR-CHAT-003 (a Grant) and are deliberately not fixed here. |
@@ -716,6 +716,57 @@ Consequences, all binding:
 **NOT BUILT:** no branch operation, no `parent_thread_id`, no anchor field and no sub-thread record exists
 today — the rule has nothing behind it yet.
 
+### 4.5a Close/reopen route and recorded system event (DF-CRIER-446)
+
+The lifecycle mutation is `POST /sessions/{id}/state` with a strict JSON body:
+`{"state":"closed","sender":"atlas"}` or `{"state":"open","sender":"atlas"}`.
+`principal_id` and optional `as_agent` may replace `sender`, exactly as on send.
+One route is chosen because both operations change the same record's state and
+share identity, scope, permission and persistence checks; the explicit enum keeps
+close and reopen mutually exclusive without two competing implementations.
+
+- Only `open → closed` and `closed → open` are legal. `closed_at` is set to
+  the close event's server timestamp (UTC, microsecond precision across all engines); reopening clears it. A later close sets a
+  new timestamp, without overwriting the earlier event.
+- Success is HTTP 200 with the session object READ BACK from the active store.
+  Unknown id is 404 `SESSION_NOT_FOUND`, detail `session "<id>" does not exist`.
+  Closing closed is 409 `SESSION_ALREADY_CLOSED`, detail
+  `session "<id>" is already closed; cannot close it again`.
+  Reopening open is 409 `SESSION_ALREADY_OPEN`, detail
+  `session "<id>" is already open; cannot reopen it`.
+  An unknown/absent state is 400 `INVALID_SESSION_STATE`, detail
+  `state must be "open" or "closed"`. Refusals append nothing.
+- The acting identity is required (`AUTHOR_REQUIRED` without it), resolved using
+  the send path's `sender` / `principal_id` / `as_agent` convention and verified
+  by the SAME ingress verifier before any append. The recorded
+  `sender_identity_basis` is `sender-identity-claimed` or
+  `sender-identity-verified`; an acting ID alone is not authentication. Existing
+  deployment Bearer and namespace gates remain in force. With permissions armed,
+  the action requires `admin` on the session; denial is 403 `SESSION_STATE_FORBIDDEN`.
+- A successful transition appends ONE existing `session.close` or `session.reopen`
+  record, with `actor`, `sender_identity_basis`, `seq`, server `ts`, and a system
+  `reason`: `Session <id> marked complete` or `Session <id> reopened`.
+  Its type determines the new state. This IS the system event, not a synthetic
+  delivered message: no fan-out, task execution or second delivery path occurs.
+- JSONL retains the record in its log. SQLite and BOTH PostgreSQL adapters retain
+  the complete record in `chat_session_lifecycle(session_id, seq, record_json)`;
+  event insertion, state/closed_at projection and sequence update commit together.
+  SQLite `:memory:` supports the same semantics but is explicitly ephemeral.
+  There is no separate memory session backend (memory registry is independent).
+  A store-level cross-handle lifecycle lock serializes transition check + append.
+- `GET /sessions/{id}/messages` additionally returns `system_events`, ordered by
+  `seq`: each carries `type`, `session_id`, `seq`, `ts`, `actor`, `state`,
+  `sender_identity_basis` (omitted on historical records without attribution), and
+  `text`. The UI interleaves these with messages by `seq`, even for an otherwise
+  empty session. The event remains after reopen and process restart. Historical
+  SQL state without an event is not retroactively attributed to an invented actor.
+- The badge displays only the server's `state` (unknown/unavailable on a missing
+  or failed read). Only Close for reported `open` and Reopen for reported `closed`
+  are offered. Actions refresh authoritative state, including after refusal or
+  uncertain response; no optimistic state change is permitted.
+- The shipped send refusal is unchanged, byte for byte: 409 `SESSION_CLOSED`,
+  detail `session "<id>" is closed and admits no new message (§1.3)`.
+
 ### 4.6 Late join — the context-share record (CR-CHAT-016, decision D10)
 
 Adding an agent (or a human) to a thread **in flight** asks **how much context to share**. Four modes:
@@ -997,7 +1048,8 @@ Added with the v2 detail pass — open, and deliberately not answered here:
   (`GET`/`POST /sessions/{id}/participants`) exist. `session_id` remains a **wire tag** on the deliver body
   (`POST /agents/{id}/inbox`, CR-FEAT-004), on the webhook envelope (`crier.session_id`) and in the
   federation hold record, and a **guard policy key** (`session:<id>`) — and is now also the key of a stored
-  session object. Still owed: the close/reopen ROUTE (§1.3's state ships; the route is CR-CHAT-002's).
+  session object. The close/reopen ROUTE and attributed durable system events now ship
+  (`POST /sessions/{id}/state`, DF-CRIER-446, §4.5a).
 - **`thread_id` IS stored (CR-CHAT-019).** `registry.InboxEntry` carries it and the deliver path records
   it, so a thread is reconstructable from stored messages alone. `session_id` is still NOT stored on
   `InboxEntry` (the session store carries the transcript record, which names the session).
@@ -1010,7 +1062,8 @@ Added with the v2 detail pass — open, and deliberately not answered here:
   `#session` (CR-CHAT-004).
 - **No lease renewal** — the lease is taken per retrieve and released by ack; the renewal event `B` draws
   has no operation behind it.
-- **No session state surface, no visibility/privacy field, no session group, no edits or reactions.**
+- **Session state and its close/reopen route ship (DF-CRIER-446, §4.5a).** The remaining historical
+  draft inventory here does not override that contract; edits/reactions remain outside this change.
 - **Nothing added in v2 is built either.** No session `kind` — no channel and no DM (§1.2, CR-CHAT-013);
   no named-group object, roster or group fan-out (§2.1, §3.4 rule 7 — `@team:x` is grammar, not a group);
   no `message_kind` on any wire field, stored field or record, and the shipped envelope `kind`

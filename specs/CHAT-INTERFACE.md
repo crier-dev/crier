@@ -721,7 +721,7 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 9 | **Conversation card** + filter chips with counts (`C`) | `GET /sessions` with `state`, `kind`, `min_messages`, `min_participants` filters | **SHIPPED** (CR-CHAT-019) — a *view* over the same objects, narrowed; not a new object. |
 | 10 | **Floating compose** action (`C`), compose icons (`A`), `+ New` (`B`) | `POST /sessions` (CR-CHAT-019); `POST /agents` exists for agents | **SHIPPED** for sessions/rooms. |
 | 11 | **Session header** — title, id, start timestamp, audience count, view selector, overflow | the session object (`GET /sessions`, `GET /sessions/{id}/messages`) | **SHIPPED** (CR-CHAT-019). The object carries title, id, `created_at` (start), `audience_count`, `participant_count`, `state` and `visibility`; `session_id` is no longer a wire tag only. |
-| 12 | **State badge** `ACTIVE` (`B`), `Live` (`D`), the "Session … marked complete" event (`B`) | the session object's `state` / `closed_at`; the closed-session refusal on `POST /sessions/{id}/messages` | **PARTIAL** (CR-CHAT-019) — the `open` / `closed` lifecycle, the close timestamp and the refusal ship; a close/reopen ROUTE and the "marked complete" system-event record are still owed (CR-CHAT-002). |
+| 12 | **State badge** `ACTIVE` (`B`), `Live` (`D`), the "Session … marked complete" event (`B`) | `POST /sessions/{id}/state`; the session object's `state` / `closed_at` and transcript `system_events`; the existing closed-session send refusal | **SHIPPED (DF-CRIER-446)** — `POST /sessions/{id}/state` closes/reopens with attributed durable system events; the badge reads the server state, and send-since-closed retains its existing refusal. Contract: CHAT-SESSIONS.md §4.5a. |
 | 13 | **Privacy indicator** — the padlock beside `A`'s title | the session object's `visibility` field + the `403 VISIBILITY_FORBIDDEN` refusal on the reads | **SHIPPED** (CR-CHAT-019) — a `private` session is readable only by a member or by a principal holding a CR-CHAT-003 read grant. |
 | 14 | **Transcript message** — author, body, timestamp | `GET /sessions/{id}/messages` (the ordered cross-agent transcript); `GET /agents/{id}/inbox` returns `InboxEntry` (id, agent_id, sender, payload, created_at, expires_at, priority, namespace, thread_id, guard); the deliver body carries `payload`, `sender`, `session_id`, `thread_id`, `request_id`, `kind` | **SHIPPED** (CR-CHAT-019) — an ordered, cross-agent transcript read exists (seq order, each with a resolvable parent), and the per-agent durable read is unchanged; the body is still `payload` (`payload.text`). |
 | 15 | **Thread reply-count pill + rail/elbows + indentation** (`A`, `D`) | `thread_id` on `POST /agents/{id}/inbox` and now persisted on the stored record (`InboxEntry.thread_id` + the session backends); `GET /sessions/{id}/messages` serves `thread_id`, `parent_id`, `root_id`, `thread_depth`, `reply_depth`; guard policy key (`thread:<id>`) | **SHIPPED** (CR-CHAT-019) — a thread is reconstructable from storage ALONE (no `InboxEntry` field was stored before this row). |
@@ -872,8 +872,8 @@ This document is a **specification of an interface that does not exist yet**. Co
   object (title, id, start, audience/participant counts, state, visibility), the ordered cross-agent
   transcript read (`GET /sessions/{id}/messages`), membership (`GET`/`POST /sessions/{id}/participants`)
   and fan-out into a session (`POST /sessions/{id}/messages`) all ship. What is still **not built**: the
-  close/reopen ROUTE (the `open`/`closed` state and its refusal ship, the route is still owed to
-  CR-CHAT-002), and the surfaces §4 rows 16-30 name below. `session_id` remains a wire tag on the deliver
+  unrelated surfaces §4 rows 16-30 name below. The close/reopen route and recorded
+  system event SHIP (DF-CRIER-446, CHAT-SESSIONS.md §4.5a); `session_id` remains a wire tag on the deliver
   body and the webhook envelope, a guard policy key, and in the federation hold record — but it is now
   also the key of a stored session object.
 - **`thread_id` IS stored (CR-CHAT-019)** — it rides the stored record (`InboxEntry.thread_id` plus the
@@ -888,7 +888,7 @@ This document is a **specification of an interface that does not exist yet**. Co
 - **No audit trail scoped to sessions and principals** — the opt-in delivery log is agent- and
   delivery-scoped and off by default.
 - **No queue-depth history / trend, no graded health severity, no fleet presence aggregate, no per-message
-  latency, no lease renewal, no session lifecycle state, no session visibility/privacy field, no file
+  latency, no lease renewal, no file
   attachments, no tag/label field on a message.**
 - **Nothing added in v2 is built.** No channel, no direct message, no named-group object or roster
   (CR-CHAT-013 — `@team:x` is grammar, not a group); no message kind on the wire, in storage or in the

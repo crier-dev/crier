@@ -218,7 +218,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 </html>
 </template>
 <main id="main" tabindex="-1">
-  <header class="thread-header"><div class="thread-heading"><h1 id="conversation-title">Your agents. One conversation.</h1><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><span id="session-state" class="pill">No session</span></header>
+  <header class="thread-header"><div class="thread-heading"><h1 id="conversation-title">Your agents. One conversation.</h1><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" hidden>Close session</button><button id="reopen-session" type="button" hidden>Reopen session</button><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
   <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button></div>
   <p id="refresh-state" class="note" role="status">HTTP reads every 15 seconds while this page is visible. No session WebSocket feed is exposed.</p>
   <div id="transcript" aria-label="Conversation transcript"><div class="empty"><strong>Choose where the conversation happens.</strong>Open an existing channel or create one using an existing agent identity.</div></div>
@@ -288,7 +288,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, agent:"", namespace:"" };
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, agent:"", namespace:"" };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -505,7 +505,36 @@ function resetAudienceWarning() {
   $("audience-warning").hidden = true;
   $("audience-warning").textContent = "";
 }
+function updateLifecycleControls() {
+  for (const [id,source] of [["close-session","open"],["reopen-session","closed"]]) {
+    const button = $(id);
+    button.hidden = state.session?.state !== source;
+    const reason = !state.agent ? "Set an acting agent ID before changing session state."
+      : state.sending ? "Wait for the current operation to finish."
+      : state.requireAgentSignature !== false ? "This browser cannot sign; signature authority is required or unknown." : "";
+    button.disabled = !!reason;
+    button.title = reason;
+  }
+}
+async function changeSessionState(next) {
+  if (state.sending || !state.agent || state.requireAgentSignature !== false) return;
+  const source = next === "closed" ? "open" : "closed";
+  if (state.session?.state !== source) return;
+  const id = state.current;
+  state.sending = true; ++state.generation; updateComposer();
+  try {
+    await call(sessionPath(id,"state"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state:next,sender:state.agent})});
+    notice("session-lifecycle-result","State transition recorded. Refreshing server state…");
+  } catch (error) {
+    notice("session-lifecycle-result",error.message + " Refreshing server state; no local state change assumed.",true);
+  } finally {
+    state.sending = false; state.busy = false;
+    // Do not retain a possibly stale badge while the authoritative read runs.
+    state.session = null; renderHeader(); await refresh();
+  }
+}
 function updateComposer() {
+  updateLifecycleControls();
   const composer = composerState(), enabled = composer.usable;
   for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
   $("thread-filter").disabled = !state.session || state.sending;
@@ -540,7 +569,7 @@ function renderHeader() {
   const s = state.session;
   $("conversation-title").textContent = s ? s.title || s.id : "Choose a conversation";
   $("conversation-meta").textContent = s ? s.id + " · " + s.kind + " · " + (s.visibility || "realm") + " · " + s.participant_count + " participants · " + s.audience_count + " agents" : "No readable session selected.";
-  $("session-state").textContent = s ? s.state : "Unavailable";
+  $("session-state").textContent = typeof s?.state === "string" && s.state ? s.state : "Unavailable";
   $("session-state").className = "pill" + (s?.state === "open" ? " mint" : "");
   $("breadcrumb").textContent = (state.namespace || "Default realm") + " / " + (s ? s.title || s.id : "Conversations");
   updateComposer();
@@ -560,9 +589,9 @@ function renderThreadOptions() {
 function renderMessages(findings = []) {
   const el = $("transcript");
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-  const msgs = state.messages.filter(m => !state.thread || m.thread_id === state.thread);
+  const msgs = [...state.messages.filter(m => !state.thread || m.thread_id === state.thread), ...(state.systemEvents || []).map(e => ({...e,systemEvent:true}))].sort((a,b) => a.seq - b.seq);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"><strong>SYSTEM EVENT</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + ' · state ' + esc(m.state) + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
@@ -748,7 +777,7 @@ async function refresh() {
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
     read("/status", b => { state.requireAgentSignature = b.require_agent_signature; renderPosture(b); updateComposer(); }, e => { state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
   if (id) {
-    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; renderHeader(); unavailable("transcript",e); }));
+    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
     reads.push(read(sessionPath(id,"permissions"), renderPermissions, e => unavailable("permissions",e)));
     reads.push(read(sessionPath(id,"tasks"), renderTasks, e => { unavailable("tasks",e); updateMessageTaskLinks(); }));
@@ -760,7 +789,7 @@ function openSession(id) {
   if (state.sending) return;
   if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
   resetAudienceWarning(); state.participants = []; $("participant-agent").value = ""; notice("participant-result",""); notice("task-result","");
-  state.current = id; state.session = null; state.messages = []; state.reply = null; state.thread = "";
+  state.current = id; state.session = null; state.messages = []; state.systemEvents = []; state.reply = null; state.thread = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
   // DF-CRIER-414: the in-flight panel belongs to the conversation that was open
@@ -1044,6 +1073,8 @@ async function watchSendProgress() {
   } finally { sendProgressBusy = false; }
 }
 setInterval(watchSendProgress, 1000);
+$("close-session").addEventListener("click", () => changeSessionState("closed"));
+$("reopen-session").addEventListener("click", () => changeSessionState("open"));
 restoreAttribution();
 updateComposer();
 refresh();

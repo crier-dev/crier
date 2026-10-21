@@ -262,7 +262,7 @@ built on.
 | Thread tree read (`parent_thread_id`, `anchor_message_id`) on the view | **BUILT** (data model) | `CHAT-SESSIONS.md` §5.2 | `chat_threads` + `State.Thread`, `State.ThreadDepth` |
 | `thread_id` on the **delivery** record (`registry.InboxEntry`) | **BUILT** (CR-CHAT-019) | `CHAT-INTERFACE.md` §4 row 15; `CHAT-SESSIONS.md` §7 | the `inbox_entries.thread_id` column (migration 009) + the deliver-path write; the session fan-out sets it on every delivery |
 | Cross-agent transcript read (`GET /sessions/{id}/messages`) | **BUILT** (CR-CHAT-019) | `CHAT-SESSIONS.md` §3.3, §7 | `internal/session/http.go` — seq-ordered, parents resolvable, `thread_depth`/`reply_depth` |
-| Session routes (`POST`/`GET /sessions`, membership) | **BUILT** (CR-CHAT-019) | `CHAT-SESSIONS.md` §7 | `cmd/server/main.go` + `internal/session/http.go`; the close/reopen route is still owed (CR-CHAT-002) |
+| Session routes (`POST`/`GET /sessions`, membership) | **BUILT** (CR-CHAT-019) | `CHAT-SESSIONS.md` §7 | `cmd/server/main.go` + `internal/session/http.go`; close/reopen and durable system events ship via `POST /sessions/{id}/state` (DF-CRIER-446, `CHAT-SESSIONS.md` §4.5a) |
 | Branch operation / wire field / route (sub-thread spawn) | **NOT BUILT** | `CHAT-SESSIONS.md` §4.5, §7; `CHAT-INTERFACE.md` §3.8.2 | owed: CR-CHAT-017 |
 | `message_kind` on the wire and in the deliver body | **NOT BUILT** | `CHAT-SESSIONS.md` §4.4 | owed: CR-CHAT-018 |
 | Late-join context-share record + prompt | **NOT BUILT** | `CHAT-SESSIONS.md` §4.6 (D10) | owed: CR-CHAT-016 |

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -104,7 +105,7 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 			return fmt.Errorf("session %s store: init: %w", s.dialect.Name(), err)
 		}
 	}
-	for _, stmt := range append(s.dialect.SchemaStatements(), messageRequestSchema) {
+	for _, stmt := range append(append(s.dialect.SchemaStatements(), messageRequestSchema), lifecycleSchema) {
 		if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(stmt)); err != nil {
 			return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
 		}
@@ -142,7 +143,7 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
-	if s.requestTx == nil && hasMessageRequestMetadata(rec) {
+	if s.requestTx == nil && (hasMessageRequestMetadata(rec) || isLifecycleRecord(rec)) {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -160,6 +161,11 @@ func (s *SQLStore) Append(ctx context.Context, rec *Record) error {
 	}
 	if hasMessageRequestMetadata(rec) {
 		if err := s.projectMessageRequest(ctx, rec); err != nil {
+			return err
+		}
+	}
+	if isLifecycleRecord(rec) {
+		if err := s.projectLifecycle(ctx, rec); err != nil {
 			return err
 		}
 	}
@@ -480,20 +486,19 @@ func (s *SQLStore) projectThreadBranch(ctx context.Context, rec *Record) error {
 	return nil
 }
 
-// Records returns the session's message records re-derived for the log
-// contract. A projection is not the log (the log is the JSONL file, §2.1), so
-// this returns the message records the view can justify — the one record class
-// the transcript table holds — and reports ErrSessionNotFound when the session
-// itself is unknown.
+// Records returns the message and lifecycle records justified by the SQL
+// projection, ordered by seq. Membership/branch history remains a JSONL-log
+// capability; lifecycle records are retained in full (DF-CRIER-446).
 func (s *SQLStore) Records(ctx context.Context, sessionID string) ([]*Record, error) {
 	st, err := s.Load(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	recs := make([]*Record, 0, len(st.Messages))
+	recs := append([]*Record(nil), st.Lifecycle...)
 	for _, m := range st.Messages {
 		recs = append(recs, m.Record())
 	}
+	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Seq < recs[j].Seq })
 	return recs, nil
 }
 
@@ -520,6 +525,9 @@ func (s *SQLStore) Load(ctx context.Context, sessionID string) (*State, error) {
 		return nil, err
 	}
 	if st.ContextShares, err = s.loadContextShares(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if st.Lifecycle, err = s.loadLifecycle(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	// A transcript read from the view is completed the same way the log's is:

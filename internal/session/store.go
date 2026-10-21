@@ -321,9 +321,10 @@ type Repository interface {
 	// AddMember appends a session.member.add record, with its late-join
 	// context answer when there is one (§2.3, §4.6).
 	AddMember(ctx context.Context, m *Member, seq int64, share *ContextShare) error
-	// LockMessage atomically locks one nonempty (session, request key) across
-	// repository handles/processes. The caller holds it from lookup through
-	// intent/fanout/outcome persistence and must release it on every exit.
+	// LockMessage atomically locks one (session, request key) across repository
+	// handles/processes. Sends use nonempty keys; the empty key is reserved for
+	// lifecycle transitions, so user-supplied send keys cannot alias that lock.
+	// The caller holds it through persistence and must release it on every exit.
 	LockMessage(ctx context.Context, sessionID, key string) (release func(), err error)
 	// TryLockMessage takes the SAME lock without waiting for another send.
 	// ErrMessageInProgress means the key is held; no reservation was made.

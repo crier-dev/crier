@@ -844,6 +844,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// see the SetTaskTriggerArming there.
 	r.HandleFunc("/sessions", sessHandler.HandleListSessions).Methods("GET")
 	r.HandleFunc("/sessions", sessHandler.HandleCreateSession).Methods("POST")
+	r.HandleFunc("/sessions/{id}/state", sessHandler.HandleSessionState).Methods("POST")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandleTranscript).Methods("GET")
 	r.HandleFunc("/sessions/{id}/messages", sessHandler.HandlePostMessage).Methods("POST")
 	// CR-CHAT-030: the TASK kind and its lifecycle (CHAT-ADDRESSING §2.5).

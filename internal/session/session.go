@@ -334,6 +334,9 @@ type Thread struct {
 // PostgreSQL view assembles to it — which is what makes CR-CHAT-002's
 // round-trip acceptance checkable as ONE comparison.
 type State struct {
+	// Lifecycle records retain actor/assurance and ordering, independently of messages.
+	Lifecycle []*Record
+
 	Session       *Session
 	Members       []*Member
 	Messages      []*Message
@@ -466,12 +469,14 @@ func (st *State) apply(rec *Record) error {
 		at := rec.TS
 		st.Session.State = SessionClosed
 		st.Session.ClosedAt = &at
+		st.Lifecycle = append(st.Lifecycle, rec)
 	case RecordReopen:
 		if st.Session == nil {
 			return fmt.Errorf("%w: session.reopen before session.create", ErrInvalidRecord)
 		}
 		st.Session.State = SessionOpen
 		st.Session.ClosedAt = nil
+		st.Lifecycle = append(st.Lifecycle, rec)
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}

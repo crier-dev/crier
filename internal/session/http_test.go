@@ -118,6 +118,7 @@ func newAPIHarnessWithGrants(t *testing.T, store Repository, grants []Permission
 func registerSessionRoutes(r *mux.Router, h *Handler) {
 	r.HandleFunc("/sessions", h.HandleListSessions).Methods(http.MethodGet)
 	r.HandleFunc("/sessions", h.HandleCreateSession).Methods(http.MethodPost)
+	r.HandleFunc("/sessions/{id}/state", h.HandleSessionState).Methods(http.MethodPost)
 	r.HandleFunc("/sessions/{id}/messages", h.HandleTranscript).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/messages", h.HandlePostMessage).Methods(http.MethodPost)
 	// CR-CHAT-030: the TASK kind and its lifecycle (§2.5, §6.11, §3.7).

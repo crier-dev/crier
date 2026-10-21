@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -200,7 +201,7 @@ func NewPostgresStoreWithPool(ctx context.Context, pool *pgxpool.Pool) (*Postgre
 // ApplySchema creates the §5.2 tables and indexes when they are absent. It is
 // idempotent and safe to run at every boot.
 func (s *PostgresStore) ApplySchema(ctx context.Context) error {
-	for _, stmt := range append(SchemaStatements, messageRequestSchema) {
+	for _, stmt := range append(append(SchemaStatements, messageRequestSchema), lifecycleSchema) {
 		if _, err := s.requestExecutor().Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("session postgres store: apply schema: %w", err)
 		}
@@ -225,7 +226,7 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
-	if s.requestTx == nil && hasMessageRequestMetadata(rec) {
+	if s.requestTx == nil && (hasMessageRequestMetadata(rec) || isLifecycleRecord(rec)) {
 		tx, err := s.pool.Begin(ctx)
 		if err != nil {
 			return err
@@ -243,6 +244,11 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	}
 	if hasMessageRequestMetadata(rec) {
 		if err := s.projectMessageRequest(ctx, rec); err != nil {
+			return err
+		}
+	}
+	if isLifecycleRecord(rec) {
+		if err := s.projectLifecycle(ctx, rec); err != nil {
 			return err
 		}
 	}
@@ -555,20 +561,19 @@ func (s *PostgresStore) projectThreadBranch(ctx context.Context, rec *Record) er
 	return nil
 }
 
-// Records returns the session's message records re-derived for the log
-// contract. A projection is not the log (the log is the JSONL file, §2.1), so
-// this returns the message records the view can justify — the one record class
-// the transcript table holds — and reports ErrSessionNotFound when the session
-// itself is unknown.
+// Records returns the message and lifecycle records justified by the SQL
+// projection, ordered by seq. Membership/branch history remains a JSONL-log
+// capability; lifecycle records are retained in full (DF-CRIER-446).
 func (s *PostgresStore) Records(ctx context.Context, sessionID string) ([]*Record, error) {
 	st, err := s.Load(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	recs := make([]*Record, 0, len(st.Messages))
+	recs := append([]*Record(nil), st.Lifecycle...)
 	for _, m := range st.Messages {
 		recs = append(recs, m.Record())
 	}
+	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Seq < recs[j].Seq })
 	return recs, nil
 }
 
@@ -595,6 +600,9 @@ func (s *PostgresStore) Load(ctx context.Context, sessionID string) (*State, err
 		return nil, err
 	}
 	if st.ContextShares, err = s.loadContextShares(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if st.Lifecycle, err = s.loadLifecycle(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	// A transcript read from the view is completed the same way the log's is:

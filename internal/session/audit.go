@@ -88,7 +88,9 @@ type AuditEvent struct {
 
 	// Actor is who acted (the record's actor, or the creator for
 	// session.start). Permission events carry the granting/revoking principal.
-	Actor AuthorRef `json:"actor,omitempty"`
+	Actor               AuthorRef    `json:"actor,omitempty"`
+	SenderIdentityBasis string       `json:"sender_identity_basis,omitempty"`
+	State               SessionState `json:"state,omitempty"`
 
 	// Member details (member.added / member.removed / member.context).
 	MemberType MemberType `json:"member_type,omitempty"`
@@ -117,12 +119,9 @@ type AuditEvent struct {
 }
 
 // AuditEventSource is the OPTIONAL capability a store can carry to serve the
-// audit read directly. The JSONL log serves the audit trail from its records
-// (RenderAuditEvents); the SQL view serves it from its projected tables — the
-// view cannot reconstruct member.context / thread.branch events, and a
-// close/reopen PAIR collapses to the latest state, so its close event is the
-// durable fact only. A store that implements neither this nor a record stream
-// richer than messages yields the trail its backend can honestly serve.
+// audit read directly. JSONL renders its records; SQL renders membership facts
+// plus the retained lifecycle history (DF-CRIER-446). SQL still cannot recover
+// historical member.context / thread.branch events it never retained.
 type AuditEventSource interface {
 	AuditEvents(ctx context.Context, sessionID string) ([]AuditEvent, error)
 }
@@ -139,9 +138,8 @@ func (s *JSONLStore) AuditEvents(ctx context.Context, sessionID string) ([]Audit
 
 // AuditEvents over the SQL view renders the projected membership/lifecycle
 // tables. Stated limits: the view is LATEST STATE per member and per session,
-// so a member's re-join reads as one add, and a close+reopen pair reads as
-// neither (the session is open). The JSONL log is the audit of record when a
-// deployment needs the full event history (§2.3 consequence 1).
+// so a member's re-join reads as one add. Lifecycle events are retained in full,
+// including close+reopen pairs; JSONL remains the full membership audit of record.
 func (s *SQLStore) AuditEvents(ctx context.Context, sessionID string) ([]AuditEvent, error) {
 	st, err := s.Load(ctx, sessionID)
 	if err != nil {
@@ -189,7 +187,9 @@ func StateAuditEvents(st *State) []AuditEvent {
 			out = append(out, rem)
 		}
 	}
-	if st.Session.State == SessionClosed && st.Session.ClosedAt != nil {
+	lifecycle, _ := RenderAuditEvents(st.Lifecycle) // stored records have already been validated
+	out = append(out, lifecycle...)
+	if len(st.Lifecycle) == 0 && st.Session.State == SessionClosed && st.Session.ClosedAt != nil {
 		out = append(out, AuditEvent{Kind: AuditSessionClose, TS: *st.Session.ClosedAt})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].TS.Before(out[j].TS) })
@@ -250,6 +250,10 @@ func RenderAuditEvents(recs []*Record) ([]AuditEvent, error) {
 			ev.Actor = *rec.Actor
 		}
 		switch rec.Type {
+		case RecordClose, RecordReopen:
+			ev.Reason = rec.Reason
+			ev.SenderIdentityBasis = rec.SenderIdentityBasis
+			ev.State = lifecycleState(rec.Type)
 		case RecordSessionCreate:
 			if rec.CreatedBy != nil {
 				ev.Actor = *rec.CreatedBy

@@ -3051,6 +3051,58 @@ paths:
         "404":
           description: No such group in this realm (GROUP_NOT_FOUND)
 
+  /sessions/{id}/state:
+    post:
+      operationId: setSessionState
+      tags: [sessions]
+      summary: Close or reopen a session with a durable attributed system event
+      description: |-
+        CHAT-SESSIONS.md §4.5a (DF-CRIER-446). Only open→closed and closed→open
+        are legal. Identity uses the send path verifier and its claimed/verified
+        sender_identity_basis. Armed permissions require admin on the session.
+        State, closed_at and the lifecycle record persist atomically in SQL;
+        JSONL appends one session.close/session.reopen record. No fan-out occurs.
+        Read system_events on the transcript route after restart for event evidence.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [state]
+              properties:
+                state:
+                  type: string
+                  enum: [open, closed]
+                sender:
+                  type: string
+                principal_id:
+                  type: string
+                as_agent:
+                  type: string
+      responses:
+        "200":
+          description: Session object read back from the active store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: INVALID_SESSION_STATE, AUTHOR_REQUIRED or INVALID_REQUEST; nothing appended
+        "401":
+          description: Existing deployment, namespace or session signature refusal; nothing appended
+        "403":
+          description: SESSION_STATE_FORBIDDEN or SESSION_SENDER_IDENTITY_MISMATCH; nothing appended
+        "404":
+          description: SESSION_NOT_FOUND; nothing appended
+        "409":
+          description: SESSION_ALREADY_CLOSED or SESSION_ALREADY_OPEN; nothing appended
+        "500":
+          description: STORE_ERROR or PERMISSIONS_ERROR; no success claimed
   /sessions/{id}/messages:
     get:
       operationId: readSessionTranscript
@@ -3926,9 +3978,11 @@ paths:
         Sources, stated honestly per backend: the JSONL log renders its full
         record stream (session.start/close/reopen, member.added/removed,
         member.context, thread.branched — the full event history, §2.3); the
-        SQL view renders its projected LATEST-STATE facts (session.start,
-        member.added/removed, session.close when closed — a re-join reads as
-        one add and a close+reopen pair as neither). When the CR-CHAT-003 ACL
+        SQL view renders projected latest membership facts plus retained
+        session.close/session.reopen history (DF-CRIER-446). A re-join reads as
+        one add, but a close+reopen pair retains both events with actor, timestamp,
+        state and sender_identity_basis. Historical state without a retained row
+        does not gain invented attribution. When the CR-CHAT-003 ACL
         is armed, grants on the session's subject overlay as
         permission.grant / permission.revoke events from the permission log,
         including tombstones.
@@ -5808,12 +5862,51 @@ components:
           description: The parent_id chain length — reply attribution, never depth (D11).
         spawned_thread:
           $ref: "#/components/schemas/SpawnedThread"
+    SessionLifecycleEvent:
+      type: object
+      required: [type, session_id, seq, ts, actor, state, text]
+      properties:
+        type:
+          type: string
+          enum: [session.close, session.reopen]
+        session_id:
+          type: string
+        seq:
+          type: integer
+        ts:
+          type: string
+          format: date-time
+        actor:
+          type: object
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+            system:
+              type: string
+        state:
+          type: string
+          enum: [open, closed]
+        sender_identity_basis:
+          type: string
+          enum: [sender-identity-claimed, sender-identity-verified]
+          description: Absent on historical records without recorded ingress assurance.
+        text:
+          type: string
     SessionTranscript:
       type: object
-      required: [session, messages, count]
+      required: [session, messages, system_events, count]
       properties:
         session:
           $ref: "#/components/schemas/Session"
+        system_events:
+          type: array
+          description: Durable system rows ordered by seq, interleaved with messages by the client.
+          items:
+            $ref: "#/components/schemas/SessionLifecycleEvent"
         messages:
           type: array
           items:
@@ -6194,6 +6287,14 @@ components:
               type: string
             system:
               type: string
+        state:
+          type: string
+          enum: [open, closed]
+          description: New state on a retained lifecycle event.
+        sender_identity_basis:
+          type: string
+          enum: [sender-identity-claimed, sender-identity-verified]
+          description: Recorded lifecycle actor assurance; absent on historical unattributed records.
         member_type:
           type: string
           enum: [agent, principal]
