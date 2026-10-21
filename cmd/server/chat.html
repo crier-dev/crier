@@ -224,7 +224,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 </html>
 </template>
 <main id="main" tabindex="-1">
-  <header class="thread-header"><div class="thread-heading"><h2 id="conversation-title">Your agents. One conversation.</h2><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" hidden>Close session</button><button id="reopen-session" type="button" hidden>Reopen session</button><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
+  <header class="thread-header"><div class="thread-heading"><h2 id="conversation-title">Your agents. One conversation.</h2><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Close session</button><button id="reopen-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Reopen session</button><p id="session-lifecycle-reason" class="note" role="status" hidden></p><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
   <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button></div>
   <p id="refresh-state" class="note" role="status">HTTP reads every 15 seconds while this page is visible. No session WebSocket feed is exposed.</p>
   <div id="transcript" aria-label="Conversation transcript"><div class="empty"><strong>Choose where the conversation happens.</strong>Open an existing channel or create one using an existing agent identity.</div></div>
@@ -295,7 +295,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, agent:"", namespace:"" };
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"" };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -555,19 +555,29 @@ function resetAudienceWarning() {
   $("audience-warning").hidden = true;
   $("audience-warning").textContent = "";
 }
+// DF-CRIER-460: /status management_surface reports whether the delivery ACL
+// is enabled, NOT whether an agent claim can administer this session. Both
+// enabled-* values need a bound principal; this page cannot present one.
+function lifecycleReason() {
+  return state.sending ? "Wait for the current operation to finish."
+    : state.permissionsArmed === true ? "Closing or reopening requires a bound principal with admin on this session; this page cannot present one (DF-CRIER-333). An acting agent ID or deployment Bearer access is not that authority."
+    : state.permissionsArmed !== false ? "Session ACL authority is unknown — refresh runtime posture before changing session state."
+    : !state.agent ? "Set an acting agent ID before changing session state."
+    : state.requireAgentSignature !== false ? "This browser cannot sign; signature authority is required or unknown." : "";
+}
 function updateLifecycleControls() {
+  const reason = lifecycleReason();
   for (const [id,source] of [["close-session","open"],["reopen-session","closed"]]) {
     const button = $(id);
     button.hidden = state.session?.state !== source;
-    const reason = !state.agent ? "Set an acting agent ID before changing session state."
-      : state.sending ? "Wait for the current operation to finish."
-      : state.requireAgentSignature !== false ? "This browser cannot sign; signature authority is required or unknown." : "";
     button.disabled = !!reason;
     button.title = reason;
   }
+  notice("session-lifecycle-reason", reason);
+  $("session-lifecycle-reason").hidden = !reason || !["open","closed"].includes(state.session?.state);
 }
 async function changeSessionState(next) {
-  if (state.sending || !state.agent || state.requireAgentSignature !== false) return;
+  if (lifecycleReason()) return;
   const source = next === "closed" ? "open" : "closed";
   if (state.session?.state !== source) return;
   const id = state.current;
@@ -576,7 +586,13 @@ async function changeSessionState(next) {
     await call(sessionPath(id,"state"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state:next,sender:state.agent})});
     notice("session-lifecycle-result","State transition recorded. Refreshing server state…");
   } catch (error) {
-    notice("session-lifecycle-result",error.message + " Refreshing server state; no local state change assumed.",true);
+    // Reuse DF-CRIER-459's HTTP/parse classifier and amber refused styling.
+    // Preserve the server's exact cause; a policy refusal is not a red failure.
+    const kind = managementFailureKind(error);
+    const label = kind === "refused" ? "Refused" : kind === "disabled" ? "Disabled by configuration" : "Failed";
+    notice("session-lifecycle-result",label + " — " + error.message + " Refreshing server state; no local state change assumed.",kind === "failed");
+    $("session-lifecycle-result").classList.add("management-read", kind);
+    $("session-lifecycle-result").dataset.readState = kind;
   } finally {
     state.sending = false; state.busy = false;
     // Do not retain a possibly stale badge while the authoritative read runs.
@@ -821,13 +837,22 @@ async function refresh() {
   if (state.sending) return;
   const generation = ++state.generation, id = state.current;
   state.busy = true;
+  // Fail closed while this refresh's authority read is pending or fails.
+  state.permissionsArmed = null; updateLifecycleControls();
   notice("refresh-state", "Refreshing recorded state…");
   const valid = () => generation === state.generation;
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
   const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
   const reads = [registry,
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
-    read("/status", b => { state.requireAgentSignature = b.require_agent_signature; renderPosture(b); updateComposer(); }, e => { state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
+    read("/status", b => {
+      state.requireAgentSignature = b.require_agent_signature;
+      // "enabled-unarmed" refers to this viewer's MANAGEMENT gate, not an
+      // ACL-off session. Never infer authority from an absent/future value.
+      state.permissionsArmed = b.management_surface === "disabled" ? false
+        : ["enabled-unarmed","admin-token-gated"].includes(b.management_surface) ? true : null;
+      renderPosture(b); updateComposer();
+    }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
   if (id) {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));

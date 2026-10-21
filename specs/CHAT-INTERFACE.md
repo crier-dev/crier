@@ -721,7 +721,7 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 9 | **Conversation card** + filter chips with counts (`C`) | `GET /sessions` with `state`, `kind`, `min_messages`, `min_participants` filters | **SHIPPED** (CR-CHAT-019) — a *view* over the same objects, narrowed; not a new object. |
 | 10 | **Floating compose** action (`C`), compose icons (`A`), `+ New` (`B`) | `POST /sessions` (CR-CHAT-019); `POST /agents` exists for agents | **SHIPPED** for sessions/rooms. |
 | 11 | **Session header** — title, id, start timestamp, audience count, view selector, overflow | the session object (`GET /sessions`, `GET /sessions/{id}/messages`) | **SHIPPED** (CR-CHAT-019). The object carries title, id, `created_at` (start), `audience_count`, `participant_count`, `state` and `visibility`; `session_id` is no longer a wire tag only. |
-| 12 | **State badge** and close/reopen system events | `POST /sessions/{id}/state`; session `state` / `closed_at` and transcript `system_events` | **SHIPPED backend (DF-CRIER-446)**; the page reads server state, but its `{state, sender}` request cannot satisfy session admin on an armed ACL (**OPEN DF-CRIER-460**). Contract: CHAT-SESSIONS.md §4.5a. |
+| 12 | **State badge** and close/reopen system events | `POST /sessions/{id}/state`; session `state` / `closed_at` and transcript `system_events` | **SHIPPED backend (DF-CRIER-446) and honest control (DF-CRIER-460)**; the page reads server state and `/status`, disabling lifecycle actions with a bound-principal reason when the ACL is enabled or unknown. `{state, sender}` remains usable only with the ACL off and signatures not required. Contract: CHAT-SESSIONS.md §4.5a. |
 | 13 | **Privacy indicator** — the padlock beside `A`'s title | the session object's `visibility` field + the `403 VISIBILITY_FORBIDDEN` refusal on the reads | **SHIPPED** (CR-CHAT-019) — a `private` session is readable only by a member or by a principal holding a CR-CHAT-003 read grant. |
 | 14 | **Transcript message** — author, body, timestamp | `GET /sessions/{id}/messages` (the ordered cross-agent transcript); `GET /agents/{id}/inbox` returns `InboxEntry` (id, agent_id, sender, payload, created_at, expires_at, priority, namespace, thread_id, guard); the deliver body carries `payload`, `sender`, `session_id`, `thread_id`, `request_id`, `kind` | **SHIPPED** (CR-CHAT-019) — an ordered, cross-agent transcript read exists (seq order, each with a resolvable parent), and the per-agent durable read is unchanged; the body is still `payload` (`payload.text`). |
 | 15 | **Thread reply-count pill + rail/elbows + indentation** (`A`, `D`) | `thread_id` on `POST /agents/{id}/inbox` and now persisted on the stored record (`InboxEntry.thread_id` + the session backends); `GET /sessions/{id}/messages` serves `thread_id`, `parent_id`, `root_id`, `thread_depth`, `reply_depth`; guard policy key (`thread:<id>`) | **SHIPPED** (CR-CHAT-019) — a thread is reconstructable from storage ALONE (no `InboxEntry` field was stored before this row). |
@@ -931,8 +931,15 @@ claims. None implies the others.
   signature-enforced session sends are refused, not silently exempted (§1, DF-CRIER-379).
 - **Close/Reopen cannot satisfy an armed ACL from this page (DF-CRIER-460).**
   `chat.html` sends `{state, sender}`; `internal/session/lifecycle.go` requires session admin authority
-  resolved through a bound principal. A visible enabled control is therefore not evidence of usable
-  authority. The unarmed case can work; the armed browser request is refused. This is not fixed here.
+  resolved through a bound principal. The page now disables the relevant visible control, with an
+  inline reason and `aria-describedby`, when the `management_surface` field from `GET /status` is `enabled-unarmed` or
+  `admin-token-gated`. Those values both mean the delivery ACL is enabled; management access is
+  not session-admin authority. Only `disabled` establishes that the ACL is off. Missing, future or
+  unreadable posture stays unknown and disabled, including while a refresh is pending. The session
+  read determines which transition is applicable; acting-ID and signature prerequisites still apply.
+  The unarmed request body is unchanged. A racing HTTP 403 uses DF-CRIER-459's `refused` class and
+  preserves the server's cause, not a red failure or an assumed state change. This is control honesty,
+  not browser sign-in: DF-CRIER-333 remains unresolved.
 - **The embedded transcript has one-level reply presentation (DF-CRIER-448).** It has no complete
   deliberate sub-thread branch workflow, return-to-exact-anchor control or expandable depth collapse.
   Backend branch storage and navigation reads do not close that UI row. D11 still forbids branching
