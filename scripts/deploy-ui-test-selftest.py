@@ -3,7 +3,7 @@
 
 Usage: python3 scripts/deploy-ui-test-selftest.py [--script /path/to/deploy-ui-test.sh]
 The selectable script and its companion library are exercised unchanged; the
-NEUTER cell copies both and changes only the pure dirty decision in the copy.
+NEUTER cells disable only the dirty or agent-count decision in isolated copies.
 """
 import argparse
 import json
@@ -42,6 +42,8 @@ elif a[0] == "inspect" and "--format" not in a:
         "Config": {
             "Env": ["CRIER_PORT=8767", "CR_REQUIRE_AGENT_SIG=false",
                     "CR_SESSION_BACKEND=jsonl", "CR_SESSION_PATH=/old",
+                    "CR_REGISTRY_BACKEND=memory", "CR_REGISTRY_SQLITE_PATH=/old/registry.db",
+                    "CR_REGISTRY_URL=postgres://old-registry", "CR_DATABASE_URL=postgres://old-db",
                     "CR_PERMISSIONS_ADMIN_TOKEN=old-fixture", "UNRELATED=keep me"],
             "Entrypoint": ["crier"], "Cmd": ["-log-level", "info"],
             "User": "", "WorkingDir": "/srv"
@@ -71,6 +73,13 @@ elif a[:2] == ["run", "-d"]:
     print(new)
     sys.exit(f.get("start_rc", 0))
 elif a[0] == "exec":
+    if a[-1].endswith("/agents"):
+        assert a[1] in (old, new), a
+        assert a[2:] == ["wget", "-q", "-T", "2", "-O", "-", "http://127.0.0.1:8767/agents"], a
+        phase = "before" if a[1] == old else "after"
+        value = f.get(phase + "_agents", {"agents": [{"id": str(i)} for i in range(6)]})
+        print(value if isinstance(value, str) else json.dumps(value))
+        sys.exit(f.get(phase + "_agents_rc", 0))
     assert a[1] == new, a
     if a[-1].endswith("/health"):
         sys.exit(0)
@@ -179,6 +188,60 @@ def main():
             check(proc.returncode == 0 and "PROMOTED:" in proc.stdout, proc.stdout)
             check(any(c[:2] == ["run", "-d"] for c in calls), calls)
 
+        def registry_env():
+            proc, _, cell = run()
+            check(proc.returncode == 0, proc.stdout)
+            env = (cell / "promoted-env").read_text().splitlines()
+            selectors = [v for v in env if v.startswith(("CR_REGISTRY_", "CR_DATABASE_URL="))]
+            check(sorted(selectors) == ["CR_REGISTRY_BACKEND=sqlite",
+                                        "CR_REGISTRY_SQLITE_PATH=/data/registry.db"], env)
+
+        def registry_counts(before=6, after=6, target=script):
+            fixture = {"before_agents": {"agents": [{}] * before},
+                       "after_agents": {"agents": [{}] * after}}
+            proc, calls, _ = run(fixture, target=target)
+            check(f"agents before={before}; after={after}" in proc.stdout, proc.stdout)
+            agent_reads = [(i, c) for i, c in enumerate(calls)
+                           if c[0] == "exec" and c[-1].endswith("/agents")]
+            check(len(agent_reads) == 2, calls)
+            remove = calls.index(["rm", "-f", "b" * 64])
+            versions = [i for i, c in enumerate(calls)
+                        if c[0] == "exec" and c[-1].endswith("/version")]
+            check(len(versions) == 3, calls)
+            check(agent_reads[0][1][1] == "b" * 64 and agent_reads[0][0] < remove, calls)
+            check(agent_reads[1][1][1] == "c" * 64 and agent_reads[1][0] > max(versions), calls)
+            if after < before and target == script:
+                check(proc.returncode != 0 and "FAILED: registry durability lost" in proc.stdout,
+                      proc.stdout)
+                check("PROMOTED:" not in proc.stdout, proc.stdout)
+                check(["rm", "-f", "c" * 64] in calls, calls)
+            else:
+                check(proc.returncode == 0 and "PASS: registry durability" in proc.stdout, proc.stdout)
+                check("PROMOTED:" in proc.stdout and "unverified" not in proc.stdout, proc.stdout)
+                check(["rm", "-f", "c" * 64] not in calls, calls)
+
+        def unknown_agents(phase="before", value="unreadable", rc=1):
+            proc, calls, _ = run({phase + "_agents": value, phase + "_agents_rc": rc})
+            check(proc.returncode != 0 and "registry durability unverified" in proc.stdout, proc.stdout)
+            counts = "agents before=unknown; after=6" if phase == "before" else "agents before=6; after=unknown"
+            check(counts in proc.stdout, proc.stdout)
+            check("PASS: registry durability" not in proc.stdout and "PROMOTED:" not in proc.stdout,
+                  proc.stdout)
+            check(sum(c[0] == "exec" and c[-1].endswith("/version") for c in calls) == 3, calls)
+            check(["rm", "-f", "c" * 64] in calls, calls)
+
+        def neuter_agents():
+            copy_dir = root / "neutered-agents"
+            copy_dir.mkdir()
+            source = script.read_text()
+            needle = '((after_agents >= before_agents)) # AGENTS_GATE: selftest mutates this decision only'
+            check(source.count(needle) == 1, "agents decision mutation anchor missing or nonunique")
+            target = copy_dir / script.name
+            target.write_text(source.replace(needle, ': # AGENTS_GATE deliberately disabled by selftest'))
+            shutil.copy2(script.with_name("deploy-ui-test-lib.sh"), copy_dir / "deploy-ui-test-lib.sh")
+            registry_counts(6, 0)
+            registry_counts(6, 0, target=target)
+
         def operational_failure(fixture, phrase):
             proc, calls, _ = run(fixture)
             check(proc.returncode != 0 and phrase in proc.stdout and "PROMOTED:" not in proc.stdout, proc.stdout)
@@ -205,7 +268,22 @@ def main():
             ("docker start failure never reports success", lambda: operational_failure({"start_rc": 1}, "replacement start failed")),
             ("name/image ownership disagreement FAILS", lambda: operational_failure({"owner_mismatch": True}, "no longer owns")),
             ("NEUTER: disabling only dirty decision accepts the refused dirty fixture", neuter),
+            ("registry sqlite posture overrides inherited registry and database selectors", registry_env),
+            ("fewer agents FAILS with registry durability lost (6 to 0)", lambda: registry_counts(6, 0)),
+            ("equal agents PASS with both counts and ordered inside-container reads", registry_counts),
+            ("more agents PASS", lambda: registry_counts(6, 7)),
+            ("zero agents is a readable count, not unknown", lambda: registry_counts(0, 0)),
+            ("unreadable pre-removal count is unverified, never zero or silent pass", unknown_agents),
+            ("unreadable post-start count is unverified", lambda: unknown_agents("after")),
+            ("NEUTER: forcing only agent comparison to pass accepts the rejected 6-to-0 fixture", neuter_agents),
         ]
+        for phase in ("before", "after"):
+            for label, value in (("empty", ""), ("malformed", "not JSON"),
+                                 ("missing agents", {}), ("null agents", {"agents": None}),
+                                 ("object agents", {"agents": {}}),
+                                 ("multiple documents", '{"agents":[]} {"agents":[]}')):
+                cases.append((f"{phase} {label} count is unverified, not zero",
+                              lambda p=phase, v=value: unknown_agents(p, v, rc=0)))
         for name, fn in cases:
             try:
                 fn()

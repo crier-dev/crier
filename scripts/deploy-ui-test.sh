@@ -5,7 +5,7 @@
 # otherwise discover the unique crier-ui-live alias on crier-ui-test-net.
 # Requires bash, docker, jq, flock. The token file contains ONE raw token line.
 # Preserve current env/mount/network/aliases/ports/restart policy and command;
-# explicitly enforce sqlite /data/sessions.db, permissions on and guard off.
+# explicitly enforce sqlite sessions + registry under /data, permissions on and guard off.
 # Containers (not background host servers) own the server lifecycle. On failed
 # read-back the unverified replacement is removed, never its persistent volume.
 set -euo pipefail
@@ -28,7 +28,7 @@ while (($#)); do
       shift 2 ;;
     -h|--help)
       printf '%s\n' 'Usage: deploy-ui-test.sh --image TAG --commit HEX --admin-token-file FILE [--container NAME]' \
-        'Checks binary provenance before removal and three live /version reads after start.'
+        'Checks binary provenance before removal, three live /version reads and registry agent counts across replacement.'
       exit 0 ;;
     *) refuse "unknown argument: $1" ;;
   esac
@@ -94,10 +94,12 @@ jq -e 'length == 1 and (.[0] |
 old_id="$(jq -r '.[0].Id' "$scratch/old.json")"
 name="$(jq -r '.[0].Name | ltrimstr("/")' "$scratch/old.json")"
 # Preserve unrelated settings, replacing only the mandated UAT posture. Remove
-# the obsolete CR_SESSION_PATH too; config.Load reads CR_SESSION_SQLITE_PATH.
-jq -r '.[0].Config.Env[] | select(test("^(CR_SESSION_BACKEND|CR_SESSION_SQLITE_PATH|CR_SESSION_PATH|CR_PERMISSIONS_ENABLED|CR_PERMISSIONS_ADMIN_TOKEN|CR_GUARD_ENABLED)=") | not)' \
+# the obsolete CR_SESSION_PATH and inherited DB selectors too; none may override
+# the explicit session/registry sqlite posture below.
+jq -r '.[0].Config.Env[] | select(test("^(CR_SESSION_BACKEND|CR_SESSION_SQLITE_PATH|CR_SESSION_PATH|CR_REGISTRY_BACKEND|CR_REGISTRY_SQLITE_PATH|CR_REGISTRY_URL|CR_DATABASE_URL|CR_PERMISSIONS_ENABLED|CR_PERMISSIONS_ADMIN_TOKEN|CR_GUARD_ENABLED)=") | not)' \
   "$scratch/old.json" >"$scratch/env"
 printf '%s\n' 'CR_SESSION_BACKEND=sqlite' 'CR_SESSION_SQLITE_PATH=/data/sessions.db' \
+  'CR_REGISTRY_BACKEND=sqlite' 'CR_REGISTRY_SQLITE_PATH=/data/registry.db' \
   'CR_PERMISSIONS_ENABLED=true' 'CR_GUARD_ENABLED=false' \
   "CR_PERMISSIONS_ADMIN_TOKEN=$token" >>"$scratch/env"
 unset token
@@ -121,6 +123,23 @@ for field in User WorkingDir; do
 done
 args+=(--entrypoint=crier "$image_id")
 while IFS= read -r -d '' arg; do args+=("$arg"); done < <(jq -j '.[0].Config.Cmd // [] | .[] | . + "\u0000"' "$scratch/old.json")
+
+# Read the exact container, not an edge proxy. Empty/malformed/error responses
+# are unknown, never a fabricated zero (jq length on null would yield zero).
+read_agents_count() {
+  local body
+  body="$(docker exec "$1" wget -q -T 2 -O - "http://127.0.0.1:$port/agents")" || return 1
+  jq -ser 'if length == 1 and (.[0] | type == "object") and
+    (.[0].agents | type == "array") then .[0].agents | length
+    else error("expected one object with an agents array") end' <<<"$body" 2>/dev/null
+}
+before_agents=unknown
+if ! before_agents="$(read_agents_count "$old_id")"; then
+  before_agents=unknown
+  printf 'WARNING: pre-removal agent count unreadable; agents before=unknown; registry durability comparison will be unverified\n' >&2
+else
+  printf 'pre-removal agents before=%s\n' "$before_agents"
+fi
 
 # Remove FIRST to release the alias and sqlite writer before the replacement.
 docker rm -f "$old_id" >/dev/null || fail 'old container removal failed; replacement not started'
@@ -149,5 +168,17 @@ for ((attempt=1; attempt<=3; attempt++)); do
   printf 'verified /version read %s/3: ' "$attempt"; provenance_values
   [[ "$attempt" == 3 ]] || sleep 1
 done
+assert_owner || fail 'replacement ownership changed during registry verification'
+after_agents=unknown
+if ! after_agents="$(read_agents_count "$new_id")"; then after_agents=unknown; fi
+printf 'registry agents before=%s; after=%s\n' "$before_agents" "$after_agents"
+[[ "$before_agents" != unknown && "$after_agents" != unknown ]] || fail 'registry durability unverified: agent count unreadable'
+agents_preserved() {
+  ((after_agents >= before_agents)) # AGENTS_GATE: selftest mutates this decision only
+}
+agents_preserved || fail 'registry durability lost: fewer agents after replacement'
+assert_owner || fail 'replacement ownership changed after registry verification'
+printf 'PASS: registry durability; agents before=%s; after=%s\n' "$before_agents" "$after_agents"
 verified=true
-printf 'PROMOTED: %s as %s (%s); three live provenance reads agree\n' "$image" "$name" "$image_id"
+printf 'PROMOTED: %s as %s (%s); three live provenance reads agree; registry durability PASS (agents before=%s; after=%s)\n' \
+  "$image" "$name" "$image_id" "$before_agents" "$after_agents"
