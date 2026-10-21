@@ -17,8 +17,8 @@ import (
 
 const managementTestToken = "management-posture-test-only-secret"
 
-const managementDisabledSentence = "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false)."
-const managementUnarmedSentence = "enabled but not armed for this viewer — ACL live; management reads refused. Configure CR_PERMISSIONS_ADMIN_TOKEN and supply it as Bearer on management reads and /status."
+const managementDisabledSentence = "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here."
+const managementUnarmedSentence = "not authorized for this viewer — ACL live; management reads refused. CR_PERMISSIONS_ADMIN_TOKEN must be configured and supplied as Bearer by an authorized deployment gateway; /status alone does not identify an unset token versus a missing or rejected viewer credential."
 const managementGatedSentence = "admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer."
 
 // Exercise the production config, router, admin gate and embedded renderer.

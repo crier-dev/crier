@@ -134,6 +134,10 @@ main { min-width:0; display:flex; flex-direction:column; }
 .management-grid > section { min-width:0; }
 .management .section-head { flex-wrap:wrap; }
 .management-read { overflow-wrap:anywhere; white-space:pre-wrap; }
+.management-read.disabled { color:var(--dim); border-left:3px solid var(--border); padding-left:10px; }
+.management-read.refused { color:var(--amber); border-left:3px solid var(--amber); padding-left:10px; }
+#management-failures { display:grid; gap:12px; margin-bottom:16px; }
+.failure-routes { color:var(--dim); font-size:11px; margin-top:4px; }
 .management-table-wrap { max-width:100%; overflow-x:auto; }
 .management-table { border-collapse:collapse; width:100%; font-size:12px; }
 .management-table th,.management-table td { border-bottom:1px solid var(--border); padding:8px; text-align:left; vertical-align:top; min-width:100px; max-width:240px; overflow-wrap:anywhere; white-space:pre-wrap; }
@@ -208,7 +212,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 <body>
 <main>
 <h1>Authentication required — this deployment is closed to direct browser access</h1>
-<p>This Crier deployment runs with <code>CR_AUTH_TOKEN</code> set: every request must carry a <code>Bearer</code> credential, and answering <code>401</code> here is the server working as configured.</p>
+<p>This Crier deployment runs with <code>CR_AUTH_TOKEN</code> set: every request except the public paths listed below must carry a <code>Bearer</code> credential. Answering <code>401</code> here is the server working as configured.</p>
 <p>A browser cannot attach a <code>Bearer</code> header on ordinary navigation, so opening this page directly will always be refused. Reading the conversations UI requires a <strong>fronting arrangement</strong> — an authenticating layer in front of the server that vouches for your browser. That mechanism is a deliberate, still-open decision (<code>DF-CRIER-333</code>); nothing on this page is a workaround and no credential belongs in a browser.</p>
 <p>Agents and API clients are unaffected: they send the header themselves and keep the same JSON refusal contract. The five public paths (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) stay reachable without a credential.</p>
 <hr>
@@ -265,6 +269,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
   <div class="section-head"><button id="management-refresh" type="button" class="ghost">Refresh management reads</button></div>
   <p class="note">Fetched once on page load (the fold opens by default), when the fold is reopened, and on request. While the fold is closed no management read is issued, and a refused read is reported once, not retried. Records are deployment-wide, not filtered to the selected conversation. No credential entry, minting or permission changes here.</p>
   <p class="note">Permissions reads require CR_PERMISSIONS_ENABLED=true and a distinct CR_PERMISSIONS_ADMIN_TOKEN. Trust records require that distinct token even with delivery ACLs off. An authorized deployment gateway must supply access; this page does not collect or store tokens.</p>
+  <div id="management-failures" role="status" aria-live="polite" hidden></div>
   <div class="management-grid">
     <section class="panel" aria-labelledby="principals-title"><h2 id="principals-title">Principals</h2><div id="management-principals" class="management-read note" role="status">Loading GET /principals…</div><p class="note">ID identifies the credential holder; kind is the record type; display_name is the human label; namespace is the recorded realm; role and status are stored authority/lifecycle values; created_at is creation time. An omitted field is not reported, not an inferred default. A token fingerprint is shown only as a short prefix, labelled as such in the column header; a token or a full hash is refused in words, never rendered.</p></section>
     <section class="panel" aria-labelledby="bindings-title"><h2 id="bindings-title">Bindings</h2><div id="management-bindings" class="management-read note" role="status">Loading GET /bindings…</div><p class="note">id is the binding record; kind is its type; principal is the credential holder; agent is the bound agent; as_agent permits acting as that agent; created_at is creation time; created_by names the author. The endpoint returns the effective record per principal/agent pair.</p></section>
@@ -359,6 +364,7 @@ async function call(path, options = {}, waitWithoutAbort = false) {
     if (!response.ok) {
       const error = new Error("HTTP " + response.status + ": " + errorText(body) + (body.detail && body.error ? " — " + body.detail : ""));
       error.serverMessage = typeof body.error === "string" ? body.error : body.error?.message;
+      error.serverCode = typeof body.error === "string" ? body.error : body.error?.code;
       error.status = response.status;
       error.detail = body.detail;
       throw error;
@@ -377,18 +383,60 @@ function notice(id, text, error = false) { $(id).textContent = text; $(id).class
 function unavailable(id, error) { notice(id, "Unavailable — " + error.message, true); }
 // Management reads deliberately do NOT join the transcript's polling loop.
 // No swallowed 401/403, automatic retries, fixture rows or browser-held tokens.
+const managementFailures = new Map();
+// The HTTP response is evidence of the cause. A viewer-specific /status value
+// cannot distinguish an unset admin token from a token this client did not send.
+function managementFailureKind(error) {
+  if (error.parseFailure) return "failed";
+  if (error.status === 403 && error.serverMessage === "MANAGEMENT_FORBIDDEN" && error.detail === "the permissions management surface is not armed") return "disabled";
+  return error.status >= 400 && error.status < 500 ? "refused" : "failed";
+}
+function renderManagementFailures() {
+  const groups = new Map();
+  for (const [id, failure] of managementFailures) {
+    // Only identical refusals/configuration causes collapse. Never hide separate
+    // failing facts just because two network errors happen to have the same text.
+    const key = failure.kind === "failed" ? id : JSON.stringify([failure.kind, failure.status, failure.code, failure.detail]);
+    if (!groups.has(key)) groups.set(key, { ...failure, routes:[] });
+    groups.get(key).routes.push(failure.route);
+  }
+  const panel = $("management-failures");
+  panel.replaceChildren();
+  panel.hidden = groups.size === 0;
+  for (const group of groups.values()) {
+    const item = document.createElement("div");
+    item.className = "note management-read " + group.kind + (group.kind === "failed" ? " error" : "");
+    item.dataset.readState = group.kind;
+    const cause = document.createElement("p");
+    cause.textContent = (group.kind === "disabled" ? "Disabled by configuration" : group.kind === "refused" ? "Refused" : "Failed") +
+      " — " + group.detail + (group.kind === "disabled"
+        ? ". Not armed on this instance — a configured posture, not a failure. Arming requires CR_PERMISSIONS_ENABLED=true and CR_PERMISSIONS_ADMIN_TOKEN; this response does not identify which prerequisite is absent."
+        : group.kind === "refused" ? ". This client is not authorized for this request. Not retried automatically."
+          : ". No empty result is inferred. Refresh explicitly to try again.");
+    const routes = document.createElement("p");
+    routes.className = "failure-routes";
+    routes.textContent = "Affected routes: " + [...new Set(group.routes)].sort().join(", ") + (group.status ? " (HTTP " + group.status + ")" : " (no HTTP response)");
+    item.append(cause, routes);
+    panel.append(item);
+  }
+}
 function managementState(id, kind, text) {
-  notice(id, text, kind === "refused" || kind === "error");
-  $(id).classList.add("management-read");
+  managementFailures.delete(id);
+  renderManagementFailures();
+  notice(id, text, kind === "failed");
+  $(id).hidden = false;
+  $(id).classList.add("management-read", kind);
   $(id).dataset.readState = kind;
 }
-function managementFailure(id, route, error, admin = true) {
-  const refused = error.status === 401 || error.status === 403;
-  const detail = typeof error.detail === "string" ? error.detail : error.message;
-  managementState(id, refused ? "refused" : "error", (refused ? "Refused" : "Error") + " — " + route + (error.status ? " (HTTP " + error.status + ")" : "") + "\n" + detail + (refused
-    ? admin ? "\nAccess requires CR_PERMISSIONS_ADMIN_TOKEN (distinct from CR_AUTH_TOKEN); permissions reads also require CR_PERMISSIONS_ENABLED=true. Supply access through an authorized deployment gateway. Not retried automatically."
-      : "\nThis route uses ordinary deployment reach access, not CR_PERMISSIONS_ADMIN_TOKEN. Not retried automatically."
-    : "\nNo empty result is inferred. Refresh explicitly to try again."));
+function managementFailure(id, route, error) {
+  const kind = managementFailureKind(error);
+  const detail = typeof error.detail === "string" && error.detail ? error.detail : error.serverMessage || error.message;
+  managementState(id, kind, "");
+  // The per-route slots remain available for the next successful read, but the
+  // cause is rendered once above the inventory, not once per endpoint.
+  $(id).hidden = true;
+  managementFailures.set(id, {kind, route, detail, status:error.status, code:error.serverCode});
+  renderManagementFailures();
 }
 const managementValue = value => value === undefined ? "not reported" : value === null ? "null (no value)" : typeof value === "object" ? JSON.stringify(value) : String(value);
 // DF-CRIER-384: a column that prints whatever the server sends is one server
@@ -444,8 +492,8 @@ async function refreshManagement() {
       try {
         const b = await call("/status");
         const flag = value => value === true ? "true" : value === false ? "false" : "unknown (not reported)";
-        notice("management-federation-posture", "GET /status · Configured require-peer: " + flag(b.federation_require_peer_configured) + " · Effective require-peer: " + flag(b.federation_require_peer_effective) + " · Token-only inbound accepted: " + flag(b.federation_token_only_accepted) + " · Lifecycle peer records: " + (Number.isInteger(b.federation_peer_count) ? b.federation_peer_count : "unknown (not reported)"));
-      } catch(error) { managementFailure("management-federation-posture","GET /status",error,false); }
+        managementState("management-federation-posture", "populated", "GET /status · Configured require-peer: " + flag(b.federation_require_peer_configured) + " · Effective require-peer: " + flag(b.federation_require_peer_effective) + " · Token-only inbound accepted: " + flag(b.federation_token_only_accepted) + " · Lifecycle peer records: " + (Number.isInteger(b.federation_peer_count) ? b.federation_peer_count : "unknown (not reported)"));
+      } catch(error) { managementFailure("management-federation-posture","GET /status",error); }
     })()
   ]);
   $("management-refresh").disabled = false;
@@ -479,7 +527,7 @@ $("trust-query-form").addEventListener("submit",async event => {
     const basis = body.basis;
     explanation.textContent = "Basis: " + (basis || "not reported by server") + (Object.hasOwn(basisWords, basis) ? " — " + basisWords[basis] : "");
     $("management-chain").append(explanation);
-  } catch(error) { managementFailure("management-chain","POST /trust/verify",error,false); }
+  } catch(error) { managementFailure("management-chain","POST /trust/verify",error); }
   finally { $("trust-query-submit").disabled = false; }
 });
 refreshManagement();
@@ -750,9 +798,9 @@ function renderPosture(b) {
       : b.federation_require_peer_configured === false && b.federation_token_only_accepted === true
         ? "token-only inbound accepted (" + peerWords + ")" : "unknown";
   const management = b.management_surface === "disabled"
-    ? "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false)."
+    ? "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here."
     : b.management_surface === "enabled-unarmed"
-      ? "enabled but not armed for this viewer — ACL live; management reads refused. Configure CR_PERMISSIONS_ADMIN_TOKEN and supply it as Bearer on management reads and /status."
+      ? "not authorized for this viewer — ACL live; management reads refused. CR_PERMISSIONS_ADMIN_TOKEN must be configured and supplied as Bearer by an authorized deployment gateway; /status alone does not identify an unset token versus a missing or rejected viewer credential."
       : b.management_surface === "admin-token-gated"
         ? "admin-token gated — enabled and gated; ACL live; management reads authorized for this viewer."
         : "unknown";
@@ -762,8 +810,9 @@ function renderPosture(b) {
     : b.session_store_mount === "external" ? "external database — storage location not observable"
     : "volume vs writable layer unknown — verify the storage mount";
   const sessionStore = reported(b.session_backend) + (typeof b.session_store_path === "string" && b.session_store_path ? " " + b.session_store_path : "") + " (" + sessionMount + ")";
-  notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.registry_durable === false);
-  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + enabled(b.auth_enabled) + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""), b.auth_enabled === false || b.registry_durable === false);
+  const auth = b.auth_enabled === false ? "disabled by configuration — CR_AUTH_TOKEN unset ⇒ auth_enabled:false; a configured posture, not a failure" : enabled(b.auth_enabled);
+  notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.health === "degraded" || b.health === "down");
+  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
 }
 async function refresh() {
   if (state.sending) return;
