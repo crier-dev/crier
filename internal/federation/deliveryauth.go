@@ -104,6 +104,7 @@ func DeliveryAuth(existing func(http.Handler) http.Handler, getStore func() *Pee
 				}
 				if completed {
 					receipt.finish()
+					attrs = append(attrs, ingressVerdictAuditAttrs(receipt.Header())...)
 					slog.Info("federation inbound delivery", append(attrs, "status", receipt.status, "receipt_flushed", true)...)
 					return
 				}
@@ -191,18 +192,7 @@ func (d peerVerdictDelta) anomalous() bool {
 // net/http writes response headers (Header.sortedKeyValues), which is therefore
 // the order a client reads them in.
 func (w *inboundReceipt) peerVerdict() peerVerdictDelta {
-	canonical := textproto.CanonicalMIMEHeaderKey(VerdictHeader)
-	var keys []string
-	for k := range w.Header() {
-		if textproto.CanonicalMIMEHeaderKey(k) == canonical {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	var values []string
-	for _, k := range keys {
-		values = append(values, w.Header()[k]...)
-	}
+	keys, values := verdictWireValues(w.Header(), VerdictHeader)
 	source := verdictSourceHandler
 	if len(values) == 1 && values[0] == string(w.ingress) {
 		source = verdictSourceIngress
@@ -210,11 +200,45 @@ func (w *inboundReceipt) peerVerdict() peerVerdictDelta {
 	return peerVerdictDelta{values: values, keys: keys, source: source}
 }
 
+// verdictWireValues reads the server map in net/http's serialization order.
+// Use only before serialization: the client parser has already folded keys and
+// must use Header.Values to retain the actual received order instead.
+func verdictWireValues(h http.Header, header string) (keys, values []string) {
+	canonical := textproto.CanonicalMIMEHeaderKey(header)
+	for k := range h {
+		if textproto.CanonicalMIMEHeaderKey(k) == canonical {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		values = append(values, h[k]...)
+	}
+	return keys, values
+}
+
+// ingressVerdictAuditAttrs records the FINAL wire shape, after finish restores
+// the canonical ingress value. Never delete a handler's differently cased key:
+// report it. Identical duplicates are a shape anomaly, not a disagreement.
+func ingressVerdictAuditAttrs(h http.Header) []any {
+	keys, values := verdictWireValues(h, IngressVerdictHeader)
+	var attrs []any
+	if len(values) > 1 {
+		attrs = append(attrs, "ingress_verdict_anomaly", true, "ingress_verdict_values", values)
+	}
+	if len(keys) > 1 || (len(keys) == 1 && keys[0] != IngressVerdictHeader) {
+		attrs = append(attrs, "ingress_verdict_keys", keys)
+	}
+	return attrs
+}
+
 // finish flushes the handler's bytes verbatim. The peer-facing verdict header is
 // the handler's to author — an onward peer's receipt replaces it legitimately
 // (DF-CRIER-371) — but the two ingress classification headers are re-asserted
-// here from captured state, after the handler returned, so a handler write cannot
-// shadow or contradict the local ingress decision (DF-CRIER-432). Handler-owned
+// here from captured state, after the handler returned. Re-assertion protects
+// the canonical map entries (DF-CRIER-432); differently cased handler entries
+// remain on the wire and are reported in the ingress audit (DF-CRIER-457).
+// Handler-owned
 // verdict fields (including an onward peer's receipt) must never be added,
 // overwritten or re-encoded in the body.
 func (w *inboundReceipt) finish() {

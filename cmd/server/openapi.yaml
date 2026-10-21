@@ -1236,7 +1236,20 @@ paths:
         names the full ordered set in peer_verdict_values instead of one chosen
         value, and names a duplicate or non-canonically spelled key in
         peer_verdict_keys. Neither shape is repaired on the wire: the
-        peer-facing header stays the handler's to author. The ingress
+        peer-facing header stays the handler's to author. DF-CRIER-457 applies
+        the same all-values rule to ingress receipts: ForwardReceipt uses
+        IngressVerdictValues (all parsed values in wire order),
+        IngressVerdictAnomaly (true for two or more, including identical
+        duplicates), and IngressVerdict (the common value only when all agree;
+        empty for conflicts or absence). No alias fallback is performed and
+        the InboundVerdict alias read is unchanged. Canonical re-assertion does
+        not remove differently cased handler keys. The completed audit reports
+        ingress_verdict_values and ingress_verdict_anomaly for multiplicity,
+        and ingress_verdict_keys for duplicate/non-canonical spellings. Original
+        spelling is reported at the sender because the client parser folds it;
+        identical duplicates are anomalous but not a semantic disagreement.
+        Existing peer_verdict fields describe only X-Crier-Fed-Verdict, so their
+        absence does not imply an anomaly-free ingress header. The ingress
         middleware preserves the handler's
         body bytes exactly, including any handler-owned verdict fields.
 
@@ -2254,7 +2267,11 @@ paths:
         an onward decision — every value the peer can read, in wire order, is what
         the audit line names (peer_verdict for one value, peer_verdict_values for
         several, peer_verdict_keys for a duplicate or non-canonically spelled key
-        — DF-CRIER-436). The middleware never annotates or re-encodes the
+        — DF-CRIER-436). Ingress receipts also retain all values and expose
+        IngressVerdictValues plus IngressVerdictAnomaly (DF-CRIER-457), never
+        choosing a conflicting first value. The completed audit reports
+        ingress_verdict_values and ingress_verdict_keys as on by-id delivery;
+        alias behavior is unchanged. The middleware never annotates or re-encodes the
         handler's response body.
 
         Stated limit: the cursor lives in the serving process and is not

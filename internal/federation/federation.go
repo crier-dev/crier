@@ -448,11 +448,18 @@ type ForwardReceipt struct {
 	// ingress classification, unless that peer's handler authored an onward
 	// verdict, in which case this is the handler's value (DF-CRIER-371).
 	Verdict string
-	// IngressVerdict is the peer's LOCAL ingress classification, read from the
-	// unshadowable ingress header (IngressVerdictHeader, DF-CRIER-432). Read
-	// this field when the local decision is what is wanted: Verdict above is
-	// the handler's as soon as a handler authors one.
+	// IngressVerdict is the single semantic value of IngressVerdictHeader.
+	// DF-CRIER-457 chooses primary + ordered values, not first-value-wins:
+	// conflicting values leave this empty; identical duplicates retain their
+	// common value but are still anomalous. No alias fallback is performed.
 	IngressVerdict string
+	// IngressVerdictValues retains ALL parsed wire values, including identical
+	// duplicates, in order. Nil means absent, not an empty-valued header.
+	IngressVerdictValues []string
+	// IngressVerdictAnomaly reports multiplicity (even identical duplicates).
+	// Original key spelling is lost in net/http's parser; the sending gate
+	// reports key anomalies separately as ingress_verdict_keys in its audit.
+	IngressVerdictAnomaly bool
 	// InboundVerdict is that same classification as reported by the retained
 	// alias (InboundVerdictHeader). A peer that emits both writes them from one
 	// captured decision, so they agree; a peer predating DF-CRIER-432 emits
@@ -527,7 +534,18 @@ func (c *Client) forwardDeliverReceipt(ctx context.Context, link Link, agentID s
 	// The peer's local ingress classification travels in two headers: the
 	// authoritative one (DF-CRIER-432) and the alias an older peer writes
 	// instead (DF-CRIER-440). Both are read — the alias is not decoration.
-	receipt.IngressVerdict = resp.Header.Get(IngressVerdictHeader)
+	receipt.IngressVerdictValues = append([]string(nil), resp.Header.Values(IngressVerdictHeader)...)
+	receipt.IngressVerdictAnomaly = len(receipt.IngressVerdictValues) > 1
+	receipt.IngressVerdict = ""
+	if len(receipt.IngressVerdictValues) > 0 {
+		receipt.IngressVerdict = receipt.IngressVerdictValues[0]
+		for _, value := range receipt.IngressVerdictValues[1:] {
+			if value != receipt.IngressVerdict {
+				receipt.IngressVerdict = ""
+				break
+			}
+		}
+	}
 	receipt.InboundVerdict = resp.Header.Get(InboundVerdictHeader)
 	return resp.StatusCode, respBody, nil
 }

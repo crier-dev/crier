@@ -30,9 +30,9 @@ const (
 	// replaces it with the onward peer's verdict (DF-CRIER-371). Read the local
 	// ingress decision from IngressVerdictHeader.
 	//
-	// It is also the one verdict header a handler can leave with more than one
-	// value: Add appends beside the seeded value, and a raw map write under a
-	// differently cased key is a separate entry (DF-CRIER-436). The wire is not
+	// It can carry more than one value: Add appends beside the seeded value,
+	// and a raw map write under a differently cased key is a separate entry
+	// (DF-CRIER-436). The wire is not
 	// repaired — the audit reports every value and every key spelling — so a
 	// reader that must agree with the audit should read Values, not Get.
 	VerdictHeader = "X-Crier-Fed-Verdict"
@@ -40,10 +40,11 @@ const (
 	// IngressVerdictHeader is the AUTHORITATIVE local ingress classification
 	// (DF-CRIER-432). DeliveryAuth writes it from state captured before the
 	// handler ran and re-asserts it after the handler returns, so a handler that
-	// writes the same header cannot shadow the ingress decision. A peer's reply
-	// is read back from this header into ForwardReceipt.IngressVerdict
-	// (DF-CRIER-440), so this is the name a reader reaches for when the LOCAL
-	// ingress decision is what it wants.
+	// writes the same canonical key cannot shadow the ingress decision. Raw
+	// differently cased keys can still reach the wire: DF-CRIER-457 reports
+	// every value in ForwardReceipt.IngressVerdictValues and records original
+	// key spellings in the server audit, rather than silently choosing one.
+	// ForwardReceipt.IngressVerdict is populated only for one semantic value.
 	IngressVerdictHeader = "X-Crier-Fed-Ingress-Verdict"
 
 	// InboundVerdictHeader is the retained alias of the same ingress
