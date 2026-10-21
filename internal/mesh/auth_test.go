@@ -55,6 +55,31 @@ func expectNoFrame(t *testing.T, conn *websocket.Conn, wait time.Duration, why s
 	t.Fatalf("%s: read failed with %v", why, err)
 }
 
+// frameWaitFloor is the read budget for a frame the mesh OWES this test: a
+// refusal, an ERROR, a forwarded REQUEST. It is not a latency assertion — it
+// separates "the frame arrives" from "the frame never arrives", so it sits
+// orders of magnitude above a loopback round trip rather than in the same order
+// as a scheduler stall, which is where the fixed 2s it replaces sat (QA-CRIER-45).
+//
+// The recorded contention red was "the refused responder got no ERROR frame:
+// ... i/o timeout" for a refusal the mesh HAD produced, because an absolute
+// deadline armed before the stall had already expired when the read finally ran.
+// A deadline cannot be re-armed (gorilla treats a read timeout as permanent), so
+// the window itself has to be wide enough that host load cannot decide the
+// verdict.
+const frameWaitFloor = 30 * time.Second
+
+// frameWait scales a frame read budget by a latency this run already measured, so
+// the wait grows with the host exactly as the measurement did and never falls
+// below frameWaitFloor. baseline is the observed peer-to-peer latency on the same
+// loopback path the frame under test takes; 0 means "no baseline measured yet".
+func frameWait(baseline time.Duration) time.Duration {
+	if wait := 20 * baseline; wait > frameWaitFloor {
+		return wait
+	}
+	return frameWaitFloor
+}
+
 // authTestKeyPair returns a fresh ed25519 keypair as hex, so a test can sign as
 // an agent without touching key files.
 func authTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -779,7 +804,7 @@ func TestMeshAuthRequestSourceCannotBeSpoofed(t *testing.T) {
 	}
 
 	// The attacker is told it was refused...
-	_ = attackerConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = attackerConn.SetReadDeadline(time.Now().Add(frameWait(0)))
 	_, data, err := attackerConn.ReadMessage()
 	if err != nil {
 		t.Fatalf("the refused requester got no ERROR frame: %v", err)
@@ -820,7 +845,7 @@ func TestMeshAuthRequestOwnSourceStillForwarded(t *testing.T) {
 		t.Fatalf("write REQUEST: %v", err)
 	}
 
-	_ = targetConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = targetConn.SetReadDeadline(time.Now().Add(frameWait(0)))
 	_, data, err := targetConn.ReadMessage()
 	if err != nil {
 		t.Fatalf("the target received nothing: %v", err)
@@ -843,10 +868,18 @@ func TestMeshAuthRequestOwnSourceStillForwarded(t *testing.T) {
 // TestMeshAuthReplyMustComeFromTheTarget: a RESPONSE for a route whose target
 // is another peer is not a reply at all, and is neither forwarded to the
 // requester nor mistaken for one.
+//
+// The route has to EXIST before the intruder's frame is worth sending, and that
+// is a readiness fact, not a sleeping bet (QA-CRIER-45): handleAgentRequest
+// records the route before it forwards the frame (internal/mesh/peer.go), so the
+// target holding the forwarded REQUEST proves the route is there. The fixed 50ms
+// sleep this replaces lost that race under host contention — the intruder's
+// RESPONSE found no route, was dropped without a refusal, and the fixed 2s read
+// then reported a timeout for a product that was behaving correctly.
 func TestMeshAuthReplyMustComeFromTheTarget(t *testing.T) {
 	m := newAuthOnMesh(t)
 	requesterConn := acceptTestPeer(t, m, "requester")
-	acceptTestPeer(t, m, "target")
+	targetConn := acceptTestPeer(t, m, "target")
 	intruderConn := acceptTestPeer(t, m, "intruder")
 
 	req := &Request{
@@ -858,12 +891,24 @@ func TestMeshAuthReplyMustComeFromTheTarget(t *testing.T) {
 		TraceID:  "pair-1-trace",
 	}
 	out, _ := Marshal(req)
+	routeStart := time.Now()
 	if err := requesterConn.WriteMessage(websocket.TextMessage, out); err != nil {
 		t.Fatalf("write REQUEST: %v", err)
 	}
 
-	// Let the route be recorded (the frame reaches the target).
-	time.Sleep(50 * time.Millisecond)
+	// Readiness signal: the target receiving the forwarded REQUEST is proof the
+	// route was recorded (record-then-send, internal/mesh/peer.go), so no sleep
+	// stands between this line and the intruder's frame.
+	forwarded, _ := readFrame(t, targetConn, frameWait(0))
+	forwardLatency := time.Since(routeStart)
+	if forwarded.Type != TypeRequest || forwarded.MessageID != "pair-1" {
+		t.Fatalf("the target received %s %s, want the forwarded REQUEST pair-1", forwarded.Type, forwarded.MessageID)
+	}
+	// Everything the mesh owes this test from here is scheduling, not network:
+	// scale the refusal wait by the forwarding latency this run just measured
+	// instead of asserting a fixed number of seconds.
+	refusalWait := frameWait(forwardLatency)
+	t.Logf("route recorded in %s (target holds the forwarded REQUEST); refusal wait %s", forwardLatency, refusalWait)
 
 	resp := &Response{
 		Envelope:   Envelope{Type: TypeResponse, Version: 1, MessageID: "pair-1-resp", Timestamp: time.Now()},
@@ -879,24 +924,18 @@ func TestMeshAuthReplyMustComeFromTheTarget(t *testing.T) {
 	}
 
 	// The intruder is told the reply was refused...
-	_ = intruderConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, data, err := intruderConn.ReadMessage()
-	if err != nil {
-		t.Fatalf("the refused responder got no ERROR frame: %v", err)
-	}
-	var errMsg ErrorMessage
-	if err := json.Unmarshal(data, &errMsg); err != nil {
-		t.Fatalf("refusal is not an ERROR frame: %v", err)
-	}
+	errMsg := readErrorMessage(t, intruderConn, refusalWait)
 	if errMsg.Error.Code != ErrCodeForbidden {
 		t.Errorf("refusal code = %q, want %q (%s)", errMsg.Error.Code, ErrCodeForbidden, errMsg.Error.Message)
 	}
 
-	// ...and the requester never sees the injected response.
-	_ = requesterConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-	if _, data, err := requesterConn.ReadMessage(); err == nil {
-		t.Fatalf("the requester received a reply from a peer it never addressed: %s", data)
-	}
+	// ...and the requester never sees the injected response. Once the refusal has
+	// been read the forward decision is already made — forwardResponse either
+	// refuses OR forwards, in that same handler — so the injected frame is either
+	// already queued on this socket or never coming. This window is a cheap
+	// double-check of that causal fact, not a latency budget.
+	expectNoFrame(t, requesterConn, 300*time.Millisecond,
+		"the requester received a reply from a peer it never addressed")
 }
 
 // TestMeshAuthFramesOutsideHandshakeAreRefused: the AUTH_* types are context
@@ -915,7 +954,7 @@ func TestMeshAuthFramesOutsideHandshakeAreRefused(t *testing.T) {
 		t.Fatalf("write AUTH_OK: %v", err)
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(frameWait(0)))
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("no refusal for an out-of-handshake AUTH_OK: %v", err)
@@ -985,7 +1024,7 @@ func TestMeshAuthOffKeepsLegacyBehaviour(t *testing.T) {
 	if err := legacyConn.WriteMessage(websocket.TextMessage, out); err != nil {
 		t.Fatalf("write REQUEST: %v", err)
 	}
-	_ = targetConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = targetConn.SetReadDeadline(time.Now().Add(frameWait(0)))
 	if _, data, err := targetConn.ReadMessage(); err != nil {
 		t.Fatalf("auth-off mesh no longer forwards a REQUEST: %v", err)
 	} else if !strings.Contains(string(data), "legacy-1") {
