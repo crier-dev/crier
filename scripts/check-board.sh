@@ -83,8 +83,11 @@
 #                                 nonblank record: an empty `tasks.jsonl` or an
 #                                 empty `events.jsonl` is refused (exit 1) in
 #                                 every mode and whatever BOARD_ALLOW_SHRINK
-#                                 says (DF-CRIER-442). A board file with no
-#                                 records is not a valid board.
+#                                 says (DF-CRIER-442/453). Emptiness uses the
+#                                 per-file census from boardctl validate, not
+#                                 byte size; refusal quotes bytes AND nonblank
+#                                 records. Comments are invalid JSON, not blank.
+#                                 A board file with no records is not valid.
 #   boardctl validate -C <root>   the board's own canon: status vocabulary, key
 #                                 shapes, event ids. ERRORS are fatal (exit 1);
 #                                 WARNINGS are printed and NOT fatal, because the
@@ -414,25 +417,8 @@ run_check() {
   fi
   check_row_retention "$repo_root" "$board" "$retention_mode"
   local retention_rc=$?
-  [ "$retention_rc" -eq 0 ] || return "$retention_rc"
-
-  # DF-CRIER-442: an empty board FILE is refused here, for BOTH canonical files.
-  # This test used to name `tasks.jsonl` alone, so with the retention arm's
-  # declared-shrink notice printed first, an `events.jsonl` truncated to 0 bytes
-  # under BOARD_ALLOW_SHRINK=1 validated 5 tasks and exited 0 — the declared
-  # reduction the hatch permits had become the disappearance of half the durable
-  # queue. The hatch permits a declared REDUCTION (the notice above says which of
-  # the two it declared); it never permits an empty file. Unconditional on
-  # purpose: this is the same refusal an empty `tasks.jsonl` always got, and it
-  # also covers a file that is empty with no baseline to shrink from.
-  local canonical
-  for canonical in "${BOARD_RETENTION_FILES[@]}"; do
-    if [ ! -s "$board/$canonical" ]; then
-      _err "board: .coding-hermes/board/$canonical is empty — no board records to validate."
-      _err "board: an empty board file is not a valid board; BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the disappearance of a board file."
-      return 1
-    fi
-  done
+  # Retention diagnostics still run first (including the declared outcome), but
+  # cannot hide the unconditional empty-file refusal or validator diagnostics.
 
   local out rc
   out="$("$validator" validate -C "$root" 2>&1)"
@@ -447,8 +433,36 @@ run_check() {
     _err "board: validation FAILED (boardctl exit $rc) — fix the rows named above; do not commit an invalid board with --no-verify."
     return 1
   fi
-  local rows warns
-  rows="$(grep -c '"id"' "$board/tasks.jsonl" 2>/dev/null || echo 0)"
+  # DF-CRIER-453: ask the validator, not the byte-size test or a second JSONL
+  # parser. Its census counts each file separately and skips whitespace-only
+  # lines. Comments are not blank: boardctl already rejected them above as JSON.
+  # Fail closed if a validator version stops exposing the census we rely on.
+  local rows="" events="" line census_matches=0
+  local census='^rows: ([0-9]+) tasks, ([0-9]+) events, [0-9]+ fixtures(, header parsed)?$'
+  while IFS= read -r line; do
+    if [[ "$line" =~ $census ]]; then
+      rows="${BASH_REMATCH[1]}"
+      events="${BASH_REMATCH[2]}"
+      census_matches=$((census_matches + 1))
+    fi
+  done <<< "$out"
+  if [ "$census_matches" -ne 1 ]; then
+    _err "board: boardctl did not report exactly one recognized per-file record census — refusing to guess whether the board is empty."
+    return 2
+  fi
+  local canonical count bytes
+  for canonical in "${BOARD_RETENTION_FILES[@]}"; do
+    count="$rows"
+    [ "$canonical" != events.jsonl ] || count="$events"
+    if [ "$count" -eq 0 ]; then
+      bytes="$(wc -c < "$board/$canonical")" || return 2
+      _err "board: .coding-hermes/board/$canonical is empty: $bytes byte(s), $count nonblank record(s) — no board records to validate."
+      _err "board: an empty board file is not a valid board; BOARD_ALLOW_SHRINK=1 permits a declared reduction, never the disappearance of a board file."
+      return 1
+    fi
+  done
+  [ "$retention_rc" -eq 0 ] || return "$retention_rc"
+  local warns
   warns="$(printf '%s\n' "$out" | grep -c '^\[warn\]' || true)"
   _say "board: validation PASS — $rows row(s) accepted ($warns warning(s), not fatal)"
   return 0

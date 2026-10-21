@@ -318,7 +318,10 @@ probe_git() {
 # output is the HOST boardctl's own version line when one is installed. What it
 # does NOT do is validate rows — board VALIDATION is not what this probe measures,
 # so it accepts, and the only rejection the fixture can produce is the board arm's
-# own. The `gitreins` stub is there for the same reason: an unconditional caller
+# own. DF-CRIER-453: it must still expose the validator's per-file census.
+# Counting physical lines is valid ONLY for these generated, one-record-per-line
+# fixtures (no blank lines or metadata); this stand-in is not a JSONL parser.
+# The `gitreins` stub is there for the same reason: an unconditional caller
 # must not reach (or hang on) the host's co-harness.
 probe_tools() {
   local tools="$1" version_line
@@ -331,6 +334,13 @@ probe_tools() {
 # boardctl — resolved by the board arm through PATH.
 case "\${1:-}" in
   version) printf '%s\\n' '$version_line' ;;
+  validate)
+    shift
+    [ "\${1:-}" = -C ] && [ -n "\${2:-}" ] || exit 2
+    tasks="\$(wc -l < "\$2/.coding-hermes/board/tasks.jsonl")" || exit 2
+    events="\$(wc -l < "\$2/.coding-hermes/board/events.jsonl")" || exit 2
+    printf 'rows: %s tasks, %s events, 0 fixtures\\n' "\$tasks" "\$events"
+    ;;
 esac
 exit 0
 PROBE_BOARDCTL

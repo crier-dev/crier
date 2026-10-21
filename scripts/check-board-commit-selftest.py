@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Exercise board gates through Git, with real boardctl and scratch-only writes.
 
---source can point at a historical source snapshot for reproducible RED controls.
-Only gitreins is stubbed: its unrelated Go checks must not mask board failures.
+--source selects a historical source snapshot; --checker overrides only the gate.
+gitreins is stubbed so unrelated Go checks cannot mask board failures. All board
+fixtures use real boardctl; two labelled protocol faults alter only its census.
 """
 import argparse
 import json
@@ -16,8 +17,13 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--checker', type=Path,
+                        help='override only check-board.sh for historical RED controls')
+    parser.add_argument('--empty-fixtures-only', action='store_true',
+                        help='run only the DF-CRIER-453 empty/populated matrix')
     args = parser.parse_args()
     source = args.source.resolve()
+    checker = args.checker.resolve() if args.checker else source / 'scripts/check-board.sh'
     validator = shutil.which('boardctl')
     if not validator:
         print('commit selftest: boardctl missing; exit 2')
@@ -82,7 +88,7 @@ def main():
                 '--title', 'canonical fixture', '--priority', 'P3', check=True)
             scripts = repo / 'scripts'
             scripts.mkdir()
-            shutil.copy2(source / 'scripts/check-board.sh', scripts / 'check-board.sh')
+            shutil.copy2(checker, scripts / 'check-board.sh')
             shutil.copytree(source / 'scripts/hooks', scripts / 'hooks')
             hooks = repo / '.hooks'
             hooks.mkdir()
@@ -180,6 +186,122 @@ def main():
                     print(f'  unexpectedly present: {present}')
                 print(result.stderr, end='')
                 failures += 1
+
+        # DF-CRIER-453: real boardctl owns blank-line semantics and the census.
+        # Comments are NOT blank: boardctl rejects them as invalid JSON. The
+        # last two cases are positive controls (they must pass before AND after).
+        for board_file in ('tasks.jsonl', 'events.jsonl'):
+            repo = fixture('nonblank-' + board_file)
+            tasks = board_rows(repo, 5)
+            events = event_rows(repo, 5)
+            seed_commit(repo, 'five-record baseline for nonblank matrix')
+            target = tasks if board_file == 'tasks.jsonl' else events
+            healthy = target.read_bytes()
+            cases = (
+                ('zero-bytes', b'', 1),
+                ('one-newline', b'\n', 1),
+                ('nine-spaces', b' ' * 9, 1),
+                ('two-newlines', b'\n\n', 1),
+                ('comment-not-blank', b'# nothing\n', 1),
+                ('one-real-record', healthy.splitlines(keepends=True)[0], 0),
+                ('healthy-multi-row', healthy, 0),
+            )
+            for case, content, expected in cases:
+                for mode in ('worktree', 'staged-index', 'CI-bare', 'standalone'):
+                    target.write_bytes(content)
+                    if mode == 'staged-index':
+                        git(repo, 'add', str(target.relative_to(repo)))
+                        # A repaired worktree cannot rescue a blank index blob.
+                        target.write_bytes(healthy)
+                    elif mode == 'CI-bare':
+                        # COMMITTED whitespace, clean checkout: the CI backstop.
+                        git(repo, 'add', str(target.relative_to(repo)))
+                        git(repo, '-c', 'core.hooksPath=/dev/null', 'commit',
+                            '--allow-empty', '-qm', 'matrix candidate ' + case)
+                        assert not git(repo, 'status', '--porcelain').stdout.strip()
+                    for hatch in (None, '1', 'true'):
+                        # A real record reduced from five is accepted only by
+                        # the exact hatch. Existing retention tests cover the
+                        # other declarations; these are the requested controls.
+                        if expected == 0 and case == 'one-real-record' and hatch != '1':
+                            continue
+                        candidate_env = dict(env)
+                        if hatch is not None:
+                            candidate_env['BOARD_ALLOW_SHRINK'] = hatch
+                        if mode == 'standalone':
+                            candidate_root = root / 'standalone'
+                            candidate_root.mkdir(exist_ok=True)
+                            shutil.copytree(repo / '.coding-hermes',
+                                            candidate_root / '.coding-hermes',
+                                            dirs_exist_ok=True)
+                            command = ('bash', str(checker), '-C', str(candidate_root))
+                        else:
+                            command = ('bash', 'scripts/check-board.sh')
+                            if mode == 'staged-index':
+                                command += ('--staged-index',)
+                        result = subprocess.run(command, cwd=repo,
+                                                env=candidate_env, text=True,
+                                                capture_output=True)
+                        output = result.stdout + result.stderr
+                        if case == 'comment-not-blank':
+                            diagnostic = 'not valid JSON'
+                        elif expected:
+                            diagnostic = (f'{board_file} is empty: {len(content)} byte(s), '
+                                          '0 nonblank record(s)')
+                        elif case == 'one-real-record' and mode != 'standalone':
+                            diagnostic = 'declared, still populated (5 -> 1 row(s))'
+                        else:
+                            count = 1 if case == 'one-real-record' and board_file == 'tasks.jsonl' else 5
+                            diagnostic = f'validation PASS — {count} row(s) accepted'
+                        label = (f'DF-CRIER-453 {board_file} {case} {mode} '
+                                 f'hatch={hatch or "unset"}')
+                        expect(label, result, expected, diagnostic)
+                        # Keep exact messages visible even on a passing fixture.
+                        for line in output.splitlines():
+                            if any(text in line for text in (
+                                    'is empty', 'not valid JSON', 'still populated',
+                                    'validation PASS', 'validation FAILED')):
+                                print('  ' + line)
+                        if expected and 'validation PASS' in output:
+                            print(f'commit selftest: {label}: false PASS printed: FAIL')
+                            failures += 1
+                # Re-establish five records before EVERY case, so all three
+                # Git modes compare 5 -> candidate, including CI's first parent.
+                target.write_bytes(healthy)
+                git(repo, 'add', str(target.relative_to(repo)))
+                git(repo, '-c', 'core.hooksPath=/dev/null', 'commit',
+                    '--allow-empty', '-qm', 'restore five-record matrix baseline')
+
+        # Protocol drift must fail closed, not turn a missing census into zero
+        # or borrow the other file's count. Delegate to REAL boardctl, changing
+        # only its summary transport for these two explicit fault injections.
+        repo = fixture('census-protocol')
+        census_shim = tools / 'boardctl'
+        census_shim.write_text(
+            '#!/bin/bash\n'
+            f'out="$("{validator}" "$@")"\nrc=$?\n'
+            'while IFS= read -r line; do\n'
+            '  case "$line" in\n'
+            '    "rows: "*)\n'
+            '      [ "$SELFTEST_CENSUS_MODE" != missing ] || continue\n'
+            '      printf "%s\\n" "$line"\n'
+            '      ;;\n'
+            '  esac\n'
+            '  printf "%s\\n" "$line"\n'
+            'done <<< "$out"\nexit "$rc"\n')
+        census_shim.chmod(0o755)
+        for fault in ('missing', 'duplicate'):
+            result = subprocess.run(
+                ('bash', 'scripts/check-board.sh'), cwd=repo,
+                env=dict(env, SELFTEST_CENSUS_MODE=fault), text=True,
+                capture_output=True)
+            expect('DF-CRIER-453 ' + fault + ' validator census fails closed',
+                   result, 2, 'exactly one recognized per-file record census')
+        census_shim.unlink()
+
+        if args.empty_fixtures_only:
+            print(f'commit selftest: {failures} failure(s)')
+            return 1 if failures else 0
 
         repo = fixture('shrink-691-to-1')
         board = board_rows(repo, 691)
