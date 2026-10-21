@@ -252,6 +252,17 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
     <form id="add-participant-form" class="stack">
       <label>Agent ID to add<input id="participant-agent" list="registered-agents" required autocomplete="off" disabled></label>
       <datalist id="registered-agents"></datalist>
+      <fieldset id="late-join-context" class="stack" hidden style="min-inline-size:0;border:1px solid var(--border);border-radius:8px">
+        <legend>How much context to share?</legend>
+        <label>Context to share<select id="participant-context-share" aria-describedby="participant-context-help" disabled>
+          <option value="none">None — start fresh</option>
+          <option value="summary" selected>Summary (default)</option>
+          <option value="since">Since a message</option>
+          <option value="full">Full history</option>
+        </select></label>
+        <label id="participant-context-boundary-row" hidden>Boundary message ID<input id="participant-context-boundary" autocomplete="off" aria-describedby="participant-context-help participant-result" disabled></label>
+        <p id="participant-context-help" class="note">The answer is recorded as a system event. “Since” shares messages after the named ID in this session. Summary/full record the last included message as their boundary.</p>
+      </fieldset>
       <button id="add-participant" type="submit" aria-describedby="composer-why" disabled>Add participant</button>
     </form><p id="participant-result" role="status"></p>
   </section>
@@ -646,8 +657,18 @@ async function changeSessionState(next) {
     state.session = null; renderHeader(); await refresh();
   }
 }
+// DF-CRIER-447: messages, not participants or system rows, make a join in flight.
+function updateLateJoinPrompt() {
+  const inFlight = !!state.session && state.messages.length > 0;
+  $("late-join-context").hidden = !inFlight;
+  $("participant-context-share").disabled = !inFlight || !!composerReason();
+  const since = inFlight && $("participant-context-share").value === "since";
+  $("participant-context-boundary-row").hidden = !since;
+  $("participant-context-boundary").disabled = !since || !!composerReason();
+}
 function updateComposer() {
   updateLifecycleControls();
+  updateLateJoinPrompt();
   const composer = composerState(), enabled = composer.usable;
   for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
   $("thread-filter").disabled = !state.session || state.sending;
@@ -704,7 +725,7 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = [...state.messages.filter(m => !state.thread || m.thread_id === state.thread), ...(state.systemEvents || []).map(e => ({...e,systemEvent:true}))].sort((a,b) => a.seq - b.seq);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"><strong>SYSTEM EVENT</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + ' · state ' + esc(m.state) + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  html += msgs.map(m => m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"><strong>SYSTEM EVENT</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + (m.state ? ' · state ' + esc(m.state) : '') + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
@@ -914,6 +935,7 @@ function openSession(id) {
   if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
   resetAudienceWarning(); state.participants = []; $("participant-agent").value = ""; notice("participant-result",""); notice("task-result","");
   state.current = id; state.session = null; state.messages = []; state.systemEvents = []; state.reply = null; state.thread = "";
+  $("participant-context-share").value = "summary"; $("participant-context-boundary").value = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
   // DF-CRIER-414: the in-flight panel belongs to the conversation that was open
@@ -1040,15 +1062,27 @@ $("add-participant-form").addEventListener("submit", async event => {
   event.preventDefault();
   const memberID = $("participant-agent").value.trim();
   if (composerReason() || !memberID) return;
+  const mode = state.messages.length ? $("participant-context-share").value : "none";
+  const boundary = $("participant-context-boundary").value.trim();
+  if (mode === "since" && !boundary) {
+    notice("participant-result", "A boundary message ID is required to share context since a message. Nothing was sent.");
+    $("participant-context-boundary").focus();
+    return;
+  }
+  const body = {member_type:"agent", member_id:memberID, role:"member", actor:state.agent, context_share:mode};
+  if (mode === "since") body.context_boundary_message_id = boundary;
   const id = state.current;
   state.sending = true; ++state.generation; updateComposer();
   try {
-    const member = await call(sessionPath(id,"participants"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({member_type:"agent", member_id:memberID, role:"member"}) });
-    notice("participant-result", "Added " + member.member_id + " · " + member.member_type + " · " + member.role);
+    const member = await call(sessionPath(id,"participants"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+    // The response names the APPLIED decision; the transcript separately
+    // renders the persisted system event fetched by refresh(), never an echo.
+    notice("participant-result", "Added " + member.member_id + " · " + member.member_type + " · " + member.role + " · recorded context " + (member.context_share?.mode || "not reported") + (member.context_share?.boundary_message_id ? " · boundary message " + member.context_share.boundary_message_id : ""));
     $("participant-agent").value = "";
   } catch(e) { notice("participant-result", e.message, true); }
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 });
+$("participant-context-share").addEventListener("change", updateLateJoinPrompt);
 $("sessions").addEventListener("click", e => { const row = e.target.closest("[data-session]"); if (row) openSession(row.dataset.session); });
 $("session-search").addEventListener("input",renderSessions);
 $("refresh").addEventListener("click",refresh);

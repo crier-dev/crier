@@ -75,7 +75,13 @@ func lifecycleContract(t *testing.T, open func() Repository) {
 	require.Empty(t, st.Messages)
 	var tr transcriptResponse
 	require.Equal(t, 200, h.do(t, "GET", "/sessions/"+room+"/messages", nil, &tr, nil))
-	require.Equal(t, lifecycleEvents(st.Lifecycle), tr.SystemEvents)
+	var transitions []LifecycleEvent
+	for _, ev := range tr.SystemEvents {
+		if ev.Type == RecordClose || ev.Type == RecordReopen {
+			transitions = append(transitions, ev)
+		}
+	}
+	require.Equal(t, lifecycleEvents(st.Lifecycle), transitions)
 	opened := transition("open", 200, "", "")
 	require.Equal(t, "open", opened.State)
 	require.Nil(t, opened.ClosedAt)

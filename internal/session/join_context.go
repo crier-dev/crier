@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,6 +32,55 @@ import (
 //
 // A share mode never widens the audience (§4.6 rule 5): nothing here
 // touches fan-out or delivery.
+
+// UnmarshalJSON accepts the concise join form while preserving the existing
+// object API. Strict decoding is retained, including for nested share fields.
+func (req *addParticipantRequest) UnmarshalJSON(data []byte) error {
+	type plain addParticipantRequest
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if raw := bytes.TrimSpace(wire["context_share"]); len(raw) > 0 && raw[0] == '"' {
+		var mode ContextShareMode
+		if err := json.Unmarshal(raw, &mode); err != nil {
+			return err
+		}
+		converted, err := json.Marshal(ContextShare{Mode: mode})
+		if err != nil {
+			return err
+		}
+		wire["context_share"] = converted
+	}
+	converted, err := json.Marshal(wire)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(converted))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode((*plain)(req))
+}
+
+// resolveJoinShare pins the upper edge of a generated summary/full history so
+// its substance stays citable. No messages is a recorded none, with a reason.
+func resolveJoinShare(st *State, cs *ContextShare) string {
+	if len(st.Messages) == 0 {
+		cs.Mode, cs.BoundaryMessageID = ShareNone, ""
+		return "nothing to share: session has no messages"
+	}
+	if cs.Mode == ShareNone {
+		cs.BoundaryMessageID = ""
+	} else if (cs.Mode == ShareSummary || cs.Mode == ShareFull) && cs.BoundaryMessageID == "" {
+		var edge *Message
+		for _, m := range st.Messages {
+			if edge == nil || m.Seq > edge.Seq {
+				edge = m
+			}
+		}
+		cs.BoundaryMessageID = edge.ID
+	}
+	return ""
+}
 
 // DefaultContextShareMode is the answer recorded when a joiner does not
 // choose (D10): a generated digest — an index, never a replacement for the
@@ -80,7 +131,13 @@ func materializedShare(st *State, cs *ContextShare, addedAt time.Time) []*Messag
 		return nil
 	}
 	for _, m := range st.Messages {
-		if !m.CreatedAt.Before(addedAt) {
+		// A recorded upper edge is seq-based, not wall-clock-based: equal or
+		// skewed timestamps must not drop the very message the summary cites.
+		if (cs.Mode == ShareSummary || cs.Mode == ShareFull) && cs.BoundaryMessageID != "" {
+			if edge := st.Message(cs.BoundaryMessageID); edge != nil && m.Seq > edge.Seq {
+				continue
+			}
+		} else if !m.CreatedAt.Before(addedAt) {
 			continue
 		}
 		if cs.Mode == ShareSince && cs.BoundaryMessageID != "" {
@@ -237,6 +294,7 @@ func (h *Handler) HandleSetMemberContext(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	resolveJoinShare(st, cs)
 	actor := strings.TrimSpace(req.Actor)
 	if actor == "" {
 		actor = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))

@@ -336,6 +336,8 @@ type Thread struct {
 type State struct {
 	// Lifecycle records retain actor/assurance and ordering, independently of messages.
 	Lifecycle []*Record
+	// ContextEvents retain join/change history, not only the latest share.
+	ContextEvents []*Record
 
 	Session       *Session
 	Members       []*Member
@@ -439,12 +441,14 @@ func (st *State) apply(rec *Record) error {
 		st.upsertMember(rec)
 		if rec.ContextShare != nil {
 			st.upsertContextShare(rec, rec.ContextShare)
+			st.ContextEvents = append(st.ContextEvents, rec)
 		}
 	case RecordMemberContext:
 		if rec.ContextShare == nil {
 			return fmt.Errorf("%w: session.member.context without context_share", ErrInvalidRecord)
 		}
 		st.upsertContextShare(rec, rec.ContextShare)
+		st.ContextEvents = append(st.ContextEvents, rec)
 	case RecordMemberRemove:
 		m := st.findMember(rec.MemberType, rec.MemberID)
 		if m == nil {

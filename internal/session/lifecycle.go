@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/crier-dev/crier/internal/permissions"
@@ -30,16 +31,26 @@ func lifecycleState(typ RecordType) SessionState {
 	return SessionOpen
 }
 
+// isSystemEventRecord retains context decisions in the existing durable system
+// event channel. Keep lifecycle predicates separate: a join is not a transition.
+func isSystemEventRecord(rec *Record) bool {
+	return isLifecycleRecord(rec) || ((rec.Type == RecordMemberAdd || rec.Type == RecordMemberContext) && rec.ContextShare != nil)
+}
+
 // LifecycleEvent is a system row, not a delivered message or a new thread.
 type LifecycleEvent struct {
-	Type                RecordType   `json:"type"`
-	SessionID           string       `json:"session_id"`
-	Seq                 int64        `json:"seq"`
-	TS                  time.Time    `json:"ts"`
-	Actor               AuthorRef    `json:"actor"`
-	State               SessionState `json:"state"`
-	SenderIdentityBasis string       `json:"sender_identity_basis,omitempty"`
-	Text                string       `json:"text"`
+	Type                RecordType    `json:"type"`
+	SessionID           string        `json:"session_id"`
+	Seq                 int64         `json:"seq"`
+	TS                  time.Time     `json:"ts"`
+	Actor               AuthorRef     `json:"actor"`
+	State               SessionState  `json:"state,omitempty"`
+	SenderIdentityBasis string        `json:"sender_identity_basis,omitempty"`
+	Text                string        `json:"text"`
+	MemberType          MemberType    `json:"member_type,omitempty"`
+	MemberID            string        `json:"member_id,omitempty"`
+	ContextShare        *ContextShare `json:"context_share,omitempty"`
+	Reason              string        `json:"reason,omitempty"`
 }
 
 func lifecycleEvents(records []*Record) []LifecycleEvent {
@@ -63,13 +74,41 @@ func lifecycleEvents(records []*Record) []LifecycleEvent {
 	return out
 }
 
+// systemEvents renders recorded facts for the transcript, including the full
+// decision history, and merges by the same seq as messages (never by timestamp).
+func systemEvents(st *State) []LifecycleEvent {
+	out := lifecycleEvents(st.Lifecycle)
+	for _, rec := range st.ContextEvents {
+		verb := "joined"
+		if rec.Type == RecordMemberContext {
+			verb = "context changed"
+		}
+		text := fmt.Sprintf("%s %s %s · context %s", rec.MemberType, rec.MemberID, verb, rec.ContextShare.Mode)
+		if rec.ContextShare.BoundaryMessageID != "" {
+			text += " · boundary message " + rec.ContextShare.BoundaryMessageID
+		}
+		if rec.Reason != "" {
+			text += " · " + rec.Reason
+		}
+		actor := AuthorRef{}
+		if rec.Actor != nil {
+			actor = *rec.Actor
+		}
+		out = append(out, LifecycleEvent{Type: rec.Type, SessionID: rec.SessionID,
+			Seq: rec.Seq, TS: rec.TS, Actor: actor, MemberType: rec.MemberType,
+			MemberID: rec.MemberID, ContextShare: rec.ContextShare, Reason: rec.Reason, Text: text})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
+}
+
 func parseLifecycle(raw string) (*Record, error) {
 	rec, err := ParseRecord([]byte(raw))
 	if err != nil {
 		return nil, err
 	}
-	if !isLifecycleRecord(rec) {
-		return nil, fmt.Errorf("%w: non-lifecycle record in chat_session_lifecycle", ErrInvalidRecord)
+	if !isSystemEventRecord(rec) {
+		return nil, fmt.Errorf("%w: non-system-event record in chat_session_lifecycle", ErrInvalidRecord)
 	}
 	return rec, nil
 }

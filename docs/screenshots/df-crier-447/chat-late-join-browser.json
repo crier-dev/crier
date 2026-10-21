@@ -1,0 +1,52 @@
+{
+  "posts": [
+    {
+      "member_type": "agent",
+      "member_id": "late-join-empty-member",
+      "role": "member",
+      "actor": "late-join-operator",
+      "context_share": "none"
+    },
+    {
+      "member_type": "agent",
+      "member_id": "late-join-member",
+      "role": "member",
+      "actor": "late-join-operator",
+      "context_share": "since",
+      "context_boundary_message_id": "27a506d542395c596d18232d"
+    }
+  ],
+  "empty": {
+    "type": "session.member.add",
+    "session_id": "a2c4e3d43b7528170ae686a4",
+    "seq": 3,
+    "ts": "2026-10-21T11:43:24.086732026Z",
+    "actor": {
+      "agent": "late-join-operator"
+    },
+    "text": "agent late-join-empty-member joined · context none · nothing to share: session has no messages",
+    "member_type": "agent",
+    "member_id": "late-join-empty-member",
+    "context_share": {
+      "mode": "none"
+    },
+    "reason": "nothing to share: session has no messages"
+  },
+  "joined": {
+    "type": "session.member.add",
+    "session_id": "a2c4e3d43b7528170ae686a4",
+    "seq": 5,
+    "ts": "2026-10-21T11:43:27.836377944Z",
+    "actor": {
+      "agent": "late-join-operator"
+    },
+    "text": "agent late-join-member joined · context since · boundary message 27a506d542395c596d18232d",
+    "member_type": "agent",
+    "member_id": "late-join-member",
+    "context_share": {
+      "mode": "since",
+      "boundary_message_id": "27a506d542395c596d18232d"
+    }
+  },
+  "errors": []
+}

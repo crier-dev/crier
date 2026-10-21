@@ -699,6 +699,14 @@ record). The surface must state the **boundary**, not just the word: "summary" a
 reply whose substance came from the summary's edge. A later change to the mode is permitted and is itself
 recorded.
 
+**SHIPPED (DF-CRIER-447):** the add-agent control asks only when the selected session contains
+messages, with all four modes and summary selected. Since requires a boundary message ID and
+cannot submit without it. Summary/full's inclusive last-included boundary and since's exclusive
+lower boundary are returned from the recorded decision and shown in server-authored system-event
+text, interleaved by seq. Empty-session joins record none with a nothing-to-share reason and no
+invented boundary. Human joins use the same API; this browser control still accepts agent IDs only.
+Later changes are recorded by the existing context PUT API, not a new browser editor.
+
 ---
 
 ## 4. The mapping table
@@ -756,7 +764,7 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 44 | **Per-thread / per-sub-thread summary card** — generated, marked generated, raw messages one click under (§3.8.2) | none | **NOT BUILT**. Owed: a summary surface + a generated marker + the raw-message link (CR-CHAT-017). Who generates it and where it is stored is undecided (§6). |
 | 45 | **Search that returns LOCATION** — `namespace > channel > thread > sub-thread > message`, filterable by agent / capability / has-attachment / unresolved (§3.8.2) | none | **NOT BUILT**. Owed: a search read over the transcript tree (CR-CHAT-017; whether it is an index or a scan is CR-CHAT-020, §6). |
 | 46 | **Attachment chip / asset reference** on a message (§3.8, CR-CHAT-014) | none — the payload is opaque today (row 34) | **NOT BUILT**. Owed: the upload/fetch surface. An asset id rides the message; the **bytes live in object storage** and the wire never carries them — design is `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`, not this document. |
-| 47 | **Late-join context-share prompt** — none / summary / since / full, recorded as a system event naming the mode **and the boundary message id** (§3.8.4) | none | **NOT BUILT**. Owed: the recorded share mode + boundary on the thread-membership event (CR-CHAT-016; the record shape is `CHAT-SESSIONS.md` §4.6). |
+| 47 | **Late-join context-share prompt** — none / summary / since / full, recorded as a system event naming the mode **and the boundary message id** (§3.8.4) | `POST /sessions/{id}/participants`; transcript `GET /sessions/{id}/messages` | **SHIPPED** (DF-CRIER-447): add-agent prompt for nonempty sessions, all four modes, boundary validation, durable join/change system events; human API shares the contract, browser editor for later changes not provided. |
 | 48 | **Message-kind rendering** — plain vs addressed vs **TASK/ACTION**, visibly distinct (§3.8.3) | none | **NOT BUILT**. Owed: the three kinds distinguishable **on the wire, in storage and in the transcript** (CR-CHAT-018; the record field is `CHAT-SESSIONS.md` §4.4, and it must **not** overload the shipped deliver-body `kind`, which is the envelope kind — `message`/`configure`/`configure_ack`). |
 | 49 | **Compile / merge a context bundle** — gather N messages (across threads or sessions) into ONE payload, hand it to an agent by tagging it, and expand a part back to its source (§4.8 of `CHAT-SESSIONS.md`) | `POST /sessions/{id}/compile` (merge + fan-out), `GET /sessions/{id}/messages/{mid}/expand` (citation → original) | **SHIPPED** (CR-CHAT-028) — the merged message is a **NEW** message whose every part carries a `{source_session_id, source_message_id}` **provenance citation**; a source the compiler could not read is omitted **with a named gap** (never silently included, never silently dropped) and a merge with nothing readable is **refused**; the compiled message rides the shipped inbox fan-out (§5.1, no second delivery path). Distinct from a quote/reply, which is an id pointer — both are needed. |
 | 50 | **Composer in-flight line** — per target: elapsed vs the delivery budget, the attempts made, and an early unreachable/timeout signal naming the target and the transport's own reason (DF-CRIER-414) | `GET /sessions/{id}/messages` → `dispatch_live` on the message being delivered (DF-CRIER-414; the same read as rows 14 and 31) | **SHIPPED** (DF-CRIER-414) — process-local and never persisted: present only while THIS process is running the pass, absent after a restart, and gone the moment the pass's outcomes are durable. It carries no outcome; the terminal outcome is still the recorded `outcomes`. |
@@ -921,7 +929,8 @@ claims. None implies the others.
   summary and session search reads (`internal/session/threading.go`), plus recorded participant
   context GET/PUT and compile/expand routes. Stored branch records and parent/anchor fields exist in
   `internal/session/threading.go` and the stores. The embedded page does not expose the complete
-  nested-thread, return-to-anchor, depth-collapse or late-join context workflows below.
+  nested-thread, return-to-anchor or depth-collapse workflows below. The late-join prompt and
+  recorded system-event rendering now ship (DF-CRIER-447, §3.8.4).
 
 ### Still missing or limited
 
@@ -950,9 +959,9 @@ claims. None implies the others.
 - **No accessibility audit is recorded (DF-CRIER-450).** Existing status roles and ARIA attributes are
   not a keyboard/focus, contrast, reduced-motion or announced-error audit; no accessibility compliance
   is claimed.
-- **The design still exceeds the embedded page.** Generated summary cards, a timeline rail,
-  location-returning transcript search and a recorded late-join context-share prompt are not complete
-  browser workflows. Attachment upload/fetch and byte handling are not provided by this interface;
+- **The design still exceeds the embedded page.** Generated summary cards, a timeline rail and
+  location-returning transcript search are not complete browser workflows. The late-join prompt is
+  shipped (DF-CRIER-447); later context changes still use the API rather than a browser editor. Attachment upload/fetch and byte handling are not provided by this interface;
   an opaque payload or asset reference is not an attachment service. Lease renewal remains deliberately
   absent (§4 row 19). The four reference images remain layout references with placeholder lettering,
   not screenshots of a fully implemented control panel.

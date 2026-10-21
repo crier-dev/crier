@@ -226,7 +226,7 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
 	}
-	if s.requestTx == nil && (hasMessageRequestMetadata(rec) || isLifecycleRecord(rec)) {
+	if s.requestTx == nil && (hasMessageRequestMetadata(rec) || isSystemEventRecord(rec)) {
 		tx, err := s.pool.Begin(ctx)
 		if err != nil {
 			return err
@@ -247,7 +247,7 @@ func (s *PostgresStore) Append(ctx context.Context, rec *Record) error {
 			return err
 		}
 	}
-	if isLifecycleRecord(rec) {
+	if isSystemEventRecord(rec) {
 		if err := s.projectLifecycle(ctx, rec); err != nil {
 			return err
 		}
@@ -569,7 +569,7 @@ func (s *PostgresStore) Records(ctx context.Context, sessionID string) ([]*Recor
 	if err != nil {
 		return nil, err
 	}
-	recs := append([]*Record(nil), st.Lifecycle...)
+	recs := append(append([]*Record(nil), st.Lifecycle...), st.ContextEvents...)
 	for _, m := range st.Messages {
 		recs = append(recs, m.Record())
 	}
@@ -602,8 +602,16 @@ func (s *PostgresStore) Load(ctx context.Context, sessionID string) (*State, err
 	if st.ContextShares, err = s.loadContextShares(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	if st.Lifecycle, err = s.loadLifecycle(ctx, sessionID); err != nil {
+	events, err := s.loadLifecycle(ctx, sessionID)
+	if err != nil {
 		return nil, err
+	}
+	for _, rec := range events {
+		if isLifecycleRecord(rec) {
+			st.Lifecycle = append(st.Lifecycle, rec)
+		} else {
+			st.ContextEvents = append(st.ContextEvents, rec)
+		}
 	}
 	// A transcript read from the view is completed the same way the log's is:
 	// a row that carries no thread key — thread_id '' from a generation before

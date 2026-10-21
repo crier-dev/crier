@@ -799,8 +799,26 @@ Rules:
 6. **`none` is a first-class answer, not a failure.** It is recorded like any other, so a joiner that was
    deliberately given nothing is distinguishable from one whose context was never decided.
 
-**NOT BUILT:** nothing records a share mode or a boundary message id today; there is no join-time prompt
-and no `session.member.context` event. Owed: CR-CHAT-016 (the surface and the record) with the shape in §5.
+**SHIPPED (DF-CRIER-447):** `POST /sessions/{id}/participants` accepts
+`context_share: "none" | "summary" | "since" | "full"` and the top-level
+`context_boundary_message_id`. The legacy `{mode, boundary_message_id}` object remains accepted.
+The response retains its object-shaped `context_share` and reads back the applied decision.
+Absent mode defaults to `summary` for a nonempty session; an empty session records `none`, no
+boundary, and reason `nothing to share: session has no messages`.
+
+`since` requires a boundary from this session: missing is HTTP 400 `INVALID_CONTEXT_SHARE`,
+unknown/cross-session is HTTP 400 `CONTEXT_BOUNDARY_NOT_FOUND`. No invalid since is downgraded,
+even on an empty session. Summary/full record the last included message as their inclusive upper
+edge; since records its exclusive lower boundary. The generated index cannot grow past its
+recorded upper edge. The member-add event (including an empty-session reason), and subsequent
+`session.member.context` changes, are durable system rows returned in transcript `system_events`,
+merged with messages by `seq`. JSONL replay and both SQL adapters retain the event payloads;
+latest-state shares alone are not used to invent event history.
+
+The embedded add-agent control asks only when the session has messages, defaults to summary,
+refuses since with no boundary in place, and renders the server's system-event text. Human joins
+use the same API contract; the existing browser add control still addresses agent IDs only.
+The later-change API remains available; no later-change browser editor is claimed.
 
 ### 4.7 Navigability — what the record must support (CR-CHAT-017, second half)
 
@@ -1069,8 +1087,8 @@ Added with the v2 detail pass — open, and deliberately not answered here:
   no `message_kind` on any wire field, stored field or record, and the shipped envelope `kind`
   (`message` | `configure` | `configure_ack`) is a **different field** that this document forbids
   overloading (§4.4); no branch operation, no `session.thread.branch` record, no `parent_thread_id` and no
-  anchor, so the depth rule (D11, §4.5) is a rule with nothing behind it; no context-share record
-  (`session.member.context`) and no join-time prompt (§4.6, D10); no depth/ancestry read, no generated
+  anchor, so the depth rule (D11, §4.5) is a rule with nothing behind it. The context-share record
+  and join-time prompt are now shipped (§4.6, D10, DF-CRIER-447); no depth/ancestry read, no generated
   summary, no generated marker and no search that returns a location (§4.7); no asset reference beyond the
   shipped opaque `payload`, and no attachment upload/fetch (CR-CHAT-014 — designed by `CHAT-PERMISSIONS.md`
   / `CHAT-STORAGE.md`, not here).

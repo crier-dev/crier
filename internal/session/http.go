@@ -407,11 +407,12 @@ type createSessionRequest struct {
 
 // addParticipantRequest is the POST /sessions/{id}/participants body.
 type addParticipantRequest struct {
-	MemberType   string        `json:"member_type"`
-	MemberID     string        `json:"member_id"`
-	Role         string        `json:"role,omitempty"`
-	ContextShare *ContextShare `json:"context_share,omitempty"`
-	Actor        string        `json:"actor,omitempty"`
+	MemberType               string        `json:"member_type"`
+	MemberID                 string        `json:"member_id"`
+	Role                     string        `json:"role,omitempty"`
+	ContextShare             *ContextShare `json:"context_share,omitempty"`
+	ContextBoundaryMessageID string        `json:"context_boundary_message_id,omitempty"`
+	Actor                    string        `json:"actor,omitempty"`
 }
 
 // postMessageRequest is the POST /sessions/{id}/messages body: composing INTO
@@ -652,7 +653,7 @@ func (h *Handler) HandleTranscript(w http.ResponseWriter, r *http.Request) {
 	out := transcriptResponse{
 		Session:      h.viewOf(st),
 		Messages:     make([]transcriptMessage, 0, len(st.Messages)),
-		SystemEvents: lifecycleEvents(st.Lifecycle),
+		SystemEvents: systemEvents(st),
 		Findings:     st.Findings,
 	}
 	for _, m := range st.Messages {
@@ -1591,14 +1592,18 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 		// surprising default rather than inventing a new one.
 		role = RoleMember
 	}
-	if req.ContextShare == nil {
-		// D10: a joiner that does not choose receives `summary` — and the
-		// default answer is RECORDED, never left undecided (§4.6 rule 1).
-		req.ContextShare = &ContextShare{Mode: DefaultContextShareMode}
-	} else {
-		if err := validateContextShare(req.ContextShare); err != nil {
-			return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
+	share := ContextShare{Mode: DefaultContextShareMode}
+	if req.ContextShare != nil {
+		share = *req.ContextShare // do not mutate caller-owned state
+	}
+	if req.ContextBoundaryMessageID != "" {
+		if share.BoundaryMessageID != "" && share.BoundaryMessageID != req.ContextBoundaryMessageID {
+			return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: "conflicting context boundary message ids"}
 		}
+		share.BoundaryMessageID = req.ContextBoundaryMessageID
+	}
+	if err := validateContextShare(&share); err != nil {
+		return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
 	}
 	if err := h.checkMemberAgent(sess, req); err != nil {
 		return err
@@ -1616,6 +1621,17 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 		}
 	}
 
+	st, err := h.store.Load(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	// Validate the boundary BEFORE the empty-session override: since must
+	// never silently become summary or none, even when there is no history.
+	if share.BoundaryMessageID != "" && st.Message(share.BoundaryMessageID) == nil {
+		return &memberError{status: http.StatusBadRequest, code: "CONTEXT_BOUNDARY_NOT_FOUND",
+			msg: fmt.Sprintf("context boundary message %q does not exist in session %q", share.BoundaryMessageID, sess.ID)}
+	}
+	reason := resolveJoinShare(st, &share)
 	seq, err := h.store.NextSeq(ctx, sess.ID)
 	if err != nil {
 		return err
@@ -1628,7 +1644,9 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 		AddedAt:    h.now(),
 		AddedBy:    actor,
 	}
-	return h.store.AddMember(ctx, m, seq, req.ContextShare)
+	rec := m.AddRecord(seq, m.AddedAt, &share)
+	rec.Reason = reason
+	return h.store.Append(ctx, rec)
 }
 
 // ---------------------------------------------------------------------------

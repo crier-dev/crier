@@ -3506,9 +3506,16 @@ paths:
         The late-join context answer (§4.6, D10): `context_share` names how
         much of the in-flight conversation the joiner is given — `none`
         (fresh) | `summary` (a generated digest) | `since` (the messages
-        after `boundary_message_id`) | `full` (the whole history). Absent,
-        it defaults to `summary` — and the default answer is RECORDED as
-        part of the membership event, never left undecided.
+        after `context_boundary_message_id`) | `full` (the whole history).
+        Accepts the string form or the legacy `{mode, boundary_message_id}` object.
+        The response retains object-shaped `context_share`, read from storage.
+        Absent, mode defaults to `summary` on a nonempty session. An empty session
+        records `none`, no boundary, and reason `nothing to share: session has no messages`.
+        Missing since boundary is 400 INVALID_CONTEXT_SHARE; unknown/cross-session
+        boundary is 400 CONTEXT_BOUNDARY_NOT_FOUND, even on an empty session.
+        Summary/full record their inclusive last-included message ID; since records
+        its exclusive lower boundary. Joins and later context changes are durable
+        transcript system_events merged by seq (DF-CRIER-447).
 
         FEDERATED ROOMS (CR-CHAT-023, specs/CHAT-FEDERATION.md §3): a member of
         a peer instance joins as a REMOTE participant by naming a
@@ -5488,14 +5495,21 @@ components:
           type: string
           description: The member's single role. Defaults to `member`. The role VOCABULARY is CHAT-PERMISSIONS.md's (CR-CHAT-003); it is stored as data.
         context_share:
-          type: object
-          description: The late-join context answer (§4.6, D10), recorded on the membership event.
-          properties:
-            mode:
-              type: string
+          description: The recorded late-join decision. Defaults to summary for nonempty sessions, none for empty sessions. Response remains object-shaped.
+          oneOf:
+            - type: string
               enum: [none, summary, full, since]
-            boundary_message_id:
-              type: string
+            - type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [none, summary, full, since]
+                boundary_message_id:
+                  type: string
+        context_boundary_message_id:
+          type: string
+          description: Required with since; must exist in this session. Conflicting nested and top-level boundaries are rejected.
         actor:
           type: string
           description: The agent id recording the change; falls back to the X-Agent-ID header.
@@ -5868,11 +5882,11 @@ components:
           $ref: "#/components/schemas/SpawnedThread"
     SessionLifecycleEvent:
       type: object
-      required: [type, session_id, seq, ts, actor, state, text]
+      required: [type, session_id, seq, ts, actor, text]
       properties:
         type:
           type: string
-          enum: [session.close, session.reopen]
+          enum: [session.close, session.reopen, session.member.add, session.member.context]
         session_id:
           type: string
         seq:
@@ -5900,6 +5914,25 @@ components:
           description: Absent on historical records without recorded ingress assurance.
         text:
           type: string
+          description: Server-authored system line, informational for normal joins.
+        member_type:
+          type: string
+          enum: [agent, principal]
+        member_id:
+          type: string
+        context_share:
+          type: object
+          required: [mode]
+          properties:
+            mode:
+              type: string
+              enum: [none, summary, full, since]
+            boundary_message_id:
+              type: string
+              description: Exclusive lower boundary for since, inclusive upper edge for summary/full. Absent for none.
+        reason:
+          type: string
+          description: Empty-session joins name the nothing-to-share reason.
     SessionTranscript:
       type: object
       required: [session, messages, system_events, count]
