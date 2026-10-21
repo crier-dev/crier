@@ -999,6 +999,8 @@ async function send(event) {
     // one this send already sends as payload.idempotency_key, so the watcher
     // attaches to exactly this message and never to another operator's send.
     state.sendWatch = { session:id, key:payload.idempotency_key || "", startedAt:Date.now(), settled:false, done:false, budgetMs:null, pendingPolls:0 };
+    // Only the browser owns a visibility/cadence loop; the send itself does not.
+    if (typeof document !== "undefined") startSendProgressWatcher();
     const result = await call(sessionPath(id,task ? "tasks" : "messages"), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) }, !task);
     const outcomes = result.outcomes || [];
     const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut");
@@ -1179,16 +1181,69 @@ function showSendProgress(text, error, spinning) {
   $("send-progress-spinner").hidden = !spinning;
 }
 function clearSendProgress() {
+  stopSendProgressWatcher();
   const panel = $("send-progress");
   if (!panel) return;
   panel.hidden = true;
   $("send-progress-spinner").hidden = true;
   $("send-progress-text").textContent = "";
 }
+// DF-CRIER-455: one owner, one cadence; no timer (even an idle one) in a hidden tab.
+const PROGRESS_POLL_INTERVAL_MS = 1000;
+let sendProgressTimer = null, sendProgressRunning = false, sendProgressResumePending = false;
+function sendProgressHidden() { return typeof document !== "undefined" && document.hidden; }
+function sendProgressActive() { return state.sendWatch && !state.sendWatch.done; }
+function stopSendProgressWatcher() {
+  if (sendProgressTimer !== null) clearTimeout(sendProgressTimer);
+  sendProgressTimer = null;
+  sendProgressResumePending = false;
+}
+function pauseSendProgressWatcher() {
+  if (!sendProgressActive()) return;
+  const last = $("send-progress-text").textContent;
+  if (last.startsWith("Delivery watcher paused — tab hidden")) return;
+  // This is a browser observation state, never a server delivery verdict. Mark
+  // it immediately: a frozen phone may not run a later staleness callback at all.
+  showSendProgress("Delivery watcher paused — tab hidden. Progress is not being refreshed."
+    + (last ? "\nLast reading (not a current delivery verdict):\n" + last : "\nNo delivery progress reading yet."), false, false);
+}
+function scheduleSendProgressWatcher() {
+  if (!sendProgressActive()) return;
+  if (sendProgressHidden()) { pauseSendProgressWatcher(); return; }
+  sendProgressTimer = setTimeout(runSendProgressWatcher, PROGRESS_POLL_INTERVAL_MS);
+}
+function startSendProgressWatcher() {
+  stopSendProgressWatcher();
+  if (sendProgressRunning) {
+    sendProgressResumePending = !sendProgressHidden() && !!sendProgressActive();
+    if (sendProgressHidden()) pauseSendProgressWatcher();
+    return;
+  }
+  scheduleSendProgressWatcher();
+}
+async function runSendProgressWatcher() {
+  if (sendProgressTimer !== null) clearTimeout(sendProgressTimer);
+  sendProgressTimer = null;
+  if (!sendProgressActive()) return;
+  if (sendProgressHidden()) { pauseSendProgressWatcher(); return; }
+  // A show/restart during an outstanding HTTP read requests one immediate read
+  // after settlement, not another parallel request or another timer owner.
+  if (sendProgressRunning) { sendProgressResumePending = true; return; }
+  sendProgressRunning = true;
+  try { await watchSendProgress(); }
+  finally {
+    sendProgressRunning = false;
+    const resume = sendProgressResumePending;
+    sendProgressResumePending = false;
+    if (sendProgressHidden()) pauseSendProgressWatcher();
+    else if (resume) void runSendProgressWatcher();
+    else scheduleSendProgressWatcher();
+  }
+}
 let sendProgressBusy = false;
 async function watchSendProgress() {
   const ticket = state.sendWatch;
-  if (!ticket || ticket.done || sendProgressBusy) return;
+  if (!ticket || ticket.done || sendProgressBusy || sendProgressHidden()) return;
   sendProgressBusy = true;
   const observationEnded = () => Date.now() - ticket.startedAt > PROGRESS_WATCH_LIMIT_MS;
   const stopWatching = (reason = "its browser observation window ended") => {
@@ -1199,7 +1254,7 @@ async function watchSendProgress() {
     // Always read before deciding to stop: a browser clock cannot say whether
     // a server budget expired, and a terminal fact wins over old live evidence.
     const body = await call(sessionPath(ticket.session, "messages"));
-    if (state.sendWatch !== ticket) return;
+    if (state.sendWatch !== ticket || ticket.done) return;
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const recorded = ticket.key ? messages.find(m => m.idempotency_key === ticket.key) : messages[messages.length - 1];
     if (!recorded) { if (ticket.settled) { ticket.done = true; clearSendProgress(); } else if (observationEnded()) stopWatching(); return; }
@@ -1233,7 +1288,7 @@ async function watchSendProgress() {
     ticket.done = true;
     showSendProgress("No in-flight pass and no per-recipient outcome recorded for this message. Delivery outcome and retry state are unknown.", false, false);
   } catch (error) {
-    if (state.sendWatch !== ticket) return;
+    if (state.sendWatch !== ticket || ticket.done) return;
     const diagnostic = error.parseFailure ? "Could not parse the server's answer (HTTP " + error.status + ")." : "Could not read delivery progress — " + error.message;
     const cachedRecord = (ticket.key ? state.messages.find(m => m.idempotency_key === ticket.key) : null) || ticket.lastRecord;
     const cached = cachedRecord && ticket.lastRecord?.dispatch_live ? {...cachedRecord, dispatch_live:ticket.lastRecord.dispatch_live} : cachedRecord;
@@ -1245,7 +1300,13 @@ async function watchSendProgress() {
     if (!ticket.done && observationEnded()) stopWatching();
   } finally { sendProgressBusy = false; }
 }
-setInterval(watchSendProgress, 1000);
+// Former scheduler: setInterval(watchSendProgress, 1000);
+// Keep this historical boundary for the existing watcher-truth extraction harness.
+document.addEventListener("visibilitychange", () => {
+  stopSendProgressWatcher();
+  if (document.hidden) pauseSendProgressWatcher();
+  else void runSendProgressWatcher();
+});
 $("close-session").addEventListener("click", () => changeSessionState("closed"));
 $("reopen-session").addEventListener("click", () => changeSessionState("open"));
 restoreAttribution();
