@@ -13,6 +13,17 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] - 2026-10-21
+
+Range: `v0.1.0-rc2`..`v0.2.0` — 660 non-merge commits (75 `feat`, 121 `fix`,
+43 `docs`, 12 `test`, 4 `ci`, 262 `chore`, 97 board, plus qa/dogfood/gitreins/
+security/refactor). No `BREAKING CHANGE` footer and no `!` type token anywhere in
+the range, so this is a minor release. The entries below are the release content
+as it was written while the work landed.
+
+
 ### Added
 
 - **Optional model/provider hints and a correlated reply on the dispatch
@@ -468,6 +479,7 @@ First release candidate — the feature-complete core carried by tag
 - v0.1.0-rc1 was cut by hand; `make release` (see [Unreleased](#unreleased))
   encodes that sequence as of the next cut.
 
-[Unreleased]: https://github.com/crier-dev/crier/compare/v0.1.0-rc2...HEAD
+[Unreleased]: https://github.com/crier-dev/crier/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/crier-dev/crier/compare/v0.1.0-rc2...v0.2.0
 [0.1.0-rc2]: https://github.com/crier-dev/crier/compare/v0.1.0-rc1...v0.1.0-rc2
 [0.1.0-rc1]: https://github.com/crier-dev/crier/releases/tag/v0.1.0-rc1
