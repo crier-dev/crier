@@ -5662,6 +5662,9 @@ components:
         parent_id:
           type: string
           description: The immediate parent's message id — reply ATTRIBUTION, not depth. Absent on a thread root.
+        anchor_message_id:
+          type: string
+          description: On a branch root, the exact message the deliberate branch answers. Derived from the durable thread record; parent_id remains absent on a root (D11).
         parent_resolvable:
           type: boolean
           description: True when parent_id names a message in this transcript, or the message is a root. False is the §4.3 broken-thread case.
@@ -5972,7 +5975,7 @@ components:
       required: [thread_id, parent_thread_id, anchor_message_id, root_message_id, depth, reason, non_member_addressees]
       description: |-
         The sub-thread a send SPAWNED (CR-CHAT-017, §4.5 rule 2): the message
-        addressed a non-participant agent, so it branched into a child thread.
+        addressed a non-participant agent or explicitly requested branch true, so it branched into a child thread.
         Present only on the send that did the spawning.
       properties:
         thread_id:
@@ -5993,7 +5996,7 @@ components:
           type: string
         non_member_addressees:
           type: array
-          description: The addressed agents that were not session participants.
+          description: The addressed agents that were not session participants; empty for an explicit branch to existing participants.
           items:
             type: string
     ThreadSummaryCard:
@@ -6457,7 +6460,11 @@ components:
           enum: [plain, addressed, task]
         parent_id:
           type: string
-          description: The message being replied to; the reply stays in that message's thread.
+          description: The exact message being answered, including a non-root reply. Ordinary replies stay in that message's thread; branch true deliberately starts a child thread anchored to it.
+        branch:
+          type: boolean
+          default: false
+          description: Explicitly create a child thread from parent_id, which is required and must resolve in the session. The new root has its own thread_id and no parent_id; its answer attribution is retained as anchor_message_id on the durable thread and transcript view. False or absent preserves ordinary flat replies.
         thread_id:
           type: string
           description: Optional assertion of the thread; a reply that names a DIFFERENT thread than its parent's is refused (THREAD_MISMATCH).

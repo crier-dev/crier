@@ -713,8 +713,15 @@ Consequences, all binding:
 6. **Two branches from one message are siblings, not levels.** Branching twice from the same message
    creates two parallel sub-threads; neither is deeper than the other, and each carries its own anchor.
 
-**NOT BUILT:** no branch operation, no `parent_thread_id`, no anchor field and no sub-thread record exists
-today — the rule has nothing behind it yet.
+**SHIPPED (DF-CRIER-448):** the message POST accepts `branch:true` plus a required,
+resolvable `parent_id` to deliberately create a child from any message, including a reply.
+The new message becomes the child's root (own `thread_id`, absent `parent_id`), and the existing
+`session.thread.branch` record retains `parent_thread_id` and `anchor_message_id`. The transcript
+view additionally exposes `anchor_message_id` on that root, so the UI can return to the exact
+answered message without inferring ancestry from reply hops. False/absent `branch` preserves the
+existing reply behavior. The pre-existing non-member-address compatibility spawn is unchanged
+by this row; it is not a new implementation of consequence 1. Depth collapse and message-level
+navigation now use these records in the browser (CHAT-INTERFACE §3.8.2).
 
 ### 4.5a Close/reopen route and recorded system event (DF-CRIER-446)
 

@@ -674,6 +674,23 @@ jobs — show the branches that **do** exist, and never make the reader walk the
   `namespace > channel > thread > sub-thread > message`, filterable by **agent**, **capability**,
   **has-attachment** and **unresolved**.
 
+**SHIPPED (DF-CRIER-448):** every message offers Reply in thread (unchanged flat
+attribution) and Branch from here (a deliberate new child thread). Both submit the exact
+selected message as `parent_id`, including a reply. Branch sends additionally name `branch:true`;
+the persisted child root uses the existing thread anchor rather than pretending a root is a reply.
+The transcript read exposes that root's `anchor_message_id`, while `thread_depth` remains the
+server's deliberate-branch depth, never `reply_depth`. Reply/branch return links and the branch
+rail open the exact message, reveal its containing collapsed group if needed, scroll and focus its
+stable `message-<id>` article. The rail marks the current message on navigation and transcript scroll.
+The depth selector defaults to `DEFAULT_THREAD_COLLAPSE_DEPTH = 3` (the same zero-based threshold
+as the API's `DefaultCollapseDepth`): branches at depth >= 3 become generated index cards.
+Each count is computed from the messages actually withheld in the current filtered view; expanding
+reveals that complete group, including its deeper branches, but not a sibling group. Expansion survives
+polling, not a session switch; changing the threshold resets expansion. This is an informational
+index over records, not an error or a summary of model-authored content. Explicit task creation keeps
+its existing thread behavior; the composer names that restriction if task is selected for a branch.
+No search surface or new summary-generation mechanism is introduced by this change.
+
 ### 3.8.3 Message kinds in the stream (CR-CHAT-018, D12)
 
 The transcript renders **three kinds distinctly** (`CHAT-SESSIONS.md` §4.4 owns the wire and storage
@@ -759,8 +776,8 @@ serves it; **the owed thing is named.** Route names below are the shipped surfac
 | 39 | **Channel list** — the Z2 index of **channels** (project rooms) (§3.8.1) | `GET /sessions?kind=channel` (CR-CHAT-019) | **SHIPPED** as the `kind` filter on the session list (CR-CHAT-019); a `/channels` alias is not built and is not owed. |
 | 40 | **Direct-message entry point** — a 1:1 with one agent (§3.8.1) | the session `kind: direct` on `POST`/`GET /sessions` (CR-CHAT-019) | **PARTIAL** — the object, the create and the list ship as one room model with a `kind`; what a DM implies for GRANTS is still CR-CHAT-003. |
 | 41 | **Named-group row / picker**, and curated-set fan-out | `POST`/`GET /groups`, `GET /groups/{name}`, `PATCH /groups/{name}/members`; `internal/session/groups_http.go` and session fan-out | **SHIPPED API and roster fan-out (CR-CHAT-013 / CR-CHAT-022)**. Console create/list/count/roster controls remain **OPEN DF-CRIER-449**. A group is not an agent credential; capability delivery remains a selector, not this fan-out. |
-| 42 | **Depth collapse** below a configurable depth (**default 3**) into an expandable summary card (§3.8.2) | `GET /sessions/{id}/messages` carries `thread_depth` and `reply_depth` (CR-CHAT-019) | **PARTIAL** — the ancestry the collapse rule reads now ships; the client collapse rule (default depth 3) and the generated summary card are still owed (CR-CHAT-017). |
-| 43 | **Timeline rail** — branch structure + current position (§3.8.2) | `GET /sessions/{id}/messages` serves `thread_id` / `parent_id` / `root_id` / `thread_depth` (CR-CHAT-019) | **PARTIAL** — the branch data the rail renders now ships (the same read as row 42); the rail's current-position presentation is client-side. |
+| 42 | **Depth collapse** below a configurable depth (**default 3**) into an expandable summary card (§3.8.2) | `GET /sessions/{id}/messages` carries `thread_depth` and `reply_depth` (CR-CHAT-019) | **SHIPPED** (DF-CRIER-448) — the browser collapse rule defaults to depth 3 (`DEFAULT_THREAD_COLLAPSE_DEPTH`, the same zero-based threshold as the API's `DefaultCollapseDepth`); a branch at depth >= the threshold renders as an expandable card stating exactly the count it withholds in the current filtered view, and expanding reveals that complete group only. The card is an index over records, not a model-generated summary — row 44 remains owed. |
+| 43 | **Timeline rail** — branch structure + current position (§3.8.2) | `GET /sessions/{id}/messages` serves `thread_id` / `parent_id` / `root_id` / `thread_depth` (CR-CHAT-019) | **SHIPPED** (DF-CRIER-448) — the branch rail renders the session's branch structure and marks the current message (`aria-current`) on anchor navigation and on transcript scroll; every link opens its exact `message-<id>`, revealing a containing collapsed group first. |
 | 44 | **Per-thread / per-sub-thread summary card** — generated, marked generated, raw messages one click under (§3.8.2) | none | **NOT BUILT**. Owed: a summary surface + a generated marker + the raw-message link (CR-CHAT-017). Who generates it and where it is stored is undecided (§6). |
 | 45 | **Search that returns LOCATION** — `namespace > channel > thread > sub-thread > message`, filterable by agent / capability / has-attachment / unresolved (§3.8.2) | none | **NOT BUILT**. Owed: a search read over the transcript tree (CR-CHAT-017; whether it is an index or a scan is CR-CHAT-020, §6). |
 | 46 | **Attachment chip / asset reference** on a message (§3.8, CR-CHAT-014) | none — the payload is opaque today (row 34) | **NOT BUILT**. Owed: the upload/fetch surface. An asset id rides the message; the **bytes live in object storage** and the wire never carries them — design is `CHAT-PERMISSIONS.md` / `CHAT-STORAGE.md`, not this document. |
@@ -925,12 +942,13 @@ claims. None implies the others.
   and served by `internal/session/groups_http.go`. They store curated rosters and fan out via the
   existing session delivery path, unlike a capability selector. DF-CRIER-449 remains open for the
   console create/list/count/roster experience; it must not be read as proof that the API is absent.
-- **Backend navigation is not browser navigation.** The server registers thread messages, timeline,
-  summary and session search reads (`internal/session/threading.go`), plus recorded participant
-  context GET/PUT and compile/expand routes. Stored branch records and parent/anchor fields exist in
-  `internal/session/threading.go` and the stores. The embedded page does not expose the complete
-  nested-thread, return-to-anchor or depth-collapse workflows below. The late-join prompt and
-  recorded system-event rendering now ship (DF-CRIER-447, §3.8.4).
+- **Thread reads ship; the page now uses the navigation ones.** The server registers thread messages,
+  timeline, summary and session search reads (`internal/session/threading.go`), plus recorded
+  participant context GET/PUT and compile/expand routes. Stored branch records and parent/anchor
+  fields exist in `internal/session/threading.go` and the stores. The embedded page ships the
+  deliberate-branch, return-to-exact-anchor and depth-collapse workflows (§3.8.2, DF-CRIER-448); the
+  generated summary reads and location-returning session search remain API reads with no browser
+  workflow. The late-join prompt and recorded system-event rendering ship (DF-CRIER-447, §3.8.4).
 
 ### Still missing or limited
 
@@ -949,10 +967,14 @@ claims. None implies the others.
   The unarmed request body is unchanged. A racing HTTP 403 uses DF-CRIER-459's `refused` class and
   preserves the server's cause, not a red failure or an assumed state change. This is control honesty,
   not browser sign-in: DF-CRIER-333 remains unresolved.
-- **The embedded transcript has one-level reply presentation (DF-CRIER-448).** It has no complete
-  deliberate sub-thread branch workflow, return-to-exact-anchor control or expandable depth collapse.
-  Backend branch storage and navigation reads do not close that UI row. D11 still forbids branching
-  merely because someone replies or addresses a non-member.
+- **The embedded transcript renders replies at one level, not as nesting (DF-CRIER-448).** Depth is
+  visualised by the branch index cards and the branch rail; a reply never adds depth (D11). "Branch
+  from here" (wire `branch:true`), return-to-exact-anchor navigation (`message-<id>` links from the
+  transcript and the rail) and expandable depth collapse (selector 1–6, default 3) ship in §3.8.2.
+  Still absent from the browser: re-parenting an existing message, a filterable transcript-search box
+  that returns a location, and generated per-thread summary cards — those reads exist in
+  `internal/session/threading.go` but are not browser workflows. An explicit task send cannot also
+  branch; the composer names that restriction instead of silently dropping the intent.
 - **Named-group rosters are not manageable in the console (DF-CRIER-449).** No group picker or
   create/list/read-membership control ships in `chat.html`; the shipped HTTP roster operations above
   and ident-only member rule do not turn a group name into an authenticated agent identity.

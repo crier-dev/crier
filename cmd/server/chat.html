@@ -73,6 +73,13 @@ main { min-width:0; display:flex; flex-direction:column; }
 .empty { padding:28px 8px; color:var(--dim); }
 .empty strong { display:block; color:var(--text); font-size:16px; margin-bottom:6px; }
 .msg { display:flex; align-items:flex-start; gap:12px; padding:15px 0; border-bottom:1px solid var(--border); }
+.branch-summary { margin:10px 0; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--panel); }
+.branch-summary p { margin-top:6px; }
+#branch-rail { max-height:32dvh; overflow-y:auto; overflow-wrap:anywhere; }
+#branch-rail ol { list-style:none; padding:0; }
+#branch-rail a { display:block; padding:4px 8px; border-left:2px solid var(--border); }
+#branch-rail [aria-current] { border-color:var(--mint); color:var(--mint); }
+.msg:focus { outline:2px solid var(--mint); outline-offset:-2px; }
 .msg.reply { margin-left:20px; padding-left:12px; border-left:2px solid var(--border); }
 .msg.task { border:1px solid rgba(245,176,74,.45); border-radius:10px; padding:14px; margin-top:10px; background:rgba(245,176,74,.05); }
 .msg.addressed .m-content { border-left:2px solid var(--lav); padding-left:12px; }
@@ -225,7 +232,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 </template>
 <main id="main" tabindex="-1">
   <header class="thread-header"><div class="thread-heading"><h2 id="conversation-title">Your agents. One conversation.</h2><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Close session</button><button id="reopen-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Reopen session</button><p id="session-lifecycle-reason" class="note" role="status" hidden></p><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
-  <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button></div>
+  <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button><label>Collapse branch depth<select id="collapse-depth"><option value="1">1</option><option value="2">2</option><option value="3" selected>3 (default)</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label></div>
   <p id="refresh-state" class="note" role="status">HTTP reads every 15 seconds while this page is visible. No session WebSocket feed is exposed.</p>
   <div id="transcript" aria-label="Conversation transcript"><div class="empty"><strong>Choose where the conversation happens.</strong>Open an existing channel or create one using an existing agent identity.</div></div>
   <div class="composer-wrap">
@@ -248,6 +255,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
   </div>
 </main>
 <aside class="rail" aria-label="Conversation context">
+  <section class="panel" aria-labelledby="branch-rail-title"><h2 id="branch-rail-title">Branch timeline</h2><nav id="branch-rail" tabindex="0" aria-label="Branch structure and current message" aria-describedby="branch-rail-hint"></nav><p id="branch-rail-hint" class="note">Scroll the timeline. Each link opens its exact message.</p></section>
   <section class="panel"><h2>Participants &amp; presence</h2><div id="participants" class="note">Select a session.</div>
     <form id="add-participant-form" class="stack">
       <label>Agent ID to add<input id="participant-agent" list="registered-agents" required autocomplete="off" disabled></label>
@@ -306,7 +314,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"" };
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"" };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -711,7 +719,7 @@ function renderHeader() {
 function renderReply() {
   resetAudienceWarning();
   $("replying").hidden = !state.reply;
-  $("replying").innerHTML = state.reply ? 'Reply to <code>' + esc(state.reply) + '</code><button type="button" id="cancel-reply">Cancel reply</button>' : "";
+  $("replying").innerHTML = state.reply ? (state.branch ? 'Branch from <code>' : 'Reply to <code>') + esc(state.reply) + '</code><button type="button" id="cancel-reply">Cancel reply</button>' : "";
 }
 function renderThreadOptions() {
   const threads = new Map();
@@ -725,10 +733,85 @@ function renderMessages(findings = []) {
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   const msgs = [...state.messages.filter(m => !state.thread || m.thread_id === state.thread), ...(state.systemEvents || []).map(e => ({...e,systemEvent:true}))].sort((a,b) => a.seq - b.seq);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
-  html += msgs.map(m => m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"><strong>SYSTEM EVENT</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + (m.state ? ' · state ' + esc(m.state) : '') + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + esc(m.parent_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button></div></article>').join("");
+  const groups = new Map();
+  for (const m of msgs) {
+    if (m.systemEvent) continue;
+    const group = collapsedThreadGroup(m);
+    if (group && !state.expandedBranches?.has(group)) {
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(m);
+    }
+  }
+  const emitted = new Set();
+  html += msgs.map(m => {
+    const group = !m.systemEvent && collapsedThreadGroup(m);
+    if (groups.has(group)) {
+      if (emitted.has(group)) return "";
+      emitted.add(group);
+      const hidden = groups.get(group);
+      return '<section class="branch-summary" data-collapsed-thread="' + esc(group) + '"><button type="button" data-expand-branch="' + esc(group) + '" aria-expanded="false">' + hidden.length + (hidden.length === 1 ? ' message hidden' : ' messages hidden') + ' — Expand branch</button><p class="note">Generated index · branch ' + esc(group) + ' · raw messages one click underneath</p></section>';
+    }
+    return m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"><strong>SYSTEM EVENT</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + (m.state ? ' · state ' + esc(m.state) : '') + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article id="' + esc(messageAnchorID(m.id)) + '" data-message-id="' + esc(m.id) + '" data-thread-depth="' + esc(m.thread_depth ?? 0) + '" tabindex="-1" class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + anchorLink(m.parent_id) : m.anchor_message_id ? ' · branch from ' + anchorLink(m.anchor_message_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button><button type="button" class="reply-button" data-branch="' + esc(m.id) + '">Branch from here</button></div></article>'; }).join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
+  renderBranchRail();
   // Avoid replacing a focused reply control on every background read.
   if (el.innerHTML !== html) { el.innerHTML = html; if (atEnd) el.scrollTop = el.scrollHeight; }
+}
+// D11: three is the deepest branch level before offering a generated index.
+// The API uses the same zero-based thread-depth threshold; reply hops are NOT depth.
+const DEFAULT_THREAD_COLLAPSE_DEPTH = 3;
+function threadCollapseDepth() {
+  return Number.isInteger(state.collapseDepth) && state.collapseDepth > 0 ? state.collapseDepth : DEFAULT_THREAD_COLLAPSE_DEPTH;
+}
+function messageAnchorID(id) { return "message-" + id; }
+function anchorLink(id) {
+  return '<a href="#' + esc(messageAnchorID(id)) + '" data-anchor="' + esc(id) + '">' + esc(id) + '</a>';
+}
+function collapsedThreadGroup(m) {
+  if (!(m.thread_depth >= threadCollapseDepth())) return null;
+  let thread = m.thread_id;
+  const seen = new Set();
+  while (!seen.has(thread)) {
+    seen.add(thread);
+    const root = state.messages.find(row => row.id === thread);
+    const parent = root?.anchor_message_id && state.messages.find(row => row.id === root.anchor_message_id);
+    if (!parent || !(parent.thread_depth >= threadCollapseDepth())) break;
+    thread = parent.thread_id;
+  }
+  return thread;
+}
+function renderBranchRail() {
+  const rail = $("branch-rail");
+  if (!rail) return;
+  if (!state.messages.some(m => m.id === state.locationMessage)) {
+    state.locationMessage = state.messages.find(m => (!state.thread || m.thread_id === state.thread) && (!collapsedThreadGroup(m) || state.expandedBranches?.has(collapsedThreadGroup(m))))?.id || null;
+  }
+  rail.innerHTML = '<ol>' + state.messages.map(m => '<li style="padding-left:' + (Math.min(Math.max(Number(m.thread_depth) || 0,0),6) * 8) + 'px"><a href="#' + esc(messageAnchorID(m.id)) + '" data-anchor="' + esc(m.id) + '"' + (state.locationMessage === m.id ? ' aria-current="location"' : '') + '>#' + esc(m.seq) + ' · ' + (m.anchor_message_id ? 'Branch · ' : m.parent_id ? 'Reply · ' : 'Thread · ') + esc(messageText(m).slice(0,48)) + '</a></li>').join("") + '</ol>';
+}
+function expandBranch(id) {
+  state.expandedBranches ||= new Set();
+  state.expandedBranches.add(id);
+  renderMessages();
+}
+function navigateToMessage(id) {
+  const m = state.messages.find(row => row.id === id);
+  if (!m) return false;
+  if (state.thread && state.thread !== m.thread_id) { state.thread = ""; $("thread-filter").value = ""; }
+  const group = collapsedThreadGroup(m);
+  if (group) { state.expandedBranches ||= new Set(); state.expandedBranches.add(group); }
+  state.locationMessage = id;
+  renderMessages();
+  const target = document.getElementById(messageAnchorID(id));
+  if (!target) return false;
+  target.scrollIntoView({block:"center"}); target.focus({preventScroll:true});
+  return true;
+}
+function startMessageReply(id, branch) {
+  if (state.sending) return;
+  const m = state.messages.find(row => row.id === id); if (!m) return;
+  state.reply = m.id; state.branch = branch; state.thread = m.thread_id;
+  $("thread-filter").value = state.thread;
+  renderReply(); renderMessages(); $("text").focus();
 }
 function loadedTaskLink(taskID) {
   // Reuse the loaded panel's identity and thread, never a transcript status.
@@ -754,7 +837,7 @@ function openTaskThread(event) {
   const target = link.dataset.taskId ? loadedTaskLink(link.dataset.taskId) : null;
   // A refresh can remove a row between rendering and activation. Fail closed.
   if (link.dataset.taskId && !target) { updateMessageTaskLinks(); return true; }
-  state.thread = link.dataset.thread; state.reply = null; $("thread-filter").value = state.thread;
+  state.thread = link.dataset.thread; state.reply = null; state.branch = false; $("thread-filter").value = state.thread;
   renderReply(); renderMessages();
   if (target) { target.focus(); target.scrollIntoView({block:"nearest"}); }
   else $("transcript").scrollIntoView({block:"start"});
@@ -934,7 +1017,8 @@ function openSession(id) {
   if (state.sending) return;
   if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
   resetAudienceWarning(); state.participants = []; $("participant-agent").value = ""; notice("participant-result",""); notice("task-result","");
-  state.current = id; state.session = null; state.messages = []; state.systemEvents = []; state.reply = null; state.thread = "";
+  state.expandedBranches = new Set(); state.locationMessage = null;
+  state.current = id; state.session = null; state.messages = []; state.systemEvents = []; state.reply = null; state.branch = false; state.thread = "";
   $("participant-context-share").value = "summary"; $("participant-context-boundary").value = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
@@ -982,6 +1066,10 @@ async function send(event) {
   if (task && !recipient) { notice("send-result","Choose an explicit agent recipient before requesting work.",true); return; }
   const payload = { payload:{text:draft}, sender:state.agent };
   if (state.reply) payload.parent_id = state.reply;
+  if (state.reply && state.branch) {
+    if (task) { notice("send-result", "Choose a message to start a branch; explicit tasks keep their existing thread behavior."); return; }
+    payload.branch = true;
+  }
   if (recipient) payload.targets = [{ kind:"agent", id:recipient }];
   if (!task) payload.message_kind = recipient || /(^|\s)[@#]\S+/.test(draft) ? "addressed" : "plain";
   state.sending = true; ++state.generation; updateComposer();
@@ -995,7 +1083,7 @@ async function send(event) {
       renderParticipants(roster);
       const audience = state.participants.filter(p => p.active && p.member_type === "agent" && p.member_id !== state.agent).map(p => p.member_id).sort();
       if (!audience.length) {
-        const confirmation = JSON.stringify({id, draft, recipient, task, reply:state.reply, agent:state.agent, namespace:state.namespace, audience});
+        const confirmation = JSON.stringify({id, draft, recipient, task, reply:state.reply, branch:!!state.branch, agent:state.agent, namespace:state.namespace, audience});
         if (state.noAgentConfirmation !== confirmation) {
           state.noAgentConfirmation = confirmation;
           notice("send-result", "");
@@ -1036,7 +1124,7 @@ async function send(event) {
     const details = outcomes.map(outcomeLine).join("\n");
     const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
     notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (result.sender_identity_basis ? "\nSender identity: " + result.sender_identity_basis + "." : "") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : inProgress ? "\nDelivery is already in flight. Draft kept. Refresh the transcript for confirmation; do not send again while it is in progress." : keepDraft ? "\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result." : ""), negative);
-    if (!keepDraft && !inProgress) { $("text").value = ""; state.reply = null; renderReply(); }
+    if (!keepDraft && !inProgress) { $("text").value = ""; state.reply = null; state.branch = false; renderReply(); }
   } catch(e) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
     // federation and persistence can outlast it. Do not label that uncertainty
@@ -1113,7 +1201,8 @@ $("identity-form").addEventListener("submit", event => {
   state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
   rememberAttribution();
   $("initial-members").innerHTML = "";
-  state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
+  state.expandedBranches = new Set(); state.locationMessage = null;
+  state.current = null; state.session = null; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
   renderDirectory(); notice("capability-matrix","Loading registry…");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
   renderReply(); renderHeader(); renderSessions(); notice("send-result","");
@@ -1123,14 +1212,32 @@ $("identity-form").addEventListener("submit", event => {
 });
 $("remember-agent").addEventListener("change",rememberAttribution);
 $("forget-agent").addEventListener("click",forgetAttribution);
-$("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; renderReply(); renderMessages(); });
-$("transcript").addEventListener("click", e => {
-  if (openTaskThread(e)) return;
-  const row = e.target.closest("[data-reply]"); if (!row || state.sending) return;
-  const m = state.messages.find(m => m.id === row.dataset.reply); if (!m) return;
-  state.reply = m.id; state.thread = m.thread_id; $("thread-filter").value = state.thread; renderReply(); renderMessages(); $("text").focus();
+$("collapse-depth").addEventListener("change", () => {
+  state.collapseDepth = Number($("collapse-depth").value); state.expandedBranches = new Set(); renderMessages();
 });
-$("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; renderReply(); } });
+$("branch-rail").addEventListener("click", e => {
+  const anchor = e.target.closest("[data-anchor]");
+  if (anchor) { e.preventDefault(); navigateToMessage(anchor.dataset.anchor); }
+});
+$("transcript").addEventListener("scroll", () => {
+  const transcript = $("transcript"), top = transcript.getBoundingClientRect().top;
+  const focused = document.activeElement?.closest("[data-message-id]");
+  const row = focused && transcript.contains(focused) && focused.getBoundingClientRect().bottom > top && focused.getBoundingClientRect().top < transcript.getBoundingClientRect().bottom ? focused : [...transcript.querySelectorAll("[data-message-id]")].find(row => row.getBoundingClientRect().bottom > top);
+  if (row && state.locationMessage !== row.dataset.messageId) { state.locationMessage = row.dataset.messageId; renderBranchRail(); }
+});
+$("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; state.branch = false; renderReply(); renderMessages(); });
+$("transcript").addEventListener("click", e => {
+  const anchor = e.target.closest("[data-anchor]");
+  if (anchor) { e.preventDefault(); navigateToMessage(anchor.dataset.anchor); return; }
+  const expand = e.target.closest("[data-expand-branch]");
+  if (expand) { expandBranch(expand.dataset.expandBranch); return; }
+  if (openTaskThread(e)) return;
+  const branch = e.target.closest("[data-branch]");
+  if (branch) { startMessageReply(branch.dataset.branch, true); return; }
+  const reply = e.target.closest("[data-reply]");
+  if (reply) startMessageReply(reply.dataset.reply, false);
+});
+$("replying").addEventListener("click", e => { if (e.target.closest("#cancel-reply") && !state.sending) { state.reply = null; state.branch = false; renderReply(); } });
 $("tasks").addEventListener("input", e => { if (e.target.dataset.taskEvidence) taskDrafts.set(taskKey(e.target.dataset.taskEvidence),e.target.value); });
 $("tasks").addEventListener("click", e => { const action = e.target.closest("[data-task-action]"); if (action) { changeTask(action.dataset.taskId, action.dataset.taskAction); return; } openTaskThread(e); });
 $("text").addEventListener("input",resetAudienceWarning);

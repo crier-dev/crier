@@ -18,9 +18,8 @@ import (
 //
 // specs/CHAT-THREADING.md §4 and specs/CHAT-SESSIONS.md §4.5 (decision D11):
 // a reply STAYS IN THREAD — depth is never a function of who replied. A
-// sub-thread is created only when a message deliberately pulls in an agent
-// that is not a participant of the session; replies to existing participants
-// spawn nothing. This file holds the branch WRITE (the spawn), the depth
+// sub-thread can be explicitly requested. The existing non-member-address
+// compatibility spawn is retained; ordinary replies remain flat. This file holds the branch WRITE (the spawn), the depth
 // collapse read, the timeline rail, the per-thread summary and the
 // search-with-location read (§3.8.2 of CHAT-INTERFACE).
 //
@@ -143,7 +142,8 @@ type spawnedThreadView struct {
 // spawnSubThreads decides and records the sub-thread spawn for ONE message
 // (§4.5 rule 2, atomic write).
 //
-// The decision: when the message ADDRESSES an agent NOT in the session's
+// The decision: an explicit branch always uses the named parent as its anchor.
+// The compatibility decision is retained: when a message ADDRESSES an agent NOT in the session's
 // active agent participants, the message branches off the thread it was
 // headed for into a child thread. Per §4.3 the thread key IS the root
 // message's id, so the child thread's id is the message's own id; the branch
@@ -154,7 +154,7 @@ type spawnedThreadView struct {
 // Multiple non-member addressees share ONE child: they are pulled into the
 // same side conversation rather than N duplicate ones.
 //
-// When every addressee is already a participant — or the message is itself a
+// Without an explicit branch, when every addressee is a participant — or the message is itself a
 // fresh thread root, which simply opens a new top-level conversation — the
 // message stays where it was headed and nothing is written: a reply to
 // existing participants never spawns (D11).
@@ -163,8 +163,8 @@ type spawnedThreadView struct {
 // the normal sendMessage pass; both carry seqs allocated back-to-back so the
 // pair is contiguous in the log. If the branch record cannot be written the
 // send is refused before any message record exists.
-func (h *Handler) spawnSubThreads(ctx context.Context, sess *Session, msg *Message, addressees []string) (*spawnedThreadView, error) {
-	if len(addressees) == 0 || msg.ParentID == "" {
+func (h *Handler) spawnSubThreads(ctx context.Context, sess *Session, msg *Message, addressees []string, explicit bool) (*spawnedThreadView, error) {
+	if (!explicit && len(addressees) == 0) || msg.ParentID == "" {
 		// No addressees, or the message opens its own top-level thread —
 		// there is nothing to branch FROM (§4.5 rule 2: a sub-thread is a
 		// branch off a message in ANOTHER thread).
@@ -175,7 +175,7 @@ func (h *Handler) spawnSubThreads(ctx context.Context, sess *Session, msg *Messa
 		return nil, fmt.Errorf("load session state for spawn decision: %w", err)
 	}
 	nonMembers := chat.NonMemberAddressees(activeAgentParticipants(st, h.now()), addressees)
-	if len(nonMembers) == 0 {
+	if len(nonMembers) == 0 && !explicit {
 		// Every addressee is a participant: the reply stays in thread.
 		return nil, nil
 	}
@@ -201,6 +201,12 @@ func (h *Handler) spawnSubThreads(ctx context.Context, sess *Session, msg *Messa
 		return nil, fmt.Errorf("allocate sub-thread seq: %w", err)
 	}
 	reason := fmt.Sprintf("addressed non-participant agent(s) %s", strings.Join(nonMembers, ", "))
+	if explicit {
+		if nonMembers == nil {
+			nonMembers = []string{}
+		}
+		reason = "deliberate branch from message " + anchor
+	}
 	// The ONE record that creates a new thread_id (§5.1). The parent thread
 	// gains nothing but the anchor named here; no parent record is rewritten.
 	if err := h.store.Branch(ctx, child, seq, reason); err != nil {

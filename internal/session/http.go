@@ -260,9 +260,10 @@ type sessionsResponse struct {
 // branch/timeline rows (42, 43) render: a resolvable parent and the thread it
 // belongs to.
 type transcriptMessage struct {
-	ID       string `json:"id"`
-	ThreadID string `json:"thread_id"`
-	ParentID string `json:"parent_id,omitempty"`
+	ID              string `json:"id"`
+	ThreadID        string `json:"thread_id"`
+	ParentID        string `json:"parent_id,omitempty"`
+	AnchorMessageID string `json:"anchor_message_id,omitempty"`
 	// ParentResolvable is true when parent_id names a message in this
 	// transcript, or when the message is a thread root (no parent). A false
 	// value is the §4.3 broken-thread case, reported not hidden.
@@ -426,6 +427,7 @@ type postMessageRequest struct {
 	MessageKind    string           `json:"message_kind,omitempty"`
 	ThreadID       string           `json:"thread_id,omitempty"`
 	ParentID       string           `json:"parent_id,omitempty"`
+	Branch         bool             `json:"branch,omitempty"`
 	Targets        []AudienceTarget `json:"targets,omitempty"`
 	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 	RequestID      string           `json:"request_id,omitempty"`
@@ -863,6 +865,10 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// Thread resolution: a root's thread is its own id; a reply stays in its
 	// parent's thread (D11, §4.5) — resolved from the transcript, never
 	// fabricated.
+	if req.Branch && msg.ParentID == "" {
+		writeAPIError(w, http.StatusBadRequest, "PARENT_NOT_FOUND", "a deliberate branch requires parent_id")
+		return
+	}
 	if msg.ParentID != "" {
 		st, err := h.store.Load(r.Context(), sess.ID)
 		if err != nil {
@@ -890,14 +896,15 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		msg.ThreadID = msgID
 	}
 
-	// Sub-thread spawn (CR-CHAT-017, §4.5 rule 2, D11): addressing an agent
+	// Sub-thread spawn: an explicit branch adds one level from the exact
+	// selected parent. The existing compatibility rule is unchanged: addressing an agent
 	// that is NOT a participant deliberately pulls a stranger into the
 	// conversation, so the message branches into a child thread
 	// (parent_thread_id + anchor_message_id). Replies to existing
 	// participants stay in this thread — spawnSubThreads writes nothing when
 	// every addressee is a member. The branch record is appended BEFORE the
 	// message record (one handler pass, contiguous seqs — the atomic write).
-	spawn, err := h.spawnSubThreads(r.Context(), sess, msg, messageAddressees(&req))
+	spawn, err := h.spawnSubThreads(r.Context(), sess, msg, messageAddressees(&req), req.Branch)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return
@@ -1433,6 +1440,9 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 		SenderIdentityBasis: m.SenderIdentityBasis,
 		CreatedAt:           m.CreatedAt,
 		ThreadDepth:         st.ThreadDepth(m.ThreadID),
+	}
+	if thread := st.Thread(m.ThreadID); thread != nil && thread.RootMessageID == m.ID {
+		v.AnchorMessageID = thread.AnchorMessageID
 	}
 	v.ParentResolvable = m.ParentID == "" || st.Message(m.ParentID) != nil
 	// A live pass is attached ONLY to the message it belongs to, and only
