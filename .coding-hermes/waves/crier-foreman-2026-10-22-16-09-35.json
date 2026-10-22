@@ -1,0 +1,61 @@
+{
+  "tick_id": "crier-foreman-2026-10-22-16-09-35",
+  "block": "DF-CRIER-474",
+  "mode": "salvage-wave-plus-serial-dispatch",
+  "created_at": "2026-10-22T16:09:35-05:00",
+  "finished_at": "2026-10-22T17:05:00Z",
+  "slots": 2,
+  "slots_reason": "16 cores, loadavg 13.07 at tick start -> max(1, min(6, 16-14)) = 2 slots",
+  "block_decision": "RESUME-FIRST: tick-482 recovery targeted block DF-CRIER-474 (rows 466/467/468/469). Fresh worktree sweep found 466 (de440d8) and 469 (235199b) COMMITTED-but-unmerged — the wave-481 sessions were killed after their commits, so 'failed 0 commits' in the 481 manifest was a teardown artifact, not a zero-write. Salvaged both instead of re-dispatching.",
+  "file_seam_rule": "466/467/468 all edit cmd/server/chat.html -> one chat.html row in flight at a time. 466 salvaged+merged first; 468 dispatched serially into a fresh worktree AFTER that merge; 467 queued for the next tick (same seam).",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-466",
+      "mode": "salvage",
+      "origin_commit": "de440d8",
+      "origin_worktree": "/home/kara/worktrees/crier-DF-CRIER-466",
+      "worktree": "/home/kara/worktrees/crier-SERGE-482-466",
+      "branch": "wt/SERGE-482-466",
+      "base_sha": "6addf92",
+      "commit": "856dc28",
+      "merged": "12604ce-era main, pushed origin+gitlab",
+      "verdict": "3c593503 PASS (dir .gitreins/history/2026-10-22/27bfb3e2)",
+      "gates": "build/vet PASS; focused posture+OpenAPI PASS; chat-refusal-truth 41/41; chat-lifecycle-truth 24/24; full suite 30/30 pkgs; e2e-battery 189/5 with 5 pre-existing A2A cells identical on clean base"
+    },
+    {
+      "task_id": "DF-CRIER-469",
+      "mode": "salvage",
+      "origin_commit": "235199b",
+      "origin_worktree": "/home/kara/worktrees/crier-DF-CRIER-469",
+      "worktree": "/home/kara/worktrees/crier-SERGE-482-469",
+      "branch": "wt/SERGE-482-469",
+      "base_sha": "6addf92",
+      "commit": "12604ce",
+      "merged": "main 12604ce, pushed origin+gitlab",
+      "verdict": "574cca34 FAIL/INCOMPLETE on two CRITERIA-AUTHORING artifacts (test name invented by foreman criterion; full-package 300s flake under loadavg 13) — judge's own probes proved the new tests PASS by name (57.4s); disclosed verbatim on the row, verdict bound not relabelled",
+      "gates": "build/vet PASS; go test ./internal/session ./cmd/server = ok 62.6s / ok 158.1s; full suite 30/30 pkgs"
+    },
+    {
+      "task_id": "DF-CRIER-468",
+      "mode": "worker-dispatch",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "worktree": "/home/kara/worktrees/crier-SERGE-482-468",
+      "branch": "wt/SERGE-482-468",
+      "base_sha": "6addf92",
+      "brief": "/tmp/crier-t483-brief-SERGE-482-468.txt",
+      "gate": "dispatched after 466 merged; first dispatch (foreground) died at 420s window with zero writes -> replaced by background dispatch, verified live via state.db session activity",
+      "verdict": "IN-FLIGHT at manifest close (row stays pending/in_progress until the commit is verified and merged by the next tick)"
+    },
+    {
+      "task_id": "DF-CRIER-467",
+      "mode": "queued-same-seam",
+      "reason": "chat.html seam held by 466 then 468",
+      "verdict": "queued-next-tick"
+    }
+  ],
+  "rejected": {
+    "INT-CI-014": "dead sibling's staged 31-file batch (window.Close plumbing + testsupport client + 24 test-file switches) verified in an isolated worktree at 6addf92: `go test ./... -count=1 -timeout 60s` still fails cmd/server 60.042s + internal/session 60.011s, FAIL list identical to the clean tree -> does NOT fix the defect. Preserved as git stash 't483 staging: INT-CI-014 dead-sibling batch + gitreins tasks.yaml'; row stays pending; gitreins task cleared --force --skip-tier2 (state-flip, not merit)."
+  },
+  "merge_plan_result": "serial merges behind local gates: 466 ff -> 856dc28, 469 rebased -> 12604ce ff; both pushed to origin+gitlab; rev-list origin/main..HEAD = 0; 0/0 parity"
+}
