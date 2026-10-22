@@ -127,7 +127,16 @@ func summaryDigest(given []*Message) string {
 
 // explainShare states, in one sentence, why the joiner's reply state is what
 // it is: what it was given, and what was withheld (§4.6, D10).
-func explainShare(cs *ContextShare, givenCount int) string {
+//
+// boundaryUnresolved reports that the share carries a boundary id this session
+// cannot resolve. The sentence then asserts the JOIN INSTANT alone and names the
+// boundary it could not honour, so the view never states a resolved edge — and
+// never says "recorded before the join" of a message that was not
+// (DF-CRIER-469).
+func explainShare(cs *ContextShare, givenCount int, boundaryUnresolved bool) string {
+	if boundaryUnresolved && cs.Mode != ShareNone {
+		return fmt.Sprintf("the recorded boundary message %q names no message of this session, so it could not be resolved and was neither honoured nor used to widen the view (mode %q): what the joiner was given is bounded by the join instant alone — %d message(s) recorded before it joined, and NONE recorded at or after it", cs.BoundaryMessageID, cs.Mode, givenCount)
+	}
 	switch cs.Mode {
 	case ShareNone:
 		return "the joiner was given NOTHING from before the join (mode `none`, §4.6 rule 6) — a deliberate fresh start, recorded like any other answer; what it says next reflects only what arrived after it joined"
@@ -142,30 +151,69 @@ func explainShare(cs *ContextShare, givenCount int) string {
 	}
 }
 
+// shareBoundaryEdge resolves the boundary recorded on a share into the seq it
+// cites. ok is false when the boundary is empty OR when the id names no message
+// of this session — a record written before the write paths began refusing one
+// (DF-CRIER-472). A boundary that cannot be resolved yields NO edge: it can
+// neither widen nor narrow what counts as given.
+func shareBoundaryEdge(st *State, boundaryMessageID string) (int64, bool) {
+	if boundaryMessageID == "" {
+		return 0, false
+	}
+	if edge := st.Message(boundaryMessageID); edge != nil {
+		return edge.Seq, true
+	}
+	return 0, false
+}
+
 // materializedShare computes what the member was actually GIVEN at its join:
 // the messages recorded before its AddedAt, narrowed by the share mode. For
 // `since`, only messages strictly after the boundary (and still before the
 // join) count — the boundary itself is withheld.
+//
+// The two inputs are combined, not chosen between (DF-CRIER-469). The JOIN
+// INSTANT is the OUTER bound of what any share could have handed this member —
+// it did not exist in the session before AddedAt, so nothing recorded after it
+// can have been given by the share, whatever the recorded boundary says. A
+// boundary may only NARROW inside that bound. The previous shape took the
+// boundary branch for `summary`/`full` and skipped only messages after the
+// boundary, so the join-instant guard was never applied there: an unresolvable
+// boundary skipped nothing and every message in the session counted as given,
+// and a boundary recorded later than the join admitted post-join messages —
+// history the share never handed over, presented as recorded fact.
 func materializedShare(st *State, cs *ContextShare, addedAt time.Time) []*Message {
-	var given []*Message
-	if cs.Mode == ShareNone {
+	if cs == nil || cs.Mode == ShareNone {
 		// `none` is a first-class answer (§4.6 rule 6): the joiner is given
 		// NOTHING, by decision.
 		return nil
 	}
+	// A recorded edge is seq-based, not wall-clock-based: equal or skewed
+	// timestamps must not drop the very message the share cites.
+	edgeSeq, edgeOK := shareBoundaryEdge(st, cs.BoundaryMessageID)
+	var given []*Message
 	for _, m := range st.Messages {
-		// A recorded upper edge is seq-based, not wall-clock-based: equal or
-		// skewed timestamps must not drop the very message the summary cites.
-		if (cs.Mode == ShareSummary || cs.Mode == ShareFull) && cs.BoundaryMessageID != "" {
-			if edge := st.Message(cs.BoundaryMessageID); edge != nil && m.Seq > edge.Seq {
-				continue
-			}
-		} else if !m.CreatedAt.Before(addedAt) {
+		// The join instant: applied to EVERY mode and every branch below. A
+		// message RECORDED AFTER the join was never handed over by the share.
+		// Equality is not "after": a tie must not drop the very message a
+		// boundary cites (TestLateJoinSummaryEdgeUsesSeq), because a join and
+		// the message it shares are stamped by the same clock at the same
+		// resolution.
+		if m.CreatedAt.After(addedAt) {
 			continue
 		}
-		if cs.Mode == ShareSince && cs.BoundaryMessageID != "" {
-			bm := st.Message(cs.BoundaryMessageID)
-			if bm != nil && m.Seq <= bm.Seq {
+		switch cs.Mode {
+		case ShareSummary, ShareFull:
+			// The recorded boundary is the share's upper edge, and it can only
+			// narrow the join-instant bound. An edge this session cannot
+			// resolve contributes nothing (and the view reports it, so the
+			// unverifiable boundary is never silently honoured).
+			if edgeOK && m.Seq > edgeSeq {
+				continue
+			}
+		case ShareSince:
+			// The boundary itself is withheld; everything after it (and before
+			// the join) was given.
+			if edgeOK && m.Seq <= edgeSeq {
 				continue
 			}
 		}
@@ -201,6 +249,12 @@ type memberContextView struct {
 	GivenCount       int      `json:"given_count"`
 	// Explanation ties the joiner's reply state to what it was given.
 	Explanation string `json:"explanation"`
+	// BoundaryUnresolved names the share's recorded boundary when this session
+	// holds no such message. A share's boundary is a citation of a message: one
+	// that cannot be resolved can neither widen nor narrow the given set, so the
+	// view REPORTS it rather than silently honouring — or silently dropping — it
+	// (DF-CRIER-469). Empty when the boundary resolved (or none was recorded).
+	BoundaryUnresolved string `json:"boundary_unresolved,omitempty"`
 }
 
 // setMemberContextRequest is the PUT body: the new share answer (§4.6 rule 3
@@ -259,6 +313,10 @@ func (h *Handler) HandleMemberContextView(w http.ResponseWriter, r *http.Request
 	}
 	cs := &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
 	given := materializedShare(st, cs, m.AddedAt)
+	// A boundary the session cannot resolve is REPORTED, never silently
+	// honoured: the given set above is bounded by the join instant alone, and
+	// the view names the citation it could not follow (DF-CRIER-469).
+	boundaryUnresolved := cs.Mode != ShareNone && shareBoundaryProblem(st, sess.ID, cs) != ""
 	view := memberContextView{
 		SessionID:   sess.ID,
 		MemberType:  string(m.MemberType),
@@ -268,7 +326,10 @@ func (h *Handler) HandleMemberContextView(w http.ResponseWriter, r *http.Request
 		SetBy:       mc.SetBy,
 		SetAt:       mc.SetAt,
 		GivenCount:  len(given),
-		Explanation: explainShare(cs, len(given)),
+		Explanation: explainShare(cs, len(given), boundaryUnresolved),
+	}
+	if boundaryUnresolved {
+		view.BoundaryUnresolved = cs.BoundaryMessageID
 	}
 	if len(given) > 0 {
 		view.GivenMessageIDs = make([]string, 0, len(given))

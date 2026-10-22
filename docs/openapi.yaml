@@ -5588,9 +5588,25 @@ components:
           type: array
           items:
             type: string
-          description: The message ids the member was given, in seq order (modes `since` and `full`).
+          description: |-
+            The message ids the member was given, in seq order (modes `since`
+            and `full`). Bounded by the JOIN INSTANT as well as the recorded
+            share: a message recorded after `added_at` is never listed, whatever
+            the boundary says.
         given_count:
           type: integer
+          description: |-
+            How many messages the member was given. Derived from the recorded
+            share AND the join instant together; a boundary can only narrow that
+            bound, never widen it.
+        boundary_unresolved:
+          type: string
+          description: |-
+            Present only when the recorded share carries a `boundary_message_id`
+            that names no message of this session. Such a boundary can neither
+            widen nor narrow the given set (the view falls back to the join
+            instant alone), and it is reported here rather than silently
+            honoured or silently dropped.
         explanation:
           type: string
           description: Why the joiner's reply state is what it is — what it was given, and what was withheld.
