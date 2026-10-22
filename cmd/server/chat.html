@@ -327,11 +327,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-<<<<<<< HEAD
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"" };
-=======
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
->>>>>>> 34abd95 (feat(groups): add POST /groups and GET /groups for named group rosters. Addresses DF-CRIER-449.)
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -1321,12 +1317,8 @@ $("identity-form").addEventListener("submit", event => {
   state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
   rememberAttribution();
   $("initial-members").innerHTML = "";
-<<<<<<< HEAD
   state.expandedBranches = new Set(); state.locationMessage = null;
-  state.current = null; state.session = null; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
-=======
-  state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
->>>>>>> 34abd95 (feat(groups): add POST /groups and GET /groups for named group rosters. Addresses DF-CRIER-449.)
+  state.current = null; state.session = null; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
   renderDirectory(); notice("capability-matrix","Loading registry…");
   notice("groups-count","Loading GET /groups…"); notice("groups","Loading named groups…"); notice("group-roster","Select a group to read its roster."); notice("group-result","");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
