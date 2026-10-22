@@ -45,7 +45,10 @@
       "base_sha": "6addf92",
       "brief": "/tmp/crier-t483-brief-SERGE-482-468.txt",
       "gate": "dispatched after 466 merged; first dispatch (foreground) died at 420s window with zero writes -> replaced by background dispatch, verified live via state.db session activity",
-      "verdict": "IN-FLIGHT at manifest close (row stays pending/in_progress until the commit is verified and merged by the next tick)"
+      "commit": "6e71013 (worker 7430fe3, rebased onto the conflict-marker hotfix 453f566)",
+      "verdict": "9fa82068 PASS (dir .gitreins/history/2026-10-22/b04a2b80); all 5 criteria verified with fresh output; task deleted after verdict read-back",
+      "gates": "chat-class-truth 11/11; chat-refusal-truth 41/41 (466's posture sentence re-applied after the rebase); chat-lifecycle-truth 24/24; node --check rc=0; build/vet PASS",
+      "divergence": "brief said disabled posture keeps the control enabled; worker measured live that management_surface=disabled 403s for EVERY client and admin-token-gated proves this viewer's credential — accepted, capability rule applied per measurement"
     },
     {
       "task_id": "DF-CRIER-467",
@@ -56,6 +59,12 @@
   ],
   "rejected": {
     "INT-CI-014": "dead sibling's staged 31-file batch (window.Close plumbing + testsupport client + 24 test-file switches) verified in an isolated worktree at 6addf92: `go test ./... -count=1 -timeout 60s` still fails cmd/server 60.042s + internal/session 60.011s, FAIL list identical to the clean tree -> does NOT fix the defect. Preserved as git stash 't483 staging: INT-CI-014 dead-sibling batch + gitreins tasks.yaml'; row stays pending; gitreins task cleared --force --skip-tier2 (state-flip, not merit)."
+  },
+  "found_and_fixed_mid_tick": {
+    "defect": "cmd/server/chat.html on main carried TWO unresolved merge-conflict marker blocks from daecd07 (DF-CRIER-449 groups merge). node --check on the inline script exited 1 at the marker line: the shipped /chat page was a JS syntax error.",
+    "why_no_gate_caught_it": "chat-refusal-truth (41/41) and chat-lifecycle-truth (24/24) extract named function regions by string index and eval them isolated; the two browser harnesses SKIP (exit 77, Playwright absent); the Go suite only embeds the file; e2e-battery never parses the page JS.",
+    "fix": "8963d3f — both hunks resolved as the union (HEAD view-state fields + groups fields); node --check rc=0; refusal 41/41; lifecycle 24/24; pushed.",
+    "filed": "QA-CRIER-47 (P0) — whole-page JS syntax gate + reject/accept selftest, wired into Make + CI."
   },
   "merge_plan_result": "serial merges behind local gates: 466 ff -> 856dc28, 469 rebased -> 12604ce ff; both pushed to origin+gitlab; rev-list origin/main..HEAD = 0; 0/0 parity"
 }
