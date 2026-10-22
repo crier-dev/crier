@@ -314,7 +314,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
       <div id="management-chain" class="management-read note" role="status">No chain query submitted.</div>
       <p class="note">POST /trust/verify evaluates without storing records, using ordinary reach access, not the admin credential. This browser cannot generate possession proofs. The basis field names the proof result from the server's fixed vocabulary: on refusal, it identifies the first failed check. The explanation beside the returned basis describes that result. No trust verdict is a delivery grant or a revocation check. Use an authorized signed client for possession verification.</p>
     </section>
-    <section class="panel" aria-labelledby="agent-class-title"><h2 id="agent-class-title">Agent class &amp; scope</h2><form id="agent-class-form" class="stack"><label>Agent ID<input id="class-agent" list="registered-agents" required autocomplete="off"></label><button id="class-query-submit" type="submit" class="ghost">Read agent class</button></form><div id="management-class" class="management-read note" role="status">No agent class query submitted.</div><p class="note">id is the agent; class is personal/service; owner is the recorded principal; namespace is its realm; capabilities are declarations; scopes list the reach rules the ACL actually reads. A missing class record is an error, not an inferred class.</p></section>
+    <section class="panel" aria-labelledby="agent-class-title"><h2 id="agent-class-title">Agent class &amp; scope</h2><p id="class-read-requirement" class="note">Reading an agent class requests GET /agents/{id}/class, which the management surface serves behind its admin credential: the request must present the deployment's CR_PERMISSIONS_ADMIN_TOKEN as its Bearer credential. This page never sends an Authorization header and collects no tokens, so it cannot present that credential itself — the control below is offered only where the server's own posture readback proves this viewer's requests already clear that gate, and an authorized deployment gateway or an authorized operator client holds the credential otherwise.</p><form id="agent-class-form" class="stack"><label>Agent ID<input id="class-agent" list="registered-agents" required autocomplete="off"></label><button id="class-query-submit" type="submit" class="ghost" aria-describedby="class-read-reason class-read-requirement">Read agent class</button></form><p id="class-read-reason" class="note" role="status"></p><div id="management-class" class="management-read note" role="status">No agent class query submitted.</div><p class="note">id is the agent; class is personal/service; owner is the recorded principal; namespace is its realm; capabilities are declarations; scopes list the reach rules the ACL actually reads. A missing class record is an error, not an inferred class.</p></section>
   </div>
   </details>
 </section>
@@ -327,7 +327,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -583,15 +583,19 @@ $("management-refresh").addEventListener("click",refreshManagement);
 $("authority-view").addEventListener("toggle",() => { if (authorityOpen()) refreshManagement(); });
 $("agent-class-form").addEventListener("submit",async event => {
   event.preventDefault();
+  // DF-CRIER-468: the disabled attribute stops the click; this guard stops an
+  // implicit submit (Enter in the input) and any direct invocation, so a
+  // structurally refused read is never sent.
+  if (classReadReason()) return;
   const route = "/agents/" + encodeURIComponent($("class-agent").value.trim()) + "/class";
-  $("class-query-submit").disabled = true;
+  state.classBusy = true; updateClassControls();
   managementState("management-class","loading","Loading GET " + route + "…");
   try {
     const body = await call(route);
     if (!body || typeof body.id !== "string") throw new Error("Invalid class response from " + route);
     managementRows("management-class","GET " + route,[body],["id","class","owner","namespace","capabilities","scopes"],"No agent class record returned.");
   } catch(error) { managementFailure("management-class","GET " + route,error); }
-  finally { $("class-query-submit").disabled = false; }
+  finally { state.classBusy = false; updateClassControls(); }
 });
 $("trust-query-form").addEventListener("submit",async event => {
   event.preventDefault();
@@ -689,6 +693,10 @@ function updateLateJoinPrompt() {
 }
 function updateComposer() {
   updateLifecycleControls();
+  // DF-CRIER-468: recomputed wherever the runtime posture is applied, exactly
+  // like the lifecycle controls — one derivation per /status read, no second
+  // predicate and no timer of its own.
+  updateClassControls();
   updateLateJoinPrompt();
   const composer = composerState(), enabled = composer.usable;
   for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
@@ -1070,12 +1078,43 @@ function renderPosture(b) {
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.health === "degraded" || b.health === "down");
   notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
 }
+// DF-CRIER-468: GET /agents/{id}/class is a management read — it passes the
+// same admin gate as /principals (internal/registry/permissions_read.go
+// managementSnapshot -> internal/registry/principals_api.go managementAuthorized),
+// which requires Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN. This page
+// never sends an Authorization header and collects no tokens, so the
+// credential is out of its reach unless the deployment's own readback proves
+// otherwise. /status reports management_surface for THIS viewer: status.go
+// assigns "admin-token-gated" only when the request passed the live admin gate
+// (an authorized deployment gateway holds the credential — DF-CRIER-410), the
+// one posture this page's read can succeed in; "enabled-unarmed" means the
+// gate is live and this viewer holds nothing; "disabled" means the delivery
+// ACL is off and the route answers 403 "the permissions management surface is
+// not armed" for EVERY client. So the control is enabled by CAPABILITY, and
+// disabled with the missing authority named on the control — DF-CRIER-460's
+// rule, applied to this read rather than a blanket disable.
+function classReadReason() {
+  return state.classBusy ? "Reading the agent class — wait for it to finish."
+    : state.managementSurface === "admin-token-gated" ? ""
+    : state.managementSurface === "enabled-unarmed" ? "Reading an agent class requires the management admin credential (Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN). This page never sends one and this deployment's ACL is live without it, so the read is refused here; an authorized deployment gateway or operator client must present that credential."
+    : state.managementSurface === "disabled" ? "This deployment runs no permissions management surface (CR_PERMISSIONS_ENABLED=false), so GET /agents/{id}/class answers 403 \"the permissions management surface is not armed\" for every client, not only this page. Configure CR_PERMISSIONS_ENABLED=true and CR_PERMISSIONS_ADMIN_TOKEN and read through a client that presents the credential."
+    : "Management authority is unknown — refresh runtime posture before reading an agent class. The route requires Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN, which this page cannot present on its own.";
+}
+function updateClassControls() {
+  const reason = classReadReason();
+  const button = $("class-query-submit");
+  button.disabled = !!reason;
+  button.title = reason;
+  notice("class-read-reason", reason);
+  $("class-read-reason").hidden = !reason;
+}
 async function refresh() {
   if (state.sending) return;
   const generation = ++state.generation, id = state.current;
   state.busy = true;
   // Fail closed while this refresh's authority read is pending or fails.
   state.permissionsArmed = null; updateLifecycleControls();
+  state.managementSurface = null; updateClassControls();
   notice("refresh-state", "Refreshing recorded state…");
   const valid = () => generation === state.generation;
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
@@ -1088,8 +1127,13 @@ async function refresh() {
       // ACL-off session. Never infer authority from an absent/future value.
       state.permissionsArmed = b.management_surface === "disabled" ? false
         : ["enabled-unarmed","admin-token-gated"].includes(b.management_surface) ? true : null;
+      // DF-CRIER-468: the class read is gated by the management admin gate's
+      // own per-viewer readback, so the raw surface value (not the derived
+      // boolean) drives it: only "admin-token-gated" proves this viewer's
+      // requests already pass that gate. Never infer from an absent value.
+      state.managementSurface = typeof b.management_surface === "string" ? b.management_surface : null;
       renderPosture(b); updateComposer();
-    }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
+    }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; state.managementSurface = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
     loadGroups()];
   if (id) {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
@@ -1569,6 +1613,8 @@ $("close-session").addEventListener("click", () => changeSessionState("closed"))
 $("reopen-session").addEventListener("click", () => changeSessionState("open"));
 restoreAttribution();
 updateComposer();
+// DF-CRIER-468: the class control fails closed until the first /status answer
+// proves this viewer's capability (updateComposer ran above with no posture).
 refresh();
 </script>
 </body>
