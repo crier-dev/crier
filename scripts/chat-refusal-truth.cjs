@@ -58,7 +58,7 @@ const posture = {auth_enabled: false, registry_durable: false, management_surfac
 // DF-CRIER-461: configuration cannot predict any particular route's read result.
 const managementPostures = [
   ['disabled', 'disabled', 'disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here.'],
-  ['enabled-unarmed', 'enabled-unarmed', 'enabled — delivery ACL not armed. Configuration reported by /status; read results are shown per route.'],
+  ['enabled-unarmed', 'enabled-unarmed', 'enabled — the delivery ACL is enabled and enforcing (CR_PERMISSIONS_ENABLED=true); management reads require CR_PERMISSIONS_ADMIN_TOKEN and this viewer\'s access is not reported. Configuration reported by /status; read results are shown per route.'],
   ['admin-token-gated', 'admin-token-gated', 'enabled and admin-token gated — management gate present. Configuration reported by /status; read results are shown per route.'],
   ['absent', undefined, 'unknown'],
 ];

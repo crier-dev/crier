@@ -18,7 +18,7 @@ import (
 const managementTestToken = "management-posture-test-only-secret"
 
 const managementDisabledSentence = "disabled — delivery ACL off (CR_PERMISSIONS_ENABLED=false). Not armed on this instance — a configured posture, not a failure. Management arming requires CR_PERMISSIONS_ADMIN_TOKEN; its configuration is not reported here."
-const managementUnarmedSentence = "enabled — delivery ACL not armed. Configuration reported by /status; read results are shown per route."
+const managementUnarmedSentence = "enabled — the delivery ACL is enabled and enforcing (CR_PERMISSIONS_ENABLED=true); management reads require CR_PERMISSIONS_ADMIN_TOKEN and this viewer's access is not reported. Configuration reported by /status; read results are shown per route."
 const managementGatedSentence = "enabled and admin-token gated — management gate present. Configuration reported by /status; read results are shown per route."
 
 // Exercise the production config, router, admin gate and embedded renderer.
@@ -65,21 +65,109 @@ func TestStatusManagementSurface(t *testing.T) {
 	t.Logf("Management postures side by side:\n%s", strings.Join(lines, "\n"))
 }
 
+// managementACLOffPhrases are the words that tell an operator enforcement is
+// absent. cmd/server/status.go derives the wire value in one place:
+//
+//	managementSurface := "disabled"
+//	if cfg.Permissions.Enabled {
+//	    managementSurface = "enabled-unarmed"
+//	}
+//
+// so "enabled-unarmed" is the ENABLED branch. "unarmed" names this viewer's
+// management gate, never the ACL. Only "disabled" — the branch where
+// CR_PERMISSIONS_ENABLED is false — may carry any of these phrases (DF-CRIER-466).
+var managementACLOffPhrases = []string{"not armed", "unarmed", "acl off", "not enforcing", "disabled"}
+
 // Keep both original wire values readable by newer clients; missing and future
 // values are unknown, never silently disabled. This is compatibility input only,
 // not product data or a replacement for the live configuration table above.
+// Every value still goes through the shipped renderer, and a sentence may only
+// claim the ACL is off for the value status.go derives from the ACL being off.
 func TestChatManagementPosture(t *testing.T) {
-	for _, tc := range []struct{ value, want string }{
-		{"disabled", managementDisabledSentence},
-		{"enabled-unarmed", managementUnarmedSentence},
-		{"admin-token-gated", managementGatedSentence},
-		{"", "unknown"},
-		{"future-posture", "unknown"},
+	for _, tc := range []struct {
+		value, want string
+		aclOff      bool
+	}{
+		{"disabled", managementDisabledSentence, true},
+		{"enabled-unarmed", managementUnarmedSentence, false},
+		{"admin-token-gated", managementGatedSentence, false},
+		{"", "unknown", false},
+		{"future-posture", "unknown", false},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			body, err := json.Marshal(map[string]string{"management_surface": tc.value})
 			require.NoError(t, err)
-			renderManagementPosture(t, body, tc.want)
+			rendered := renderManagementPosture(t, body, tc.want)
+			if tc.aclOff {
+				return
+			}
+			for _, phrase := range managementACLOffPhrases {
+				require.NotContains(t, strings.ToLower(rendered), phrase,
+					"management_surface=%q is not the ACL-off value, so its sentence must not say %q; got: %s",
+					tc.value, phrase, rendered)
+			}
+		})
+	}
+}
+
+// TestRenderedUnarmedPostureReadsAsItsStatusSource takes the wire value from
+// status.go itself — buildStatusResponse is the function that assigns it — and
+// holds the sentence the shipped renderer produces for it to that meaning:
+// permissions are ON, management reads require the admin token, and this
+// viewer's own access is not something the line can report. No fixture value is
+// asserted here, so the sentence cannot drift away from its source unnoticed.
+func TestRenderedUnarmedPostureReadsAsItsStatusSource(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		enabled     bool
+		wantValue   string
+		sentence    string
+		mustContain []string
+	}{
+		{
+			name:      "permissions-enabled",
+			enabled:   true,
+			wantValue: "enabled-unarmed",
+			sentence:  managementUnarmedSentence,
+			mustContain: []string{
+				"CR_PERMISSIONS_ENABLED=true",
+				"CR_PERMISSIONS_ADMIN_TOKEN",
+				"not reported",
+			},
+		},
+		{
+			name:      "permissions-disabled",
+			enabled:   false,
+			wantValue: "disabled",
+			sentence:  managementDisabledSentence,
+			mustContain: []string{
+				"CR_PERMISSIONS_ENABLED=false",
+				"delivery ACL off",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := buildStatusResponse(config.Config{
+				Permissions: config.PermissionsConfig{Enabled: tc.enabled},
+			}, "memory")
+			require.Equal(t, tc.wantValue, response.ManagementSurface,
+				"status.go must report %q when CR_PERMISSIONS_ENABLED is %t", tc.wantValue, tc.enabled)
+			body, err := json.Marshal(response)
+			require.NoError(t, err)
+			rendered := renderManagementPosture(t, body, tc.sentence)
+			for _, want := range tc.mustContain {
+				require.Contains(t, rendered, want)
+			}
+			if !tc.enabled {
+				return
+			}
+			// Permissions are enabled: no phrase in this sentence may say the
+			// ACL is off, which is exactly what the old wording claimed.
+			for _, phrase := range managementACLOffPhrases {
+				require.NotContains(t, strings.ToLower(rendered), phrase,
+					"CR_PERMISSIONS_ENABLED=true is the armed branch; the sentence must not say %q; got: %s",
+					phrase, rendered)
+			}
 		})
 	}
 }
