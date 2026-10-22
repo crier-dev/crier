@@ -93,6 +93,44 @@
 #                                 WARNINGS are printed and NOT fatal, because the
 #                                 validator itself tolerates legacy shapes and
 #                                 says so per line.
+#   close-as-merged ancestry      every row that THIS diff newly closes (its
+#                                 status becomes a closed word, or its recorded
+#                                 commit changes) must name a commit that
+#                                 actually exists on the branch it is closed on:
+#                                 `git merge-base --is-ancestor <commit_hash>
+#                                 <main|origin/main>`. A hash that is not an
+#                                 ancestor, a hash that resolves to no commit,
+#                                 and an 'already merged' close with NO hash are
+#                                 all REFUSED, each naming the row and the value
+#                                 it checked (DF-CRIER-452).
+#
+# WHY THE ANCESTRY ARM EXISTS (DF-CRIER-452, MEASURED 2026-10-21 at main 0974c73)
+# -------------------------------------------------------------------------------
+# Rows DF-CRIER-438/439/441 were closed in board commit 5cc8229 with
+# commit_hash=cfe9f0a and the prose 'Implementation already merged in cfe9f0a'.
+# `git merge-base --is-ancestor cfe9f0a main` exited 1; the commit existed only
+# on the worker branch (`git rev-list --left-right --count main...wt/DF-CRIER-438`
+# = '39 1'), and the fix's own artefact was absent from main
+# (`grep -c kill-after scripts/doctor-hooks.sh` = 0 there, 8 on the branch). Three
+# rows read complete for a day while the defect they address was still live. A
+# close that RECORDS a hash is not a close that VERIFIED one — the same law as the
+# landing script that printed success over a failed merge: assert the COMMIT is in
+# the branch, never that a command printed something.
+#
+# SCOPE OF THE ANCESTRY ARM — stated, not implied:
+#   * it reads only rows this diff CHANGES into a closed state (index vs HEAD, or
+#     worktree vs HEAD). It is a gate on closes, NOT a historical audit: legacy
+#     rows already closed before this gate existed are not re-judged, so the arm
+#     cannot block an unrelated commit over an old row;
+#   * the bases are the MAIN lineage — `main`, then `origin/main`, accepting an
+#     ancestor of either (a local main that is ahead of the pushed remote is the
+#     normal pre-push state). With neither ref present it falls back to HEAD and
+#     SAYS SO in its scope line;
+#   * a close with no commit_hash at all is allowed with an advisory count unless
+#     its own close prose claims the work was 'already merged' — then it is
+#     refused, because that claim is exactly what must be verified;
+#   * it is not a claim about the commit's CONTENT: an ancestor that is empty, or
+#     a merge that later reverted the change, is outside what ancestry can say.
 #
 # WHAT IS NOT CHECKED
 # -------------------
@@ -362,6 +400,155 @@ fail('shrink refused: '
 PY
 }
 
+# check_close_ancestry <git-repo-root> <board-dir>
+#
+# DF-CRIER-452: a close as "already merged" must be VERIFIED, not recorded.
+# Reads only the rows THIS diff changes into a closed state (index vs HEAD, or
+# worktree vs HEAD) and refuses any close whose commit_hash is not an ancestor of
+# the main lineage — `main`, else `origin/main`, else HEAD, named in the scope
+# line — and any hash that resolves to no commit at all. An 'already merged'
+# close carrying no hash is refused too, because the claim is the thing that must
+# be proven. Rows already closed at HEAD are never re-judged: this gates closes,
+# it is not a historical audit.
+check_close_ancestry() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    _err "board: python3 is required for the close-ancestry gate — refusing a silent skip."
+    return 2
+  fi
+  python3 - "$1" "$2" <<'PY'
+import json
+import os
+import re
+import subprocess
+import sys
+
+repo, board_dir = sys.argv[1], sys.argv[2]
+PREFIX = '.coding-hermes/board/'
+TASKS = 'tasks.jsonl'
+CLOSED = {'complete', 'closed', 'done', 'completed'}
+CLAIM = re.compile(r'already[\s_-]*merged', re.I)
+# Fields a closer writes. Deliberately NOT the filing prose (title/reasoning/
+# source): a row that merely DESCRIBES an 'already merged' defect is not a close
+# claiming one.
+CLOSE_PROSE = ('worker_summary', 'foreman_note', 'review_notes', 'note',
+               'resolution', 'close_note')
+
+
+def git(*args):
+    return subprocess.run(['git', '-C', repo, *args], capture_output=True,
+                          text=True)
+
+
+def say(message):
+    print('board: close-ancestry: ' + message)
+
+
+def err(message):
+    print('check-board.sh: board: close-ancestry: ' + message, file=sys.stderr)
+
+
+# A board root outside git has no branch to verify a close against. Say so —
+# the selftest fixtures are such roots — and leave the other arms to decide.
+if git('rev-parse', '--git-dir').returncode:
+    say('board root is not a git repository — no branch to verify a close '
+        'against; arm skipped')
+    raise SystemExit(0)
+
+baseline = git('show', 'HEAD:' + PREFIX + TASKS)
+if baseline.returncode:
+    say('no committed ' + PREFIX + TASKS + ' at HEAD — nothing to compare; '
+        'arm skipped')
+    raise SystemExit(0)
+
+path = os.path.join(board_dir, TASKS)
+try:
+    with open(path) as handle:
+        target_text = handle.read()
+except OSError as error:
+    err('cannot read ' + path + ': ' + str(error))
+    raise SystemExit(2)
+
+
+def parse(text):
+    rows = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get('id') is not None:
+            rows[str(row['id'])] = row
+    return rows
+
+
+before, after = parse(baseline.stdout), parse(target_text)
+
+bases = [name for name in ('main', 'origin/main')
+         if git('rev-parse', '--verify', '--quiet',
+                name + '^{commit}').returncode == 0]
+if not bases:
+    bases = ['HEAD']
+    say('neither main nor origin/main resolves here — verifying against HEAD '
+        '(the branch tip this commit extends)')
+
+new_closes = []
+for rid, row in after.items():
+    if row.get('status') not in CLOSED:
+        continue
+    prev = before.get(rid)
+    if (prev is not None and prev.get('status') in CLOSED
+            and str(prev.get('commit_hash') or '')
+            == str(row.get('commit_hash') or '')):
+        # Already closed at the baseline with the same hash: not a new close,
+        # not this arm's business (that is the legacy-row scope above).
+        continue
+    new_closes.append(row)
+
+refused = []
+unhashed = []
+checked = 0
+for row in new_closes:
+    rid = str(row['id'])
+    value = str(row.get('commit_hash') or '').strip()
+    if not value:
+        prose = ' '.join(str(row.get(field) or '') for field in CLOSE_PROSE)
+        if CLAIM.search(prose):
+            refused.append((rid, '(none)',
+                            "was closed as 'already merged' with no commit_hash "
+                            'to verify'))
+        else:
+            unhashed.append(rid)
+        continue
+    if git('rev-parse', '--verify', '--quiet', value + '^{commit}').returncode:
+        refused.append((rid, value,
+                        'is not a commit in this repository — there is nothing '
+                        'on the branch to verify'))
+        continue
+    checked += 1
+    if not any(git('merge-base', '--is-ancestor', value, base).returncode == 0
+               for base in bases):
+        refused.append((rid, value,
+                        'is not an ancestor of ' + ' / '.join(bases)))
+
+say('checked ' + str(checked) + ' new close(s) against ' + ' / '.join(bases)
+    + '; ' + str(len(unhashed)) + ' close(s) carried no commit_hash (allowed, '
+    'advisory only); ' + str(len(refused)) + ' refused')
+
+if refused:
+    for rid, value, reason in refused:
+        err('row ' + rid + ': commit_hash ' + value + ' ' + reason
+            + ' — cannot close as already-merged')
+    err('close refused: ' + str(len(refused)) + ' row(s) name a commit that is '
+        'not on the branch this close lands on; merge the work first, then close '
+        'with the MERGED commit (`git merge-base --is-ancestor <hash> '
+        + bases[0] + '` must exit 0)')
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
 run_check() {
   local root="$1" staged="${2:-0}" repo_root="$1"
   cleanup_index_root
@@ -417,6 +604,11 @@ run_check() {
   fi
   check_row_retention "$repo_root" "$board" "$retention_mode"
   local retention_rc=$?
+  # DF-CRIER-452: verify a close's commit_hash before the board can accept it.
+  # Runs on the same scope (index or worktree) the retention arm just measured,
+  # so the rows checked are the rows this commit will carry.
+  check_close_ancestry "$repo_root" "$board"
+  local ancestry_rc=$?
   # Retention diagnostics still run first (including the declared outcome), but
   # cannot hide the unconditional empty-file refusal or validator diagnostics.
 
@@ -462,6 +654,7 @@ run_check() {
     fi
   done
   [ "$retention_rc" -eq 0 ] || return "$retention_rc"
+  [ "$ancestry_rc" -eq 0 ] || return "$ancestry_rc"
   local warns
   warns="$(printf '%s\n' "$out" | grep -c '^\[warn\]' || true)"
   _say "board: validation PASS — $rows row(s) accepted ($warns warning(s), not fatal)"
@@ -619,6 +812,98 @@ PY
     fails=$((fails + 1))
   else
     _say "selftest: the hatch does not permit an empty events.jsonl (exit 1)"
+  fi
+
+  # fixture 7 (DF-CRIER-452): a close must name a commit that is ON the branch.
+  # MEASURED defect: rows closed as 'Implementation already merged in cfe9f0a'
+  # while `git merge-base --is-ancestor cfe9f0a main` exited 1 — the hash existed
+  # only on a worker branch. The fixture reproduces exactly that shape with a real
+  # sibling-branch commit, and proves BOTH arms:
+  #   7a an ancestor of main is ACCEPTED (so the arm is not refusing everything),
+  #   7b a commit that exists but is not on main is REFUSED, naming the hash,
+  #   7c an 'already merged' close with NO hash at all is REFUSED as well.
+  anc="$tmp/ancestry"
+  cat >"$tmp/close-row.py" <<'PY'
+import json
+import sys
+
+path, rid, value, prose = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+rows = [json.loads(line) for line in open(path) if line.strip()]
+for row in rows:
+    if str(row.get('id')) == rid:
+        row['status'] = 'complete'
+        if value == '-':
+            row.pop('commit_hash', None)
+        else:
+            row['commit_hash'] = value
+        if prose:
+            row['worker_summary'] = prose
+open(path, 'w').writelines(json.dumps(row) + '\n' for row in rows)
+PY
+  boardctl init -C "$anc" --project selftest --namespace selftest >/dev/null 2>&1
+  boardctl create -C "$anc" --id DF-452-ANCESTOR --title "a close naming a merged commit" --priority P2 >/dev/null 2>&1
+  boardctl create -C "$anc" --id DF-452-SIBLING --title "a close naming an unmerged commit" --priority P2 >/dev/null 2>&1
+  boardctl create -C "$anc" --id DF-452-NOHASH --title "a close claiming already merged with no commit" --priority P2 >/dev/null 2>&1
+  git -C "$anc" init -q >/dev/null 2>&1
+  git -C "$anc" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+  git -C "$anc" add -A >/dev/null 2>&1
+  git -C "$anc" -c core.hooksPath=/dev/null -c user.email=selftest@example.invalid -c user.name=selftest commit -qm base >/dev/null 2>&1
+  main_sha="$(git -C "$anc" rev-parse --short HEAD)"
+  # A real commit that exists in the repository but is NOT an ancestor of main.
+  git -C "$anc" checkout -q -b wt/sibling >/dev/null 2>&1
+  printf 'unmerged worker work\n' >"$anc/sibling-work.txt"
+  git -C "$anc" add sibling-work.txt >/dev/null 2>&1
+  git -C "$anc" -c core.hooksPath=/dev/null -c user.email=selftest@example.invalid -c user.name=selftest commit -qm "feat: unmerged worker commit" >/dev/null 2>&1
+  sibling_sha="$(git -C "$anc" rev-parse --short HEAD)"
+  git -C "$anc" checkout -q main >/dev/null 2>&1
+  if [ "$main_sha" = "$sibling_sha" ]; then
+    _err "selftest: the ancestry fixture built the same commit on both refs — the fixture is broken"
+    fails=$((fails + 1))
+  fi
+
+  cp -r "$anc" "$tmp/anc-ok"
+  python3 "$tmp/close-row.py" "$tmp/anc-ok/.coding-hermes/board/tasks.jsonl" \
+    DF-452-ANCESTOR "$main_sha" ""
+  run_check "$tmp/anc-ok" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    _err "selftest: a close naming an ancestor of main ($main_sha) was REJECTED (exit $rc) — the ancestry arm refuses legitimate closes"
+    fails=$((fails + 1))
+  else
+    _say "selftest: close naming an ancestor of main accepted ($main_sha)"
+  fi
+
+  cp -r "$anc" "$tmp/anc-bad"
+  python3 "$tmp/close-row.py" "$tmp/anc-bad/.coding-hermes/board/tasks.jsonl" \
+    DF-452-SIBLING "$sibling_sha" ""
+  bad_err="$(run_check "$tmp/anc-bad" 2>&1 >/dev/null)"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    _err "selftest: a close naming $sibling_sha — a commit on no branch that lands on main — was ACCEPTED; the ancestry arm is vacuous"
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$bad_err" | grep -qF "commit_hash $sibling_sha"; then
+    _err "selftest: the refusal did not name the unmerged commit $sibling_sha"
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$bad_err" | grep -qF "is not an ancestor of main"; then
+    _err "selftest: the refusal did not say which base the commit failed against"
+    fails=$((fails + 1))
+  else
+    _say "selftest: close naming unmerged commit $sibling_sha refused, naming the commit and the base"
+  fi
+
+  cp -r "$anc" "$tmp/anc-nohash"
+  python3 "$tmp/close-row.py" "$tmp/anc-nohash/.coding-hermes/board/tasks.jsonl" \
+    DF-452-NOHASH - "Implementation already merged in $sibling_sha"
+  nohash_err="$(run_check "$tmp/anc-nohash" 2>&1 >/dev/null)"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    _err "selftest: an 'already merged' close with no commit_hash was ACCEPTED — the claim was never verified"
+    fails=$((fails + 1))
+  elif ! printf '%s\n' "$nohash_err" | grep -qF "DF-452-NOHASH"; then
+    _err "selftest: the no-hash refusal did not name the row it refused"
+    fails=$((fails + 1))
+  else
+    _say "selftest: 'already merged' close with no commit_hash refused, naming the row"
   fi
 
   # Real commit/merge/applypatch entrypoints, not just direct checker calls.

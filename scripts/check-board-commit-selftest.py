@@ -874,6 +874,45 @@ def main():
                    'INVALID-1' if invalid else 'scope staged index')
             expect_board_only_scope('pre-applypatch', result, expected)
 
+        # DF-CRIER-452: a close that RECORDS a commit_hash must VERIFY it.
+        # MEASURED defect (2026-10-21 at main 0974c73): DF-CRIER-438/439/441 were
+        # closed with commit_hash=cfe9f0a and 'Implementation already merged in
+        # cfe9f0a' while `git merge-base --is-ancestor cfe9f0a main` exited 1 —
+        # the hash existed only on the worker branch, and the fix's own artefact
+        # was absent from main. Here a REAL `git commit` closes the row against a
+        # hash that lives on a sibling branch (must be refused, naming the hash)
+        # and then against a hash on main (must be accepted), so the gate is
+        # proven both discriminating and non-obstructive.
+        repo = fixture('close-ancestry')
+        board = repo / '.coding-hermes/board/tasks.jsonl'
+        git(repo, 'checkout', '-qb', 'wt/sibling')
+        (repo / 'unmerged.txt').write_text('worker work\n')
+        seed_commit(repo, 'unmerged worker commit (hooks disabled for setup)')
+        sibling = git(repo, 'rev-parse', '--short', 'HEAD').stdout.strip()
+        git(repo, 'checkout', '-q', 'main')
+        merged = git(repo, 'rev-parse', '--short', 'HEAD').stdout.strip()
+
+        def close_row(sha, note):
+            # Close ONE row in place: the fixture board keeps its row count, so a
+            # retention refusal can never be mistaken for the ancestry verdict.
+            rows = [json.loads(line) for line in board.read_text().splitlines()
+                    if line.strip()]
+            rows[0].update(status='complete', commit_hash=sha,
+                           worker_summary=note)
+            board.write_text(''.join(json.dumps(entry) + '\n' for entry in rows))
+            git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
+            return git(repo, 'commit', '-qm', 'board: close SELFTEST-1',
+                       check=False)
+
+        expect('DF-CRIER-452 real commit refuses a close over a sibling-branch commit',
+               close_row(sibling, 'Implementation already merged in ' + sibling),
+               1, 'commit_hash ' + sibling + ' is not an ancestor of main')
+        expect('DF-CRIER-452 the refusal left HEAD on the merged baseline',
+               git(repo, 'rev-parse', '--short', 'HEAD'), 0, merged)
+        expect('DF-CRIER-452 real commit accepts a close over a commit on main',
+               close_row(merged, 'worker commit ' + merged), 0,
+               'close-ancestry: checked 1 new close(s)')
+
         repo = fixture('no-verify')
         poison(repo)
         git(repo, 'add', '.coding-hermes/board/tasks.jsonl')
