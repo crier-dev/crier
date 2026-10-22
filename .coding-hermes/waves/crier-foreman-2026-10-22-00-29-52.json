@@ -1,0 +1,71 @@
+{
+  "tick_id": "crier-foreman-2026-10-22-00-29-52",
+  "block": "DF-CRIER-474",
+  "mode": "wave",
+  "slots": 6,
+  "workers": [
+    {
+      "task_id": "DF-CRIER-333",
+      "priority": "P1",
+      "title": "Browser access under CR_AUTH_TOKEN has no sign-in path",
+      "worktree": "crier-wt-333",
+      "branch": "wt/DF-CRIER-333",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "refused - stale base, owner-gated, board diff"
+    },
+    {
+      "task_id": "DF-CRIER-452",
+      "priority": "P1",
+      "title": "Close-as-merged gate: verify commit_hash is ancestor of main",
+      "worktree": "crier-wt-452",
+      "branch": "wt/DF-CRIER-452",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "complete - merged 1174d89"
+    },
+    {
+      "task_id": "DF-CRIER-466",
+      "priority": "P1",
+      "title": "Posture line says delivery ACL not armed when it IS enabled",
+      "worktree": "crier-wt-466",
+      "branch": "wt/DF-CRIER-466",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "failed - 0 commits, fixup dispatched tick 482"
+    },
+    {
+      "task_id": "DF-CRIER-467",
+      "priority": "P1",
+      "title": "Task send progress panel reports another message's delivery",
+      "worktree": "crier-wt-467",
+      "branch": "wt/DF-CRIER-467",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "failed - 0 commits, fixup not dispatched"
+    },
+    {
+      "task_id": "DF-CRIER-468",
+      "priority": "P1",
+      "title": "Agent-class read control always 403s",
+      "worktree": "crier-wt-468",
+      "branch": "wt/DF-CRIER-468",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "failed - 0 commits, fixup not dispatched"
+    },
+    {
+      "task_id": "DF-CRIER-469",
+      "priority": "P1",
+      "title": "Context view claims joiner was GIVEN messages recorded after it joined",
+      "worktree": "crier-wt-469",
+      "branch": "wt/DF-CRIER-469",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "verdict": "failed - 0 commits, fixup not dispatched"
+    }
+  ],
+  "created_at": "2026-10-22T00:29:52-05:00",
+  "finished_at": "2026-10-22T03:07:00-05:00",
+  "recovery_note": "Wave recovery tick 482: DF-CRIER-333 refused (stale+owner-gated+board-diff). DF-CRIER-452 complete. DF-CRIER-466/467/468/469 all RED (0 commits, stale base d8cec0d). Fixup worker dispatched for DF-CRIER-466 only; others pending next tick."
+}
