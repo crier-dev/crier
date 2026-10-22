@@ -46,6 +46,9 @@ function client(surface = 'disabled', sessionState = 'open') {
   });
   vm.runInContext(stateSource + '\n' + extract('function errorText(', 'function renderManagementFailures(') +
     extract('function composerState(', 'function renderReply(') + extract('function renderPosture(', 'function openSession(') +
+    // DF-CRIER-449: refresh() now re-reads the named-group panel, so the shipped
+    // group surface ships with the region this harness executes.
+    extract('function groupMembers(', 'function renderPermissions(') +
     html.split('\n').filter(line => /^\$\("(?:close|reopen)-session"\)\.addEventListener/.test(line)).join('\n'), context);
   const run = expression => vm.runInContext(expression, context);
   run('state.current = "room"; state.agent = "atlas";');

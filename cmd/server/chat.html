@@ -274,6 +274,19 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
       <button id="add-participant" type="submit" aria-describedby="composer-why" disabled>Add participant</button>
     </form><p id="participant-result" role="status"></p>
   </section>
+  <section class="panel" aria-labelledby="groups-title"><h2 id="groups-title">Named groups</h2>
+    <p id="groups-count" class="note" role="status">Loading GET /groups…</p>
+    <div id="groups" class="note">Loading named groups…</div>
+    <form id="group-create-form" class="stack">
+      <label>Group name<input id="group-name" required autocomplete="off" aria-describedby="group-help" placeholder="team"></label>
+      <label>Member agent IDs<input id="group-members" autocomplete="off" aria-describedby="group-help" placeholder="atlas, nimbus"></label>
+      <button id="group-create" type="submit" class="ghost" disabled>Create group</button>
+    </form>
+    <p id="group-help" class="note">A name is addressable as @team:name (an ident: a letter, digit or _ first, then letters, digits, _ . -). A member is an agent id; separate members with commas or spaces. Creating records the acting agent ID as created_by, so apply one in Connection &amp; identity first — attribution, not authentication.</p>
+    <p id="group-result" role="status"></p>
+    <div id="group-roster" class="note">Select a group to read its roster.</div>
+    <p class="note">Counts are measured from the returned roster, never placeholders. A group is a roster address, not an agent credential: it is not listed among agents and cannot send as one. Membership edits (PATCH /groups/{name}/members) are API-only and unavailable here.</p>
+  </section>
   <section class="panel" id="capability-matrix-panel" aria-labelledby="capability-matrix-title"><h2 id="capability-matrix-title">Declared-capability matrix</h2>
     <div id="capability-matrix" class="note" role="region" tabindex="0" aria-labelledby="capability-matrix-title" aria-describedby="capability-matrix-more capability-matrix-legend">Loading registry…</div>
     <p id="capability-matrix-more" class="note"></p>
@@ -314,7 +327,11 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
+<<<<<<< HEAD
 const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"" };
+=======
+const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
+>>>>>>> 34abd95 (feat(groups): add POST /groups and GET /groups for named group rosters. Addresses DF-CRIER-449.)
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -693,6 +710,12 @@ function updateComposer() {
   $("composer-refresh").hidden = !state.agent || !state.session || state.sending || state.requireAgentSignature === true || state.requireAgentSignature === false;
   $("send-button").title = why;
   for (const id of ["participant-agent","add-participant"]) { $(id).disabled = !enabled; $(id).title = why; }
+  // DF-CRIER-449: creating a roster needs an acting ID (it is the recorded
+  // created_by) and no send in flight — the reason is stated, never left implicit.
+  const groupWhy = !state.agent ? "Apply an acting agent ID first: a roster records who created it. That is attribution, not authentication."
+    : state.sending ? "Wait for the current send to finish."
+    : state.groupBusy ? "Creating the roster…" : "";
+  for (const id of ["group-name","group-members","group-create"]) { $(id).disabled = !!groupWhy; $(id).title = groupWhy; }
   for (const button of document.querySelectorAll("[data-task-action]")) {
     const ownerMismatch = button.dataset.taskAction === "complete" && (button.dataset.taskOwner !== state.agent || button.dataset.taskOwnerKind !== "agent");
     button.disabled = !enabled || ownerMismatch;
@@ -854,6 +877,73 @@ function renderParticipants(body) {
     return '<div class="card person"><span class="avatar" aria-hidden="true">' + avatar(p.member_id) + '</span><div><strong>' + esc(p.member_id) + '</strong><p class="note">' + esc(p.member_type) + ' · ' + esc(p.role) + ' · ' + (p.active ? "active member" : "removed member") + '</p><p class="note"><span class="dot ' + (a ? esc(a.status) : '') + '"></span>' + esc(status) + '</p>' + (a?.capabilities || []).map(c => '<span class="cap">' + esc(c) + '</span>').join("") + '</div></div>';
   }).join("") || '<p class="note">No participants returned.</p>';
 }
+// DF-CRIER-449: the named-group roster surface. A named group is an addressable
+// ROSTER (@team:name) — never an agent row and never a capability pool. Its count
+// is the length of the members the SERVER returned, so an empty group reads 0 and
+// an unreadable list says so rather than showing an invented roster.
+function groupMembers(g) { return Array.isArray(g?.members) ? g.members : []; }
+function groupCountLabel(n) { return n === 1 ? "1 member" : n + " members"; }
+function groupMemberTags(members) {
+  return members.map(m => '<span class="cap">' + esc(m) + '</span>').join("");
+}
+function renderGroups(body) {
+  const groups = Array.isArray(body?.groups) ? body.groups : [];
+  state.groups = groups;
+  const realm = state.namespace ? " in realm " + state.namespace : "";
+  $("groups-count").textContent = groups.length
+    ? (groups.length === 1 ? "1 named group" : groups.length + " named groups") + realm
+    : "No named groups" + realm + ".";
+  $("groups").innerHTML = groups.map(g => {
+    const members = groupMembers(g);
+    return '<div class="card"><div class="actions">' +
+      '<button type="button" class="ghost" data-group-read="' + esc(g.name) + '">Read ' + esc(g.name) + ' roster</button>' +
+      '<span class="pill">' + esc(groupCountLabel(members.length)) + '</span>' +
+      '<button type="button" class="ghost" data-group-address="' + esc(g.name) + '">Address @team:' + esc(g.name) + '</button></div>' +
+      '<p class="note">' + (members.length ? groupMemberTags(members) : "Empty roster — a send addressed to it fans out to nobody.") + '</p></div>';
+  }).join("") || '<p class="note">No named groups returned. Create one below — a group is a roster, not an agent.</p>';
+}
+function renderGroupRoster(g) {
+  state.group = g;
+  const members = groupMembers(g);
+  $("group-roster").innerHTML = '<div class="card"><strong>@team:' + esc(g.name) + '</strong>' +
+    '<p class="note">' + esc(groupCountLabel(members.length)) + ' · read ' + esc(stamp(g.updated_at)) + ' · ' + esc(g.namespace || "default realm") + '</p>' +
+    '<p class="note">' + (members.length ? groupMemberTags(members) : "Empty roster.") + '</p>' +
+    '<p class="note">Created by ' + esc(g.created_by || "not reported") + ' · last edited by ' + esc(g.updated_by || "not reported") + '</p>' +
+    '<p class="note">Read fresh from GET /groups/' + esc(g.name) + ': the next send to it resolves the members current at that moment, not this snapshot.</p></div>';
+}
+async function loadGroups() {
+  try { renderGroups(await call("/groups")); }
+  catch (e) {
+    state.groups = [];
+    if (e.serverCode === "GROUPS_UNCONFIGURED") {
+      // A deployment posture, neither an empty roster nor a page failure.
+      $("groups-count").textContent = "Named groups are not configured on this server.";
+      $("groups").innerHTML = '<p class="note">GET /groups answered GROUPS_UNCONFIGURED: no group store is wired on this deployment, so no group can be listed or created. That is a configuration posture, not an empty roster.</p>';
+      return;
+    }
+    $("groups-count").textContent = "Named groups unavailable.";
+    unavailable("groups", e);
+  }
+}
+async function readGroup(name) {
+  if (!name) return;
+  try { renderGroupRoster(await call("/groups/" + encodeURIComponent(name))); }
+  catch (e) { notice("group-roster", "Could not read the @team:" + name + " roster — " + e.message, true); }
+}
+// The named-group picker: it inserts the group's address token, it never sends and
+// never turns the group into a sender. A capability (@cap:) stays distinct.
+function addressGroup(name) {
+  if (!name || state.sending) return;
+  const composer = $("text");
+  // A disabled composer with no stated reason reads as a broken control: name the
+  // one unmet precondition instead of silently writing into a disabled field.
+  if (composer.disabled) { notice("group-result", "Open an open conversation first (Pick a channel / Create channel): the picker writes the @team:" + name + " address into that session's composer.", true); return; }
+  const token = "@team:" + name + " ";
+  const draft = composer.value;
+  composer.value = draft && !/\s$/.test(draft) ? draft + " " + token : draft + token;
+  composer.focus();
+  notice("group-result", "Inserted @team:" + name + " into the composer. Addressing a group fans ONE message out to every CURRENT member.");
+}
 function renderPermissions(body) {
   $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + (body.actions || Object.keys(r.allowed || {})).map(a => '<span class="pill ' + (r.allowed?.[a] === true ? 'mint' : '') + '">' + esc(a) + ': ' + (r.allowed?.[a] === true ? 'allowed' : r.allowed && typeof r.allowed === 'object' ? 'denied' : 'unknown') + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
 }
@@ -1003,7 +1093,8 @@ async function refresh() {
       state.permissionsArmed = b.management_surface === "disabled" ? false
         : ["enabled-unarmed","admin-token-gated"].includes(b.management_surface) ? true : null;
       renderPosture(b); updateComposer();
-    }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); })];
+    }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
+    loadGroups()];
   if (id) {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
@@ -1171,6 +1262,35 @@ $("add-participant-form").addEventListener("submit", async event => {
   finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 });
 $("participant-context-share").addEventListener("change", updateLateJoinPrompt);
+// DF-CRIER-449: reading a roster and picking a group are two different actions:
+// the first reads GET /groups/{name}, the second only inserts the address token.
+$("groups").addEventListener("click", e => {
+  const read = e.target.closest("[data-group-read]");
+  if (read) { void readGroup(read.dataset.groupRead); return; }
+  const address = e.target.closest("[data-group-address]");
+  if (address) addressGroup(address.dataset.groupAddress);
+});
+$("group-create-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (state.groupBusy || state.sending) return;
+  const name = $("group-name").value.trim();
+  const members = [...new Set($("group-members").value.split(/[\s,]+/).map(m => m.trim()).filter(Boolean))];
+  if (!state.agent) { notice("group-result", "Apply an acting agent ID first: a roster records who created it. That is attribution, not authentication.", true); return; }
+  if (!name) { notice("group-result", "A group name is required.", true); $("group-name").focus(); return; }
+  state.groupBusy = true; updateComposer();
+  notice("group-result", "Creating " + name + "…");
+  try {
+    // created_by is sent explicitly: the server also accepts X-Agent-ID, but the
+    // recorded author should be the one this page shows, not a header fallback.
+    const created = await call("/groups", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ name, created_by:state.agent, members }) });
+    const stored = groupMembers(created);
+    notice("group-result", "Created @team:" + created.name + " with " + groupCountLabel(stored.length) + (stored.length ? ": " + stored.join(", ") : ". An empty roster fans out to nobody."));
+    $("group-name").value = ""; $("group-members").value = "";
+    renderGroupRoster(created);
+    await loadGroups();
+  } catch (e) { notice("group-result", "Not created — " + e.message, true); }
+  finally { state.groupBusy = false; updateComposer(); }
+});
 $("sessions").addEventListener("click", e => { const row = e.target.closest("[data-session]"); if (row) openSession(row.dataset.session); });
 $("session-search").addEventListener("input",renderSessions);
 $("refresh").addEventListener("click",refresh);
@@ -1201,9 +1321,14 @@ $("identity-form").addEventListener("submit", event => {
   state.agent = $("agent").value.trim(); state.namespace = $("namespace").value.trim();
   rememberAttribution();
   $("initial-members").innerHTML = "";
+<<<<<<< HEAD
   state.expandedBranches = new Set(); state.locationMessage = null;
   state.current = null; state.session = null; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = [];
+=======
+  state.current = null; state.session = null; state.reply = null; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
+>>>>>>> 34abd95 (feat(groups): add POST /groups and GET /groups for named group rosters. Addresses DF-CRIER-449.)
   renderDirectory(); notice("capability-matrix","Loading registry…");
+  notice("groups-count","Loading GET /groups…"); notice("groups","Loading named groups…"); notice("group-roster","Select a group to read its roster."); notice("group-result","");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
   renderReply(); renderHeader(); renderSessions(); notice("send-result","");
   $("thread-filter").innerHTML = '<option value="">All threads</option>';

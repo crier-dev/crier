@@ -1794,7 +1794,7 @@ claims:
   - id: ROUTE-CHAT-INTERFACE-GROUPS
     kind: route
     doc: specs/CHAT-INTERFACE.md
-    quote: "**Named-group APIs ship; the browser roster surface does not.**"
+    quote: "**Named-group APIs and the browser roster surface ship (DF-CRIER-449).**"
     expect: "/groups"
     xfail: null
   - id: ANCHOR-CHAT-INTERFACE-SIGN-IN-OPEN
@@ -1811,11 +1811,6 @@ claims:
     kind: anchor
     doc: specs/CHAT-INTERFACE.md
     quote: "**The embedded transcript renders replies at one level, not as nesting (DF-CRIER-448).**"
-    xfail: null
-  - id: ANCHOR-CHAT-INTERFACE-GROUP-UI-OPEN
-    kind: anchor
-    doc: specs/CHAT-INTERFACE.md
-    quote: "**Named-group rosters are not manageable in the console (DF-CRIER-449).**"
     xfail: null
   - id: ANCHOR-CHAT-INTERFACE-ACCESSIBILITY-OPEN
     kind: anchor
