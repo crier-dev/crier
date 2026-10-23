@@ -41,5 +41,7 @@
   "status": "failed",
   "failure_reason": "3 workers produced zero diff (phantom dispatch); 1 worker (DF-CRIER-467) produced uncommitted work but main is red (TestChatLateJoinTruth, TestChatClientNoParallelAuthOrExecution fail on origin/main). No merges possible.",
   "recovered_at": "2026-10-23T02:10:00-05:00",
-  "recovery_tick": "crier-foreman-2026-10-23-01-48-47"
+  "recovery_tick": "crier-foreman-2026-10-23-01-48-47",
+  "finished_at": "2026-10-23T09:15:00-05:00",
+  "recovery_closeout": "verified all four manifest branches remain at zero commits ahead of current main; DF-CRIER-467 staged work preserved in its worktree; no merge performed because main and branch tips fail the existing chat tests"
 }
