@@ -1,0 +1,45 @@
+{
+  "tick_id": "crier-foreman-2026-10-23-00-31-33",
+  "block": "DF-CRIER-474",
+  "mode": "wave",
+  "slots": 4,
+  "workers": [
+    {
+      "task_id": "DF-CRIER-467",
+      "priority": "P1",
+      "title": "task send progress panel reports another message's delivery",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-467",
+      "branch": "wt/DF-CRIER-467",
+      "brief": "/tmp/crier-t484-brief-DF-CRIER-467.txt"
+    },
+    {
+      "task_id": "DF-CRIER-470",
+      "priority": "P1",
+      "title": "membership writes trust caller-supplied actor",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-470",
+      "branch": "wt/DF-CRIER-470",
+      "brief": "/tmp/crier-t484-brief-DF-CRIER-470.txt"
+    },
+    {
+      "task_id": "DF-CRIER-465",
+      "priority": "P2",
+      "title": "member-join system event does not say who added",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-465",
+      "branch": "wt/DF-CRIER-465",
+      "brief": "/tmp/crier-t484-brief-DF-CRIER-465.txt"
+    },
+    {
+      "task_id": "DF-CRIER-471",
+      "priority": "P2",
+      "title": "POST /sessions answers 400 after partial creation",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-471",
+      "branch": "wt/DF-CRIER-471",
+      "brief": "/tmp/crier-t484-brief-DF-CRIER-471.txt"
+    }
+  ],
+  "created_at": "2026-10-23T00:31:33-05:00",
+  "status": "failed",
+  "failure_reason": "3 workers produced zero diff (phantom dispatch); 1 worker (DF-CRIER-467) produced uncommitted work but main is red (TestChatLateJoinTruth, TestChatClientNoParallelAuthOrExecution fail on origin/main). No merges possible.",
+  "recovered_at": "2026-10-23T02:10:00-05:00",
+  "recovery_tick": "crier-foreman-2026-10-23-01-48-47"
+}
