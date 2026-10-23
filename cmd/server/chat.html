@@ -327,7 +327,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
+const state = { current:null, session:null, sessionRead:"not-selected", sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -738,7 +738,8 @@ function renderHeader() {
   const s = state.session;
   $("conversation-title").textContent = s ? s.title || s.id : "Choose a conversation";
   $("conversation-meta").textContent = s ? s.id + " · " + s.kind + " · " + (s.visibility || "realm") + " · " + s.participant_count + " participants · " + s.audience_count + " agents" : "No readable session selected.";
-  $("session-state").textContent = typeof s?.state === "string" && s.state ? s.state : "Unavailable";
+  const sessionState = state.sessionRead === "pending" ? "Read not attempted" : state.sessionRead === "failed" ? "Read failed" : state.sessionRead === "refused" ? "Read refused" : typeof s?.state === "string" && s.state ? s.state : "No session";
+  $("session-state").textContent = sessionState;
   $("session-state").className = "pill" + (s?.state === "open" ? " mint" : "");
   $("breadcrumb").textContent = (state.namespace || "Default realm") + " / " + (s ? s.title || s.id : "Conversations");
   updateComposer();
@@ -949,7 +950,10 @@ function addressGroup(name) {
   notice("group-result", "Inserted @team:" + name + " into the composer. Addressing a group fans ONE message out to every CURRENT member.");
 }
 function renderPermissions(body) {
-  $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + (body.actions || Object.keys(r.allowed || {})).map(a => '<span class="pill ' + (r.allowed?.[a] === true ? 'mint' : '') + '">' + esc(a) + ': ' + (r.allowed?.[a] === true ? 'allowed' : r.allowed && typeof r.allowed === 'object' ? 'denied' : 'unknown') + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
+  const actions = Array.isArray(body.actions) ? body.actions : [...new Set((body.rows || []).flatMap(r => r.allowed && typeof r.allowed === "object" ? Object.keys(r.allowed) : []))];
+  const permission = (allowed, action) => allowed && typeof allowed === "object" && Object.prototype.hasOwnProperty.call(allowed, action)
+    ? allowed[action] === true ? "allowed" : "denied" : "not reported";
+  $("permissions").innerHTML = (body.rows || []).map(r => '<div class="card"><strong>' + esc(r.member_type + ":" + r.member_id) + '</strong><p class="note">' + esc(r.role) + '</p><div class="actions">' + actions.map(a => '<span class="pill ' + (permission(r.allowed, a) === "allowed" ? 'mint' : '') + '">' + esc(a) + ': ' + permission(r.allowed, a) + (r.source?.[a] ? ' (' + esc(r.source[a]) + ')' : '') + '</span>').join("") + '</div></div>').join("") || '<p class="note">No permission rows returned.</p>';
 }
 function renderTasks(body) {
   const html = (body.tasks || []).map(t => {
@@ -1136,7 +1140,7 @@ async function refresh() {
     }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; state.managementSurface = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
     loadGroups()];
   if (id) {
-    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
+    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.sessionRead = "read"; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.sessionRead = e.status >= 400 && e.status < 500 ? "refused" : "failed"; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
     reads.push(read(sessionPath(id,"permissions"), renderPermissions, e => unavailable("permissions",e)));
     reads.push(read(sessionPath(id,"tasks"), renderTasks, e => { unavailable("tasks",e); updateMessageTaskLinks(); }));
@@ -1149,7 +1153,7 @@ function openSession(id) {
   if (state.current !== id && $("text").value && !window.confirm("Discard the unsent draft and switch conversations?")) return;
   resetAudienceWarning(); state.participants = []; $("participant-agent").value = ""; notice("participant-result",""); notice("task-result","");
   state.expandedBranches = new Set(); state.locationMessage = null;
-  state.current = id; state.session = null; state.messages = []; state.systemEvents = []; state.reply = null; state.branch = false; state.thread = "";
+  state.current = id; state.session = null; state.sessionRead = "pending"; state.messages = []; state.systemEvents = []; state.reply = null; state.branch = false; state.thread = "";
   $("participant-context-share").value = "summary"; $("participant-context-boundary").value = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
@@ -1362,7 +1366,7 @@ $("identity-form").addEventListener("submit", event => {
   rememberAttribution();
   $("initial-members").innerHTML = "";
   state.expandedBranches = new Set(); state.locationMessage = null;
-  state.current = null; state.session = null; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
+  state.current = null; state.session = null; state.sessionRead = "not-selected"; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
   renderDirectory(); notice("capability-matrix","Loading registry…");
   notice("groups-count","Loading GET /groups…"); notice("groups","Loading named groups…"); notice("group-roster","Select a group to read its roster."); notice("group-result","");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
