@@ -7,7 +7,7 @@ description: >-
   scheme, the ack contract, webhook delivery modes + HMAC, fed-link caveats,
   and common pitfalls. Load this when working in the crier repo or
   integrating with a running crier server.
-version: 1.6.0
+version: 1.7.0
 ---
 
 # Crier Usage — field guide for agents
@@ -528,3 +528,29 @@ Reader rules this gate assumes, and you should keep:
    attributed. Repair recipe and the full evidence trail:
    `docs/dogfood/diagnostics-2026-10-20-board-truncation.md` and
    `docs/dogfood/2026-10-20-board-truncation-gate.md`.
+
+## Named groups + late-join context + lifecycle (live-verified 2026-10-23 @ 59d503b)
+
+- Send to a named group from a session: the body tag `@team:<name>` in the
+  payload text, or `targets:[{"kind":"group","id":"<name>"}]`. NEVER
+  `{"kind":"team",...}` — accepted but silently delivers to NOBODY (201, empty
+  dispatch, DEBUG-only log; DF-CRIER-475). Only kind `group` fans out.
+- Group store: `POST /groups` (created_by is a STRING here, unlike the session's
+  object form), dup → 409 GROUP_EXISTS; membership edit =
+  `PATCH /groups/{name}/members` `{add:[...], remove:[...], actor:...}` (remove
+  first). Roster accepts UNREGISTERED placeholder ids; a send to one records a
+  refused AGENT_NOT_FOUND outcome per member, never a silent drop.
+- Context share (§4.6): add a participant with `context_share:"none"|"summary"|"since"|"full"`
+  (+ top-level `context_boundary_message_id` for since). Missing boundary → 400
+  INVALID_CONTEXT_SHARE; unknown/cross-session boundary → 400
+  CONTEXT_BOUNDARY_NOT_FOUND. Empty session joins record `none`; a default join
+  on a nonempty session records `summary` with the inclusive upper edge.
+- What the joiner was GIVEN: `GET /sessions/{id}/participants/{type}/{id}/context`
+  — share, set_by/at, given_message_ids, generated_summary (summary mode), and an
+  explanation. Later changes: PUT on the same route (new event, never a rewrite).
+- Lifecycle: `POST /sessions/{id}/state` `{"state":"closed"|"open","sender":...}`.
+  200 reads the session back; double-close/reopen-open 409s are named; all
+  transitions land durable system_events (session.close / session.reopen).
+- Membership re-add is 201 + a NEW member.add event (no 409, no dedupe): a
+  retried request doubles the join event in the transcript (event-sequence model
+  per spec §2.3/§2.4 — observe, don't retry blindly).
