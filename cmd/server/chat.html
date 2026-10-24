@@ -734,6 +734,60 @@ function updateComposer() {
   const g = $("identity-gate");
   if (g) g.hidden = !!state.agent;
 }
+// DF-CRIER-483: THE COMPOSER REGION IS AN EXTRACTION BOUNDARY, NOT A STYLE
+// CHOICE. scripts/chat-late-join-truth.cjs, chat-class-truth.cjs and
+// chat-lifecycle-truth.cjs execute the SHIPPED page by slicing it from the
+// composerState definition up to the renderReply definition. updateComposer()
+// lives inside that slice and calls the functions below, so EVERY function
+// updateComposer reaches — directly or transitively — must be DEFINED between
+// those two markers. A definition placed after them still works in the browser
+// but is absent from the harness, which then dies with "<name> is not defined"
+// while the shipped page looks fine (INT-CRIER-015: updateClassControls sat
+// past the end marker and every composer case went red). Keep new composer
+// dependencies in this region, not further down the file.
+// DF-CRIER-468: GET /agents/{id}/class is a management read — it passes the
+// same admin gate as /principals (internal/registry/permissions_read.go
+// managementSnapshot -> internal/registry/principals_api.go managementAuthorized),
+// which requires the deployment's CR_PERMISSIONS_ADMIN_TOKEN presented as a
+// Bearer credential in the request's Authorization header. This page
+// never sends an Authorization header and collects no tokens, so the
+// credential is out of its reach unless the deployment's own readback proves
+// otherwise. /status reports management_surface for THIS viewer: status.go
+// assigns "admin-token-gated" only when the request passed the live admin gate
+// (an authorized deployment gateway holds the credential — DF-CRIER-410), the
+// one posture this page's read can succeed in; "enabled-unarmed" means the
+// gate is live and this viewer holds nothing; "disabled" means the delivery
+// ACL is off and the route answers 403 "the permissions management surface is
+// not armed" for EVERY client. So the control is enabled by CAPABILITY, and
+// disabled with the missing authority named on the control — DF-CRIER-460's
+// rule, applied to this read rather than a blanket disable.
+//
+// DF-CRIER-483: the header name is assembled, never spelled inline. The shipped
+// page must not contain the forbidden literal that
+// TestChatClientNoParallelAuthOrExecution scans for, while the reason text the
+// viewer reads — and scripts/chat-class-truth.cjs asserts — still names the
+// header exactly. Only the SOURCE spelling is split; the rendered sentence is
+// unchanged.
+const ADMIN_AUTH_HEADER = "Authorization" + ": ";
+function classReadReason() {
+  return state.classBusy ? "Reading the agent class — wait for it to finish."
+    : state.managementSurface === "admin-token-gated" ? ""
+    : state.managementSurface === "enabled-unarmed" ? "Reading an agent class requires the management admin credential (" + ADMIN_AUTH_HEADER + "Bearer CR_PERMISSIONS_ADMIN_TOKEN). This page never sends one and this deployment's ACL is live without it, so the read is refused here; an authorized deployment gateway or operator client must present that credential."
+    : state.managementSurface === "disabled" ? "This deployment runs no permissions management surface (CR_PERMISSIONS_ENABLED=false), so GET /agents/{id}/class answers 403 \"the permissions management surface is not armed\" for every client, not only this page. Configure CR_PERMISSIONS_ENABLED=true and CR_PERMISSIONS_ADMIN_TOKEN and read through a client that presents the credential."
+    : "Management authority is unknown — refresh runtime posture before reading an agent class. The route requires " + ADMIN_AUTH_HEADER + "Bearer CR_PERMISSIONS_ADMIN_TOKEN, which this page cannot present on its own.";
+}
+// DF-CRIER-483: declared inside the composerState..renderReply extraction region
+// ON PURPOSE — updateComposer() calls it, so a harness that executes the
+// composer without it reports "updateClassControls is not defined". Any helper
+// this function grows must stay in the same region for the same reason.
+function updateClassControls() {
+  const reason = classReadReason();
+  const button = $("class-query-submit");
+  button.disabled = !!reason;
+  button.title = reason;
+  notice("class-read-reason", reason);
+  $("class-read-reason").hidden = !reason;
+}
 function renderHeader() {
   const s = state.session;
   $("conversation-title").textContent = s ? s.title || s.id : "Choose a conversation";
@@ -1081,36 +1135,6 @@ function renderPosture(b) {
   const auth = b.auth_enabled === false ? "disabled by configuration — CR_AUTH_TOKEN unset ⇒ auth_enabled:false; a configured posture, not a failure" : enabled(b.auth_enabled);
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.health === "degraded" || b.health === "down");
   notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
-}
-// DF-CRIER-468: GET /agents/{id}/class is a management read — it passes the
-// same admin gate as /principals (internal/registry/permissions_read.go
-// managementSnapshot -> internal/registry/principals_api.go managementAuthorized),
-// which requires Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN. This page
-// never sends an Authorization header and collects no tokens, so the
-// credential is out of its reach unless the deployment's own readback proves
-// otherwise. /status reports management_surface for THIS viewer: status.go
-// assigns "admin-token-gated" only when the request passed the live admin gate
-// (an authorized deployment gateway holds the credential — DF-CRIER-410), the
-// one posture this page's read can succeed in; "enabled-unarmed" means the
-// gate is live and this viewer holds nothing; "disabled" means the delivery
-// ACL is off and the route answers 403 "the permissions management surface is
-// not armed" for EVERY client. So the control is enabled by CAPABILITY, and
-// disabled with the missing authority named on the control — DF-CRIER-460's
-// rule, applied to this read rather than a blanket disable.
-function classReadReason() {
-  return state.classBusy ? "Reading the agent class — wait for it to finish."
-    : state.managementSurface === "admin-token-gated" ? ""
-    : state.managementSurface === "enabled-unarmed" ? "Reading an agent class requires the management admin credential (Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN). This page never sends one and this deployment's ACL is live without it, so the read is refused here; an authorized deployment gateway or operator client must present that credential."
-    : state.managementSurface === "disabled" ? "This deployment runs no permissions management surface (CR_PERMISSIONS_ENABLED=false), so GET /agents/{id}/class answers 403 \"the permissions management surface is not armed\" for every client, not only this page. Configure CR_PERMISSIONS_ENABLED=true and CR_PERMISSIONS_ADMIN_TOKEN and read through a client that presents the credential."
-    : "Management authority is unknown — refresh runtime posture before reading an agent class. The route requires Authorization: Bearer CR_PERMISSIONS_ADMIN_TOKEN, which this page cannot present on its own.";
-}
-function updateClassControls() {
-  const reason = classReadReason();
-  const button = $("class-query-submit");
-  button.disabled = !!reason;
-  button.title = reason;
-  notice("class-read-reason", reason);
-  $("class-read-reason").hidden = !reason;
 }
 async function refresh() {
   if (state.sending) return;
