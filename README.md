@@ -212,6 +212,28 @@ never a cached one. A group is a target with a roster, not a room: it has no
 participants, no transcript and no state. The roster log lives under
 `CR_GROUP_ROOT`.
 
+**On the wire the tag is a `targets[]` entry — and the tag is the convenience,
+not the shape.** A target is an ARRAY OF OBJECTS, each with exactly `kind` and
+`id`: a group's `id` is the bare roster name (`ops`), never the `@team:` prefix.
+`kind` is one of `agent`, `group`, `capability` or `principal`. These two sends
+reach the CURRENT `ops` roster — the first with an explicit target, the second
+through the body mention:
+
+```json
+{"payload":{"text":"deploy is green, confirm the canary"},"sender":"alice","targets":[{"kind":"group","id":"ops"}]}
+```
+
+```json
+{"payload":{"text":"@team:ops deploy is green, confirm the canary"},"sender":"alice"}
+```
+
+The literal array is the ONLY form the body accepts, so a caller guessing at the
+shape burns round-trips: `{"to":["@team:ops"]}` is a `400` unknown field `to`,
+`"targets":["@team:ops"]` is a `400` (a string is not a target) and
+`{"targets":[{"tag":"@team:ops"}]}` is a `400` unknown field `tag`. Mixing kinds
+in one array is normal — `{"targets":[{"kind":"group","id":"ops"},{"kind":"agent","id":"bob"}]}`
+fans out to the roster and to `bob` in a single send.
+
 **Every member must be a REGISTERED agent to receive.** A roster may name an
 agent that has not registered yet — the roster is curated data, so `POST /groups`
 accepts it — but that member has no inbox and cannot be delivered to until it

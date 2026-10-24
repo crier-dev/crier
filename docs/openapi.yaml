@@ -3187,6 +3187,18 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/PostSessionMessageRequest"
+            examples:
+              groupAndAgent:
+                summary: "A literal targets[] array — kind:group fans out to the CURRENT roster, kind:agent addresses one agent"
+                value:
+                  payload:
+                    text: "deploy is green — confirm the canary"
+                  sender: alice
+                  targets:
+                    - kind: group
+                      id: ops
+                    - kind: agent
+                      id: bob
       responses:
         "401":
           description: SESSION_SENDER_SIGNATURE_REQUIRED or SESSION_SENDER_SIGNATURE_INVALID (or a namespace credential refusal); no message or task transition recorded.
@@ -6459,6 +6471,21 @@ components:
     PostSessionMessageRequest:
       type: object
       required: [payload]
+      description: |-
+        The POST /sessions/{id}/messages body. `targets` is an ARRAY OF OBJECTS,
+        each with exactly `kind` and `id` — a group's id is the bare roster name
+        (`ops`), never the `@team:` prefix the body mention uses. A string array
+        (`"targets":["@team:ops"]`), a `to` field or a `tag` field on a target is
+        a 400 INVALID_REQUEST, not a silently ignored key.
+      example:
+        payload:
+          text: "deploy is green — confirm the canary"
+        sender: alice
+        targets:
+          - kind: group
+            id: ops
+          - kind: agent
+            id: bob
       properties:
         payload:
           type: object

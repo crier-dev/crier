@@ -457,6 +457,58 @@ Check the refusal text too: it names the range (`{"error":"priority must be
 value inside the documented range and is accepted, `priority: 10` is one past it
 and is refused.
 
+**1d. A named group as an explicit `targets[]` send (CR-CHAT-022)** — the wire
+shape behind the `@team:<name>` tag, and the piece a tester used to have to
+guess. A group is a TARGET — `{"kind":"group","id":"ops"}` — never a bare
+string, a `to`, or a `tag`. The roster fans out through the same inbox path §1
+just used: one delivery per CURRENT member (the authoring agent excepted, as any
+send's audience rule does), and a member the registry does not hold is a recorded
+SKIP, never a fatal error.
+
+```bash
+# A roster over the two agents §0b registered. `created_by` (or an X-Agent-ID
+# header) is required; the roster is curated data, so an unregistered member is
+# accepted HERE and skipped on send.
+curl -s -X POST $BASE/groups -H 'Content-Type: application/json' \
+  -d '{"name":"ops","created_by":"alice","members":["alice","bob"]}'          # -> 201
+
+# A session to send into. The creator is required (400 CREATED_BY_REQUIRED
+# without one); unlike a message send this call needs no signature.
+TS=$(date +%s)
+SID=$(curl -s -X POST $BASE/sessions -H 'Content-Type: application/json' \
+  -d "{\"title\":\"group send $TS\",\"created_by\":{\"agent\":\"alice\"}}" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')           # -> 201
+
+# THE SHAPE — copy this `targets` array verbatim. Each target is an OBJECT with
+# exactly two keys, `kind` and `id`; a group's id is the BARE roster name
+# (`ops`), never the `@team:` prefix the body mention takes. `kind` is one of
+# agent, group, capability, principal. The send is SIGNED (signatures are on),
+# so the sender and X-Agent-ID are the same agent.
+SPATH=/sessions
+TS=$(date +%s)
+SEND=(-H 'Content-Type: application/json' -H "X-Agent-ID: alice" -H "X-Agent-Ts: ${TS}" \
+  -H "X-Agent-Sig: $(sig /tmp/crier-alice.key POST $SPATH/$SID/messages "$TS")")
+curl -s -X POST $BASE/sessions/$SID/messages "${SEND[@]}" \
+  -d '{"payload":{"text":"deploy is green"},"sender":"alice","targets":[{"kind":"group","id":"ops"}]}'
+# -> 201 with "audience":{"rule":"explicit","targets":[{"kind":"group","id":"ops"}]}
+#    and one outcome per CURRENT member (never the author). bob's §1 retrieve
+#    (signed as bob) holds the message: the group is a fan-out, not a room.
+
+# The three shapes that do NOT work, each a 400 naming the real cause. These are
+# the round-trips the shape above replaces:
+curl -s -X POST $BASE/sessions/$SID/messages "${SEND[@]}" \
+  -d '{"payload":{"text":"x"},"sender":"alice","to":["@team:ops"]}'           # -> 400 unknown field "to"
+curl -s -X POST $BASE/sessions/$SID/messages "${SEND[@]}" \
+  -d '{"payload":{"text":"x"},"sender":"alice","targets":["@team:ops"]}'      # -> 400 cannot unmarshal string
+curl -s -X POST $BASE/sessions/$SID/messages "${SEND[@]}" \
+  -d '{"payload":{"text":"x"},"sender":"alice","targets":[{"tag":"@team:ops"}]}'  # -> 400 unknown field "tag"
+
+# Mixing kinds in ONE array is one send, not two: the roster's fan-out plus bob.
+curl -s -X POST $BASE/sessions/$SID/messages "${SEND[@]}" \
+  -d '{"payload":{"text":"both"},"sender":"alice","targets":[{"kind":"group","id":"ops"},{"kind":"agent","id":"bob"}]}'
+# -> 201 "audience":{"rule":"explicit", ...}: two targets, one message.
+```
+
 **2. Relay pub/sub** — fan-out to live subscribers (topic patterns support `*`
 for exactly one segment and a terminal `>` for one-or-more):
 
