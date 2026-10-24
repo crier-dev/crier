@@ -2029,6 +2029,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeAPIError writes this surface's ONE error envelope: a named machine
+// code in `error` and a human `detail`, so a client can branch on the code and
+// a reader can tell WHAT was not found (DF-CRIER-480). Both fields are always
+// written: an error body with a code and no detail is the shape that left the
+// late-join context GET's callers unable to tell a wrong member from a wrong
+// session from an unset share.
+//
+// The vocabulary is only this surface's answers. A 404 whose body carries
+// neither field — most commonly the router's bare {"error":"not found"}
+// (cmd/server/fallback.go) — did not reach a session handler at all: the
+// request path did not match the route template (a trailing slash on the
+// canonical path is the usual cause). No handler in this package writes that
+// shape, and none may start to: it would be indistinguishable from a path miss.
 func writeAPIError(w http.ResponseWriter, status int, code, detail string) {
 	writeJSON(w, status, map[string]string{"error": code, "detail": detail})
 }
