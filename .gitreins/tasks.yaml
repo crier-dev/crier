@@ -2995,3 +2995,11 @@ tasks:
     -count=1 -cover output
   status: in_progress
   created_at: '2026-10-20T00:44:22.823589+00:00'
+- id: DF-CRIER-479
+  title: Make empty session audience explicit
+  criteria:
+  - 201 response documents zero-participant audience or adds explicit dispatch evidence
+    and regression coverage
+  status: complete
+  created_at: '2026-10-24T02:25:37.880024+00:00'
+  completed_at: '2026-10-24T03:08:18.712809+00:00'
