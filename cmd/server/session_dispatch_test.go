@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,19 @@ func sessionDispatchFixture(t *testing.T, hook http.Handler, verdict string) (st
 }
 
 func sessionDispatchFixtureAtRoot(t *testing.T, hook http.Handler, verdict, logRoot string) (string, string, *atomic.Int32, <-chan webhook.Envelope) {
+	t.Helper()
+	return sessionDispatchFixtureAtRootWithEnv(t, hook, verdict, logRoot, nil)
+}
+
+// sessionDispatchFixtureAtRootWithEnv is sessionDispatchFixtureAtRoot with extra
+// server environment. INT-CI-014: the delivery budget is a CONFIG value
+// (CR_SESSION_DELIVERY_TIMEOUT_MS, 1..30000ms, default 30000), and a test that
+// asserts an OUTCOME rather than the budget's magnitude was paying the default
+// wall clock for it — a failed blocking webhook retries with backoff until the
+// budget expires, so the default made one subtest cost 30s of a 60s package
+// budget. Passing `extra` lets such a test state the budget it actually needs
+// while exercising the identical retry/classify/refuse path.
+func sessionDispatchFixtureAtRootWithEnv(t *testing.T, hook http.Handler, verdict, logRoot string, extra map[string]string) (string, string, *atomic.Int32, <-chan webhook.Envelope) {
 	t.Helper()
 	calls := &atomic.Int32{}
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,11 +61,16 @@ func sessionDispatchFixtureAtRoot(t *testing.T, hook http.Handler, verdict, logR
 		t.Cleanup(receiver.Close)
 		hookURL = receiver.URL
 	}
-	base := startTestServerWithEnv(t, map[string]string{
+	env := map[string]string{
 		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": logRoot,
 		"CR_REQUIRE_AGENT_SIG": "false", // inspect the durable write; signature behavior has its own battery
 		"CR_GROUP_LOG_ROOT":    t.TempDir(), "CR_GUARD_ENABLED": "true", "SESSION_GUARD_TEST_KEY": "test-key",
-	})
+	}
+	// Caller-supplied keys win: they are what the test means to bound.
+	for k, v := range extra {
+		env[k] = v
+	}
+	base := startTestServerWithEnv(t, env)
 	agent := map[string]any{"id": "session-target", "public_key": strings.Repeat("ab", 32),
 		"guard": map[string]any{"policies": []any{map[string]any{"id": "session-policy", "fail_closed": true,
 			"providers": []any{map[string]string{"provider": "custom", "model": "mock-model", "base_url": llm.URL, "api_key_ref": "env:SESSION_GUARD_TEST_KEY"}}}}},
@@ -130,15 +149,43 @@ func TestSessionFanoutConsultsTargetGuard(t *testing.T) {
 	require.Zero(t, msg.Delivered)
 }
 
+// INT-CI-014: this test asserts the OUTCOME of a failed blocking webhook, not the
+// magnitude of the delivery budget. It used to run against the 30000ms default, so
+// the InternalServerError subtest — a RETRYABLE status, retried with backoff until
+// the budget expires — cost the full 30s of a 60s per-package `make test` budget
+// while buying no additional assertion (measured: 30.39s of the package's 60s
+// deadline, the second-largest single test in cmd/server).
+//
+// The budget is a config value (CR_SESSION_DELIVERY_TIMEOUT_MS, and RUNTIME_TIMEOUT_MS
+// must stay strictly below it), so the test now states the budget it needs in
+// milliseconds instead of inheriting the production default. The retry, classify and
+// refuse path is the production one and is unchanged; `attempts` below is bounded so a
+// future change that returns this test to the default budget reds it on WALL CLOCK
+// rather than silently eating half the package's deadline again.
 func TestSessionFanoutWebhookFailureIsRefused(t *testing.T) {
+	// 2s of budget fits the first retry (backoff(1)=1s) and then the deadline, which is
+	// all this test needs: one retry proves the ladder runs, the deadline proves the
+	// refusal is reported when it ends.
+	const (
+		sessionBudget = 2000
+		runtimeBudget = 1500
+		// 5x the budget: generous enough for a loaded runner, far below the 30s
+		// default this test must never quietly return to.
+		wallCeiling = 10 * time.Second
+	)
 	for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			root := t.TempDir()
-			base, room, _, envelopes := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			base, room, _, envelopes := sessionDispatchFixtureAtRootWithEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"reply":"must not become a reply"}`))
-			}), "allow", root)
+			}), "allow", root, map[string]string{
+				"CR_SESSION_DELIVERY_TIMEOUT_MS": strconv.Itoa(sessionBudget),
+				"RUNTIME_TIMEOUT_MS":             strconv.Itoa(runtimeBudget),
+			})
+			started := time.Now()
 			msg := sendDispatchMessage(t, base, room)
+			elapsed := time.Since(started)
 			require.Equal(t, "refused", msg.Outcomes[0].Outcome, "a failed webhook is not a delivered message")
 			require.NotEmpty(t, msg.Outcomes[0].Reason)
 			require.NotEmpty(t, envelopes)
@@ -154,6 +201,36 @@ func TestSessionFanoutWebhookFailureIsRefused(t *testing.T) {
 			require.Equal(t, http.StatusOK, code, "%s", raw)
 			require.Len(t, transcript.Messages, 1)
 			require.Equal(t, "refused", transcript.Messages[0].Outcomes[0].Outcome)
+
+			// INT-CI-014 regression gates. Two properties this test must keep now that
+			// its budget is stated rather than inherited:
+			//
+			//  1. the budget it asked for is the budget it got — an unbounded or
+			//     default-budget wait is the defect, so the wall clock is asserted
+			//     against the ceiling, not merely reported;
+			//  2. the retry CLASSIFIER still runs: a 4xx that is not 408/429 is
+			//     non-retryable (exactly one attempt), a 5xx is retryable (more than
+			//     one attempt). Without this, "fast" could be reached by refusing
+			//     before ever retrying, which is a different behaviour.
+			require.Less(t, elapsed, wallCeiling,
+				"a failed blocking webhook took %s against a %dms budget: the delivery budget must bound this wait", elapsed, sessionBudget)
+			attempts := 0
+			for {
+				select {
+				case <-envelopes:
+					attempts++
+					continue
+				default:
+				}
+				break
+			}
+			if status == http.StatusInternalServerError {
+				require.Greater(t, attempts, 1,
+					"a 5xx is retryable: the blocking delivery must retry inside its budget (attempts=%d)", attempts)
+			} else {
+				require.Equal(t, 1, attempts,
+					"a non-retryable 4xx must not be retried (attempts=%d)", attempts)
+			}
 		})
 	}
 }
