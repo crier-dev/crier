@@ -36,7 +36,7 @@ help:
 	@echo "  mcp               Build and run the MCP bridge in one command (stdio; the documented launcher — its stdout carries only JSON-RPC frames)"
 	@echo "  run               Build and run the server (default :8767, pidfile $(PIDFILE))"
 	@echo "  stop              Stop the server started by make run (reads $(PIDFILE); no pidfile = nothing to stop, exit 0)"
-	@echo "  test              Full test suite, no caching (go test ./... -count=1 -timeout 60s)"
+	@echo "  test              Full test suite, no caching, packages serialized (go test ./... -count=1 -timeout 60s -p 1)"
 	@echo "  test-short        Unit tests only — skips integration, no Docker required"
 	@echo "  test-integration  PostgreSQL-backed registry tests (requires Docker)"
 	@echo "  lint              Static analysis (go vet ./...)"
@@ -107,7 +107,7 @@ mcp: build-mcp
 	@exec ./bin/crier-mcp
 
 test:
-	go test ./... -count=1 -timeout 60s
+	go test ./... -count=1 -timeout 60s -p 1 -p 1
 
 test-short:
 	go test -short ./...
