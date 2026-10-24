@@ -1,0 +1,20 @@
+{
+  "tick_id": "crier-foreman-2026-10-24-22-17-52",
+  "block": "INT-CI-014",
+  "mode": "serial-fallback",
+  "wave_budget": 5,
+  "slots": 3,
+  "slots_reason": "nproc 16, loadavg 12.86 -> max(1, min(6, 16-ceil(12.86))) = 3; selected block has one ready row",
+  "workers": [
+    {
+      "task_id": "INT-CI-014",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-014-tick-20261024",
+      "branch": "wt/INT-CI-014-tick-20261024",
+      "brief": "/tmp/crier-foreman-2026-10-24-22-17-52-INT-CI-014-brief.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "dispatch": "/tmp/crier-foreman-2026-10-24-22-17-52-dispatch.sh",
+      "status": "running"
+    }
+  ]
+}
