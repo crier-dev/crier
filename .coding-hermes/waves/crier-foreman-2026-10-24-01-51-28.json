@@ -1,0 +1,105 @@
+{
+  "tick_id": "crier-foreman-2026-10-24-01-51-28",
+  "block": "DF-CRIER-483",
+  "block_family": "DF-CRIER-474",
+  "wave_size": 6,
+  "slots": 6,
+  "slots_reason": "nproc 16, loadavg 5.80 -> max(1, min(6, 16-6)) = 10, capped at 6; 6 independent ready rows in block",
+  "selection": "RESUME-FIRST: prior tick targeted DF-CRIER-474 family. DF-CRIER-483 is the root cause of INT-CRIER-015 (red main). Six independent rows touching different files dispatched in parallel.",
+  "rows": [
+    {
+      "id": "DF-CRIER-483",
+      "priority": "P1",
+      "title": "chat.html updateClassControls undefined - fixes INT-CRIER-015",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-483",
+      "branch": "wt/DF-CRIER-483",
+      "files": [
+        "cmd/server/chat.html"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-475",
+      "priority": "P1",
+      "title": "kind:team silent no-op in FanoutRecipients",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-475",
+      "branch": "wt/DF-CRIER-475",
+      "files": [
+        "internal/session/fanout.go",
+        "internal/session/session.go"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-480",
+      "priority": "P1",
+      "title": "context view 404 vs 200 divergence",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-480",
+      "branch": "wt/DF-CRIER-480",
+      "files": [
+        "internal/session/http.go",
+        "internal/session/join_context_test.go"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-476",
+      "priority": "P2",
+      "title": "TESTERS.md stale install block",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-476",
+      "branch": "wt/DF-CRIER-476",
+      "files": [
+        "TESTERS.md",
+        "docs/claims.yaml"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-477",
+      "priority": "P2",
+      "title": "targets[] wire shape undocumented",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-477",
+      "branch": "wt/DF-CRIER-477",
+      "files": [
+        "docs/openapi.yaml",
+        "cmd/server/openapi.yaml",
+        "README.md"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "id": "DF-CRIER-478",
+      "priority": "P2",
+      "title": "specs/CHAT-SESSIONS.md \u00a77 self-contradicts shipped surface",
+      "worktree": "~/.hermes/worktrees/crier/DF-CRIER-478",
+      "branch": "wt/DF-CRIER-478",
+      "files": [
+        "specs/CHAT-SESSIONS.md",
+        "docs/claims.yaml"
+      ],
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    }
+  ],
+  "ts": "2026-10-24T01:51:28Z",
+  "finished_at": "2026-10-24T02:15:00Z",
+  "recovered_by": "crier-foreman-2026-10-24-02-06-43",
+  "outcome": {
+    "merged": [
+      "DF-CRIER-476",
+      "DF-CRIER-477"
+    ],
+    "zero_diff_rejected": [
+      "DF-CRIER-483",
+      "DF-CRIER-475",
+      "DF-CRIER-480",
+      "DF-CRIER-478"
+    ],
+    "notes": "Docs-only merges (DF-CRIER-476, DF-CRIER-477) passed gates. Pre-existing test failures (INT-CRIER-015) unrelated to docs changes. 4 workers produced zero diff \u2014 rejected per foreman rules."
+  }
+}
