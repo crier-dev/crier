@@ -16,6 +16,13 @@ import (
 func TestSessionSlowHarnessAnswerLands(t *testing.T) {
 	var calls atomic.Int32
 	root := t.TempDir()
+	// This test's SUBJECT is a slow endpoint: a 6s answer must land, not be cut
+	// at the package's test-scoped budget (testmain_test.go sets 1.5s so that a
+	// REFUSAL test does not spend the whole default 30s waiting for retries).
+	// The pair keeps the shipped invariant (runtime strictly below session) and
+	// leaves the 6s answer well inside the delivery budget.
+	t.Setenv("CR_SESSION_DELIVERY_TIMEOUT_MS", "10000")
+	t.Setenv("RUNTIME_TIMEOUT_MS", "1000")
 	base, room, _, _ := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		select {

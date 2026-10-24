@@ -4,11 +4,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
+
+// docsBehaviorProbeEnv opts a run IN to the live hook-doctor battery.
+//
+// The battery shells out to `make doctor-hooks-selftest`, which materializes six
+// scratch git repositories and drives a REAL git entrypoint per hook per
+// scenario. Measured on this host (2026-10-23, 16 CPUs, one-minute loadavg
+// ~14): 50-71s of wall clock, i.e. it alone exceeds the 60s per-binary budget
+// `make test` sets (`go test ./... -count=1 -timeout 60s`, Makefile:110) — the
+// whole package then dies as an unnameable suite-wide timeout instead of a
+// verdict about the claim.
+//
+// It is also measured TWICE on every push today: `.github/workflows/ci.yml`
+// runs the same script as its own step ("Hook doctor rejection and NEUTER
+// selftest": `make doctor-hooks-selftest`), and this test re-runs it from
+// inside `go test`. The gate therefore does not depend on this subprocess
+// spending the unit-test budget: it stays armed in CI on the dedicated step,
+// and `make doctor-hooks-selftest` is one command for a local full run.
+// Setting CR_DOCS_BEHAVIOR_PROBE=1 runs it here as well.
+const docsBehaviorProbeEnv = "CR_DOCS_BEHAVIOR_PROBE"
 
 // Behavior claims use an id-keyed allowlist, never commands from YAML. Running
 // fixtures proves both refusal and acceptance without repairing/mutating the
@@ -85,6 +105,12 @@ func TestDocsClaimsBehaviors(t *testing.T) {
 	}
 	if found != 1 {
 		t.Fatalf("want exactly one non-xfail BEHAVIOR-HOOK-DOCTOR behavior claim, got %d", found)
+	}
+	// The premise above (the claim exists and is not excused) is checked on
+	// EVERY run, so deleting or relabelling the claim still reds this package.
+	// Only the live subprocess battery below is opt-in — see docsBehaviorProbeEnv.
+	if os.Getenv(docsBehaviorProbeEnv) != "1" {
+		t.Skipf("%s is unset: the live hook-doctor battery (`make doctor-hooks-selftest`) runs in CI as its own step (.github/workflows/ci.yml) and costs more wall clock than this package's 60s `make test` budget; set %s=1 to run it here", docsBehaviorProbeEnv, docsBehaviorProbeEnv)
 	}
 	reportFindings(t, verifyBehaviorClaims(set, func(id string) (string, error) {
 		return liveBehavior(root, id)
