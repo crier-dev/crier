@@ -238,10 +238,24 @@ func TestSessionAPI_ContextShareRefusals(t *testing.T) {
 			require.Equal(t, "CONTEXT_BOUNDARY_NOT_FOUND", errBody["error"])
 
 			// A member that was never added is a 404, distinct from a share
-			// refusal.
-			var view memberContextView
+			// refusal — and it is answered in the SAME envelope as every other
+			// session 404 (a named code plus a detail naming the member), not
+			// with a bare status and not with the router's "not found"
+			// (DF-CRIER-480: an integrator must be able to tell a wrong
+			// member from a wrong session from an unset share).
 			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodGet,
-				"/sessions/"+id+"/participants/agent/ghost/context", nil, &view, nil))
+				"/sessions/"+id+"/participants/agent/ghost/context", nil, &errBody, nil))
+			require.Equal(t, "MEMBER_NOT_FOUND", errBody["error"])
+			require.Contains(t, errBody["detail"], "ghost")
+			require.Contains(t, errBody["detail"], id,
+				"the refusal names the session the member was looked for in")
+
+			// …and an unknown SESSION is a DIFFERENT named 404, so the two
+			// states are distinguishable from the body alone.
+			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodGet,
+				"/sessions/no-such-room/participants/agent/nimbus-2/context", nil, &errBody, nil))
+			require.Equal(t, "SESSION_NOT_FOUND", errBody["error"])
+			require.Contains(t, errBody["detail"], "no-such-room")
 
 			// A closed session admits no context change (§1.3).
 			require.NoError(t, store.Append(bgCtx, CloseRecord(id, 100, time.Now(), AuthorRef{Agent: fixAgentA}, "done")))
@@ -420,6 +434,61 @@ func TestSessionAPI_ContextShareBoundaryVerifiedAccepted(t *testing.T) {
 				require.Equal(t, root, view.Share.BoundaryMessageID, "the verified boundary is recorded")
 				require.Equal(t, 1, view.GivenCount, "the boundary is honoured as the upper edge")
 			}
+		})
+	}
+}
+
+// TestJoinContextGETBodies is DF-CRIER-480 at the handler level: the three
+// answers this GET can give are three BODIES, and the difference between "no
+// such session", "no such member" and "an empty view" is readable from the
+// body alone. The wire-level twin (cmd/server/context_view_wire_test.go) proves
+// the same three on the served route table; this one keeps the contract in the
+// package that writes it, so a body change is caught without booting a server.
+//
+// The third body is the one the row was filed over: a live member whose share
+// gave it nothing is a 200 carrying `given_count: 0` — never a 404 — which is
+// exactly the "0 rows on the same request" the dogfood recorded.
+func TestJoinContextGETBodies(t *testing.T) {
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			h := newAPIHarness(t, store)
+			id := h.createRoom(t)
+
+			// (1) Unknown session: a NAMED 404, and the detail names the
+			// session — never a bare status or the router's "not found".
+			var sessionErr map[string]string
+			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodGet,
+				"/sessions/no-such-room/participants/agent/"+fixAgentA+"/context",
+				nil, &sessionErr, nil))
+			require.Equal(t, "SESSION_NOT_FOUND", sessionErr["error"])
+			require.Contains(t, sessionErr["detail"], "no-such-room")
+
+			// (2) Known session, unknown member: a DIFFERENT named 404 whose
+			// detail names the member and the session it was looked for in.
+			var memberErr map[string]string
+			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodGet,
+				"/sessions/"+id+"/participants/agent/ghost/context",
+				nil, &memberErr, nil))
+			require.Equal(t, "MEMBER_NOT_FOUND", memberErr["error"])
+			require.Contains(t, memberErr["detail"], "ghost")
+			require.Contains(t, memberErr["detail"], id)
+			require.NotEqual(t, sessionErr["error"], memberErr["error"],
+				"the two 404s must be distinguishable from their codes")
+
+			// (3) Known member: 200 with the documented view. The room held no
+			// messages when it was created, so every member's share is the
+			// recorded `none` and the given set is empty — an EMPTY VIEW, which
+			// is a 200.
+			var view memberContextView
+			require.Equal(t, http.StatusOK, h.do(t, http.MethodGet,
+				"/sessions/"+id+"/participants/agent/"+fixAgentA+"/context",
+				nil, &view, nil))
+			require.True(t, view.Decided)
+			require.NotNil(t, view.Share)
+			require.Equal(t, ShareNone, view.Share.Mode)
+			require.Equal(t, 0, view.GivenCount)
+			require.NotEmpty(t, view.Explanation)
 		})
 	}
 }

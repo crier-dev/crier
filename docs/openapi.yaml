@@ -3582,12 +3582,87 @@ paths:
 
         `decided: false` marks a member whose share was never decided —
         distinct from an explicit `none` (§4.6 rule 6).
+
+        ── The answers this operation gives, and what tells them apart (DF-CRIER-480) ──
+
+        A dogfood probe reported this operation answering `200` from one server
+        and `404 {"error":"not found"}` from another on what it took to be the
+        same request; an integrator could not tell whether the session, the
+        member, the path or the share was the wrong part. The states below are
+        the whole answer, and (1)-(3) are DIFFERENT ANSWERS, not spellings of
+        one: an EMPTY view is a `200`, and only an absent session or member is a
+        `404`.
+
+        (1) `200`, share `none` — the member is in the session and its share is
+        recorded. `given_count: 0` here is the whole point: a `none` share hands
+        the joiner nothing, and a join into a session that held no messages is
+        recorded `none` too ("nothing to share: session has no messages"). An
+        empty view is NEVER a `404`.
+
+            {"session_id":"df23-room","member_type":"agent","member_id":"df23-peer",
+             "decided":true,"share":{"mode":"none"},"given_count":0,
+             "explanation":"the joiner was given NOTHING from before the join (mode `none`, §4.6 rule 6) — …"}
+
+        (2) `200`, share recorded with a materialized given set — the same shape
+        when the share did hand the joiner something:
+
+            {"session_id":"df23-room","member_type":"agent","member_id":"df23-late",
+             "decided":true,"share":{"mode":"summary","boundary_message_id":"m-1"},
+             "set_by":"kara","given_count":1,"given_message_ids":["m-1"],
+             "generated_summary":"generated summary of 1 message(s) recorded before the join: …",
+             "explanation":"the joiner was given a GENERATED digest of the 1 message(s) recorded before it joined (mode `summary`, D10) — …"}
+
+        (3) `200`, `decided: false` — the member is in the session but carries NO
+        share record at all (a join recorded before shares were recorded,
+        §4.6 rule 6). The view reports the gap instead of inventing a mode, and
+        `share` is absent:
+
+            {"session_id":"df23-room","member_type":"agent","member_id":"pre-legacy",
+             "decided":false,"given_count":0,
+             "explanation":"no context-share record exists for this member — what it was given was never decided (distinct from an explicit `none`, §4.6 rule 6)"}
+
+        (4) `404 MEMBER_NOT_FOUND` — the SESSION exists, the member does not:
+
+            {"error":"MEMBER_NOT_FOUND",
+             "detail":"member \"df23-peer\" (agent) was never added to session \"df23-room\""}
+
+        (5) `404 SESSION_NOT_FOUND` — no such session in this realm (never
+        created, expired, or living in another realm; the detail says which of
+        the last two it is):
+
+            {"error":"SESSION_NOT_FOUND","detail":"session \"df23-room\" does not exist"}
+
+        Every `404` THIS OPERATION writes carries both a named `error` code and
+        a `detail` — that is the envelope shared with every other session route,
+        and the code is what separates (4) from (5). A `404` carrying neither,
+        most commonly the bare `{"error":"not found"}`, did not reach this
+        operation at all: the request path did not match this route template.
+        The usual cause is a trailing slash on the canonical path (`…/context/`),
+        which the router does not serve. Reading that body as "the member or the
+        share is unknown" is the confusion this section exists to end — the
+        served path has no trailing slash.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
+        - name: member_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent, principal]
+          description: The member's kind, exactly as it was added (`agent` or `principal`).
+        - name: member_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The member's id, exactly as it was added — the lookup is exact, so a differently-cased or trimmed id is MEMBER_NOT_FOUND. URL-encode it.
       responses:
         "200":
-          description: The member's materialized context view.
+          description: |-
+            The member's materialized context view — `decided: true` with the
+            recorded share, or `decided: false` for a member whose share was
+            never decided. `given_count: 0` is a legitimate, EMPTY view and
+            never a 404.
           content:
             application/json:
               schema:
@@ -3595,7 +3670,12 @@ paths:
         "403":
           description: The session is private and the caller is neither a member nor granted a read (VISIBILITY_FORBIDDEN)
         "404":
-          description: No such session or member in this realm (SESSION_NOT_FOUND / MEMBER_NOT_FOUND)
+          description: |-
+            `MEMBER_NOT_FOUND` — the session exists and the member was never
+            added to it — or `SESSION_NOT_FOUND` — no such session in this
+            realm. Both carry a `detail` naming what was not found; any 404
+            without that envelope did not reach this operation (see the
+            operation description).
     put:
       operationId: setMemberContext
       tags: [sessions]
@@ -3609,6 +3689,18 @@ paths:
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
+        - name: member_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [agent, principal]
+          description: The member's kind, exactly as it was added (`agent` or `principal`).
+        - name: member_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The member's id, exactly as it was added — the lookup is exact, so a differently-cased or trimmed id is MEMBER_NOT_FOUND. URL-encode it.
       requestBody:
         required: true
         content:
