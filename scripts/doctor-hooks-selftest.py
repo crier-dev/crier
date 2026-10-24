@@ -236,6 +236,37 @@ def main():
         good = fixture("correct install with spaces")
         check("correct install (global override ignored)", good, True)
         require(good, "make", "doctor-hooks")
+
+        # The docs behavior claim needs a live positive probe, one static
+        # disarm, and one probe-only disarm control. The complete 51-case
+        # battery remains the standalone target; keeping this claim-specific
+        # path small prevents one prose claim from consuming the package's
+        # 60-second test budget while preserving real hook execution evidence.
+        if os.environ.get("DOCTOR_HOOKS_CLAIM_FAST") == "1":
+            dead = fixture("claim-fast-pre-commit")
+            disarm(dead, "pre-commit", PREPEND_DISARM)
+            check("unconditional `exit 0` above the board arm (pre-commit)", dead, False,
+                  "exits before its board arm",
+                  diagnostics=("the arm cannot run", MARKERS["pre-commit"][0][0]))
+
+            probe_only = fixture("claim-fast-probe-only")
+            disarm(probe_only, "pre-merge-commit", PROBE_ONLY_DISARM)
+            check("probe-only disarm (guard the static arm cannot see)", probe_only, False,
+                  "does not reach its board arm",
+                  diagnostics=("ACCEPTED (exit 0)", "the arm never ran"),
+                  forbidden=("exits before its board arm",))
+            text = (ROOT / "scripts/doctor-hooks.sh").read_text()
+            verdict = 'require_probe() { probe_hook "$1" "$2" "$3" || return 1; }'
+            assert text.count(verdict) == 1
+            probe_neutered = base / "claim-fast-probe-neutered.sh"
+            probe_neutered.write_text(text.replace(
+                verdict, 'require_probe() { probe_hook "$1" "$2" "$3" || true; }'))
+            check("NEUTER probe verdict accepts what the real doctor rejects",
+                  probe_only, True, "does not reach its board arm", doctor=probe_neutered)
+            print("NEUTER accepts unset fixture rejected by real doctor: exit 0", flush=True)
+            print("doctor-hooks selftest: PASS (claim-fast live probes, including NEUTER)", flush=True)
+            return
+
         nested = good / "nested"
         nested.mkdir()
         check("invoked from subdirectory", nested, True)

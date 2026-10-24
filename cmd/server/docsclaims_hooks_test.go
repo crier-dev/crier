@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -34,8 +35,29 @@ func liveBehavior(repoRoot, id string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "make", "--no-print-directory", "doctor-hooks-selftest")
 	cmd.Dir = repoRoot
+	// The selftest has its own explicit short bound for the intentional hanging-hook
+	// case. Keep the normal probe bound conservative here so this docs behavior claim
+	// cannot consume the entire 60s package budget when the suite is loaded.
+	cmd.Env = append(os.Environ(), "DOCTOR_PROBE_TIMEOUT=5", "DOCTOR_HOOKS_CLAIM_FAST=1")
 	cmd.WaitDelay = 2 * time.Second
-	out, err := cmd.CombinedOutput()
+	// The selftest's hook probes spawn bounded subprocess trees. Capture to a
+	// file rather than CombinedOutput's pipe: a descendant that outlives a
+	// timed-out probe must not keep the test blocked on an inherited pipe fd.
+	logFile, err := os.CreateTemp("", "crier-doctor-hooks-*.log")
+	if err != nil {
+		return "", fmt.Errorf("doctor-hooks-selftest log: %w", err)
+	}
+	logPath := logFile.Name()
+	defer func() { _ = os.Remove(logPath) }()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	err = cmd.Run()
+	_ = logFile.Close()
+	outBytes, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		return "", fmt.Errorf("doctor-hooks-selftest log read: %w", readErr)
+	}
+	out := outBytes
 	if err != nil {
 		return "", fmt.Errorf("doctor-hooks-selftest: %w\n%s", err, out)
 	}
