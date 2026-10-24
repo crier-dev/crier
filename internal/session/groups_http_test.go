@@ -349,3 +349,78 @@ func TestGroupStore_KeepLastPerName(t *testing.T) {
 	require.False(t, ValidGroupName(""))
 	require.True(t, ValidGroupName("Infra-Team_1.x"))
 }
+
+// TestTeamKindTargetOutcome is DF-CRIER-475's regression: the body address form
+// `@team:<name>` mis-mapped onto a STRUCTURED target — `{"kind":"team",
+// "id":"<existing group>"}` — used to answer 201 with the audience recorded and
+// an EMPTY dispatch (`dispatch_evidence` targets=[] receipts=[]): "team" was not
+// an AudienceTargetKind, so FanoutRecipients dropped it through its default
+// branch after the message had already been stored. NO error, NO visible skip.
+//
+// The outcome must be one of two named things and never a bare 201: a per-member
+// fan-out, or a refusal that NAMES the kind. It is now the refusal, issued before
+// anything is written, and the documented `group` kind still fans out — which is
+// what pins the refusal to the KIND and not to the roster.
+func TestTeamKindTargetOutcome(t *testing.T) {
+	h := newGroupHarness(t, "atlas", "nimbus")
+
+	// An EXISTING group, so a refusal cannot be excused as "no such roster".
+	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/groups", createGroupRequest{
+		Name: "ops", CreatedBy: "kara", Members: []string{"atlas", "nimbus"},
+	}, new(groupView), nil))
+
+	room := h.createRoom(t)
+
+	var refusal map[string]string
+	code := h.do(t, http.MethodPost, "/sessions/"+room+"/messages", postMessageRequest{
+		Payload: json.RawMessage(`{"text":"deploy window opens"}`),
+		Sender:  "kara-agent",
+		Targets: []AudienceTarget{{Kind: AudienceTargetKind("team"), ID: "ops"}},
+	}, &refusal, nil)
+
+	// (1) Never the bare 201: the outcome is the named refusal.
+	require.NotEqual(t, http.StatusCreated, code, "a kind that cannot be addressed must never answer 201")
+	require.Equal(t, http.StatusBadRequest, code)
+	require.Equal(t, CodeUnknownTargetKind, refusal["error"],
+		"the refusal names the kind problem, not a generic audience error")
+	require.Contains(t, refusal["detail"], `"team"`, "the refused kind is quoted back")
+	for _, kind := range []string{"agent", "group", "capability", "principal"} {
+		require.Contains(t, refusal["detail"], kind,
+			"the refusal names every accepted kind so the sender can fix the request")
+	}
+
+	// (2) Nothing was recorded and nobody was delivered to — the silent no-op
+	// shape (a stored message with targets=[] receipts=[]) is gone with the 201.
+	var transcript transcriptResponse
+	require.Equal(t, http.StatusOK, h.do(t, http.MethodGet, "/sessions/"+room+"/messages", nil, &transcript, nil))
+	require.Empty(t, transcript.Messages, "a refused send writes no transcript row")
+	for _, id := range []string{"atlas", "nimbus"} {
+		entries, _, err := h.reg.Retrieve(id, time.Minute, 10)
+		require.NoError(t, err, "agent %s", id)
+		require.Empty(t, entries, "agent %s must not hold a message from a refused send", id)
+	}
+
+	// (3) The documented kind for the SAME roster still fans out one delivery per
+	// member, with per-member receipts — the arm the alias/refusal choice must
+	// keep working.
+	var msg transcriptMessage
+	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+room+"/messages", postMessageRequest{
+		Payload: json.RawMessage(`{"text":"deploy window opens"}`),
+		Sender:  "kara-agent",
+		Targets: []AudienceTarget{{Kind: TargetGroup, ID: "ops"}},
+	}, &msg, nil))
+
+	require.Equal(t, AudienceExplicit, msg.Audience.Rule)
+	require.Equal(t, []AudienceTarget{{Kind: TargetGroup, ID: "ops"}}, msg.Audience.Targets)
+	require.Len(t, msg.Outcomes, 2, "one receipt per current roster member")
+	require.Empty(t, msg.SkippedAgents)
+	require.NotEmpty(t, msg.DispatchEvidence)
+	require.ElementsMatch(t, []string{"atlas", "nimbus"},
+		msg.DispatchEvidence[len(msg.DispatchEvidence)-1].Targets,
+		"the dispatch records the resolved member set — never an empty one")
+	for _, id := range []string{"atlas", "nimbus"} {
+		entries, _, err := h.reg.Retrieve(id, time.Minute, 10)
+		require.NoError(t, err, "agent %s", id)
+		require.Len(t, entries, 1, "agent %s must hold the group send", id)
+	}
+}

@@ -99,6 +99,15 @@ type AudienceSkip struct {
 //   - a `principal` target has no inbox and is reached through a bound agent
 //     (CR-CHAT-007, NOT BUILT), so it is not fanned out.
 //
+// A kind OUTSIDE that closed set is a NAMED skip carrying
+// UNKNOWN_TARGET_KIND and the accepted kinds (DF-CRIER-475). This function
+// cannot refuse it earlier than that — it has no request to answer with, and
+// its result is a partition, not an error — so the send path calls
+// ValidateAudienceTargets BEFORE anything is recorded and this branch is the
+// defense-in-depth path for a directly-constructed audience or a stored record
+// written before that check existed. Either way the outcome is named, never a
+// bare 201 with an empty dispatch.
+//
 // The returned agents are de-duplicated and sorted, so two runs of the same
 // audience produce the same delivery set.
 func FanoutRecipients(aud Audience, roster map[string][]string) (agents []string, skipped []AudienceSkip) {
@@ -134,9 +143,12 @@ func FanoutRecipients(aud Audience, roster map[string][]string) (agents []string
 				Reason: "a principal has no inbox; reached through a bound agent (CR-CHAT-007, §3.4 rule 5)",
 			})
 		default:
+			// 400 UNKNOWN_TARGET_KIND names agent|group|capability|principal at
+			// the send path; here the same code is carried by the skip's reason.
 			skipped = append(skipped, AudienceSkip{
 				Target: t,
-				Reason: fmt.Sprintf("unknown audience target kind %q", t.Kind),
+				Reason: fmt.Sprintf("%s: audience target kind %q is not addressable; accepted kinds are %s",
+					CodeUnknownTargetKind, t.Kind, AcceptedTargetKinds),
 			})
 		}
 	}

@@ -152,6 +152,68 @@ const (
 	TargetPrincipal  AudienceTargetKind = "principal"
 )
 
+// AcceptedTargetKinds is the CLOSED set of address kinds a send may name in a
+// structured `targets[]` entry (§2.1, §3.4 rule 7, specs/CHAT-ADDRESSING.md
+// §1.4), rendered as the "|"-joined list a refusal quotes back. It is split
+// from the constants above only so one wire string can name the whole set
+// without a second hand-maintained list.
+const AcceptedTargetKinds = "agent|group|capability|principal"
+
+// CodeUnknownTargetKind is the named refusal of a target kind outside
+// AcceptedTargetKinds (DF-CRIER-475): answered 400 UNKNOWN_TARGET_KIND with a
+// detail naming agent|group|capability|principal, before anything is recorded.
+// Before this code existed, a target with an unknown kind was a skip recorded
+// INSIDE the fan-out — that is, after the message had already been stored — so
+// the shipped answer was 201 with the audience recorded and an empty dispatch
+// (targets=[], receipts=[]), an error to nobody. The kind is now refused
+// BEFORE the message is recorded.
+const CodeUnknownTargetKind = "UNKNOWN_TARGET_KIND"
+
+// UnknownTargetKindError is the refusal of one unaddressable target kind. It
+// is a TYPE, not a formatted string, so an HTTP surface can answer with the
+// dedicated code instead of the generic INVALID_AUDIENCE one.
+type UnknownTargetKindError struct {
+	Kind AudienceTargetKind
+}
+
+// Error renders the refusal with the accepted kinds spelled out: the caller
+// must be able to fix the request from the message alone. The named-group form
+// is called out because that is the mistake the code exists for — a body tag
+// `@team:<name>` mis-mapped onto a structured target.
+func (e *UnknownTargetKindError) Error() string {
+	return fmt.Sprintf("%s: audience target kind %q is not addressable; accepted kinds are %s "+
+		"(a named group is kind %q in targets[], or @team:<name> in the message body)",
+		CodeUnknownTargetKind, string(e.Kind), AcceptedTargetKinds, string(TargetGroup))
+}
+
+// AddressableTargetKind reports whether kind is one of AcceptedTargetKinds.
+// The check is exact: the wire value is the whole vocabulary, so a case
+// variant is a different kind and is refused like any other unknown one.
+func AddressableTargetKind(kind AudienceTargetKind) bool {
+	switch kind {
+	case TargetAgent, TargetGroup, TargetCapability, TargetPrincipal:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateAudienceTargets refuses the FIRST target kind that is not
+// addressable. Kinds beyond the closed set were previously discovered only by
+// FanoutRecipients, where an unknown kind became a skip beside a stored
+// message; a send path therefore validated its audience BEFORE anything is
+// written (§3.2's named-error rule). It deliberately does NOT resolve a
+// roster or check membership — that stays fan-out's job at send time (§1.4
+// consequence 1).
+func ValidateAudienceTargets(targets []AudienceTarget) error {
+	for _, t := range targets {
+		if !AddressableTargetKind(t.Kind) {
+			return &UnknownTargetKindError{Kind: t.Kind}
+		}
+	}
+	return nil
+}
+
 // AuthorRef names who produced a record (§5.1 `author` / `actor` /
 // `created_by`). An agent's own write is {Agent}; a human through a binding is
 // {Principal, AsAgent}; a system actor is {System}.
