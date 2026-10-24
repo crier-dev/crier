@@ -1060,9 +1060,17 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	// identities never enter local dispatch, even when they have no active
 	// membership or federation route; the remote leg records that refusal.
 	targets := append(append([]string{}, deliverable...), remoteTargets...)
+	// The audience summary of THIS pass (DF-CRIER-479): the rule that resolved
+	// the audience and how many targets it resolved to. Counted from the SAME
+	// recipient snapshot the fan-out below consumes (roster-expanded, author
+	// excluded, before the realm partition), so an EMPTY session audience — no
+	// participant has joined yet — records resolved_target_count 0 instead of
+	// leaving the caller to infer "nothing was delivered" from two empty arrays.
 	msg.DispatchEvidence = append(msg.DispatchEvidence, DispatchEvidence{
 		Attempt: len(msg.DispatchEvidence) + 1, StartedAt: h.now(),
-		Targets: append([]string{}, dedupeSorted(targets)...), Receipts: []DeliveryOutcome{},
+		AudienceRule:        aud.Rule,
+		ResolvedTargetCount: len(dedupeSorted(recipients)),
+		Targets:             append([]string{}, dedupeSorted(targets)...), Receipts: []DeliveryOutcome{},
 	})
 	attempt := &msg.DispatchEvidence[len(msg.DispatchEvidence)-1]
 	if err := h.appendDispatchEvidence(r.Context(), msg, prior); err != nil {

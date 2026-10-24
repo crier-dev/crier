@@ -10,13 +10,27 @@ import (
 // DispatchEvidence journals one fan-out pass, independently of the outcome
 // write-back. StartedAt proves only entry to the dispatch boundary; CompletedAt
 // and Receipts prove returned results, never remote execution. See §3.2's table.
+//
+// AudienceRule and ResolvedTargetCount are the AUDIENCE SUMMARY of the pass
+// (DF-CRIER-479): the rule that produced the audience and how many targets it
+// resolved to deliver to. They exist so a 201 on a session audience whose
+// resolution is EMPTY — the ordinary create-then-send-before-any-member-joins
+// ordering — states "delivered to zero targets" in the body itself, instead of
+// leaving the caller to derive it from an empty targets[] + outcomes[]. A
+// ResolvedTargetCount of 0 with a CompletedAt and OutcomesRecorded is the
+// PROVEN zero-delivery pass, not an unfinished one.
+//
+// A record written before these fields existed reads back with an empty rule
+// and a count of 0; targets[] remains the durable authority for those rows.
 type DispatchEvidence struct {
-	Attempt          int               `json:"attempt"`
-	StartedAt        time.Time         `json:"started_at"`
-	CompletedAt      *time.Time        `json:"completed_at,omitempty"`
-	Targets          []string          `json:"targets"`
-	Receipts         []DeliveryOutcome `json:"receipts"`
-	OutcomesRecorded bool              `json:"outcomes_recorded"`
+	Attempt             int               `json:"attempt"`
+	StartedAt           time.Time         `json:"started_at"`
+	CompletedAt         *time.Time        `json:"completed_at,omitempty"`
+	AudienceRule        AudienceRule      `json:"audience_rule"`
+	ResolvedTargetCount int               `json:"resolved_target_count"`
+	Targets             []string          `json:"targets"`
+	Receipts            []DeliveryOutcome `json:"receipts"`
+	OutcomesRecorded    bool              `json:"outcomes_recorded"`
 }
 
 // addReceipts keeps one result per target: the local fan-out also returns the

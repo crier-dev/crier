@@ -2913,6 +2913,16 @@ paths:
         automatically. `members` may name initial participants, each recorded as
         a membership event with its own role.
 
+        A session created with no `members` (or with the creator named only as
+        `created_by`) has ZERO participants, and a send into it therefore
+        resolves to an EMPTY session audience: the ordering "create the room,
+        then send before any member joins" answers `201` while delivering to
+        zero participants at send time, not later. Join the recipients
+        (`POST /sessions/{id}/participants`) or pass explicit `targets` before
+        sending if anyone is expected to receive it. The 201 body states this
+        itself: `dispatch_evidence[].audience_rule` is `session` and
+        `dispatch_evidence[].resolved_target_count` is `0`.
+
         `namespace` (or `X-Crier-Namespace`) is the realm the room lives in and
         is recorded with it; a name this server does not declare is refused. A
         session may declare a `retention_seconds` SHORTER than its realm's,
@@ -3162,6 +3172,18 @@ paths:
         `audience` is the caller's explicit `targets`, or every active
         participant except the author; a `principal` target is recorded but has
         no inbox to deliver to (reached through a bound agent, CR-CHAT-007).
+
+        A `201` is a RECORDED message, not proof that anyone received it. When
+        the audience is the session default and it resolves to NOBODY — the
+        ordinary create-then-send-before-any-member-joins ordering — the send
+        still answers `201` with empty `targets`/`outcomes`, and says so
+        explicitly in `dispatch_evidence`: `audience_rule` names the rule that
+        resolved the audience (`session` for the participant default, `explicit`
+        for a caller-named `targets` list) and `resolved_target_count` is the
+        number of targets it resolved to (`0` for a session with zero
+        participants at send time). Read those two fields before assuming a send
+        reached anyone. Joining a member after the send does not retroactively
+        deliver it.
 
         Threading (§4.5, D11): name `parent_id` to reply — the reply STAYS in its
         parent's thread. Omit it and the message opens a new thread whose id is
@@ -5879,10 +5901,17 @@ components:
           description: "See specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary. Omitted when false."
         dispatch_evidence:
           type: array
-          description: "Durable fan-out journal; fields and evidence limits are defined in specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary."
+          description: |-
+            Durable fan-out journal; fields and evidence limits are defined in
+            specs/CHAT-SESSIONS.md#delivery-outcome-vocabulary. Each attempt
+            carries the AUDIENCE SUMMARY of its pass (`audience_rule` +
+            `resolved_target_count`), so a 201 whose audience resolved to nobody
+            — a session audience with zero participants at send time — states
+            zero targets rather than leaving the caller to infer it from an
+            empty `targets`/`receipts` pair.
           items:
             type: object
-            required: [attempt, started_at, targets, receipts, outcomes_recorded]
+            required: [attempt, started_at, audience_rule, resolved_target_count, targets, receipts, outcomes_recorded]
             properties:
               attempt:
                 type: integer
@@ -5893,6 +5922,14 @@ components:
               completed_at:
                 type: string
                 format: date-time
+              audience_rule:
+                type: string
+                enum: [session, explicit, reply-default]
+                description: "The rule that produced this pass's audience: `session` for the active-participant default, `explicit` for a caller-named targets list. A reader never re-derives it from membership that may have changed since."
+              resolved_target_count:
+                type: integer
+                minimum: 0
+                description: "How many targets the audience resolved to for THIS pass (roster-expanded, author excluded). `0` means nothing was dispatched: for a session audience that is zero participants at send time, not an unfinished pass — a completed pass reports it with completed_at and outcomes_recorded true."
               targets:
                 type: array
                 items:
