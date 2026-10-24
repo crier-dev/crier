@@ -683,6 +683,54 @@ func TestFanoutRecipients_GroupFansOutCapabilityDoesNot(t *testing.T) {
 	require.Contains(t, reasons, "no inbox")
 }
 
+// TestFanoutRecipients_UnknownKindIsNamed pins the fan-out half of
+// DF-CRIER-475: a kind outside the closed set is never a silent drop and never
+// quietly becomes a group. The skip carries UNKNOWN_TARGET_KIND, quotes the
+// refused kind and names every accepted one — even when the id HAPPENS to name a
+// real roster, which is exactly the `{"kind":"team","id":"ops"}` shape.
+func TestFanoutRecipients_UnknownKindIsNamed(t *testing.T) {
+	aud := Audience{Rule: AudienceExplicit, Targets: []AudienceTarget{
+		{Kind: TargetAgent, ID: "atlas"},
+		{Kind: AudienceTargetKind("team"), ID: "ops"},
+	}}
+	agents, skipped := FanoutRecipients(aud, map[string][]string{"ops": {"nimbus", "kappa"}})
+
+	require.Equal(t, []string{"atlas"}, agents,
+		"an unknown kind is not aliased behind the caller's back: it delivers to nobody here")
+	require.Len(t, skipped, 1)
+	require.Equal(t, AudienceTargetKind("team"), skipped[0].Target.Kind)
+	require.Contains(t, skipped[0].Reason, CodeUnknownTargetKind)
+	require.Contains(t, skipped[0].Reason, `"team"`)
+	for _, kind := range []string{"agent", "group", "capability", "principal"} {
+		require.Contains(t, skipped[0].Reason, kind, "the skip names the accepted kinds")
+	}
+}
+
+// TestValidateAudienceTargets_ClosedSet pins the pre-write check: the four
+// shipped kinds are addressable, an alias (`team`) is a typed refusal naming the
+// accepted set, and an absent kind is refused like any other unknown one.
+func TestValidateAudienceTargets_ClosedSet(t *testing.T) {
+	addressable := []AudienceTarget{
+		{Kind: TargetAgent, ID: "atlas"},
+		{Kind: TargetGroup, ID: "ops"},
+		{Kind: TargetCapability, ID: "data"},
+		{Kind: TargetPrincipal, ID: "prin_bane"},
+	}
+	require.NoError(t, ValidateAudienceTargets(addressable))
+	require.NoError(t, ValidateAudienceTargets(nil), "no explicit targets is not a refusal")
+
+	for _, kind := range []AudienceTargetKind{"team", "", "Agent"} {
+		err := ValidateAudienceTargets([]AudienceTarget{{Kind: kind, ID: "ops"}})
+		require.Error(t, err, "kind %q must be refused", kind)
+		var unknown *UnknownTargetKindError
+		require.ErrorAs(t, err, &unknown)
+		require.Equal(t, kind, unknown.Kind)
+		require.Contains(t, err.Error(), CodeUnknownTargetKind)
+		require.Contains(t, err.Error(), AcceptedTargetKinds,
+			"the refusal names the whole accepted set, so one string fixes the request")
+	}
+}
+
 func TestReplyAudience_DefaultRule(t *testing.T) {
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)

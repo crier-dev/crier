@@ -931,7 +931,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// active participant except the author.
 	aud, err := h.resolveAudience(r.Context(), sess, &req, author.AgentID())
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "INVALID_AUDIENCE", err.Error())
+		writeAudienceError(w, err)
 		return
 	}
 
@@ -1007,16 +1007,25 @@ func (h *Handler) deliverMessage(w http.ResponseWriter, r *http.Request, sess *S
 	// A target that is deliberately NOT fanned out is never a silent drop
 	// (§3.2's named-error rule): a group with no roster is a delivery miss
 	// and is said out loud, while the by-design skips (a capability is a
-	// selector, a principal has no inbox) stay visible at debug level.
+	// selector, a principal has no inbox) stay visible at debug level. A kind
+	// outside the addressable set cannot arrive through a send — resolveAudience
+	// refuses it before anything is written — so reaching here means a
+	// directly-constructed audience or a record written before DF-CRIER-475:
+	// that one is warned, with the same code the send path would have answered.
 	for _, s := range skipped {
-		if s.Target.Kind == TargetGroup {
+		switch s.Target.Kind {
+		case TargetGroup:
 			slog.Warn("fan-out: skipping group with no known roster",
 				"group", s.Target.ID, "message_id", msg.ID, "reason", s.Reason)
-			continue
+		case TargetAgent, TargetCapability, TargetPrincipal:
+			slog.Debug("fan-out: audience target is not fanned out",
+				"target_kind", string(s.Target.Kind), "target", s.Target.ID,
+				"message_id", msg.ID, "reason", s.Reason)
+		default:
+			slog.Warn("fan-out: audience target kind is not addressable",
+				"code", CodeUnknownTargetKind, "target_kind", string(s.Target.Kind),
+				"target", s.Target.ID, "message_id", msg.ID, "reason", s.Reason)
 		}
-		slog.Debug("fan-out: audience target is not fanned out",
-			"target_kind", string(s.Target.Kind), "target", s.Target.ID,
-			"message_id", msg.ID, "reason", s.Reason)
 	}
 	// Explicit targets, group expansion and pre-change retry outcomes must not
 	// reintroduce the sender before realm checks can produce a false refusal.
@@ -1472,6 +1481,15 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 // participants minus the author.
 func (h *Handler) resolveAudience(ctx context.Context, sess *Session, req *postMessageRequest, authorAgent string) (Audience, error) {
 	if len(req.Targets) > 0 {
+		// The kind vocabulary is CLOSED and is checked HERE — before a
+		// message id, thread, seq or transcript row exists (DF-CRIER-475). An
+		// unknown kind used to survive this function and become a skip inside
+		// the fan-out, which answered 201 with the audience recorded and
+		// nothing delivered: a silent no-op for the `@team:<name>` body form
+		// mis-mapped onto a structured target. It is a named refusal now.
+		if err := ValidateAudienceTargets(req.Targets); err != nil {
+			return Audience{}, err
+		}
 		seen := map[string]bool{}
 		targets := make([]AudienceTarget, 0, len(req.Targets))
 		for _, t := range req.Targets {
@@ -2013,6 +2031,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeAPIError(w http.ResponseWriter, status int, code, detail string) {
 	writeJSON(w, status, map[string]string{"error": code, "detail": detail})
+}
+
+// writeAudienceError renders an audience refusal with its own code where it has
+// one: an unaddressable target kind is 400 UNKNOWN_TARGET_KIND (DF-CRIER-475)
+// naming the accepted kinds, never the generic INVALID_AUDIENCE. Every other
+// audience problem keeps that vocabulary.
+func writeAudienceError(w http.ResponseWriter, err error) {
+	var unknown *UnknownTargetKindError
+	if errors.As(err, &unknown) {
+		writeAPIError(w, http.StatusBadRequest, CodeUnknownTargetKind, err.Error())
+		return
+	}
+	writeAPIError(w, http.StatusBadRequest, "INVALID_AUDIENCE", err.Error())
 }
 
 // writeRealmError renders a namespace failure with the same vocabulary the

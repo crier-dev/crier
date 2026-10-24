@@ -234,6 +234,13 @@ shape burns round-trips: `{"to":["@team:ops"]}` is a `400` unknown field `to`,
 in one array is normal — `{"targets":[{"kind":"group","id":"ops"},{"kind":"agent","id":"bob"}]}`
 fans out to the roster and to `bob` in a single send.
 
+**In a structured `targets[]` list only `agent` and `group` fan out** —
+`capability` is a selector (one live holder at delivery time) and `principal`
+has no inbox, so a send records them without delivering, and any other `kind`,
+`team` included (since `@team:<name>` is the BODY form of a `group` target, not
+a kind of its own), is refused `400 UNKNOWN_TARGET_KIND` before the message is
+recorded, naming the accepted kinds (`agent|group|capability|principal`).
+
 **Every member must be a REGISTERED agent to receive.** A roster may name an
 agent that has not registered yet — the roster is curated data, so `POST /groups`
 accepts it — but that member has no inbox and cannot be delivered to until it
