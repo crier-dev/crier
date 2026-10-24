@@ -99,16 +99,35 @@ func (s *SQLStore) Close() error {
 
 // ApplySchema runs the engine's session setup and creates the view tables and
 // indexes when they are absent. It is idempotent and safe to run at every boot.
+//
+// The DDL runs in ONE transaction. Each statement autocommitted on its own is a
+// separate journal create + fsync: on the SQLite adapter that measured ~260-370ms
+// per store open for the view (~14 statements), which is what pushed the test
+// suite over its per-package timeout (INT-CI-014) — the package opens a fresh
+// store per test case. The connection pragmas stay OUTSIDE the transaction on
+// purpose: `PRAGMA foreign_keys` is documented to be a no-op inside a
+// transaction, so arming it there would silently stop enforcing the ON DELETE
+// CASCADE edges the view depends on.
 func (s *SQLStore) ApplySchema(ctx context.Context) error {
 	for _, stmt := range s.dialect.InitStatements() {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("session %s store: init: %w", s.dialect.Name(), err)
 		}
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("session %s store: apply schema: begin: %w", s.dialect.Name(), err)
+	}
 	for _, stmt := range append(append(s.dialect.SchemaStatements(), messageRequestSchema), lifecycleSchema) {
-		if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(stmt)); err != nil {
+		if _, err := tx.ExecContext(ctx, s.dialect.Rebind(stmt)); err != nil {
+			_ = tx.Rollback()
 			return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
 		}
+	}
+	// The commit is the ONE durability point for the whole view, so a
+	// half-created schema cannot survive a crash mid-boot either.
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("session %s store: apply schema: commit: %w", s.dialect.Name(), err)
 	}
 	return nil
 }

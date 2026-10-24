@@ -107,7 +107,7 @@ mcp: build-mcp
 	@exec ./bin/crier-mcp
 
 test:
-	go test ./... -count=1 -timeout 60s -p 1 -p 1
+	go test ./... -count=1 -timeout 60s -p 1
 
 test-short:
 	go test -short ./...
