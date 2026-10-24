@@ -87,19 +87,22 @@
     }
   ],
   "ts": "2026-10-24T01:51:28Z",
-  "finished_at": "2026-10-24T02:15:00Z",
-  "recovered_by": "crier-foreman-2026-10-24-02-06-43",
+  "finished_at": "2026-10-24T03:05:00Z",
+  "recovered_by": [
+    "crier-foreman-2026-10-24-02-06-43"
+  ],
   "outcome": {
-    "merged": [
-      "DF-CRIER-476",
-      "DF-CRIER-477"
-    ],
-    "zero_diff_rejected": [
-      "DF-CRIER-483",
-      "DF-CRIER-475",
-      "DF-CRIER-480",
-      "DF-CRIER-478"
-    ],
-    "notes": "Docs-only merges (DF-CRIER-476, DF-CRIER-477) passed gates. Pre-existing test failures (INT-CRIER-015) unrelated to docs changes. 4 workers produced zero diff \u2014 rejected per foreman rules."
+    "merged": {
+      "DF-CRIER-476": "a9b4f27",
+      "DF-CRIER-477": "4e953ea",
+      "DF-CRIER-478": "ca484db",
+      "DF-CRIER-483": "1ecf2be",
+      "DF-CRIER-475": "99c8fed",
+      "DF-CRIER-480": "a2a1cb2"
+    },
+    "rejected": {},
+    "correction": "The first recovery pass (git snapshot 02:16Z) read 4 branches as zero-commit and marked DF-CRIER-475/478/480/483 FAILED 'zero diff'. They were not dead: their workers were still live from the previous wave tick and committed at 02:2x-02:5xZ. Re-checked, all four were rebased onto main, gated and merged; rows corrected to complete with commit hashes. LESSON: a 0-worker recovery blob plus an empty branch is NOT proof of a dead worker - check for a live process whose cmdline names the task before declaring zero-diff.",
+    "gates": "go build ./... + go vet ./... PASS; go test ./... -count=1 -timeout 300s -p 4 -> 30/30 packages ok, EXIT 0 on merged tree 06b9753; make docs-check PASS; chat-late-join-truth 12/12",
+    "pushed": "origin/main == gitlab/main == 06b9753, ahead 0, parity 0/0"
   }
 }
