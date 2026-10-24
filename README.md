@@ -1368,6 +1368,39 @@ candidate list is a named failure that starts nothing (QA-CRIER-10).
 
 Endpoints called (all declared in [`docs/openapi.yaml`](docs/openapi.yaml)): `GET /sessions`, `POST /sessions`, `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages`, `GET /sessions/{id}/permissions`. An optional `X-Agent-ID` header can be typed in for private-session access. Guard verdicts are **not** exposed by the public API on transcript records (`TranscriptMessage` in the spec carries no guard field), so each message renders an explicit "guard verdict: not exposed by API" placeholder instead of a fake verdict. The page is proven served by `TestChatClientRouteServesHTML` (`cmd/server/chatclient_test.go`).
 
+### Session audiences — what a `201` does and does not mean (DF-CRIER-479)
+
+`POST /sessions` records the room; it does **not** add the creator as a member
+(§1.4: creating does not imply inviting), so a freshly created session with no
+`members` has **zero participants**. `POST /sessions/{id}/messages` with no
+`targets` addresses the session default — every active participant except the
+author — which for that room resolves to nobody. The send is still recorded and
+still answers `201`.
+
+That is the ordinary create-then-send order: a send made before any member
+joins delivers to zero participants at send time, and joining afterwards does
+not retroactively deliver it. Join first (`POST /sessions/{id}/participants`),
+or name `targets` explicitly, if anyone is expected to receive the message.
+
+The response states it rather than leaving it to be inferred from two empty
+arrays: each `dispatch_evidence` attempt carries an audience summary —
+`audience_rule` (the rule that resolved the audience: `session` for the
+participant default, `explicit` for a caller-named `targets` list) and
+`resolved_target_count` (how many targets it resolved to for that pass). A
+zero-participant send reads:
+
+```json
+{"audience":{"rule":"session","targets":null},
+ "outcomes":[],
+ "dispatch_evidence":[{"attempt":1,"audience_rule":"session","resolved_target_count":0,
+                       "targets":[],"receipts":[],"outcomes_recorded":true,"completed_at":"…"}]}
+```
+
+`resolved_target_count: 0` with `outcomes_recorded: true` and a `completed_at`
+is the PROVEN zero-delivery pass — nothing was dispatched because nobody was
+enrolled, not because the pass was cut short. A non-empty audience reports the
+same fields with the real count and the per-target `outcomes` beside it.
+
 ### Session webhook budgets and retries
 
 Session recipients default to a `30000` ms blocking delivery budget
