@@ -14,16 +14,14 @@ you), and **§2.0b** builds the keypair by hand if you would rather see the wire
 
 ## 1. Get it running (5 minutes)
 
-**Prebuilt binary, no Go toolchain** (CR-FEAT-028) — once a release has
-published its assets. Every release *targets* cross-compiled `crier` and
-`crier-mcp` for linux/amd64, linux/arm64 and darwin/arm64, and the installer
-verifies each against the release's `SHA256SUMS` before anything is written.
-Two things to know before you run it:
+**Prebuilt binary, no Go toolchain** (CR-FEAT-028) — this is the fast path, and
+it works on the current release. Release **v0.2.0** publishes 8 assets:
+cross-compiled `crier` and `crier-mcp` executables for linux/amd64, linux/arm64
+and darwin/arm64 (bare static executables — nothing is tarred or zipped), plus
+the `install.sh` installer and the `SHA256SUMS` manifest the installer verifies
+every download against. A checksum mismatch, or a manifest with no entry for this
+box's platform, installs nothing — there is deliberately no flag to skip that.
 
-- **The current release has no published assets.** `v0.1.0-rc2` carries an empty
-  asset list, and the installer refuses to install an unverified download, so on
-  that release this command fails closed naming the missing manifest and installs
-  nothing. The source path below is the one that works today.
 - **A fresh box has no fetch tool at all** — a bare Debian ships neither `curl`
   nor `wget`, so install one first (`apt-get install -y curl ca-certificates`).
 
@@ -36,13 +34,13 @@ export PATH="$HOME/.local/bin:$PATH"
 CR_GUARD_ENABLED=false crier -port 8767 -pidfile .crier.pid &
 ```
 
-`sh -s -- --version <tag>` pins a release instead of the newest; `--dir <path>`
-installs somewhere else. An unverified download installs nothing — the installer
-fails loudly on a checksum mismatch or a manifest with no entry for the binary,
-and there is no flag to skip that. If you would rather read the source, or you
-are testing the build itself, use the clone path below: both end at the same
-server on the same port, and `crier -version` (or `curl -s localhost:8767/version`)
-says which build answered either way.
+`sh -s -- --version <tag>` pins a release instead of the newest (asset names carry
+the platform, not the version, so the default `releases/latest/download/<name>`
+needs no API call); `--dir <path>` installs somewhere else. It installs both
+binaries: `crier` (server + `keygen`) and `crier-mcp` (the MCP bridge). If you
+would rather read the source, or you are testing the build itself, use the clone
+path below: both end at the same server on the same port, and `crier -version`
+(or `curl -s localhost:8767/version`) says which build answered either way.
 
 **From source:**
 

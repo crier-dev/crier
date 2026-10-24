@@ -566,6 +566,35 @@ claims:
     quote: "publishes 8 assets"
     expect: 8
     xfail: null
+  # DF-CRIER-476: TESTERS.md §1 is the FIRST section a tester reads, and it still
+  # said "the current release has no published assets" (v0.1.0-rc2) after v0.2.0
+  # had shipped the whole set — so a tester paid ~90 extra seconds of Go-toolchain
+  # setup for a path the installer no longer needs. These claims hold that section
+  # to the release it now names:
+  #   * the asset count reuses the SHARED id above, so it is the same single
+  #     measurement of scripts/release-artifacts.sh (RELEASE_TARGETS x two
+  #     binaries + install.sh + SHA256SUMS) that pins the README — moving the
+  #     asset set without moving this sentence fails the gate, exactly as it does
+  #     for the README;
+  #   * the tag and the `SHA256SUMS` manifest are anchored, so reverting §1 to the
+  #     stale "no published assets" prose fails with "anchor missing" before any
+  #     live probe can pass.
+  - id: COUNT-RELEASE-ASSETS
+    kind: count
+    doc: TESTERS.md
+    quote: "publishes 8 assets"
+    expect: 8
+    xfail: null
+  - id: ANCHOR-TESTERS-RELEASE-V020
+    kind: anchor
+    doc: TESTERS.md
+    quote: "Release **v0.2.0** publishes 8 assets"
+    xfail: null
+  - id: ANCHOR-TESTERS-INSTALL-VERIFIES-SHA256SUMS
+    kind: anchor
+    doc: TESTERS.md
+    quote: "the `SHA256SUMS` manifest the installer verifies"
+    xfail: null
 
   # --- xfail claims (CR-GAP-062): prose that is FALSE at HEAD, pinned to the board
   # row that will fix it. The anchor is still load-bearing; the assertion is
