@@ -141,6 +141,18 @@ ignore_paths:
   # NOT owed; channels use /sessions?kind=channel. Not a claimed API route.
   - /channels
 
+  # DF-CRIER-478: specs/CHAT-SESSIONS.md is now scanned (its §7 inventory claims make
+  # the whole spec a claim doc). Three path-looking tokens in it are NOT standalone
+  # crier routes: §3.2 and §7 name the inbox sub-surfaces in shorthand after the full
+  # inbox path (`GET /agents/{id}/inbox`, `/ack`, `/stats`, `/transfer`,
+  # `/dead-letters`), so the bare segment is a continuation of the path above it, not
+  # a root route. The full registered paths are probed live by the route claims.
+  # `/stats` is already ignored above for the ecosystem sink's own counter endpoint —
+  # same token class, one entry.
+  - /ack
+  - /transfer
+  - /dead-letters
+
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
   - id: ROUTE-README-RELAY-PUBLISH
@@ -1845,4 +1857,170 @@ claims:
     kind: anchor
     doc: specs/CHAT-INTERFACE.md
     quote: "**No accessibility audit is recorded (DF-CRIER-450).**"
+    xfail: null
+
+  # --- DF-CRIER-478: specs/CHAT-SESSIONS.md §7 is an implementation inventory, not
+  # an absent-interface disclaimer. The dogfood tick found it saying "no session
+  # kind" and "no message_kind on any wire field, stored field or record" while the
+  # SAME section said sessions ship, and the live product returns kind:"channel" on
+  # POST /sessions and message_kind:"plain" on every transcript record.
+  #
+  # What these claims PROVE, and how:
+  #   (a) every shipped statement in §7 is still in the spec (anchor);
+  #   (b) every route §7 names is REGISTERED — probed live, only 404 fails, so a
+  #       400/403/405 is a pass and proves existence, never authorized access;
+  #   (c) naming this doc makes the scanned-path pass walk the WHOLE spec, so every
+  #       route path §7 prints must be a live route or a deliberate ignore_paths
+  #       entry — an inventory line cannot name a route the router does not serve;
+  #   (d) the still-not-built list is pinned VERBATIM (ANCHOR-…-NOT-BUILT-INVENTORY),
+  #       so the drift this row was filed for — a shipped field, record type or route
+  #       creeping back into the not-built list — fails the build instead of waiting
+  #       for the next reader.
+  # What they do NOT prove: authorized access, populated reads, write semantics, or
+  # that a name is absent from docs/openapi.yaml SCHEMAS. The pin is textual and this
+  # gate has no semantic schema probe; a §7 edit therefore has to update its claim in
+  # the same commit, which is the intended cost of pinning prose.
+  - id: ANCHOR-CHAT-SESSIONS-INVENTORY-RECONCILED
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Status: implemented in part · v2 design of 2026-10-03 · inventory reconciled 2026-10-23 (DF-CRIER-478).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-SESSION-OBJECT-ROUTES
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session object, its membership and its routes ship (CR-CHAT-019).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-SESSION-KIND-SHIPS
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session `kind` ships (CR-CHAT-013, §1.2).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-MESSAGE-KIND-SHIPS
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**`message_kind` ships on the wire and in the record (CR-CHAT-018, D12, §4.4).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-GROUP-FANOUT-SHIPS
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The named group and its fan-out ship (CR-CHAT-013, CR-CHAT-022, D8, §2.1, §3.4 rule 7).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-STORAGE-SHAPES-SHIP
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The append log and the query view ship (CR-CHAT-006, §5).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-THREADING-READS-SHIP
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Threading ships — the branch record, the depth rule and the navigation reads (CR-CHAT-017, §4.5, §4.7).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-LATE-JOIN-SHIPS
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Late join ships (CR-CHAT-016, D10, §4.6; DF-CRIER-447).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-COMPILE-SHIPS
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Compile ships (CR-CHAT-028, §4.8).**"
+    xfail: null
+  - id: ANCHOR-CHAT-SESSIONS-NOT-BUILT-INVENTORY
+    kind: anchor
+    doc: specs/CHAT-SESSIONS.md
+    # DF-CRIER-478: the NOT-BUILT inventory is pinned VERBATIM, from its heading to the
+    # NEXT heading, so drift cannot slip in at an edge: the quote is one contiguous block,
+    # so adding a shipped field name (`kind`, `message_kind`), a record type or a route
+    # ANYWHERE inside this list — before the first bullet, after the last one, or between
+    # two — no longer matches and fails `make docs-check`. Deleting an item fails too.
+    # A route PATH is additionally checked by the scanned-path pass these claims turn on
+    # for the whole spec (every path token must be a live route or a deliberate
+    # ignore_paths entry). LIMIT: the pin is textual — it compares this list against
+    # itself, not each name against docs/openapi.yaml schemas; no semantic schema probe
+    # exists in this gate, so a §7 edit must update this claim in the same commit.
+    quote: |-
+      ### Still not built
+
+      - **Attachments are not built (CR-CHAT-014).** No attachment upload or fetch and no byte handling exists on
+        the session surface: an asset is a **reference inside the opaque `payload`**, and its storage,
+        authorization and lifecycle are `CHAT-STORAGE.md` / `CHAT-PERMISSIONS.md`'s design (D9), not this
+        document's. Nothing here serves attachment bytes.
+      - **No lease renewal.** The lease is taken per retrieve and released by ack; the renewal event `B` draws
+        has no operation behind it.
+      - **No session `group` field and no richer lifecycle (CR-CHAT-010).** The project/team handle stays
+        reserved so adding a team is data rather than schema surgery; a richer state machine (paused, archived,
+        per-participant state) is not built, and there is no `deleted` state by design (§1.3). `visibility`
+        ships as a read scope (`realm` \| `private`); it is not a grant editor.
+      - **The four filters of §4.7 rule 3 are not implemented.** The search read ships and every hit carries its
+        `full_path`, but it takes `q` only: filtering by **agent**, **capability**, **has-attachment** and
+        **unresolved** is not an exposed query parameter.
+      - **No message edit and no reaction.** A message is append-only (§3.3) and the transcript is never
+        rewritten, so an edit or a reaction has neither an operation nor a record type.
+
+      ### Executable scope of this inventory
+  - id: ROUTE-CHAT-SESSIONS-SESSIONS
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session object, its membership and its routes ship (CR-CHAT-019).**"
+    expect: "/sessions"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-MESSAGES
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session object, its membership and its routes ship (CR-CHAT-019).**"
+    expect: "/sessions/{id}/messages"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-PARTICIPANTS
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session object, its membership and its routes ship (CR-CHAT-019).**"
+    expect: "/sessions/{id}/participants"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-STATE
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The session object, its membership and its routes ship (CR-CHAT-019).**"
+    expect: "/sessions/{id}/state"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-GROUPS
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The named group and its fan-out ship (CR-CHAT-013, CR-CHAT-022, D8, §2.1, §3.4 rule 7).**"
+    expect: "/groups"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-GROUP
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The named group and its fan-out ship (CR-CHAT-013, CR-CHAT-022, D8, §2.1, §3.4 rule 7).**"
+    expect: "/groups/{name}"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-GROUP-MEMBERS
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**The named group and its fan-out ship (CR-CHAT-013, CR-CHAT-022, D8, §2.1, §3.4 rule 7).**"
+    expect: "/groups/{name}/members"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-THREADS
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Threading ships — the branch record, the depth rule and the navigation reads (CR-CHAT-017, §4.5, §4.7).**"
+    expect: "/sessions/{id}/threads/{thread_id}"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-THREAD-SUMMARY
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Threading ships — the branch record, the depth rule and the navigation reads (CR-CHAT-017, §4.5, §4.7).**"
+    expect: "/sessions/{id}/threads/{thread_id}/summary"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-SEARCH
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Threading ships — the branch record, the depth rule and the navigation reads (CR-CHAT-017, §4.5, §4.7).**"
+    expect: "/sessions/{id}/search"
+    xfail: null
+  - id: ROUTE-CHAT-SESSIONS-COMPILE
+    kind: route
+    doc: specs/CHAT-SESSIONS.md
+    quote: "**Compile ships (CR-CHAT-028, §4.8).**"
+    expect: "/sessions/{id}/compile"
     xfail: null

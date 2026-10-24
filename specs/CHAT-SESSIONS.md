@@ -1,6 +1,7 @@
 # CHAT-SESSIONS.md — the session and threading model
 
-Status: **DRAFT v2** · 2026-10-03 · Owner: Bane · Tickets: **CR-CHAT-002** (the session object, data model,
+Status: **DRAFT v2 · design revision 2026-10-03 · implementation inventory reconciled 2026-10-23
+(DF-CRIER-478)** · Owner: Bane · Tickets: **CR-CHAT-002** (the session object, data model,
 membership, ordered transcript, per-namespace retention) and **CR-CHAT-005** (threading: session vs
 thread vs topic, reply semantics)
 REVISION v2 · 2026-10-03 — folded Bane's detail pass into this document. **Added:** the session `kind` —
@@ -22,6 +23,13 @@ as *the immediate parent* (§4.2), which could be read as "a reply-to-a-reply is
 not the rule.** `parent_id` is reply **attribution**; a reply never changes `thread_id` and never deepens
 the tree; a level is created **only** by a deliberate branch. §4.2 / §4.3 are corrected in place, §4.5 is
 new, and §6 item 5 is marked ANSWERED — nothing was left silently contradictory.
+REVISION 2026-10-23 (DF-CRIER-478) — **§7 reconciled with the shipped surface.** The v2 inventory had come
+to contradict the product it documents: it denied the session `kind` and the message kind on every wire
+field, stored field and record, while the same section said sessions ship, and the live server answers
+`kind:"channel"` on a `POST /sessions` response and `message_kind:"plain"` on every transcript record. §7
+now lists what ships with the code that carries it, keeps an explicit still-not-built list, and the inline
+`NOT BUILT` markers in §1.2 / §1.4 / §4.4 / §4.7 that had gone stale are corrected in place. `docs/claims.yaml`
+pins that inventory, so the same drift fails `make docs-check` instead of waiting for the next reader.
 Series: `specs/CHAT-INTERFACE.md` (the spec of record — objects, UI surface, the element→endpoint mapping),
 `specs/CHAT-PERMISSIONS.md` (CR-CHAT-003 — principals, roles, grants), `specs/CHAT-ADDRESSING.md`
 (CR-CHAT-004 — the tag grammar), `specs/CHAT-STORAGE.md` (CR-CHAT-006 — the dual backend, the bundle, the
@@ -53,14 +61,14 @@ share; it is **not** a bus primitive and **not** a new transport (§4, D1).
 | `id` | string, opaque, URL-safe | yes | The session's identity. It is the **same value** the wire already carries as `session_id` — on the deliver body (`POST /agents/{id}/inbox`, CR-FEAT-004), on the webhook envelope (`crier.session_id`) and in the federation hold record — and the same value the guard resolves `session:<id>` policy keys against. One identity, no mapping table. |
 | `namespace` | string | yes | The realm the session lives in. `""` is the default namespace (the shipped canonical spelling). A session is attached to exactly one realm, and no surface in this series may move it or bridge two realms (`specs/NAMESPACES.md`). |
 | `title` | string | no | Display only. Drawn in every option (`A` "Build Plan", `D` "#A7F3 · Multi-Agent Task" as a subtitle). Never an addressing target. |
-| `kind` | enum `channel` \| `direct` | yes | The session's **shape** (CR-CHAT-013). `channel` = a **project-scoped top-level room**: the place a project lives, whose **top level is the project conversation** and whose threads carry the detail. `direct` = a **1:1** with one agent. A channel and a DM are the **same object** with different defaults — one membership model, one transcript, one fan-out rule (§3.4) — not two primitives. A session record with no `kind` reads as `channel`, so a record written before this field existed is not a third shape. **NOT BUILT.** |
+| `kind` | enum `channel` \| `direct` | yes | The session's **shape** (CR-CHAT-013). `channel` = a **project-scoped top-level room**: the place a project lives, whose **top level is the project conversation** and whose threads carry the detail. `direct` = a **1:1** with one agent. A channel and a DM are the **same object** with different defaults — one membership model, one transcript, one fan-out rule (§3.4) — not two primitives. A session record with no `kind` reads as `channel`, so a record written before this field existed is not a third shape. **SHIPPED** (CR-CHAT-013): stored on the record, validated on create and update, a required field of the `Session` schema in `docs/openapi.yaml`, filterable on the list read — see §7. |
 | `created_at` | timestamp | yes | When the session was created. |
 | `created_by` | Principal | yes | Who created it. Recorded as an **event** (§2.3), so it is auditable; a session whose creator cannot be named is invalid. |
 | `state` | enum `open` \| `closed` | yes | See §1.3. |
 | `closed_at` | timestamp | no | Set by each `close` event; cleared by `reopen` (§4.5a). |
 | `retention_seconds` | integer | no | The session's message-lifetime default. Bounded by the realm's `retention_seconds`: a session may declare a **shorter** lifetime, never a longer one (§3.5). |
 | `group` | string | no | A session-group / project handle, for the multi-team mapping (CR-CHAT-010: project/team ↔ namespace / session-group). **NOT BUILT** — the field is reserved here so adding a team is data, not schema surgery. |
-| `visibility` | enum | no | Whether the session is discoverable and by whom. Drawn only as a **privacy indicator**: `A` draws a padlock glyph beside the title, with no label. **NOT BUILT**; its semantics belong to CR-CHAT-003 (a Grant) and are deliberately not fixed here. |
+| `visibility` | enum | no | Whether the session is discoverable and by whom. Drawn only as a **privacy indicator**: `A` draws a padlock glyph beside the title, with no label. **SHIPPED** as a read scope — `realm` \| `private` on the stored record and on `CreateSessionRequest` (`docs/openapi.yaml`), enforced on session reads (`VISIBILITY_FORBIDDEN`); it fixes who may READ the room, while grant semantics remain CR-CHAT-003's. See §7. |
 
 The transcript and membership are **not** fields on the object: they are ordered event sequences (§2.3,
 §3.1) owned by the append log, because a mutable list field on a room record is exactly the hidden state
@@ -97,7 +105,7 @@ that makes "reconstructable from the transcript alone" (§4.3) unprovable.
   `read`, `invite`, `admin`, `mint` — so the ability to open a room and the ability to add a member to
   it are two different capabilities, and a creator who holds only `admin` over an empty room has a room
   they cannot populate.
-- `POST /sessions` (owed) records `created_by` from the authenticated principal; a request that cannot
+- `POST /sessions` records `created_by` from the authenticated principal; a request that cannot
   name one is refused, never defaulted to a service identity.
 
 ---
@@ -672,9 +680,12 @@ Rules:
 5. **Rendering follows the kind** (`CHAT-INTERFACE.md` §3.8.3): an addressed message is emphasis on the
    addressed participant; a task is a distinct card. Drawing them alike is a defect.
 
-**NOT BUILT:** no wire field, no stored field and no record type carries the message kind today; the
-three-way distinction exists only as this rule. The one identity discipline of §3.4 is unaffected — a
-message has one id across the room whatever its kind.
+**BUILT (CR-CHAT-018 / CR-CHAT-019, §7):** the message kind is carried as data end to end — a
+`json:"message_kind"` field on the send request and on the transcript record, validated at write
+(`plain` \| `addressed` \| `task`), stored by both backends and queryable as `chat_transcript.message_kind`
+(§5.2), so the three-way distinction survives a round trip instead of existing only as this rule. Rule 4
+holds unchanged: the shipped envelope `kind` is a different field and is not overloaded. The one identity
+discipline of §3.4 is unaffected — a message has one id across the room whatever its kind.
 
 ### 4.5 The depth rule — depth is EARNED (CR-CHAT-017, decision D11)
 
@@ -851,8 +862,12 @@ never asked to invent structure the transcript does not carry:
    of the message's (opaque) payload — the asset **reference** of CR-CHAT-014 — so the `has-attachment`
    filter needs the reference on the message, not a content index.
 
-**NOT BUILT:** no depth/ancestry read, no summary surface, no generated marker and no search read exist.
-The route work is CR-CHAT-017 / CR-CHAT-019 / CR-CHAT-020.
+**BUILT (CR-CHAT-017 / CR-CHAT-019 / CR-CHAT-020, §7):** the reads exist. Thread depth and the thread tree
+(`State.ThreadDepth`), the thread read with depth collapse (`GET /sessions/{id}/threads/{thread_id}`) and
+the branch timeline (`.../timeline`), the generated summary — marked `generated: true`, with the raw
+messages one read under it (`.../summary`) — and a transcript search whose every hit carries its
+`full_path` (`GET /sessions/{id}/search`) all ship in `internal/session/threading.go`. Not built: the four
+query filters of rule 3 (agent, capability, has-attachment, unresolved) — the search read takes `q` only.
 
 ### 4.8 Compile — gathering N messages into ONE cited bundle (CR-CHAT-028)
 
@@ -1064,41 +1079,78 @@ Added with the v2 detail pass — open, and deliberately not answered here:
 
 ## 7. Status
 
-**Status: DRAFT v2 · 2026-10-03 · CR-CHAT-002 + CR-CHAT-005.**
+**Status: implemented in part · v2 design of 2026-10-03 · inventory reconciled 2026-10-23 (DF-CRIER-478).**
+The `DRAFT v2` label on the header describes the **design revision**, not an absent implementation. This
+section is the implementation inventory at HEAD `f247bde`; it **supersedes** every older build-status
+annotation in this document: the stale inline `NOT BUILT` markers (the session `kind` and `visibility` in
+§1.2, the `owed` create route in §1.4, the message kind in §4.4, the navigability reads in §4.7) are
+corrected in place, and the markers that are still accurate stand as written and agree with this list.
+Three claims stay separate and none implies another: a route is **registered**, a record
+is **stored**, a control is **rendered**. The browser surface is `CHAT-INTERFACE.md` §7's inventory, not
+this section's.
 
-**Not built** — this document specifies objects and rules that no route implements:
+### Shipped surfaces
 
-- **The session object and its routes ship (CR-CHAT-019).** `POST /sessions`, `GET /sessions`,
-  `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages` and the membership routes
-  (`GET`/`POST /sessions/{id}/participants`) exist. `session_id` remains a **wire tag** on the deliver body
-  (`POST /agents/{id}/inbox`, CR-FEAT-004), on the webhook envelope (`crier.session_id`) and in the
-  federation hold record, and a **guard policy key** (`session:<id>`) — and is now also the key of a stored
-  session object. The close/reopen ROUTE and attributed durable system events now ship
-  (`POST /sessions/{id}/state`, DF-CRIER-446, §4.5a).
-- **`thread_id` IS stored (CR-CHAT-019).** `registry.InboxEntry` carries it and the deliver path records
-  it, so a thread is reconstructable from stored messages alone. `session_id` is still NOT stored on
-  `InboxEntry` (the session store carries the transcript record, which names the session).
+- **The session object, its membership and its routes ship (CR-CHAT-019).** `POST`/`GET /sessions`,
+  `GET`/`POST /sessions/{id}/messages` and `GET`/`POST /sessions/{id}/participants` are registered by
+  `cmd/server/sessionroutes.go` and served by `internal/session/http.go`; the close/reopen route
+  `POST /sessions/{id}/state` appends durable, attributed system events (DF-CRIER-446, §4.5a). Membership
+  changes are recorded events (`session.member.add` / `.remove` / `.context`), not a derived list.
+  `session_id` remains a **wire tag** on the deliver body (`POST /agents/{id}/inbox`, CR-FEAT-004), on the
+  webhook envelope (`crier.session_id`) and in the federation hold record, and a **guard policy key**
+  (`session:<id>`) — and is now also the key of a stored session object.
+- **The session `kind` ships (CR-CHAT-013, §1.2).** `channel` and `direct` are the **same object** with
+  different defaults. `kind` is a **stored** field of the session record (`internal/session/store.go`,
+  `KindChannel` / `KindDirect` in `internal/session/session.go`), a **validated** request field on create
+  and on update (`internal/session/http.go`), a **required** field of the `Session` schema in
+  `docs/openapi.yaml` with a `kind` filter on the list read — and a record written without it reads as
+  `channel` (`DefaultKind`), so an older record is not a third shape.
+- **`message_kind` ships on the wire and in the record (CR-CHAT-018, D12, §4.4).** The three kinds are
+  **data, not inference**: `message_kind` is its own `json:"message_kind"` field on the send request and on
+  the transcript record, it is validated at write (`plain` \| `addressed` \| `task`), it is stored by the
+  JSONL record and by the SQL view, and it is a queryable column (`chat_transcript.message_kind`, §5.2), so
+  the distinction survives a round trip. The shipped envelope `kind` (`message` \| `configure` \|
+  `configure_ack`) is a **different field** and is still forbidden to overload (§4.4 rule 4).
+- **The named group and its fan-out ship (CR-CHAT-013, CR-CHAT-022, D8, §2.1, §3.4 rule 7).**
+  `POST`/`GET /groups`, `GET /groups/{name}` and `PATCH /groups/{name}/members` (registered in
+  `cmd/server/main.go`, served by `internal/session/groups_http.go`) store a curated, editable roster.
+  A send addressed `@team:x` resolves that roster **at send time** and issues one delivery per distinct
+  current member through the session delivery path (`internal/session/groups.go`, `fanout.go`) — the
+  session shape, not a capability: a capability target stays a **selector** resolving to one live holder.
+- **The append log and the query view ship (CR-CHAT-006, §5).** `internal/session/jsonl_store.go` writes
+  the §5.1 records (`session.create`, `session.member.add`, `session.member.context`, `session.message`,
+  `session.thread.branch`, `session.thread.reply`, `session.close`, `session.reopen`);
+  `internal/session/sql_store.go` and `postgres_store.go` project the six §5.2 tables (`chat_sessions`,
+  `chat_session_members`, `chat_transcript`, `chat_deliveries`, `chat_threads`, `chat_context_shares`).
+  The record types and the tables are no longer target shapes.
+- **Threading ships — the branch record, the depth rule and the navigation reads (CR-CHAT-017, §4.5, §4.7).**
+  `session.thread.branch` carries `thread_id`, `parent_thread_id`, `anchor_message_id` and
+  `root_message_id`, and the store **rejects** a branch line missing them just as it rejects a
+  `session.message` carrying `parent_id` (`internal/session/store.go`) — so "a reply never deepens a
+  thread" is enforced at the record, not merely stated (D11). The reads ship in
+  `internal/session/threading.go`: thread depth and the thread tree (`State.ThreadDepth`), the thread read
+  with depth collapse (`GET /sessions/{id}/threads/{thread_id}`), the branch timeline
+  (`GET /sessions/{id}/threads/{thread_id}/timeline`), the generated summary marked `generated: true` with
+  the raw messages one read under it (`GET /sessions/{id}/threads/{thread_id}/summary`), and a transcript
+  search whose every hit carries its `full_path` (`GET /sessions/{id}/search`).
+- **Late join ships (CR-CHAT-016, D10, §4.6; DF-CRIER-447).** `context_share` on `session.member.add`, a
+  later `session.member.context` record for a change, the join-time prompt and the `chat_context_shares`
+  projection.
+- **Membership roles and grants ship (CR-CHAT-003).** A member's role rides its membership event (never
+  derived from who owns which agent), the session permission matrix and its roles/audit reads are
+  registered (`GET /sessions/{id}/permissions`, `GET /sessions/{id}/roles`, `GET /sessions/{id}/audit` —
+  `internal/session/audit_http.go`), and principal/binding/grant management ships
+  (`docs/openapi.yaml`, `internal/registry/`) — that surface's own inventory is `CHAT-INTERFACE.md` §7
+  (DF-CRIER-445), and this document claims no browser control over it.
 - **The fan-out ships (CR-CHAT-019).** `POST /sessions/{id}/messages` is the one-call "send to the
   session": it enumerates the membership, issues one `POST`-equivalent delivery per participant through
   the same path, and records the transcript record with each target's outcome.
-- **No append log and no session tables.** The JSONL record types and the four Postgres tables in §5 are
-  target shapes; nothing writes them (CR-CHAT-006 owns the mechanism).
-- **No membership, no roles, no grants** (CR-CHAT-003) and **no address parser** for `@team:` / `@ns/*` /
-  `#session` (CR-CHAT-004).
-- **No lease renewal** — the lease is taken per retrieve and released by ack; the renewal event `B` draws
-  has no operation behind it.
-- **Session state and its close/reopen route ship (DF-CRIER-446, §4.5a).** The remaining historical
-  draft inventory here does not override that contract; edits/reactions remain outside this change.
-- **Nothing added in v2 is built either.** No session `kind` — no channel and no DM (§1.2, CR-CHAT-013);
-  no named-group object, roster or group fan-out (§2.1, §3.4 rule 7 — `@team:x` is grammar, not a group);
-  no `message_kind` on any wire field, stored field or record, and the shipped envelope `kind`
-  (`message` | `configure` | `configure_ack`) is a **different field** that this document forbids
-  overloading (§4.4); no branch operation, no `session.thread.branch` record, no `parent_thread_id` and no
-  anchor, so the depth rule (D11, §4.5) is a rule with nothing behind it. The context-share record
-  and join-time prompt are now shipped (§4.6, D10, DF-CRIER-447); no depth/ancestry read, no generated
-  summary, no generated marker and no search that returns a location (§4.7); no asset reference beyond the
-  shipped opaque `payload`, and no attachment upload/fetch (CR-CHAT-014 — designed by `CHAT-PERMISSIONS.md`
-  / `CHAT-STORAGE.md`, not here).
+- **`thread_id` IS stored (CR-CHAT-019).** `registry.InboxEntry` carries it and the deliver path records
+  it, so a thread is reconstructable from stored messages alone. `session_id` is still NOT stored on
+  `InboxEntry` (the session store carries the transcript record, which names the session).
+- **Compile ships (CR-CHAT-028, §4.8).** `POST /sessions/{id}/compile` and
+  `GET /sessions/{id}/messages/{mid}/expand` are registered and served by `internal/session`; the
+  new-message property, the per-part citations and the named-gap rules are §4.8's and are not restated here.
 
 **Shipped and reused, not to be reinvented:** the durable inbox with lease / ack / TTL / dead letters
 (`GET /agents/{id}/inbox`, `/ack`, `/stats`, `/transfer`, `/dead-letters`), idempotent delivery
@@ -1106,8 +1158,34 @@ Added with the v2 detail pass — open, and deliberately not answered here:
 (`GET /namespaces`, CR-FEAT-029), capability delivery as a **selector** (CR-FEAT-026), the relay topic
 primitive, the guard verdict metadata, and the derived agent presence (CR-FEAT-024).
 
-Not claimed, and not to be claimed in `docs/claims.yaml`, until they exist: sessions, membership,
-transcripts, threads, the fan-out, session retention, session state, and the session storage shapes — nor
-any v2 addition: session `kind` (channel / direct), the named-group fan-out, the message kinds, sub-thread
-branching, the depth rule, the late-join context record, the navigability properties, or the attachment
-reference.
+### Still not built
+
+- **Attachments are not built (CR-CHAT-014).** No attachment upload or fetch and no byte handling exists on
+  the session surface: an asset is a **reference inside the opaque `payload`**, and its storage,
+  authorization and lifecycle are `CHAT-STORAGE.md` / `CHAT-PERMISSIONS.md`'s design (D9), not this
+  document's. Nothing here serves attachment bytes.
+- **No lease renewal.** The lease is taken per retrieve and released by ack; the renewal event `B` draws
+  has no operation behind it.
+- **No session `group` field and no richer lifecycle (CR-CHAT-010).** The project/team handle stays
+  reserved so adding a team is data rather than schema surgery; a richer state machine (paused, archived,
+  per-participant state) is not built, and there is no `deleted` state by design (§1.3). `visibility`
+  ships as a read scope (`realm` \| `private`); it is not a grant editor.
+- **The four filters of §4.7 rule 3 are not implemented.** The search read ships and every hit carries its
+  `full_path`, but it takes `q` only: filtering by **agent**, **capability**, **has-attachment** and
+  **unresolved** is not an exposed query parameter.
+- **No message edit and no reaction.** A message is append-only (§3.3) and the transcript is never
+  rewritten, so an edit or a reaction has neither an operation nor a record type.
+
+### Executable scope of this inventory
+
+`docs/claims.yaml` anchors every shipped statement above and probes the route paths it names with
+`make docs-check`'s existing `kind: route` language (GET, non-404) against the real in-process server. A
+named 403, 405 or 400 proves **registration**, not authorized access, a populated read or write semantics;
+the §5.2 table names are pinned by their anchor line, not by running a migration. Those claims also make
+the scanned-path pass walk **this** document, so every route path §7 prints must be a live route or a
+deliberate `ignore_paths` entry — an inventory line cannot name a route the router does not serve.
+
+`ANCHOR-CHAT-SESSIONS-NOT-BUILT-INVENTORY` pins the **still-not-built list verbatim**. That is the gate on
+the drift that produced this reconciliation: adding a shipped field name, a record type or a route to the
+not-built list — or quietly deleting a `Still not built` item — no longer matches the anchor and fails
+`make docs-check`, while each shipped item's own anchor fails the same way if its statement is edited away.
