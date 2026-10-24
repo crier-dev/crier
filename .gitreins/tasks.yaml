@@ -3003,3 +3003,13 @@ tasks:
   status: complete
   created_at: '2026-10-24T02:25:37.880024+00:00'
   completed_at: '2026-10-24T03:08:18.712809+00:00'
+- id: DF-CRIER-474
+  title: A single-thread view interleaves session-wide system events without saying
+    they are outside the thread
+  criteria:
+  - When a thread filter is active, rows not members of that thread are excluded or
+    marked session-wide; focused harness proves one in-thread message and one session-wide
+    event; unfiltered view remains unchanged
+  status: complete
+  created_at: '2026-10-24T08:33:49.618189+00:00'
+  completed_at: '2026-10-24T16:01:30.932918+00:00'
