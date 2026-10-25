@@ -14,6 +14,7 @@ import (
 
 // Real production mux, registry verifier and active backend. No verifier stub.
 func TestSessionLifecycleProductionRoute(t *testing.T) {
+	parallelBoot(t)
 	for _, backend := range []string{"jsonl", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			root := t.TempDir()

@@ -60,6 +60,7 @@ func buildAuditedSession(t *testing.T, h *apiHarness) string {
 // exactly the documented set, every member is a valid kind, and the list is
 // the one the endpoint serves.
 func TestAuditEventVocabularyIsClosed(t *testing.T) {
+	t.Parallel()
 	want := []AuditEventKind{
 		AuditSessionStart,
 		AuditSessionClose,
@@ -85,6 +86,7 @@ func TestAuditEventVocabularyIsClosed(t *testing.T) {
 // appended into the trail — the renderer refuses with ErrUnknownAuditEvent,
 // it does not skip the line and it does not guess a kind for it.
 func TestAuditRenderRefusesUnknownRecordKind(t *testing.T) {
+	t.Parallel()
 	forged := &Record{
 		V:         RecordFormatVersion,
 		Type:      RecordType("session.member.resurrect"),
@@ -103,6 +105,7 @@ func TestAuditRenderRefusesUnknownRecordKind(t *testing.T) {
 // create, join, and close events yields exactly the closed-vocabulary events,
 // in order, with the actors attributed.
 func TestAuditTrailPerBackend(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			store := b.open(t, b.pathFn(t))
@@ -154,6 +157,7 @@ func TestAuditTrailPerBackend(t *testing.T) {
 // should a future version skew graft one in. The test asserts both refusals
 // directly against the store and the renderer.
 func TestAuditTrailRefusesGraftedRecord(t *testing.T) {
+	t.Parallel()
 	forged := &Record{
 		V:         RecordFormatVersion,
 		Type:      RecordType("session.member.resurrect"),
@@ -182,6 +186,7 @@ func TestAuditTrailRefusesGraftedRecord(t *testing.T) {
 // with >= 2 participants, one row per ACTIVE participant, and the roles are
 // distinguishable — the observer's send is a dash while the owner's is a tick.
 func TestPermissionMatrixPerBackend(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			store := b.open(t, b.pathFn(t))
@@ -225,6 +230,7 @@ func TestPermissionMatrixPerBackend(t *testing.T) {
 // durable event's role, never a client-side guess. A removed member keeps
 // its badge with active=false.
 func TestRoleBadgesPerBackend(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			store := b.open(t, b.pathFn(t))
@@ -263,6 +269,7 @@ func TestRoleBadgesPerBackend(t *testing.T) {
 // permission.grant events, a tombstoned grant as permission.revoke, and the
 // matrix overlay flips the granted cell with source=grant.
 func TestAuditGrantOverlay(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	grants := []PermissionsGrantView{
 		{
@@ -330,6 +337,7 @@ func TestAuditGrantOverlay(t *testing.T) {
 // TestAuditReadsRefuseUnknownSession: the reads are ordinary scoped reads —
 // an unknown session is a 404 in every realm, never a silent empty trail.
 func TestAuditReadsRefuseUnknownSession(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 
@@ -342,6 +350,7 @@ func TestAuditReadsRefuseUnknownSession(t *testing.T) {
 // TestAuditEventsJSONShape pins the wire shape the UI renders: kind, seq, ts
 // and actor are present and the member details carry the recorded values.
 func TestAuditEventsJSONShape(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 	id := buildAuditedSession(t, h)

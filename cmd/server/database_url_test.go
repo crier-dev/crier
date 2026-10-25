@@ -10,6 +10,7 @@ import (
 )
 
 func TestDatabaseURLSQLiteProduction(t *testing.T) {
+	parallelBoot(t)
 	root := t.TempDir()
 	path := filepath.Join(root, "from-url.sqlite")
 	base := startTestServerWithEnv(t, map[string]string{

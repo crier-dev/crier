@@ -70,6 +70,7 @@ func (a *addressingTest) post(t *testing.T, agentID, body string) (*httptest.Res
 // refused with the NAMED error and NOTHING is stored, and no other agent
 // receives anything.
 func TestDeliverAddressing_MalformedRefusedNamed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		addressing  string
@@ -106,6 +107,7 @@ func TestDeliverAddressing_MalformedRefusedNamed(t *testing.T) {
 // TestDeliverAddressing_MalformedRefusedViaHeader is the same refusal when the
 // value arrives as the X-Crier-Addressing header rather than the body field.
 func TestDeliverAddressing_MalformedRefusedViaHeader(t *testing.T) {
+	t.Parallel()
 	a := newAddressingTest(t)
 	capabilityHolder(t, a.store, "quill")
 
@@ -126,6 +128,7 @@ func TestDeliverAddressing_MalformedRefusedViaHeader(t *testing.T) {
 // HTTP boundary: a 65-address list is refused (never truncated) and the body
 // names both the limit and the count received.
 func TestDeliverAddressing_TooManyRefusedNamesLimitAndCount(t *testing.T) {
+	t.Parallel()
 	a := newAddressingTest(t)
 	capabilityHolder(t, a.store, "quill")
 
@@ -146,6 +149,7 @@ func TestDeliverAddressing_TooManyRefusedNamesLimitAndCount(t *testing.T) {
 // and an agent NAMED in the addressing field that is not the path target
 // receives nothing — the tag did not fan out because nothing executes a tag.
 func TestDeliverAddressing_WellFormedAcceptedNoFanOut(t *testing.T) {
+	t.Parallel()
 	a := newAddressingTest(t)
 	capabilityHolder(t, a.store, "quill")
 	capabilityHolder(t, a.store, "atlas") // named in `addressing`, must receive nothing
@@ -163,6 +167,7 @@ func TestDeliverAddressing_WellFormedAcceptedNoFanOut(t *testing.T) {
 // exactly as before CR-CHAT-004, and an EMPTY field behaves like an absent one
 // so a client that always sends the key is not broken.
 func TestDeliverAddressing_AbsentFieldUnchanged(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string

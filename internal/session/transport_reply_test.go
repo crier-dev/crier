@@ -8,6 +8,7 @@ import (
 )
 
 func TestTransportReplyTextShapes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, body, want string }{
 		{"raw-whitespace-preserved", "\n the answer \n", "\n the answer \n"},
 		{"string-whitespace-preserved", `"\n the answer \n"`, "\n the answer \n"},

@@ -151,6 +151,7 @@ func (s *nsServerBoot) inboxDepth(t *testing.T, id string) int {
 // the live relay: the tight realm's cap is exhausted while the quiet realm keeps
 // publishing, and the same limit does not follow an agent id across realms.
 func TestCRFEAT029TwoNamespacesDoNotShareFate(t *testing.T) {
+	parallelBoot(t)
 	doc := `{"namespaces":[
 		{"name":"tight","rate_limit_per_minute":3},
 		{"name":"loose","rate_limit_per_minute":40}
@@ -193,6 +194,7 @@ func TestCRFEAT029TwoNamespacesDoNotShareFate(t *testing.T) {
 // inbox path: the target's realm is the authority, a mismatched claim is refused
 // with a named error, and the refused message is not stored.
 func TestCRFEAT029MessageCannotCrossNamespaces(t *testing.T) {
+	parallelBoot(t)
 	doc := `{"namespaces":[{"name":"acme"},{"name":"globex"}]}`
 	// Signature enforcement is orthogonal to realms and the acceptance drives
 	// the bus with plain HTTP (the README dev posture), so the inbox reads here
@@ -245,6 +247,7 @@ func TestCRFEAT029MessageCannotCrossNamespaces(t *testing.T) {
 // namespaces at all must produce the same JSON, and the namespace-aware server
 // must not grow a member on any existing surface.
 func TestCRFEAT029SingleNamespaceIsByteIdentical(t *testing.T) {
+	parallelBoot(t)
 	plain := bootNamespaceServer(t, nil)
 
 	// A realm is declared here, but this registration names none — it is the
@@ -309,6 +312,7 @@ func TestCRFEAT029SingleNamespaceIsByteIdentical(t *testing.T) {
 // end to end, and a document that cannot be read fails the boot instead of
 // serving an empty realm set.
 func TestCRFEAT029NamespaceDocumentCanComeFromAFile(t *testing.T) {
+	parallelBoot(t)
 	path := filepath.Join(t.TempDir(), "namespaces.json")
 	doc := `{"namespaces":[{"name":"fromfile","rate_limit_per_minute":7}]}`
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
@@ -333,6 +337,7 @@ func TestCRFEAT029NamespaceDocumentCanComeFromAFile(t *testing.T) {
 // serve is refused everywhere it can be named, and never redirected to the
 // default realm.
 func TestCRFEAT029UnknownNamespaceIsRefusedOnBothLanes(t *testing.T) {
+	parallelBoot(t)
 	s := bootNamespaceServer(t, map[string]string{"CR_NAMESPACES": `{"namespaces":[{"name":"acme"}]}`})
 
 	status, body := s.publish(t, "ghost", "agent-a", "topic.a")
@@ -352,6 +357,7 @@ func TestCRFEAT029UnknownNamespaceIsRefusedOnBothLanes(t *testing.T) {
 // the real HTTP surface (registration and delivery), and a wrong one is a 401
 // that names the header.
 func TestCRFEAT029NamespaceTokenPostureEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	doc := `{"namespaces":[{"name":"private","auth":"token","token_ref":"env:CR_NS_PRIVATE_TOKEN"}]}`
 	s := bootNamespaceServer(t, map[string]string{
 		"CR_NAMESPACES":        doc,
@@ -454,6 +460,7 @@ func keys(body string) string {
 // boot shapes so a future change cannot make "no namespaces" behave differently
 // from "an empty namespace list".
 func TestCRFEAT029DocumentIsOptionalAndEmptyMeansImplicit(t *testing.T) {
+	parallelBoot(t)
 	empty := bootNamespaceServer(t, map[string]string{"CR_NAMESPACES": "{}"})
 	status, body := empty.do(t, http.MethodGet, "/namespaces", "", nil)
 	if status != http.StatusOK {
@@ -468,6 +475,7 @@ func TestCRFEAT029DocumentIsOptionalAndEmptyMeansImplicit(t *testing.T) {
 // default message lifetime on the live inbox path, and the default realm keeps
 // the store's own default.
 func TestCRFEAT029RetentionIsPerNamespaceEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	doc := `{"namespaces":[{"name":"short","retention_seconds":120}]}`
 	s := bootNamespaceServer(t, map[string]string{
 		"CR_NAMESPACES":        doc,
@@ -518,6 +526,7 @@ func TestCRFEAT029RetentionIsPerNamespaceEndToEnd(t *testing.T) {
 // served live by the same server, which is what makes this a live check rather
 // than a file comparison).
 func TestCRFEAT029NamespaceIsInTheOpenAPISpec(t *testing.T) {
+	parallelBoot(t)
 	s := bootNamespaceServer(t, nil)
 	status, body := s.do(t, http.MethodGet, "/openapi.yaml", "", nil)
 	if status != http.StatusOK {
@@ -536,6 +545,7 @@ func TestCRFEAT029NamespaceIsInTheOpenAPISpec(t *testing.T) {
 // register → deliver → retrieve round trip still works on a server with realms
 // declared.
 func TestCRFEAT029ExistingSurfacesStillWork(t *testing.T) {
+	parallelBoot(t)
 	s := bootNamespaceServer(t, map[string]string{
 		"CR_NAMESPACES":        `{"namespaces":[{"name":"acme"}]}`,
 		"CR_REQUIRE_AGENT_SIG": "false",
@@ -584,6 +594,7 @@ func TestCRFEAT029ExistingSurfacesStillWork(t *testing.T) {
 // listing reports posture, so a token-less caller must not read it on a server
 // that has auth on.
 func TestCRFEAT029NamespaceListingRequiresAuth(t *testing.T) {
+	parallelBoot(t)
 	s := bootNamespaceServer(t, map[string]string{"CR_AUTH_TOKEN": "tok"})
 
 	status, _ := s.do(t, http.MethodGet, "/namespaces", "", nil)
@@ -605,6 +616,7 @@ func TestCRFEAT029NamespaceListingRequiresAuth(t *testing.T) {
 // refused rather than ignored, per the DF-CRIER-180 doctrine that a value the
 // server does not honor must be an error, never a no-op.
 func TestCRFEAT029BodyNamespaceOnPublishIsRefused(t *testing.T) {
+	parallelBoot(t)
 	s := bootNamespaceServer(t, map[string]string{"CR_NAMESPACES": `{"namespaces":[{"name":"acme"}]}`})
 
 	status, body := s.do(t, http.MethodPost, "/relay/publish",

@@ -83,6 +83,7 @@ func BenchmarkAck(b *testing.B) {
 }
 
 func TestRetrieve_LeaseExpiryReleasedInline(t *testing.T) {
+	t.Parallel()
 	const agentID = "agent-lease"
 
 	store := NewMemoryStore()
@@ -135,6 +136,7 @@ func TestRetrieve_LeaseExpiryReleasedInline(t *testing.T) {
 }
 
 func TestAck_EmptyMessageIDs(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "agent-1"}); err != nil {
 		t.Fatalf("register: %v", err)
@@ -151,6 +153,7 @@ func TestAck_EmptyMessageIDs(t *testing.T) {
 // last_seen stayed frozen at registration and a client could not use the
 // PATCH response to confirm the write.
 func TestMemoryStore_Update_AdvancesLastSeen(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	agent := &Agent{ID: "agent-patch", Capabilities: []string{"relay", "mesh"}}
 	if err := store.Register(agent); err != nil {
@@ -197,6 +200,7 @@ func TestMemoryStore_Update_AdvancesLastSeen(t *testing.T) {
 // TestMemoryStore_Update_NotFound keeps the missing-agent contract (404) with
 // the new write semantics in place.
 func TestMemoryStore_Update_NotFound(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	err := store.Update(&Agent{ID: "ghost"})
 	if !errors.Is(err, ErrAgentNotFound) {

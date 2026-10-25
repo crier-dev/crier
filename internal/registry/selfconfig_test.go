@@ -33,6 +33,7 @@ func selfConfigRouter(h *Handler) *mux.Router {
 // ----- GET /agents?capability=abc (spec §7, CR-FEAT-007) -----
 
 func TestListAgents_CapabilityFilter(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, pubA := newTestPubKey(t)
 	_, pubB := newTestPubKey(t)
@@ -107,6 +108,7 @@ func TestListAgents_CapabilityFilter(t *testing.T) {
 // ----- PATCH /agents/{id} (spec §7, CR-FEAT-007) -----
 
 func TestUpdateAgent_PatchCapabilities(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store) // agent-1 with [relay mesh]
 	router := selfConfigRouter(NewHandler(store))
@@ -178,6 +180,7 @@ func TestUpdateAgent_PatchCapabilities(t *testing.T) {
 }
 
 func TestUpdateAgent_WebhookAddUpdateRemove(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := selfConfigRouter(NewHandler(store))
@@ -262,6 +265,7 @@ func TestUpdateAgent_WebhookAddUpdateRemove(t *testing.T) {
 }
 
 func TestUpdateAgent_Errors(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := selfConfigRouter(NewHandler(store))
@@ -292,6 +296,7 @@ func TestUpdateAgent_Errors(t *testing.T) {
 // echoed the registration value forever, so the response could not be used
 // to confirm the write.
 func TestUpdateAgent_AdvancesLastSeen(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registered := registerTestAgent(t, store) // agent-1
 	router := selfConfigRouter(NewHandler(store))
@@ -359,6 +364,7 @@ type nonUpdatableStore struct {
 }
 
 func TestUpdateAgent_StoreWithoutUpdater(t *testing.T) {
+	t.Parallel()
 	inner := setupTestStore(t)
 	registerTestAgent(t, inner)
 	router := selfConfigRouter(NewHandler(&nonUpdatableStore{inner}))
@@ -375,6 +381,7 @@ func TestUpdateAgent_StoreWithoutUpdater(t *testing.T) {
 // ----- PATCH signature gate (same requireAgent gate as DELETE) -----
 
 func TestUpdateAgent_RequiresSignature(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -417,6 +424,7 @@ func TestUpdateAgent_RequiresSignature(t *testing.T) {
 // acts on it by PATCHing its own registration, and a follow-up capability
 // query reflects the change.
 func TestDeliver_WebhookConfigure_PassScenario(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var gotEvent, gotKind string
 	var gotPayload map[string]any
@@ -589,6 +597,7 @@ func TestDeliver_WebhookConfigure_PassScenario(t *testing.T) {
 // webhook wire: missing kind defaults to message; configure_ack (the agent's
 // reply to a directive, spec §7) travels untouched.
 func TestDeliver_WebhookKind_DefaultsAndAck(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name    string
 		kind    string

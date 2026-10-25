@@ -58,6 +58,7 @@ func newSigHandler(store Store) *Handler {
 }
 
 func TestAuthorizeAgent_ValidSignature(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -73,6 +74,7 @@ func TestAuthorizeAgent_ValidSignature(t *testing.T) {
 }
 
 func TestAuthorizeAgent_MissingHeaders(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -136,6 +138,7 @@ func deniedMessage(t *testing.T, h *Handler, req *http.Request, targetID string)
 // whitespace-only) X-Agent-Sig branch: 401, NOT the missing-headers message,
 // and a body that names the empty signature and the non-seekable-payload cause.
 func TestAuthorizeAgent_EmptySignatureNamesTheCause(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		sig  string
@@ -173,6 +176,7 @@ func TestAuthorizeAgent_EmptySignatureNamesTheCause(t *testing.T) {
 // 6 hex chars is not hex rubbish, so the message must report the expected
 // 128-char length AND the actual value/length rather than a generic line.
 func TestAuthorizeAgent_ShortSignatureNamesTheLength(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -199,6 +203,7 @@ func TestAuthorizeAgent_ShortSignatureNamesTheLength(t *testing.T) {
 // TestAuthorizeAgent_NonHexSignatureSaysNotHex pins the non-hex branch: the
 // message must say the value is not hex, not merely report a length.
 func TestAuthorizeAgent_NonHexSignatureSaysNotHex(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -225,6 +230,7 @@ func TestAuthorizeAgent_NonHexSignatureSaysNotHex(t *testing.T) {
 // message must survive verbatim — a caller with no signature at all must not be
 // told to debug an empty signing step.
 func TestAuthorizeAgent_MissingHeaderMessageUnchanged(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		setHeaders func(*http.Request)
@@ -255,6 +261,7 @@ func TestAuthorizeAgent_MissingHeaderMessageUnchanged(t *testing.T) {
 }
 
 func TestAuthorizeAgent_CrossAgentRejected(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, privA := testAgentKeypair(t, store, "agent-a")
@@ -275,6 +282,7 @@ func TestAuthorizeAgent_CrossAgentRejected(t *testing.T) {
 }
 
 func TestAuthorizeAgent_WrongKeyRejected(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -292,6 +300,7 @@ func TestAuthorizeAgent_WrongKeyRejected(t *testing.T) {
 }
 
 func TestAuthorizeAgent_StaleTimestampRejected(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -327,6 +336,7 @@ func TestAuthorizeAgent_StaleTimestampRejected(t *testing.T) {
 // test TOGETHER with that doc paragraph — the pair is the contract, and a
 // silent change to either half is the drift this test exists to catch.
 func TestAuthorizeAgent_InWindowReplayIsAccepted_DocumentedTrade(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -367,6 +377,7 @@ func TestAuthorizeAgent_InWindowReplayIsAccepted_DocumentedTrade(t *testing.T) {
 }
 
 func TestAuthorizeAgent_UnknownAgentNotFound(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -388,6 +399,7 @@ func TestAuthorizeAgent_UnknownAgentNotFound(t *testing.T) {
 // with enforcement ON gets 401 naming the real reason — never a 500 (the
 // pre-fix "invalid stored public key" Internal Server Error), never a 200.
 func TestAuthorizeAgent_KeylessAgentFailsClosed401(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	// Keyless agent: registered with an empty key (enforcement off at the
@@ -436,6 +448,7 @@ func bodySignedRequest(t *testing.T, priv ed25519.PrivateKey, agentID, method, p
 // row that opts in sends X-Agent-Body-SHA256; the case that leaves it ABSENT
 // pins that the legacy 3-line path is byte-identical (pass and fail both).
 func TestAuthorizeAgent_BodyBinding(t *testing.T) {
+	t.Parallel()
 	const (
 		agentID = "agent-1"
 		method  = http.MethodPost
@@ -590,6 +603,7 @@ func TestAuthorizeAgent_BodyBinding(t *testing.T) {
 // row names — a body swapped between the signed request and its delivery — is
 // closed on the delivered path, not just in a unit.
 func TestHandleAck_BodyBindingRejectsAlteredBody(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -610,6 +624,7 @@ func TestHandleAck_BodyBindingRejectsAlteredBody(t *testing.T) {
 }
 
 func TestHandleRetrieve_RequiresSignature(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -629,6 +644,7 @@ func TestHandleRetrieve_RequiresSignature(t *testing.T) {
 }
 
 func TestHandleRetrieve_SignedSucceeds(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -659,6 +675,7 @@ func TestHandleRetrieve_SignedSucceeds(t *testing.T) {
 }
 
 func TestHandleAck_SignedSucceeds_UnsignedFails(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -701,6 +718,7 @@ func TestHandleAck_SignedSucceeds_UnsignedFails(t *testing.T) {
 }
 
 func TestHandleStats_RequiresSignature(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -715,6 +733,7 @@ func TestHandleStats_RequiresSignature(t *testing.T) {
 }
 
 func TestHandleUnregister_RequiresSignature(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, _ = testAgentKeypair(t, store, "agent-1")
@@ -729,6 +748,7 @@ func TestHandleUnregister_RequiresSignature(t *testing.T) {
 }
 
 func TestHandleUnregister_SignedSucceeds(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := newSigHandler(store)
 	_, priv := testAgentKeypair(t, store, "agent-1")
@@ -746,6 +766,7 @@ func TestHandleUnregister_SignedSucceeds(t *testing.T) {
 }
 
 func TestRequireAgent_DisabledByDefault(t *testing.T) {
+	t.Parallel()
 	// Legacy behavior: Handler without SetRequireAgentSig(true) allows access.
 	store := NewMemoryStore()
 	h := NewHandler(store)

@@ -85,6 +85,7 @@ const principalGrantAgentBody = `{"payload":{"text":"hi"},"principal_id":"prin_v
 // principal holds a binding and a READ grant — a speech right and a read right
 // — and the send is still refused, with a machine-readable body.
 func TestDeliverRefusedWithoutGrantNamedError(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "quill")
 
@@ -121,6 +122,7 @@ func TestDeliverRefusedWithoutGrantNamedError(t *testing.T) {
 // principal that names no live binding is refused with the reason a client
 // branches on.
 func TestDeliverRefusedNoBindingNamedError(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "quill")
 	a.seed(t,
@@ -136,6 +138,7 @@ func TestDeliverRefusedNoBindingNamedError(t *testing.T) {
 
 // TestDeliverAnonymousOnClassedTargetRefused covers §6.7's anonymous row.
 func TestDeliverAnonymousOnClassedTargetRefused(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "quill")
 	a.seed(t, (&permissions.AgentInfo{ID: "quill", Class: permissions.ClassPersonal, Owner: "prin_other"}).Record(time.Now()))
@@ -149,6 +152,7 @@ func TestDeliverAnonymousOnClassedTargetRefused(t *testing.T) {
 // TestDeliverAllowedWithSendGrant is the positive half: the grant that admits a
 // send does so, and the message lands.
 func TestDeliverAllowedWithSendGrant(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "quill")
 	a.seed(t,
@@ -172,6 +176,7 @@ func TestDeliverAllowedWithSendGrant(t *testing.T) {
 
 // TestOwnerMayReachOwnAgent is §3.2's ownership rule through the wire.
 func TestOwnerMayReachOwnAgent(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "atlas")
 	a.seed(t,
@@ -189,6 +194,7 @@ func TestOwnerMayReachOwnAgent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRevokedGrantRefusedThroughHandler(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "quill")
 	a.seed(t,
@@ -221,6 +227,7 @@ func TestRevokedGrantRefusedThroughHandler(t *testing.T) {
 // existing fleet: with the ACL ARMED, an agent with no class record is still
 // reachable exactly as it shipped (§8.1's residual, stated rather than hidden).
 func TestUnclassedTargetKeepsLegacyPosture(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "legacy")
 	rec, _ := a.deliver(t, "/agents/legacy/inbox", `{"payload":{"text":"hi"}}`)
@@ -231,6 +238,7 @@ func TestUnclassedTargetKeepsLegacyPosture(t *testing.T) {
 // wired, the SAME classed-agent request that the ACL refuses above is accepted,
 // which is the pre-CR-CHAT-003 posture (§6.4 rule 2).
 func TestNoCheckerIsByteIdenticalLegacy(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store) // no SetPermissionsChecker
 	capabilityHolder(t, store, "quill")
@@ -248,6 +256,7 @@ func TestNoCheckerIsByteIdenticalLegacy(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityRefusalConsumesNoRotationTurn(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "worker-a", capabilityProbe)
 	a.register(t, "worker-b", capabilityProbe)
@@ -282,6 +291,7 @@ func TestCapabilityRefusalConsumesNoRotationTurn(t *testing.T) {
 // TestCapabilityViewerRefusedInvoke is §6.5's third worked line, through the
 // capability surface.
 func TestCapabilityViewerRefusedInvoke(t *testing.T) {
+	t.Parallel()
 	a := newACLTest(t)
 	a.register(t, "worker-a", capabilityProbe)
 	a.seed(t,

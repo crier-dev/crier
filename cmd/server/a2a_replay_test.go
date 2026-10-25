@@ -97,6 +97,7 @@ func (s *failingA2AReplayStore) FinishA2AReplay(agent, key, token string, record
 }
 
 func TestA2AReplayFailsClosed(t *testing.T) {
+	parallelBoot(t) // parent-side env-free boot path (INT-CI-014)
 	for _, mode := range []string{"acquire", "finish", "reject", "ambiguous", "corrupt"} {
 		t.Run(mode, func(t *testing.T) {
 			store := &failingA2AReplayStore{MemoryStore: registry.NewMemoryStore(), failAcquire: mode == "acquire", failFinish: mode == "finish"}
@@ -137,6 +138,7 @@ func TestA2AReplayFailsClosed(t *testing.T) {
 }
 
 func TestA2AReplayConcurrentHandlers(t *testing.T) {
+	parallelBoot(t) // parent-side env-free boot path (INT-CI-014)
 	store := registry.NewMemoryStore()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32

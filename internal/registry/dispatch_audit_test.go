@@ -15,6 +15,7 @@ import (
 )
 
 func TestDispatchPeekSnapshotsDoNotMutateHints(t *testing.T) {
+	t.Parallel()
 	for _, surface := range []string{"peek", "list"} {
 		t.Run(surface, func(t *testing.T) {
 			h := newCR36Harness(t, nil)
@@ -47,6 +48,7 @@ func TestDispatchPeekSnapshotsDoNotMutateHints(t *testing.T) {
 }
 
 func TestDispatchServicePermissionMatrix(t *testing.T) {
+	t.Parallel()
 	identities := []struct{ agent, principal string }{
 		{cr36Scheduler, "prin_sched"}, {cr36Router, "prin_router"}, {cr36Outsider, "prin_outsider"},
 	}
@@ -88,6 +90,7 @@ func TestDispatchServicePermissionMatrix(t *testing.T) {
 // Real HTTP delivery -> signed RemoteStore poll -> correlated result -> signed
 // ack. Only completed work is acked; its unfinished sibling must redeliver.
 func TestDispatchAuthorizedRouterCompletesOnlyOneMessage(t *testing.T) {
+	t.Parallel()
 	a := newCR36ACL(t)
 	routerPub, routerKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)

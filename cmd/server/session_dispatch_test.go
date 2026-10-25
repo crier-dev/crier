@@ -119,6 +119,7 @@ func sendDispatchMessage(t *testing.T, base, room string) sessionDispatchView {
 }
 
 func TestSessionFanoutPostsWebhook(t *testing.T) {
+	parallelBoot(t)
 	base, room, _, envelopes := sessionDispatchFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) }), "allow")
 	msg := sendDispatchMessage(t, base, room)
 	select {
@@ -140,6 +141,7 @@ func TestSessionFanoutPostsWebhook(t *testing.T) {
 }
 
 func TestSessionFanoutConsultsTargetGuard(t *testing.T) {
+	parallelBoot(t)
 	base, room, calls, envelopes := sessionDispatchFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }), "block")
 	msg := sendDispatchMessage(t, base, room)
 	require.EqualValues(t, 1, calls.Load(), "target policy must run on the session path")
@@ -163,6 +165,7 @@ func TestSessionFanoutConsultsTargetGuard(t *testing.T) {
 // future change that returns this test to the default budget reds it on WALL CLOCK
 // rather than silently eating half the package's deadline again.
 func TestSessionFanoutWebhookFailureIsRefused(t *testing.T) {
+	parallelBoot(t)
 	// 2s of budget fits the first retry (backoff(1)=1s) and then the deadline, which is
 	// all this test needs: one retry proves the ladder runs, the deadline proves the
 	// refusal is reported when it ends.
@@ -246,6 +249,7 @@ func storedDispatchTranscript(t *testing.T, root, room string) *session.State {
 }
 
 func TestSessionFanoutWebhookReplyRecordedInThread(t *testing.T) {
+	parallelBoot(t)
 	root := t.TempDir()
 	base, room, _, _ := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"reply":"Agent answer: <ready> & waiting"}`))
@@ -291,6 +295,7 @@ func TestSessionFanoutWebhookReplyRecordedInThread(t *testing.T) {
 }
 
 func TestSessionFanoutWebhookEmptyReplyWritesNothing(t *testing.T) {
+	parallelBoot(t)
 	for _, body := range []string{"", `""`, `"  "`, `null`, `{"reply":""}`, `{"reply":"  "}`, `{"reply":42}`, `{"ok":true}`, `[]`} {
 		t.Run("body="+body, func(t *testing.T) {
 			root := t.TempDir()
@@ -309,6 +314,7 @@ func TestSessionFanoutWebhookEmptyReplyWritesNothing(t *testing.T) {
 }
 
 func TestSessionFanoutWebhookReplyDoesNotFanout(t *testing.T) {
+	parallelBoot(t)
 	root := t.TempDir()
 	base, room, calls, envelopes := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"reply":"Only record this answer"}`))
@@ -346,6 +352,7 @@ func TestSessionFanoutWebhookReplyDoesNotFanout(t *testing.T) {
 }
 
 func TestSessionFanoutGuardRunsOnceBeforeStore(t *testing.T) {
+	parallelBoot(t)
 	base, room, calls, _ := sessionDispatchFixture(t, nil, "allow")
 	msg := sendDispatchMessage(t, base, room)
 	require.Equal(t, "accepted", msg.Outcomes[0].Outcome)

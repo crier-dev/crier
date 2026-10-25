@@ -21,6 +21,7 @@ import (
 // Exercise run() and the real HTTP listener with signature enforcement disabled:
 // deployment compatibility policy must not inflate a trust-verification claim.
 func TestTrustPossessionHTTP(t *testing.T) {
+	parallelBoot(t)
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			base := startTestServerWithEnv(t, map[string]string{

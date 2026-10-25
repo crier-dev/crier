@@ -227,6 +227,7 @@ func inboxLeaseOf(t *testing.T, body string) (messageIDs []string, leaseID strin
 // through the whole lifecycle, every transition named, plus the terminal-state
 // refusals the specification makes mandatory.
 func TestA2ATaskLifecycle_Transcript(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	priv := registerA2AAgent(t, base, a2aLifecycleTenant, true, nil)
@@ -482,6 +483,7 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 // reaches a QUEUED message too — the case an ack-based cancel could not express,
 // because Ack requires the caller to hold the lease.
 func TestA2ATaskLifecycle_CancelIsCanceledEvenWhenNothingHoldsTheLease(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	priv := registerA2AAgent(t, base, a2aLifecycleTenant, true, nil)
@@ -511,6 +513,7 @@ func TestA2ATaskLifecycle_CancelIsCanceledEvenWhenNothingHoldsTheLease(t *testin
 // TestA2ATaskLifecycle_ListTasksPaginationLive drives the cursor over a real
 // store: two pages, no repeats, and the totals §3.1.4 requires.
 func TestA2ATaskLifecycle_ListTasksPaginationLive(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	registerA2AAgent(t, base, a2aLifecycleTenant, true, nil)
@@ -625,6 +628,7 @@ func TestA2ATaskLifecycle_SweptTaskIsFailedFromItsDeadLetter(t *testing.T) {
 // live task opens with the Task (§9.4.6) and closes when crier's own store shows
 // a terminal outcome — here, the consumer's ack.
 func TestA2ATaskLifecycle_SubscribeToTaskStreamsUntilTerminal(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	priv := registerA2AAgent(t, base, a2aLifecycleTenant, true, nil)
@@ -689,6 +693,7 @@ func lifecycleParams(method, tenant, id string) string {
 // default, and these calls carry no X-Agent-* header) — and the per-agent gate is
 // the same one the send operations enforce.
 func TestA2ATaskLifecycle_NoNewAuthAndTheSameGate(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED":       "true",
 		"CR_REQUIRE_AGENT_SIG": "true",
@@ -730,6 +735,7 @@ func TestA2ATaskLifecycle_NoNewAuthAndTheSameGate(t *testing.T) {
 // the router's own 404 — the path does not exist, exactly as it did not before
 // this row.
 func TestA2ATaskLifecycle_SwitchOffRegistersNothing(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": ""})
 	client := &http.Client{Timeout: 5 * time.Second}
 	for _, method := range []string{

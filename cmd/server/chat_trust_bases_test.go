@@ -81,6 +81,7 @@ func TestChatTrustBasisVocabulary(t *testing.T) {
 }
 
 func TestChatTrustBasisServedMap(t *testing.T) {
+	parallelBoot(t)
 	resp, err := http.Get(startTestServer(t) + "/chat")
 	if err != nil {
 		t.Fatal(err)

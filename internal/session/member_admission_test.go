@@ -13,6 +13,7 @@ import (
 )
 
 func TestSessionParticipantRejectsUnknownAgent(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -37,6 +38,7 @@ type failingAgentLookup struct{ err error }
 
 func (l failingAgentLookup) Get(string) (*registry.Agent, error) { return nil, l.err }
 func TestSessionParticipantRegistryFailureIsNotMissing(t *testing.T) {
+	t.Parallel()
 	for _, lookup := range []AgentLookup{nil, failingAgentLookup{errors.New("registry unavailable")}, failingAgentLookup{nil}} {
 		h := NewHTTPHandler(NewJSONLStoreForTest(t), HTTPOptions{Agents: lookup})
 		_, err := h.addOrReaddMember(context.Background(), &Session{ID: "room"}, addParticipantRequest{MemberType: "agent", MemberID: "operator"}, "human")
@@ -46,6 +48,7 @@ func TestSessionParticipantRegistryFailureIsNotMissing(t *testing.T) {
 }
 
 func TestSessionLegacyMemberSendExcludesAuthorAndKeepsPartialSuccess(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -82,6 +85,7 @@ func TestSessionLegacyMemberSendExcludesAuthorAndKeepsPartialSuccess(t *testing.
 }
 
 func TestSessionExplicitAudienceExcludesAuthor(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	room := h.createRoom(t)
@@ -96,6 +100,7 @@ func TestSessionExplicitAudienceExcludesAuthor(t *testing.T) {
 }
 
 func TestSessionFanoutNeverDeliversToAuthor(t *testing.T) {
+	t.Parallel()
 	reg := registry.NewMemoryStore()
 	require.NoError(t, reg.Register(&registry.Agent{ID: "atlas"}))
 	require.NoError(t, reg.Register(&registry.Agent{ID: "nimbus"}))

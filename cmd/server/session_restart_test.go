@@ -62,6 +62,7 @@ type restartRequestEvidence struct {
 
 // Helper process: no package-level state from the sender survives a replay.
 func TestSessionRequestRestartChild(t *testing.T) {
+	parallelBoot(t)
 	phase := os.Getenv("CRIER_REQUEST_RESTART_CHILD")
 	if phase == "" {
 		return

@@ -19,6 +19,7 @@ import (
 )
 
 func TestTrustPossessionBackendParity(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			var s Store = NewMemoryStore()

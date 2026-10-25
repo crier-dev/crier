@@ -20,6 +20,7 @@ import (
 )
 
 func TestInbound371ProductionPolicyStatusAndReceipt(t *testing.T) {
+	parallelBoot(t)
 	for _, tc := range []struct {
 		name, required string
 		configured     bool

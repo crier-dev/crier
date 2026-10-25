@@ -23,6 +23,7 @@ type listErrReporter interface {
 // failing server is distinguishable from an empty registry. Pre-fix,
 // RemoteStore laundered every failure into a silent empty slice.
 func TestRemoteStore_ListReportsServerError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "registry backend exploded", http.StatusInternalServerError)
 	}))
@@ -58,6 +59,7 @@ func TestRemoteStore_ListReportsServerError(t *testing.T) {
 // contract answer is unchanged (non-nil empty slice) but the recorded
 // error must name the decode step.
 func TestRemoteStore_ListReportsDecodeError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("this-is-not-json"))
@@ -90,6 +92,7 @@ func TestRemoteStore_ListReportsDecodeError(t *testing.T) {
 // store that failed once clears the recorded error on the next successful
 // List, so ListError always describes the LAST call.
 func TestRemoteStore_ListEmptyRegistryIsClean(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {

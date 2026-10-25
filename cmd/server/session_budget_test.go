@@ -17,10 +17,12 @@ import (
 // Test the env -> production handler -> Fanout -> DeliveryRequest.TimeoutMs ->
 // webhook driver chain, including the persisted transcript and its summary.
 func TestSessionFanoutBudgetMixedOutcomes(t *testing.T) {
+	parallelBoot(t)
 	testSessionFanoutBudget(t, false)
 }
 
 func TestSessionFanoutAllTimeoutsRunConcurrently(t *testing.T) {
+	parallelBoot(t)
 	testSessionFanoutBudget(t, true)
 }
 

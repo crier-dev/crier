@@ -75,5 +75,6 @@ func exerciseTrustStore(t *testing.T, s TrustStore) {
 
 func TestMemoryTrustStore(t *testing.T) { exerciseTrustStore(t, NewMemoryStore()) }
 func TestAuthorityTrustStore(t *testing.T) {
+	t.Parallel()
 	exerciseTrustStore(t, NewAuthorityStore(NewMemoryStore(), nil, ""))
 }

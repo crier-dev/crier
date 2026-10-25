@@ -41,6 +41,7 @@ func d8CreateGroup(t *testing.T, client *http.Client, base, name string, members
 // agents, one curated group and one capability pool; a group send fans out to
 // all five, a capability send lands on exactly one holder per delivery.
 func TestNamedGroupVsCapabilityTargetEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_REQUIRE_AGENT_SIG": "false",
 		"CR_SESSION_LOG_ROOT":  t.TempDir(),

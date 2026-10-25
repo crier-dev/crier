@@ -134,6 +134,7 @@ func registerAgent(t *testing.T, store *registry.PostgresStore, id string) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_SchemaShapeIsTheSpecShape(t *testing.T) {
+	t.Parallel()
 	store := newTestPostgresStore(t)
 	ctx := context.Background()
 
@@ -168,6 +169,7 @@ func TestPostgres_SchemaShapeIsTheSpecShape(t *testing.T) {
 }
 
 func TestPostgres_TranscriptOrderingKeyIsSessionSeq(t *testing.T) {
+	t.Parallel()
 	store := newTestPostgresStore(t)
 	ctx := context.Background()
 	for _, rec := range buildScenario() {
@@ -186,6 +188,7 @@ func TestPostgres_TranscriptOrderingKeyIsSessionSeq(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_RoundTripsIdenticalContentToTheLog(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	recs := buildScenario()
@@ -221,6 +224,7 @@ func TestPostgres_RoundTripsIdenticalContentToTheLog(t *testing.T) {
 }
 
 func TestPostgres_ReAppendIsIdempotentAndKeepLast(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	recs := buildScenario()
@@ -246,6 +250,7 @@ func TestPostgres_ReAppendIsIdempotentAndKeepLast(t *testing.T) {
 }
 
 func TestPostgres_UnknownSessionIsNotAnEmptySession(t *testing.T) {
+	t.Parallel()
 	store := newTestPostgresStore(t)
 	_, err := store.Load(context.Background(), "does-not-exist")
 	require.ErrorIs(t, err, ErrSessionNotFound)
@@ -258,6 +263,7 @@ func TestPostgres_UnknownSessionIsNotAnEmptySession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	reg := newTestRegistry(t)
 	for _, id := range []string{"atlas", "nimbus", "kappa"} {
@@ -314,6 +320,7 @@ func inboxDepth(t *testing.T, reg *registry.PostgresStore, id string) int {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_DepthRuleAndBranchHoldInTheView(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	for _, rec := range buildScenario() {
@@ -347,6 +354,7 @@ func TestPostgres_DepthRuleAndBranchHoldInTheView(t *testing.T) {
 }
 
 func TestPostgres_RecordFromTheViewIsRereadable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	for _, rec := range buildScenario() {
@@ -370,6 +378,7 @@ func TestPostgres_RecordFromTheViewIsRereadable(t *testing.T) {
 // against the real §5.2 tables: create → add member (with a late-join context
 // answer) → post a root and a reply → close → reopen, then reads it all back.
 func TestPostgres_CRUDSurfaceWritesTheView(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 
@@ -447,6 +456,7 @@ func TestPostgres_CRUDSurfaceWritesTheView(t *testing.T) {
 // JSONL log, filtered and copied verbatim), so importing it into either view is
 // a replay, and the two engines must agree on the State it produces.
 func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	recs := buildScenario()
 
@@ -495,6 +505,7 @@ func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
 // creates — create, duplicate refusal, edit preserving creation facts, list
 // ordering — against a REAL PostgreSQL.
 func TestPostgres_GroupStoreRoundTripsTheRoster(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	gs := store.Groups()

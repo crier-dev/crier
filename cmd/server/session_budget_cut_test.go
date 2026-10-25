@@ -39,13 +39,15 @@ func TestSessionDeliveryBudgetCut(t *testing.T) {
 			// package; a healthy run never reaches it — the test releases the answer
 			// as soon as it has graded the cut.
 			const lateHold = 10 * time.Second
-			t.Setenv("CR_SESSION_DELIVERY_TIMEOUT_MS", "200")
-			t.Setenv("RUNTIME_TIMEOUT_MS", "100")
+			// INT-CI-014: the budget posture travels in the boot overlay —
+			// both keys are read by config at boot, so the fixture's extra
+			// map carries them and the test never touches process env.
+			budgetExtra := map[string]string{"CR_SESSION_DELIVERY_TIMEOUT_MS": "200", "RUNTIME_TIMEOUT_MS": "100"}
 			lateDone := make(chan struct{})
 			lateRelease := make(chan struct{})
 			var closeLate sync.Once
 			root := t.TempDir()
-			base, room, _, _ := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			base, room, _, _ := sessionDispatchFixtureAtRootWithEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				defer closeLate.Do(func() { close(lateDone) })
 				if flushed {
 					_, _ = w.Write([]byte(`{"reply":"partial answer must be discarded","live":true}`))
@@ -61,7 +63,7 @@ func TestSessionDeliveryBudgetCut(t *testing.T) {
 				if !flushed {
 					_, _ = w.Write([]byte(`{"reply":"late answer must be discarded","live":true}`))
 				}
-			}), "allow", root)
+			}), "allow", root, budgetExtra)
 			start := time.Now()
 			msg := sendDispatchMessage(t, base, room)
 			elapsed := time.Since(start)
@@ -106,14 +108,15 @@ func TestSessionDeliveryBudgetCut(t *testing.T) {
 }
 
 func TestSessionDelivery503RefusalReportsAttempts(t *testing.T) {
-	t.Setenv("CR_SESSION_DELIVERY_TIMEOUT_MS", "1200")
-	t.Setenv("RUNTIME_TIMEOUT_MS", "100")
+	parallelBoot(t)
+	// INT-CI-014: the budget posture travels in the boot overlay.
+	budgetExtra := map[string]string{"CR_SESSION_DELIVERY_TIMEOUT_MS": "1200", "RUNTIME_TIMEOUT_MS": "100"}
 	var calls atomic.Int32
 	root := t.TempDir()
-	base, room, _, _ := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	base, room, _, _ := sessionDispatchFixtureAtRootWithEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-	}), "allow", root)
+	}), "allow", root, budgetExtra)
 	start := time.Now()
 	msg := sendDispatchMessage(t, base, room)
 	elapsed := time.Since(start)

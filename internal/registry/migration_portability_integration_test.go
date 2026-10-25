@@ -12,6 +12,7 @@ import (
 // PostgreSQL retains the original DDL, including database-level validation:
 // bypass Go's trust validators to prove the dialect fix did not weaken it.
 func TestPostgresMigration017Constraints(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	key, sig := strings.Repeat("a1", 32), strings.Repeat("b2", 64)
 	for _, bad := range []string{"", "abc", strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("g", 64), strings.Repeat("A", 64)} {

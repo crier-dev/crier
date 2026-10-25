@@ -97,6 +97,7 @@ func createFederatedSession(t *testing.T, in *fedPeerInstance) string {
 }
 
 func TestFederatedRoomRemoteParticipantCrosses(t *testing.T) {
+	t.Parallel()
 	a := newInstance(t)
 	b := newInstance(t)
 
@@ -156,6 +157,7 @@ func TestFederatedRoomRemoteParticipantCrosses(t *testing.T) {
 }
 
 func TestFederatedRoomPerPeerRefusal(t *testing.T) {
+	t.Parallel()
 	a := newInstance(t)
 	b := newInstance(t)
 	require.NoError(t, b.reg.Register(&registry.Agent{ID: "atlas-b"}))
@@ -206,6 +208,7 @@ func TestFederatedRoomPerPeerRefusal(t *testing.T) {
 }
 
 func TestFederatedRoomNoPolicyNoRemoteJoin(t *testing.T) {
+	t.Parallel()
 	// With NO peer policies configured (the shipped posture), a
 	// remote-shaped member id is refused: nothing is admitted by default
 	// and every existing behavior is unchanged.
@@ -218,6 +221,7 @@ func TestFederatedRoomNoPolicyNoRemoteJoin(t *testing.T) {
 }
 
 func TestRemoteMemberIDRoundTrip(t *testing.T) {
+	t.Parallel()
 	id := RemoteMemberID("peer_acme", "atlas")
 	require.Equal(t, "remote:peer_acme:atlas", id)
 	peer, subject, ok := ParseRemoteMemberID(id)
@@ -232,6 +236,7 @@ func TestRemoteMemberIDRoundTrip(t *testing.T) {
 }
 
 func TestDeliverRemoteWithoutFedClientRefusesNamed(t *testing.T) {
+	t.Parallel()
 	// A remote participant joined while the federation client is not wired:
 	// the send records a REFUSED outcome with the named reason — shown,
 	// never swallowed (§3.2).

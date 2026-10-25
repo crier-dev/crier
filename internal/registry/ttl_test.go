@@ -78,6 +78,7 @@ func deliverAndDecode(t *testing.T, router http.Handler, agentID, body string) (
 // ---------------------------------------------------------------------------
 
 func TestDeliver_TTLSeconds_HourAppliesToStoredMessage(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -100,6 +101,7 @@ func TestDeliver_TTLSeconds_HourAppliesToStoredMessage(t *testing.T) {
 }
 
 func TestDeliver_TTLSeconds_AbsentKeeps24hDefault(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -117,6 +119,7 @@ func TestDeliver_TTLSeconds_AbsentKeeps24hDefault(t *testing.T) {
 }
 
 func TestDeliver_TTLSeconds_ZeroNeverExpires(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -152,6 +155,7 @@ func TestDeliver_TTLSeconds_ZeroNeverExpires(t *testing.T) {
 }
 
 func TestDeliver_TTLSeconds_ZeroSurvivesPurgeWhileExpiredSiblingIsRemoved(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	registerTestAgent(t, store)
 
@@ -183,6 +187,7 @@ func TestDeliver_TTLSeconds_ZeroSurvivesPurgeWhileExpiredSiblingIsRemoved(t *tes
 }
 
 func TestDeliver_TTLSeconds_RejectsInvalidValues(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		ttl  int
@@ -216,6 +221,7 @@ func TestDeliver_TTLSeconds_RejectsInvalidValues(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestResolveMessageExpiry_Contract(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	zero, hour, negative := 0, 3600, -1
 	explicit := base.Add(72 * time.Hour)
@@ -254,6 +260,7 @@ func TestResolveMessageExpiry_Contract(t *testing.T) {
 }
 
 func TestDeliverRequest_TTLSeconds_AbsentStaysAbsentInForwardedBody(t *testing.T) {
+	t.Parallel()
 	// A federation forward re-marshals the decoded request, so an absent
 	// ttl_seconds must not be materialized as 0 (which would mean "never
 	// expire" downstream) or as null.
@@ -273,6 +280,7 @@ func TestDeliverRequest_TTLSeconds_AbsentStaysAbsentInForwardedBody(t *testing.T
 // ---------------------------------------------------------------------------
 
 func TestMemoryStore_Deliver_NegativeTTLRejected(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	registerTestAgent(t, store)
 
@@ -291,6 +299,7 @@ func TestMemoryStore_Deliver_NegativeTTLRejected(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRemoteStore_Deliver_ForwardsTTLSeconds(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		ttl   *int
@@ -353,6 +362,7 @@ func (infinityArg) Match(v any) bool {
 }
 
 func TestPostgresStoreUnit_Deliver_NeverExpiresWritesInfinity(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	zero := 0
 	entry := &InboxEntry{Payload: []byte(`{"n":1}`), TTLSeconds: &zero}
@@ -368,6 +378,7 @@ func TestPostgresStoreUnit_Deliver_NeverExpiresWritesInfinity(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_TTLSeconds_HourIsWritten(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	hour := 3600
 	entry := &InboxEntry{Payload: []byte(`{"n":1}`), TTLSeconds: &hour}
@@ -384,6 +395,7 @@ func TestPostgresStoreUnit_Deliver_TTLSeconds_HourIsWritten(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_NegativeTTLRejectedBeforeSQL(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	negative := -1
 
@@ -395,6 +407,7 @@ func TestPostgresStoreUnit_Deliver_NegativeTTLRejectedBeforeSQL(t *testing.T) {
 }
 
 func TestPgTimestamptz_RoundTrip(t *testing.T) {
+	t.Parallel()
 	never := pgTimestamptz(time.Time{})
 	require.True(t, never.Valid)
 	require.Equal(t, pgtype.Infinity, never.InfinityModifier)
@@ -415,6 +428,7 @@ func TestPgTimestamptz_RoundTrip(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_InfinityExpiryScansAsZero(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 

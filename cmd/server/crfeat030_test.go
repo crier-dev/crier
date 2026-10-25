@@ -379,6 +379,10 @@ func TestDetectionRoutesAreOptOut(t *testing.T) {
 	t.Setenv("CR_DETECT_KEY", "")
 	logPath := t.TempDir() + "/absent.jsonl"
 
+	// INT-CI-014: the ambient CR_DETECT_* scrub above is all this negative
+	// control needs — the boot itself reads the overlay (startTestServerWithEnv),
+	// so this t.Setenv-ing test stays serial (runtime pause) while the boot
+	// posture is unchanged.
 	base := startTestServerWithEnv(t, map[string]string{"CR_DETECT_LOG": ""})
 	client := &http.Client{Timeout: 2 * time.Second}
 	for _, probe := range []struct{ method, path string }{

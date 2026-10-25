@@ -88,6 +88,7 @@ func testA2AReplayContract(t *testing.T, stores []A2AReplayStore) {
 }
 
 func TestA2AReplayStores(t *testing.T) {
+	t.Parallel()
 	t.Run("memory-authority", func(t *testing.T) {
 		s := NewMemoryStore()
 		testA2AReplayContract(t, []A2AReplayStore{s, NewAuthorityStore(s, nil, "")})
@@ -117,6 +118,7 @@ func TestA2AReplayStores(t *testing.T) {
 }
 
 func TestSQLiteMigration018Upgrade(t *testing.T) {
+	t.Parallel()
 	path, db := sqliteMigrationFixture(t, 17)
 	_, err := db.Exec(`INSERT INTO agents(id,registered_at,last_seen) VALUES('pre-replay',1,1)`)
 	require.NoError(t, err)

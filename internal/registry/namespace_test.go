@@ -137,6 +137,7 @@ func (f *nsHandler) entryNamespace(t *testing.T, id string) string {
 // TestRegisterIntoDeclaredNamespace covers the happy path and the wire shape:
 // a named realm appears on the row, the default one does not.
 func TestRegisterIntoDeclaredNamespace(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme"}]}`)
 
 	rec := f.register(t, "named", "acme", nil)
@@ -194,6 +195,7 @@ func TestRegisterIntoDeclaredNamespace(t *testing.T) {
 // the default realm — with per-realm guard settings that would also silently
 // leave the guarded realm.
 func TestRegisterIntoUndeclaredNamespaceIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme"}]}`)
 
 	rec := f.register(t, "typo", "acmee", nil)
@@ -240,6 +242,7 @@ func TestRegisterNamespaceTokenPosture(t *testing.T) {
 // message's realm comes from the TARGET's row and a mismatched claim is
 // refused. Nothing is stored on the refusal.
 func TestDeliveryIsPinnedToTheTargetNamespace(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme"},{"name":"globex"}]}`)
 	if rec := f.register(t, "in-acme", "acme", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
@@ -305,6 +308,7 @@ func TestDeliveryNamespaceTokenPosture(t *testing.T) {
 // an explicit 0 (never expires). Each case gets its own agent so the assertions
 // never depend on what a previous retrieve leased.
 func TestNamespaceRetentionIsTheDefaultLifetime(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"short","retention_seconds":60}]}`)
 	for _, id := range []string{"inherits", "explicit-zero", "default-realm"} {
 		nsName := "short"
@@ -381,6 +385,7 @@ func TestNamespaceRetentionIsTheDefaultLifetime(t *testing.T) {
 // and the realm that declared guard_enabled=false must stay completely out of
 // it while the other realm still gets its verdict.
 func TestNamespaceGuardSettingsDoNotInterfere(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictBlock)
 	realmPolicy, err := json.Marshal(map[string]any{
 		"id": "realm-block",
@@ -478,6 +483,7 @@ func (f *guardFixture) registerAgentNS(t *testing.T, id, nsName string, headers 
 // the mock LLM and blocks) rather than by the deployment default (whose
 // provider is unreachable in a test, so the guard would fail open).
 func TestNamespaceGuardPolicyIsTheRealmDefault(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictBlock)
 	realmPolicy, err := json.Marshal(map[string]any{
 		"id": "realm-default",
@@ -526,6 +532,7 @@ func TestNamespaceGuardPolicyIsTheRealmDefault(t *testing.T) {
 // TestNamespaceGuardPolicyDoesNotOverrideTheAgent covers the specificity rule:
 // an agent's own guard.policies outrank the realm default.
 func TestNamespaceGuardPolicyDoesNotOverrideTheAgent(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	realmPolicy := `{"namespaces":[{"name":"acme","guard_policy":{"id":"blocker","thresholds":{"block_risk":"high"},"action":"block"}}]}`
 	reg, err := namespace.Parse(realmPolicy, nil)
@@ -562,6 +569,7 @@ func TestNamespaceGuardPolicyDoesNotOverrideTheAgent(t *testing.T) {
 // TestTransferCannotCrossNamespaces: moving live messages into another realm's
 // inbox would be exactly the implicit crossing the feature forbids.
 func TestTransferCannotCrossNamespaces(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme"},{"name":"globex"}]}`)
 	if rec := f.register(t, "src", "acme", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
@@ -618,6 +626,7 @@ func TestTransferCannotCrossNamespaces(t *testing.T) {
 // is refused rather than ignored (a silently accepted member would look exactly
 // like a successful move).
 func TestPatchCannotMoveAnAgentBetweenNamespaces(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme"},{"name":"globex"}]}`)
 	if rec := f.register(t, "a", "acme", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
@@ -646,6 +655,7 @@ func TestPatchCannotMoveAnAgentBetweenNamespaces(t *testing.T) {
 // row, so the realm the retention policy belonged to has to be recorded with
 // the record.
 func TestDeadLetterKeepsTheRealm(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"acme","retention_seconds":1}]}`)
 	if rec := f.register(t, "expiring", "acme", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
@@ -673,6 +683,7 @@ func TestDeadLetterKeepsTheRealm(t *testing.T) {
 // property at the JSON level: with namespaces configured (or not), a
 // registration that names no realm produces the body it always did.
 func TestDefaultNamespaceRegistrationIsByteIdentical(t *testing.T) {
+	t.Parallel()
 	// A handler with NO namespace registry at all — the pre-CR-FEAT-029 server.
 	plainStore := NewMemoryStore()
 	plain := NewHandler(plainStore)
@@ -751,6 +762,7 @@ func TestListNamespacesReportsPolicyWithoutSecrets(t *testing.T) {
 // TestWebhookEnvelopeCarriesTheRealm: the push transport states the realm too,
 // so a webhook receiver can tell which realm's policy produced the message.
 func TestWebhookEnvelopeCarriesTheRealm(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	f.addWebhookDriver(t)
 	reg, err := namespace.Parse(`{"namespaces":[{"name":"acme"}]}`, nil)
@@ -798,6 +810,7 @@ func TestWebhookEnvelopeCarriesTheRealm(t *testing.T) {
 // decision: a row may spell the default realm either way, and both resolve to
 // the same canonical value.
 func TestNamespaceOfAgentCanonicalises(t *testing.T) {
+	t.Parallel()
 	if got := namespaceOfAgent(nil); got != "" {
 		t.Errorf("namespaceOfAgent(nil) = %q, want \"\"", got)
 	}
@@ -813,6 +826,7 @@ func TestNamespaceOfAgentCanonicalises(t *testing.T) {
 // lanes diverging: the canonical spelling and the header names live in one
 // package, and both lanes read them from there.
 func TestNamespaceHeadersAreTheDocumentedOnes(t *testing.T) {
+	t.Parallel()
 	if namespace.HeaderNamespace != "X-Crier-Namespace" {
 		t.Errorf("namespace header = %q", namespace.HeaderNamespace)
 	}
@@ -824,6 +838,7 @@ func TestNamespaceHeadersAreTheDocumentedOnes(t *testing.T) {
 // TestRetentionForUsesTheStoreDefault: the helper that resolves a realm's
 // retention must fall back to the store default, not to zero.
 func TestRetentionForUsesTheStoreDefault(t *testing.T) {
+	t.Parallel()
 	reg, err := namespace.Parse(`{"namespaces":[{"name":"a"},{"name":"b","retention_seconds":90}]}`, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -841,6 +856,7 @@ func TestRetentionForUsesTheStoreDefault(t *testing.T) {
 // cannot verify? No: it must REFUSE it, because accepting a realm the server
 // does not declare is exactly the silent widening the feature forbids.
 func TestUnwiredHandlerRefusesAnUndeclaredNamespace(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store)
 	router := mux.NewRouter()
@@ -861,6 +877,7 @@ func TestUnwiredHandlerRefusesAnUndeclaredNamespace(t *testing.T) {
 // TestGuardFilterAbsentPlusGuardDisabledRealm: with no guard wired at all,
 // a realm that skips guarding is still a no-op — the seam must not panic.
 func TestGuardSkippedWithoutAGuardWired(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"unguarded","guard_enabled":false}]}`)
 	if rec := f.register(t, "a", "unguarded", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())

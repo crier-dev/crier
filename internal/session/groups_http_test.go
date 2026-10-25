@@ -88,6 +88,7 @@ func newMuxWithGroupRoutes(h *Handler) *mux.Router {
 // TestGroupAPI_CreateAddInspect is AC-a and AC-d: create a group, edit its
 // roster, and read the roster back — members, creator, last editor.
 func TestGroupAPI_CreateAddInspect(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus", "orion", "vega", "lyra")
 
 	var created groupView
@@ -165,6 +166,7 @@ func TestGroupAPI_CreateAddInspect(t *testing.T) {
 // TestGroupAPI_SendOneMessageToNamedGroup is AC-b: ONE message addressed to a
 // named group of 5 agents lands in EACH participant's inbox.
 func TestGroupAPI_SendOneMessageToNamedGroup(t *testing.T) {
+	t.Parallel()
 	const n = 5
 	agents := []string{"atlas", "nimbus", "orion", "vega", "lyra"}
 	require.Len(t, agents, n)
@@ -203,6 +205,7 @@ func TestGroupAPI_SendOneMessageToNamedGroup(t *testing.T) {
 // the NEXT send reaches the CURRENT members — the removed one stops receiving,
 // the added one starts.
 func TestGroupAPI_RosterEditRoutesToCurrentMembers(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus", "orion")
 
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/groups", createGroupRequest{
@@ -251,6 +254,7 @@ func TestGroupAPI_RosterEditRoutesToCurrentMembers(t *testing.T) {
 // TestGroupAPI_DirectMessageIsOneToOne is AC-c: a `direct` session send with
 // one agent target reaches ONLY that agent.
 func TestGroupAPI_DirectMessageIsOneToOne(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus")
 
 	var dm sessionView
@@ -287,6 +291,7 @@ func TestGroupAPI_DirectMessageIsOneToOne(t *testing.T) {
 // TestGroupAPI_UnknownGroupIsASkipNotADelivery: a group target with no roster
 // is a RECORDED skip — no member is guessed, nothing is delivered.
 func TestGroupAPI_UnknownGroupIsASkipNotADelivery(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus")
 	room := h.createRoom(t)
 
@@ -305,6 +310,7 @@ func TestGroupAPI_UnknownGroupIsASkipNotADelivery(t *testing.T) {
 // TestGroupAPI_RealmWall: a group of another realm reads as 404 — the same
 // rule a session of another realm follows.
 func TestGroupAPI_RealmWall(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas")
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/groups", createGroupRequest{
 		Name: "infra", CreatedBy: "kara", Members: []string{"atlas"},
@@ -319,6 +325,7 @@ func TestGroupAPI_RealmWall(t *testing.T) {
 // version per name survives reopen, edits preserve creation facts, and the
 // name rule is the @team: grammar.
 func TestGroupStore_KeepLastPerName(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, err := NewJSONLGroupStore(dir)
 	require.NoError(t, err)
@@ -362,6 +369,7 @@ func TestGroupStore_KeepLastPerName(t *testing.T) {
 // anything is written, and the documented `group` kind still fans out — which is
 // what pins the refusal to the KIND and not to the roster.
 func TestTeamKindTargetOutcome(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus")
 
 	// An EXISTING group, so a refusal cannot be excused as "no such roster".

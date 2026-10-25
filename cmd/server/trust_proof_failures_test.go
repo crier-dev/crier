@@ -20,6 +20,7 @@ import (
 )
 
 func TestTrustProofFailureBasesHTTP(t *testing.T) {
+	parallelBoot(t)
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			base := startTestServerWithEnv(t, map[string]string{

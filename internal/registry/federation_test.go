@@ -63,6 +63,7 @@ func deliverTo(t *testing.T, router *mux.Router, id string, reqBody []byte, head
 }
 
 func TestHandleDeliverFederationFallback(t *testing.T) {
+	t.Parallel()
 	// The remote relay answers like a real relay-2 in blocking webhook
 	// mode: 200 with {id, reply, session_id, request_id}. The reply must
 	// come back to the original caller verbatim.
@@ -104,6 +105,7 @@ func TestHandleDeliverFederationFallback(t *testing.T) {
 }
 
 func TestHandleDeliverFederationAllLinks404(t *testing.T) {
+	t.Parallel()
 	remote := &fedRemoteRelay{t: t, status: http.StatusNotFound, body: `{"error":"agent not found"}`}
 	srv := httptest.NewServer(remote.handler())
 	defer srv.Close()
@@ -119,6 +121,7 @@ func TestHandleDeliverFederationAllLinks404(t *testing.T) {
 }
 
 func TestHandleDeliverFederationDisabledKeepsLocal404(t *testing.T) {
+	t.Parallel()
 	router, _ := setupFedRouter(setupTestStore(t), nil)
 	rec := deliverTo(t, router, "ghost", []byte(`{"payload":{}}`), nil)
 	if rec.Code != http.StatusNotFound {
@@ -127,6 +130,7 @@ func TestHandleDeliverFederationDisabledKeepsLocal404(t *testing.T) {
 }
 
 func TestHandleDeliverFederationHopGuard(t *testing.T) {
+	t.Parallel()
 	// A request that already crossed a link (hop marker set) must never be
 	// forwarded again — relay-2 answering relay-1's forward would otherwise
 	// bounce forever when links are mutual.
@@ -145,6 +149,7 @@ func TestHandleDeliverFederationHopGuard(t *testing.T) {
 }
 
 func TestHandleDeliverFederationLocalAgentUnchanged(t *testing.T) {
+	t.Parallel()
 	// A locally-registered agent must be delivered to its local inbox — the
 	// federation fallback only fires for unknown agents.
 	remote := &fedRemoteRelay{t: t, status: http.StatusOK, body: `{"id":"x"}`}
@@ -165,6 +170,7 @@ func TestHandleDeliverFederationLocalAgentUnchanged(t *testing.T) {
 }
 
 func TestHandleDeliverFederationFirstNon404Wins(t *testing.T) {
+	t.Parallel()
 	// relay-1 404s (does not know the agent), relay-2 answers 202 — the
 	// second link wins and its async accept is relayed verbatim.
 	miss := &fedRemoteRelay{t: t, status: http.StatusNotFound, body: `{"error":"agent not found"}`}

@@ -19,6 +19,7 @@ import (
 // Production boot, real registered keys and independent transcript/inbox reads.
 // No verifier stub: deleting the composition-root wiring must fail this test.
 func TestSessionSenderIdentityHTTP(t *testing.T) {
+	parallelBoot(t)
 	for _, tc := range []struct {
 		name, signature, sender, refusal, basis string
 		enforce                                 bool

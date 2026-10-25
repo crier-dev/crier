@@ -89,6 +89,7 @@ func sameJSON(t *testing.T, want, got json.RawMessage) {
 // design rule: one NEW message whose every part cites its source, delivered to
 // the tagged agent through the shipped path, with the sources untouched.
 func TestCompile_MergesAcrossThreadsAndSessionsWithACitationPerPart(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	roomA := h.createRoom(t)
@@ -213,6 +214,7 @@ func TestCompile_MergesAcrossThreadsAndSessionsWithACitationPerPart(t *testing.T
 // TestCompile_ExpandResolvesEveryPartToItsOriginal is AC2: a citation resolves
 // back to the source message's content AND its location.
 func TestCompile_ExpandResolvesEveryPartToItsOriginal(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	roomA := h.createRoom(t)
@@ -273,6 +275,7 @@ func TestCompile_ExpandResolvesEveryPartToItsOriginal(t *testing.T) {
 // compiler could not read is reported by name, and a merge with NOTHING
 // readable is refused.
 func TestCompile_UnreadableSourceIsANamedGapNeverSilent(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	room := h.createRoom(t)
@@ -328,6 +331,7 @@ func TestCompile_UnreadableSourceIsANamedGapNeverSilent(t *testing.T) {
 // permission arm, and AC2's counterpart: a source resolves for a caller who may
 // read it and is a NAMED GAP for one who may not.
 func TestCompile_PrivateSourceIsANamedGapForACallerWhoMayNotReadIt(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 
@@ -392,6 +396,7 @@ func TestCompile_PrivateSourceIsANamedGapForACallerWhoMayNotReadIt(t *testing.T)
 // TestCompile_SourceInAnotherRealmIsANamedGap covers the §4 row 38 realm wall at
 // the source read: the compiler cannot reach across it.
 func TestCompile_SourceInAnotherRealmIsANamedGap(t *testing.T) {
+	t.Parallel()
 	nsReg, err := namespace.NewRegistry([]namespace.Policy{
 		{Name: namespace.DefaultName, Auth: namespace.AuthShared},
 		{Name: "other", Auth: namespace.AuthShared},
@@ -437,6 +442,7 @@ func TestCompile_SourceInAnotherRealmIsANamedGap(t *testing.T) {
 // a compile never creates work (D12), a named-but-empty source is refused by
 // name rather than skipped, and a closed session admits no compile.
 func TestCompile_RefusesTaskKindAndMalformedSources(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	room := h.createRoom(t)
@@ -483,6 +489,7 @@ func TestCompile_RefusesTaskKindAndMalformedSources(t *testing.T) {
 // TestCompile_DedupesTheSameSourceNamedTwice pins the de-duplication: a source
 // named in both forms is gathered once, so a merge cannot cite it twice.
 func TestCompile_DedupesTheSameSourceNamedTwice(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	room := h.createRoom(t)

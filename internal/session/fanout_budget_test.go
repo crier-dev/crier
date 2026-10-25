@@ -29,6 +29,7 @@ func (d *budgetDeliverer) DispatchDelivery(_ context.Context, _ string, req regi
 }
 
 func TestFanoutPassesBudgetAndPreservesPriorOutcomes(t *testing.T) {
+	t.Parallel()
 	for _, budget := range []int{0, 250} {
 		t.Run(strconv.Itoa(budget), func(t *testing.T) {
 			wantBudget := budget

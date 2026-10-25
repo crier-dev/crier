@@ -8,6 +8,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 
 	"github.com/crier-dev/crier/config"
@@ -29,12 +30,23 @@ import (
 //
 // config.Load has already refused the both-set case, so the precedence here is
 // total rather than a silent tie-break.
-func buildNamespaces(cfg config.Config) (*namespace.Registry, error) {
+// buildNamespaces parses the realm document through a lookup whose env:
+// token_ref resolution reads the SAME source the configuration did — process
+// env in production, the boot overlay in tests (INT-CI-014). nil selects
+// process env, exactly the previous behavior.
+func buildNamespaces(cfg config.Config, getenv config.Getenv) (*namespace.Registry, error) {
+	lookup := func(key string) (string, bool) {
+		if getenv == nil {
+			return os.LookupEnv(key)
+		}
+		v := getenv(key)
+		return v, v != ""
+	}
 	if strings.TrimSpace(cfg.Namespaces.File) != "" {
-		return namespace.ParseFile(strings.TrimSpace(cfg.Namespaces.File), nil)
+		return namespace.ParseFile(strings.TrimSpace(cfg.Namespaces.File), lookup)
 	}
 	if strings.TrimSpace(cfg.Namespaces.Inline) != "" {
-		return namespace.Parse(cfg.Namespaces.Inline, nil)
+		return namespace.Parse(cfg.Namespaces.Inline, lookup)
 	}
-	return namespace.NewRegistry(nil, nil)
+	return namespace.NewRegistry(nil, lookup)
 }

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/pidfile"
 	"github.com/crier-dev/crier/internal/testsupport"
@@ -115,6 +116,10 @@ func TestServerHealth(t *testing.T) {
 }
 
 // freePort finds a random free TCP port by listening on :0 and releasing.
+// The close-then-bind window is real (a loaded host can steal the port
+// between freePort and the server's own bind), so the boot helpers retry
+// with a fresh port when the server exits before /health — see
+// startTestServerWithEnv (INT-CI-014).
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -123,6 +128,77 @@ func freePort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// envOverlay is a config.Getenv over a per-test map. Lookups consult the map
+// first (a PRESENT empty string means "scrubbed to unset" — config treats ""
+// as unset exactly like the env does), then fall through to process env.
+// This is what lets several differently-configured servers boot in ONE test
+// process without touching process env, which is what makes t.Parallel()
+// legal for every test that boots only through this helper (INT-CI-014).
+func envOverlay(extra map[string]string, scrubbed []string) config.Getenv {
+	lookup := map[string]string{}
+	for _, k := range scrubbed {
+		lookup[k] = ""
+	}
+	for k, v := range extra {
+		lookup[k] = v
+	}
+	return func(key string) string {
+		if v, ok := lookup[key]; ok {
+			return v
+		}
+		return os.Getenv(key)
+	}
+}
+
+// startRunScopedServerWithEnv boots the real run() against an explicit
+// environment lookup instead of process env (INT-CI-014). Signature mirrors
+// startRunScopedServer so the wait/cleanup lifecycle is shared.
+func startRunScopedServerWithEnv(args []string, getenv config.Getenv) *runScopedServer {
+	run := &runScopedServer{
+		done:     make(chan struct{}),
+		exitCode: make(chan int, 1),
+		shutdown: make(chan os.Signal, 1),
+	}
+	go func() {
+		defer close(run.done)
+		run.exitCode <- runWithEnv(args, run.shutdown, getenv)
+	}()
+	return run
+}
+
+// bootSlots bounds how many in-process servers may be LIVE at once. The
+// testing runtime starts every t.Parallel test concurrently — with ~850
+// parallel tests each booting a real server, UNBOUNDED concurrency meant
+// hundreds of goroutine sets fighting for GOMAXPROCS cores (the -count=5
+// thrash), while a tiny bound turns the batch into a near-serial queue whose
+// makespan brushes the 60s package budget. 24 live IO-bound servers on a
+// 16-core host keeps both bounded: parallel tests queue for a slot at
+// t.Parallel time and hold it until their cleanup runs (INT-CI-014).
+var bootSlots = make(chan struct{}, 24)
+
+// parallelBoot enables test-level parallelism iff the suite is NOT running in
+// the process-env serial regime. Tests that call t.Setenv anywhere in their
+// own body set that variable through the testing runtime, which pauses all
+// other tests; a test that both t.Setenvs AND t.Parallels deadlocks the
+// package. Overlay-booted tests never touch process env, so they may opt in
+// by calling this INSTEAD of t.Setenv-ing anything — the mark lives at the
+// TEST level only: a test that t.Setenvs must NOT reach this (which is why
+// the boot helpers below never call it — a dirty test must stay serial even
+// when it boots through the overlay helper). Production invocations of the
+// suite (make test, CI) run with the variable unset → parallel on.
+func parallelBoot(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CR_TEST_ENV_MODE") == "1" {
+		return
+	}
+	t.Parallel()
+	// Acquire AFTER t.Parallel so the queue is the parallel batch itself; the
+	// slot is released when the test's cleanup runs (LIFO, before later
+	// cleanups that stop the server — order does not matter for the count).
+	bootSlots <- struct{}{}
+	t.Cleanup(func() { <-bootSlots })
 }
 
 // runScopedServer is the shared lifecycle for servers booted inside this test
@@ -175,55 +251,128 @@ func startTestServer(t *testing.T) string {
 	return startTestServerWithEnv(t, nil)
 }
 
+// deterministicTestEnv is the overlay scrub startTestServerWithEnv applies
+// before the caller's overrides: no auth, no database, guard off — the same
+// values the serial regime set via t.Setenv (INT-CI-014 keeps the posture,
+// drops the process-env mutation). A "" entry scrubs a variable to unset;
+// CR_GUARD_ENABLED is pinned to "false" exactly as the old t.Setenv did so
+// registry routes do not depend on an external model service.
+var deterministicTestEnv = map[string]string{
+	"CR_AUTH_TOKEN":      "",
+	"CR_DATABASE_URL":    "",
+	"DATABASE_URL":       "",
+	"CRIER_DATABASE_URL": "",
+	"CR_GUARD_ENABLED":   "false",
+}
+
 // startTestServerWithEnv is startTestServer plus caller-supplied environment
 // overrides, applied AFTER the deterministic scrub below: a test can boot the
 // same server under a different CR_* posture. INT-A2A-001 uses it to boot the
 // server twice — CR_A2A_ENABLED unset and CR_A2A_ENABLED=true — and assert the
 // existing surface is byte-identical in both positions.
+//
+// INT-CI-014: the overrides land in a per-test overlay (envOverlay) that the
+// boot reads config through, so process env is never mutated. Every test that
+// boots only through this helper is therefore safe to run in parallel —
+// parallelBoot opts it in. Two boot hazards are handled:
+//
+//   - the freePort race (another process binds the port between freePort and
+//     the server's own bind): retried on a fresh port, three attempts total;
+//   - the FOREIGN-ANSWERER race: a stolen port can make the /health poll
+//     answer with a DIFFERENT test's server (bind failed on ours, but the
+//     thief answers 200 on the same port). Each boot therefore carries its own
+//     CR_PIDFILE, which the server writes only after ITS OWN bind succeeded;
+//     if the pidfile is absent once /health answers, the answerer was not us
+//     and the boot retries.
 func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 	t.Helper()
 
-	// Deterministic environment: no DB, no auth token, no inherited port.
-	// The guard is off so the registry routes do not depend on an external
-	// model service being reachable.
-	t.Setenv("CR_AUTH_TOKEN", "")
-	t.Setenv("CR_DATABASE_URL", "")
-	t.Setenv("DATABASE_URL", "")
-	t.Setenv("CRIER_DATABASE_URL", "")
-	t.Setenv("CR_GUARD_ENABLED", "false")
+	over := make(map[string]string, len(deterministicTestEnv)+len(extra))
+	for k, v := range deterministicTestEnv {
+		over[k] = v
+	}
 	for k, v := range extra {
-		t.Setenv(k, v)
+		over[k] = v
 	}
 
-	port := freePort(t)
-	t.Setenv("CRIER_PORT", strconv.Itoa(port))
+	var lastErr error
+	lastPort := 0
+	var exitCode chan int
+	for attempt := 0; attempt < 3; attempt++ {
+		pidPath := filepath.Join(t.TempDir(), fmt.Sprintf("boot-%d.pid", attempt))
+		// CRIER_PORT=0: the server binds an ephemeral port ITSELF (no
+		// release-then-rebind window — the freePort race class is gone) and
+		// records the bound port in the pidfile. The harness polls the
+		// pidfile for the port, then /health for readiness.
+		over["CRIER_PORT"] = "0"
+		over["CR_PIDFILE"] = pidPath
+		run := startRunScopedServerWithEnv(nil, envOverlay(over, nil))
+		exitCode = run.exitCode
 
-	run := startRunScopedServer(nil)
-	exitCode := run.exitCode
-	t.Cleanup(func() { run.stop(t) })
+		// Phase 1: wait for OUR pidfile (written only after OUR bind).
+		var port int
+		pidDeadline := time.Now().Add(20 * time.Second)
+		for port == 0 {
+			if rec, err := pidfile.Read(pidPath); err == nil && rec.Port > 0 {
+				port = rec.Port
+				break
+			}
+			if time.Now().After(pidDeadline) {
+				lastErr = fmt.Errorf("boot attempt %d never wrote its pidfile", attempt+1)
+				break
+			}
+			select {
+			case <-run.done:
+				lastErr = fmt.Errorf("boot attempt %d exited before binding (exit code %d)",
+					attempt+1, runExitCode(exitCode))
+			default:
+			}
+			if lastErr != nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if port == 0 {
+			continue
+		}
+		lastPort = port
+		baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+		client := &http.Client{Timeout: 2 * time.Second}
 
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	// Wait for the server to come up (bounded).
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		resp, err := client.Get(baseURL + "/health")
-		if err == nil {
-			resp.Body.Close()
-			break
+		booted := false
+		// Phase 2: readiness on the bound port — the answerer is provably
+		// ours because WE hold the bind (the kernel handed it to us).
+		deadline := time.Now().Add(20 * time.Second)
+		for !booted {
+			resp, err := client.Get(baseURL + "/health")
+			if err == nil {
+				resp.Body.Close()
+				booted = true
+				break
+			}
+			if time.Now().After(deadline) {
+				run.stop(t)
+				t.Fatalf("server did not start within 20s: %v", err)
+			}
+			select {
+			case <-run.done:
+				lastErr = fmt.Errorf("boot attempt %d exited before /health on port %d (exit code %d): %v",
+					attempt+1, port, runExitCode(exitCode), err)
+			default:
+			}
+			if lastErr != nil {
+				break
+			}
+			time.Sleep(25 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("server did not start within 20s: %v", err)
+		if !booted {
+			continue
 		}
-		select {
-		case <-run.done:
-			t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)", port, runExitCode(exitCode), err)
-		default:
-		}
-		time.Sleep(25 * time.Millisecond)
+		t.Cleanup(func() { run.stop(t) })
+		return baseURL
 	}
-	return baseURL
+	t.Fatalf("server exited before answering /health after 3 boot attempts on port %d: run() exit code %d (last error: %v)", lastPort, runExitCode(exitCode), lastErr)
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +510,7 @@ func qa17EarlyBootFailureChild(t *testing.T) {
 // the contract on the wire, and the body byte-for-byte so the fix cannot
 // change what the endpoint returns.
 func TestHealthDeclaresJSONContentType(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 2 * time.Second}
 
@@ -418,6 +568,7 @@ func TestHealthDeclaresJSONContentType(t *testing.T) {
 // /version (TestVersionEndpointServed) and /openapi.json (TestOpenAPIServed)
 // are listed here anyway so one table covers the reachable JSON surface.
 func TestJSONRoutesDeclareJSONContentType(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 
 	routes := []struct {
@@ -936,14 +1087,14 @@ func TestParseArgs(t *testing.T) {
 // no pidfile (DF-CRIER-194 default-off).
 func TestResolvePidfile(t *testing.T) {
 	t.Setenv("CR_PIDFILE", "/from/env")
-	if got := resolvePidfile(""); got != "/from/env" {
+	if got := resolvePidfile(nil, ""); got != "/from/env" {
 		t.Errorf("resolvePidfile(\"\") = %q, want the env value /from/env", got)
 	}
-	if got := resolvePidfile("/from/flag"); got != "/from/flag" {
+	if got := resolvePidfile(nil, "/from/flag"); got != "/from/flag" {
 		t.Errorf("resolvePidfile(flag) = %q, want /from/flag (flag wins)", got)
 	}
 	t.Setenv("CR_PIDFILE", "")
-	if got := resolvePidfile(""); got != "" {
+	if got := resolvePidfile(nil, ""); got != "" {
 		t.Errorf("resolvePidfile with nothing set = %q, want empty", got)
 	}
 }
@@ -1174,6 +1325,7 @@ func TestPidfileLifecycle(t *testing.T) {
 // stop poll could only ever time out. Asserts: stop exits 0, the server
 // PROCESS is gone, the pidfile is removed, the port is bindable again.
 func TestStopRunningServer(t *testing.T) {
+	parallelBoot(t) // parent-side env-free boot path (INT-CI-014)
 	// Same env discipline as TestServerHealth, passed to BOTH children.
 	env := append(os.Environ(),
 		"CR_AUTH_TOKEN=",
@@ -1637,6 +1789,7 @@ func TestVersionEndpointServed(t *testing.T) {
 // an -X flag naming a symbol it cannot find, so only an assertion on the
 // output can catch a typo'd path.
 func TestServerVersionCLIFlags(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	dir := t.TempDir()
 	plainBin := filepath.Join(dir, "crier-plain")
 	injectedBin := filepath.Join(dir, "crier-injected")

@@ -79,6 +79,7 @@ func getJSON(t *testing.T, client *http.Client, url string) (int, []byte) {
 // TestDaggerControlSurfaceEndToEnd drives create → observe → inbox delivery and
 // cancel against a real server boot.
 func TestDaggerControlSurfaceEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	const (
 		agent = "hermes-dagger-e2e"
 		runID = "run-e2e-1"
@@ -194,6 +195,7 @@ func TestDaggerControlSurfaceEndToEnd(t *testing.T) {
 // deployment that does not control DAGs serves exactly the surface it did
 // before the feature existed.
 func TestDaggerRoutesAreOptIn(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServerWithEnv(t, map[string]string{
 		"CR_REQUIRE_AGENT_SIG": "false",
 	})

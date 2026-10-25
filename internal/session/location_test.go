@@ -22,6 +22,7 @@ import (
 // namespace, channel (the session), thread — populated by the delivery path,
 // so the agent can SAY where it is instead of inferring it.
 func TestLocation_FanoutDeliveryCarriesLocation(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -51,6 +52,7 @@ func TestLocation_FanoutDeliveryCarriesLocation(t *testing.T) {
 // plain deliver path: a POST /agents/{id}/inbox with session/thread context
 // records the location WITH the stored entry, and the accept echoes it.
 func TestLocation_DeliverCarriesLocationOnAccept(t *testing.T) {
+	t.Parallel()
 	reg := registry.NewMemoryStore()
 	require.NoError(t, reg.Register(&registry.Agent{ID: fixAgentA}))
 
@@ -85,6 +87,7 @@ func TestLocation_DeliverCarriesLocationOnAccept(t *testing.T) {
 // (§4.5), the deliveries it fans out carry sub_thread = the child's thread id,
 // and thread = the PARENT thread the child branched from.
 func TestLocation_SubThreadNamedOnSpawnedDelivery(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -125,6 +128,7 @@ func TestLocation_SubThreadNamedOnSpawnedDelivery(t *testing.T) {
 // thread — the permitted set, in seq order — and the response echoes the
 // location it asked for.
 func TestLocation_FetchThreadMessagesByLocation(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -158,6 +162,7 @@ func TestLocation_FetchThreadMessagesByLocation(t *testing.T) {
 // location-addressed fetch: ?sub_thread_id= returns ONLY the child thread's
 // messages, never the parent's.
 func TestLocation_FetchSubThreadMessages(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -183,6 +188,7 @@ func TestLocation_FetchSubThreadMessages(t *testing.T) {
 // the session rules refuse gets 403 PERMISSION_FORBIDDEN — a NAMED error —
 // and NEVER an empty list that would read as "the thread is quiet".
 func TestLocation_UnpermittedFetchIsNamedRefusal(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 
@@ -221,6 +227,7 @@ func TestLocation_UnpermittedFetchIsNamedRefusal(t *testing.T) {
 // the transcript, not a permission problem — 404, a DIFFERENT answer from the
 // refusal, so a caller can tell a typo from a permission wall.
 func TestLocation_FetchUnknownThreadIs404Not403(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -235,6 +242,7 @@ func TestLocation_FetchUnknownThreadIs404Not403(t *testing.T) {
 // TestLocation_FetchWrongSubThreadParentIs404: a sub_thread_id that is not a
 // child of the named thread is a location that does not exist as addressed.
 func TestLocation_FetchWrongSubThreadParentIs404(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)

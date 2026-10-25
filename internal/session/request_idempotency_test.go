@@ -18,6 +18,7 @@ import (
 )
 
 func TestMessageRequestIdempotency(t *testing.T) {
+	t.Parallel()
 	runMessageRequestIdempotency(t, localBackends())
 }
 
@@ -101,6 +102,7 @@ func runMessageRequestIdempotency(t *testing.T, backends []localBackend) {
 }
 
 func TestMessageRequestIdempotencySessionScope(t *testing.T) {
+	t.Parallel()
 	runMessageRequestIdempotencySessionScope(t, localBackends())
 }
 
@@ -146,6 +148,7 @@ func (d *heldRequestDeliverer) DispatchDelivery(context.Context, string, registr
 }
 
 func TestMessageRequestIdempotencyConcurrent(t *testing.T) {
+	t.Parallel()
 	runMessageRequestIdempotencyConcurrent(t, localBackends())
 }
 

@@ -11,6 +11,7 @@ import (
 // With ACL disabled existing config permits equal tokens. That configuration
 // remains legal, but it MUST NOT turn the reach credential into a trust writer.
 func TestTrustEqualCredentialsFailClosed(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_AUTH_TOKEN": "same-secret", "CR_PERMISSIONS_ADMIN_TOKEN": "same-secret", "CR_PERMISSIONS_ENABLED": "false"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	for _, method := range []string{"GET", "POST"} {

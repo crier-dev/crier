@@ -38,6 +38,7 @@ func appendRecords(t *testing.T, store Store, recs []*Record) {
 // ---------------------------------------------------------------------------
 
 func TestSQLite_BackendNameAndSchemaShape(t *testing.T) {
+	t.Parallel()
 	store := newTestSQLiteStore(t)
 	require.Equal(t, "sqlite", store.Backend())
 
@@ -81,6 +82,7 @@ func TestSQLite_BackendNameAndSchemaShape(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSQLite_ParityWithTheLogAndTheBundle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
 	recs := buildScenario()
@@ -117,6 +119,7 @@ func TestSQLite_ParityWithTheLogAndTheBundle(t *testing.T) {
 }
 
 func TestSQLite_DuplicateReplayIsIdempotentAndKeepLast(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
 	recs := buildScenario()
@@ -148,6 +151,7 @@ func TestSQLite_DuplicateReplayIsIdempotentAndKeepLast(t *testing.T) {
 }
 
 func TestSQLite_RestartRecoversIdenticalState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "restart.sqlite")
 
@@ -177,6 +181,7 @@ func TestSQLite_RestartRecoversIdenticalState(t *testing.T) {
 // retrieves messages, branches a thread, restarts, and recovers identical
 // state — with no PostgreSQL URL anywhere.
 func TestSQLite_CleanInstallLifecycleSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	logRoot := filepath.Join(root, "log")
@@ -266,6 +271,7 @@ func TestSQLite_CleanInstallLifecycleSurvivesRestart(t *testing.T) {
 // TestSQLite_ReconcileReportsDivergenceReadOnly proves the reconciler is
 // read-only: a view that is AHEAD of the log is reported, not rolled back.
 func TestSQLite_ReconcileReportsDivergenceReadOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
 	recs := buildScenario()
@@ -289,6 +295,7 @@ func TestSQLite_ReconcileReportsDivergenceReadOnly(t *testing.T) {
 }
 
 func TestSQLite_UnknownSessionIsNotAnEmptySession(t *testing.T) {
+	t.Parallel()
 	store := newTestSQLiteStore(t)
 	_, err := store.Load(context.Background(), "does-not-exist")
 	require.ErrorIs(t, err, ErrSessionNotFound)
@@ -300,6 +307,7 @@ func TestSQLite_UnknownSessionIsNotAnEmptySession(t *testing.T) {
 // the SQLite tables: create → add member (with a late-join context answer) →
 // post a root and a reply → read it all back → close → reopen.
 func TestSQLite_CRUDSurfaceWritesTheView(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
 
@@ -372,6 +380,7 @@ func TestSQLite_CRUDSurfaceWritesTheView(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestOpenStore_BackendSelection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -409,6 +418,7 @@ func TestOpenStore_BackendSelection(t *testing.T) {
 // posture: two goroutines appending at distinct seqs both land, with no
 // SQLITE_BUSY surfacing as a failed append.
 func TestSQLite_ConcurrentAppendsAreSerialised(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
 

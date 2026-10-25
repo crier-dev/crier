@@ -41,6 +41,7 @@ func lateJoinHistoryContract(t *testing.T, open func() Repository) {
 }
 
 func TestLateJoinSummaryEdgeUsesSeq(t *testing.T) {
+	t.Parallel()
 	at := time.Now().UTC()
 	st := &State{Messages: []*Message{
 		{ID: "edge", Seq: 2, CreatedAt: at},
@@ -54,6 +55,7 @@ func TestLateJoinSummaryEdgeUsesSeq(t *testing.T) {
 }
 
 func TestLateJoinHistoryDurable(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			path := be.pathFn(t)
@@ -63,6 +65,7 @@ func TestLateJoinHistoryDurable(t *testing.T) {
 }
 
 func TestLateJoinHistoryPostgres(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("CRIER_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("PostgreSQL late-join integration requires CRIER_TEST_POSTGRES_DSN (isolated test database)")

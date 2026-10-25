@@ -9,6 +9,7 @@ import (
 )
 
 func TestInboxDeliveryRejectsOversizedBodiesBeforeSideEffects(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		path  string
@@ -73,6 +74,7 @@ func TestInboxDeliveryRejectsOversizedBodiesBeforeSideEffects(t *testing.T) {
 }
 
 func TestInboxDeliveryAtBodyLimitRemainsRetrievable(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	handler, router := setupRouterWithHandler(store)
 	const limit = 128

@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionGroupExpansionExcludesAuthor(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus")
 	room := h.createRoom(t)
 	var group groupView

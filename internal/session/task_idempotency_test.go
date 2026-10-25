@@ -19,6 +19,7 @@ import (
 // These exercise the real task routes and durable stores, including a fresh
 // handle on retry: an HTTP-handler-local cache cannot satisfy the contract.
 func TestTaskRequestSharedLock(t *testing.T) {
+	t.Parallel()
 	backends := append(localBackends(), localBackend{
 		name: "sqlite_memory", pathFn: func(*testing.T) string { return ":memory:" },
 		open: func(t *testing.T, path string) Repository {
@@ -59,6 +60,7 @@ func runTaskRequestSharedLock(t *testing.T, backends []localBackend) {
 }
 
 func TestTaskRequestIdempotencyReplaysCreationAfterClaim(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			store := backend.open(t, backend.pathFn(t))
@@ -81,6 +83,7 @@ func TestTaskRequestIdempotencyReplaysCreationAfterClaim(t *testing.T) {
 }
 
 func TestTaskRequestIdempotencyRefusalReplaysWithoutWrite(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 	req := keyedTaskRequest("refused")
@@ -106,6 +109,7 @@ func (*noTaskReplayWrites) PostMessage(context.Context, *Message) error {
 }
 
 func TestTaskRequestIdempotencyNonTaskKeyConflict(t *testing.T) {
+	t.Parallel()
 	h := newAPIHarness(t, newLocalJSONLStore(t))
 	room := h.createRoom(t)
 	h.postTo(t, room, postMessageRequest{Sender: "atlas", Payload: json.RawMessage(`{"text":"hello"}`), IdempotencyKey: "message-key"})
@@ -115,6 +119,7 @@ func TestTaskRequestIdempotencyNonTaskKeyConflict(t *testing.T) {
 }
 
 func TestTaskRequestIdempotency(t *testing.T) {
+	t.Parallel()
 	runTaskRequestIdempotency(t, localBackends())
 }
 
@@ -180,6 +185,7 @@ func keyedTaskRequest(key string) postTaskRequest {
 }
 
 func TestTaskRequestIdempotencyTriggerOnce(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 	fired := make(chan string, 2)
@@ -212,6 +218,7 @@ func TestTaskRequestIdempotencyTriggerOnce(t *testing.T) {
 }
 
 func TestTaskRequestIdempotencyValidationDoesNotBurnKey(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, invalid := range []string{"payload", "author", "targets", "thread"} {
@@ -247,6 +254,7 @@ func TestTaskRequestIdempotencyValidationDoesNotBurnKey(t *testing.T) {
 }
 
 func TestTaskRequestIdempotencyConcurrent(t *testing.T) {
+	t.Parallel()
 	runTaskRequestIdempotencyConcurrent(t, localBackends())
 }
 
@@ -315,6 +323,7 @@ func runTaskRequestIdempotencyConcurrent(t *testing.T, backends []localBackend) 
 }
 
 func TestTaskRequestIdempotencySessionScope(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			store := backend.open(t, backend.pathFn(t))

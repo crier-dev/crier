@@ -18,6 +18,7 @@ import (
 )
 
 func TestDaggerDeliveryWaitEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	const (
 		agent = "wait-e2e-agent"
 		runID = "run-wait-e2e"

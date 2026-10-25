@@ -15,6 +15,7 @@ import (
 )
 
 func TestTrustBackendParity(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			var s Store = NewMemoryStore()
@@ -153,6 +154,7 @@ func exerciseMalformedTrustRecords(t *testing.T, s TrustStore) {
 }
 
 func TestSQLiteTrustReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "trust.db")
 	s, err := NewSQLiteStore(path)
 	require.NoError(t, err)

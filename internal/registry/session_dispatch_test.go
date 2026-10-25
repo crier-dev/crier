@@ -11,6 +11,7 @@ import (
 )
 
 func TestSessionDispatchReplaySkipsGuardAndStore(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	if code := f.registerAgent(t, "receiver", f.guardPolicy(true)); code != http.StatusCreated {
 		t.Fatalf("register status %d", code)
@@ -33,6 +34,7 @@ func TestSessionDispatchReplaySkipsGuardAndStore(t *testing.T) {
 }
 
 func TestSessionDispatchPreservesServiceAuthorityBoundary(t *testing.T) {
+	t.Parallel()
 	base := NewMemoryStore()
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("protected service webhook must not be invoked")
@@ -57,6 +59,7 @@ func TestSessionDispatchPreservesServiceAuthorityBoundary(t *testing.T) {
 }
 
 func TestSessionDispatchCancellationDoesNotStore(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "receiver"}); err != nil {
 		t.Fatal(err)

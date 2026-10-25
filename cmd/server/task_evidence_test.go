@@ -18,6 +18,7 @@ import (
 // journal binds the task to the run, and only a persisted terminal observation
 // authorizes an evidence-free completion request. The executor alone is a stub.
 func TestTaskCompletionTriggerEvidenceEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	var succeeded atomic.Bool
 	stub := daggerStub(t, "run-task-evidence", func() string {
 		if succeeded.Load() {

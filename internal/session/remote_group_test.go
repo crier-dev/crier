@@ -51,6 +51,7 @@ func (d *remoteGroupLocalDispatch) DispatchDelivery(ctx context.Context, id stri
 // These tests intentionally use only pre-fix symbols so the RED control runs
 // against origin/main rather than failing to compile on a new helper/signature.
 func TestRemoteGroupRouting(t *testing.T) {
+	t.Parallel()
 	const remote = "remote:peer_b:atlas-b"
 	for _, tc := range []struct {
 		name        string
@@ -176,6 +177,7 @@ func TestRemoteGroupRouting(t *testing.T) {
 }
 
 func TestRemoteGroupUnknownRosterUsesAudienceSkip(t *testing.T) {
+	t.Parallel()
 	a := newInstance(t)
 	roster := &remoteGroupRoster{}
 	a.handler.opts.Groups = roster

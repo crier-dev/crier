@@ -52,6 +52,7 @@ func getContextView(t *testing.T, h *apiHarness, id, mt, mid string) memberConte
 // context_share in the request is decided `summary`, and the recorded answer
 // is visible — both in the membership list and in the joiner's view.
 func TestSessionAPI_ContextShareDefaultSummary(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -87,6 +88,7 @@ func TestSessionAPI_ContextShareDefaultSummary(t *testing.T) {
 // TestSessionAPI_ContextShareModes is (a): each explicit mode is recorded
 // with its exact boundary, and the materialized view matches the mode.
 func TestSessionAPI_ContextShareModes(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -148,6 +150,7 @@ func TestSessionAPI_ContextShareModes(t *testing.T) {
 // permitted, appended as a NEW session.member.context event (never a rewrite
 // of the add), and the materialized view reflects the latest answer.
 func TestSessionAPI_ContextShareLaterChange(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -220,6 +223,7 @@ func TestSessionAPI_ContextShareLaterChange(t *testing.T) {
 // change naming a message that does not exist, an unknown member, and a
 // closed session.
 func TestSessionAPI_ContextShareRefusals(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -271,6 +275,7 @@ func TestSessionAPI_ContextShareRefusals(t *testing.T) {
 // member with NO share record is reported `decided: false` — never folded
 // into an explicit `none`.
 func TestSessionAPI_ContextShareUndecidedDistinctFromNone(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	id := h.createRoom(t)
@@ -300,6 +305,7 @@ func TestSessionAPI_ContextShareUndecidedDistinctFromNone(t *testing.T) {
 // blanket refusal of the capability cannot pass this test — the fix must
 // validate, not forbid.
 func TestSessionAPI_ContextShareBoundaryValidatedAllModes(t *testing.T) {
+	t.Parallel()
 	const bogus = "boundary-from-nowhere"
 	putPath := func(id string) string {
 		return "/sessions/" + id + "/participants/agent/nimbus-2/context"
@@ -376,6 +382,7 @@ func TestSessionAPI_ContextShareBoundaryValidatedAllModes(t *testing.T) {
 // text becomes the add path's wording ("context boundary message …"); what the
 // refusal IS (status + code) is pinned here as unchanged.
 func TestSessionAPI_ContextShareBoundaryUnchangedForSince(t *testing.T) {
+	t.Parallel()
 	const bogus = "boundary-from-nowhere"
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
@@ -412,6 +419,7 @@ func TestSessionAPI_ContextShareBoundaryUnchangedForSince(t *testing.T) {
 // is still accepted under summary and full and is recorded. Without this arm a
 // fix that blanket-refused every boundary for those modes would go green.
 func TestSessionAPI_ContextShareBoundaryVerifiedAccepted(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -449,6 +457,7 @@ func TestSessionAPI_ContextShareBoundaryVerifiedAccepted(t *testing.T) {
 // gave it nothing is a 200 carrying `given_count: 0` — never a 404 — which is
 // exactly the "0 rows on the same request" the dogfood recorded.
 func TestJoinContextGETBodies(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))

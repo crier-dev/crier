@@ -77,12 +77,14 @@ func testAgent(t *testing.T) *Agent {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_NewPostgresStore_EmptyConnString(t *testing.T) {
+	t.Parallel()
 	_, err := NewPostgresStore(context.Background(), "")
 	require.True(t, errors.Is(err, ErrInvalidStoreInput),
 		"expected ErrInvalidStoreInput, got %v", err)
 }
 
 func TestPostgresStoreUnit_NewPostgresStoreWithPoolConfig_EmptyConnString(t *testing.T) {
+	t.Parallel()
 	_, err := NewPostgresStoreWithPoolConfig(context.Background(), "", DefaultPoolConfig())
 	require.True(t, errors.Is(err, ErrInvalidStoreInput),
 		"expected ErrInvalidStoreInput, got %v", err)
@@ -93,6 +95,7 @@ func TestPostgresStoreUnit_NewPostgresStoreWithPoolConfig_EmptyConnString(t *tes
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Close_NilPoolSafe(t *testing.T) {
+	t.Parallel()
 	s := &PostgresStore{pool: nil}
 	s.Close() // must not panic
 }
@@ -102,6 +105,7 @@ func TestPostgresStoreUnit_Close_NilPoolSafe(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Register_NilAgent(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Register(nil)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -109,6 +113,7 @@ func TestPostgresStoreUnit_Register_NilAgent(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Register_BlankID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := &Agent{ID: "", PublicKey: make(HexKey, ed25519.PublicKeySize)}
 	err := s.Register(ag)
@@ -117,6 +122,7 @@ func TestPostgresStoreUnit_Register_BlankID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Register_InvalidPublicKeySize(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := &Agent{ID: "test", PublicKey: make(HexKey, 1)} // wrong size
 	err := s.Register(ag)
@@ -129,6 +135,7 @@ func TestPostgresStoreUnit_Register_InvalidPublicKeySize(t *testing.T) {
 // store and persisted as SQL NULL (a nil arg) — an empty bytea would fail
 // migration 004's length CHECK. Non-empty keys keep the 32-byte rule.
 func TestPostgresStoreUnit_Register_KeylessAgentAllowedAndWritesNull(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := &Agent{ID: "keyless", PublicKey: HexKey(nil), Capabilities: []string{"relay"}}
 
@@ -142,6 +149,7 @@ func TestPostgresStoreUnit_Register_KeylessAgentAllowedAndWritesNull(t *testing.
 }
 
 func TestPostgresStoreUnit_Register_InvalidStatus(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := &Agent{
 		ID:        "test",
@@ -161,12 +169,14 @@ func TestPostgresStoreUnit_Register_InvalidStatus(t *testing.T) {
 // representation: a nil config yields a nil slice, which pgx encodes as NULL
 // (never an empty byte slice, which Postgres would reject as invalid JSON).
 func TestPostgresStoreUnit_MarshalOptionalConfig_NilIsNull(t *testing.T) {
+	t.Parallel()
 	raw, err := marshalOptionalConfig[*webhook.Config](nil)
 	require.NoError(t, err)
 	require.Nil(t, raw)
 }
 
 func TestPostgresStoreUnit_MarshalOptionalConfig_MarshalsConfig(t *testing.T) {
+	t.Parallel()
 	raw, err := marshalOptionalConfig(testWebhookConfig())
 	require.NoError(t, err)
 	require.Equal(t, wantWebhookJSON, string(raw))
@@ -176,6 +186,7 @@ func TestPostgresStoreUnit_MarshalOptionalConfig_MarshalsConfig(t *testing.T) {
 // anti-silent-drop guard: a config that cannot be marshalled must fail loudly
 // rather than persist nothing behind a success status (DF-CRIER-151).
 func TestPostgresStoreUnit_MarshalOptionalConfig_FailureIsInvalidInput(t *testing.T) {
+	t.Parallel()
 	raw, err := marshalOptionalConfig(&poisonConfig{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput), "want ErrInvalidStoreInput, got %v", err)
@@ -186,6 +197,7 @@ func TestPostgresStoreUnit_MarshalOptionalConfig_FailureIsInvalidInput(t *testin
 // NULL representations read back as an absent config: SQL NULL (nil src) and a
 // stored JSON null. Neither may be an error or an empty object.
 func TestPostgresStoreUnit_UnmarshalOptionalConfig_NullFormsAreNil(t *testing.T) {
+	t.Parallel()
 	for _, raw := range [][]byte{nil, {}, []byte(""), []byte("null"), []byte(" null ")} {
 		var cfg *webhook.Config
 		require.NoError(t, unmarshalOptionalConfig(raw, &cfg), "raw=%q", raw)
@@ -194,6 +206,7 @@ func TestPostgresStoreUnit_UnmarshalOptionalConfig_NullFormsAreNil(t *testing.T)
 }
 
 func TestPostgresStoreUnit_UnmarshalOptionalConfig_DecodesConfig(t *testing.T) {
+	t.Parallel()
 	var cfg *webhook.Config
 	require.NoError(t, unmarshalOptionalConfig([]byte(wantWebhookJSON), &cfg))
 	require.NotNil(t, cfg)
@@ -205,6 +218,7 @@ func TestPostgresStoreUnit_UnmarshalOptionalConfig_DecodesConfig(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Register_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -223,6 +237,7 @@ func TestPostgresStoreUnit_Register_Success(t *testing.T) {
 // (pre-fix they were not in the statement at all, so the column set is pinned
 // by the ExpectExec SQL regex as well).
 func TestPostgresStoreUnit_Register_PersistsWebhookAndGuard(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.Webhook = testWebhookConfig()
@@ -242,6 +257,7 @@ func TestPostgresStoreUnit_Register_PersistsWebhookAndGuard(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Register_AgentExists(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -268,6 +284,7 @@ func TestPostgresStoreUnit_Register_AgentExists(t *testing.T) {
 // so the conflict is reported as ErrPublicKeyMismatch (not the plain duplicate)
 // and the row is never overwritten (the INSERT is the only write attempted).
 func TestPostgresStoreUnit_Register_PublicKeyMismatch(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -296,6 +313,7 @@ func TestPostgresStoreUnit_Register_PublicKeyMismatch(t *testing.T) {
 // conflict falls back to the historical ErrAgentExists rather than claiming a
 // key rotation it never saw.
 func TestPostgresStoreUnit_Register_ConflictReadFailureStaysDuplicate(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -314,6 +332,7 @@ func TestPostgresStoreUnit_Register_ConflictReadFailureStaysDuplicate(t *testing
 }
 
 func TestPostgresStoreUnit_Register_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -334,6 +353,7 @@ func TestPostgresStoreUnit_Register_SQLError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Get_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	now := time.Now().UTC()
@@ -361,6 +381,7 @@ func TestPostgresStoreUnit_Get_Success(t *testing.T) {
 // an agent stored without either config reads back with both pointers nil —
 // not an error, not an empty object.
 func TestPostgresStoreUnit_Get_NullConfigsAreNil(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	pub := make([]byte, ed25519.PublicKeySize)
@@ -381,6 +402,7 @@ func TestPostgresStoreUnit_Get_NullConfigsAreNil(t *testing.T) {
 // TestPostgresStoreUnit_Get_StoredJSONNullIsNil: a column holding the JSON
 // value `null` (rather than SQL NULL) is the same absent config on the wire.
 func TestPostgresStoreUnit_Get_StoredJSONNullIsNil(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	pub := make([]byte, ed25519.PublicKeySize)
@@ -399,6 +421,7 @@ func TestPostgresStoreUnit_Get_StoredJSONNullIsNil(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	pub := make([]byte, ed25519.PublicKeySize)
 
@@ -434,6 +457,7 @@ func TestPostgresStoreUnit_Get_InvalidConfigJSON(t *testing.T) {
 // public_key (a keyless agent, DF-CRIER-192) reads back with an EMPTY key —
 // not an error, matching the in-memory backend's representation.
 func TestPostgresStoreUnit_Get_KeylessAgentRoundTrips(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 
@@ -452,6 +476,7 @@ func TestPostgresStoreUnit_Get_KeylessAgentRoundTrips(t *testing.T) {
 // TestPostgresStoreUnit_List_KeylessAgentKept: a NULL public_key row stays
 // in the listing (pre-fix any non-32-byte key dropped the WHOLE list).
 func TestPostgresStoreUnit_List_KeylessAgentKept(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	pub := make([]byte, ed25519.PublicKeySize)
@@ -470,6 +495,7 @@ func TestPostgresStoreUnit_List_KeylessAgentKept(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
@@ -482,6 +508,7 @@ func TestPostgresStoreUnit_Get_NotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Get_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
@@ -499,6 +526,7 @@ func TestPostgresStoreUnit_Get_SQLError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_List_Empty(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	rows := pgxmock.NewRows(agentRowColumns())
@@ -512,6 +540,7 @@ func TestPostgresStoreUnit_List_Empty(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_List_Populated(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	// Two agents
@@ -537,6 +566,7 @@ func TestPostgresStoreUnit_List_Populated(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_List_QueryError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectQuery(`SELECT id, public_key, capabilities, status, registered_at, last_seen, webhook, guard, a2a, COALESCE\(namespace, ''\) FROM agents`).
@@ -553,6 +583,7 @@ func TestPostgresStoreUnit_List_QueryError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Update_NilAgent(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Update(nil)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -560,6 +591,7 @@ func TestPostgresStoreUnit_Update_NilAgent(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Update_BlankID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Update(&Agent{ID: ""})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -569,6 +601,7 @@ func TestPostgresStoreUnit_Update_BlankID(t *testing.T) {
 // TestPostgresStoreUnit_Update_PersistsWebhookAndGuard pins the UPDATE column
 // set and args — the pre-fix statement wrote capabilities only.
 func TestPostgresStoreUnit_Update_PersistsWebhookAndGuard(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.Webhook = testWebhookConfig()
@@ -586,6 +619,7 @@ func TestPostgresStoreUnit_Update_PersistsWebhookAndGuard(t *testing.T) {
 // absent/null removes the webhook, which is an explicit SQL NULL write, not a
 // skipped column.
 func TestPostgresStoreUnit_Update_NilWebhookClearsColumn(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.Webhook = nil
@@ -600,6 +634,7 @@ func TestPostgresStoreUnit_Update_NilWebhookClearsColumn(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Update_NotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -613,6 +648,7 @@ func TestPostgresStoreUnit_Update_NotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Update_NilCapabilitiesMarshalAsEmptyArray(t *testing.T) {
+	t.Parallel()
 	// A nil capability list is stored as [] rather than null, matching Register
 	// (the column is NOT NULL DEFAULT '[]' with a jsonb_typeof = 'array' CHECK).
 	s, mock := newMockStore(t)
@@ -628,6 +664,7 @@ func TestPostgresStoreUnit_Update_NilCapabilitiesMarshalAsEmptyArray(t *testing.
 }
 
 func TestPostgresStoreUnit_Update_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -685,6 +722,7 @@ func (c *capturedTimeArg) asTime(t *testing.T) time.Time {
 // reported the PRE-write last_seen while the stored row had the new one. The
 // timestamp must be generated once and visible in both places.
 func TestPostgresStoreUnit_Update_AdvancesCallerLastSeen(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.RegisteredAt = time.Now().UTC().Add(-time.Hour)
@@ -720,6 +758,7 @@ func TestPostgresStoreUnit_Update_AdvancesCallerLastSeen(t *testing.T) {
 // backwards (an out-of-order or replayed frame). RED on a bare
 // `SET last_seen = $2`: the monotonic guard is gone.
 func TestPostgresStoreUnit_Touch_AdvancesLastSeenOnly(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	heartbeat := time.Now().UTC().Truncate(time.Microsecond)
 	cap := &capturedTimeArg{}
@@ -740,6 +779,7 @@ func TestPostgresStoreUnit_Touch_AdvancesLastSeenOnly(t *testing.T) {
 // ordinary case for a peer that connected without a registry row, which the
 // mesh sink logs at debug rather than as a failure.
 func TestPostgresStoreUnit_Touch_NotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`UPDATE agents`).
@@ -754,6 +794,7 @@ func TestPostgresStoreUnit_Touch_NotFound(t *testing.T) {
 // TestPostgresStoreUnit_Touch_BlankID rejects a blank id without reaching the
 // pool: a statement built around an empty id could only match nothing.
 func TestPostgresStoreUnit_Touch_BlankID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Touch("", time.Now())
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -764,6 +805,7 @@ func TestPostgresStoreUnit_Touch_BlankID(t *testing.T) {
 // warns on it) and is NOT laundered into agent-not-found — a registry that
 // cannot record liveness must not look like a registry that has no such agent.
 func TestPostgresStoreUnit_Touch_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`UPDATE agents`).
@@ -781,6 +823,7 @@ func TestPostgresStoreUnit_Touch_SQLError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Unregister_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`DELETE FROM agents`).
@@ -793,6 +836,7 @@ func TestPostgresStoreUnit_Unregister_Success(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Unregister_NotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`DELETE FROM agents`).
@@ -805,6 +849,7 @@ func TestPostgresStoreUnit_Unregister_NotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Unregister_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`DELETE FROM agents`).
@@ -822,6 +867,7 @@ func TestPostgresStoreUnit_Unregister_SQLError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Deliver_BlankAgentID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Deliver("", &InboxEntry{Payload: []byte(`{}`)})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -829,6 +875,7 @@ func TestPostgresStoreUnit_Deliver_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_NilEntry(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Deliver("agent", nil)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -836,6 +883,7 @@ func TestPostgresStoreUnit_Deliver_NilEntry(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte("not-json")})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -843,6 +891,7 @@ func TestPostgresStoreUnit_Deliver_InvalidJSON(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_ExpiryBeforeCreated(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	err := s.Deliver("agent", &InboxEntry{
@@ -859,6 +908,7 @@ func TestPostgresStoreUnit_Deliver_ExpiryBeforeCreated(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	entry := &InboxEntry{Payload: []byte(`{"msg":"hello"}`), Sender: "foreman", IdempotencyKey: "k-1", ThreadID: "thr-1",
 		PrincipalID: "prin_01", Location: &Location{Channel: "sess-1", ThreadID: "thr-1"}}
@@ -888,6 +938,7 @@ func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	// A delivery that names no sender and carries no key stores NULL for both
@@ -905,6 +956,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
@@ -918,6 +970,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
@@ -931,6 +984,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
@@ -950,6 +1004,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Retrieve_BlankAgentID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, err := s.Retrieve("", time.Second, 1)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -957,6 +1012,7 @@ func TestPostgresStoreUnit_Retrieve_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_ZeroLeaseDuration(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, err := s.Retrieve("agent", 0, 1)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -964,6 +1020,7 @@ func TestPostgresStoreUnit_Retrieve_ZeroLeaseDuration(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_NegativeLeaseDuration(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, err := s.Retrieve("agent", -time.Second, 1)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -971,6 +1028,7 @@ func TestPostgresStoreUnit_Retrieve_NegativeLeaseDuration(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_ZeroMaxMessages(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, err := s.Retrieve("agent", time.Second, 0)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -978,6 +1036,7 @@ func TestPostgresStoreUnit_Retrieve_ZeroMaxMessages(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_NegativeMaxMessages(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, err := s.Retrieve("agent", time.Second, -1)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -989,6 +1048,7 @@ func TestPostgresStoreUnit_Retrieve_NegativeMaxMessages(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 
@@ -1046,6 +1106,7 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_AgentNotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1060,6 +1121,7 @@ func TestPostgresStoreUnit_Retrieve_AgentNotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Retrieve_BeginError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin().WillReturnError(errors.New("pool exhausted"))
@@ -1074,6 +1136,7 @@ func TestPostgresStoreUnit_Retrieve_BeginError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Ack_BlankAgentID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Ack("", "lease", []string{"id"})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -1081,6 +1144,7 @@ func TestPostgresStoreUnit_Ack_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_BlankLeaseID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Ack("agent", "", []string{"id"})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -1088,6 +1152,7 @@ func TestPostgresStoreUnit_Ack_BlankLeaseID(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_DuplicateIDs(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	err := s.Ack("agent", "lease", []string{"x", "x"})
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -1099,6 +1164,7 @@ func TestPostgresStoreUnit_Ack_DuplicateIDs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Ack_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1124,6 +1190,7 @@ func TestPostgresStoreUnit_Ack_Success(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_AgentNotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1138,6 +1205,7 @@ func TestPostgresStoreUnit_Ack_AgentNotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_LeaseConflict(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1157,6 +1225,7 @@ func TestPostgresStoreUnit_Ack_LeaseConflict(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_EmptyIDsRejected(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1175,6 +1244,7 @@ func TestPostgresStoreUnit_Ack_EmptyIDsRejected(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Stats_BlankAgentID(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	_, _, _, err := s.Stats("")
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
@@ -1186,6 +1256,7 @@ func TestPostgresStoreUnit_Stats_BlankAgentID(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_Stats_Success(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1211,6 +1282,7 @@ func TestPostgresStoreUnit_Stats_Success(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Stats_EmptyQueue(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1235,6 +1307,7 @@ func TestPostgresStoreUnit_Stats_EmptyQueue(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Stats_AgentNotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1253,6 +1326,7 @@ func TestPostgresStoreUnit_Stats_AgentNotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgresStoreUnit_PurgeExpired_RemovesTTLExpired(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 
@@ -1286,6 +1360,7 @@ func TestPostgresStoreUnit_PurgeExpired_RemovesTTLExpired(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_PurgeExpired_ReportsAfterCommit(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 
@@ -1316,6 +1391,7 @@ func TestPostgresStoreUnit_PurgeExpired_ReportsAfterCommit(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_PurgeExpired_BeginError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin().WillReturnError(errors.New("pool closed"))
@@ -1326,6 +1402,7 @@ func TestPostgresStoreUnit_PurgeExpired_BeginError(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_PurgeExpired_DeleteError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -1342,6 +1419,7 @@ func TestPostgresStoreUnit_PurgeExpired_DeleteError(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_PurgeExpired_UpdateError(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 

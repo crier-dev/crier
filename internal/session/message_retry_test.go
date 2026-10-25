@@ -15,6 +15,7 @@ import (
 )
 
 func TestAllRetryableOutcomes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		outcomes []Outcome
@@ -72,6 +73,7 @@ func (d *retryRuntimeDeliverer) DispatchDelivery(_ context.Context, target strin
 // Reopen the repository/handler after each attempt: original intent, refreshed
 // outcomes and per-attempt keys must survive independently of process caches.
 func TestMessageRetryPersistsAcrossBackends(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			path := backend.pathFn(t)

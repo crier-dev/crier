@@ -80,6 +80,7 @@ func setupRouterWithHandler(store Store) (*Handler, *mux.Router) {
 // ----- AC 1: Register agent with ed25519 public key → 201, duplicate → 409 -----
 
 func TestRegister_Success(t *testing.T) {
+	t.Parallel()
 	hexKey, _ := newTestPubKey(t)
 	store := setupTestStore(t)
 	router := setupRouter(store)
@@ -112,6 +113,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_Duplicate(t *testing.T) {
+	t.Parallel()
 	hexKey, _ := newTestPubKey(t)
 	store := setupTestStore(t)
 	router := setupRouter(store)
@@ -135,6 +137,7 @@ func TestRegister_Duplicate(t *testing.T) {
 }
 
 func TestRegister_InvalidPublicKey(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	router := setupRouter(store)
 
@@ -169,6 +172,7 @@ func TestRegister_InvalidPublicKey(t *testing.T) {
 // with enforcement ON (the default) the same request keeps the historical 400.
 // A malformed key is rejected identically in both modes.
 func TestRegister_PublicKeyPresenceConditional(t *testing.T) {
+	t.Parallel()
 	hexKey, _ := newTestPubKey(t)
 
 	tests := []struct {
@@ -256,6 +260,7 @@ func TestRegister_PublicKeyPresenceConditional(t *testing.T) {
 // enforcement off, an agent registered without public_key carries an EMPTY
 // key everywhere — no hex decode, no fabricated key material.
 func TestRegister_KeylessAgentEmptyKey(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	handler := NewHandler(store)
 	router := mux.NewRouter()
@@ -292,6 +297,7 @@ func TestRegister_KeylessAgentEmptyKey(t *testing.T) {
 // ----- AC 2: List agents + get agent detail -----
 
 func TestListAndGetAgent(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -329,6 +335,7 @@ func TestListAndGetAgent(t *testing.T) {
 // ----- AC 3: Unregister cleans up inbox -----
 
 func TestUnregister_CleansInbox(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -363,6 +370,7 @@ func TestUnregister_CleansInbox(t *testing.T) {
 // ----- AC 4: Deliver + Retrieve returns correct messages -----
 
 func TestDeliverAndRetrieve(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -399,6 +407,7 @@ func TestDeliverAndRetrieve(t *testing.T) {
 // ----- AC 5: Lease — ACK removes, un-ACKed return after lease expires -----
 
 func TestLeaseAckAndExpiry(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -442,6 +451,7 @@ func TestLeaseAckAndExpiry(t *testing.T) {
 }
 
 func TestAck_WrongLease(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -460,6 +470,7 @@ func TestAck_WrongLease(t *testing.T) {
 }
 
 func TestAck_EmptyMessageIDsRejected(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -501,6 +512,7 @@ func TestAck_EmptyMessageIDsRejected(t *testing.T) {
 // ----- AC 6: TTL-expired messages auto-purged -----
 
 func TestPurgeExpired(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -531,6 +543,7 @@ func TestPurgeExpired(t *testing.T) {
 // ----- AC 7: Agent unregister cleans up inbox -----
 
 func TestUnregister_ClearsInboxDirectly(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -546,6 +559,7 @@ func TestUnregister_ClearsInboxDirectly(t *testing.T) {
 // ----- AC 8: Concurrent delivery — two retrievers get disjoint message sets -----
 
 func TestConcurrentRetrieve_Disjoint(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -592,6 +606,7 @@ func TestConcurrentRetrieve_Disjoint(t *testing.T) {
 // ----- Stats tests -----
 
 func TestStats(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -625,6 +640,7 @@ func TestStats(t *testing.T) {
 }
 
 func TestStats_NotFound(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, _, _, err := store.Stats("nonexistent")
 	if err == nil {
@@ -635,6 +651,7 @@ func TestStats_NotFound(t *testing.T) {
 // ----- Handler integration tests -----
 
 func TestHandleDeliver_AgentNotFound(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	router := setupRouter(store)
 
@@ -650,6 +667,7 @@ func TestHandleDeliver_AgentNotFound(t *testing.T) {
 }
 
 func TestHandleStats(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -683,6 +701,7 @@ func TestHandleStats(t *testing.T) {
 // ----- AC: async webhook delivery returns 202 Accepted (spec §4, CR-FEAT-005) -----
 
 func TestDeliver_WebhookAsync_Returns202(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	posts := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

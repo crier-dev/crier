@@ -97,6 +97,7 @@ func signedFedRequest(t *testing.T, h http.Handler, priv ed25519.PrivateKey, pee
 // is not the announced peer's — is refused 401 BEFORE the policy layer runs
 // (the deliver handler never executes).
 func TestPeerAuthForgedAnnouncementRefusedAtBoundary(t *testing.T) {
+	t.Parallel()
 	_, wrongPriv := fedAuthPeerKey(t)
 	h, _ := setupPeerAuthHandler(t, federation.PeerPolicies{
 		"peer_ok": {Peer: "peer_ok", NamespacesAllow: []string{""}},
@@ -110,6 +111,7 @@ func TestPeerAuthForgedAnnouncementRefusedAtBoundary(t *testing.T) {
 // AC-d (boundary form): a revoked peer with a VALID signature gets 403
 // FED_PEER_REVOKED.
 func TestPeerAuthRevokedPeerRefusedAtBoundary(t *testing.T) {
+	t.Parallel()
 	h, priv := setupPeerAuthHandler(t, federation.PeerPolicies{
 		"peer_revoked": {Peer: "peer_revoked", NamespacesAllow: []string{""}},
 	})
@@ -127,6 +129,7 @@ func TestPeerAuthRevokedPeerRefusedAtBoundary(t *testing.T) {
 // FED_NAMESPACE_NOT_PERMITTED on B — with a PROVEN identity, since the
 // signature gate runs first.
 func TestPeerAuthAuthorizedActionAllowedUnauthorizedRefused(t *testing.T) {
+	t.Parallel()
 	h, priv := setupPeerAuthHandler(t, federation.PeerPolicies{
 		"peer_ok": {Peer: "peer_ok", NamespacesAllow: []string{"ns-a"}},
 	})
@@ -151,6 +154,7 @@ func TestPeerAuthAuthorizedActionAllowedUnauthorizedRefused(t *testing.T) {
 // request announcing a peer identity takes the shipped CR-CHAT-023 path
 // unchanged (policy consulted on the bare claim, no signature asked).
 func TestLegacySharedSecretModeUnchanged(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	if err := store.Register(&Agent{ID: "atlas"}); err != nil {
 		t.Fatalf("register: %v", err)

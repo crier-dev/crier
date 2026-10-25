@@ -10,6 +10,7 @@ import (
 )
 
 func TestInboxAcknowledgementWatchScopeAndCleanup(t *testing.T) {
+	t.Parallel()
 	var observer inboxAcknowledgements
 	first, stopFirst := observer.WatchAcknowledgement("a", "m")
 	second, stopSecond := observer.WatchAcknowledgement("a", "m")
@@ -31,6 +32,7 @@ func TestInboxAcknowledgementWatchScopeAndCleanup(t *testing.T) {
 }
 
 func TestInboxAcknowledgementMemoryOnlySuccessfulAck(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "a"}))
 	require.NoError(t, store.Deliver("a", &InboxEntry{ID: "m", Payload: []byte(`{}`)}))
@@ -47,6 +49,7 @@ func TestInboxAcknowledgementMemoryOnlySuccessfulAck(t *testing.T) {
 }
 
 func TestInboxAcknowledgementPostgresRequiresCommit(t *testing.T) {
+	t.Parallel()
 	for _, commitFailure := range []bool{false, true} {
 		name := "committed"
 		if commitFailure {

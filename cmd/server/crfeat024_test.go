@@ -101,6 +101,7 @@ func awaitPeer(t *testing.T, client *http.Client, baseURL, want string, present 
 // TestPresenceGoesStaleWhenTheAgentDiesEndToEnd is the CR-FEAT-024 acceptance
 // criterion, measured live.
 func TestPresenceGoesStaleWhenTheAgentDiesEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_REQUIRE_AGENT_SIG":      "false",
 		"CR_PRESENCE_STALE_AFTER_S": fmt.Sprint(presenceWindowS),

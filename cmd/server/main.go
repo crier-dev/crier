@@ -161,6 +161,18 @@ func run(args []string) int {
 // in-process callers can supply a private channel so one test server's cleanup
 // cannot broadcast into a sibling or a later boot (CI-019).
 func runWithSignals(args []string, sigCh <-chan os.Signal) int {
+	return runWithEnv(args, sigCh, os.Getenv)
+}
+
+// runWithEnv is runWithSignals over an explicit environment-lookup function.
+// Production passes os.Getenv; the in-process test harness passes an overlay
+// map wrapped around os.Getenv so several servers can be booted in ONE test
+// process with different configurations without racing process env (the
+// env-driven default path is otherwise byte-identical, INT-CI-014).
+func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
 	// Subcommands (CR-FEAT-027). `crier keygen` owns its own flag set and never
 	// starts the server, so it is dispatched here — before parseArgs — and every
 	// other argument shape keeps the pre-existing flag behaviour unchanged (a
@@ -186,25 +198,39 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	if stop {
 		// -stop never starts the server: it resolves the pidfile (flag
 		// wins over CR_PIDFILE), performs the safe stop, and exits.
-		return stopServer(os.Stdout, resolvePidfile(pidfilePath))
+		return stopServer(os.Stdout, resolvePidfile(getenv, pidfilePath))
 	}
 
 	// Flag overrides take precedence over the env-driven configuration.
 	// Zero/empty values mean "not set" — the env vars win in that case.
+	// The overrides land in the lookup overlay, not process env: same
+	// precedence, no env mutation (INT-CI-014).
 	if port > 0 {
-		os.Setenv("CRIER_PORT", strconv.Itoa(port))
+		overlay := getenv
+		getenv = func(key string) string {
+			if key == "CRIER_PORT" {
+				return strconv.Itoa(port)
+			}
+			return overlay(key)
+		}
 	}
 	if dbURL != "" {
-		os.Setenv("CR_DATABASE_URL", dbURL)
+		overlay := getenv
+		getenv = func(key string) string {
+			if key == "CR_DATABASE_URL" {
+				return dbURL
+			}
+			return overlay(key)
+		}
 	}
-	pfPath := resolvePidfile(pidfilePath)
+	pfPath := resolvePidfile(getenv, pidfilePath)
 
 	// Bootstrap with a default info-level text logger so any pre-config
 	// logging has a destination. Re-initialized with the user's choices
 	// after cfg.Load() below.
 	initLogger(config.Config{LogLevel: "info", LogFormat: "text"})
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadFrom(getenv)
 	if err != nil {
 		slog.Error("load configuration", "error", err)
 		return 1
@@ -347,7 +373,7 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	// per-realm rate limits, and the registry's registration/delivery/guard/
 	// retention rules). A broken document fails the boot — a realm that cannot
 	// be read must never be served as a half-configured one.
-	nsReg, err := buildNamespaces(cfg)
+	nsReg, err := buildNamespaces(cfg, getenv)
 	if err != nil {
 		slog.Error("initialize namespaces", "error", err)
 		return 1
@@ -568,6 +594,12 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 			DefaultPolicyJSON: cfg.Guard.DefaultPolicy,
 			KanbanWriter:      kanbanWriter,
 			KanbanQueueSize:   cfg.Guard.KanbanQueueSize,
+			// env:VAR api-key refs resolve at CALL time (router.go), so the
+			// lookup must come from the same source the configuration did —
+			// process env in production, the boot overlay in tests
+			// (INT-CI-014). Without this an overlay-booted server would
+			// resolve keys against the real process env and miss.
+			LookupEnv: getenv,
 		})
 		if err != nil {
 			slog.Error("initialize message guard", "error", err)
@@ -1115,6 +1147,11 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 		queueDepth: newQueueDepthReader(regStore),
 	})
 
+	// INT-CI-014: a CRIER_PORT of 0 binds an ephemeral port (" :0") — the
+	// kernel picks a port nobody holds, which eliminates the freePort race
+	// class for in-process test boots entirely (no release-then-rebind
+	// window). The bound port is recorded in the pidfile; the test harness
+	// reads it from there.
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      srvHandler,
@@ -1195,6 +1232,13 @@ func runWithSignals(args []string, sigCh <-chan os.Signal) int {
 	if err != nil {
 		logServeFailure(cfg.Port, err, pfPath)
 		return 1
+	}
+	// An ephemeral bind (CRIER_PORT=0, INT-CI-014) reports its ACTUAL port
+	// here; every consumer of cfg.Port below (log line, pidfile) reads the
+	// bound truth, never the 0 placeholder.
+	if tcp := ln.Addr().(*net.TCPAddr); tcp.Port != cfg.Port {
+		cfg.Port = tcp.Port
+		slog.Info("ephemeral port bound", "port", cfg.Port)
 	}
 	if pfPath != "" {
 		self, exeErr := os.Executable()
@@ -1393,11 +1437,14 @@ func parseArgs(args []string, out io.Writer) (help, showVersion, stop bool, port
 // then the CR_PIDFILE env var; empty means "no pidfile" and the server
 // writes nothing (the default — behaviour only changes for operators who
 // ask for it, DF-CRIER-194).
-func resolvePidfile(flagPath string) string {
+func resolvePidfile(getenv config.Getenv, flagPath string) string {
 	if flagPath != "" {
 		return flagPath
 	}
-	return os.Getenv("CR_PIDFILE")
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return getenv("CR_PIDFILE")
 }
 
 // stopServer performs the -stop action against path and returns a process

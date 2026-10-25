@@ -14,6 +14,7 @@ import (
 // These tests cross the production HTTP -> session -> registry -> webhook path,
 // including the registry's successful-HTTP receipt cache and durable read-back.
 func TestSessionSlowHarnessAnswerLands(t *testing.T) {
+	parallelBoot(t)
 	var calls atomic.Int32
 	root := t.TempDir()
 	base, room, _, _ := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

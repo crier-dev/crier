@@ -36,6 +36,7 @@ func fedDeliver(t *testing.T, handler *Handler, id, body string, headers map[str
 }
 
 func TestInboundPeerPolicyUnknownPeerRefused(t *testing.T) {
+	t.Parallel()
 	store := fedPolicyStore(t)
 	registerFedAgent(t, store, "atlas")
 	handler := NewHandler(store)
@@ -62,6 +63,7 @@ func TestInboundPeerPolicyUnknownPeerRefused(t *testing.T) {
 }
 
 func TestInboundPeerPolicyNamespaceRefusalWholesaleAndPerNamespace(t *testing.T) {
+	t.Parallel()
 	store := fedPolicyStore(t)
 	registerFedAgent(t, store, "atlas")
 	registerFedAgent(t, store, "quill")
@@ -106,6 +108,7 @@ func TestInboundPeerPolicyNamespaceRefusalWholesaleAndPerNamespace(t *testing.T)
 }
 
 func TestInboundPeerPolicyAgentGate(t *testing.T) {
+	t.Parallel()
 	store := fedPolicyStore(t)
 	registerFedAgent(t, store, "atlas")
 	registerFedAgent(t, store, "deploy-bot")
@@ -155,6 +158,7 @@ func TestInboundPeerPolicyAgentGate(t *testing.T) {
 }
 
 func TestInboundNoPeerHeaderUnchanged(t *testing.T) {
+	t.Parallel()
 	// A request with no peer announcement takes the shipped path — the
 	// degraded default posture (§5.3 item 1), byte-for-byte unchanged even
 	// when policies ARE configured.
@@ -170,6 +174,7 @@ func TestInboundNoPeerHeaderUnchanged(t *testing.T) {
 }
 
 func TestInboundPolicyRefusalHasNoSideEffect(t *testing.T) {
+	t.Parallel()
 	// §6.3: a refusal has no side effect — no inbox entry, nothing stored.
 	store := fedPolicyStore(t)
 	registerFedAgent(t, store, "atlas")

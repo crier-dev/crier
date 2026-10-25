@@ -8,7 +8,8 @@ import (
 	"github.com/crier-dev/crier/config"
 )
 
-// initLogger installs the process-wide slog default logger based on cfg.
+//	initLogger installs the process-wide slog default logger based on cfg.
+//
 // It must be called once during startup; main() re-invokes it after cfg.Load()
 // so the chosen level/format take effect.
 //

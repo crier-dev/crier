@@ -179,6 +179,7 @@ func nestWalk(nodes []*session.ReplyNode) []*session.Message {
 // ---------------------------------------------------------------------------
 
 func TestNestedThreads_ParallelThreadsReadDistinct(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := nestBuildStore(t)
 	st, err := store.Load(ctx, nestSessionID)
@@ -232,6 +233,7 @@ func TestNestedThreads_ParallelThreadsReadDistinct(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNestedThreads_ThreeLevelsWithExactParents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	st, err := nestBuildStore(t).Load(ctx, nestSessionID)
 	require.NoError(t, err)
@@ -292,6 +294,7 @@ func TestNestedThreads_ThreeLevelsWithExactParents(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRequestThread_RequestBecomesThreadAndRepliesNest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store, err := session.NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
@@ -359,6 +362,7 @@ func TestRequestThread_RequestBecomesThreadAndRepliesNest(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNestedThreads_TranscriptAloneReconstructsFullTree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := nestBuildStore(t)
 

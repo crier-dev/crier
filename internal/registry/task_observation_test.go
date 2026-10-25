@@ -15,6 +15,7 @@ func taskObservationFixture(outcome string) TaskObservation {
 }
 
 func TestTaskObservation_MemoryScopeCopiesAndMonotonicity(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	wrapped := NewAuthorityStore(store, nil, "")
 	unknown := taskObservationFixture("unknown")
@@ -48,6 +49,7 @@ func TestTaskObservation_MemoryScopeCopiesAndMonotonicity(t *testing.T) {
 }
 
 func TestTaskObservation_MemoryCloseAtomic(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "a"}))
 	o := taskObservationFixture("canceled")
@@ -66,6 +68,7 @@ func TestTaskObservation_MemoryCloseAtomic(t *testing.T) {
 }
 
 func TestTaskObservation_PostgresCloseRollback(t *testing.T) {
+	t.Parallel()
 	store, mock := newMockStore(t)
 	o := taskObservationFixture("canceled")
 	mock.ExpectBegin()
@@ -77,6 +80,7 @@ func TestTaskObservation_PostgresCloseRollback(t *testing.T) {
 }
 
 func TestTaskObservation_PostgresReadAndWrite(t *testing.T) {
+	t.Parallel()
 	store, mock := newMockStore(t)
 	o := taskObservationFixture("acknowledged")
 	mock.ExpectExec("INSERT INTO a2a_task_observations").WithArgs("a", o.TaskID, o.ObservedAt, o.Outcome, []byte(o.Evidence)).WillReturnResult(pgxmock.NewResult("INSERT", 1))
@@ -94,6 +98,7 @@ func TestTaskObservation_PostgresReadAndWrite(t *testing.T) {
 }
 
 func TestTaskObservation_InvalidInput(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	for _, change := range []func(*TaskObservation){
 		func(o *TaskObservation) { o.TaskID = "" },

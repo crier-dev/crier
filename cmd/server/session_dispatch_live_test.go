@@ -130,6 +130,7 @@ func registerLiveTarget(t *testing.T, base, agentID, hookURL string) string {
 // config.Load requires. The endpoint is dead (nothing listens on the port), so
 // the dial fails at once — the measured defect's shape.
 func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
+	parallelBoot(t)
 	deadPort := freePort(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": t.TempDir(),
@@ -148,8 +149,12 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 
 	// (1) The in-flight window: poll for the runtime's own first attempt. Every
 	// assertion below reads the server's response; nothing is synthesised from
-	// a client-side timer.
-	deadline := time.Now().Add(1500 * time.Millisecond)
+	// a client-side timer. The window is the DELIVERY budget (2s), not a fixed
+	// 1500ms: under a fully loaded host the durable-write→dispatch start can
+	// itself take a second+ (measured, INT-CI-014 three-run floor), and the
+	// in-flight reading is still genuinely pre-budget whenever the fan-out has
+	// not yet expired — the Later assertions pin ElapsedMs < BudgetMs anyway.
+	deadline := time.Now().Add(2 * time.Second)
 	var live *dispatchLiveView
 	for live == nil && time.Now().Before(deadline) {
 		view := fetchLiveTranscript(t, client, base, room)
@@ -229,6 +234,7 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 // the live pass reports the attempt it made and never invents an unreachable
 // class, and the delivery still ends as delivered.
 func TestSessionDispatchLiveNeverCallsASlowEndpointUnreachable(t *testing.T) {
+	parallelBoot(t)
 	release := make(chan struct{})
 	hook := newBlockingHook(t, release)
 	base := startTestServerWithEnv(t, map[string]string{

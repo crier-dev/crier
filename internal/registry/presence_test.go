@@ -47,6 +47,7 @@ func agedRow(t *testing.T, store *MemoryStore, id string, age time.Duration) *Ag
 }
 
 func TestPresenceStatusTable(t *testing.T) {
+	t.Parallel()
 	window := DefaultStalenessWindow
 	now := time.Now()
 
@@ -87,6 +88,7 @@ func TestPresenceStatusTable(t *testing.T) {
 // of 0 taken literally would mark a row stale the instant its last heartbeat
 // was a millisecond old, which reads as a fleet-wide outage.
 func TestPresenceWindowDefaults(t *testing.T) {
+	t.Parallel()
 	for _, window := range []time.Duration{0, -time.Second} {
 		if got := NewPresence(window).StaleAfter(); got != DefaultStalenessWindow {
 			t.Errorf("NewPresence(%v).StaleAfter() = %v, want the default %v",
@@ -111,6 +113,7 @@ func TestPresenceWindowDefaults(t *testing.T) {
 // Postgres CHECK constraint and every honest consumer depend on: the derivation
 // reports `stale` for an old row while the row itself keeps whatever it stored.
 func TestPresenceDeriveDoesNotMutateTheStoredRow(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	row := agedRow(t, store, "walker", time.Hour)
 	storedSeen := row.LastSeen
@@ -143,6 +146,7 @@ func TestPresenceDeriveDoesNotMutateTheStoredRow(t *testing.T) {
 }
 
 func TestPresenceDeriveNilAndDeriveAll(t *testing.T) {
+	t.Parallel()
 	p := NewPresence(0)
 	if got := p.Derive(nil, time.Now()); got != nil {
 		t.Errorf("Derive(nil) = %v, want nil", got)
@@ -170,6 +174,7 @@ func TestPresenceDeriveNilAndDeriveAll(t *testing.T) {
 // real handlers: the derived value is what a dashboard built on GET /agents or
 // GET /agents/{id} actually receives.
 func TestHandlersReportStaleStatus(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	agedRow(t, store, "walker", time.Hour)
 
@@ -236,6 +241,7 @@ func doHandlerGet(t *testing.T, r *mux.Router, path string) (int, string) {
 }
 
 func TestMemoryStoreTouchAdvancesLastSeenOnly(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "agent-a", Capabilities: []string{"relay"}}); err != nil {
 		t.Fatalf("register: %v", err)
@@ -282,6 +288,7 @@ func TestMemoryStoreTouchAdvancesLastSeenOnly(t *testing.T) {
 }
 
 func TestMemoryStoreTouchUnknownAgent(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	err := store.Touch("ghost", time.Now())
 	if err == nil {
@@ -299,6 +306,7 @@ func TestMemoryStoreTouchUnknownAgent(t *testing.T) {
 type storeWithoutTouch struct{ Store }
 
 func TestHeartbeatSinkIsNilWithoutTheCapability(t *testing.T) {
+	t.Parallel()
 	var plain Store = storeWithoutTouch{NewMemoryStore()}
 	if sink := HeartbeatSink(plain); sink != nil {
 		t.Error("HeartbeatSink returned a sink for a store that cannot touch — the mesh would call a nil-capability store")

@@ -64,6 +64,7 @@ func getStats(t *testing.T, router http.Handler, target string) statsResponse {
 // genuinely empty inbox: messages is empty in both, but queue_depth and
 // leased_count separate HELD from NOTHING-QUEUED.
 func TestRetrieveDisambiguation_AllLeasedVsEmptyInbox(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -93,6 +94,7 @@ func TestRetrieveDisambiguation_AllLeasedVsEmptyInbox(t *testing.T) {
 // (b) The counters on the retrieve response agree with the stats endpoint
 // taken immediately after, for both the empty and the all-leased state.
 func TestRetrieveDisambiguation_CountersMatchStats(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -123,6 +125,7 @@ func TestRetrieveDisambiguation_CountersMatchStats(t *testing.T) {
 // ?lease_seconds=N mints a lease that expires ~N seconds later (the message
 // is claimable again by a later retrieve).
 func TestRetrieveDisambiguation_DocumentedParamSpellings(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -150,6 +153,7 @@ func TestRetrieveDisambiguation_DocumentedParamSpellings(t *testing.T) {
 
 // (d) The historical spellings still behave as before (regression guard).
 func TestRetrieveDisambiguation_LegacySpellingsStillWork(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -172,6 +176,7 @@ func TestRetrieveDisambiguation_LegacySpellingsStillWork(t *testing.T) {
 
 // (e) The documented bound is enforced for BOTH spellings: >100 -> 400.
 func TestRetrieveDisambiguation_LimitOverBoundIs400(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)

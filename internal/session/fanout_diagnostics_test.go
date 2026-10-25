@@ -78,6 +78,7 @@ func fanoutIdempotencyBudget(t *testing.T) time.Duration {
 // Contend on the REAL registry lock, not the session request lock (which waits
 // and replays). Both fan-outs derive the same per-target delivery key.
 func TestFanoutConcurrentIdempotencyNeverRefusesInProgress(t *testing.T) {
+	t.Parallel()
 	budget := fanoutIdempotencyBudget(t)
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
@@ -170,6 +171,7 @@ func TestFanoutConcurrentIdempotencyNeverRefusesInProgress(t *testing.T) {
 }
 
 func TestOutcomeDiagnosticsSurviveReopen(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			path := backend.pathFn(t)

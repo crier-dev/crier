@@ -84,6 +84,7 @@ var managementACLOffPhrases = []string{"not armed", "unarmed", "acl off", "not e
 // Every value still goes through the shipped renderer, and a sentence may only
 // claim the ACL is off for the value status.go derives from the ACL being off.
 func TestChatManagementPosture(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, tc := range []struct {
 		value, want string
 		aclOff      bool
@@ -117,6 +118,7 @@ func TestChatManagementPosture(t *testing.T) {
 // viewer's own access is not something the line can report. No fixture value is
 // asserted here, so the sentence cannot drift away from its source unnoticed.
 func TestRenderedUnarmedPostureReadsAsItsStatusSource(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, tc := range []struct {
 		name        string
 		enabled     bool

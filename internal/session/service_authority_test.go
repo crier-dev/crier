@@ -10,6 +10,7 @@ import (
 )
 
 func TestProtectedRecipientRejectsSessionFanoutBypass(t *testing.T) {
+	t.Parallel()
 	base := registry.NewMemoryStore()
 	if err := base.Register(&registry.Agent{ID: "router", PublicKey: registry.HexKey(make(ed25519.PublicKey, ed25519.PublicKeySize))}); err != nil {
 		t.Fatal(err)

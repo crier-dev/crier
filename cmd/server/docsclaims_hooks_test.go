@@ -96,6 +96,12 @@ func verifyBehaviorClaims(set claimsFile, probe func(string) (string, error)) []
 }
 
 func TestDocsClaimsBehaviors(t *testing.T) {
+	// INT-CI-014: deliberately NOT parallelBoot. The probe shells out to
+	// `make doctor-hooks-selftest` (make + python + git subprocess trees);
+	// queued at the tail of the parallel batch it starts after the drain and
+	// then runs its subprocesses under post-storm cache pressure — measured
+	// 18s past a 60s package alarm (make2, three-run floor). In the serial
+	// phase it is uncontended and finishes inside the phase every time.
 	root := resolveRepoRoot(t)
 	set := loadClaimsFile(t, root)
 	// Removing or relabeling the claim must not make the behavioral gate vacuous.
@@ -114,6 +120,7 @@ func TestDocsClaimsBehaviors(t *testing.T) {
 }
 
 func TestDocsClaimsBehaviorNegativeControl(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	set := claimsFile{Claims: []docClaim{{ID: "BEHAVIOR-HOOK-DOCTOR", Kind: "behavior", Doc: "README.md", Quote: "doctor rejects", Expect: "doctor-hooks-selftest"}}}
 	for _, tc := range []struct {
 		name string

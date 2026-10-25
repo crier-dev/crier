@@ -12,6 +12,7 @@ import (
 // The real server positive control pins task.task_id; the browser then exercises
 // absent/failed/delayed task reads with explicitly intercepted fixture responses.
 func TestChatClientTaskMessageLinkBrowser(t *testing.T) {
+	parallelBoot(t)
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required for the task-link browser regression")

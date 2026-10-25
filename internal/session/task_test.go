@@ -139,6 +139,7 @@ func (h *taskHarness) createRoomAs(t *testing.T) string {
 // AC-a: an agent emits a TASK addressed to the correct agents in the correct
 // thread; the task record is created with a lifecycle.
 func TestTaskCreatedWithLifecycle(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 	// A task addresses another agent, never its own author.
@@ -185,6 +186,7 @@ func TestTaskCreatedWithLifecycle(t *testing.T) {
 // AC-b: a bare `addressed` tag from the same agent creates NO task record and
 // NO execution.
 func TestBareAddressedTagCreatesNoTask(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 
@@ -228,6 +230,7 @@ func TestBareAddressedTagCreatesNoTask(t *testing.T) {
 // AC-c: a TASK from a sender without the TASK authority is refused with the
 // named error — not delivered as a message.
 func TestTaskWithoutAuthorityRefusedNamed(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 
@@ -261,6 +264,7 @@ func TestTaskWithoutAuthorityRefusedNamed(t *testing.T) {
 // AC-c companion: the ACL is per-target — a task naming a target the sender
 // cannot invoke is refused even when the session send is granted.
 func TestTaskInvokeCheckedPerTarget(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 
@@ -286,6 +290,7 @@ func TestTaskInvokeCheckedPerTarget(t *testing.T) {
 
 // AC-d: the §3.7 structural rules at the record boundary.
 func TestTaskRecordStructuralRules(t *testing.T) {
+	t.Parallel()
 	// A task-kind record without a task payload is malformed.
 	rec := &Record{V: RecordFormatVersion, Type: RecordMessage, SessionID: "s", Seq: 1,
 		TS: time.Now(), MessageID: "m1", ThreadID: "m1", MessageKind: MessageTask,
@@ -324,6 +329,7 @@ func TestTaskRecordStructuralRules(t *testing.T) {
 // transition is a NEW record-version in the SAME thread, and the outputs land
 // in that thread.
 func TestTaskLifecycleClaimCompleteInThread(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 
@@ -394,6 +400,7 @@ func TestTaskLifecycleClaimCompleteInThread(t *testing.T) {
 
 // The lifecycle's illegal transitions are refused with named errors.
 func TestTaskLifecycleIllegalTransitions(t *testing.T) {
+	t.Parallel()
 	h := newTaskHarness(t, newLocalJSONLStore(t))
 	room := h.createRoomAs(t)
 
@@ -441,6 +448,7 @@ func TestTaskLifecycleIllegalTransitions(t *testing.T) {
 // The SQL view serves the same task lifecycle the JSONL log does (§2.1: the
 // dual backends are measured against ONE State).
 func TestTaskLifecycleSQLStoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("SQL battery skipped in -short")
 	}
@@ -534,6 +542,7 @@ type taskListView struct {
 // suite is not -short (the dogfood ran on the SQL view, so it is the backend
 // that matters most).
 func TestTaskLifecycle_Verifiable(t *testing.T) {
+	t.Parallel()
 	backends := localBackends()
 	t.Run(backends[0].name, func(t *testing.T) { runTaskLifecycleVerifiable(t, backends[0]) })
 	t.Run(backends[1].name, func(t *testing.T) {

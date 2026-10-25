@@ -95,6 +95,7 @@ func pushWebhookOf(row map[string]any) map[string]any {
 // refused with crier's own answer verbatim — asserted separately in
 // TestA2APushConfig_WriteInheritsCriersAgentSignatureGate.
 func TestA2APushConfig_CreateGetListDeleteRoundTripOntoTheWebhookConfig(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED":       "true",
 		"CR_REQUIRE_AGENT_SIG": "false",
@@ -253,6 +254,7 @@ func TestA2APushConfig_CreateGetListDeleteRoundTripOntoTheWebhookConfig(t *testi
 // PushNotificationNotSupportedError from every push-notification operation. A
 // silent success would report a push channel that does not exist.
 func TestA2APushConfig_NotSupportedWithoutAWebhook(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED":       "true",
 		"CR_REQUIRE_AGENT_SIG": "false",
@@ -337,6 +339,7 @@ func TestA2APushConfig_NotSupportedWithoutAWebhook(t *testing.T) {
 // driver (its dispatch headers are on the request), because the agent's push
 // channel IS the webhook.
 func TestA2APushConfig_NotificationIsTheStreamResponseEnvelope(t *testing.T) {
+	parallelBoot(t)
 	type received struct {
 		header http.Header
 		body   []byte
@@ -487,6 +490,7 @@ func TestA2APushConfig_NotificationIsTheStreamResponseEnvelope(t *testing.T) {
 // the shipped driver's, not a new one: an endpoint that answers 500 is retried
 // by crier's own bounded redelivery loop, with the retry counter on the request.
 func TestA2APushConfig_NotificationUsesCriersRetryMachinery(t *testing.T) {
+	parallelBoot(t)
 	var mu sync.Mutex
 	retries := []string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -551,6 +555,7 @@ func TestA2APushConfig_NotificationUsesCriersRetryMachinery(t *testing.T) {
 // the agent's webhook config is EXACTLY what it was before. A refusal may never
 // leave a half-written configuration behind.
 func TestA2APushConfig_RefusalsChangeNothing(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED":       "true",
 		"CR_REQUIRE_AGENT_SIG": "false",
@@ -754,6 +759,7 @@ func TestA2APushConfig_RefusalsChangeNothing(t *testing.T) {
 // The reads are unaffected: they ask the relay a question, they do not rewrite
 // an agent's row.
 func TestA2APushConfig_WriteInheritsCriersAgentSignatureGate(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_A2A_ENABLED": "true",
 		// CR_REQUIRE_AGENT_SIG is left at its default (true).

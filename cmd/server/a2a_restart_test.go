@@ -24,6 +24,7 @@ import (
 // DF-CRIER-390: the default memory registry loses its replay state on restart;
 // SQLite retains it. Both must state their actual guarantee on the send wire.
 func TestA2AReplayAcrossProcessRestart(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, backend := range []string{"sqlite", "memory"} {
 		t.Run(backend, func(t *testing.T) {
 			root := t.TempDir()
@@ -79,6 +80,7 @@ func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 }
 
 func TestA2AReplayWindowReportedAfterExpiry(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, backend := range []string{"sqlite", "memory"} {
 		t.Run(backend, func(t *testing.T) {
 			base, _, stop := bootA2AReplayChild(t, t.TempDir(), backend, "window", "1")

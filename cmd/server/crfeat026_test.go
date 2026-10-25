@@ -69,6 +69,7 @@ func e2eCapabilityDeliver(t *testing.T, client *http.Client, baseURL, capability
 // and ackable there, the rotation moves across holders, a zero-holder dial is
 // the named refusal with nothing stored, and the by-id route is unchanged.
 func TestCapabilityRoutedDeliveryEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 30 * time.Second}
 

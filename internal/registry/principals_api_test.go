@@ -114,6 +114,7 @@ func (m *mgmtTest) seedClassed(t *testing.T, agentID, owner string) {
 // ---------------------------------------------------------------------------
 
 func TestManagementRefusedWithoutArming(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store) // no store, no token
 	r := mux.NewRouter()
@@ -125,6 +126,7 @@ func TestManagementRefusedWithoutArming(t *testing.T) {
 }
 
 func TestManagementRefusedWithoutAdminToken(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	m.handler.SetPermissionsAdminToken("") // store wired, gate closed
 	rec, body := m.post(t, "/principals", "", `{}`)
@@ -133,6 +135,7 @@ func TestManagementRefusedWithoutAdminToken(t *testing.T) {
 }
 
 func TestManagementRefusedWithWrongToken(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	rec, body := m.post(t, "/principals", "not-the-token", `{}`)
 	require.Equal(t, http.StatusForbidden, rec.Code)
@@ -144,6 +147,7 @@ func TestManagementRefusedWithWrongToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMintBindGrantDeliverRecordsPrincipal(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	capabilityHolder(t, m.store, "atlas")
 
@@ -220,6 +224,7 @@ func TestMintBindGrantDeliverRecordsPrincipal(t *testing.T) {
 }
 
 func TestGrantUnknownActionRefused400(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	rec, body := m.post(t, "/grants", m.token,
 		`{"principal":"prin_x","subject":{"type":"agent","ref":"atlas"},"actions":["execute"]}`)
@@ -228,6 +233,7 @@ func TestGrantUnknownActionRefused400(t *testing.T) {
 }
 
 func TestRevokeGrantThroughManagementSurface(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	capabilityHolder(t, m.store, "atlas")
 	m.seedClassed(t, "atlas", "prin_other")
@@ -262,6 +268,7 @@ func TestRevokeGrantThroughManagementSurface(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSuspendedPrincipalGrantsInert(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	capabilityHolder(t, m.store, "quill")
 	m.seedClassed(t, "quill", "prin_other")
@@ -293,6 +300,7 @@ func TestSuspendedPrincipalGrantsInert(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAnonymousDeliveryStoresNoPrincipalField(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store) // no ACL at all: the shipped posture
 	capabilityHolder(t, store, "legacy")
@@ -331,6 +339,7 @@ func TestAnonymousDeliveryStoresNoPrincipalField(t *testing.T) {
 // role is validated by the handler, so an unknown one is a 400 naming the four
 // roles — never a 500 produced by the store's record check.
 func TestMintPrincipalUnknownRoleRefused400(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	before := m.appendCount(t)
 
@@ -359,6 +368,7 @@ func TestMintPrincipalUnknownRoleRefused400(t *testing.T) {
 // TestMintPrincipalUnknownStatusRefused400 is the same field class on the same
 // handler: status carried the identical 500.
 func TestMintPrincipalUnknownStatusRefused400(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	before := m.appendCount(t)
 
@@ -377,6 +387,7 @@ func TestMintPrincipalUnknownStatusRefused400(t *testing.T) {
 // four roles still mint, the record carries the role, and the principal is in
 // the store the ACL reads.
 func TestMintPrincipalAcceptsEveryDocumentedRole(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	snapBefore, err := m.perms.Snapshot(context.Background())
 	require.NoError(t, err)
@@ -405,6 +416,7 @@ func TestMintPrincipalAcceptsEveryDocumentedRole(t *testing.T) {
 // TestCreateBindingRejectsAgentIDInPrincipalField: §2.3/§6.1 — the principal
 // field is a principal id, and an agent id is not one.
 func TestCreateBindingRejectsAgentIDInPrincipalField(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	capabilityHolder(t, m.store, "atlas")
 	before := m.appendCount(t)
@@ -423,6 +435,7 @@ func TestCreateBindingRejectsAgentIDInPrincipalField(t *testing.T) {
 // minted is a binding the ACL could never resolve, so it is refused before the
 // append rather than stored as dead weight.
 func TestCreateBindingRejectsUnknownPrincipal(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	before := m.appendCount(t)
 	unknown := permissions.NewPrincipalID() // well-formed, never minted here
@@ -446,6 +459,7 @@ func TestCreateBindingRejectsUnknownPrincipal(t *testing.T) {
 // the same invariant: the two id vocabularies are not interchangeable in
 // either field.
 func TestCreateBindingRejectsPrincipalIDInAgentField(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	before := m.appendCount(t)
 
@@ -467,6 +481,7 @@ func TestCreateBindingRejectsPrincipalIDInAgentField(t *testing.T) {
 // (§2.3 requires the binding target, not the agent's existence), and the empty
 // field case keeps its shipped 400.
 func TestCreateBindingValidFlowsRemainGreen(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 
 	rec, principal := m.post(t, "/principals", m.token, `{"display_name":"Bane","namespace":"acme","role":"member"}`)

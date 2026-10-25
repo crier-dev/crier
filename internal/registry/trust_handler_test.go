@@ -12,6 +12,7 @@ import (
 )
 
 func TestTrustHandlerMalformedAndUnavailable(t *testing.T) {
+	t.Parallel()
 	s := NewMemoryStore()
 	a, d := registryTrustFixture()
 	require.NoError(t, s.AddTrustAnchor(a))

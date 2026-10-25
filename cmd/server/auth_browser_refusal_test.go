@@ -55,6 +55,7 @@ func df444Get(t *testing.T, url, accept string) (int, string, string) {
 }
 
 func TestBrowserChatNavigationUnderAuthTokenIsALegibleRefusal(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServerWithEnv(t, map[string]string{
 		"CR_AUTH_TOKEN": df444Token,
 	})
@@ -155,6 +156,7 @@ func TestBrowserChatNavigationUnderAuthTokenIsALegibleRefusal(t *testing.T) {
 // operator reads and the source in the repo. The middleware receives whatever
 // this template extractor produced; the extraction must not have rewritten it.
 func TestBrowserRefusalPageMatchesEmbeddedTemplate(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServerWithEnv(t, map[string]string{
 		"CR_AUTH_TOKEN": df444Token,
 	})

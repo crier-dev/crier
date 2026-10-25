@@ -91,6 +91,7 @@ func probeHint(t *testing.T, client *http.Client, method, url string) (hintBody,
 // by shape: every request here is exactly one path segment away from a route the
 // router serves, and every one must come back naming it.
 func TestWrongShapedPathNamesTheRightShape(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -193,6 +194,7 @@ func TestWrongShapedPathNamesTheRightShape(t *testing.T) {
 // really serves — a 404 there would mean the hint sent the caller to another
 // dead end, which is the exact failure this row exists to remove.
 func TestShapeHintNamesARouteTheServerServes(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -247,6 +249,7 @@ func materializeTemplate(template string) string {
 // so the boundary is deliberate and visible rather than an accident of a
 // less specific assertion.
 func TestPathsThatAreNotNearMissesKeepTheExactBody(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -272,6 +275,7 @@ func TestPathsThatAreNotNearMissesKeepTheExactBody(t *testing.T) {
 // aimed at. It is asserted here so that behaviour is a decision with a test, not
 // an emergent side of the matcher.
 func TestExtraSegmentOnAPrefixSharingPathStillHints(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -289,6 +293,7 @@ func TestExtraSegmentOnAPrefixSharingPathStillHints(t *testing.T) {
 // so its body must stay exactly what DF-CRIER-213 shipped — no hint fields, no
 // second opinion next to Allow.
 func TestWrongMethodAnswerKeepsItsShape(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -306,6 +311,7 @@ func TestWrongMethodAnswerKeepsItsShape(t *testing.T) {
 // served by their handlers. The router's own routes — including the one the
 // review was reaching for — answer, not this fallback.
 func TestMatchedRoutesAreUnaffectedByTheHint(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -330,6 +336,7 @@ func TestMatchedRoutesAreUnaffectedByTheHint(t *testing.T) {
 // escaped for the context it is moved into — a raw "/" pasted into the suggested
 // path would name a different (still 404) shape.
 func TestShapeHintEchoesNothingUnboundedOrUnsafe(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 

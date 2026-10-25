@@ -12,6 +12,7 @@ import (
 // Proof offered on an ordinary relay topic must not be ignored, even without
 // the A2A option. This does not make proof mandatory for ordinary relay traffic.
 func TestRelayPublishOfferedIdentityHTTP(t *testing.T) {
+	parallelBoot(t)
 	for _, a2aEnabled := range []bool{false, true} {
 		t.Run("a2a="+strconv.FormatBool(a2aEnabled), func(t *testing.T) {
 			base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": strconv.FormatBool(a2aEnabled), "CR_REQUIRE_AGENT_SIG": "true"})

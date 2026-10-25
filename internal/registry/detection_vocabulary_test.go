@@ -9,6 +9,7 @@ import (
 )
 
 func TestInboxAcceptanceDetectorVocabulary(t *testing.T) {
+	t.Parallel()
 	verdict, transport := deliveryVerdict(http.StatusCreated, "")
 	require.Equal(t, "inbox_accepted", verdict, "storing a message is not observing an answer")
 	require.Equal(t, "inbox", transport)
@@ -20,6 +21,7 @@ func TestInboxAcceptanceDetectorVocabulary(t *testing.T) {
 }
 
 func TestForbiddenResponseEvidence(t *testing.T) {
+	t.Parallel()
 	verdict, transport := deliveryVerdict(http.StatusForbidden, "")
 	require.Equal(t, "forbidden_unclassified", verdict, "status alone establishes no cause")
 	require.Empty(t, transport)
@@ -57,6 +59,7 @@ func TestForbiddenResponseEvidence(t *testing.T) {
 }
 
 func TestStatusRecorderCapturesOnlyForbiddenBody(t *testing.T) {
+	t.Parallel()
 	for _, code := range []int{http.StatusForbidden, http.StatusCreated, http.StatusOK} {
 		w := httptest.NewRecorder()
 		rec := newStatusRecorder(w)

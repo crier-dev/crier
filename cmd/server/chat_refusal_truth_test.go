@@ -24,6 +24,7 @@ func TestChatRefusalTruth(t *testing.T) {
 // extract its declared public paths, and verify each one without a credential.
 // This tests both the prose's scope and the actual middleware/route composition.
 func TestBrowserRefusalPublicExceptions(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_AUTH_TOKEN":              df444Token,
 		"CR_PERMISSIONS_ENABLED":     "false",

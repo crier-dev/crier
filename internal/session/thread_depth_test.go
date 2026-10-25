@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeliberateBranchAndNonRootReplies(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			path := be.pathFn(t)

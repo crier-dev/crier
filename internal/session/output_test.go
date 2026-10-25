@@ -44,6 +44,7 @@ func outputFixture(t *testing.T, h *apiHarness) string {
 }
 
 func TestSessionOutput_TraceMode(t *testing.T) {
+	t.Parallel()
 	for _, tc := range localBackends() {
 		t.Run(tc.name, func(t *testing.T) {
 			store := tc.open(t, tc.pathFn(t))
@@ -71,6 +72,7 @@ func TestSessionOutput_TraceMode(t *testing.T) {
 }
 
 func TestSessionOutput_TraceIsDefaultMode(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 	sid := outputFixture(t, h)
@@ -82,6 +84,7 @@ func TestSessionOutput_TraceIsDefaultMode(t *testing.T) {
 }
 
 func TestSessionOutput_SummaryMode(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 	sid := outputFixture(t, h)
@@ -123,6 +126,7 @@ func TestSessionOutput_SummaryMode(t *testing.T) {
 }
 
 func TestSessionOutput_SummaryUnavailable(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 	sid := h.createRoom(t) // no messages, no threads — nothing to summarise
@@ -132,6 +136,7 @@ func TestSessionOutput_SummaryUnavailable(t *testing.T) {
 }
 
 func TestSessionOutput_InvalidMode(t *testing.T) {
+	t.Parallel()
 	store := localBackends()[0].open(t, localBackends()[0].pathFn(t))
 	h := newAPIHarness(t, store)
 	sid := outputFixture(t, h)
@@ -159,6 +164,7 @@ func outputPrivateFixture(t *testing.T, h *apiHarness) string {
 }
 
 func TestSessionOutput_UnauthorizedRead(t *testing.T) {
+	t.Parallel()
 	h := newAPIHarness(t, NewJSONLStoreForTest(t))
 	sid := outputPrivateFixture(t, h)
 

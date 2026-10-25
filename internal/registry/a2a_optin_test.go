@@ -72,6 +72,7 @@ func a2aOf(t *testing.T, r *mux.Router, id string) (json.RawMessage, bool) {
 // key inside the a2a object — naming the key and the accepted keys — registers
 // nothing on the refusal, and accepts every legal shape.
 func TestRegister_A2AMemberStrictness(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		a2a         string // raw a2a member; "" = no a2a member at all
@@ -175,6 +176,7 @@ func TestRegister_A2AMemberStrictness(t *testing.T) {
 // round-trip: an agent registered WITH the block and one WITHOUT both read back
 // with identical core fields, and only the opted-in agent carries the member.
 func TestRegister_A2ABlockRoundTripsWithCoreFieldsUnchanged(t *testing.T) {
+	t.Parallel()
 	r := newStrictWebhookRouter()
 	hexKey, _ := newTestPubKey(t)
 
@@ -225,6 +227,7 @@ func TestRegister_A2ABlockRoundTripsWithCoreFieldsUnchanged(t *testing.T) {
 // before this option existed. A new required key, a serialized empty block or a
 // renamed field would all fail here.
 func TestRegister_WithoutA2ABlockKeepsThePreA2AShape(t *testing.T) {
+	t.Parallel()
 	r := newStrictWebhookRouter()
 	hexKey, _ := newTestPubKey(t)
 
@@ -247,6 +250,7 @@ func TestRegister_WithoutA2ABlockKeepsThePreA2AShape(t *testing.T) {
 // TestUpdate_A2AThreeState: PATCH follows the webhook object's rule — present
 // replaces, explicit null clears, absent leaves the agent's opt-in untouched.
 func TestUpdate_A2AThreeState(t *testing.T) {
+	t.Parallel()
 	r := newStrictWebhookRouter()
 	hexKey, _ := newTestPubKey(t)
 
@@ -286,6 +290,7 @@ func TestUpdate_A2AThreeState(t *testing.T) {
 // 400 that changes nothing — not the block, not the capabilities riding in the
 // same body.
 func TestUpdate_A2AMalformedLeavesAgentUntouched(t *testing.T) {
+	t.Parallel()
 	r := newStrictWebhookRouter()
 	hexKey, _ := newTestPubKey(t)
 
@@ -314,6 +319,7 @@ func TestUpdate_A2AMalformedLeavesAgentUntouched(t *testing.T) {
 // TestAgent_A2ASerializationOmitempty is the store-level half of the shape
 // promise: the zero value serializes without the member, a set block with it.
 func TestAgent_A2ASerializationOmitempty(t *testing.T) {
+	t.Parallel()
 	plain, err := json.Marshal(&Agent{ID: "a", Capabilities: []string{}})
 	require.NoError(t, err)
 	if keys := agentKeysOf(t, string(plain)); !reflect.DeepEqual(keys, preA2AConfigKeys) {

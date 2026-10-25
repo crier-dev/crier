@@ -321,6 +321,7 @@ func sortedNormalize(v any) any {
 }
 
 func TestA2AOption_ExistingSurfaceUnchanged(t *testing.T) {
+	parallelBoot(t)
 	groups := []struct {
 		name        string
 		baseEnv     map[string]string

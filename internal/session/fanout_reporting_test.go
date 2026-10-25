@@ -7,6 +7,7 @@ import (
 )
 
 func TestSummarizeFanoutExactOutcome(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []Outcome{OutcomeDelivered, OutcomeAccepted, OutcomeHeld, OutcomeLeased, OutcomeAcked, OutcomeExpired, OutcomeRefused, OutcomeFailed, OutcomeCanned, OutcomeBudgetCut, OutcomeUnreadableReply, "future"} {
 		t.Run(string(outcome), func(t *testing.T) {
 			var view transcriptMessage

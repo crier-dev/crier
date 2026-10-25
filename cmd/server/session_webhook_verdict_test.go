@@ -12,6 +12,7 @@ import (
 // webhook. Check both the send response and the independently re-opened log plus
 // public transcript; a 200 must not make those three surfaces contradict.
 func TestSessionFanoutWebhookBodyVerdict(t *testing.T) {
+	parallelBoot(t)
 	for _, tc := range []struct {
 		name    string
 		body    string

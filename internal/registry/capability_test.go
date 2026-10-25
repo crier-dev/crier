@@ -154,6 +154,7 @@ func ageRow(t *testing.T, store Store, id string, age time.Duration) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryLandsOnAHolderAndIsAckable(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	capabilityHolder(t, store, "worker-a", capabilityProbe, "relay")
@@ -219,6 +220,7 @@ func TestCapabilityDeliveryLandsOnAHolderAndIsAckable(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryRoundRobinsOverLiveHolders(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	for _, id := range []string{"worker-a", "worker-b", "worker-c"} {
@@ -263,6 +265,7 @@ func TestCapabilityDeliveryRoundRobinsOverLiveHolders(t *testing.T) {
 }
 
 func TestCapabilityDeliverySkipsStaleHoldersAndFallsBackWhenNoneLive(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	capabilityHolder(t, store, "worker-live", capabilityProbe)
@@ -300,6 +303,7 @@ func TestCapabilityDeliverySkipsStaleHoldersAndFallsBackWhenNoneLive(t *testing.
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryWithZeroHoldersIsANamedRefusal(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	// A holder of a DIFFERENT capability, so the refusal cannot come from an
@@ -336,6 +340,7 @@ func TestCapabilityDeliveryWithZeroHoldersIsANamedRefusal(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryLeavesDeliverByIDUntouched(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	capabilityHolder(t, store, "worker-a", capabilityProbe)
@@ -360,6 +365,7 @@ func TestCapabilityDeliveryLeavesDeliverByIDUntouched(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryIdempotencyIsScopedToTheCapability(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	capabilityHolder(t, store, "worker-a", capabilityProbe)
@@ -424,6 +430,7 @@ func TestCapabilityDeliveryIdempotencyIsScopedToTheCapability(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryHolderDiesMidLeaseIsRequeued(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	capabilityHolder(t, store, "worker-a", capabilityProbe)
@@ -509,6 +516,7 @@ func (d *recordingDetector) seen() []DeliveryObservation {
 }
 
 func TestCapabilityDeliveryIsObservedOncePerRequest(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	handler, router := setupRouterWithHandler(store)
 	detector := newRecordingDetector()
@@ -556,6 +564,7 @@ func TestCapabilityDeliveryIsObservedOncePerRequest(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryConcurrentRotationIsFairAndRaceFree(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	_, router := setupRouterWithHandler(store)
 	holders := []string{"worker-a", "worker-b", "worker-c", "worker-d"}
@@ -617,6 +626,7 @@ func TestCapabilityDeliveryConcurrentRotationIsFairAndRaceFree(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCapabilityDeliveryToAWebhookHolderNamesItInTheAccept(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	posts := 0
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

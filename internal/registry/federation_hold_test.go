@@ -114,6 +114,7 @@ func inboxMessages(t *testing.T, store Store, agentID string) []*InboxEntry {
 // agent while every link is unreachable is held at the source (202) instead
 // of being reported as agent-not-found (DF-CRIER-7).
 func TestHandleDeliverFederationTransientOutageHeld(t *testing.T) {
+	t.Parallel()
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	dead.Close() // unreachable link
 
@@ -173,6 +174,7 @@ func TestHandleDeliverFederationTransientOutageHeld(t *testing.T) {
 // hold queue the transient failure is surfaced synchronously as a bounded
 // FEDERATION_FAILED 502 — never the old misleading 404.
 func TestHandleDeliverFederationTransientWithoutHoldQueueReturns502(t *testing.T) {
+	t.Parallel()
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	dead.Close()
 
@@ -217,6 +219,7 @@ func TestHandleDeliverFederationTransientWithoutHoldQueueReturns502(t *testing.T
 // classification: a retryable remote 5xx means "the link is unhealthy", not
 // "here is the answer" — it is held rather than relayed to the sender.
 func TestHandleDeliverFederationRetryable5xxIsHeldNotRelayed(t *testing.T) {
+	t.Parallel()
 	relay := newHoldRelay(t, http.StatusServiceUnavailable, `{"error":"relay overloaded"}`)
 	srv := httptest.NewServer(relay.handler())
 	defer srv.Close()
@@ -242,6 +245,7 @@ func TestHandleDeliverFederationRetryable5xxIsHeldNotRelayed(t *testing.T) {
 // comes back inside the hold budget; the delivery is forwarded exactly once
 // with the original bytes and no failure notification is written.
 func TestHandleDeliverFederationRecoveryDeliversOnceAndReportsNothing(t *testing.T) {
+	t.Parallel()
 	relay := newHoldRelay(t, http.StatusServiceUnavailable, `{"id":"remote-1","reply":{"text":"pong"}}`)
 	srv := httptest.NewServer(relay.handler())
 	defer srv.Close()
@@ -283,6 +287,7 @@ func TestHandleDeliverFederationRecoveryDeliversOnceAndReportsNothing(t *testing
 // terminal contract: the hold budget expires and the sender gets exactly one
 // durable FEDERATION_FAILED entry carrying the correlation context.
 func TestHandleDeliverFederationExhaustionNotifiesSenderExactlyOnce(t *testing.T) {
+	t.Parallel()
 	relay := newHoldRelay(t, http.StatusServiceUnavailable, "")
 	srv := httptest.NewServer(relay.handler())
 	defer srv.Close()
@@ -362,6 +367,7 @@ func TestHandleDeliverFederationExhaustionNotifiesSenderExactlyOnce(t *testing.T
 // distinction survives the hold machinery: a definitive all-404 is answered
 // immediately and never queued.
 func TestHandleDeliverFederationAllLinks404StaysNotFoundWithHoldQueue(t *testing.T) {
+	t.Parallel()
 	relay := newHoldRelay(t, http.StatusNotFound, `{"error":"agent not found"}`)
 	srv := httptest.NewServer(relay.handler())
 	defer srv.Close()
@@ -389,6 +395,7 @@ func TestHandleDeliverFederationAllLinks404StaysNotFoundWithHoldQueue(t *testing
 // one machine-readable FEDERATION_FAILED entry in the sender's inbox, and an
 // error (logged, never requeued) when the sender cannot receive it.
 func TestFederationFailureSinkWritesDurableNotification(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	sink := FederationFailureSink(store)
@@ -436,6 +443,7 @@ func TestFederationFailureSinkWritesDurableNotification(t *testing.T) {
 // same bounded 502 the no-hold-queue path already returns. The paired subtest
 // proves the hold is unchanged when a sender IS named.
 func TestHandleDeliverFederationSenderlessTransientIsNeverHeld(t *testing.T) {
+	t.Parallel()
 	relay := newHoldRelay(t, http.StatusServiceUnavailable, `{"error":"relay overloaded"}`)
 	srv := httptest.NewServer(relay.handler())
 	defer srv.Close()
