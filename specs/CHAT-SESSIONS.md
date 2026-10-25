@@ -833,6 +833,21 @@ recorded upper edge. The member-add event (including an empty-session reason), a
 merged with messages by `seq`. JSONL replay and both SQL adapters retain the event payloads;
 latest-state shares alone are not used to invent event history.
 
+**SHIPPED (DF-CRIER-482) — the default is a JOIN answer, never a re-add answer.**
+The `summary` default above answers "how much does this joiner get", so it is applied to a
+JOIN only. A POST for a member that is already an ACTIVE participant is governed by §2.3's
+no-op rule instead:
+
+- no `context_share` in the request (or the share the member already holds): **no record is
+  appended** — 200, `action: "unchanged"`, `changed: false`, and the stored share, its boundary
+  and `added_at` are untouched. The audit trail gains no second `member.added`;
+- a DIFFERENT `context_share`: a `session.member.context` event is appended (201,
+  `action: "context_share_updated"`, `context_share_previous` naming the replaced share) —
+  never a second `member.add`, so an operator can see a grant changed and by which actor;
+- the role is not changed in place by a re-add (§2.3: a role change is a remove + add pair);
+  the response reports the recorded role;
+- re-adding a REMOVED member is still a NEW event (§2.4 rule 5).
+
 The embedded add-agent control asks only when the session has messages, defaults to summary,
 refuses since with no boundary in place, and renders the server's system-event text. Human joins
 use the same API contract; the existing browser add control still addresses agent IDs only.

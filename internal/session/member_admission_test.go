@@ -39,7 +39,7 @@ func (l failingAgentLookup) Get(string) (*registry.Agent, error) { return nil, l
 func TestSessionParticipantRegistryFailureIsNotMissing(t *testing.T) {
 	for _, lookup := range []AgentLookup{nil, failingAgentLookup{errors.New("registry unavailable")}, failingAgentLookup{nil}} {
 		h := NewHTTPHandler(NewJSONLStoreForTest(t), HTTPOptions{Agents: lookup})
-		err := h.addMember(context.Background(), &Session{ID: "room"}, addParticipantRequest{MemberType: "agent", MemberID: "operator"}, "human")
+		_, err := h.addOrReaddMember(context.Background(), &Session{ID: "room"}, addParticipantRequest{MemberType: "agent", MemberID: "operator"}, "human")
 		require.Equal(t, http.StatusServiceUnavailable, statusForMemberError(err))
 		require.Equal(t, "AGENT_LOOKUP_UNAVAILABLE", codeForMemberError(err))
 	}

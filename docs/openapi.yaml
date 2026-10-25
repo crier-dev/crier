@@ -3551,6 +3551,32 @@ paths:
         its exclusive lower boundary. Joins and later context changes are durable
         transcript system_events merged by seq (DF-CRIER-447).
 
+        RE-ADDING AN EXISTING PARTICIPANT (DF-CRIER-482): a request naming a
+        member that is ALREADY an active participant never rewrites that
+        member's stored context share by accident. The default above is the
+        answer for a JOIN, not for a retry, and a duplicate add for the same
+        member is a no-op, not a second row (specs/CHAT-SESSIONS.md §2.3
+        consequence 2). `action` in the response says which case this request
+        was, and `changed` says whether anything was recorded:
+
+        - a member that is absent (or was removed — a re-add of a removed
+          member is a NEW event, §2.4 rule 5) is joined: `201`,
+          `action: added`, one `session.member.add` record;
+        - an active member with NO `context_share` (or with the share it
+          already holds) is left exactly as it was: `200`, `action: unchanged`,
+          `changed: false`, and NO record at all — the stored share, its
+          boundary and `added_at` are all unchanged, and the audit trail gains
+          no second `member.added`;
+        - an active member WITH a different `context_share` is changed: `201`,
+          `action: context_share_updated`, `changed: true`, a
+          `session.member.context` record (audit kind `member.context`, never a
+          second `member.added`, §2.3), and `context_share_previous` naming the
+          share that was replaced.
+
+        The role is not changed in place by a re-add: §2.3 makes a role change a
+        remove+add pair. The response reports the RECORDED role, so a differing
+        `role` in the body is visible rather than silently applied.
+
         FEDERATED ROOMS (CR-CHAT-023, specs/CHAT-FEDERATION.md §3): a member of
         a peer instance joins as a REMOTE participant by naming a
         remote-qualified id `remote:<peer>:<subject>`. The join is admitted
@@ -3570,14 +3596,27 @@ paths:
             schema:
               $ref: "#/components/schemas/AddParticipantRequest"
       responses:
-        "201":
-          description: The recorded participant.
+        "200":
+          description: |-
+            The recorded participant, unchanged: the member was already active
+            and the request would have changed nothing (action `unchanged`,
+            changed `false`). No record was written.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionParticipant"
+                $ref: "#/components/schemas/AddParticipantResult"
+        "201":
+          description: |-
+            The recorded participant. action `added` — a new membership event;
+            action `context_share_updated` — an explicit share change,
+            recorded as member.context with `context_share_previous` naming the
+            share it replaced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddParticipantResult"
         "400":
-          description: A malformed request (an unknown member_type, or an absent member_id)
+          description: A malformed request (an unknown member_type, an absent member_id, or an invalid context_share)
         "404":
           description: No such session in this realm (SESSION_NOT_FOUND)
         "409":
@@ -5786,6 +5825,48 @@ components:
         count:
           type: integer
           description: The number of ACTIVE participants.
+    AddParticipantResult:
+      type: object
+      description: |-
+        The POST /sessions/{id}/participants body (DF-CRIER-482): the recorded
+        participant, flat, plus what THIS request did to it. A client that read
+        the participant fields of the older body keeps reading the same keys;
+        `action` and `changed` are what make a re-add tellable from a first
+        join.
+      allOf:
+        - $ref: "#/components/schemas/SessionParticipant"
+        - type: object
+          required: [changed, action]
+          properties:
+            changed:
+              type: boolean
+              description: |-
+                True when the request recorded something (a join, or an
+                explicit context-share change). False when it appended nothing:
+                the member was already active and its stored share is
+                untouched, so `added_at` and `context_share` are the recorded
+                facts, unchanged.
+            action:
+              type: string
+              enum: [added, context_share_updated, unchanged]
+              description: |-
+                `added` — a new membership event (201).
+                `context_share_updated` — a re-add that named a DIFFERENT
+                context share, recorded as `member.context` (201), with
+                `context_share_previous` naming what it replaced.
+                `unchanged` — a no-op re-add (200): no record was written, so
+                the audit trail gains no second `member.added`.
+            context_share_previous:
+              type: object
+              description: |-
+                The share this request REPLACED. Present only on
+                `context_share_updated`, so an applied re-add never changes a
+                recorded grant silently.
+              properties:
+                mode:
+                  type: string
+                boundary_message_id:
+                  type: string
     TranscriptMessage:
       type: object
       required: [id, thread_id, seq, message_kind, author, audience, created_at]

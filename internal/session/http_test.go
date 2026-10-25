@@ -390,14 +390,14 @@ func TestSessionAPI_Membership(t *testing.T) {
 
 	var p participantView
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-		addParticipantRequest{MemberType: string(MemberAgent), MemberID: "atlas", Role: string(RoleObserver)},
+		addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2", Role: string(RoleObserver)},
 		&p, nil))
-	require.Equal(t, "atlas", p.MemberID)
+	require.Equal(t, "nimbus-2", p.MemberID)
 	require.True(t, p.Active)
 
 	var list participantsResponse
 	require.Equal(t, http.StatusOK, h.do(t, http.MethodGet, "/sessions/"+id+"/participants", nil, &list, nil))
-	require.Equal(t, 3, list.Count)
+	require.Equal(t, 4, list.Count)
 
 	// An unknown member_type is refused with its named error.
 	var errBody map[string]string

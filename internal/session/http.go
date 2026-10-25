@@ -391,6 +391,41 @@ type participantsResponse struct {
 	Count        int               `json:"count"`
 }
 
+// The three actions POST /sessions/{id}/participants can take on ONE member.
+// They exist because a write that can be a repeat of itself must say which case
+// it was: before DF-CRIER-482 a re-add was indistinguishable from a first join
+// in both the response and the record.
+const (
+	// memberActionAdded — the member was absent (or had been removed, §2.4 rule
+	// 5): a new session.member.add event was appended.
+	memberActionAdded = "added"
+	// memberActionUpdated — the member was ALREADY active and the request named
+	// a DIFFERENT context share: a session.member.context event was appended
+	// (never a second member.added, §2.3), and context_share_previous names the
+	// share it replaced.
+	memberActionUpdated = "context_share_updated"
+	// memberActionUnchanged — the member was already active and nothing about it
+	// would change: NO record was appended and the stored share is untouched.
+	memberActionUnchanged = "unchanged"
+)
+
+// addParticipantResponse is the POST /sessions/{id}/participants body: the
+// membership as it is NOW recorded, plus what THIS request did to it. The
+// participant fields are flat, so a client that read the pre-DF-CRIER-482 body
+// keeps reading the same keys.
+type addParticipantResponse struct {
+	participantView
+	// Changed is false exactly when the request appended nothing — a re-add of
+	// an active member that named no share, or named the share it already has.
+	Changed bool `json:"changed"`
+	// Action is one of memberActionAdded / memberActionUpdated /
+	// memberActionUnchanged.
+	Action string `json:"action"`
+	// ContextSharePrevious is the share this request REPLACED, present only on
+	// memberActionUpdated: an applied re-add never changes a grant silently.
+	ContextSharePrevious *ContextShare `json:"context_share_previous,omitempty"`
+}
+
 // createSessionRequest is the POST /sessions body (§1.4).
 type createSessionRequest struct {
 	// ID is optional; absent mints one.
@@ -733,6 +768,13 @@ func (h *Handler) HandleListParticipants(w http.ResponseWriter, r *http.Request)
 
 // HandleAddParticipant serves POST /sessions/{id}/participants — the
 // "Add participants" affordance (row 37).
+//
+// A request naming a member that is ALREADY an active participant is a RE-ADD,
+// and §2.3 consequence 2 makes a duplicate add a no-op, not a second row. The
+// response says which case it was (`action`, `changed`), and a re-add that would
+// change the stored context share has to NAME that share — an absent
+// `context_share` never means "replace the grant with the join default"
+// (DF-CRIER-482).
 func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	_, sess, ok := h.loadScoped(w, r)
 	if !ok {
@@ -751,37 +793,21 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	if actor == "" {
 		actor = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
 	}
-	if err := h.addMember(r.Context(), sess, req, actor); err != nil {
+
+	// The response is the recorded fact, not the request echoed — read back
+	// from the store, including the late-join context answer (§4.6 D10).
+	out, err := h.addOrReaddMember(r.Context(), sess, req, actor)
+	if err != nil {
 		writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
 		return
 	}
-
-	// Return the member just recorded, read back from the store so the
-	// response is the recorded fact, not the request echoed — including the
-	// late-join context answer (its default included, §4.6 D10).
-	st, err := h.store.Load(r.Context(), sess.ID)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
-		return
+	// 200 for a no-op, 201 for anything the request actually changed. A joining
+	// request that created nothing is not a creation.
+	status := http.StatusCreated
+	if out.Action == memberActionUnchanged {
+		status = http.StatusOK
 	}
-	for _, m := range st.Members {
-		if m.MemberType == MemberType(req.MemberType) && m.MemberID == req.MemberID && m.ActiveAt(h.now()) {
-			view := participantView{
-				MemberType: string(m.MemberType),
-				MemberID:   m.MemberID,
-				Role:       string(m.Role),
-				AddedAt:    m.AddedAt,
-				Active:     true,
-				Remote:     IsRemoteMember(m.MemberID),
-			}
-			if mc := contextShareFor(st, m.MemberType, m.MemberID); mc != nil {
-				view.ContextShare = &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
-			}
-			writeJSON(w, http.StatusCreated, view)
-			return
-		}
-	}
-	writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", "the member was recorded but could not be read back")
+	writeJSON(w, status, out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1740,22 +1766,142 @@ func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan
 	return h.store.Append(ctx, rec)
 }
 
-// addMember records one membership event (§2.3). A join to a session in
-// another realm is refused, and so is adding an unknown agent or one in
-// another realm: either would put two realms in one room.
-func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) error {
+// addOrReaddMember records one membership request (§2.3) and reports what it
+// actually did: a first join, a recorded share change, or a no-op.
+//
+// The compose step cannot tell a first join from a RE-ADD on its own — an absent
+// `context_share` is defaulted to `summary` (§4.6 D10) for a joiner, which is
+// right for a join and WRONG for a re-add: applied again, that default silently
+// replaces the grant the member joined with. So the existing membership is read
+// here, BEFORE anything is appended, and:
+//
+//   - no active membership (never joined, or removed — §2.4 rule 5 makes a
+//     re-add of a removed member a NEW event): append session.member.add;
+//   - active membership and the request names no share, or names the share the
+//     member already holds: append NOTHING (§2.3 consequence 2 — "a duplicate
+//     add for the same member and role is a no-op, not a second row");
+//   - active membership and the request names a DIFFERENT share: append
+//     session.member.context, the record §2.3 defines for a later change of this
+//     one field, so the audit trail shows a grant changed rather than a second
+//     join.
+//
+// A re-add never changes the member's role: §2.3 makes a role change a
+// remove+add pair, never an in-place edit. The response reports the recorded
+// role, so a differing `role` in the body is visible rather than silently
+// applied.
+func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) (*addParticipantResponse, error) {
 	plan, err := h.composeMember(sess, req, actor)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	st, err := h.store.Load(ctx, sess.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := checkMemberBoundary(st, sess.ID, plan); err != nil {
-		return err
+		return nil, err
 	}
-	return h.appendMember(ctx, sess, plan)
+
+	existing := st.findMember(plan.Member.MemberType, plan.Member.MemberID)
+	if existing == nil || !existing.ActiveAt(h.now()) {
+		if err := h.appendMember(ctx, sess, plan); err != nil {
+			return nil, err
+		}
+		return h.addParticipantView(ctx, sess.ID, plan.Member.MemberType, plan.Member.MemberID, memberActionAdded, nil)
+	}
+
+	current := contextShareFor(st, existing.MemberType, existing.MemberID)
+	namedShare := req.ContextShare != nil || strings.TrimSpace(req.ContextBoundaryMessageID) != ""
+	if !namedShare || sharesEqual(current, plan.Share) {
+		return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUnchanged, nil)
+	}
+
+	// An explicit change. It is recorded as session.member.context — a new
+	// event, never a rewrite of the add (§4.6 rule 3) — and the reason is what
+	// an operator reading the trail sees: a re-add replaced a grant.
+	at := h.now()
+	seq, err := h.store.NextSeq(ctx, sess.ID)
+	if err != nil {
+		return nil, err
+	}
+	mc := &MemberContext{
+		SessionID:         sess.ID,
+		MemberType:        existing.MemberType,
+		MemberID:          existing.MemberID,
+		Mode:              plan.Share.Mode,
+		BoundaryMessageID: plan.Share.BoundaryMessageID,
+		SetBy:             actor,
+		SetAt:             at,
+	}
+	rec := mc.Record(seq, at)
+	rec.Reason = reAddShareChangeReason(current)
+	if err := h.store.Append(ctx, rec); err != nil {
+		return nil, err
+	}
+	previous := shareOf(current)
+	return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUpdated, previous)
+}
+
+// reAddShareChangeReason states the change an operator will read on the audit
+// row: which grant a re-add replaced.
+func reAddShareChangeReason(current *MemberContext) string {
+	prev := shareOf(current)
+	if prev == nil {
+		return "re-add of an active participant recorded its context share (it held none)"
+	}
+	if prev.BoundaryMessageID == "" {
+		return fmt.Sprintf("re-add of an active participant replaced its context share (was mode %q)", prev.Mode)
+	}
+	return fmt.Sprintf("re-add of an active participant replaced its context share (was mode %q, boundary %q)",
+		prev.Mode, prev.BoundaryMessageID)
+}
+
+// shareOf copies a stored share into the wire type, so a response can never
+// alias the state it was read from.
+func shareOf(mc *MemberContext) *ContextShare {
+	if mc == nil {
+		return nil
+	}
+	return &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID}
+}
+
+// sharesEqual compares a stored share with a requested one on the two fields a
+// share is: mode and boundary.
+func sharesEqual(current *MemberContext, want *ContextShare) bool {
+	if current == nil || want == nil {
+		return false
+	}
+	return current.Mode == want.Mode && current.BoundaryMessageID == want.BoundaryMessageID
+}
+
+// addParticipantView reads the membership back from the store and renders the
+// POST /sessions/{id}/participants body: the recorded fact, never the request
+// echoed.
+func (h *Handler) addParticipantView(ctx context.Context, sessionID string, mt MemberType, id, action string, previous *ContextShare) (*addParticipantResponse, error) {
+	st, err := h.store.Load(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	m := st.findMember(mt, id)
+	if m == nil {
+		return nil, &memberError{status: http.StatusInternalServerError, code: "STORE_ERROR",
+			msg: "the member was recorded but could not be read back"}
+	}
+	out := &addParticipantResponse{
+		participantView: participantView{
+			MemberType:   string(m.MemberType),
+			MemberID:     m.MemberID,
+			Role:         string(m.Role),
+			AddedAt:      m.AddedAt,
+			Active:       m.ActiveAt(h.now()),
+			Remote:       IsRemoteMember(m.MemberID),
+			ContextShare: shareOf(contextShareFor(st, m.MemberType, m.MemberID)),
+		},
+		Changed:              action != memberActionUnchanged,
+		Action:               action,
+		ContextSharePrevious: previous,
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
