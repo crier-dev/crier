@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -78,6 +78,7 @@ help:
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
 	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
+	@echo "  chat-ui-browser-selftest  DF-CRIER-335: the real-browser chat panel suite (responsive 390/768/1280) plus its rejection-path controls via scripts/chat-ui-browser-selftest.cjs — rc 0 pass, 1 regression, 77 named skip when playwright/Chromium/the built server are absent"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
 	@echo "  generate          Run go generate ./..."
@@ -834,6 +835,30 @@ release-upload:
 # No network, no docker, no keys; ports come from the shared selector.
 install-path-selftest:
 	bash scripts/install-path-selftest.sh
+
+# DF-CRIER-335: the loop's definition of done requires the responsive check at
+# 390/768/1280 to be a make target and a CI step over
+# scripts/chat-ui-browser-selftest.cjs — "not a screenshot someone eyeballed".
+# The harnesses existed (chat-ui-browser.cjs since CR-CHAT-038; the selftest
+# since DF-CRIER-365/386) but nothing wired them into make or CI, so every run
+# was a hand-typed command in a dogfood doc. This target runs the selftest
+# verbatim; it builds nothing itself. The FULL run needs the three
+# prerequisites the harness header documents: a built server (CRIER_TEST_BINARY,
+# default /tmp/cr-chat-038-server), playwright on NODE_PATH
+# (npm install --prefix /tmp/crier-browser playwright), and a Chromium at
+# CHROME_BIN (default /usr/bin/google-chrome). Without them the script prints a
+# named SKIP and exits 77 — a missing browser is an explicit skip, never a PASS.
+# Exit contract: 0 = clean browser suite + every rejection-path control
+# verified (including the 390/768/1280 zero-overflow checks); 1 = a real
+# regression (the clean run failed, or a mutation the harness must reject was
+# accepted); 77 = prerequisite skip. The CI step runs the same script directly
+# and treats ONLY 77 as a skip — a stock ubuntu runner carries no Chromium, and
+# make cannot relay the distinction because it folds any recipe failure into
+# its own exit 2 — while a regression (1) still fails that step. The full
+# assertions are exercised on hosts that have the toolchain (run commands:
+# docs/dogfood/DF-CRIER-365-browser-harness.md, DF-CRIER-386-browser-reason-contract.md).
+chat-ui-browser-selftest:
+	node scripts/chat-ui-browser-selftest.cjs
 
 generate:
 	go generate ./...

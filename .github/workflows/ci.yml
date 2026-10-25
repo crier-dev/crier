@@ -263,6 +263,27 @@ jobs:
           make gofmt-selftest
 
       # CR-GAP-069: a runnable demo (or an ad-hoc dogfood script) that backgrounds a
+      # DF-CRIER-335: the control-panel loop's definition of done requires the
+      # 390/768/1280 responsive check to be a make target AND a CI step over
+      # scripts/chat-ui-browser-selftest.cjs — "not a screenshot someone
+      # eyeballed". This runs the real-browser harness (clean full suite plus
+      # its rejection-path controls). A stock ubuntu runner has no Chromium and
+      # no playwright install, so the harness's named prerequisite skip
+      # (exit 77) is the expected shape here and is tolerated EXPLICITLY by
+      # exit code — a regression (exit 1) still fails the step, and a clean
+      # PASS (exit 0) means the full assertions ran, viewport checks included.
+      # Hosts with the toolchain (CRIER_TEST_BINARY + playwright on NODE_PATH +
+      # CHROME_BIN) exercise every assertion; run commands:
+      # docs/dogfood/DF-CRIER-365-browser-harness.md and
+      # docs/dogfood/DF-CRIER-386-browser-reason-contract.md. The step drives
+      # the script DIRECTLY (not through the make target): make folds any
+      # recipe failure into its own exit 2 (measured: recipe exit 77 -> make
+      # exit 2), which cannot carry the harness's 77-skip vs 1-regression
+      # distinction. The make target remains the operator surface on hosts.
+      - name: Chat UI browser selftest (responsive 390/768/1280)
+        run: node scripts/chat-ui-browser-selftest.cjs || test $? -eq 77
+
+      # CR-GAP-069: a runnable demo (or an ad-hoc dogfood script) that backgrounds a
       # crier server with no EXIT trap leaks the process and the port, and nothing in
       # the repo noticed — the dogfood federation demo left two orphans on
       # :18767/:18877 for a human to reap. This arm is the notice: it classifies a
