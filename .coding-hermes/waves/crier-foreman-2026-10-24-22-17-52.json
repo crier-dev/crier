@@ -16,5 +16,8 @@
       "dispatch": "/tmp/crier-foreman-2026-10-24-22-17-52-dispatch.sh",
       "status": "running"
     }
-  ]
+  ],
+  "finished_at": "2026-10-25T00:50:30.929421Z",
+  "recovery_status": "complete",
+  "recovery_notes": "Branch wt/INT-CI-014-tick-20261024 already merged to main (commit 2193d79). Worktree removed, branch deleted. Board row INT-CI-014 remains pending (partial fix landed, full acceptance unmet)."
 }
