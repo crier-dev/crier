@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-10-25-01-50-18",
+  "block": "DF-CRIER-483",
+  "block_completion": "99%",
+  "wave_type": "serial",
+  "reason": "Only 1 dispatchable row in block (DF-CRIER-333 owner-blocked, DF-CRIER-335 is loop contract waiting on 333)",
+  "rows": [
+    {
+      "id": "DF-CRIER-481",
+      "title": "POST /sessions with valid member + invalid context boundary -> 400 but session durable (participant_count=0)",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-481",
+      "branch": "wt/DF-CRIER-481",
+      "base": "origin/main",
+      "base_sha": "26af58e",
+      "status": "dispatched",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman"
+    }
+  ],
+  "slots": 1,
+  "load_at_dispatch": 8.53,
+  "nproc": 16
+}
