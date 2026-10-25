@@ -551,6 +551,12 @@ Reader rules this gate assumes, and you should keep:
 - Lifecycle: `POST /sessions/{id}/state` `{"state":"closed"|"open","sender":...}`.
   200 reads the session back; double-close/reopen-open 409s are named; all
   transitions land durable system_events (session.close / session.reopen).
-- Membership re-add is 201 + a NEW member.add event (no 409, no dedupe): a
-  retried request doubles the join event in the transcript (event-sequence model
-  per spec §2.3/§2.4 — observe, don't retry blindly).
+- Membership re-add (DF-CRIER-482): a POST for a member that is ALREADY an
+  active participant does NOT append a second member.add. With NO
+  `context_share` it is a no-op — 200, `action:"unchanged"`, `changed:false`,
+  stored share/boundary/added_at untouched, no new audit event. With a
+  DIFFERENT `context_share` it records `member.context` (201,
+  `action:"context_share_updated"`, with `context_share_previous`) — never a
+  second `member.added`. A re-add does NOT change the role (§2.3: a role change
+  is a remove+add pair); the response reports the recorded role. A re-add of a
+  REMOVED member is still a new member.add (201, `action:"added"`).
