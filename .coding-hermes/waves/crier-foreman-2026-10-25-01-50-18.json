@@ -20,5 +20,8 @@
   ],
   "slots": 1,
   "load_at_dispatch": 8.53,
-  "nproc": 16
+  "nproc": 16,
+  "finished_at": "2026-10-25T03:20:00Z",
+  "recovery_status": "complete",
+  "recovery_notes": "Recovered DF-CRIER-481: branch rebased onto current main, gates rerun, implementation merged as d0c2f75d and pushed to origin/main and gitlab/main. Branch/worktree removed. Full block acceptance remains open because DF-CRIER-333 is owner-blocked and DF-CRIER-335 depends on it."
 }
