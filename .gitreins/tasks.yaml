@@ -3020,3 +3020,12 @@ tasks:
     0; 60s budget in Makefile is NOT raised
   status: in_progress
   created_at: '2026-10-25T01:11:36.327834+00:00'
+- id: DF-CRIER-335
+  title: Crier control-panel completion loop
+  criteria:
+  - Verify the loop contract and its acceptance evidence; do not claim completion
+    while DF-CRIER-333 owner decision or required browser evidence is absent. Produce
+    a commit only if a concrete repository change is required and fully verified.
+  status: complete
+  created_at: '2026-10-25T08:19:53.506000+00:00'
+  completed_at: '2026-10-25T09:08:22.212811+00:00'
