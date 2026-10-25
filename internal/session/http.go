@@ -609,23 +609,50 @@ func (h *Handler) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 		RetentionSeconds: req.RetentionSeconds,
 		Visibility:       visibility,
 	}
-	// Reject unresolved initial agents before writing any room or membership.
+	// A create is all-or-nothing up to its first record: every declared member is
+	// composed AND validated — including its context boundary — against the EMPTY
+	// state of the room that does not exist yet, and nothing is written until they
+	// all pass. That is what keeps a 400 truthful: an unresolvable agent
+	// (DF-CRIER-471) and a context boundary the new room's transcript cannot
+	// contain (DF-CRIER-481) both refuse the request with no session and no
+	// membership persisted, so a retry with the same id creates the room instead
+	// of colliding with a durable ghost of the failed attempt.
+	//
+	// Rolling back instead is NOT available here, and that was measured, not
+	// assumed: the store is an append-only record log — session.create,
+	// session.member.add, message, thread.branch, session.close, session.reopen —
+	// with no delete/tombstone record, and CreateSession on every backend is just
+	// Append(sess.CreateRecord(seq, ...)). Validating before the first write is the
+	// only way to reach the caller-visible outcome "nothing happened".
+	pending := &State{Session: sess}
+	plans := make([]*memberPlan, 0, len(req.Members))
 	for _, m := range req.Members {
-		if err := h.checkMemberAgent(sess, m); err != nil {
+		plan, err := h.composeMember(sess, m, creator.AgentID())
+		if err != nil {
 			writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
 			return
 		}
+		if err := checkMemberBoundary(pending, sess.ID, plan); err != nil {
+			writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
+			return
+		}
+		plans = append(plans, plan)
 	}
 	if err := h.store.CreateSession(r.Context(), sess, 1); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "STORE_ERROR", err.Error())
 		return
 	}
 
-	for _, m := range req.Members {
-		if err := h.addMember(r.Context(), sess, m, creator.AgentID()); err != nil {
-			writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
+	// Past this line the room EXISTS. A failure now is reported as the partial
+	// success it is, naming the session id and the members already recorded —
+	// never as a bare "nothing happened" (DF-CRIER-481).
+	added := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		if err := h.appendMember(r.Context(), sess, plan); err != nil {
+			writePartialCreateError(w, sess, added, err)
 			return
 		}
+		added = append(added, plan.Member.MemberID)
 	}
 
 	st, err := h.store.Load(r.Context(), id)
@@ -1606,20 +1633,34 @@ func (h *Handler) checkMemberAgent(sess *Session, req addParticipantRequest) err
 	return nil
 }
 
-// addMember records one membership event (§2.3). A join to a session in
-// another realm is refused, and so is adding an unknown agent or one in
-// another realm: either would put two realms in one room.
-func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) error {
+// memberPlan is one membership composed and validated but NOT yet written. A
+// create builds the whole plan before its first record, so a member the room
+// cannot honour — an unknown agent, an invalid share, a boundary the transcript
+// does not contain — refuses the request with nothing persisted rather than
+// leaving a room behind that the caller believes it never made (DF-CRIER-481).
+type memberPlan struct {
+	Member *Member
+	// Share is the RESOLVED context share (mode/boundary adjusted by
+	// resolveJoinShare), not the raw request value.
+	Share  *ContextShare
+	Reason string
+}
+
+// composeMember validates one membership request that needs no room history and
+// composes the record it would append. Everything here is state-free apart from
+// the prospective session (its id and realm), which is why the create path can
+// run it before the room exists.
+func (h *Handler) composeMember(sess *Session, req addParticipantRequest, actor string) (*memberPlan, error) {
 	mt := MemberType(strings.TrimSpace(req.MemberType))
 	switch mt {
 	case MemberAgent, MemberPrincipal:
 	default:
-		return &memberError{status: http.StatusBadRequest, code: "INVALID_MEMBER",
+		return nil, &memberError{status: http.StatusBadRequest, code: "INVALID_MEMBER",
 			msg: fmt.Sprintf("member_type must be %q or %q", MemberAgent, MemberPrincipal)}
 	}
 	id := strings.TrimSpace(req.MemberID)
 	if id == "" {
-		return &memberError{status: http.StatusBadRequest, code: "INVALID_MEMBER", msg: "member_id is required"}
+		return nil, &memberError{status: http.StatusBadRequest, code: "INVALID_MEMBER", msg: "member_id is required"}
 	}
 	role := MemberRole(strings.TrimSpace(req.Role))
 	if role == "" {
@@ -1634,15 +1675,15 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 	}
 	if req.ContextBoundaryMessageID != "" {
 		if share.BoundaryMessageID != "" && share.BoundaryMessageID != req.ContextBoundaryMessageID {
-			return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: "conflicting context boundary message ids"}
+			return nil, &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: "conflicting context boundary message ids"}
 		}
 		share.BoundaryMessageID = req.ContextBoundaryMessageID
 	}
 	if err := validateContextShare(&share); err != nil {
-		return &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
+		return nil, &memberError{status: http.StatusBadRequest, code: "INVALID_CONTEXT_SHARE", msg: err.Error()}
 	}
 	if err := h.checkMemberAgent(sess, req); err != nil {
-		return err
+		return nil, err
 	}
 
 	// CR-CHAT-023 (§3.2, §3.3, §6.2): a remote-qualified member id names a
@@ -1653,26 +1694,10 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 	// reinterpretation of identity.
 	if IsRemoteMember(id) {
 		if err := validateRemoteMember(h.opts.PeerPolicies, id, sess.Namespace); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	st, err := h.store.Load(ctx, sess.ID)
-	if err != nil {
-		return err
-	}
-	// Validate the boundary BEFORE the empty-session override: since must
-	// never silently become summary or none, even when there is no history.
-	// The predicate is shared with the later-change path (shareBoundaryProblem)
-	// so the two write paths of this one field cannot disagree (DF-CRIER-472).
-	if detail := shareBoundaryProblem(st, sess.ID, &share); detail != "" {
-		return &memberError{status: http.StatusBadRequest, code: "CONTEXT_BOUNDARY_NOT_FOUND", msg: detail}
-	}
-	reason := resolveJoinShare(st, &share)
-	seq, err := h.store.NextSeq(ctx, sess.ID)
-	if err != nil {
-		return err
-	}
 	m := &Member{
 		SessionID:  sess.ID,
 		MemberType: mt,
@@ -1681,9 +1706,56 @@ func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipa
 		AddedAt:    h.now(),
 		AddedBy:    actor,
 	}
-	rec := m.AddRecord(seq, m.AddedAt, &share)
-	rec.Reason = reason
+	return &memberPlan{Member: m, Share: &share}, nil
+}
+
+// checkMemberBoundary resolves a composed member's context share against the
+// session's transcript and records the late-join answer. The boundary predicate
+// is shared with the later-change path (shareBoundaryProblem) so the two write
+// paths of this one field cannot disagree (DF-CRIER-472).
+//
+// Validate the boundary BEFORE the empty-session override: since must never
+// silently become summary or none, even when there is no history.
+//
+// It is a separate step from composeMember because it is the one check that
+// needs the room's RECORDED state — for a create that state is the empty
+// transcript of the room not yet written, which is why a declared boundary can
+// never resolve there (DF-CRIER-481).
+func checkMemberBoundary(st *State, sessionID string, p *memberPlan) error {
+	if detail := shareBoundaryProblem(st, sessionID, p.Share); detail != "" {
+		return &memberError{status: http.StatusBadRequest, code: "CONTEXT_BOUNDARY_NOT_FOUND", msg: detail}
+	}
+	p.Reason = resolveJoinShare(st, p.Share)
+	return nil
+}
+
+// appendMember writes an already-validated membership as the next record.
+func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan) error {
+	seq, err := h.store.NextSeq(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	rec := p.Member.AddRecord(seq, p.Member.AddedAt, p.Share)
+	rec.Reason = p.Reason
 	return h.store.Append(ctx, rec)
+}
+
+// addMember records one membership event (§2.3). A join to a session in
+// another realm is refused, and so is adding an unknown agent or one in
+// another realm: either would put two realms in one room.
+func (h *Handler) addMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) error {
+	plan, err := h.composeMember(sess, req, actor)
+	if err != nil {
+		return err
+	}
+	st, err := h.store.Load(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	if err := checkMemberBoundary(st, sess.ID, plan); err != nil {
+		return err
+	}
+	return h.appendMember(ctx, sess, plan)
 }
 
 // ---------------------------------------------------------------------------
@@ -2065,6 +2137,27 @@ func writeAudienceError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeAPIError(w, http.StatusBadRequest, "INVALID_AUDIENCE", err.Error())
+}
+
+// writePartialCreateError renders the one outcome a POST /sessions must never
+// misreport: the room EXISTS, so "nothing happened" would be a lie. It keeps the
+// failure's own status and code (a store fault is 500 STORE_ERROR) and ADDS the
+// surviving session id plus the members already recorded, so the caller can
+// address the room it now owns instead of retrying into a 409 for a room it
+// believes it never created (DF-CRIER-471/481).
+func writePartialCreateError(w http.ResponseWriter, sess *Session, added []string, err error) {
+	if added == nil {
+		added = []string{}
+	}
+	detail := fmt.Sprintf("session %q WAS created (state %q) and %d member(s) were recorded (%s); the request failed afterwards: %v — the session is durable, address it by that id rather than retrying the create",
+		sess.ID, sess.State, len(added), strings.Join(added, ", "), err)
+	writeJSON(w, statusForMemberError(err), map[string]any{
+		"error":         codeForMemberError(err),
+		"detail":        detail,
+		"session_id":    sess.ID,
+		"members_added": added,
+		"partial":       true,
+	})
 }
 
 // writeRealmError renders a namespace failure with the same vocabulary the
