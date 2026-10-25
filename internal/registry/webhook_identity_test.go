@@ -44,6 +44,7 @@ func decodeCapturedEnvelope(t *testing.T, body []byte) map[string]any {
 // out naming BOTH identities — X-Crier-Target is the agent in the request
 // path (the delivery's target), X-Crier-Agent is the deliver body's sender.
 func TestDeliver_WebhookPOSTNamesItsTarget(t *testing.T) {
+	t.Parallel()
 	wh := &webhookRecorder{}
 	whSrv := httptest.NewServer(wh)
 	t.Cleanup(whSrv.Close)
@@ -78,6 +79,7 @@ func TestDeliver_WebhookPOSTNamesItsTarget(t *testing.T) {
 // the outbound POST must omit X-Crier-Agent entirely (not send it blank) while
 // still naming the target in the header and the body.
 func TestDeliver_WebhookPOSTSenderOmitted(t *testing.T) {
+	t.Parallel()
 	wh := &webhookRecorder{}
 	whSrv := httptest.NewServer(wh)
 	t.Cleanup(whSrv.Close)
@@ -111,6 +113,7 @@ func TestDeliver_WebhookPOSTSenderOmitted(t *testing.T) {
 // carries the target header once, and every inner envelope repeats its own
 // crier.target.
 func TestDeliver_BatchPOSTNamesItsTarget(t *testing.T) {
+	t.Parallel()
 	wh := &webhookRecorder{}
 	whSrv := httptest.NewServer(wh)
 	t.Cleanup(whSrv.Close)
@@ -160,6 +163,7 @@ func TestDeliver_BatchPOSTNamesItsTarget(t *testing.T) {
 // corrected docs now state (specs/WEBHOOK-DELIVERY.md §3, examples/demo.sh,
 // internal/registry/handler.go HandleDeliver).
 func TestDeliver_InboxGuardErrorRidesInTheBody(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	f.llm.status = http.StatusInternalServerError // provider down → fail open
 

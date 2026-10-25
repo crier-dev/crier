@@ -55,6 +55,7 @@ func (d *joinedBudgetDeliverer) DispatchDelivery(ctx context.Context, target str
 // every attempt starts before any is released, and neither outcomes nor answers
 // are published while even one attempt is still waiting for its budget.
 func TestFanoutBudgetJoinsConcurrentAttempts(t *testing.T) {
+	t.Parallel()
 	for _, allHang := range []bool{false, true} {
 		t.Run("all_hang="+strconv.FormatBool(allHang), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

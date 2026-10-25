@@ -10,6 +10,7 @@ import (
 // Exercise the served artifact, not a second copy of the page. Behavioral
 // state/escaping coverage is in scripts/chat-management-browser.cjs.
 func TestChatManagementRoutesInServedScript(t *testing.T) {
+	parallelBoot(t)
 	resp, err := http.Get(startTestServer(t) + "/chat")
 	if err != nil {
 		t.Fatal(err)

@@ -246,6 +246,7 @@ func waitForPosts(t *testing.T, w *webhookRecorder, n int) {
 // ── tests ───────────────────────────────────────────────────────────────
 
 func TestGuardDeliver_AllowThroughInbox(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	if code := f.registerAgent(t, "agent-1", f.guardPolicy(false)); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -277,6 +278,7 @@ func TestGuardDeliver_AllowThroughInbox(t *testing.T) {
 }
 
 func TestGuardDeliver_BlockReturns403(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictBlock)
 	if code := f.registerAgent(t, "agent-1", f.guardPolicy(false)); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -303,6 +305,7 @@ func TestGuardDeliver_BlockReturns403(t *testing.T) {
 }
 
 func TestGuardDeliver_SanitizeQuarantinesPayload(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictSanitize)
 	if code := f.registerAgent(t, "agent-1", f.guardPolicy(false)); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -341,6 +344,7 @@ func TestGuardDeliver_SanitizeQuarantinesPayload(t *testing.T) {
 }
 
 func TestGuardDeliver_WebhookPOSTCarriesHeaders(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	f.addWebhookDriver(t)
 	wh := &webhookRecorder{}
@@ -400,6 +404,7 @@ func TestGuardDeliver_WebhookPOSTCarriesHeaders(t *testing.T) {
 }
 
 func TestGuardDeliver_BlockedWebhookNeverPosts(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictBlock)
 	f.addWebhookDriver(t)
 	wh := &webhookRecorder{}
@@ -432,6 +437,7 @@ func TestGuardDeliver_BlockedWebhookNeverPosts(t *testing.T) {
 }
 
 func TestGuardDeliver_FailOpenOnProviderDown(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	f.addWebhookDriver(t)
 	wh := &webhookRecorder{}
@@ -476,6 +482,7 @@ func TestGuardDeliver_FailOpenOnProviderDown(t *testing.T) {
 }
 
 func TestGuardDeliver_CircuitOpenFailsOpenUnlessFailClosed(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	f.llm.status = http.StatusInternalServerError
 	// Circuit trips after 1 failure; the policy chain has a single provider.
@@ -528,6 +535,7 @@ func newCircuitGuard(t *testing.T, llmURL string, env envStub, threshold int, co
 }
 
 func TestGuardRegister_Validation(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 
 	// custom provider missing base_url → 400.
@@ -555,6 +563,7 @@ func TestGuardRegister_Validation(t *testing.T) {
 }
 
 func TestGuardDeliver_NoFilterMeansNoGuard(t *testing.T) {
+	t.Parallel()
 	// A handler WITHOUT a guard filter delivers as before: no metadata,
 	// no LLM calls.
 	store := NewMemoryStore()
@@ -593,6 +602,7 @@ func TestGuardDeliver_NoFilterMeansNoGuard(t *testing.T) {
 }
 
 func TestGuardDeliver_UnknownAgentStill404(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	rec := f.deliver(t, "ghost", `{"text":"x"}`, "")
 	if rec.Code != http.StatusNotFound {
@@ -661,6 +671,7 @@ func jevPolicy(stubURL string) *guard.AgentGuardConfig {
 // decisions shape (nothing appended to the URL, no messages array), and the
 // chat-completions mock was never touched.
 func TestGuardDeliver_JevProviderAllowsThroughInbox(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	stub := &jevDecisionsStub{resp: jevDecisionsResponse("none", 0, 0)}
 	stubSrv := httptest.NewServer(stub)
@@ -722,6 +733,7 @@ func TestGuardDeliver_JevProviderAllowsThroughInbox(t *testing.T) {
 // the 403 GUARD_BLOCKED contract and the jev provenance, and nothing lands in
 // the inbox.
 func TestGuardDeliver_JevProviderBlocksAtChokePoint(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	stub := &jevDecisionsStub{resp: jevDecisionsResponse("instruction_injection", 2, 0.97)}
 	stubSrv := httptest.NewServer(stub)
@@ -767,6 +779,7 @@ func (f *guardFixture) channelPolicy() *guard.AgentGuardConfig {
 }
 
 func TestGuardDeliver_PerChannelOverride(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictBlock)
 	if code := f.registerAgent(t, "agent-1", f.channelPolicy()); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -829,6 +842,7 @@ func TestGuardDeliver_PerChannelOverride(t *testing.T) {
 }
 
 func TestGuardDeliver_ThreadIDPassesThroughEnvelope(t *testing.T) {
+	t.Parallel()
 	// deliverRequest.thread_id must ride through to the webhook envelope's
 	// EnvelopeMeta.ThreadID (spec §9.3) — observable on the outbound POST.
 	f := newGuardFixture(t, guardVerdictAllow)
@@ -862,6 +876,7 @@ func TestGuardDeliver_ThreadIDPassesThroughEnvelope(t *testing.T) {
 // ── CR-FEAT-011: PATCH guard surface (spec §9.2) ────────────────────────
 
 func TestGuardPatch_ReplaceRemoveUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	if code := f.registerAgent(t, "agent-1", nil); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -917,6 +932,7 @@ func TestGuardPatch_ReplaceRemoveUnchanged(t *testing.T) {
 // risk marker (the §6.3 over-cap `oversize` evidence) must be visible in the
 // deliver response; only a CLEAN allow stays absent.
 func TestGuardDeliver_RiskMarkedAllowIsSurfaced(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	if code := f.registerAgent(t, "agent-1", f.guardPolicy(false)); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)
@@ -979,6 +995,7 @@ func TestGuardDeliver_RiskMarkedAllowIsSurfaced(t *testing.T) {
 // must be refused (403 GUARD_BLOCKED) rather than delivered, even under a
 // fail_open policy.
 func TestGuardDeliver_FailOpenInjectionBlocksOnWire(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	dead := &guard.AgentGuardConfig{Policies: []guard.Policy{{
 		ID: "dead-policy",
@@ -1018,6 +1035,7 @@ func TestGuardDeliver_FailOpenInjectionBlocksOnWire(t *testing.T) {
 }
 
 func TestGuardPatch_InvalidGuard400(t *testing.T) {
+	t.Parallel()
 	f := newGuardFixture(t, guardVerdictAllow)
 	if code := f.registerAgent(t, "agent-1", nil); code != http.StatusCreated {
 		t.Fatalf("register: %d", code)

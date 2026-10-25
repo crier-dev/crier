@@ -16,6 +16,7 @@ import (
 // String expectations deliberately compile against fb82c89 too: the RED control
 // must exercise the old producers, not fail because new constants are absent.
 func TestRemoteTransportReceipt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, body, inbound, verdict, want, code, answer string
 		status                                           int
@@ -118,6 +119,7 @@ func (d receiptDispatcher) DispatchDelivery(context.Context, string, registry.De
 }
 
 func TestLocalTransportReceipt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, transport, mode, reply, want string
 		answers                            int

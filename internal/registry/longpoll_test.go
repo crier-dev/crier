@@ -154,6 +154,7 @@ func maskVolatile(t *testing.T, body string) string {
 // ----- AC 1: the long-poll returns EARLY on delivery -----
 
 func TestInboxLongPollReturnsEarlyOnDelivery(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 
@@ -206,6 +207,7 @@ func TestInboxLongPollReturnsEarlyOnDelivery(t *testing.T) {
 // ----- AC 2: the long-poll times out EMPTY, with the poll-only body -----
 
 func TestInboxLongPollTimesOutEmptyWithThePollOnlyBody(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "waiter")
 	registerLongPollAgent(t, store, "poll-only")
@@ -242,6 +244,7 @@ func TestInboxLongPollTimesOutEmptyWithThePollOnlyBody(t *testing.T) {
 // ----- AC 3: the poll-only path is unchanged (absent and 0) -----
 
 func TestInboxPollOnlyPathIsUnchanged(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	for _, id := range []string{"poll-a", "poll-b", "wait-a"} {
 		registerLongPollAgent(t, store, id)
@@ -295,6 +298,7 @@ func TestInboxPollOnlyPathIsUnchanged(t *testing.T) {
 // ----- the budget is honored or rejected, never silently ignored -----
 
 func TestInboxWaitSecondsValidation(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 
@@ -338,6 +342,7 @@ func TestInboxWaitSecondsValidation(t *testing.T) {
 // a parked request): a budget below it must be ACCEPTED, and the read must
 // still return immediately when the agent already has a claimable message.
 func TestInboxWaitSecondsAcceptanceBoundary(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 	mustDeliver(t, srv.URL, "agent-1", "sender-1")
@@ -357,6 +362,7 @@ func TestInboxWaitSecondsAcceptanceBoundary(t *testing.T) {
 // ----- errors and parameter rejections are never waited out -----
 
 func TestInboxLongPollDoesNotWaitOutErrors(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 
@@ -381,6 +387,7 @@ func TestInboxLongPollDoesNotWaitOutErrors(t *testing.T) {
 // ----- out-of-band inbox writes are covered by the fallback re-read -----
 
 func TestInboxLongPollWakesOnOutOfBandStoreWrite(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 
@@ -411,6 +418,7 @@ func TestInboxLongPollWakesOnOutOfBandStoreWrite(t *testing.T) {
 // ----- the notifier itself: wake-up edges, and nil safety -----
 
 func TestInboxNotifierWakesWaitersAndToleratesNil(t *testing.T) {
+	t.Parallel()
 	// A nil notifier (a zero-value Handler that NewHandler never built) must
 	// degrade to no-wake-up, never panic on the delivery path.
 	var nilNotifier *inboxNotifier
@@ -473,6 +481,7 @@ func (n *inboxNotifier) waitersMu(t *testing.T) {
 // ----- a cancelled request ends the park instead of holding it -----
 
 func TestInboxLongPollCancelledContextEndsThePark(t *testing.T) {
+	t.Parallel()
 	h, _, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 
@@ -545,6 +554,7 @@ func (p *recordingPinger) await(t *testing.T, want int) []pingCall {
 }
 
 func TestDeliverFiresInboxPingOnStoredDelivery(t *testing.T) {
+	t.Parallel()
 	h, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 	pinger := &recordingPinger{reply: true}
@@ -558,6 +568,7 @@ func TestDeliverFiresInboxPingOnStoredDelivery(t *testing.T) {
 }
 
 func TestDeliverDoesNotPingOutsideTheInboxLane(t *testing.T) {
+	t.Parallel()
 	// (a) a delivery the relay REJECTS must not ping: nothing was stored.
 	h, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
@@ -655,6 +666,7 @@ func TestDeliverDoesNotPingOutsideTheInboxLane(t *testing.T) {
 // contract: a pinger that reports failure (or panics-free false) must not change
 // the accept the sender sees.
 func TestInboxPingFailureIsInvisibleToTheDelivery(t *testing.T) {
+	t.Parallel()
 	h, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 	pinger := &recordingPinger{reply: false}
@@ -679,6 +691,7 @@ func TestInboxPingFailureIsInvisibleToTheDelivery(t *testing.T) {
 // the long-poll is internal to the handler, so it works with no pinger at all
 // (every deployment before CR-FEAT-023, and the default in tests).
 func TestInboxLongPollWithoutPingerStillWorks(t *testing.T) {
+	t.Parallel()
 	h, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 	if h.inboxPing != nil {
@@ -703,6 +716,7 @@ func TestInboxLongPollWithoutPingerStillWorks(t *testing.T) {
 // delivery each, every message claimed exactly once under the normal lease
 // rules.
 func TestInboxLongPollConcurrentWaitersShareTheBatch(t *testing.T) {
+	t.Parallel()
 	_, srv, store := longPollServer(t)
 	registerLongPollAgent(t, store, "agent-1")
 

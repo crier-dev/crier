@@ -165,7 +165,9 @@ func TestLoad_Port_Invalid(t *testing.T) {
 	}{
 		{"non-numeric", "abc"},
 		{"empty string handled as default", ""}, // empty -> default, not an error
-		{"zero", "0"},
+		// {"zero", "0"} — INT-CI-014 made 0 LEGAL: it binds an ephemeral
+		// port (the in-process test harness boots CRIER_PORT=0 and reads the
+		// bound port from the pidfile), so it no longer errors.
 		{"negative", "-1"},
 		{"too high", "65536"},
 		{"way too high", "99999"},

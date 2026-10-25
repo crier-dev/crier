@@ -16,6 +16,7 @@ import (
 // Real server composition: both terminal notification and wait-request wiring
 // must use its already-configured dispatcher, including an enabled guard.
 func TestDaggerDeliveryChokePoint(t *testing.T) {
+	parallelBoot(t)
 	for _, verdict := range []string{"allow", "block"} {
 		t.Run(verdict, func(t *testing.T) {
 			var checks atomic.Int32

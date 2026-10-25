@@ -147,6 +147,7 @@ func newLegacyStore(t *testing.T) *session.JSONLStore {
 // message written through the log states its thread_id in the BYTES on disk,
 // and the reduced State reports the same key with nothing to backfill.
 func TestThreadID_PersistedOnStoredMessages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store, err := session.NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
@@ -192,6 +193,7 @@ func TestThreadID_PersistedOnStoredMessages(t *testing.T) {
 // thread_id, orders by seq and attaches each record to its parent_id — with no
 // side table, no membership lookup and no client state.
 func TestThreadID_ReplyChainReconstructableFromStorageAlone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	store, err := session.NewJSONLStore(root)
@@ -238,6 +240,7 @@ func TestThreadID_ReplyChainReconstructableFromStorageAlone(t *testing.T) {
 // REPORTS that it did, and the write path is unchanged: it still refuses to
 // emit a thread-less message.
 func TestThreadID_LegacyRecordWithoutThreadIDStillReads(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newLegacyStore(t)
 
@@ -277,6 +280,7 @@ func TestThreadID_LegacyRecordWithoutThreadIDStillReads(t *testing.T) {
 // that is not in the transcript, is a BROKEN THREAD — reported as a finding,
 // never silently re-rooted or dropped.
 func TestThreadID_BrokenThreadIsReportedNotReRooted(t *testing.T) {
+	t.Parallel()
 	const sid = "s-broken"
 	sess := (&session.Session{ID: sid, CreatedBy: session.AuthorRef{Agent: "atlas"}}).CreateRecord(1, thrAt(0))
 	rootRec := (&session.Message{ID: "m1", SessionID: sid, ThreadID: "m1", Kind: session.MessagePlain,
@@ -333,6 +337,7 @@ func TestThreadID_BrokenThreadIsReportedNotReRooted(t *testing.T) {
 // message — the §3.2 write-back a fan-out already performs — and the transcript
 // then states every key on its own.
 func TestThreadID_MigrationStory_WriteBackPersistsDerivedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newLegacyStore(t)
 

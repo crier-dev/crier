@@ -9,6 +9,7 @@ import (
 )
 
 func TestProgressDeliveryClasses(t *testing.T) {
+	t.Parallel()
 	store := registry.NewMemoryStore()
 	for _, agent := range []*registry.Agent{
 		{ID: "blocking", Webhook: &webhook.Config{URL: "http://127.0.0.1:39999", DeliveryMode: "blocking"}},

@@ -14,6 +14,7 @@ import (
 // error — the same representation an in-memory or postgres keyless agent
 // carries — so the RemoteStore read path can read such an agent.
 func TestHexKey_UnmarshalEmpty(t *testing.T) {
+	t.Parallel()
 	var k HexKey
 	if err := json.Unmarshal([]byte(`""`), &k); err != nil {
 		t.Fatalf("UnmarshalJSON(\"\"): %v (want nil — empty key is the keyless wire form)", err)
@@ -27,6 +28,7 @@ func TestHexKey_UnmarshalEmpty(t *testing.T) {
 // (unchanged by DF-CRIER-198): an empty HexKey marshals to the empty string,
 // which is what the handler writes for a keyless agent's public_key.
 func TestHexKey_MarshalEmpty(t *testing.T) {
+	t.Parallel()
 	b, err := json.Marshal(HexKey(nil))
 	if err != nil {
 		t.Fatalf("MarshalJSON(empty): %v", err)
@@ -39,6 +41,7 @@ func TestHexKey_MarshalEmpty(t *testing.T) {
 // TestHexKey_RoundTrip proves a real 32-byte key still marshals to its hex
 // string and decodes back to identical bytes.
 func TestHexKey_RoundTrip(t *testing.T) {
+	t.Parallel()
 	raw, err := hex.DecodeString(strings.Repeat("ab", ed25519.PublicKeySize))
 	if err != nil {
 		t.Fatalf("decode fixture key: %v", err)
@@ -65,6 +68,7 @@ func TestHexKey_RoundTrip(t *testing.T) {
 // TestHexKey_UnmarshalRejectsBadLengths keeps the length guard strict except
 // for the legal empty key: 31 and 33 bytes error with the existing wording.
 func TestHexKey_UnmarshalRejectsBadLengths(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		hex  string
@@ -89,6 +93,7 @@ func TestHexKey_UnmarshalRejectsBadLengths(t *testing.T) {
 // TestHexKey_UnmarshalRejectsNonHex keeps invalid hex failing with the
 // existing wording: non-hex characters and an odd-length string.
 func TestHexKey_UnmarshalRejectsNonHex(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		hex  string

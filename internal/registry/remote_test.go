@@ -67,6 +67,7 @@ func pkcs8Ed25519PEM(t *testing.T, priv ed25519.PrivateKey) []byte {
 }
 
 func TestRemoteStore_RegisterGetListUnregister(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServer(t)
 	rs := NewRemoteStore(srv.URL, "remote-client", "")
 
@@ -102,6 +103,7 @@ func TestRemoteStore_RegisterGetListUnregister(t *testing.T) {
 }
 
 func TestRemoteStore_DeliverRetrieveAck(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServer(t)
 	rs := NewRemoteStore(srv.URL, "bob", "")
 
@@ -151,6 +153,7 @@ func TestRemoteStore_DeliverRetrieveAck(t *testing.T) {
 }
 
 func TestRemoteStore_Errors(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServer(t)
 	rs := NewRemoteStore(srv.URL+"/", "ghost", "")
 
@@ -176,6 +179,7 @@ func TestRemoteStore_Errors(t *testing.T) {
 }
 
 func TestRemoteStore_SendsAgentIDHeader(t *testing.T) {
+	t.Parallel()
 	var gotHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Get("X-Agent-ID")
@@ -275,6 +279,7 @@ func newCapturingSigServer(t *testing.T, requireSig bool) (*httptest.Server, *Me
 // with a PKCS#8 PEM key file can register-time-bind its public key, retrieve,
 // read stats, ack, and unregister without 401 signature errors.
 func TestRemoteStore_SignedLifecycle(t *testing.T) {
+	t.Parallel()
 	srv, store, cap := newCapturingSigServer(t, true)
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -398,6 +403,7 @@ func TestRemoteStore_SignedLifecycle(t *testing.T) {
 // part of the signed payload, and the signature must verify over the decoded
 // path exactly as the server's r.URL.Path sees it.
 func TestRemoteStore_SignedRetrieveExcludesQueryFromPath(t *testing.T) {
+	t.Parallel()
 	srv, store, cap := newCapturingSigServer(t, true)
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -442,6 +448,7 @@ func TestRemoteStore_SignedRetrieveExcludesQueryFromPath(t *testing.T) {
 // or verification fails. A space-containing agent id exercises exactly that
 // divergence (%20 on the wire, space in r.URL.Path).
 func TestRemoteStore_SignatureContractPayload(t *testing.T) {
+	t.Parallel()
 	agentID := "agent with spaces"
 	srv, store, cap := newCapturingSigServer(t, true)
 
@@ -477,6 +484,7 @@ func TestRemoteStore_SignatureContractPayload(t *testing.T) {
 // signed body must still be readable afterwards — signRequest restores it so
 // the transport can send it.
 func TestRemoteStore_SignRequestBodyBinding(t *testing.T) {
+	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
@@ -529,6 +537,7 @@ func TestRemoteStore_SignRequestBodyBinding(t *testing.T) {
 // no-op (unsigned store, 401 from the server), and a wrong key yields 401 —
 // not a crash or a silent pass.
 func TestRemoteStore_SignedErrors(t *testing.T) {
+	t.Parallel()
 	srv, store := newRemoteTestServerSigning(t, true)
 
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -565,6 +574,7 @@ func TestRemoteStore_SignedErrors(t *testing.T) {
 // non-PKCS#8, and non-ed25519 keys all fail explicitly and no key material
 // leaks into error strings.
 func TestLoadEd25519PrivateKeyFile(t *testing.T) {
+	t.Parallel()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate ed25519 key: %v", err)
@@ -690,6 +700,7 @@ func TestLoadEd25519PrivateKeyFile(t *testing.T) {
 // silently leave the guarded realm, and every later realm check would be
 // measured against the wrong row.
 func TestRemoteStore_RegisterCarriesTheNamespace(t *testing.T) {
+	t.Parallel()
 	t.Run("declared realm is forwarded and stored", func(t *testing.T) {
 		store := NewMemoryStore()
 		h := NewHandler(store)
@@ -761,6 +772,7 @@ func TestRemoteStore_RegisterCarriesTheNamespace(t *testing.T) {
 // the WRONG agent. doAck already decoded its own 404s (DF-CRIER-32); the
 // shared path did not.
 func TestRemoteStore_NotFoundNamesTheSubjectNotTheProxy(t *testing.T) {
+	t.Parallel()
 	const (
 		proxy   = "proxy-agent"
 		subject = "ghost-subject"

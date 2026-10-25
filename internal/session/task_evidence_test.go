@@ -13,6 +13,7 @@ import (
 // Exercise real routes on both persistent backends, including reopen. Refusals
 // must not append a lifecycle event or change the owner's task.
 func TestTaskCompletionRequiresOwnerAndEvidence(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			path := b.pathFn(t)
@@ -82,6 +83,7 @@ func TestTaskCompletionRequiresOwnerAndEvidence(t *testing.T) {
 }
 
 func TestTaskFailureByOwnerDoesNotRequireSuccessEvidence(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 	code, created := h.createTask(t, room)
@@ -99,6 +101,7 @@ func TestTaskFailureByOwnerDoesNotRequireSuccessEvidence(t *testing.T) {
 // Each refusal is independent, so a negative control tests owner and evidence
 // enforcement directly rather than stopping first on an additive view field.
 func TestTaskCompletionRefusals(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, actor, state, code string
 	}{
@@ -126,6 +129,7 @@ func TestTaskCompletionRefusals(t *testing.T) {
 }
 
 func TestTaskCompletionEvidenceReaderRefusesUnavailableOrEmpty(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		raw    json.RawMessage

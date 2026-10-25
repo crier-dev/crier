@@ -95,6 +95,7 @@ func deadLetters(t *testing.T, router http.Handler, agentID string) []*DeadLette
 // ---------------------------------------------------------------------------
 
 func TestPurgeExpired_ExpiredMessageIsDeadLetteredAndReceipted(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -133,6 +134,7 @@ func TestPurgeExpired_ExpiredMessageIsDeadLetteredAndReceipted(t *testing.T) {
 }
 
 func TestPurgeExpired_IsExactlyOnceEvenIfTheStoreReportsTwice(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -151,6 +153,7 @@ func TestPurgeExpired_IsExactlyOnceEvenIfTheStoreReportsTwice(t *testing.T) {
 }
 
 func TestPurgeExpired_SecondSweepFindsNothingToReport(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -165,6 +168,7 @@ func TestPurgeExpired_SecondSweepFindsNothingToReport(t *testing.T) {
 }
 
 func TestPurgeExpired_SenderlessMessageIsStillDeadLettered(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	handler, router := setupRouterWithHandler(store)
@@ -178,6 +182,7 @@ func TestPurgeExpired_SenderlessMessageIsStillDeadLettered(t *testing.T) {
 }
 
 func TestPurgeExpired_UnknownSenderIsStillDeadLettered(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	handler, router := setupRouterWithHandler(store)
@@ -191,6 +196,7 @@ func TestPurgeExpired_UnknownSenderIsStillDeadLettered(t *testing.T) {
 }
 
 func TestPurgeExpired_AckedMessageIsNotDeadLettered(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -233,6 +239,7 @@ func TestPurgeExpired_AckedMessageIsNotDeadLettered(t *testing.T) {
 }
 
 func TestPurgeExpired_NeverExpiringMessageSurvives(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -257,6 +264,7 @@ func TestPurgeExpired_NeverExpiringMessageSurvives(t *testing.T) {
 }
 
 func TestPurgeExpired_ReceiptCannotRecurse(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "foreman")
@@ -283,6 +291,7 @@ func TestPurgeExpired_ReceiptCannotRecurse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeadLetters_NewestFirstAndBounded(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	handler, router := setupRouterWithHandler(store)
@@ -318,6 +327,7 @@ func TestDeadLetters_NewestFirstAndBounded(t *testing.T) {
 }
 
 func TestDeadLetters_EmptyIsAnArrayNotNull(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	_, router := setupRouterWithHandler(store)
@@ -330,6 +340,7 @@ func TestDeadLetters_EmptyIsAnArrayNotNull(t *testing.T) {
 }
 
 func TestDeadLetters_LimitIsHonoredOrRejected(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	_, router := setupRouterWithHandler(store)
@@ -346,6 +357,7 @@ func TestDeadLetters_LimitIsHonoredOrRejected(t *testing.T) {
 }
 
 func TestDeadLetters_OutliveTheAgentRow(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	handler, router := setupRouterWithHandler(store)
@@ -363,6 +375,7 @@ func TestDeadLetters_OutliveTheAgentRow(t *testing.T) {
 }
 
 func TestDeadLetters_StoreWithoutADestinationAnswers501(t *testing.T) {
+	t.Parallel()
 	base := NewMemoryStore()
 	fake := &ownershipStore{Store: base}
 	registerTestAgent(t, fake)
@@ -380,6 +393,7 @@ func TestDeadLetters_StoreWithoutADestinationAnswers501(t *testing.T) {
 }
 
 func TestPurgeExpired_StoreWithoutAReporterFallsBackToTheCount(t *testing.T) {
+	t.Parallel()
 	base := NewMemoryStore()
 	fake := &ownershipStore{Store: base}
 	registerTestAgent(t, fake)
@@ -412,6 +426,7 @@ func postTransfer(t *testing.T, router http.Handler, from, body string) *httptes
 }
 
 func TestTransfer_MovesAStuckLeaseToAnotherInbox(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -460,6 +475,7 @@ func TestTransfer_MovesAStuckLeaseToAnotherInbox(t *testing.T) {
 }
 
 func TestTransfer_WrongLeaseMovesNothing(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -483,6 +499,7 @@ func TestTransfer_WrongLeaseMovesNothing(t *testing.T) {
 }
 
 func TestTransfer_ForceOverridesAStuckLeaseWithoutItsID(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -507,6 +524,7 @@ func TestTransfer_ForceOverridesAStuckLeaseWithoutItsID(t *testing.T) {
 }
 
 func TestTransfer_UnleasedMessageNeedsNoLeaseOrForce(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -527,6 +545,7 @@ func TestTransfer_UnleasedMessageNeedsNoLeaseOrForce(t *testing.T) {
 }
 
 func TestTransfer_UnknownMessageMovesNothing(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -548,6 +567,7 @@ func TestTransfer_UnknownMessageMovesNothing(t *testing.T) {
 }
 
 func TestTransfer_UnknownTargetAgentIs404(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	_, router := setupRouterWithHandler(store)
@@ -564,6 +584,7 @@ func TestTransfer_UnknownTargetAgentIs404(t *testing.T) {
 }
 
 func TestTransfer_RejectsInvalidRequests(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")
@@ -589,6 +610,7 @@ func TestTransfer_RejectsInvalidRequests(t *testing.T) {
 }
 
 func TestTransfer_StoreWithoutTheCapabilityAnswers501(t *testing.T) {
+	t.Parallel()
 	store := &ownershipStore{Store: NewMemoryStore()}
 	registerTestAgent(t, store)
 	_, router := setupRouterWithHandler(store)
@@ -603,6 +625,7 @@ func TestTransfer_StoreWithoutTheCapabilityAnswers501(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMemoryStore_DeadLetterAppendIsIdempotent(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	registerTestAgent(t, store)
 
@@ -629,6 +652,7 @@ func TestMemoryStore_DeadLetterAppendIsIdempotent(t *testing.T) {
 }
 
 func TestMemoryStore_DeadLetterValidationAndBounds(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	registerTestAgent(t, store)
 
@@ -643,6 +667,7 @@ func TestMemoryStore_DeadLetterValidationAndBounds(t *testing.T) {
 }
 
 func TestMemoryStore_DeadLetterCapacityEvictsOldest(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	store.deadLetters = newMemoryDeadLetters(2)
 
@@ -664,6 +689,7 @@ func TestMemoryStore_DeadLetterCapacityEvictsOldest(t *testing.T) {
 }
 
 func TestMemoryStore_TransferValidation(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "worker-b")

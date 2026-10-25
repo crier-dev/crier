@@ -76,6 +76,7 @@ func e2eDeliver(t *testing.T, client *http.Client, url, sender string) string {
 }
 
 func TestInboxLongPollEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 30 * time.Second}
 	registerAgent(t, client, base, "poller")
@@ -155,6 +156,7 @@ func TestInboxLongPollEndToEnd(t *testing.T) {
 }
 
 func TestInboxPingReachesTheMeshSocketEndToEnd(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "false"})
 	client := &http.Client{Timeout: 30 * time.Second}
 	registerAgent(t, client, base, "pinger")

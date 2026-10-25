@@ -40,7 +40,13 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	u := url.URL{Scheme: "file", Path: absolute}
-	params := url.Values{"_pragma": []string{"busy_timeout(10000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(FULL)"}}
+	// busy_timeout(30s) matches the transaction context bound below: under a
+	// fully loaded host (parallel test suites on other packages hitting their
+	// own SQLite files) an fsync with synchronous=FULL can stall for seconds;
+	// a 10s busy window surfaced as spurious SQLITE_BUSY at -count=5
+	// (INT-CI-014). 30s keeps the same "wait, don't fail" semantics the
+	// context timeout already implies.
+	params := url.Values{"_pragma": []string{"busy_timeout(30000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(FULL)"}}
 	u.RawQuery = params.Encode()
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {

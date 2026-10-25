@@ -20,6 +20,7 @@ import (
 )
 
 func TestDocsClaimsInterfaceAuthorityFixture(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_AUTH_TOKEN":              df297MessageToken,
 		"CR_PERMISSIONS_ENABLED":     "true",
@@ -90,14 +91,17 @@ func TestDocsClaimsInterfaceAuthorityFixture(t *testing.T) {
 // The generic scanner substitutes docsclaims-probe for EVERY placeholder.
 // Seed matching resources, just as seedProbeChatSession does, so an existing
 // resource route is not misclassified as absent merely because its id is absent.
-func seedDocsClaimsInterfaceResources(t *testing.T, client *http.Client, base string) {
+func seedDocsClaimsInterfaceResources(t *testing.T, client *http.Client, base, sessionLogRoot string) {
 	t.Helper()
 	code, body := df297Request(t, client, http.MethodPost, base+"/groups", "test-token", "",
 		`{"name":"docsclaims-probe","created_by":"docsclaims-probe","members":["docsclaims-probe"]}`)
 	require.Equal(t, http.StatusCreated, code, "%s", body)
 
-	cfg, err := config.Load()
-	require.NoError(t, err)
+	// INT-CI-014: the fixture store is the one the BOOTED server was pointed
+	// at via its overlay (returned by bootDocsClaimsServer), NOT
+	// config.Load() of the ambient environment — under parallel tests the
+	// ambient no longer carries this test's CR_SESSION_LOG_ROOT.
+	cfg := config.Config{Session: config.SessionConfig{Backend: "jsonl", LogRoot: sessionLogRoot}}
 	require.Equal(t, "jsonl", cfg.ResolvedSessionBackend())
 	store, err := session.NewJSONLStore(cfg.Session.LogRoot)
 	require.NoError(t, err)

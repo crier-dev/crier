@@ -108,5 +108,6 @@ func testAckTaskObservation(t *testing.T, store Store) {
 }
 
 func TestAckTaskObservationMemory(t *testing.T) {
+	t.Parallel()
 	testAckTaskObservation(t, NewMemoryStore())
 }

@@ -14,6 +14,7 @@ import (
 )
 
 func TestFederation363InboundRevocation(t *testing.T) {
+	t.Parallel()
 	a, b := newKeyedRelay(t, "relay-a"), newKeyedRelay(t, "relay-b")
 	declarePeer(t, a, b)
 	declarePeer(t, b, a)
@@ -37,6 +38,7 @@ func TestFederation363InboundRevocation(t *testing.T) {
 }
 
 func TestFederation363RevokingOnePeerDoesNotDisableAnother(t *testing.T) {
+	t.Parallel()
 	a, b := newKeyedRelay(t, "a"), newKeyedRelay(t, "b")
 	declarePeer(t, a, b)
 	declarePeer(t, b, a)
@@ -68,6 +70,7 @@ func TestFederation363RevokingOnePeerDoesNotDisableAnother(t *testing.T) {
 }
 
 func TestFederation363UnknownPeerCannotUseEmptyStore(t *testing.T) {
+	t.Parallel()
 	b := newKeyedRelay(t, "b")
 	if err := b.store.Register(&Agent{ID: "remote"}); err != nil {
 		t.Fatal(err)
@@ -80,6 +83,7 @@ func TestFederation363UnknownPeerCannotUseEmptyStore(t *testing.T) {
 }
 
 func TestFederation363AsyncReceiptRetainsFieldsAndAddsVerdict(t *testing.T) {
+	t.Parallel()
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
 	defer remote.Close()
 	store := setupTestStore(t)

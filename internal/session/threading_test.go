@@ -35,6 +35,7 @@ func branchOff(t *testing.T, h *apiHarness, sessID, parentID string) transcriptM
 // anchor_message_id), the branching message becomes the child's root, and the
 // send reports the spawn.
 func TestSubThreadSpawnOnNonMemberAddress(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -85,6 +86,7 @@ func TestSubThreadSpawnOnNonMemberAddress(t *testing.T) {
 // message id is unchanged, its messages stay in it, and the branch adds no
 // message to the parent's transcript.
 func TestParentThreadUnchangedApartFromAnchor(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -132,6 +134,7 @@ func TestParentThreadUnchangedApartFromAnchor(t *testing.T) {
 // TestReplyToParticipantStaysInThread: a reply whose addressees are all
 // participants spawns NOTHING (D11 — a reply stays in thread).
 func TestReplyToParticipantStaysInThread(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -173,6 +176,7 @@ func TestReplyToParticipantStaysInThread(t *testing.T) {
 // TestDepthCollapseThreshold: GET /threads/{id}?depth=N returns children
 // beyond N as collapsed:true summary cards, and on-screen below it.
 func TestDepthCollapseThreshold(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -229,6 +233,7 @@ func TestDepthCollapseThreshold(t *testing.T) {
 // current position, and the summary returns a generated index with a link to
 // the raw messages.
 func TestTimelineAndSummary(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)
@@ -277,6 +282,7 @@ func TestTimelineAndSummary(t *testing.T) {
 // full_path [namespace, channel, thread_id, parent_thread_id?, message_id] —
 // the parent id present for a sub-thread hit.
 func TestSearchReturnsFullPath(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	sessID := h.createRoom(t)

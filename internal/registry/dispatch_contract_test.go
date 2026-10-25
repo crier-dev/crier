@@ -12,6 +12,7 @@ import (
 )
 
 func TestDispatchRejectsInvalidTTL(t *testing.T) {
+	t.Parallel()
 	for _, ttl := range []int{-1, int(maxTTLSeconds + 1)} {
 		t.Run(fmt.Sprint(ttl), func(t *testing.T) {
 			store := NewMemoryStore()
@@ -37,6 +38,7 @@ func TestDispatchRejectsInvalidTTL(t *testing.T) {
 }
 
 func TestDispatchNamespaceRefusalMatchesHTTP(t *testing.T) {
+	t.Parallel()
 	f := newNSHandler(t, `{"namespaces":[{"name":"interactive"},{"name":"batch"}]}`)
 	target := &Agent{ID: "receiver", Namespace: "interactive"}
 	require.NoError(t, f.store.Register(target))

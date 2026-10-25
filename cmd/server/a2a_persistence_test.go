@@ -59,6 +59,7 @@ func assertStoredTask(t *testing.T, base, id string, state a2a.TaskState) {
 }
 
 func TestA2APersistence_UnobservedRemovalIsUnknown(t *testing.T) {
+	parallelBoot(t) // parent-side env-free boot path (INT-CI-014)
 	base, store := terminalHarness(t)
 	id, stream := terminalSubscription(t, base)
 	require.NoError(t, store.CloseEntry("terminal-agent", id))

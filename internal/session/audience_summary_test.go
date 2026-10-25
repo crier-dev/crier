@@ -23,6 +23,7 @@ import (
 // on both the empty and the non-empty arm, so an additive change that silently
 // dropped the summary fails here.
 func TestSessionAudienceSummaryEmptyAudience(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			store := backend.open(t, backend.pathFn(t))
@@ -94,6 +95,7 @@ func TestSessionAudienceSummaryEmptyAudience(t *testing.T) {
 // audience with real targets still reports the rule and the COUNT of resolved
 // recipients (roster-expanded, author excluded), beside the per-target outcomes.
 func TestSessionAudienceSummaryNonEmptyAudience(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			store := backend.open(t, backend.pathFn(t))

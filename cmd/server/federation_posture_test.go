@@ -56,6 +56,7 @@ const notice = (id, text) => { rendered[id] = text; };
 }
 
 func TestFederation391HTMLPosture(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, tc := range []struct{ status, want string }{
 		{`{"federation_require_peer_configured":true,"federation_require_peer_effective":false,"federation_peer_count":0,"federation_token_only_accepted":true}`, "Federation: require-peer configured but inert (0 peers) — token-only inbound accepted"},
 		{`{"federation_require_peer_configured":true,"federation_require_peer_effective":true,"federation_peer_count":1,"federation_token_only_accepted":false}`, "Federation: strict (1 peer)"},
@@ -81,6 +82,7 @@ func TestFederation391StatusWithoutGateCannotClaimEffective(t *testing.T) {
 }
 
 func TestFederation391ProductionBoots(t *testing.T) {
+	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
 	for _, tc := range []struct {
 		name, state                string
 		required, store, effective bool

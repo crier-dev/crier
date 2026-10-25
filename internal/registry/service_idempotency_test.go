@@ -53,6 +53,7 @@ func strictServicePost(t *testing.T, h *Handler, key ed25519.PrivateKey, sender,
 }
 
 func TestServiceAuthorityStoreAndDurableMemoryReplay(t *testing.T) {
+	t.Parallel()
 	h, store, keys := strictServiceHandler(t)
 	secured := h.store.(*AuthorityStore)
 	require.ErrorIs(t, secured.Deliver("router", &InboxEntry{Payload: json.RawMessage(`{}`)}), ErrServiceAuthorityRequired)
@@ -79,6 +80,7 @@ func TestServiceAuthorityStoreAndDurableMemoryReplay(t *testing.T) {
 }
 
 func TestServiceMissingKeyAndAudienceRefuseBeforeEffects(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, body, audience string
 		status               int
@@ -102,6 +104,7 @@ func TestServiceMissingKeyAndAudienceRefuseBeforeEffects(t *testing.T) {
 }
 
 func TestProtectedServiceBodyLimitPrecedesAuthorizationReplayAndBudget(t *testing.T) {
+	t.Parallel()
 	const limit = 192
 	for _, chunked := range []bool{false, true} {
 		t.Run(map[bool]string{false: "content_length", true: "chunked"}[chunked], func(t *testing.T) {
@@ -157,6 +160,7 @@ func TestProtectedServiceBodyLimitPrecedesAuthorizationReplayAndBudget(t *testin
 }
 
 func TestProtectedServiceSignatureUsesDecodedPathAndExcludesQuery(t *testing.T) {
+	t.Parallel()
 	h, store, keys := strictServiceHandler(t)
 	body := `{"sender":"scheduler","payload":{},"idempotency_key":"path"}`
 	request := func(target, signedPath string, includeQuery bool) *httptest.ResponseRecorder {
@@ -202,6 +206,7 @@ func TestProtectedServiceSignatureUsesDecodedPathAndExcludesQuery(t *testing.T) 
 }
 
 func TestProtectedServiceTranscriptFailuresHaveExactContract(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, signMethod, signPath, signedBody, sentBody, audience string
 		status                                                     int
@@ -236,6 +241,7 @@ func TestProtectedServiceTranscriptFailuresHaveExactContract(t *testing.T) {
 }
 
 func TestServiceSenderNamespacesAreIndependent(t *testing.T) {
+	t.Parallel()
 	h, store, keys := strictServiceHandler(t)
 	for _, sender := range []string{"scheduler", "backup"} {
 		body := `{"sender":"` + sender + `","payload":{},"idempotency_key":"shared"}`
@@ -248,6 +254,7 @@ func TestServiceSenderNamespacesAreIndependent(t *testing.T) {
 }
 
 func TestAuthorityStorePreservesShippedStoreCapabilities(t *testing.T) {
+	t.Parallel()
 	base := NewMemoryStore()
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -280,6 +287,7 @@ func TestAuthorityStorePreservesShippedStoreCapabilities(t *testing.T) {
 }
 
 func TestValidateServiceIdentitiesRejectsMissingAndKeyless(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "router"}))
 	policy, err := ParseServiceDeliveryAllowlist("scheduler>router")

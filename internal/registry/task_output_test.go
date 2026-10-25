@@ -15,6 +15,7 @@ func taskOutputFixture() TaskOutput {
 }
 
 func TestTaskOutputMemoryScopeCopiesAndFirstEvidence(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	wrapped := NewAuthorityStore(store, nil, "")
 	o := taskOutputFixture()
@@ -47,6 +48,7 @@ func TestTaskOutputMemoryScopeCopiesAndFirstEvidence(t *testing.T) {
 }
 
 func TestTaskOutputPostgresReadWrite(t *testing.T) {
+	t.Parallel()
 	store, mock := newMockStore(t)
 	o := taskOutputFixture()
 	mock.ExpectExec("INSERT INTO a2a_task_outputs.*ON CONFLICT .* DO NOTHING").WithArgs("a", o.TaskID, o.ObservedAt, []byte(o.Artifact)).WillReturnResult(pgxmock.NewResult("INSERT", 1))
@@ -64,6 +66,7 @@ func TestTaskOutputPostgresReadWrite(t *testing.T) {
 }
 
 func TestTaskOutputInvalidInput(t *testing.T) {
+	t.Parallel()
 	for _, change := range []func(*TaskOutput){
 		func(o *TaskOutput) { o.TaskID = "" },
 		func(o *TaskOutput) { o.ObservedAt = time.Time{} },

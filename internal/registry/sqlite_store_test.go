@@ -12,6 +12,7 @@ import (
 
 // The same assertions exercise both engines, rather than a SQLite-only imitation.
 func TestLocalStoreParity(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			var s Store = NewMemoryStore()
@@ -95,6 +96,7 @@ func TestLocalStoreParity(t *testing.T) {
 }
 
 func TestSQLiteStoreDurability(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.db")
 	s, err := NewSQLiteStore(path)
 	require.NoError(t, err)
@@ -144,6 +146,7 @@ func TestSQLiteStoreDurability(t *testing.T) {
 }
 
 func TestSQLiteStoreIndependentHandles(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.db")
 	a, err := NewSQLiteStore(path)
 	require.NoError(t, err)

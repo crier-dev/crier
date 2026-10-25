@@ -12,6 +12,7 @@ import (
 )
 
 func TestMessageRequestLockCancellation(t *testing.T) {
+	t.Parallel()
 	backends := append(localBackends(), localBackend{
 		name: "sqlite_memory", pathFn: func(*testing.T) string { return ":memory:" },
 		open: func(t *testing.T, path string) Repository {
@@ -44,6 +45,7 @@ func TestMessageRequestLockCancellation(t *testing.T) {
 }
 
 func TestSQLiteMessageRequestProjectionIsAtomic(t *testing.T) {
+	t.Parallel()
 	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "atomic.sqlite"))
 	require.NoError(t, err)
 	defer func() { _ = s.Close() }()
@@ -70,6 +72,7 @@ func TestSQLiteMessageRequestProjectionIsAtomic(t *testing.T) {
 }
 
 func TestMessageRequestIdempotencyRefusalDetails(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			s := backend.open(t, backend.pathFn(t))

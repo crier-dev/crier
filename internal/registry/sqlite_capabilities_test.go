@@ -23,6 +23,7 @@ func newTestSQLiteStore(t *testing.T) *SQLiteStore {
 func TestAckTaskObservationSQLite(t *testing.T) { testAckTaskObservation(t, newTestSQLiteStore(t)) }
 
 func TestSQLiteEvidenceAtomicAndDurable(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.db")
 	s, err := NewSQLiteStore(path)
 	require.NoError(t, err)
@@ -79,6 +80,7 @@ func TestSQLiteEvidenceAtomicAndDurable(t *testing.T) {
 }
 
 func TestSQLiteMetadataLeaseAndOwnership(t *testing.T) {
+	t.Parallel()
 	s := newTestSQLiteStore(t)
 	a := &Agent{ID: "a", PublicKey: make(HexKey, 32), Capabilities: []string{"worker"}, Namespace: "realm", Webhook: &webhook.Config{URL: "http://localhost/hook"}}
 	require.NoError(t, s.Register(a))
@@ -159,6 +161,7 @@ func TestSQLiteMetadataLeaseAndOwnership(t *testing.T) {
 }
 
 func TestSQLiteServiceReceiptDurableAndAtomic(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.db")
 	s, err := NewSQLiteStore(path)
 	require.NoError(t, err)
@@ -190,6 +193,7 @@ func TestSQLiteServiceReceiptDurableAndAtomic(t *testing.T) {
 }
 
 func TestSQLiteMigrationsAndBackendFailures(t *testing.T) {
+	t.Parallel()
 	// Build the historical prefix, rather than deleting newer markers while
 	// leaving their tables behind. New migrations must not move this boundary.
 	_, db := sqliteMigrationFixture(t, 14)

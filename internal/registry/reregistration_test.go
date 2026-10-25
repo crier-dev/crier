@@ -86,6 +86,7 @@ func assertStructuredKeyConflict(t *testing.T, id string, status int, body strin
 // the body spelling: POST /agents with an id that is already registered under a
 // different key.
 func TestReRegistration_NewPublicKeyInBodyIsAStructured409(t *testing.T) {
+	t.Parallel()
 	firstKey, _ := newTestPubKey(t)
 	secondKey, _ := newTestPubKey(t)
 
@@ -120,6 +121,7 @@ func TestReRegistration_NewPublicKeyInBodyIsAStructured409(t *testing.T) {
 // the id-in-path spelling — the spelling the row's acceptance criterion names —
 // with a control proving the route itself serves a first registration.
 func TestReRegistration_NewPublicKeyOnIDPathIsAStructured409(t *testing.T) {
+	t.Parallel()
 	firstKey, _ := newTestPubKey(t)
 	secondKey, _ := newTestPubKey(t)
 
@@ -156,6 +158,7 @@ func TestReRegistration_NewPublicKeyOnIDPathIsAStructured409(t *testing.T) {
 // duplicate, with its historical body, so no existing client's handling of a
 // duplicate changes.
 func TestReRegistration_SamePublicKeyKeepsTheDuplicateClass(t *testing.T) {
+	t.Parallel()
 	key, _ := newTestPubKey(t)
 
 	store := setupTestStore(t)
@@ -182,6 +185,7 @@ func TestReRegistration_SamePublicKeyKeepsTheDuplicateClass(t *testing.T) {
 // uppercase hex is the same key. Comparing the DECODED bytes keeps a
 // case-different spelling from reading as a rotation attempt.
 func TestReRegistration_HexCaseIsNotAKeyConflict(t *testing.T) {
+	t.Parallel()
 	key, _ := newTestPubKey(t)
 
 	store := setupTestStore(t)
@@ -203,6 +207,7 @@ func TestReRegistration_HexCaseIsNotAKeyConflict(t *testing.T) {
 // where the refused re-registration also carries different capabilities and a
 // different webhook: nothing about the stored row may move.
 func TestReRegistration_ConflictPreservesTheStoredRegistration(t *testing.T) {
+	t.Parallel()
 	firstKey, _ := newTestPubKey(t)
 	secondKey, _ := newTestPubKey(t)
 
@@ -244,6 +249,7 @@ func TestReRegistration_ConflictPreservesTheStoredRegistration(t *testing.T) {
 // over an id that HAS a key would strip the key the agent signs with. That is
 // the same class of conflict, not a silent downgrade.
 func TestReRegistration_KeylessOverKeyedIsAConflict(t *testing.T) {
+	t.Parallel()
 	key, _ := newTestPubKey(t)
 
 	store := setupTestStore(t)
@@ -269,6 +275,7 @@ func TestReRegistration_KeylessOverKeyedIsAConflict(t *testing.T) {
 // names a DIFFERENT id is refused (400) and registers neither id, rather than
 // resolving the disagreement silently in either direction.
 func TestReRegistration_PathAndBodyIDMustAgree(t *testing.T) {
+	t.Parallel()
 	key, _ := newTestPubKey(t)
 
 	store := setupTestStore(t)
@@ -292,6 +299,7 @@ func TestReRegistration_PathAndBodyIDMustAgree(t *testing.T) {
 // the two HTTP spellings are built on, including the two classes being
 // DISTINCT sentinels (the bridge and the handlers switch on them).
 func TestReRegistration_StoreReportsTheConflictClass(t *testing.T) {
+	t.Parallel()
 	_, firstKey := newTestPubKey(t)
 	_, secondKey := newTestPubKey(t)
 
@@ -327,6 +335,7 @@ func TestReRegistration_StoreReportsTheConflictClass(t *testing.T) {
 // agents with — and requires the bridge to see the conflict CLASS rather than a
 // flat "already registered".
 func TestReRegistration_RemoteStoreDistinguishesTheConflict(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServerSigning(t, false)
 	rs := NewRemoteStore(srv.URL, "probe-client", "")
 
@@ -351,6 +360,7 @@ func TestReRegistration_RemoteStoreDistinguishesTheConflict(t *testing.T) {
 // decoder must keep reading that as the plain duplicate — the mismatch class is
 // only ever claimed on an OBSERVED code.
 func TestReRegistration_LegacyRelayIsNotMisreported(t *testing.T) {
+	t.Parallel()
 	_, key := newTestPubKey(t)
 
 	for _, tt := range []struct {
@@ -385,6 +395,7 @@ func TestReRegistration_LegacyRelayIsNotMisreported(t *testing.T) {
 // the same request must produce the same answer on both routes, which is what
 // makes the two spellings one endpoint rather than two behaviours.
 func TestReRegistration_BothSpellingsShareOneImplementation(t *testing.T) {
+	t.Parallel()
 	key, _ := newTestPubKey(t)
 	otherKey, _ := newTestPubKey(t)
 

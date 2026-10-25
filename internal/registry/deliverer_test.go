@@ -7,6 +7,7 @@ import (
 )
 
 func TestProducerDelivererEntryIdentityAndRefusals(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store)
 	require.ErrorContains(t, h.Deliver("target", nil), "nil delivery entry")

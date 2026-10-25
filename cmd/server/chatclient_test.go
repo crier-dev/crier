@@ -10,6 +10,7 @@ import (
 )
 
 func TestChatClientRouteServesHTML(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 
 	resp, err := http.Get(baseURL + "/chat")

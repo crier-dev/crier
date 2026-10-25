@@ -11,6 +11,7 @@ import (
 )
 
 func TestDeliveryMsRidesDeliverAndRetrieve(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 
 	if err := store.Register(&Agent{ID: "target", PublicKey: HexKey("aa"), Capabilities: []string{}}); err != nil {

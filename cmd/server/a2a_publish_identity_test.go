@@ -25,6 +25,7 @@ import (
 // Black-box production composition: no stream, direct store injection or signature
 // verifier stub. Every refusal must leave an acknowledged task unanswered.
 func TestA2APublishIdentityHTTP(t *testing.T) {
+	parallelBoot(t)
 	for _, tc := range []struct {
 		name, signature, refusal, basis string
 		enforce                         bool

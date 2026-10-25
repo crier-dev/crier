@@ -41,6 +41,7 @@ func TestSessionSQLiteAliasProductionRestart(t *testing.T) {
 }
 
 func TestSessionSQLiteAliasChild(t *testing.T) {
+	parallelBoot(t)
 	phase := os.Getenv("CRIER413_PHASE")
 	if phase == "" {
 		return

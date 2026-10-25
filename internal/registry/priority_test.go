@@ -63,6 +63,7 @@ func queueDepthOf(t *testing.T, store Store) QueueDepth {
 }
 
 func TestMemoryStore_RetrieveTakesTheHighestPriorityFirst(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -91,6 +92,7 @@ func TestMemoryStore_RetrieveTakesTheHighestPriorityFirst(t *testing.T) {
 }
 
 func TestMemoryStore_RetrieveEqualPriorityKeepsArrivalOrder(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -109,6 +111,7 @@ func TestMemoryStore_RetrieveEqualPriorityKeepsArrivalOrder(t *testing.T) {
 // default, which resolves to the same stored value) reads back exactly FIFO,
 // across a batch edge.
 func TestMemoryStore_RetrieveWithoutPriorityIsUnchangedFIFO(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 
@@ -158,6 +161,7 @@ func priorityCall(t *testing.T, r *mux.Router, method, path, body string) *httpt
 // outside it is a 400 naming the range, and nothing is stored — a clamp would
 // silently retrieve the message at a priority the caller never asked for.
 func TestHandleDeliver_PriorityOutOfRangeIsRejectedNotClamped(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	h := NewHandler(store)
@@ -197,6 +201,7 @@ func TestHandleDeliver_PriorityOutOfRangeIsRejectedNotClamped(t *testing.T) {
 // serialises without a `priority` key at all, so a pre-CR-FEAT-035 client parses
 // the same bytes it always did; a delivery that names one carries it.
 func TestHandleRetrieve_PrioritylessMessageKeepsTheOldWireShape(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	h := NewHandler(store)
@@ -247,6 +252,7 @@ func deliverOne(t *testing.T, r *mux.Router, agentID string) *httptest.ResponseR
 // deliveries arrive — the pre-CR-FEAT-035 behaviour, measured rather than
 // asserted in prose.
 func TestGlobalRateLimitDisabledByDefaultFreesEveryDelivery(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	h := NewHandler(store)
@@ -265,6 +271,7 @@ func TestGlobalRateLimitDisabledByDefaultFreesEveryDelivery(t *testing.T) {
 // half: once the budget is spent, the next delivery is refused 429 with a
 // NAMED error body, a `Retry-After` header, and it reaches no store at all.
 func TestGlobalRateLimitShedsWithNamedErrorAndRetryAfter(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	h := NewHandler(store)
@@ -309,6 +316,7 @@ func TestGlobalRateLimitShedsWithNamedErrorAndRetryAfter(t *testing.T) {
 // per agent, so a second producer arriving at a spent budget is refused too —
 // which is exactly what a per-agent cap alone could never do.
 func TestGlobalRateLimitShedsAcrossEveryProducer(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	require.NoError(t, store.Register(&Agent{ID: "agent-2"}))
@@ -326,6 +334,7 @@ func TestGlobalRateLimitShedsAcrossEveryProducer(t *testing.T) {
 // TestMemoryStore_QueueDepthCountsPendingAndLeased pins the store-wide
 // measurement against the per-agent counters it must agree with.
 func TestMemoryStore_QueueDepthCountsPendingAndLeased(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 	require.NoError(t, store.Register(&Agent{ID: "agent-2"}))
@@ -363,6 +372,7 @@ func TestMemoryStore_QueueDepthCountsPendingAndLeased(t *testing.T) {
 // expiry rules the per-agent Stats already applies, so the store-wide number is
 // the SUM of the per-agent ones rather than a second definition of "queued".
 func TestMemoryStore_QueueDepthSkipsExpiredButCountsNeverExpiring(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 

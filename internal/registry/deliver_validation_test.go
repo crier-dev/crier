@@ -42,6 +42,7 @@ const allowedModes = "blocking|async|batch"
 // TestHandleDeliver_RejectsUnhonorableRequestParameters is the table-driven
 // gate: one named case per row, each with its own target, endpoint and body.
 func TestHandleDeliver_RejectsUnhonorableRequestParameters(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		hasWebhook bool   // target has a webhook endpoint (false = inbox-only agent)
@@ -261,6 +262,7 @@ func TestHandleDeliver_RejectsUnhonorableRequestParameters(t *testing.T) {
 // never a PERMANENT rejection) in far less than the endpoint's own latency.
 // Without the budget the caller would wait for the endpoint's 3s.
 func TestHandleDeliver_BlockingTimeoutBudgetIsHonored(t *testing.T) {
+	t.Parallel()
 	const (
 		endpointSleep = 3 * time.Second
 		budget        = 500 * time.Millisecond
@@ -332,6 +334,7 @@ func TestHandleDeliver_BlockingTimeoutBudgetIsHonored(t *testing.T) {
 // failure class this task fixes — a documented parameter the server does not
 // honor (and, pre-fix, one it accepted and echoed while never executing it).
 func TestHandleDeliver_DocsMatchTheValidatedParameters(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
 	if err != nil {
 		t.Fatalf("read docs/openapi.yaml: %v", err)
@@ -453,6 +456,7 @@ func TestHandleDeliver_DocsMatchTheValidatedParameters(t *testing.T) {
 // answer is identical for a webhook target (nothing dispatched), an
 // inbox-only target (nothing stored) and an unregistered target.
 func TestHandleDeliver_RejectsMissingOrNonObjectPayload(t *testing.T) {
+	t.Parallel()
 	// The refused inputs: one named case per shape. `{}` is the reproduced
 	// defect; the `payloads` row is the client-bug shape the contract exists
 	// to catch (a typo'd key must not read as a content-less success).
@@ -552,6 +556,7 @@ func TestHandleDeliver_RejectsMissingOrNonObjectPayload(t *testing.T) {
 // object `{}` — still delivers on every transport, and the stored bytes are
 // the sender's bytes.
 func TestHandleDeliver_ValidObjectPayloadUnchanged(t *testing.T) {
+	t.Parallel()
 	const valid = `{"payload":{"x":1}}`
 
 	t.Run("inbox_only_stores_the_payload_intact", func(t *testing.T) {

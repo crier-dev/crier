@@ -440,48 +440,54 @@ func docsClaimsInstanceKey(t *testing.T) string {
 	return path
 }
 
-func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
+func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client, sessionLogRoot string) {
 	t.Helper()
 
-	t.Setenv("CR_AUTH_TOKEN", "test-token")
-	t.Setenv("CR_DATABASE_URL", "")
-	t.Setenv("DATABASE_URL", "")
-	t.Setenv("CRIER_DATABASE_URL", "")
-	// DF-CRIER-445 fixture: scanner resource seeds are test-owned, never a
-	// real session/group store inherited from the process environment.
-	t.Setenv("CR_SESSION_BACKEND", "jsonl")
-	t.Setenv("CR_SESSION_LOG_ROOT", t.TempDir())
-	t.Setenv("CR_GROUP_ROOT", t.TempDir())
-	// DF-CRIER-142: the README documents live paths GET /metrics and
-	// GET /debug/pprof/ (both opt-in via CR_ENABLE_METRICS /
-	// CR_ENABLE_PPROF, off by default). The docs claim these paths, so the
-	// booted server must expose them for the route claims and the scanned
-	// README path tokens to probe.
-	t.Setenv("CR_ENABLE_METRICS", "true")
-	t.Setenv("CR_ENABLE_PPROF", "true")
-	// INT-A2A-002: same rule for the opt-in A2A surface — the README documents
-	// GET /.well-known/agent-card.json, so the booted server must expose it for
-	// the ROUTE-A2A-AGENT-CARD route claim and the README path tokens. With the
-	// switch OFF the path answers the router's 404; that half of the contract is
-	// gated live in a2a_optin_test.go, against the default posture.
-	//
-	// The variable is set for the BOOT and cleared again once the server answers,
-	// because run() reads the configuration exactly once while the DEFAULT-*
-	// claims are probed by calling config.Load() at assertion time — and
-	// DEFAULT-A2A-ENABLED measures the value the README prints, i.e. the UNSET
-	// posture. Leaving it set here would make that claim observe the switch this
-	// test turned on, which is a different question from the one it asks.
-	t.Setenv("CR_A2A_ENABLED", "true")
+	// INT-CI-014: the boot reads its configuration through a per-test overlay
+	// instead of mutating process env. The DEFAULT-* probes and the fixture
+	// seeding can then observe the TRUE ambient environment while this server
+	// runs an opt-in posture, and the test becomes parallel-safe. The boot
+	// env block below is the same configuration the t.Setenv regime set.
+	sessionLogRoot = t.TempDir()
+	groupRoot := t.TempDir()
+	detectDir := t.TempDir()
+	bootEnv := map[string]string{
+		"CR_AUTH_TOKEN":       "test-token",
+		"CR_DATABASE_URL":     "",
+		"DATABASE_URL":        "",
+		"CRIER_DATABASE_URL":  "",
+		"CR_SESSION_BACKEND":  "jsonl",
+		"CR_SESSION_LOG_ROOT": sessionLogRoot,
+		"CR_GROUP_ROOT":       groupRoot,
+		// DF-CRIER-142: the README documents live paths GET /metrics and
+		// GET /debug/pprof/ (both opt-in via CR_ENABLE_METRICS /
+		// CR_ENABLE_PPROF, off by default). The docs claim these paths, so the
+		// booted server must expose them for the route claims and the scanned
+		// README path tokens to probe.
+		"CR_ENABLE_METRICS": "true",
+		"CR_ENABLE_PPROF":   "true",
+		// INT-A2A-002: same rule for the opt-in A2A surface — the README documents
+		// GET /.well-known/agent-card.json, so the booted server must expose it for
+		// the ROUTE-A2A-AGENT-CARD route claim and the README path tokens. With the
+		// switch OFF the path answers the router's 404; that half of the contract is
+		// gated live in a2a_optin_test.go, against the default posture.
+		//
+		// The overlay carries the switch for the BOOT only: run() reads the
+		// configuration exactly once at boot, while the DEFAULT-* claims are
+		// probed by calling config.Load() on the AMBIENT environment at
+		// assertion time — DEFAULT-A2A-ENABLED measures the value the README
+		// prints, i.e. the UNSET posture. The overlay (unlike process env)
+		// cannot leak into those probes by construction.
+		"CR_A2A_ENABLED": "true",
 
-	// CR-FEAT-030: the README and specs/DETECTION.md document the five
-	// detection routes, which exist ONLY when CR_DETECT_ENABLED is on. Same
-	// deal as the two opt-in surfaces above: the booted server must expose
-	// them for those claims to be measurable. The log is written into the
-	// test's own temp dir, so the gate never touches a real one.
-	dir := t.TempDir()
-	t.Setenv("CR_DETECT_ENABLED", "true")
-	t.Setenv("CR_DETECT_LOG", filepath.Join(dir, "delivery.jsonl"))
-	t.Setenv("CR_DETECT_KEY", filepath.Join(dir, "delivery.key"))
+		// CR-FEAT-030: the README and specs/DETECTION.md document the five
+		// detection routes, which exist ONLY when CR_DETECT_ENABLED is on. Same
+		// deal as the two opt-in surfaces above: the log is written into the
+		// test's own temp dir, so the gate never touches a real one.
+		"CR_DETECT_ENABLED": "true",
+		"CR_DETECT_LOG":     filepath.Join(detectDir, "delivery.jsonl"),
+		"CR_DETECT_KEY":     filepath.Join(detectDir, "delivery.key"),
+	}
 
 	// CR-CHAT-033: same rule for the opt-in dagger control surface — the
 	// README documents the six /dagger routes, so the booted server must
@@ -497,9 +503,9 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 		_, _ = w.Write([]byte(`{"run_id":"` + docsClaimsProbeAgent + `","status":"running"}`))
 	}))
 	t.Cleanup(daggerStub.Close)
-	t.Setenv("CR_DAGGER_URL", daggerStub.URL)
-	t.Setenv("CR_DAGGER_STORE_DIR", t.TempDir())
-	t.Setenv("CR_DAGGER_POLL_S", "0")
+	bootEnv["CR_DAGGER_URL"] = daggerStub.URL
+	bootEnv["CR_DAGGER_STORE_DIR"] = t.TempDir()
+	bootEnv["CR_DAGGER_POLL_S"] = "0"
 
 	// DF-CRIER-436: same rule for the opt-in instance peer store. The federation
 	// spec documents GET/POST /fed/peers, PATCH /fed/peers/{id} and
@@ -511,13 +517,13 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	// real one), and the store starts EMPTY with CR_FED_REQUIRE_PEER unset, so
 	// the inbound posture every other claim observes is unchanged: peers=0,
 	// token_only_accepted=true, and a keyless inbox POST is still FED_TOKEN_ONLY.
-	t.Setenv("CR_FED_SELF_KEY_FILE", docsClaimsInstanceKey(t))
-	t.Setenv("CR_FED_RECORDS_FILE", filepath.Join(t.TempDir(), "federation-peers.json"))
+	bootEnv["CR_FED_SELF_KEY_FILE"] = docsClaimsInstanceKey(t)
+	bootEnv["CR_FED_RECORDS_FILE"] = filepath.Join(t.TempDir(), "federation-peers.json")
 
 	port := freePort(t)
-	t.Setenv("CRIER_PORT", fmt.Sprintf("%d", port))
+	bootEnv["CRIER_PORT"] = fmt.Sprintf("%d", port)
 
-	run := startRunScopedServer(nil)
+	run := startRunScopedServerWithEnv(nil, envOverlay(bootEnv, nil))
 	exitCode := run.exitCode
 	t.Cleanup(func() { run.stop(t) })
 
@@ -547,12 +553,10 @@ func bootDocsClaimsServer(t *testing.T) (baseURL string, client *http.Client) {
 	}
 
 	// The A2A switch has done its work: the running server registered the route
-	// from the configuration it read at boot, and the DEFAULT-* probes below must
-	// see the environment as it normally is (see the note where it is set).
-	if err := os.Unsetenv("CR_A2A_ENABLED"); err != nil {
-		t.Fatalf("clear CR_A2A_ENABLED after boot: %v", err)
-	}
-	return baseURL, client
+	// from the overlay configuration it read at boot, and the DEFAULT-* probes
+	// read the true ambient environment (the overlay cannot leak there — see
+	// the note where the switch is set).
+	return baseURL, client, sessionLogRoot
 }
 
 // registerAgent registers an agent on the booted server (in-memory backend) so the
@@ -673,9 +677,10 @@ func normalizeRoutePath(path string) string {
 // runs the four claim phases driven entirely by docs/claims.yaml: anchors, routes
 // (+scanned paths), defaults, counts.
 func TestDocsClaims(t *testing.T) {
+	parallelBoot(t)
 	repoRoot := resolveRepoRoot(t)
 	set := loadClaimsFile(t, repoRoot)
-	baseURL, client := bootDocsClaimsServer(t)
+	baseURL, client, sessionLogRoot := bootDocsClaimsServer(t)
 
 	registerAgent(t, client, baseURL, docsClaimsProbeAgent)
 	registerAgent(t, client, baseURL, "agent-1")
@@ -697,7 +702,7 @@ func TestDocsClaims(t *testing.T) {
 	// the template with the probe agent substituted — the same pattern
 	// seedDaggerProbeRun uses for the dagger run records above.
 	seedProbeChatSession(t, client, baseURL)
-	seedDocsClaimsInterfaceResources(t, client, baseURL)
+	seedDocsClaimsInterfaceResources(t, client, baseURL, sessionLogRoot)
 	// Identity the CR-GAP-062 ttl_seconds xfail probe drives. The webhook
 	// default-mode probe registers its OWN identity with the webhook attached
 	// (an update would need a signed request; the default is only observable
@@ -2702,6 +2707,7 @@ func registerAgentWithWebhook(client *http.Client, baseURL, id, webhookURL strin
 // that must produce a failure for (i) a wrong expectation and (ii) a claim whose
 // quote is absent from its doc. If either stops failing, the detector is dead.
 func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
+	parallelBoot(t)
 	set := claimsFile{
 		Claims: []docClaim{
 			{ID: "NEG-WRONG-EXPECTATION", Kind: "count", Doc: "README.md", Quote: "17 endpoints", Expect: 99},
@@ -2791,7 +2797,7 @@ func TestDocsClaimsDetectorNegativeControl(t *testing.T) {
 		return false
 	}
 
-	baseURL, client := bootDocsClaimsServer(t)
+	baseURL, client, _ := bootDocsClaimsServer(t)
 	var hits atomic.Int64
 	counting := *client
 	counting.Transport = countingTransport{next: client.Transport, n: &hits}

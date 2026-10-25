@@ -211,6 +211,7 @@ func (h *apiHarness) createRoom(t *testing.T) string {
 // transcript, parents resolvable, the human recorded as addressing but not
 // delivered to, and the thread id PERSISTED on the stored inbox record.
 func TestSessionAPI_FanoutAndOrderedTranscript(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -278,6 +279,7 @@ func TestSessionAPI_FanoutAndOrderedTranscript(t *testing.T) {
 // reopen half): close the store, open a fresh one over the same path, and
 // prove the thread survives and the tree reassembles with NO client state.
 func TestSessionAPI_ThreadTreeReconstructableFromStorageAlone(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			path := be.pathFn(t)
@@ -336,6 +338,7 @@ func TestSessionAPI_ThreadTreeReconstructableFromStorageAlone(t *testing.T) {
 // stored thread id, so the property is asserted for the PostgreSQL backend
 // here without a live server (the integration battery drives it live).
 func TestSessionAPI_ThreadIDColumnDeclaredInEverySQLSchema(t *testing.T) {
+	t.Parallel()
 	for name, stmts := range map[string][]string{
 		"sqlite":   sqliteSchemaStatements,
 		"postgres": postgresSchemaStatements,
@@ -353,6 +356,7 @@ func TestSessionAPI_ThreadIDColumnDeclaredInEverySQLSchema(t *testing.T) {
 // TestSessionAPI_ListWithStateAndCountFilters covers rows 8/9: the list is a
 // view over the same objects, and the filters narrow it.
 func TestSessionAPI_ListWithStateAndCountFilters(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 
@@ -384,6 +388,7 @@ func TestSessionAPI_ListWithStateAndCountFilters(t *testing.T) {
 // TestSessionAPI_Membership covers rows 24/37: add a participant, read the
 // membership list, and see a removed member retained with active=false.
 func TestSessionAPI_Membership(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	id := h.createRoom(t)
@@ -409,6 +414,7 @@ func TestSessionAPI_Membership(t *testing.T) {
 // TestSessionAPI_ClosedSessionRefusesWrites covers §1.3's lifecycle on the
 // message route and the membership route.
 func TestSessionAPI_ClosedSessionRefusesWrites(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	id := h.createRoom(t)
@@ -429,6 +435,7 @@ func TestSessionAPI_ClosedSessionRefusesWrites(t *testing.T) {
 // TestSessionAPI_RealmScopingAndVisibility covers §4 row 38 (realm wall) and
 // row 13 (a private session's read guard).
 func TestSessionAPI_RealmScopingAndVisibility(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 
@@ -461,6 +468,7 @@ func TestSessionAPI_RealmScopingAndVisibility(t *testing.T) {
 // delivery step: a member whose stored row is in another realm is refused with
 // a NAMED outcome rather than delivered to.
 func TestSessionAPI_FanoutRefusesCrossRealmTarget(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	reg := registry.NewMemoryStore()
 	require.NoError(t, reg.Register(&registry.Agent{ID: fixAgentA}))
@@ -505,6 +513,7 @@ func TestSessionAPI_FanoutRefusesCrossRealmTarget(t *testing.T) {
 // TestSessionAPI_CreateRequiresCreator covers §1.4: creation is never defaulted
 // to a service identity.
 func TestSessionAPI_CreateRequiresCreator(t *testing.T) {
+	t.Parallel()
 	store := NewJSONLStoreForTest(t)
 	h := newAPIHarness(t, store)
 	var errBody map[string]string

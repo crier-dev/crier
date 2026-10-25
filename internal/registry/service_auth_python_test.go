@@ -14,6 +14,7 @@ import (
 // This is a real cross-language HTTP round trip, not a mock of the Go verifier
 // or Python signer. It talks only to this test's disposable loopback server.
 func TestServiceDeliveryPythonInterop(t *testing.T) {
+	t.Parallel()
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 unavailable: service client interoperability requires Python")

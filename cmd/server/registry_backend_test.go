@@ -36,6 +36,7 @@ func TestSQLiteRegistryProductionRestart(t *testing.T) {
 	}
 }
 func TestSQLiteRegistryProductionChild(t *testing.T) {
+	parallelBoot(t)
 	phase := os.Getenv("CRIER364_PHASE")
 	if phase == "" {
 		return

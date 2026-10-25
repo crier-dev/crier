@@ -9,6 +9,7 @@ import (
 )
 
 func TestPermissionsManagementAuthorizedMatchesReadGate(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, bearer string
 		store, token bool

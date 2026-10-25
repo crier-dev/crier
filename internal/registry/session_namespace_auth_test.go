@@ -13,6 +13,7 @@ import (
 )
 
 func TestSessionDispatchTargetNamespaceAuth(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		targetNS  string
@@ -80,6 +81,7 @@ func TestSessionDispatchTargetNamespaceAuth(t *testing.T) {
 }
 
 func TestDeliveryRequestDoesNotSerializeNamespaceToken(t *testing.T) {
+	t.Parallel()
 	raw, err := json.Marshal(DeliveryRequest{NamespaceToken: "caller-credential"})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "caller-credential")

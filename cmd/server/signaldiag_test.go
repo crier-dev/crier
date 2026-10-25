@@ -279,6 +279,7 @@ func TestSignalShutdownReturnsZeroAndLogsTheSignal(t *testing.T) {
 // it must stop its own run without broadcasting SIGTERM to every live run or
 // leaving a redundant process signal that can race with the next boot.
 func TestInProcessServerCleanupIsRunScoped(t *testing.T) {
+	parallelBoot(t)
 	observed := make(chan os.Signal, 1)
 	signal.Notify(observed, syscall.SIGTERM)
 	defer signal.Stop(observed)

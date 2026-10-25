@@ -23,6 +23,7 @@ import (
 //     restart of the store (it is stored, not remembered).
 
 func TestPostgresIntegration_PriorityOrdersRetrieve(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "priority")
 
@@ -61,6 +62,7 @@ func TestPostgresIntegration_PriorityOrdersRetrieve(t *testing.T) {
 // retrieves in arrival order. That is the migration's whole compatibility
 // contract.
 func TestPostgresIntegration_ExistingRowsReadBackAtPriorityZero(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "legacy")
 
@@ -93,6 +95,7 @@ VALUES ($1, $2, $3::jsonb, $4, $5, FALSE);`, id, agent.ID, []byte(`{"legacy":tru
 // operator's number is the sum of the numbers a consumer already sees, not a
 // second definition of "queued".
 func TestPostgresIntegration_QueueDepthMatchesThePerAgentCounters(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	first := newTestAgent(t, store, "depth-a")
 	second := newTestAgent(t, store, "depth-b")

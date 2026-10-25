@@ -287,6 +287,7 @@ func dswBootChild(t *testing.T) {
 // check's create path plus the probes behind it — not just a pre-made
 // directory being accepted.
 func TestDaggerStoreWritableBoots(t *testing.T) {
+	parallelBoot(t)
 	dir := filepath.Join(t.TempDir(), "crier-dagger-"+strconv.Itoa(os.Getpid()))
 	baseURL := startTestServerWithEnv(t, map[string]string{
 		"CR_REQUIRE_AGENT_SIG": "false",

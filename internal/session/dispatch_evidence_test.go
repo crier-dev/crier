@@ -29,6 +29,7 @@ func (s *dispatchJournalFailure) Append(ctx context.Context, rec *Record) error 
 }
 
 func TestDispatchEvidenceStorageFailureAcrossBackends(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		for _, after := range []bool{false, true} {
 			name := "before"
@@ -85,6 +86,7 @@ func TestDispatchEvidenceStorageFailureAcrossBackends(t *testing.T) {
 }
 
 func TestOutcomeMissingNegativeRetryNeverRedispatches(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			path := backend.pathFn(t)
@@ -127,6 +129,7 @@ func TestOutcomeMissingNegativeRetryNeverRedispatches(t *testing.T) {
 }
 
 func TestOutcomeLegacyUnknownAndZeroTargetReplay(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			store := backend.open(t, backend.pathFn(t))
@@ -169,6 +172,7 @@ func TestOutcomeLegacyUnknownAndZeroTargetReplay(t *testing.T) {
 }
 
 func TestDispatchEvidenceReplayStates(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	for _, tc := range []struct {
 		name     string
@@ -202,6 +206,7 @@ func (s evidenceAppendProbe) Append(ctx context.Context, rec *Record) error {
 }
 
 func TestDispatchEvidenceAppendOutlivesCanceledRequest(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false
@@ -222,6 +227,7 @@ func TestDispatchEvidenceAppendOutlivesCanceledRequest(t *testing.T) {
 }
 
 func TestFanoutPreservesReceiptsWhenAnswerAppendFails(t *testing.T) {
+	t.Parallel()
 	d := receiptDispatcher{registry.DeliveryResult{Transport: "webhook", DeliveryMode: "blocking", Reply: json.RawMessage(`{"reply":"genuine answer"}`)}}
 	msg := &Message{ID: "answer", SessionID: "room", ThreadID: "answer", Payload: json.RawMessage(`{}`)}
 	outcomes, err := fanoutWithReplies(context.Background(), d, msg, []string{"nimbus"}, nil, 0, "", func(string, json.RawMessage) error {
@@ -233,6 +239,7 @@ func TestFanoutPreservesReceiptsWhenAnswerAppendFails(t *testing.T) {
 }
 
 func TestDispatchEvidenceProjectionAndConflict(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	msg := &Message{ID: "journal", ThreadID: "journal", SessionID: "s", Seq: 1, Kind: MessagePlain,
 		Author: AuthorRef{Agent: "atlas"}, Audience: Audience{Rule: "explicit", Targets: []AudienceTarget{}}, CreatedAt: now}

@@ -20,6 +20,7 @@ func (tr sessionBearerTransport) RoundTrip(r *http.Request) (*http.Response, err
 }
 
 func TestSessionSenderBearerCannotBypassEnforcement(t *testing.T) {
+	parallelBoot(t)
 	for _, enforce := range []bool{true, false} {
 		t.Run(strconv.FormatBool(enforce), func(t *testing.T) {
 			const token = "session-test-deployment-access"
@@ -58,6 +59,7 @@ func TestSessionSenderBearerCannotBypassEnforcement(t *testing.T) {
 }
 
 func TestSessionSenderGateCoversEverySendEntrypoint(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_REQUIRE_AGENT_SIG": "true", "CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": t.TempDir(), "CR_GROUP_ROOT": t.TempDir()})
 	client := &http.Client{Timeout: 5 * time.Second}
 	key := registerA2AAgent(t, base, "owner", false, nil)

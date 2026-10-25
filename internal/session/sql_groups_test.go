@@ -17,6 +17,7 @@ import (
 // fresh SQLite view: create, duplicate-create refusal, update preserving the
 // creation facts, roster replace on update, list ordering, and the name rule.
 func TestSQLGroupStore_CRUDAndKeepLast(t *testing.T) {
+	t.Parallel()
 	store := newTestSQLiteStore(t)
 	gs := store.Groups()
 	ctx := context.Background()
@@ -72,6 +73,7 @@ func TestSQLGroupStore_CRUDAndKeepLast(t *testing.T) {
 // TestSQLGroupStore_RosterSurvivesReopen: the view is durable — a fresh store
 // over the SAME database file reads the same roster (the SQLite restart case).
 func TestSQLGroupStore_RosterSurvivesReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := t.TempDir() + "/sessions.sqlite"
 

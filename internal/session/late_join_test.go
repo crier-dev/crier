@@ -12,6 +12,7 @@ import (
 // Exercise the public wire shape, not a Go request struct that could hide a
 // dropped field. Every local durable backend must retain the same system row.
 func TestLateJoinWire(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))
@@ -112,6 +113,7 @@ func assertLateJoinEvent(t *testing.T, h *apiHarness, id, member, mode, boundary
 }
 
 func TestLateJoinEmptySession(t *testing.T) {
+	t.Parallel()
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {
 			store := be.open(t, be.pathFn(t))

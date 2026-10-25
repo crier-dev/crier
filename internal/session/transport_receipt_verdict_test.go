@@ -11,6 +11,7 @@ import (
 // the defect: vocabulary chosen by the peer was treated as observed agent speech.
 // Headers and status envelopes prove no answer crossed the boundary.
 func TestTransportReceiptVocabulary(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, body, verdict, inbound string
 		want                         Outcome
@@ -63,6 +64,7 @@ func TestTransportReceiptVocabulary(t *testing.T) {
 }
 
 func TestSummarizeFanoutMixedReceipts(t *testing.T) {
+	t.Parallel()
 	var view transcriptMessage
 	summarizeFanout(&view, []DeliveryOutcome{
 		{Target: "answer", Outcome: OutcomeDelivered},

@@ -112,6 +112,7 @@ func assertJSONErrorEnvelope(t *testing.T, name string, got wireResponse, wantSt
 // the same JSON envelope as every other error surface, with a correlation
 // id, instead of net/http's text/plain "404 page not found".
 func TestUnknownPathAnswersJSON404(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -162,6 +163,7 @@ func TestUnknownPathStaysTokenFreeWithAuthEnabled(t *testing.T) {
 // TestWrongMethodAnswersJSON405 pins the 405 contract, including the Allow
 // header derived from the router's own match table.
 func TestWrongMethodAnswersJSON405(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -220,6 +222,7 @@ func TestWrongMethodAnswersJSON405(t *testing.T) {
 // assertions on the two public JSON endpoints (/health, /version) plus a
 // registry route that runs the full middleware chain.
 func TestMatchedRoutesUnchangedByFallbacks(t *testing.T) {
+	parallelBoot(t)
 	baseURL := startTestServer(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 

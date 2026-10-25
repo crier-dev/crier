@@ -134,6 +134,7 @@ func forwardClient(local, remote *keyedRelay) *federation.Client {
 }
 
 func TestFederation363MutualHandshakeAndVerdicts(t *testing.T) {
+	t.Parallel()
 	a, b := newKeyedRelay(t, "relay-a"), newKeyedRelay(t, "relay-b")
 	declarePeer(t, a, b)
 	declarePeer(t, b, a)
@@ -205,6 +206,7 @@ func assertFedVerdict(t *testing.T, r *httptest.ResponseRecorder, status int, v 
 	t.Logf("measured %s: HTTP %d body=%s", v, r.Code, r.Body.String())
 }
 func TestFederation363TokenOnlyByteParity(t *testing.T) {
+	t.Parallel()
 	want := `{"id":"original","reply":{"text":"legacy pong"},"request_id":"req-legacy"}`
 	var gotBody []byte
 	remote := httptest.NewServer(middleware.Auth("legacy-secret")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

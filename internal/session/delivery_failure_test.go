@@ -14,6 +14,7 @@ import (
 )
 
 func TestDeliveryFailureDiagnostics(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		err       error
@@ -44,6 +45,7 @@ func TestDeliveryFailureDiagnostics(t *testing.T) {
 }
 
 func TestRestoreOutcomeMetadataPreservesLifecycle(t *testing.T) {
+	t.Parallel()
 	at := time.Now().UTC()
 	m := &Message{ID: "message", Outcomes: []DeliveryOutcome{{Target: "receiver", Outcome: OutcomeAcked, UpdatedAt: at}}}
 	require.NoError(t, restoreMessageRequest([]*Message{m}, m.ID, "", `[{"target":"receiver","outcome":"in_progress","code":"DELIVERY_IN_PROGRESS","retryable":true,"reason":"already in progress"}]`))
@@ -64,6 +66,7 @@ func (d diagnosticReplyDeliverer) DispatchDelivery(context.Context, string, regi
 	return registry.DeliveryResult{Transport: "webhook", DeliveryMode: "blocking", Reply: d.reply}, nil
 }
 func TestFanoutReplyDiagnosticRetryability(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		reply, code string
 		retryable   bool

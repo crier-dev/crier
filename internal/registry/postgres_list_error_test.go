@@ -170,6 +170,7 @@ func runListFailureCase(t *testing.T, tc listFailureCase) {
 // PostgresStore laundered every failure into a silent empty slice with
 // nothing recorded.
 func TestPostgresListError_FailureBranchesRecordContextualError(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	for _, tc := range postgresListFailureCases(now) {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +235,7 @@ func (r errRow) Scan(dest ...any) error { return r.err }
 // reports a mid-iteration failure (connection reset mid-stream). Pre-fix
 // this laundered into a silent empty slice exactly like a query failure.
 func TestPostgresListError_RowsIterationError(t *testing.T) {
+	t.Parallel()
 	s := &PostgresStore{pool: &errRowsPool{err: errors.New("connection reset mid-stream")}}
 
 	got := s.List()
@@ -257,6 +259,7 @@ func TestPostgresListError_RowsIterationError(t *testing.T) {
 // failed List records the error, and the NEXT successful List — empty or
 // populated — clears it. ListError must describe the LAST call.
 func TestPostgresListError_RecoveredBySuccess(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	for _, tc := range []struct {
 		name string
@@ -322,6 +325,7 @@ func TestPostgresListError_RecoveredBySuccess(t *testing.T) {
 // is the assertion that keeps an over-eager fix from reporting errors on
 // empty results.
 func TestPostgresListError_EmptyRegistryIsClean(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	expectListRows(mock)
 
@@ -347,6 +351,7 @@ func TestPostgresListError_EmptyRegistryIsClean(t *testing.T) {
 // work is real and complete before the barrier, so the race detector (not
 // timing) enforces the mutex discipline.
 func TestPostgresListError_ConcurrentListsSynchronized(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	rep, ok := any(s).(listErrReporter)
 	if !ok {

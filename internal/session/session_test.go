@@ -163,6 +163,7 @@ func buildScenario() []*Record {
 // ---------------------------------------------------------------------------
 
 func TestRecord_ValidateRejectsMalformedLines(t *testing.T) {
+	t.Parallel()
 	valid := (&Session{ID: fixSessionID, CreatedBy: AuthorRef{Agent: "atlas"}}).CreateRecord(1, at(0))
 	require.NoError(t, valid.Validate())
 
@@ -209,6 +210,7 @@ func TestRecord_ValidateRejectsMalformedLines(t *testing.T) {
 }
 
 func TestRecord_MarshalParseRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, rec := range buildScenario() {
 		line, err := rec.MarshalLine()
 		require.NoError(t, err)
@@ -228,6 +230,7 @@ func TestRecord_MarshalParseRoundTrip(t *testing.T) {
 }
 
 func TestParseRecord_RefusesUnknownVersion(t *testing.T) {
+	t.Parallel()
 	_, err := ParseRecord([]byte(`{"v":99,"type":"session.create","session_id":"s","seq":1,"ts":"2026-10-04T05:00:00Z"}`))
 	require.ErrorIs(t, err, ErrInvalidRecord)
 }
@@ -237,6 +240,7 @@ func TestParseRecord_RefusesUnknownVersion(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReplay_ReconstructsSessionState(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -269,6 +273,7 @@ func TestReplay_ReconstructsSessionState(t *testing.T) {
 }
 
 func TestReplay_KeepLastPerSeq(t *testing.T) {
+	t.Parallel()
 	recs := []*Record{(&Session{ID: "s1", CreatedBy: AuthorRef{Agent: "a"}}).CreateRecord(1, at(0))}
 	// Two lines claiming (s1, seq 2) with different content: the LAST wins, and
 	// it is never a silent error — the log is append-only history.
@@ -284,6 +289,7 @@ func TestReplay_KeepLastPerSeq(t *testing.T) {
 }
 
 func TestReplay_MembershipAtTime(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -307,6 +313,7 @@ func TestReplay_MembershipAtTime(t *testing.T) {
 }
 
 func TestReplay_ClosedSessionRefusesNewRecords(t *testing.T) {
+	t.Parallel()
 	recs := []*Record{(&Session{ID: "s1", CreatedBy: AuthorRef{Agent: "a"}}).CreateRecord(1, at(0))}
 	recs = append(recs, CloseRecord("s1", 2, at(1), AuthorRef{Agent: "a"}, "done"))
 
@@ -330,6 +337,7 @@ func TestReplay_ClosedSessionRefusesNewRecords(t *testing.T) {
 }
 
 func TestReplay_RejectsForeignSessionAndOrphans(t *testing.T) {
+	t.Parallel()
 	sessionRec := (&Session{ID: "s1", CreatedBy: AuthorRef{Agent: "a"}}).CreateRecord(1, at(0))
 
 	// A record naming another session is refused, never folded in.
@@ -353,6 +361,7 @@ func TestReplay_RejectsForeignSessionAndOrphans(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDepthRule_ReplyStaysInThread(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -376,6 +385,7 @@ func TestDepthRule_ReplyStaysInThread(t *testing.T) {
 }
 
 func TestDepthRule_BranchCreatesNewThreadOnly(t *testing.T) {
+	t.Parallel()
 	recs := buildScenario()
 	st, err := Replay(fixSessionID, recs)
 	require.NoError(t, err)
@@ -437,6 +447,7 @@ func threadSnapshot(st *State, threadID string) string {
 // ---------------------------------------------------------------------------
 
 func TestContextShare_LateJoinAndLaterChange(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -454,6 +465,7 @@ func TestContextShare_LateJoinAndLaterChange(t *testing.T) {
 // A share mode never widens the audience: what a joiner is GIVEN is a context
 // decision, while WHO receives deliveries stays the audience rule (§4.6 rule 5).
 func TestContextShare_DoesNotChangeAudience(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -468,6 +480,7 @@ func TestContextShare_DoesNotChangeAudience(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestJSONLStore_RoundTripsIdenticalContent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store, err := NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
@@ -495,6 +508,7 @@ func TestJSONLStore_RoundTripsIdenticalContent(t *testing.T) {
 }
 
 func TestJSONLStore_BundleExportImportRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	store, err := NewJSONLStore(filepath.Join(root, "log"))
@@ -529,6 +543,7 @@ func TestJSONLStore_BundleExportImportRoundTrip(t *testing.T) {
 }
 
 func TestJSONLStore_MissingSessionAndUnsafeID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store, err := NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
@@ -545,6 +560,7 @@ func TestJSONLStore_MissingSessionAndUnsafeID(t *testing.T) {
 }
 
 func TestJSONLStore_RefusesMalformedLine(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	store, err := NewJSONLStore(root)
@@ -582,6 +598,7 @@ func newFanoutFixture(t *testing.T, ids ...string) *registry.MemoryStore {
 }
 
 func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newFanoutFixture(t, "atlas", "nimbus", "kappa")
 
@@ -627,6 +644,7 @@ func TestFanout_DeliversToOneInboxPerMember(t *testing.T) {
 }
 
 func TestFanout_RetryDoesNotDoubleDeliver(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newFanoutFixture(t, "nimbus")
 
@@ -647,6 +665,7 @@ func TestFanout_RetryDoesNotDoubleDeliver(t *testing.T) {
 }
 
 func TestFanout_RefusalIsANamedOutcome(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := newFanoutFixture(t, "atlas") // nimbus is unknown
 
@@ -666,6 +685,7 @@ func TestFanout_RefusalIsANamedOutcome(t *testing.T) {
 }
 
 func TestFanoutRecipients_GroupFansOutCapabilityDoesNot(t *testing.T) {
+	t.Parallel()
 	aud := Audience{Rule: AudienceExplicit, Targets: []AudienceTarget{
 		{Kind: TargetAgent, ID: "atlas"},
 		{Kind: TargetGroup, ID: "team:infra"},
@@ -689,6 +709,7 @@ func TestFanoutRecipients_GroupFansOutCapabilityDoesNot(t *testing.T) {
 // refused kind and names every accepted one — even when the id HAPPENS to name a
 // real roster, which is exactly the `{"kind":"team","id":"ops"}` shape.
 func TestFanoutRecipients_UnknownKindIsNamed(t *testing.T) {
+	t.Parallel()
 	aud := Audience{Rule: AudienceExplicit, Targets: []AudienceTarget{
 		{Kind: TargetAgent, ID: "atlas"},
 		{Kind: AudienceTargetKind("team"), ID: "ops"},
@@ -710,6 +731,7 @@ func TestFanoutRecipients_UnknownKindIsNamed(t *testing.T) {
 // shipped kinds are addressable, an alias (`team`) is a typed refusal naming the
 // accepted set, and an absent kind is refused like any other unknown one.
 func TestValidateAudienceTargets_ClosedSet(t *testing.T) {
+	t.Parallel()
 	addressable := []AudienceTarget{
 		{Kind: TargetAgent, ID: "atlas"},
 		{Kind: TargetGroup, ID: "ops"},
@@ -732,6 +754,7 @@ func TestValidateAudienceTargets_ClosedSet(t *testing.T) {
 }
 
 func TestReplyAudience_DefaultRule(t *testing.T) {
+	t.Parallel()
 	st, err := Replay(fixSessionID, buildScenario())
 	require.NoError(t, err)
 
@@ -755,6 +778,7 @@ func TestReplyAudience_DefaultRule(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestState_TwoProjectionsAgree(t *testing.T) {
+	t.Parallel()
 	// The JSONL log and (in the integration battery) the PostgreSQL view are
 	// measured against the same State. Here the log's own two read paths — the
 	// append log and a transported bundle — must agree, which is the half of
@@ -791,6 +815,7 @@ func TestState_TwoProjectionsAgree(t *testing.T) {
 }
 
 func TestNextSeq(t *testing.T) {
+	t.Parallel()
 	require.Equal(t, int64(1), NextSeq(nil))
 	require.Equal(t, int64(14), NextSeq(buildScenario()))
 }
@@ -799,6 +824,7 @@ func TestNextSeq(t *testing.T) {
 // with different content. The write-back case (same seq, later content) is one
 // such pair by design; an identical duplicate is NOT.
 func TestConflicts(t *testing.T) {
+	t.Parallel()
 	sess := (&Session{ID: "s1", CreatedBy: AuthorRef{Agent: "a"}}).CreateRecord(1, at(0))
 	msg := &Message{ID: "m1", SessionID: "s1", ThreadID: "m1", Kind: MessagePlain,
 		Author: AuthorRef{Agent: "a"}, Audience: Audience{Rule: AudienceSession}, Seq: 2, CreatedAt: at(1)}
@@ -822,6 +848,7 @@ func TestConflicts(t *testing.T) {
 }
 
 func TestErrors_AreDistinct(t *testing.T) {
+	t.Parallel()
 	// The error vocabulary is what a caller branches on; keep them distinct.
 	for _, pair := range [][2]error{{ErrSessionNotFound, ErrInvalidRecord}, {ErrSessionNotFound, ErrSessionClosed}} {
 		require.False(t, errors.Is(pair[0], pair[1]))
@@ -853,6 +880,7 @@ func readAll(path string) ([]byte, error) { return os.ReadFile(path) }
 // ---------------------------------------------------------------------------
 
 func TestJSONLStore_CRUDSurfaceRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store, err := NewJSONLStore(t.TempDir())
 	require.NoError(t, err)

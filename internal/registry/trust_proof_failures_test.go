@@ -21,6 +21,7 @@ import (
 // Exercise the production verifier through AuthorityStore, not a second proof
 // parser. String expectations deliberately also compile against the old handler.
 func TestTrustProofFailureBases(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			var s Store = NewMemoryStore()
@@ -135,6 +136,7 @@ func (s trustProofUnavailableStore) Get(string) (*Agent, error) {
 }
 
 func TestTrustProofRegistryUnavailableBasis(t *testing.T) {
+	t.Parallel()
 	s := trustProofUnavailableStore{NewMemoryStore()}
 	a, d := registryTrustFixture()
 	require.NoError(t, s.AddTrustAnchor(a))

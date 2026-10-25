@@ -48,6 +48,7 @@ func TestChatClientOperatorShell(t *testing.T) {
 // DF-CRIER-332 replaces the blanket storage ban with a single attribution-only
 // slot. Browser coverage exercises its opt-in, reload, clear and denial paths.
 func TestChatClientAttributionOptIn(t *testing.T) {
+	parallelBoot(t)
 	html := string(chatClientHTML)
 	for _, marker := range []string{
 		`id="remember-agent" type="checkbox"`,

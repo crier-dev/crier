@@ -69,6 +69,7 @@ func inboxCount(t *testing.T, store Store, agentID string) int {
 // ---------------------------------------------------------------------------
 
 func TestIdempotency_RepeatedDeliverStoresOneMessage(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -96,6 +97,7 @@ func TestIdempotency_RepeatedDeliverStoresOneMessage(t *testing.T) {
 }
 
 func TestIdempotency_DifferentKeysStoreTwoMessages(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -106,6 +108,7 @@ func TestIdempotency_DifferentKeysStoreTwoMessages(t *testing.T) {
 }
 
 func TestIdempotency_AbsentKeyDeliversEveryTime(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -120,6 +123,7 @@ func TestIdempotency_AbsentKeyDeliversEveryTime(t *testing.T) {
 }
 
 func TestIdempotency_KeyIsScopedToTheTargetAgent(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	registerAgentAt(t, store, "agent-2")
@@ -133,6 +137,7 @@ func TestIdempotency_KeyIsScopedToTheTargetAgent(t *testing.T) {
 }
 
 func TestIdempotency_PayloadIsNotReStoredOnReplay(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -149,6 +154,7 @@ func TestIdempotency_PayloadIsNotReStoredOnReplay(t *testing.T) {
 }
 
 func TestIdempotency_OverlongKeyRejected(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -168,6 +174,7 @@ func TestIdempotency_OverlongKeyRejected(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIdempotency_WindowExpiryDeliversAgain(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	handler, router := setupRouterWithHandler(store)
@@ -190,6 +197,7 @@ func TestIdempotency_WindowExpiryDeliversAgain(t *testing.T) {
 }
 
 func TestIdempotency_NonPositiveWindowFallsBackToTheDocumentedDefault(t *testing.T) {
+	t.Parallel()
 	// A window of 0 must never mean "deduplicate nothing": that is the feature
 	// silently absent while the API still documents it.
 	handler := NewHandler(NewMemoryStore())
@@ -208,6 +216,7 @@ func TestIdempotency_NonPositiveWindowFallsBackToTheDocumentedDefault(t *testing
 // ---------------------------------------------------------------------------
 
 func TestIdempotency_RejectedDeliveryIsNotRecorded(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -224,6 +233,7 @@ func TestIdempotency_RejectedDeliveryIsNotRecorded(t *testing.T) {
 }
 
 func TestIdempotency_ConcurrentDuplicatesProduceOneMessage(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -278,6 +288,7 @@ func TestIdempotency_ConcurrentDuplicatesProduceOneMessage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIdempotency_WebhookRetryCallsTheEndpointOnce(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -309,6 +320,7 @@ func TestIdempotency_WebhookRetryCallsTheEndpointOnce(t *testing.T) {
 }
 
 func TestIdempotency_WebhookAsyncRetryQueuesOnce(t *testing.T) {
+	t.Parallel()
 	var posts atomic.Int32
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
@@ -343,6 +355,7 @@ func TestIdempotency_WebhookAsyncRetryQueuesOnce(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIdempotencyRegistry_ClaimThenRecordThenReplay(t *testing.T) {
+	t.Parallel()
 	reg := newIdempotencyRegistry(time.Minute)
 	now := time.Now()
 
@@ -375,6 +388,7 @@ func TestIdempotencyRegistry_ClaimThenRecordThenReplay(t *testing.T) {
 }
 
 func TestIdempotencyRegistry_AbandonReleasesTheKey(t *testing.T) {
+	t.Parallel()
 	reg := newIdempotencyRegistry(time.Minute)
 
 	_, outcome, attempt := reg.Acquire("agent", "k", time.Now())
@@ -387,6 +401,7 @@ func TestIdempotencyRegistry_AbandonReleasesTheKey(t *testing.T) {
 }
 
 func TestIdempotencyRegistry_WindowedRecordExpires(t *testing.T) {
+	t.Parallel()
 	reg := newIdempotencyRegistry(time.Minute)
 	now := time.Now()
 
@@ -403,6 +418,7 @@ func TestIdempotencyRegistry_WindowedRecordExpires(t *testing.T) {
 }
 
 func TestIdempotencyRegistry_KeyCannotImpersonateAnotherPair(t *testing.T) {
+	t.Parallel()
 	reg := newIdempotencyRegistry(time.Minute)
 	now := time.Now()
 
@@ -417,6 +433,7 @@ func TestIdempotencyRegistry_KeyCannotImpersonateAnotherPair(t *testing.T) {
 }
 
 func TestValidateIdempotencyKey_Bounds(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, validateIdempotencyKey("k"))
 	require.NoError(t, validateIdempotencyKey(string(make([]byte, maxIdempotencyKeyLen))))
 	err := validateIdempotencyKey(string(make([]byte, maxIdempotencyKeyLen+1)))
@@ -429,6 +446,7 @@ func TestValidateIdempotencyKey_Bounds(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeliver_RecordsSenderAndKeyOnTheStoredMessage(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)

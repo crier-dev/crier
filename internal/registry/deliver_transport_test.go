@@ -118,6 +118,7 @@ func waitForEndpointPosts(t *testing.T, got *atomic.Int32, n int32, what string)
 // ----- A1: async webhook accept names the transport and the queue mode -----
 
 func TestDeliver_WebhookAsync_AcceptNamesWebhookTransport(t *testing.T) {
+	t.Parallel()
 	var posts atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
@@ -163,6 +164,7 @@ func TestDeliver_WebhookAsync_AcceptNamesWebhookTransport(t *testing.T) {
 }
 
 func TestDeliver_WebhookBatch_AcceptNamesBatchMode(t *testing.T) {
+	t.Parallel()
 	var posts atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
@@ -205,6 +207,7 @@ func TestDeliver_WebhookBatch_AcceptNamesBatchMode(t *testing.T) {
 // ----- A1/A2: inbox accept names the inbox transport and still carries expiry -----
 
 func TestDeliver_Inbox_AcceptNamesInboxTransport(t *testing.T) {
+	t.Parallel()
 	h, _ := deliverHarness(t, "agent-inbox", nil /* no webhook → durable inbox */)
 
 	rec, wire := postDeliver(t, h, "agent-inbox", `{"payload":{"msg":"durable"},"ttl_seconds":60}`)
@@ -228,6 +231,7 @@ func TestDeliver_Inbox_AcceptNamesInboxTransport(t *testing.T) {
 // ----- blocking: the success body names the webhook transport -----
 
 func TestDeliver_Blocking_AcceptNamesWebhookTransport(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"echo":true}`))
@@ -255,6 +259,7 @@ func TestDeliver_Blocking_AcceptNamesWebhookTransport(t *testing.T) {
 // ----- A3-ish: 502 for a permanent rejection, 504 for timeout/budget -----
 
 func TestDeliver_Blocking_PermanentRejectIs502(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		status       int
@@ -302,6 +307,7 @@ func TestDeliver_Blocking_PermanentRejectIs502(t *testing.T) {
 }
 
 func TestDeliver_Blocking_TimeoutIs504(t *testing.T) {
+	t.Parallel()
 	t.Run("budget exhausted by retryable failures", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -345,6 +351,7 @@ func TestDeliver_Blocking_TimeoutIs504(t *testing.T) {
 // ----- A2: agents WITHOUT webhooks are untouched -----
 
 func TestDeliver_NoWebhook_UnchangedStatusAndBody(t *testing.T) {
+	t.Parallel()
 	h, store := deliverHarness(t, "agent-plain", nil)
 
 	rec, wire := postDeliver(t, h, "agent-plain", `{"payload":{"msg":"plain"}}`)
@@ -374,6 +381,7 @@ func TestDeliver_NoWebhook_UnchangedStatusAndBody(t *testing.T) {
 // transport is not omitempty, so a sender can branch on it without
 // inferring the destination from the status code (DF-CRIER-157).
 func TestTransportField_IsAlwaysPresentOnBothAcceptPaths(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

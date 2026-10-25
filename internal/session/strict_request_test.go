@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionUnknownNameListsAccepted(t *testing.T) {
+	t.Parallel()
 	s, err := NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })

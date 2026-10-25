@@ -10,6 +10,7 @@ import (
 )
 
 func TestCountAgentsForStatusUsesTheSamePresenceRule(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store)
 

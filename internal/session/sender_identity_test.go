@@ -14,6 +14,7 @@ import (
 )
 
 func TestSenderIdentitySurvivesReopenWithoutRecipients(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			path := backend.pathFn(t)
@@ -45,6 +46,7 @@ func TestSenderIdentitySurvivesReopenWithoutRecipients(t *testing.T) {
 }
 
 func TestSignatureEnforcementWithoutVerifierFailsClosed(t *testing.T) {
+	t.Parallel()
 	repo := newTestSQLiteStore(t)
 	harness := newAPIHarness(t, repo)
 	room := harness.createRoom(t)

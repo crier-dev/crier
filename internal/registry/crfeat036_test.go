@@ -238,6 +238,7 @@ const (
 // supported spelling of the default arm — the hint the scheduler sent is the
 // hint the polling router reads, and Crier has filled in nothing.
 func TestDispatchHintsSurviveDeliveryToAPollingRouter(t *testing.T) {
+	t.Parallel()
 	testDispatchHintsRoundTrip(t, func(t *testing.T) *cr36Harness { return newCR36Harness(t, nil) })
 }
 
@@ -378,6 +379,7 @@ func cr36ID(t *testing.T, msg map[string]json.RawMessage) string {
 // carries no `model`, `provider` or `reply_to` member at all — the canonical
 // default is the absent member, and no default value is ever filled in.
 func TestDispatchWithoutHintsIsByteIdenticalToBefore(t *testing.T) {
+	t.Parallel()
 	h := newCR36Harness(t, nil)
 	h.register(t, cr36Router)
 
@@ -406,6 +408,7 @@ func TestDispatchWithoutHintsIsByteIdenticalToBefore(t *testing.T) {
 // TestDispatchHintsAreIndependent proves the two hints are independent members:
 // naming one never materialises the other.
 func TestDispatchHintsAreIndependent(t *testing.T) {
+	t.Parallel()
 	h := newCR36Harness(t, nil)
 	h.register(t, cr36Router)
 
@@ -425,6 +428,7 @@ func TestDispatchHintsAreIndependent(t *testing.T) {
 // existing invalid-json answer instead of being silently dropped — a selection
 // the bus cannot carry must not look like one it did.
 func TestDispatchHintRejectsNonStringShape(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, body string }{
 		{"number_hint", `{"payload":{"x":1},"model":5}`},
 		{"object_hint", `{"payload":{"x":1},"provider":{"name":"zai"}}`},
@@ -451,6 +455,7 @@ func TestDispatchHintRejectsNonStringShape(t *testing.T) {
 // on: publish a dispatch, lease it as the router, return a reply that carries
 // the ORIGINAL Crier message id, acknowledge only the finished work.
 func TestStubRouterLeasesRepliesAndAcks(t *testing.T) {
+	t.Parallel()
 	h := newCR36Harness(t, nil)
 	h.register(t, cr36Scheduler)
 	h.register(t, cr36Router)
@@ -504,6 +509,7 @@ func TestStubRouterLeasesRepliesAndAcks(t *testing.T) {
 // and a signed read by a DIFFERENT agent (the scheduler) is refused too —
 // authorization is the verified identity, never a claim in the request.
 func TestRouterInboxIsReadableOnlyByTheRoutersOwnSignedIdentity(t *testing.T) {
+	t.Parallel()
 	h := newCR36Harness(t, nil)
 	// The shipped default: per-agent signing ON (config.RequireAgentSig).
 	h.handler.SetRequireAgentSig(true)
@@ -541,6 +547,7 @@ func TestRouterInboxIsReadableOnlyByTheRoutersOwnSignedIdentity(t *testing.T) {
 // router with no way to tell an explicit choice from a default, and a result
 // would arrive at the scheduler with no id to match on.
 func TestRemoteProxyForwardsSelectionHintsAndCorrelation(t *testing.T) {
+	t.Parallel()
 	var (
 		mu   sync.Mutex
 		last []byte
@@ -604,6 +611,7 @@ func TestRemoteProxyForwardsSelectionHintsAndCorrelation(t *testing.T) {
 // lease expires, a stale lease cannot ack it, and the re-leased copy still
 // carries the scheduler's hints.
 func TestStubRouterLeaseExpiryAndRedelivery(t *testing.T) {
+	t.Parallel()
 	h := newCR36Harness(t, nil)
 	h.register(t, cr36Router)
 
@@ -717,6 +725,7 @@ func (a *cr36ACL) sendAs(t *testing.T, target, principal, asAgent, body string, 
 // of AC2: least-privilege identities can do exactly the two deliveries the
 // architecture needs, and the dispatch reaches the router with its hints.
 func TestRouterDispatchAuthorizationAllowsTheTwoServiceSends(t *testing.T) {
+	t.Parallel()
 	a := newCR36ACL(t)
 
 	// scheduler -> router: the dispatch, hints intact.
@@ -747,6 +756,7 @@ func TestRouterDispatchAuthorizationAllowsTheTwoServiceSends(t *testing.T) {
 // AC2: least privilege means the pairs nobody granted are refused with a named
 // error, and nothing is stored.
 func TestRouterDispatchAuthorizationDeniesUnrelatedPairs(t *testing.T) {
+	t.Parallel()
 	a := newCR36ACL(t)
 	dispatch := dispatchBody(cr36ExplicitModel, cr36ExplicitProvider, "")
 
@@ -812,6 +822,7 @@ func TestRouterDispatchAuthorizationDeniesUnrelatedPairs(t *testing.T) {
 // the payload — confers nothing. The same forged request is refused with and
 // without it, and the same granted request is admitted with and without it.
 func TestPayloadReplyToCannotGrantAuthority(t *testing.T) {
+	t.Parallel()
 	a := newCR36ACL(t)
 
 	// The forged shapes an attacker would try: the envelope claiming to answer
@@ -866,6 +877,7 @@ func TestPayloadReplyToCannotGrantAuthority(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSelectionHintWireForms(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		raw  string
@@ -911,6 +923,7 @@ func TestSelectionHintWireForms(t *testing.T) {
 }
 
 func TestSelectionHintRejectsNonStringShapes(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`5`, `{}`, `[]`, `true`, `"unterminated`} {
 		t.Run(raw, func(t *testing.T) {
 			var h SelectionHint
@@ -925,6 +938,7 @@ func TestSelectionHintRejectsNonStringShapes(t *testing.T) {
 // absent), it stores SQL NULL for "sent nothing", and it degrades to "nothing
 // sent" rather than failing a read when the column is unreadable.
 func TestSelectionHintStorageRoundTrip(t *testing.T) {
+	t.Parallel()
 	blank := &SelectionHint{Form: HintBlank, Value: ""}
 	space := &SelectionHint{Form: HintBlank, Value: " "}
 	null := &SelectionHint{Form: HintNull}
@@ -1007,6 +1021,7 @@ func TestSelectionHintStorageRoundTrip(t *testing.T) {
 // the polling router in a state the router reads as "the choice is still
 // open", and the message carries no model or provider Crier invented.
 func TestDefaultHintSpellingsLeaveSelectionOpen(t *testing.T) {
+	t.Parallel()
 	for _, tc := range cr36DefaultSpellings {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newCR36Harness(t, nil)

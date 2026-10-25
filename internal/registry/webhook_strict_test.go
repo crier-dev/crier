@@ -69,6 +69,7 @@ func webhookOf(t *testing.T, r *mux.Router, id string) (json.RawMessage, bool) {
 // misnamed key inside the webhook object — naming the key and the accepted
 // keys — and registers nothing on the refusal; valid objects still register.
 func TestRegister_WebhookMemberStrictness(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		webhook     string // raw webhook member; "" = no webhook member at all
@@ -157,6 +158,7 @@ func TestRegister_WebhookMemberStrictness(t *testing.T) {
 // the guard object, must still register — those surfaces are deliberately out
 // of scope for this row.
 func TestRegister_TopLevelObjectStaysPermissive(t *testing.T) {
+	t.Parallel()
 	hexKey, _ := newTestPubKey(t)
 	r := newStrictWebhookRouter()
 	body := `{"id":"agent-1","public_key":"` + hexKey + `","surprise_top_level":true,` +
@@ -175,6 +177,7 @@ func TestRegister_TopLevelObjectStaysPermissive(t *testing.T) {
 // leaves the agent's stored webhook byte-identical, while valid objects update
 // it and an absent-or-null member still removes it.
 func TestPatch_WebhookMemberStrictness(t *testing.T) {
+	t.Parallel()
 	hexKey, _ := newTestPubKey(t)
 	r := newStrictWebhookRouter()
 

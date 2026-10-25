@@ -20,6 +20,7 @@ import (
 // boot) and a migration file whose version prefix does not parse. Both are
 // structural, so this costs milliseconds and needs no database.
 func TestEmbeddedMigrationsLoad(t *testing.T) {
+	t.Parallel()
 	if _, err := iofs.New(migrationFS, "migrations"); err != nil {
 		t.Fatalf("the embedded migration set does not load: %v", err)
 	}

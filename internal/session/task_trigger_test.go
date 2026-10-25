@@ -73,6 +73,7 @@ func (h *triggerHarness) createTask(t *testing.T, room string) (int, transcriptM
 // TestTaskTriggerFiresOnce: one created task fires the hook exactly once,
 // with the task id and session it belongs to.
 func TestTaskTriggerFiresOnce(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 
@@ -108,6 +109,7 @@ func TestTaskTriggerFiresOnce(t *testing.T) {
 // its recording — see internal/daggerctl/trigger_test.go — this proves the
 // session surface's side of the fire-and-forget contract.)
 func TestTaskTriggerFailureNeverFailsTask(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 	h.handler.SetTaskTrigger(func(taskID, sessionID, payload string) {
@@ -123,6 +125,7 @@ func TestTaskTriggerFailureNeverFailsTask(t *testing.T) {
 // TestNoTriggerArmedChangesNothing: a handler with no hook (the default)
 // creates the task and fires nothing — the byte-identical-before proof.
 func TestNoTriggerArmedChangesNothing(t *testing.T) {
+	t.Parallel()
 	h := newTriggerHarness(t)
 	room := h.createRoom(t)
 	code, _ := h.createTask(t, room)

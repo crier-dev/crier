@@ -26,6 +26,7 @@ import (
 // ---- MemoryStore -----------------------------------------------------------
 
 func TestMemoryStore_RetrieveEmptyInboxMintsNoLease(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	require.NoError(t, store.Register(&Agent{ID: "agent-1"}))
 
@@ -37,6 +38,7 @@ func TestMemoryStore_RetrieveEmptyInboxMintsNoLease(t *testing.T) {
 }
 
 func TestMemoryStore_RetrieveAllLeasedMintsNoLease(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	require.NoError(t, store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{"n":1}`)}))
@@ -59,6 +61,7 @@ func TestMemoryStore_RetrieveAllLeasedMintsNoLease(t *testing.T) {
 }
 
 func TestMemoryStore_AckMissingIDReportsMessageNotFound(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	require.NoError(t, store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -77,6 +80,7 @@ func TestMemoryStore_AckMissingIDReportsMessageNotFound(t *testing.T) {
 }
 
 func TestMemoryStore_AckWrongLeaseReportsLeaseConflict(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	require.NoError(t, store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -91,6 +95,7 @@ func TestMemoryStore_AckWrongLeaseReportsLeaseConflict(t *testing.T) {
 }
 
 func TestMemoryStore_AckMissingIDWinsOverWrongLease(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	require.NoError(t, store.Deliver("agent-1", &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -137,6 +142,7 @@ func decodeRetrieve(t *testing.T, rec *httptest.ResponseRecorder) ([]*InboxEntry
 }
 
 func TestHTTPRetrieve_EmptyInboxReturnsEmptyMessagesAndLease(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -150,6 +156,7 @@ func TestHTTPRetrieve_EmptyInboxReturnsEmptyMessagesAndLease(t *testing.T) {
 }
 
 func TestHTTPRetrieve_AllLeasedReturnsEmptyMessagesAndLease(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -171,6 +178,7 @@ func TestHTTPRetrieve_AllLeasedReturnsEmptyMessagesAndLease(t *testing.T) {
 }
 
 func TestHTTPAck_MissingIDIs404AndWrongLeaseIs409(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -217,6 +225,7 @@ func newRemoteAgentStore(t *testing.T, agentID string) *RemoteStore {
 }
 
 func TestRemoteStore_RetrieveEmptyInboxEmptyLease(t *testing.T) {
+	t.Parallel()
 	rs := newRemoteAgentStore(t, "bob")
 
 	msgs, leaseID, err := rs.Retrieve("bob", 30*time.Second, 10)
@@ -227,6 +236,7 @@ func TestRemoteStore_RetrieveEmptyInboxEmptyLease(t *testing.T) {
 }
 
 func TestRemoteStore_AckMissingIDDecodesMessageNotFound(t *testing.T) {
+	t.Parallel()
 	rs := newRemoteAgentStore(t, "bob")
 
 	err := rs.Ack("bob", "any-lease", []string{"never-delivered"})
@@ -236,6 +246,7 @@ func TestRemoteStore_AckMissingIDDecodesMessageNotFound(t *testing.T) {
 }
 
 func TestRemoteStore_AckWrongLeaseDecodesLeaseConflict(t *testing.T) {
+	t.Parallel()
 	rs := newRemoteAgentStore(t, "bob")
 	require.NoError(t, rs.Deliver("bob", &InboxEntry{Payload: json.RawMessage(`{"kind":"ping"}`)}))
 
@@ -254,6 +265,7 @@ func TestRemoteStore_AckWrongLeaseDecodesLeaseConflict(t *testing.T) {
 // ---- PostgresStore (pgxmock) ----------------------------------------------
 
 func TestPostgresStoreUnit_Retrieve_NoClaimMintsNoLease(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -276,6 +288,7 @@ func TestPostgresStoreUnit_Retrieve_NoClaimMintsNoLease(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_MissingIDMessageNotFound(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()
@@ -295,6 +308,7 @@ func TestPostgresStoreUnit_Ack_MissingIDMessageNotFound(t *testing.T) {
 }
 
 func TestPostgresStoreUnit_Ack_WrongLeaseConflict(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 
 	mock.ExpectBegin()

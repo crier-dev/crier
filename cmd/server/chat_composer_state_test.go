@@ -11,6 +11,7 @@ import (
 // Exercise the embedded page against two real routers. The only network
 // injection delays an actual send response so the in-flight state is observable.
 func TestChatClientComposerStateBrowser(t *testing.T) {
+	parallelBoot(t)
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required for the composer browser regression")

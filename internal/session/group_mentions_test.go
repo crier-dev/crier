@@ -18,6 +18,7 @@ import (
 // resolves the tag to the group's CURRENT members — one delivery per member
 // through the shipped inbox path, no explicit targets needed.
 func TestGroupAPI_TeamMentionResolvesToCurrentMembers(t *testing.T) {
+	t.Parallel()
 	agents := []string{"atlas", "nimbus", "orion", "vega", "lyra"}
 	h := newGroupHarness(t, agents...)
 
@@ -55,6 +56,7 @@ func TestGroupAPI_TeamMentionResolvesToCurrentMembers(t *testing.T) {
 // roster FRESH at send time — after a member is removed, the NEXT send reaches
 // the current members and the removed one receives nothing.
 func TestGroupAPI_TeamMentionEditRoutesToCurrentMembers(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus", "orion")
 
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/groups", createGroupRequest{
@@ -98,6 +100,7 @@ func TestGroupAPI_TeamMentionEditRoutesToCurrentMembers(t *testing.T) {
 // roster is a recorded skip — nothing is delivered to anybody, and the
 // message is still recorded (the named-error rule, never a silent drop).
 func TestGroupAPI_TeamMentionUnknownGroupIsASkip(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "atlas", "nimbus")
 	room := h.createRoom(t)
 
@@ -120,6 +123,7 @@ func TestGroupAPI_TeamMentionUnknownGroupIsASkip(t *testing.T) {
 // `refused` outcome that still names the reason, so the skip is reported,
 // never swallowed and never hidden behind the count (DF-CRIER-305).
 func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
+	t.Parallel()
 	// Two of the three roster members are registered; "ghost" is not.
 	h := newGroupHarness(t, "atlas", "nimbus")
 
@@ -174,6 +178,7 @@ func TestGroupFanOut_UnregisteredTargets(t *testing.T) {
 // delivered, and leased/acked/expired retain their distinct lifecycle words
 // in per-target outcomes without being counted as either (DF-CRIER-378).
 func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
+	t.Parallel()
 	var v transcriptMessage
 	summarizeFanout(&v, []DeliveryOutcome{
 		{Target: "atlas", Outcome: OutcomeDelivered},
@@ -191,6 +196,7 @@ func TestSummarizeFanout_OnlyRefusalIsASkip(t *testing.T) {
 // prefix order means an agent literally named "team" (bare form) is still an
 // agent addressee and is NOT expanded as a group (D8 / §2.1.1).
 func TestGroupAPI_MentionOfAgentLiteralNameIsNotAGroup(t *testing.T) {
+	t.Parallel()
 	h := newGroupHarness(t, "team", "atlas", "nimbus")
 	room := h.createRoom(t)
 

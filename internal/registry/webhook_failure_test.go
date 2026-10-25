@@ -16,6 +16,7 @@ import (
 // as a durable, machine-readable entry (DF-CRIER-8). It bypasses webhook
 // routing entirely, so it cannot recurse.
 func TestWebhookFailureSink_DeliversDurableNotification(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "agent-a"}); err != nil {
 		t.Fatalf("register sender: %v", err)
@@ -66,6 +67,7 @@ func TestWebhookFailureSink_DeliversDurableNotification(t *testing.T) {
 // TestWebhookFailureSink_TransportErrorCarriesErrString: a transport-level
 // failure (no HTTP status) surfaces the error string instead.
 func TestWebhookFailureSink_TransportErrorCarriesErrString(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "agent-a"}); err != nil {
 		t.Fatalf("register sender: %v", err)
@@ -97,6 +99,7 @@ func TestWebhookFailureSink_TransportErrorCarriesErrString(t *testing.T) {
 // sender makes the sink return an error — the driver treats that as
 // best-effort (logged, no requeue), so the error must surface here.
 func TestWebhookFailureSink_UnregisteredSenderErrors(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	sink := WebhookFailureSink(store)
 	err := sink(webhook.FailureNotification{
@@ -112,6 +115,7 @@ func TestWebhookFailureSink_UnregisteredSenderErrors(t *testing.T) {
 // own inbox, because the operator whose endpoint failed is the one who must
 // learn about it — carrying the additive no_sender marker.
 func TestWebhookFailureSink_NoSenderDeliversToTargetInbox_DFCRIER320(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	if err := store.Register(&Agent{ID: "agent-b"}); err != nil {
 		t.Fatalf("register target: %v", err)
@@ -171,6 +175,7 @@ func TestWebhookFailureSink_NoSenderDeliversToTargetInbox_DFCRIER320(t *testing.
 // goes to the SENDER's inbox only, and the payload carries no no_sender
 // marker (it stays byte-compatible with the pre-DF-CRIER-320 shape).
 func TestWebhookFailureSink_SenderPresentUnchanged_DFCRIER320(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	for _, id := range []string{"agent-a", "agent-b"} {
 		if err := store.Register(&Agent{ID: id}); err != nil {
@@ -216,6 +221,7 @@ func TestWebhookFailureSink_SenderPresentUnchanged_DFCRIER320(t *testing.T) {
 // not exist (unregistered target, or an empty target) returns an error for
 // the driver to log best-effort — no panic, no write, no requeue.
 func TestWebhookFailureSink_NoSenderUnregisteredTargetErrors_DFCRIER320(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		target string
@@ -247,6 +253,7 @@ func TestWebhookFailureSink_NoSenderUnregisteredTargetErrors_DFCRIER320(t *testi
 // silent drop is gone. Exhaustion accounting is unchanged (one POST per
 // attempt, drop after the budget).
 func TestWebhookFailureSink_ExhaustedNoSenderLandsInTargetInbox_DFCRIER320(t *testing.T) {
+	t.Parallel()
 	posts := make(chan struct{}, 64)
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts <- struct{}{}

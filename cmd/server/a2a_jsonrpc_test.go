@@ -240,6 +240,7 @@ func sendMessageBody(tenant, method, messageID string) string {
 // CR_A2A_ENABLED unset the path answers the router's own 404 (exactly what it
 // answered before this row), and with it set the path exists.
 func TestA2AJSONRPC_RouteExistsOnlyWhenTheOptionIsOn(t *testing.T) {
+	parallelBoot(t)
 	t.Run("switch unset (default off)", func(t *testing.T) {
 		base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": ""})
 		client := &http.Client{Timeout: 5 * time.Second}
@@ -270,6 +271,7 @@ func TestA2AJSONRPC_RouteExistsOnlyWhenTheOptionIsOn(t *testing.T) {
 // test: send → task, then the SAME delivery read by the agent through crier's own
 // inbox, with the multi-part message and its alt/tags intact.
 func TestA2AJSONRPCSend_ReachesACrierConsumerWithPartsIntact(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	const agentID = "a2a-consumer"
@@ -416,6 +418,7 @@ func TestA2AJSONRPCSend_ReachesACrierConsumerWithPartsIntact(t *testing.T) {
 // that still delivered would be the worst possible bug — that none of them
 // reaches the agent's inbox.
 func TestA2AJSONRPC_GatesAndRefusals(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{"CR_A2A_ENABLED": "true"})
 	client := &http.Client{Timeout: 5 * time.Second}
 	const (

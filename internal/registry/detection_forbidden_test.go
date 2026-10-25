@@ -26,6 +26,7 @@ import (
 // not a fake observer or a direct call to the status mapper. Each case also
 // proves that only the guard case actually consulted the guard provider.
 func TestDeliveryForbiddenAuditFamily(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		cause, verdict, responseError string
 		session, authorityStore       bool

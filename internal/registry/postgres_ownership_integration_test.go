@@ -22,6 +22,7 @@ import (
 // TABLE, not the migration file: a migration applied under another name, or one
 // that only half-ran, must fail here.
 func TestPostgresOwnership_MigrationAddsOwnershipSchema(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -60,6 +61,7 @@ func TestPostgresOwnership_MigrationAddsOwnershipSchema(t *testing.T) {
 }
 
 func TestPostgresOwnership_DeliverPersistsSenderAndKey(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "owner")
 	entry := &InboxEntry{
@@ -78,6 +80,7 @@ func TestPostgresOwnership_DeliverPersistsSenderAndKey(t *testing.T) {
 }
 
 func TestPostgresOwnership_DeliverStoresNullForAbsentProvenance(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "owner")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: []byte(`{}`)}))
@@ -99,6 +102,7 @@ func TestPostgresOwnership_DeliverStoresNullForAbsentProvenance(t *testing.T) {
 }
 
 func TestPostgresOwnership_PurgeReportsWhatItRemoved(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	target := newTestAgent(t, store, "target")
 	other := newTestAgent(t, store, "other")
@@ -149,6 +153,7 @@ func TestPostgresOwnership_PurgeReportsWhatItRemoved(t *testing.T) {
 }
 
 func TestPostgresOwnership_DeadLetterAppendIsIdempotentAndNewestFirst(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "dead")
 
@@ -203,6 +208,7 @@ func TestPostgresOwnership_DeadLetterAppendIsIdempotentAndNewestFirst(t *testing
 }
 
 func TestPostgresOwnership_RetentionSweepsOldDeadLetters(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "retention")
 
@@ -230,6 +236,7 @@ func TestPostgresOwnership_RetentionSweepsOldDeadLetters(t *testing.T) {
 }
 
 func TestPostgresOwnership_TransferMovesAStuckLease(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	holder := newTestAgent(t, store, "holder")
 	relief := newTestAgent(t, store, "relief")
@@ -266,6 +273,7 @@ func TestPostgresOwnership_TransferMovesAStuckLease(t *testing.T) {
 }
 
 func TestPostgresOwnership_TransferRefusesForeignAndUnknown(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	holder := newTestAgent(t, store, "holder")
 	relief := newTestAgent(t, store, "relief")
@@ -312,6 +320,7 @@ func TestPostgresOwnership_TransferRefusesForeignAndUnknown(t *testing.T) {
 }
 
 func TestPostgresOwnership_TransferMovesUnleasedWithoutForce(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	holder := newTestAgent(t, store, "holder")
 	relief := newTestAgent(t, store, "relief")

@@ -17,6 +17,7 @@ import (
 // agent through the real unsigned server, then Get must succeed and return
 // an empty key.
 func TestRemoteStore_KeylessGet(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServer(t) // signing disabled: keyless allowed
 	rs := NewRemoteStore(srv.URL, "remote-client", "")
 
@@ -40,6 +41,7 @@ func TestRemoteStore_KeylessGet(t *testing.T) {
 // one keyed + one keyless agent, List must return BOTH. Before the fix a
 // single keyless agent made List swallow the decode error and report 0.
 func TestRemoteStore_ListIncludesKeyless(t *testing.T) {
+	t.Parallel()
 	srv, _ := newRemoteTestServer(t)
 	rs := NewRemoteStore(srv.URL, "remote-client", "")
 

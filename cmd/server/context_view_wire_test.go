@@ -82,6 +82,7 @@ type contextWireView struct {
 
 // TestContextViewWireBodies is AC 1 + AC 2 of DF-CRIER-480 on the wire.
 func TestContextViewWireBodies(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND":   "jsonl",
 		"CR_SESSION_LOG_ROOT":  t.TempDir(),

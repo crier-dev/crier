@@ -17,6 +17,7 @@ import (
 // unresolvable boundary skipped nothing (every message counted as given) and a
 // boundary later than the join admitted messages recorded after the join.
 func TestMaterializedShareBoundedByJoinInstant(t *testing.T) {
+	t.Parallel()
 	join := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	st := &State{Messages: []*Message{
 		{ID: "pre-1", Seq: 1, CreatedAt: join.Add(-3 * time.Minute)},
@@ -73,6 +74,7 @@ func TestMaterializedShareBoundedByJoinInstant(t *testing.T) {
 // as its edge it must survive — the join instant narrows a boundary, it must not
 // silently drop the very message the digest is anchored to.
 func TestMaterializedShareKeepsTheCitedEdgeAtATimestampTie(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	st := &State{Messages: []*Message{
 		{ID: "edge", Seq: 2, CreatedAt: at},
@@ -100,6 +102,7 @@ func TestMaterializedShareKeepsTheCitedEdgeAtATimestampTie(t *testing.T) {
 // defect was measured on. Seeding it here keeps the READ path honest
 // independently of the WRITE path's validation.
 func TestSessionAPI_ContextViewNeverClaimsPostJoinMessages(t *testing.T) {
+	t.Parallel()
 	const bogus = "boundary-from-nowhere"
 	for _, be := range localBackends() {
 		t.Run(be.name, func(t *testing.T) {

@@ -530,11 +530,27 @@ type WebhookConfig struct {
 	BatchFlushInterval time.Duration // CR_WEBHOOK_BATCH_FLUSH_S — batch flush interval default
 }
 
+// Getenv is the environment-lookup seam config.Load reads through. Load()
+// passes os.Getenv; tests may supply an overlay map so one process can boot
+// many differently-configured servers WITHOUT mutating process env (which
+// would force every test into the runtime-wide t.Setenv serial lockstep and
+// blow INT-CI-014's per-package 60s budget).
+type Getenv func(key string) string
+
 // Load reads configuration from environment with defaults.
 func Load() (Config, error) {
+	return LoadFrom(os.Getenv)
+}
+
+// LoadFrom is Load over an explicit lookup function. Behavior is byte-identical
+// to Load when getenv is os.Getenv (or nil, which also means os.Getenv).
+func LoadFrom(getenv Getenv) (Config, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
 	cfg := Config{
 		Port:               8767,
-		AuthToken:          os.Getenv("CR_AUTH_TOKEN"),
+		AuthToken:          getenv("CR_AUTH_TOKEN"),
 		LogLevel:           "info",
 		LogFormat:          "text",
 		RateLimitPerMinute: 100,
@@ -574,7 +590,7 @@ func Load() (Config, error) {
 		},
 	}
 
-	if v := os.Getenv("CR_LOG_LEVEL"); v != "" {
+	if v := getenv("CR_LOG_LEVEL"); v != "" {
 		switch v {
 		case "debug", "info", "warn", "error":
 			cfg.LogLevel = v
@@ -583,7 +599,7 @@ func Load() (Config, error) {
 		}
 	}
 
-	if v := os.Getenv("CR_LOG_FORMAT"); v != "" {
+	if v := getenv("CR_LOG_FORMAT"); v != "" {
 		switch v {
 		case "text", "json":
 			cfg.LogFormat = v
@@ -593,9 +609,13 @@ func Load() (Config, error) {
 	}
 
 	// Port
-	if v := os.Getenv("CRIER_PORT"); v != "" {
+	if v := getenv("CRIER_PORT"); v != "" {
 		p, err := strconv.Atoi(v)
-		if err != nil || p < 1 || p > 65535 {
+		// 0 is legal: it binds an ephemeral port (INT-CI-014's in-process
+		// test boots use it — the kernel picks a port nobody holds, which
+		// removes the freePort release-then-rebind race entirely). The
+		// bound port is reported in the pidfile and the boot log.
+		if err != nil || p < 0 || p > 65535 {
 			return cfg, fmt.Errorf("invalid CRIER_PORT: %q", v)
 		}
 		cfg.Port = p
@@ -604,7 +624,7 @@ func Load() (Config, error) {
 	// Database URL — three env var precedence: CR_DATABASE_URL → DATABASE_URL → CRIER_DATABASE_URL
 	dbURL, dbSource := "", "CR_DATABASE_URL"
 	for _, source := range []string{"CR_DATABASE_URL", "DATABASE_URL", "CRIER_DATABASE_URL"} {
-		if v := os.Getenv(source); v != "" {
+		if v := getenv(source); v != "" {
 			dbURL, dbSource = v, source
 			break
 		}
@@ -614,8 +634,8 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	cfg.Database.URL = dbURL
-	cfg.Registry.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_REGISTRY_BACKEND")))
-	cfg.Registry.SQLitePath = strings.TrimSpace(os.Getenv("CR_REGISTRY_SQLITE_PATH"))
+	cfg.Registry.Backend = strings.ToLower(strings.TrimSpace(getenv("CR_REGISTRY_BACKEND")))
+	cfg.Registry.SQLitePath = strings.TrimSpace(getenv("CR_REGISTRY_SQLITE_PATH"))
 	if cfg.Registry.SQLitePath != "" {
 		cfg.Registry.SQLitePathSource = "CR_REGISTRY_SQLITE_PATH"
 	}
@@ -640,14 +660,14 @@ func Load() (Config, error) {
 	}
 
 	// Pool settings
-	if v := os.Getenv("CR_DATABASE_MAX_CONNS"); v != "" {
+	if v := getenv("CR_DATABASE_MAX_CONNS"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_MAX_CONNS: %q", v)
 		}
 		cfg.Database.MaxConns = int32(n)
 	}
-	if v := os.Getenv("CR_DATABASE_MIN_CONNS"); v != "" {
+	if v := getenv("CR_DATABASE_MIN_CONNS"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n < 0 {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_MIN_CONNS: %q", v)
@@ -658,21 +678,21 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("CR_DATABASE_MIN_CONNS (%d) > CR_DATABASE_MAX_CONNS (%d)", cfg.Database.MinConns, cfg.Database.MaxConns)
 	}
 
-	if v := os.Getenv("CR_DATABASE_MAX_CONN_LIFETIME"); v != "" {
+	if v := getenv("CR_DATABASE_MAX_CONN_LIFETIME"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_MAX_CONN_LIFETIME: %q", v)
 		}
 		cfg.Database.MaxConnLifetime = d
 	}
-	if v := os.Getenv("CR_DATABASE_MAX_CONN_IDLE_TIME"); v != "" {
+	if v := getenv("CR_DATABASE_MAX_CONN_IDLE_TIME"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_MAX_CONN_IDLE_TIME: %q", v)
 		}
 		cfg.Database.MaxConnIdleTime = d
 	}
-	if v := os.Getenv("CR_DATABASE_CONNECT_TIMEOUT"); v != "" {
+	if v := getenv("CR_DATABASE_CONNECT_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DATABASE_CONNECT_TIMEOUT: %q", v)
@@ -686,7 +706,7 @@ func Load() (Config, error) {
 	// CR_DATABASE_URL is set, jsonl otherwise) — so no existing deployment
 	// changes, and a single-user/local deployment can run on SQLite with no
 	// PostgreSQL service at all.
-	cfg.Session.Backend = strings.ToLower(strings.TrimSpace(os.Getenv("CR_SESSION_BACKEND")))
+	cfg.Session.Backend = strings.ToLower(strings.TrimSpace(getenv("CR_SESSION_BACKEND")))
 	switch cfg.Session.Backend {
 	case SessionBackendAuto, SessionBackendSQLite, SessionBackendPostgres, SessionBackendJSONL:
 	default:
@@ -695,11 +715,11 @@ func Load() (Config, error) {
 	}
 	// The session-scoped spelling wins; retain CR_SQLITE_PATH for existing
 	// deployments. There is no general known-key registry in this loader.
-	cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SESSION_SQLITE_PATH"))
+	cfg.Session.SQLitePath = strings.TrimSpace(getenv("CR_SESSION_SQLITE_PATH"))
 	if cfg.Session.SQLitePath != "" {
 		cfg.Session.SQLitePathSource = "CR_SESSION_SQLITE_PATH"
 	} else {
-		cfg.Session.SQLitePath = strings.TrimSpace(os.Getenv("CR_SQLITE_PATH"))
+		cfg.Session.SQLitePath = strings.TrimSpace(getenv("CR_SQLITE_PATH"))
 		if cfg.Session.SQLitePath != "" {
 			cfg.Session.SQLitePathSource = "CR_SQLITE_PATH"
 		}
@@ -710,9 +730,9 @@ func Load() (Config, error) {
 	if err := cfg.validateDatabaseBackend(dbSource, "CR_SESSION_BACKEND", cfg.ResolvedSessionBackend()); err != nil {
 		return cfg, err
 	}
-	cfg.Session.LogRoot = strings.TrimSpace(os.Getenv("CR_SESSION_LOG_ROOT"))
+	cfg.Session.LogRoot = strings.TrimSpace(getenv("CR_SESSION_LOG_ROOT"))
 	cfg.Session.DeliveryTimeoutMs = registry.DefaultSessionDeliveryTimeoutMs
-	if v := os.Getenv("CR_SESSION_DELIVERY_TIMEOUT_MS"); v != "" {
+	if v := getenv("CR_SESSION_DELIVERY_TIMEOUT_MS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > registry.DefaultSessionDeliveryTimeoutMs {
 			return cfg, fmt.Errorf("invalid CR_SESSION_DELIVERY_TIMEOUT_MS: %q (want 1..30000 milliseconds)", v)
@@ -723,7 +743,7 @@ func Load() (Config, error) {
 	// budget that guarantees refusal before that runtime may answer. Strictness
 	// reserves transport/queue headroom; this is not an end-to-end HTTP deadline.
 	cfg.Session.RuntimeTimeoutMs = 20000
-	if v := os.Getenv("RUNTIME_TIMEOUT_MS"); v != "" {
+	if v := getenv("RUNTIME_TIMEOUT_MS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 25000 {
 			return cfg, fmt.Errorf("invalid RUNTIME_TIMEOUT_MS: %q (want 1..25000 milliseconds)", v)
@@ -734,7 +754,7 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("RUNTIME_TIMEOUT_MS=%d must be strictly less than CR_SESSION_DELIVERY_TIMEOUT_MS=%d (milliseconds)",
 			cfg.Session.RuntimeTimeoutMs, cfg.Session.DeliveryTimeoutMs)
 	}
-	cfg.Session.GroupRoot = strings.TrimSpace(os.Getenv("CR_GROUP_ROOT"))
+	cfg.Session.GroupRoot = strings.TrimSpace(getenv("CR_GROUP_ROOT"))
 	if cfg.Session.GroupRoot == "" {
 		cfg.Session.GroupRoot = DefaultGroupRoot
 	}
@@ -760,7 +780,7 @@ func Load() (Config, error) {
 	}
 
 	// Rate limit
-	if v := os.Getenv("CR_RATE_LIMIT_PER_MINUTE"); v != "" {
+	if v := getenv("CR_RATE_LIMIT_PER_MINUTE"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
 			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_PER_MINUTE: %q (want non-negative integer)", v)
@@ -771,7 +791,7 @@ func Load() (Config, error) {
 	// Inbound inbox request body limit. This is strict and always enabled: a
 	// non-positive or non-integer value is a startup error rather than a silent
 	// unlimited-body fallback.
-	if v := os.Getenv("CR_INBOX_MAX_BODY_BYTES"); v != "" {
+	if v := getenv("CR_INBOX_MAX_BODY_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_INBOX_MAX_BODY_BYTES: %q (want positive integer)", v)
@@ -784,7 +804,7 @@ func Load() (Config, error) {
 	// delivery path is identical to a build without the feature, which is the
 	// contract this row was filed under. A negative value is a startup error
 	// rather than a silent "disabled", because "off" already has a spelling.
-	if v := os.Getenv("CR_RATE_LIMIT_GLOBAL_PER_MINUTE"); v != "" {
+	if v := getenv("CR_RATE_LIMIT_GLOBAL_PER_MINUTE"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
 			return cfg, fmt.Errorf("invalid CR_RATE_LIMIT_GLOBAL_PER_MINUTE: %q (want non-negative integer)", v)
@@ -793,23 +813,23 @@ func Load() (Config, error) {
 	}
 
 	// WebSocket allowed origins (comma-separated, "*" = allow all)
-	cfg.WSAllowedOrigins = os.Getenv("CR_WS_ALLOWED_ORIGINS")
+	cfg.WSAllowedOrigins = getenv("CR_WS_ALLOWED_ORIGINS")
 
 	// Federation (CR-FEAT-006): relay-to-relay links, comma-separated base
 	// URLs. Empty = federation disabled (deliveries to unknown agents 404
 	// as before).
-	if v := os.Getenv("CR_FED_LINKS"); v != "" {
+	if v := getenv("CR_FED_LINKS"); v != "" {
 		cfg.Federation.Links = splitTrim(v)
 	}
-	cfg.Federation.Name = os.Getenv("CR_FED_NAME")
+	cfg.Federation.Name = getenv("CR_FED_NAME")
 	// CR_FED_TOKEN (DF-CRIER-6): optional shared secret for outbound link
 	// auth, sent as "Authorization: Bearer <token>" to linked relays. Empty
 	// (default) = unauthenticated links, as before. Never logged or served.
-	cfg.Federation.Token = os.Getenv("CR_FED_TOKEN")
+	cfg.Federation.Token = getenv("CR_FED_TOKEN")
 	// CR_FED_MAX_HOLD_S (DF-CRIER-7, spec §8/§9): how long a delivery whose
 	// links are all transiently down is held at this relay before the sender
 	// gets an explicit FEDERATION_FAILED outcome. Default 300s.
-	if v := os.Getenv("CR_FED_MAX_HOLD_S"); v != "" {
+	if v := getenv("CR_FED_MAX_HOLD_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_FED_MAX_HOLD_S: %q (want positive seconds)", v)
@@ -819,27 +839,27 @@ func Load() (Config, error) {
 	// CR_FED_QUEUE_FILE (DF-CRIER-7): path of the durable hold-queue
 	// document. Unset (default) keeps held deliveries in process memory
 	// only, matching the in-memory registry backend contract.
-	cfg.Federation.QueueFile = os.Getenv("CR_FED_QUEUE_FILE")
+	cfg.Federation.QueueFile = getenv("CR_FED_QUEUE_FILE")
 	// CR_FED_PEERS_FILE (CR-CHAT-023): path of the per-peer policy document.
 	// Unset (default) configures no peers — federation behaves exactly as
 	// before peer policies existed.
-	cfg.Federation.PeersFile = os.Getenv("CR_FED_PEERS_FILE")
+	cfg.Federation.PeersFile = getenv("CR_FED_PEERS_FILE")
 	// CR_FED_AUTH_FILE (CR-CHAT-024): path of the peer-identity +
 	// revocation document. Empty keeps federation auth on the shipped
 	// shared-secret posture; set, it arms the signature gate on requests
 	// announcing a peer identity.
-	cfg.Federation.AuthFile = os.Getenv("CR_FED_AUTH_FILE")
+	cfg.Federation.AuthFile = getenv("CR_FED_AUTH_FILE")
 	// CR_FED_SELF_KEY_FILE (CR-CHAT-024): path of this relay's own hex
 	// ed25519 seed, used to sign outbound forwards (mutual auth).
-	cfg.Federation.SelfKeyFile = os.Getenv("CR_FED_SELF_KEY_FILE")
-	if v := os.Getenv("CR_FED_REQUIRE_PEER"); v != "" {
+	cfg.Federation.SelfKeyFile = getenv("CR_FED_SELF_KEY_FILE")
+	if v := getenv("CR_FED_REQUIRE_PEER"); v != "" {
 		parsed, err := parseTolerantBool("CR_FED_REQUIRE_PEER", v)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.Federation.RequirePeer = parsed
 	}
-	cfg.Federation.RecordsFile = os.Getenv("CR_FED_RECORDS_FILE")
+	cfg.Federation.RecordsFile = getenv("CR_FED_RECORDS_FILE")
 	if cfg.Federation.RecordsFile == "auto" {
 		base := cfg.Federation.QueueFile
 		if base == "" {
@@ -848,15 +868,15 @@ func Load() (Config, error) {
 		cfg.Federation.RecordsFile = filepath.Join(filepath.Dir(base), "federation-peers.json")
 	}
 
-	cfg.ServiceDeliveryAllowlist = os.Getenv("CR_SERVICE_DELIVERY_ALLOWLIST")
+	cfg.ServiceDeliveryAllowlist = getenv("CR_SERVICE_DELIVERY_ALLOWLIST")
 	if _, err := registry.ParseServiceDeliveryAllowlist(cfg.ServiceDeliveryAllowlist); err != nil {
 		return cfg, err
 	}
-	cfg.ServiceDeliveryAudience = os.Getenv("CR_SERVICE_DELIVERY_AUDIENCE")
+	cfg.ServiceDeliveryAudience = getenv("CR_SERVICE_DELIVERY_AUDIENCE")
 
 	// Per-agent request signing enforcement. Default true (secure).
 	// Set CR_REQUIRE_AGENT_SIG=false only for trusted single-user setups.
-	if v := os.Getenv("CR_REQUIRE_AGENT_SIG"); v != "" {
+	if v := getenv("CR_REQUIRE_AGENT_SIG"); v != "" {
 		parsed, err := parseTolerantBool("CR_REQUIRE_AGENT_SIG", v)
 		if err != nil {
 			return cfg, err
@@ -870,7 +890,7 @@ func Load() (Config, error) {
 	// client at once instead of asking the operator to opt in. When on, a
 	// connecting agent must hold the private half of the key the registry
 	// holds for the id in the connect URL.
-	if v := os.Getenv("CR_REQUIRE_MESH_AUTH"); v != "" {
+	if v := getenv("CR_REQUIRE_MESH_AUTH"); v != "" {
 		parsed, err := parseTolerantBool("CR_REQUIRE_MESH_AUTH", v)
 		if err != nil {
 			return cfg, err
@@ -880,7 +900,7 @@ func Load() (Config, error) {
 	// CR_MESH_AUTH_TIMEOUT_S bounds the challenge/response. Unset leaves the
 	// zero value, which the mesh resolves to its own default
 	// (mesh.DefaultMeshAuthTimeout) — one constant, not a copy of it here.
-	if v := os.Getenv("CR_MESH_AUTH_TIMEOUT_S"); v != "" {
+	if v := getenv("CR_MESH_AUTH_TIMEOUT_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_MESH_AUTH_TIMEOUT_S: %q (want positive seconds)", v)
@@ -890,7 +910,7 @@ func Load() (Config, error) {
 	// CR_MESH_ALLOWED_ORIGINS is the MESH-ONLY origin allowlist, separate from
 	// CR_WS_ALLOWED_ORIGINS (which also covers the relay). Unset (default)
 	// allows every origin, as the mesh always has.
-	cfg.MeshAllowedOrigins = os.Getenv("CR_MESH_ALLOWED_ORIGINS")
+	cfg.MeshAllowedOrigins = getenv("CR_MESH_ALLOWED_ORIGINS")
 
 	// CR_PRESENCE_STALE_AFTER_S is how long a registry row may go without
 	// liveness evidence before the status reported for it becomes "stale"
@@ -900,7 +920,7 @@ func Load() (Config, error) {
 	// a window of 0 would report every row stale the instant its last
 	// heartbeat was a millisecond old, which is a broken presence signal
 	// masquerading as a strict one (the fail-closed direction is wrong here).
-	if v := os.Getenv("CR_PRESENCE_STALE_AFTER_S"); v != "" {
+	if v := getenv("CR_PRESENCE_STALE_AFTER_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_PRESENCE_STALE_AFTER_S: %q (want positive seconds)", v)
@@ -915,7 +935,7 @@ func Load() (Config, error) {
 	// here. A non-positive value is refused rather than honored: a window of 0
 	// would silently mean "deduplicate nothing", which is the feature being
 	// absent while the deliver schema still documents it.
-	if v := os.Getenv("CR_IDEMPOTENCY_WINDOW_S"); v != "" {
+	if v := getenv("CR_IDEMPOTENCY_WINDOW_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_IDEMPOTENCY_WINDOW_S: %q (want positive seconds)", v)
@@ -924,36 +944,36 @@ func Load() (Config, error) {
 	}
 
 	// Webhook delivery tuning (specs/WEBHOOK-DELIVERY.md §9).
-	cfg.Webhook.Secret = os.Getenv("CR_WEBHOOK_SECRET")
-	if v := os.Getenv("CR_WEBHOOK_TIMEOUT_S"); v != "" {
+	cfg.Webhook.Secret = getenv("CR_WEBHOOK_SECRET")
+	if v := getenv("CR_WEBHOOK_TIMEOUT_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_TIMEOUT_S: %q", v)
 		}
 		cfg.Webhook.Timeout = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_WEBHOOK_MAX_RETRIES"); v != "" {
+	if v := getenv("CR_WEBHOOK_MAX_RETRIES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_MAX_RETRIES: %q", v)
 		}
 		cfg.Webhook.MaxRetries = n
 	}
-	if v := os.Getenv("CR_WEBHOOK_REDELIVER_S"); v != "" {
+	if v := getenv("CR_WEBHOOK_REDELIVER_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_REDELIVER_S: %q", v)
 		}
 		cfg.Webhook.RedeliverEvery = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_WEBHOOK_PROBE_S"); v != "" {
+	if v := getenv("CR_WEBHOOK_PROBE_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_PROBE_S: %q", v)
 		}
 		cfg.Webhook.ProbeEvery = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_WEBHOOK_CIRCUIT_THRESHOLD"); v != "" {
+	if v := getenv("CR_WEBHOOK_CIRCUIT_THRESHOLD"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_CIRCUIT_THRESHOLD: %q", v)
@@ -962,14 +982,14 @@ func Load() (Config, error) {
 	}
 	// Batch flush controls (CR-FEAT-005): per-agent registration values
 	// override these defaults at delivery time.
-	if v := os.Getenv("CR_WEBHOOK_BATCH_MAX"); v != "" {
+	if v := getenv("CR_WEBHOOK_BATCH_MAX"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_BATCH_MAX: %q", v)
 		}
 		cfg.Webhook.BatchMaxMessages = n
 	}
-	if v := os.Getenv("CR_WEBHOOK_BATCH_FLUSH_S"); v != "" {
+	if v := getenv("CR_WEBHOOK_BATCH_FLUSH_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_WEBHOOK_BATCH_FLUSH_S: %q", v)
@@ -978,56 +998,56 @@ func Load() (Config, error) {
 	}
 
 	// LLM message guard (CR-FEAT-010, spec §9.1).
-	if v := os.Getenv("CR_GUARD_ENABLED"); v != "" {
+	if v := getenv("CR_GUARD_ENABLED"); v != "" {
 		parsed, err := parseTolerantBool("CR_GUARD_ENABLED", v)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.Guard.Enabled = parsed
 	}
-	if v := os.Getenv("CR_GUARD_TIMEOUT_MS"); v != "" {
+	if v := getenv("CR_GUARD_TIMEOUT_MS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_TIMEOUT_MS: %q", v)
 		}
 		cfg.Guard.Timeout = time.Duration(n) * time.Millisecond
 	}
-	if v := os.Getenv("CR_GUARD_MAX_CONCURRENT"); v != "" {
+	if v := getenv("CR_GUARD_MAX_CONCURRENT"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_MAX_CONCURRENT: %q", v)
 		}
 		cfg.Guard.MaxConcurrent = n
 	}
-	if v := os.Getenv("CR_GUARD_CIRCUIT_THRESHOLD"); v != "" {
+	if v := getenv("CR_GUARD_CIRCUIT_THRESHOLD"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_CIRCUIT_THRESHOLD: %q", v)
 		}
 		cfg.Guard.CircuitThreshold = n
 	}
-	if v := os.Getenv("CR_GUARD_CIRCUIT_COOLDOWN_S"); v != "" {
+	if v := getenv("CR_GUARD_CIRCUIT_COOLDOWN_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_CIRCUIT_COOLDOWN_S: %q", v)
 		}
 		cfg.Guard.CircuitCooldown = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_GUARD_MAX_PAYLOAD_BYTES"); v != "" {
+	if v := getenv("CR_GUARD_MAX_PAYLOAD_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_MAX_PAYLOAD_BYTES: %q", v)
 		}
 		cfg.Guard.MaxPayloadBytes = n
 	}
-	if v := os.Getenv("CR_GUARD_RENDER_MAX_BYTES"); v != "" {
+	if v := getenv("CR_GUARD_RENDER_MAX_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_GUARD_RENDER_MAX_BYTES: %q", v)
 		}
 		cfg.Guard.RenderMaxBytes = n
 	}
-	if v := os.Getenv("CR_GUARD_KANBAN_QUEUE"); v != "" {
+	if v := getenv("CR_GUARD_KANBAN_QUEUE"); v != "" {
 		// CR-FEAT-014 (spec §8.2): kanban worker queue capacity. The
 		// worker itself is enabled per-policy via policy.kanban.enabled.
 		n, err := strconv.Atoi(v)
@@ -1040,31 +1060,31 @@ func Load() (Config, error) {
 	// = the Hermes kanban CLI writer. Scheme validation (http/https) is
 	// deferred to writer construction in cmd/server — it fails fast there
 	// (spec §9.1) when the value is set but unusable.
-	cfg.Guard.KanbanURL = os.Getenv("CR_GUARD_KANBAN_URL")
-	if v := os.Getenv("CR_GUARD_DEEPSEEK_BASE_URL"); v != "" {
+	cfg.Guard.KanbanURL = getenv("CR_GUARD_KANBAN_URL")
+	if v := getenv("CR_GUARD_DEEPSEEK_BASE_URL"); v != "" {
 		cfg.Guard.DeepSeekBaseURL = v
 	}
-	if v := os.Getenv("CR_GUARD_MODEL"); v != "" {
+	if v := getenv("CR_GUARD_MODEL"); v != "" {
 		cfg.Guard.Model = v
 	}
 	// CR_GUARD_PATTERNS_EXTRA is passed through; it is parsed and validated
 	// by guard.New at startup (a broken pattern table fails fast, spec §9.1).
-	cfg.Guard.ExtraPatterns = os.Getenv("CR_GUARD_PATTERNS_EXTRA")
+	cfg.Guard.ExtraPatterns = getenv("CR_GUARD_PATTERNS_EXTRA")
 	// CR_GUARD_DEFAULT_POLICY is passed through; parsed + validated by
 	// guard.New at startup (a broken server default fails fast, spec §9.1).
-	cfg.Guard.DefaultPolicy = os.Getenv("CR_GUARD_DEFAULT_POLICY")
+	cfg.Guard.DefaultPolicy = getenv("CR_GUARD_DEFAULT_POLICY")
 
 	// Opt-in live-inspection surfaces (DF-CRIER-142). Same tolerant bool
 	// dialect as CR_REQUIRE_AGENT_SIG / CR_GUARD_ENABLED; default false, so
 	// an unset flag leaves the surface unregistered (404).
-	if v := os.Getenv("CR_ENABLE_PPROF"); v != "" {
+	if v := getenv("CR_ENABLE_PPROF"); v != "" {
 		parsed, err := parseTolerantBool("CR_ENABLE_PPROF", v)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.Observability.EnablePProf = parsed
 	}
-	if v := os.Getenv("CR_ENABLE_METRICS"); v != "" {
+	if v := getenv("CR_ENABLE_METRICS"); v != "" {
 		parsed, err := parseTolerantBool("CR_ENABLE_METRICS", v)
 		if err != nil {
 			return cfg, err
@@ -1078,7 +1098,7 @@ func Load() (Config, error) {
 	// The value is carried here only — no surface reads it yet, and the
 	// per-agent half of the gate is the optional `a2a` block on a registry
 	// row (§4.2).
-	if v := os.Getenv("CR_A2A_ENABLED"); v != "" {
+	if v := getenv("CR_A2A_ENABLED"); v != "" {
 		parsed, err := parseTolerantBool("CR_A2A_ENABLED", v)
 		if err != nil {
 			return cfg, err
@@ -1089,15 +1109,15 @@ func Load() (Config, error) {
 	// Detection & containment (CR-FEAT-030, specs/DETECTION.md). OPT-IN: with
 	// CR_DETECT_ENABLED unset the server registers no detection route, writes
 	// no log and behaves exactly as before.
-	if v := os.Getenv("CR_DETECT_ENABLED"); v != "" {
+	if v := getenv("CR_DETECT_ENABLED"); v != "" {
 		parsed, err := parseTolerantBool("CR_DETECT_ENABLED", v)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.Detection.Enabled = parsed
 	}
-	cfg.Detection.LogPath = os.Getenv("CR_DETECT_LOG")
-	cfg.Detection.KeyPath = os.Getenv("CR_DETECT_KEY")
+	cfg.Detection.LogPath = getenv("CR_DETECT_LOG")
+	cfg.Detection.KeyPath = getenv("CR_DETECT_KEY")
 	// The quiet window is the one detection setting whose DEFAULT is a value
 	// rather than "whatever internal/detect resolves": the zero pair would be
 	// ambiguous between "unset" and "disabled", so the documented window is
@@ -1111,35 +1131,35 @@ func Load() (Config, error) {
 	if cfg.Detection.LogPath != "" && cfg.Detection.KeyPath == "" {
 		cfg.Detection.KeyPath = cfg.Detection.LogPath + ".key"
 	}
-	if v := os.Getenv("CR_DETECT_FANOUT_WINDOW_S"); v != "" {
+	if v := getenv("CR_DETECT_FANOUT_WINDOW_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DETECT_FANOUT_WINDOW_S: %q (want positive seconds)", v)
 		}
 		cfg.Detection.FanoutWindow = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_DETECT_FANOUT_MIN_TARGETS"); v != "" {
+	if v := getenv("CR_DETECT_FANOUT_MIN_TARGETS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DETECT_FANOUT_MIN_TARGETS: %q (want a positive count)", v)
 		}
 		cfg.Detection.FanoutMinTargets = n
 	}
-	if v := os.Getenv("CR_DETECT_NEWPEER_WINDOW_S"); v != "" {
+	if v := getenv("CR_DETECT_NEWPEER_WINDOW_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DETECT_NEWPEER_WINDOW_S: %q (want positive seconds)", v)
 		}
 		cfg.Detection.NewPeerWindow = time.Duration(n) * time.Second
 	}
-	if v := os.Getenv("CR_DETECT_NEWPEER_MIN_TARGETS"); v != "" {
+	if v := getenv("CR_DETECT_NEWPEER_MIN_TARGETS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DETECT_NEWPEER_MIN_TARGETS: %q (want a positive count)", v)
 		}
 		cfg.Detection.NewPeerMinTargets = n
 	}
-	if v := os.Getenv("CR_DETECT_QUIET_HOURS"); v != "" {
+	if v := getenv("CR_DETECT_QUIET_HOURS"); v != "" {
 		start, end, err := parseHourRange("CR_DETECT_QUIET_HOURS", v)
 		if err != nil {
 			return cfg, err
@@ -1147,14 +1167,14 @@ func Load() (Config, error) {
 		cfg.Detection.QuietStartHour = start
 		cfg.Detection.QuietEndHour = end
 	}
-	if v := os.Getenv("CR_DETECT_QUIET_MIN_MESSAGES"); v != "" {
+	if v := getenv("CR_DETECT_QUIET_MIN_MESSAGES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return cfg, fmt.Errorf("invalid CR_DETECT_QUIET_MIN_MESSAGES: %q (want a positive count)", v)
 		}
 		cfg.Detection.QuietMinMessages = n
 	}
-	if v := os.Getenv("CR_CANARY_TOKENS"); v != "" {
+	if v := getenv("CR_CANARY_TOKENS"); v != "" {
 		for _, tok := range splitTrim(v) {
 			cfg.Detection.CanaryTokens = append(cfg.Detection.CanaryTokens, tok)
 		}
@@ -1165,8 +1185,8 @@ func Load() (Config, error) {
 	// rule enforced HERE is that the two spellings cannot both be set, because
 	// a silent precedence rule is exactly the kind of ambiguity that makes an
 	// operator read the source to find out which realm is live.
-	cfg.Namespaces.Inline = os.Getenv("CR_NAMESPACES")
-	cfg.Namespaces.File = os.Getenv("CR_NAMESPACES_FILE")
+	cfg.Namespaces.Inline = getenv("CR_NAMESPACES")
+	cfg.Namespaces.File = getenv("CR_NAMESPACES_FILE")
 	if strings.TrimSpace(cfg.Namespaces.Inline) != "" && strings.TrimSpace(cfg.Namespaces.File) != "" {
 		return cfg, fmt.Errorf("CR_NAMESPACES and CR_NAMESPACES_FILE are both set — declare the namespace document in exactly one place")
 	}
@@ -1175,18 +1195,18 @@ func Load() (Config, error) {
 	// default OFF: with CR_PERMISSIONS_ENABLED unset no checker is wired and
 	// the delivery path is byte-identical to a build without this feature.
 	// Same tolerant bool dialect as CR_GUARD_ENABLED / CR_A2A_ENABLED.
-	if v := os.Getenv("CR_PERMISSIONS_ENABLED"); v != "" {
+	if v := getenv("CR_PERMISSIONS_ENABLED"); v != "" {
 		parsed, err := parseTolerantBool("CR_PERMISSIONS_ENABLED", v)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.Permissions.Enabled = parsed
 	}
-	cfg.Permissions.StoreDir = os.Getenv("CR_PERMISSIONS_DIR")
+	cfg.Permissions.StoreDir = getenv("CR_PERMISSIONS_DIR")
 	if cfg.Permissions.Enabled && strings.TrimSpace(cfg.Permissions.StoreDir) == "" {
 		cfg.Permissions.StoreDir = defaultPermissionsDir
 	}
-	cfg.Permissions.AdminToken = os.Getenv("CR_PERMISSIONS_ADMIN_TOKEN")
+	cfg.Permissions.AdminToken = getenv("CR_PERMISSIONS_ADMIN_TOKEN")
 	// DF-CRIER-297: CR_PERMISSIONS_ADMIN_TOKEN is a SECOND secret, deliberately
 	// distinct from CR_AUTH_TOKEN (see PermissionsConfig.AdminToken). Set to the
 	// same value the two roles collapse into one credential — the message token
@@ -1206,22 +1226,22 @@ func Load() (Config, error) {
 	// /dagger route, so the served surface is exactly what it was before this
 	// feature existed. The interval and timeout are validated even when the
 	// surface is off, so a typo is named rather than silently ignored.
-	poll, pollSet, err := parseSeconds("CR_DAGGER_POLL_S", os.Getenv("CR_DAGGER_POLL_S"))
+	poll, pollSet, err := parseSeconds("CR_DAGGER_POLL_S", getenv("CR_DAGGER_POLL_S"))
 	if err != nil {
 		return cfg, err
 	}
-	timeout, timeoutSet, err := parseSeconds("CR_DAGGER_TIMEOUT_S", os.Getenv("CR_DAGGER_TIMEOUT_S"))
+	timeout, timeoutSet, err := parseSeconds("CR_DAGGER_TIMEOUT_S", getenv("CR_DAGGER_TIMEOUT_S"))
 	if err != nil {
 		return cfg, err
 	}
-	cfg.Dagger.URL = strings.TrimSpace(os.Getenv("CR_DAGGER_URL"))
-	cfg.Dagger.Token = os.Getenv("CR_DAGGER_TOKEN")
-	cfg.Dagger.StoreDir = strings.TrimSpace(os.Getenv("CR_DAGGER_STORE_DIR"))
+	cfg.Dagger.URL = strings.TrimSpace(getenv("CR_DAGGER_URL"))
+	cfg.Dagger.Token = getenv("CR_DAGGER_TOKEN")
+	cfg.Dagger.StoreDir = strings.TrimSpace(getenv("CR_DAGGER_STORE_DIR"))
 	// Task-created DAG trigger (CR-CHAT-034). Opt-in like the surface itself:
 	// an empty value arms nothing, and the trigger only exists when the dagger
 	// surface is configured at all (it fires THROUGH the bridge).
-	cfg.Dagger.TriggerOnTask = strings.TrimSpace(os.Getenv("CR_DAGGER_TRIGGER_ON_TASK"))
-	cfg.Dagger.TriggerAgent = strings.TrimSpace(os.Getenv("CR_DAGGER_TRIGGER_AGENT"))
+	cfg.Dagger.TriggerOnTask = strings.TrimSpace(getenv("CR_DAGGER_TRIGGER_ON_TASK"))
+	cfg.Dagger.TriggerAgent = strings.TrimSpace(getenv("CR_DAGGER_TRIGGER_AGENT"))
 	if cfg.Dagger.URL != "" {
 		if cfg.Dagger.StoreDir == "" {
 			cfg.Dagger.StoreDir = defaultDaggerStoreDir

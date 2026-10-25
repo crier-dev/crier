@@ -84,6 +84,7 @@ func df297JSON(t *testing.T, body string) map[string]any {
 // reaches the relay, the inbox and the mesh — and the admin token is refused
 // everywhere outside the management surface.
 func TestManagementRoutesWithDualTokens(t *testing.T) {
+	parallelBoot(t)
 	// CR_REQUIRE_AGENT_SIG is off so the inbox leg exercises the AUTH
 	// middleware rather than failing on the per-agent ed25519 signature the
 	// documented dev shortcut disables; the management legs are unaffected by

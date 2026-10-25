@@ -22,6 +22,7 @@ import (
 // Docker or existing database connection. It skips explicitly when local
 // binaries are unavailable (or initdb cannot run as the current root user).
 func TestDispatchPostgresSerializedRoundTripsAndLegacyMigration(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("scratch initdb refuses root; run as an unprivileged user")
 	}

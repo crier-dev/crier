@@ -139,6 +139,7 @@ func TestStatusStorePostureNamesTheLegacyAliasItIgnores(t *testing.T) {
 // jsonl store. This is the "never reads durable" half of the acceptance
 // criteria — a store that is not opened cannot have written the file.
 func TestMismatchedStorePostureLiveNeverOpensTheNamedFiles(t *testing.T) {
+	parallelBoot(t)
 	root := t.TempDir()
 	sessionPath := filepath.Join(root, "sessions.db")
 	registryPath := filepath.Join(root, "registry.db")

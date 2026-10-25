@@ -12,6 +12,7 @@ import (
 )
 
 func TestSessionParticipantAdmissionAndLegacyPartialSend(t *testing.T) {
+	parallelBoot(t)
 	root := t.TempDir()
 	base, room, calls, envelopes := sessionDispatchFixtureAtRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"reply":"Echo answer"}`)) }), "allow", root)
 	code, raw := sessionDo(t, http.DefaultClient, http.MethodPost, base+"/agents", map[string]any{"id": "speaker", "public_key": strings.Repeat("cd", 32)}, nil)

@@ -21,6 +21,7 @@ func TestChatLateJoinTruth(t *testing.T) {
 }
 
 func TestChatLateJoinBrowser(t *testing.T) {
+	parallelBoot(t)
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required for the late-join browser regression")

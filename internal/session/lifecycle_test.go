@@ -112,6 +112,7 @@ func lifecycleContract(t *testing.T, open func() Repository) {
 }
 
 func TestSessionLifecycleDurable(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			path := b.pathFn(t)
@@ -121,6 +122,7 @@ func TestSessionLifecycleDurable(t *testing.T) {
 }
 
 func TestSessionLifecyclePostgres(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("CRIER_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("PostgreSQL lifecycle integration skipped: CRIER_TEST_POSTGRES_DSN is not configured (must name an isolated test database)")
@@ -159,6 +161,7 @@ func TestSessionLifecyclePostgres(t *testing.T) {
 }
 
 func TestSessionLifecycleMemorySQLite(t *testing.T) {
+	t.Parallel()
 	repo, err := NewSQLiteStore(":memory:")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, repo.Close()) }()
@@ -174,6 +177,7 @@ func TestSessionLifecycleMemorySQLite(t *testing.T) {
 }
 
 func TestSessionLifecycleConcurrentClose(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			path := b.pathFn(t)
@@ -215,6 +219,7 @@ func TestSessionLifecycleConcurrentClose(t *testing.T) {
 }
 
 func TestSessionLifecycleSQLAtomicRollback(t *testing.T) {
+	t.Parallel()
 	repo := newTestSQLiteStore(t)
 	h := newAPIHarness(t, repo)
 	room := h.createRoom(t)
@@ -234,6 +239,7 @@ func TestSessionLifecycleSQLAtomicRollback(t *testing.T) {
 }
 
 func TestSessionLifecycleIngressProof(t *testing.T) {
+	t.Parallel()
 	repo := newTestSQLiteStore(t)
 	h := newAPIHarness(t, repo)
 	room := h.createRoom(t)
@@ -277,6 +283,7 @@ func TestSessionLifecycleIngressProof(t *testing.T) {
 }
 
 func TestSessionLifecycleAdminRequired(t *testing.T) {
+	t.Parallel()
 	for _, b := range localBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			repo := b.open(t, b.pathFn(t))

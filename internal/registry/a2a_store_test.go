@@ -29,6 +29,7 @@ func testA2AConfig() *a2a.Config {
 // the INSERT args — the column set is pinned by the ExpectExec SQL regex, so a
 // statement that loses the column fails here too.
 func TestPostgresStoreUnit_Register_PersistsA2A(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.A2A = testA2AConfig()
@@ -47,6 +48,7 @@ func TestPostgresStoreUnit_Register_PersistsA2A(t *testing.T) {
 // the block writes SQL NULL (a nil arg) — never an empty object, which would
 // read back as "opted out" rather than "absent".
 func TestPostgresStoreUnit_Register_NilA2AWritesNull(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 
@@ -62,6 +64,7 @@ func TestPostgresStoreUnit_Register_NilA2AWritesNull(t *testing.T) {
 // TestPostgresStoreUnit_Update_WritesAndClearsA2A: the UPDATE carries the block
 // and an explicit clear writes SQL NULL into that column instead of skipping it.
 func TestPostgresStoreUnit_Update_WritesAndClearsA2A(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	ag := testAgent(t)
 	ag.A2A = testA2AConfig()
@@ -84,6 +87,7 @@ func TestPostgresStoreUnit_Update_WritesAndClearsA2A(t *testing.T) {
 // TestPostgresStoreUnit_Get_DecodesA2A: the read path decodes a stored block
 // (Get) and reads a NULL column back as an absent one.
 func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	pub := make([]byte, 32)
 
@@ -120,6 +124,7 @@ func TestPostgresStoreUnit_Get_DecodesA2A(t *testing.T) {
 // TestPostgresStoreUnit_Get_InvalidA2AJSON: an unreadable stored document is an
 // error, not an agent silently served without its opt-in.
 func TestPostgresStoreUnit_Get_InvalidA2AJSON(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	now := time.Now().UTC()
 	pub := make([]byte, 32)

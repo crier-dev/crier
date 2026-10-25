@@ -46,6 +46,7 @@ func outcomeFailureHarness(t *testing.T, store Repository, reg *registry.MemoryS
 }
 
 func TestOutcomeMissingReplayAcrossBackends(t *testing.T) {
+	t.Parallel()
 	for _, backend := range localBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			path := backend.pathFn(t)

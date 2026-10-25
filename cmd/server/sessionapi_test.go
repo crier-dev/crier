@@ -17,6 +17,7 @@ import (
 // one exists so a route that is built but never registered fails here rather
 // than only in a client.
 func TestSessionAPIRoutesServed(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND":  "jsonl",
 		"CR_SESSION_LOG_ROOT": t.TempDir(),
@@ -76,6 +77,7 @@ func TestSessionAPIRoutesServed(t *testing.T) {
 // internal/session/compile_test.go; this one exists so a route that is built but
 // never registered fails here rather than only in a client.
 func TestSessionAPICompileRoutesServed(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND":   "jsonl",
 		"CR_REQUIRE_AGENT_SIG": "false", // unsigned fixture tests compile routes

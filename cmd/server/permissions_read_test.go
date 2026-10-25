@@ -28,6 +28,7 @@ func permissionsReadServer(t *testing.T) (string, string, *http.Client) {
 }
 
 func TestPermissionsReadRoundTrip(t *testing.T) {
+	parallelBoot(t)
 	base, dir, client := permissionsReadServer(t)
 	post := func(path, body string) map[string]any {
 		t.Helper()
@@ -135,6 +136,7 @@ func TestPermissionsReadRoundTrip(t *testing.T) {
 }
 
 func TestPermissionsReadEmptyAndAdminGate(t *testing.T) {
+	parallelBoot(t)
 	base, dir, client := permissionsReadServer(t)
 	// buildPermissions creates a directory at boot, not a log. Remove that empty
 	// directory to prove a GET does not create EITHER the directory or the file.

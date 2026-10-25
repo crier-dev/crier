@@ -17,6 +17,7 @@ import (
 // one exists so a route that is built but never registered fails here rather
 // than only in a client.
 func TestGroupAPIRoutesServed(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_LOG_ROOT": t.TempDir(),
 		"CR_GROUP_ROOT":       t.TempDir(),
@@ -91,6 +92,7 @@ type groupJSON struct {
 // length of a returned roster, so the count assertions here are over members the
 // server actually stored — an empty group reads 0, never "unknown".
 func TestGroupAPICreateListAndRoster(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_LOG_ROOT": t.TempDir(),
 		"CR_GROUP_ROOT":       t.TempDir(),
@@ -169,6 +171,7 @@ func TestGroupAPICreateListAndRoster(t *testing.T) {
 // count, a roster read and an address picker, and it must obtain a group's size
 // from the members the server returned (groupMembers) rather than a literal.
 func TestGroupConsoleSurfaceServed(t *testing.T) {
+	parallelBoot(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_LOG_ROOT": t.TempDir(),
 		"CR_GROUP_ROOT":       t.TempDir(),

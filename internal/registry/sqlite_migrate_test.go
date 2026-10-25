@@ -47,10 +47,12 @@ func checkSQLiteMigrationChain(t *testing.T, source fs.FS) error {
 }
 
 func TestSQLiteMigrationChainSyntax(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, checkSQLiteMigrationChain(t, migrationFS))
 }
 
 func TestSQLiteMigrationChainSyntaxRejectsBrokenFixture(t *testing.T) {
+	t.Parallel()
 	files, err := fs.Glob(migrationFS, "migrations/*.up.sql")
 	require.NoError(t, err)
 	fixture := fstest.MapFS{}
@@ -92,6 +94,7 @@ func assertSQLiteMigrationVersions(t *testing.T, s *SQLiteStore) {
 }
 
 func TestSQLiteFullChainRegisterReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "registry.db")
 	s, err := NewSQLiteStore(path)
 	require.NoError(t, err)
@@ -139,6 +142,7 @@ func sqliteMigrationFixture(t *testing.T, through int) (string, *sql.DB) {
 // Freeze the actual pre-trust schema at version 16, not latest-1: a new
 // migration must never silently move this fixture's historical boundary.
 func TestSQLiteMigration017UpgradePreservesAgent(t *testing.T) {
+	t.Parallel()
 	path, db := sqliteMigrationFixture(t, 16)
 	var n int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='trust_anchors'`).Scan(&n))
@@ -158,6 +162,7 @@ func TestSQLiteMigration017UpgradePreservesAgent(t *testing.T) {
 }
 
 func TestSQLiteMigration017Constraints(t *testing.T) {
+	t.Parallel()
 	s := newTestSQLiteStore(t)
 	key, sig := strings.Repeat("a1", 32), strings.Repeat("b2", 64)
 	for _, bad := range []string{"", "abc", strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("g", 64), strings.Repeat("A", 64), key + "\x00junk", "a\x00" + strings.Repeat("g", 62)} {

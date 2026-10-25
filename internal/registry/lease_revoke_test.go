@@ -12,6 +12,7 @@ import (
 // an ACKed message is not resurrected, and an agent with nothing leased answers
 // 0 rather than failing.
 func TestMemoryStoreRevokeLeasesReturnsMessagesToTheQueue(t *testing.T) {
+	t.Parallel()
 	s := NewMemoryStore()
 	if err := s.Register(&Agent{ID: "a"}); err != nil {
 		t.Fatal(err)
@@ -79,6 +80,7 @@ func TestMemoryStoreRevokeLeasesReturnsMessagesToTheQueue(t *testing.T) {
 // message's TTL still applies, so a contained agent's backlog does not become
 // immortal.
 func TestMemoryStoreRevokeLeasesLeavesExpiryAlone(t *testing.T) {
+	t.Parallel()
 	s := NewMemoryStore()
 	if err := s.Register(&Agent{ID: "a"}); err != nil {
 		t.Fatal(err)
@@ -106,6 +108,7 @@ func TestMemoryStoreRevokeLeasesLeavesExpiryAlone(t *testing.T) {
 // all three lease columns cleared together (the table's CHECK constraint
 // requires it), scoped to the agent, and only where a lease exists.
 func TestPostgresStoreRevokeLeasesSQL(t *testing.T) {
+	t.Parallel()
 	s, mock := newMockStore(t)
 	if _, err := s.RevokeLeases(""); err != ErrInvalidStoreInput {
 		t.Fatalf("RevokeLeases(\"\") = %v, want ErrInvalidStoreInput", err)

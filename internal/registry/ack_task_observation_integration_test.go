@@ -11,10 +11,12 @@ import (
 )
 
 func TestAckTaskObservationPostgres(t *testing.T) {
+	t.Parallel()
 	testAckTaskObservation(t, newTestStore(t))
 }
 
 func TestAckTaskObservationPostgresRollback(t *testing.T) {
+	t.Parallel()
 	store := newTestStore(t)
 	require.NoError(t, store.Register(testAgent(t)))
 	ctx := context.Background()

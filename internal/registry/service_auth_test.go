@@ -74,6 +74,7 @@ func serviceHeaders(key ed25519.PrivateKey, sender, method, path, body string, a
 }
 
 func TestServiceDeliveryAllowedAndSelfOnlyReads(t *testing.T) {
+	t.Parallel()
 	h, keys := serviceHarness(t)
 	h.handler.SetRequireAgentSig(true)
 	for _, pair := range [][2]string{{"scheduler", "router"}, {"router", "scheduler"}} {
@@ -110,6 +111,7 @@ func TestServiceDeliveryAllowedAndSelfOnlyReads(t *testing.T) {
 }
 
 func TestServiceDeliveryRejectsBeforeEffects(t *testing.T) {
+	t.Parallel()
 	cases := []string{"missing", "missing digest", "empty digest", "wrong digest", "legacy signature", "uppercase digest", "tampered body", "invalid signature", "forged key", "keyless", "stale", "future", "invalid timestamp", "sender mismatch", "missing sender", "unregistered", "unlisted", "principal", "as_agent", "principal only", "reply authority", "tampered reply", "wrong path", "wrong method"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -224,6 +226,7 @@ func TestServiceDeliveryRejectsBeforeEffects(t *testing.T) {
 }
 
 func TestServiceDeliveryOrdinaryCompatibility(t *testing.T) {
+	t.Parallel()
 	h, _ := serviceHarness(t)
 	code, out := h.send(t, "POST", "/agents/ordinary/inbox", `{"principal_id":"human","as_agent":"personal","sender":"legacy","payload":{}}`, nil)
 	require.Equal(t, 201, code, out)
@@ -233,6 +236,7 @@ func TestServiceDeliveryOrdinaryCompatibility(t *testing.T) {
 }
 
 func TestServiceDeliveryCapabilityCannotBypass(t *testing.T) {
+	t.Parallel()
 	h, _ := serviceHarness(t)
 	a, err := h.store.Get("router")
 	require.NoError(t, err)
@@ -254,6 +258,7 @@ func TestServiceDeliveryCapabilityCannotBypass(t *testing.T) {
 }
 
 func TestServiceDeliveryPolicyValidation(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(NewMemoryStore())
 	for _, raw := range []string{"* >router", "scheduler>*", "scheduler", "scheduler>router>other", ">router", "scheduler>", "scheduler>router,", "scheduler>router,,router>scheduler", "scheduler name>router", "scheduler>/router"} {
 		require.Error(t, setServicePolicy(t, h, raw), raw)
@@ -264,6 +269,7 @@ func TestServiceDeliveryPolicyValidation(t *testing.T) {
 // A human ACL remains authoritative for ordinary recipients. A verified service
 // pair is a distinct authority and needs no fabricated human principal/binding.
 func TestServiceDeliveryIndependentOfHumanACL(t *testing.T) {
+	t.Parallel()
 	h, keys := serviceHarness(t)
 	ps, err := permissions.NewJSONLStore(t.TempDir())
 	require.NoError(t, err)
@@ -284,6 +290,7 @@ func TestServiceDeliveryIndependentOfHumanACL(t *testing.T) {
 }
 
 func TestServiceDeliveryHintsKeepDocumentedForms(t *testing.T) {
+	t.Parallel()
 	spellings := append(append([]hintSpelling{}, cr36DefaultSpellings...), hintSpelling{name: "explicit", raw: `" Model/Provider-X "`, want: `" Model/Provider-X "`})
 	for _, model := range spellings {
 		for _, provider := range spellings {
@@ -306,6 +313,7 @@ func TestServiceDeliveryHintsKeepDocumentedForms(t *testing.T) {
 }
 
 func TestServiceDeliveryUnconfiguredHumanACLStillWorks(t *testing.T) {
+	t.Parallel()
 	h := newCR36ACL(t)
 	require.NoError(t, setServicePolicy(t, h.handler, "scheduler>router,router>scheduler"))
 	// These legacy recipients are classed and have real human bindings/grants,
@@ -317,6 +325,7 @@ func TestServiceDeliveryUnconfiguredHumanACLStillWorks(t *testing.T) {
 }
 
 func TestServiceDeliveryPolicyIsDirectedAndCaseSensitive(t *testing.T) {
+	t.Parallel()
 	h, keys := serviceHarness(t)
 	require.NoError(t, setServicePolicy(t, h.handler, "scheduler>router,outsider>scheduler"))
 	body := `{"sender":"router","reply_to":"scheduler","payload":{}}`

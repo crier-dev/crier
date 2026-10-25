@@ -26,6 +26,7 @@ func (s *permissionsReadFailureStore) Snapshot(context.Context) (*permissions.Sn
 }
 
 func TestPermissionsReadFailClosed(t *testing.T) {
+	t.Parallel()
 	for name, call := range map[string]func(*Handler, http.ResponseWriter, *http.Request){
 		"principals": (*Handler).HandleListPrincipals,
 		"bindings":   (*Handler).HandleListBindings,
@@ -69,6 +70,7 @@ func TestPermissionsReadFailClosed(t *testing.T) {
 }
 
 func TestPermissionsReadPrincipalDescriptions(t *testing.T) {
+	t.Parallel()
 	m := newMgmtTest(t)
 	m.router.HandleFunc("/principals", m.handler.HandleListPrincipals).Methods(http.MethodGet)
 	mint := func(body string) map[string]any {

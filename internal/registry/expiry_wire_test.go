@@ -48,6 +48,7 @@ func wireField(t *testing.T, body []byte, key string) (json.RawMessage, bool) {
 // ---------------------------------------------------------------------------
 
 func TestDeliver_TTLSeconds_ZeroAcceptReportsExpiresAtNull(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -71,6 +72,7 @@ func TestDeliver_TTLSeconds_ZeroAcceptReportsExpiresAtNull(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRetrieve_TTLSeconds_ZeroMessageReportsExpiresAtNull(t *testing.T) {
+	t.Parallel()
 	store := setupTestStore(t)
 	registerTestAgent(t, store)
 	router := setupRouter(store)
@@ -110,6 +112,7 @@ func TestRetrieve_TTLSeconds_ZeroMessageReportsExpiresAtNull(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeliver_ExpiresAtStaysRFC3339ForFiniteLifetimes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		ttl      any
@@ -163,6 +166,7 @@ func TestDeliver_ExpiresAtStaysRFC3339ForFiniteLifetimes(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeliver_WebhookAcceptsOmitExpiresAtKeyEntirely(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"echo":true}`))
@@ -201,6 +205,7 @@ func TestDeliver_WebhookAcceptsOmitExpiresAtKeyEntirely(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestInboxEntry_MarshalJSON_TriStateExpiry(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 
 	t.Run("zero time is null", func(t *testing.T) {
@@ -261,6 +266,7 @@ func TestInboxEntry_MarshalJSON_TriStateExpiry(t *testing.T) {
 // TestMessageExpiry_TriState pins the encoding itself: null for the zero time,
 // the untouched time.Time JSON encoding for anything else.
 func TestMessageExpiry_TriState(t *testing.T) {
+	t.Parallel()
 	never, err := json.Marshal(MessageExpiry{})
 	require.NoError(t, err)
 	require.Equal(t, "null", string(never))

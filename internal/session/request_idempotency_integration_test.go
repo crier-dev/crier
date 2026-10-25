@@ -10,6 +10,7 @@ import (
 )
 
 func TestPostgresMessageRequestIdempotency(t *testing.T) {
+	t.Parallel()
 	backends := []localBackend{
 		{name: "pgxpool", pathFn: func(*testing.T) string { return testDSN }, open: func(t *testing.T, path string) Repository {
 			s, err := NewPostgresStore(context.Background(), path)

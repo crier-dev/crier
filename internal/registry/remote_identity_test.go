@@ -85,6 +85,7 @@ func storeKey(t *testing.T, store *MemoryStore, id string, pub ed25519.PublicKey
 // a 404 on GET means the identity is absent, so EnsureRegistered POSTs the
 // hex public key and reports Created.
 func TestRemoteStore_EnsureRegistered_MissingRegisters(t *testing.T) {
+	t.Parallel()
 	its := newIdentityTestServer(t, nil)
 	// A signing key is configured: the bootstrap routes are ungated, but the
 	// store still signs every request (as production does).
@@ -135,6 +136,7 @@ func TestRemoteStore_EnsureRegistered_MissingRegisters(t *testing.T) {
 // TestRemoteStore_EnsureRegistered_ExistingSameKey: an identity already on
 // the server with the same key is idempotent — no POST at all.
 func TestRemoteStore_EnsureRegistered_ExistingSameKey(t *testing.T) {
+	t.Parallel()
 	its := newIdentityTestServer(t, nil)
 	pub, priv := identityKey(t)
 	storeKey(t, its.store, "bridge-2", pub)
@@ -162,6 +164,7 @@ func TestRemoteStore_EnsureRegistered_ExistingSameKey(t *testing.T) {
 // It must NOT error and must NOT overwrite the server's registration — the
 // caller decides (and logs the remedy).
 func TestRemoteStore_EnsureRegistered_ExistingDifferentKey(t *testing.T) {
+	t.Parallel()
 	its := newIdentityTestServer(t, nil)
 	stalePub, _ := identityKey(t)
 	localPub, localPriv := identityKey(t)
@@ -199,6 +202,7 @@ func TestRemoteStore_EnsureRegistered_ExistingDifferentKey(t *testing.T) {
 // a race (409). EnsureRegistered re-GETs and reports what is actually there
 // — Existed, no error.
 func TestRemoteStore_EnsureRegistered_Race409(t *testing.T) {
+	t.Parallel()
 	pub, priv := identityKey(t)
 	var its *identityTestServer
 	var raced int32
@@ -241,6 +245,7 @@ func TestRemoteStore_EnsureRegistered_Race409(t *testing.T) {
 // TestRemoteStore_EnsureRegistered_Validation: local input errors are
 // explicit and never touch the wire.
 func TestRemoteStore_EnsureRegistered_Validation(t *testing.T) {
+	t.Parallel()
 	its := newIdentityTestServer(t, nil)
 	rs := NewRemoteStore(its.srv.URL, "bridge-5", "")
 
@@ -259,6 +264,7 @@ func TestRemoteStore_EnsureRegistered_Validation(t *testing.T) {
 // returned as-is (not swallowed, not reported as a mismatch) so the caller
 // can log the cause and keep starting up.
 func TestRemoteStore_EnsureRegistered_TransportError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"boom"}`))
@@ -284,6 +290,7 @@ func TestRemoteStore_EnsureRegistered_TransportError(t *testing.T) {
 // EnsureRegistered on a signature-requiring server, a signed Retrieve of the
 // bridge's own inbox succeeds. Before registration the same call 404s.
 func TestRemoteStore_EnsureRegistered_SignedServerRoundTrip(t *testing.T) {
+	t.Parallel()
 	store := NewMemoryStore()
 	h := NewHandler(store)
 	h.SetRequireAgentSig(true)
