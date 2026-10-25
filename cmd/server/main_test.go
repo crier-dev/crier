@@ -1974,3 +1974,78 @@ func isShortHex(s string) bool {
 	}
 	return true
 }
+
+// INT-CI-014 regression pins: the parallel boot infrastructure is what keeps
+// the cmd/server package inside its 60s budget (make test), so a silent
+// regression in any of these mechanisms re-creates the original timeout.
+
+// TestParallelBootOptsIntoParallelBatch proves parallelBoot actually opts a
+// test into the parallel regime: its subtests must run CONCURRENTLY. If
+// parallelBoot ever stops calling t.Parallel (or the CR_TEST_ENV_MODE hatch
+// swallows it unconditionally), every overlay-booted test falls back to the
+// runtime-wide serial lockstep and the package wall blows the 60s budget —
+// the exact defect this infrastructure exists to prevent.
+func TestParallelBootOptsIntoParallelBatch(t *testing.T) {
+	if os.Getenv("CR_TEST_ENV_MODE") == "1" {
+		t.Skip("serial env-regime run: parallelBoot is a no-op by design")
+	}
+	release := make(chan struct{})
+	var inside sync.WaitGroup
+	inside.Add(2)
+	for i := 0; i < 2; i++ {
+		t.Run(fmt.Sprintf("concurrent-%d", i), func(t *testing.T) {
+			parallelBoot(t)
+			inside.Done()
+			// Both subtests must be INSIDE their bodies at once: if
+			// parallelBoot stopped enabling parallelism, the second subtest
+			// would not be entered until the first returned, so this select
+			// times out (30s) and the test FAILS — a loud red, never a
+			// silent pass, before the 60s package budget is at risk.
+			select {
+			case <-release:
+			case <-time.After(30 * time.Second):
+				t.Errorf("subtests ran serially: parallelBoot no longer opts into the parallel batch")
+			}
+		})
+	}
+	// A parent must not Wait() on parallel subtests (the testing runtime
+	// deadlocks: parallel bodies only run after the parent returns), so a
+	// watcher opens the barrier instead; the parent's return then joins the
+	// subtests normally.
+	go func() {
+		inside.Wait()
+		close(release)
+	}()
+}
+
+// TestBootSlotsBoundAndRoundTrip proves the boot semaphore has the documented
+// capacity and still admits tests after saturating: a zero-capacity (or
+// closed) channel would deadlock the entire parallel batch into the package
+// timeout instead of failing a single test.
+func TestBootSlotsBoundAndRoundTrip(t *testing.T) {
+	if cap(bootSlots) != 24 {
+		t.Fatalf("bootSlots capacity = %d, want 24", cap(bootSlots))
+	}
+	saturated := make([]struct{}, 0, cap(bootSlots))
+	for i := 0; i < cap(bootSlots); i++ {
+		bootSlots <- struct{}{}
+		saturated = append(saturated, struct{}{})
+	}
+	// Drain from the position cleanup would release, then prove the slot is
+	// immediately reusable — the property a wedged semaphore loses.
+	<-bootSlots
+	select {
+	case bootSlots <- struct{}{}:
+	default:
+		t.Errorf("bootSlots did not admit a test after a cleanup released a slot")
+	}
+	for range saturated {
+		<-bootSlots
+	}
+	select {
+	case bootSlots <- struct{}{}:
+		<-bootSlots
+	default:
+		t.Errorf("bootSlots not reusable after full drain")
+	}
+}

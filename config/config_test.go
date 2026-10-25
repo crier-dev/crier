@@ -837,3 +837,15 @@ func TestLoad_ObservabilityIndependent(t *testing.T) {
 	assert.True(t, cfg.Observability.EnablePProf)
 	assert.False(t, cfg.Observability.EnableMetrics)
 }
+
+// TestLoad_Port_ZeroIsEphemeral pins the INT-CI-014 positive arm: CRIER_PORT=0
+// is LEGAL and selects the kernel's ephemeral range, which is what lets the
+// in-process test harness boot servers with no freePort release-then-rebind
+// race. The negative arm above proves every other invalid value still errors.
+func TestLoad_Port_ZeroIsEphemeral(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("CRIER_PORT", "0")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.Port, "port 0 must be preserved: the server binds the kernel-assigned ephemeral port")
+}
