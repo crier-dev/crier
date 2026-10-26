@@ -15,12 +15,10 @@ import (
 )
 
 func TestPostgresTrustBackendParity(t *testing.T) {
-	t.Parallel()
 	exerciseTrustBackendParity(t, newTestStore(t))
 }
 
 func TestPostgresTrustStore(t *testing.T) {
-	t.Parallel()
 	s := newTestStore(t)
 	exerciseTrustStore(t, NewAuthorityStore(s, nil, ""))
 	s.Close()
@@ -40,7 +38,6 @@ func TestPostgresTrustStore(t *testing.T) {
 }
 
 func TestMigration017TrustRoundTrip(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	db := openTestDB(ctx, t)
@@ -65,6 +62,5 @@ func TestMigration017TrustRoundTrip(t *testing.T) {
 }
 
 func TestPostgresTrustPossession(t *testing.T) {
-	t.Parallel()
 	exerciseTrustPossession(t, NewAuthorityStore(newTestStore(t), nil, ""))
 }

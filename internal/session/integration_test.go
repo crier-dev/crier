@@ -134,7 +134,6 @@ func registerAgent(t *testing.T, store *registry.PostgresStore, id string) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_SchemaShapeIsTheSpecShape(t *testing.T) {
-	t.Parallel()
 	store := newTestPostgresStore(t)
 	ctx := context.Background()
 
@@ -169,7 +168,6 @@ func TestPostgres_SchemaShapeIsTheSpecShape(t *testing.T) {
 }
 
 func TestPostgres_TranscriptOrderingKeyIsSessionSeq(t *testing.T) {
-	t.Parallel()
 	store := newTestPostgresStore(t)
 	ctx := context.Background()
 	for _, rec := range buildScenario() {
@@ -188,7 +186,6 @@ func TestPostgres_TranscriptOrderingKeyIsSessionSeq(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_RoundTripsIdenticalContentToTheLog(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	recs := buildScenario()
@@ -224,7 +221,6 @@ func TestPostgres_RoundTripsIdenticalContentToTheLog(t *testing.T) {
 }
 
 func TestPostgres_ReAppendIsIdempotentAndKeepLast(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	recs := buildScenario()
@@ -250,7 +246,6 @@ func TestPostgres_ReAppendIsIdempotentAndKeepLast(t *testing.T) {
 }
 
 func TestPostgres_UnknownSessionIsNotAnEmptySession(t *testing.T) {
-	t.Parallel()
 	store := newTestPostgresStore(t)
 	_, err := store.Load(context.Background(), "does-not-exist")
 	require.ErrorIs(t, err, ErrSessionNotFound)
@@ -263,7 +258,6 @@ func TestPostgres_UnknownSessionIsNotAnEmptySession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	reg := newTestRegistry(t)
 	for _, id := range []string{"atlas", "nimbus", "kappa"} {
@@ -277,12 +271,15 @@ func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
 	}
 	outcomes, err := Fanout(ctx, registry.NewSessionDeliverer(registry.NewHandler(reg)), msg, []string{"nimbus", "kappa", "atlas", "ghost"}, nil)
 	require.NoError(t, err)
-	require.Len(t, outcomes, 4)
+	// DF-CRIER-347: the author is never a delivery target — atlas addressed
+	// itself explicitly and is still excluded at the transport boundary, so
+	// exactly three outcomes come back (nimbus, kappa, ghost).
+	require.Len(t, outcomes, 3)
 
-	// All three registered members hold the SAME message in their own durable
+	// Both addressed members hold the SAME message in their own durable
 	// inbox — reached through the shipped lease/ack path, not a session-local
-	// queue.
-	for _, target := range []string{"atlas", "nimbus", "kappa"} {
+	// queue. The author (atlas) is excluded by DF-CRIER-347 and holds none.
+	for _, target := range []string{"nimbus", "kappa"} {
 		entries, leaseID, err := reg.Retrieve(target, time.Minute, 10)
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "%s has exactly one delivery", target)
@@ -292,6 +289,12 @@ func TestPostgres_FanoutDeliversThroughTheShippedInboxPath(t *testing.T) {
 		require.Equal(t, IdempotencyKey(fixSessionID, "msg_pg_fanout", "msg_pg_fanout", target),
 			entries[0].IdempotencyKey)
 	}
+
+	// The author's own inbox stays empty: exclusion is a delivery-state fact,
+	// not just an absent outcome row.
+	atlasEntries, _, err := reg.Retrieve("atlas", time.Minute, 10)
+	require.NoError(t, err)
+	require.Empty(t, atlasEntries, "the author is never a delivery target (DF-CRIER-347)")
 
 	// The unknown member is a NAMED refusal, not a vanished delivery.
 	refused := map[string]DeliveryOutcome{}
@@ -320,7 +323,6 @@ func inboxDepth(t *testing.T, reg *registry.PostgresStore, id string) int {
 // ---------------------------------------------------------------------------
 
 func TestPostgres_DepthRuleAndBranchHoldInTheView(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	for _, rec := range buildScenario() {
@@ -354,7 +356,6 @@ func TestPostgres_DepthRuleAndBranchHoldInTheView(t *testing.T) {
 }
 
 func TestPostgres_RecordFromTheViewIsRereadable(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	for _, rec := range buildScenario() {
@@ -378,7 +379,6 @@ func TestPostgres_RecordFromTheViewIsRereadable(t *testing.T) {
 // against the real §5.2 tables: create → add member (with a late-join context
 // answer) → post a root and a reply → close → reopen, then reads it all back.
 func TestPostgres_CRUDSurfaceWritesTheView(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 
@@ -456,7 +456,6 @@ func TestPostgres_CRUDSurfaceWritesTheView(t *testing.T) {
 // JSONL log, filtered and copied verbatim), so importing it into either view is
 // a replay, and the two engines must agree on the State it produces.
 func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	recs := buildScenario()
 
@@ -505,7 +504,6 @@ func TestDualBackend_BundleImportsIntoSQLiteAndPostgresEqually(t *testing.T) {
 // creates — create, duplicate refusal, edit preserving creation facts, list
 // ordering — against a REAL PostgreSQL.
 func TestPostgres_GroupStoreRoundTripsTheRoster(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	store := newTestPostgresStore(t)
 	gs := store.Groups()

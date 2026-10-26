@@ -128,7 +128,6 @@ func newTestAgent(t *testing.T, store *PostgresStore, idPrefix string) *Agent {
 // --- NewPostgresStore / RunMigrations -----------------------------------------
 
 func TestPostgresStore_NewPostgresStore_EmptyConnString(t *testing.T) {
-	t.Parallel()
 	_, err := NewPostgresStore(context.Background(), "")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput),
@@ -136,14 +135,12 @@ func TestPostgresStore_NewPostgresStore_EmptyConnString(t *testing.T) {
 }
 
 func TestPostgresStore_NewPostgresStoreWithPoolConfig_EmptyConnString(t *testing.T) {
-	t.Parallel()
 	_, err := NewPostgresStoreWithPoolConfig(context.Background(), "", DefaultPoolConfig())
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrInvalidStoreInput))
 }
 
 func TestPostgresStore_NewPostgresStoreWithPoolConfig_CustomConfig(t *testing.T) {
-	t.Parallel()
 	// Verify PoolConfig values are accepted and applied — exercise the
 	// pgxpool.Config setter branches that the default constructor skips.
 	cfg := PoolConfig{
@@ -161,7 +158,6 @@ func TestPostgresStore_NewPostgresStoreWithPoolConfig_CustomConfig(t *testing.T)
 }
 
 func TestPostgresStore_NewPostgresStore_RunMigrations(t *testing.T) {
-	t.Parallel()
 	// newTestStore already exercises NewPostgresStore → RunMigrations end to end.
 	// This test makes the explicit coverage line and verifies the schema landed.
 	store := newTestStore(t)
@@ -175,7 +171,6 @@ func TestPostgresStore_NewPostgresStore_RunMigrations(t *testing.T) {
 }
 
 func TestPostgresStore_RunMigrations_EmptyConnString(t *testing.T) {
-	t.Parallel()
 	// Direct exercise of the standalone RunMigrations guard.
 	err := RunMigrations(context.Background(), "")
 	require.Error(t, err)
@@ -183,7 +178,6 @@ func TestPostgresStore_RunMigrations_EmptyConnString(t *testing.T) {
 }
 
 func TestPostgresStore_RunMigrations_BadConnString(t *testing.T) {
-	t.Parallel()
 	// Cover the open/ping failure path of RunMigrations — unparseable URL.
 	err := RunMigrations(context.Background(), "postgres://nope:nope@127.0.0.1:1/nope?sslmode=disable&connect_timeout=1")
 	require.Error(t, err)
@@ -192,7 +186,6 @@ func TestPostgresStore_RunMigrations_BadConnString(t *testing.T) {
 // --- Register -----------------------------------------------------------------
 
 func TestPostgresStore_Register_Success(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -218,7 +211,6 @@ func TestPostgresStore_Register_Success(t *testing.T) {
 }
 
 func TestPostgresStore_Register_OfflineStatus(t *testing.T) {
-	t.Parallel()
 	// Cover the non-default status branch (Register sets whatever valid
 	// status the caller supplied; StatusOnline path is exercised by other tests).
 	store := newTestStore(t)
@@ -238,7 +230,6 @@ func TestPostgresStore_Register_OfflineStatus(t *testing.T) {
 }
 
 func TestPostgresStore_Register_NilCapabilities(t *testing.T) {
-	t.Parallel()
 	// Cover the json.Marshal branch on a nil Capabilities slice.
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -259,7 +250,6 @@ func TestPostgresStore_Register_NilCapabilities(t *testing.T) {
 }
 
 func TestPostgresStore_Register_Duplicate(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	existing := newTestAgent(t, store, "dup")
 
@@ -295,7 +285,6 @@ func TestPostgresStore_Register_Duplicate(t *testing.T) {
 }
 
 func TestPostgresStore_Register_BlankID(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -305,7 +294,6 @@ func TestPostgresStore_Register_BlankID(t *testing.T) {
 }
 
 func TestPostgresStore_Register_NilAgent(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	err := store.Register(nil)
 	require.Error(t, err)
@@ -313,7 +301,6 @@ func TestPostgresStore_Register_NilAgent(t *testing.T) {
 }
 
 func TestPostgresStore_Register_InvalidPublicKey(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -324,7 +311,6 @@ func TestPostgresStore_Register_InvalidPublicKey(t *testing.T) {
 }
 
 func TestPostgresStore_Register_InvalidStatus(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -340,7 +326,6 @@ func TestPostgresStore_Register_InvalidStatus(t *testing.T) {
 // --- Get ----------------------------------------------------------------------
 
 func TestPostgresStore_Get_Success(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "get")
 
@@ -351,7 +336,6 @@ func TestPostgresStore_Get_Success(t *testing.T) {
 }
 
 func TestPostgresStore_Get_NotFound(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	_, err := store.Get("does-not-exist")
 	require.Error(t, err)
@@ -361,7 +345,6 @@ func TestPostgresStore_Get_NotFound(t *testing.T) {
 // --- List ---------------------------------------------------------------------
 
 func TestPostgresStore_List_Empty(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	got := store.List()
 	require.NotNil(t, got, "List must return non-nil on empty result")
@@ -369,7 +352,6 @@ func TestPostgresStore_List_Empty(t *testing.T) {
 }
 
 func TestPostgresStore_List_Populated(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	a := newTestAgent(t, store, "list-a")
 	b := newTestAgent(t, store, "list-b")
@@ -389,7 +371,6 @@ func TestPostgresStore_List_Populated(t *testing.T) {
 // --- Unregister ---------------------------------------------------------------
 
 func TestPostgresStore_Unregister_Success(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "unreg")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{"k":"v"}`)}))
@@ -401,7 +382,6 @@ func TestPostgresStore_Unregister_Success(t *testing.T) {
 }
 
 func TestPostgresStore_Unregister_NotFound(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	err := store.Unregister("ghost-agent")
 	require.Error(t, err)
@@ -409,7 +389,6 @@ func TestPostgresStore_Unregister_NotFound(t *testing.T) {
 }
 
 func TestPostgresStore_Unregister_CascadesInbox(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "cascade")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -423,7 +402,6 @@ func TestPostgresStore_Unregister_CascadesInbox(t *testing.T) {
 // --- Deliver ------------------------------------------------------------------
 
 func TestPostgresStore_Deliver_Success(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "deliver")
 	entry := &InboxEntry{Payload: json.RawMessage(`{"hello":"world"}`)}
@@ -434,7 +412,6 @@ func TestPostgresStore_Deliver_Success(t *testing.T) {
 }
 
 func TestPostgresStore_DispatchSelectionRoundTrip(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "selection")
 
@@ -488,7 +465,6 @@ func TestPostgresStore_DispatchSelectionRoundTrip(t *testing.T) {
 }
 
 func TestPostgresStore_Deliver_BlankAgentID(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput blank-agent-id guard on Deliver.
 	store := newTestStore(t)
 	err := store.Deliver("", &InboxEntry{Payload: json.RawMessage(`{}`)})
@@ -497,7 +473,6 @@ func TestPostgresStore_Deliver_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStore_Deliver_NilEntry(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput nil-entry guard on Deliver.
 	store := newTestStore(t)
 	err := store.Deliver("any-agent", nil)
@@ -506,7 +481,6 @@ func TestPostgresStore_Deliver_NilEntry(t *testing.T) {
 }
 
 func TestPostgresStore_Deliver_UnknownAgent(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	err := store.Deliver("nope", &InboxEntry{Payload: json.RawMessage(`{}`)})
 	require.Error(t, err)
@@ -514,7 +488,6 @@ func TestPostgresStore_Deliver_UnknownAgent(t *testing.T) {
 }
 
 func TestPostgresStore_Deliver_InvalidJSON(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "badjson")
 	err := store.Deliver(agent.ID, &InboxEntry{Payload: []byte("not-json")})
@@ -523,7 +496,6 @@ func TestPostgresStore_Deliver_InvalidJSON(t *testing.T) {
 }
 
 func TestPostgresStore_Deliver_DuplicateID(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "dupmsg")
 	entry := &InboxEntry{ID: "fixed-id", Payload: json.RawMessage(`{}`)}
@@ -538,7 +510,6 @@ func TestPostgresStore_Deliver_DuplicateID(t *testing.T) {
 // --- Retrieve -----------------------------------------------------------------
 
 func TestPostgresStore_Retrieve_BlankAgentID(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput blank-agent-id guard on Retrieve.
 	store := newTestStore(t)
 	_, _, err := store.Retrieve("", time.Second, 1)
@@ -547,7 +518,6 @@ func TestPostgresStore_Retrieve_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_NonPositiveLease(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput zero/negative lease duration guard.
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "zeroduration")
@@ -557,7 +527,6 @@ func TestPostgresStore_Retrieve_NonPositiveLease(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_NonPositiveMaxMessages(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput zero/negative maxMessages guard.
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "zeromax")
@@ -567,7 +536,6 @@ func TestPostgresStore_Retrieve_NonPositiveMaxMessages(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_UnknownAgent(t *testing.T) {
-	t.Parallel()
 	// Cover the agent existence check path inside the transaction.
 	store := newTestStore(t)
 	_, _, err := store.Retrieve("missing-agent", time.Second, 1)
@@ -576,7 +544,6 @@ func TestPostgresStore_Retrieve_UnknownAgent(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_EmptyInbox(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "empty")
 
@@ -589,7 +556,6 @@ func TestPostgresStore_Retrieve_EmptyInbox(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_AllLeasedMintsNoLease(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "allleased")
 
@@ -610,7 +576,6 @@ func TestPostgresStore_Retrieve_AllLeasedMintsNoLease(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_FIFOOrder(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "fifo")
 
@@ -630,7 +595,6 @@ func TestPostgresStore_Retrieve_FIFOOrder(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_MaxMessagesCapsBatch(t *testing.T) {
-	t.Parallel()
 	// Verify the LIMIT clause on Retrieve: 7 entries, max=3 → exactly 3 returned.
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "capbatch")
@@ -645,7 +609,6 @@ func TestPostgresStore_Retrieve_MaxMessagesCapsBatch(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_DisjointBatches(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "disjoint")
 
@@ -685,7 +648,6 @@ func TestPostgresStore_Retrieve_DisjointBatches(t *testing.T) {
 }
 
 func TestPostgresStore_Retrieve_ExpiredLeaseReturnsToQueue(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "lease")
 
@@ -716,7 +678,6 @@ func TestPostgresStore_Retrieve_ExpiredLeaseReturnsToQueue(t *testing.T) {
 // --- Ack ----------------------------------------------------------------------
 
 func TestPostgresStore_Ack_Success(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "ack")
 
@@ -740,7 +701,6 @@ func TestPostgresStore_Ack_Success(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_WrongLease(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "wronglease")
 
@@ -755,7 +715,6 @@ func TestPostgresStore_Ack_WrongLease(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_DuplicateIDs(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "dupack")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -768,7 +727,6 @@ func TestPostgresStore_Ack_DuplicateIDs(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_EmptyMessageIDs(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "noop")
 	require.NoError(t, store.Deliver(agent.ID, &InboxEntry{Payload: json.RawMessage(`{}`)}))
@@ -786,7 +744,6 @@ func TestPostgresStore_Ack_EmptyMessageIDs(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_BlankAgentID(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput blank-agent-id guard on Ack.
 	store := newTestStore(t)
 	err := store.Ack("", "lease", []string{"id"})
@@ -795,7 +752,6 @@ func TestPostgresStore_Ack_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_BlankLeaseID(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput blank-lease-id guard on Ack.
 	store := newTestStore(t)
 	err := store.Ack("any-agent", "", []string{"id"})
@@ -804,7 +760,6 @@ func TestPostgresStore_Ack_BlankLeaseID(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_UnknownAgent(t *testing.T) {
-	t.Parallel()
 	// Cover the agent existence check path inside the Ack transaction.
 	store := newTestStore(t)
 	err := store.Ack("missing-agent", "lease", []string{"id"})
@@ -813,7 +768,6 @@ func TestPostgresStore_Ack_UnknownAgent(t *testing.T) {
 }
 
 func TestPostgresStore_Ack_MissingID(t *testing.T) {
-	t.Parallel()
 	// Ack with an ID the inbox does not hold must report ErrMessageNotFound
 	// (distinct from a lease conflict) and delete nothing.
 	store := newTestStore(t)
@@ -835,7 +789,6 @@ func TestPostgresStore_Ack_MissingID(t *testing.T) {
 // --- Stats --------------------------------------------------------------------
 
 func TestPostgresStore_Stats_BlankAgentID(t *testing.T) {
-	t.Parallel()
 	// Cover the ErrInvalidStoreInput blank-agent-id guard on Stats.
 	store := newTestStore(t)
 	_, _, _, err := store.Stats("")
@@ -844,7 +797,6 @@ func TestPostgresStore_Stats_BlankAgentID(t *testing.T) {
 }
 
 func TestPostgresStore_Stats_EmptyQueue(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "stats-empty")
 
@@ -856,7 +808,6 @@ func TestPostgresStore_Stats_EmptyQueue(t *testing.T) {
 }
 
 func TestPostgresStore_Stats_QueuedAndLeased(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "stats-mix")
 
@@ -877,7 +828,6 @@ func TestPostgresStore_Stats_QueuedAndLeased(t *testing.T) {
 }
 
 func TestPostgresStore_Stats_AgentNotFound(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	_, _, _, err := store.Stats("missing-agent")
 	require.Error(t, err)
@@ -887,7 +837,6 @@ func TestPostgresStore_Stats_AgentNotFound(t *testing.T) {
 // --- PurgeExpired -------------------------------------------------------------
 
 func TestPostgresStore_PurgeExpired_TTLRemoval(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "ttl")
 
@@ -911,7 +860,6 @@ func TestPostgresStore_PurgeExpired_TTLRemoval(t *testing.T) {
 }
 
 func TestPostgresStore_PurgeExpired_StaleLeaseRelease(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "stalelease")
 
@@ -937,7 +885,6 @@ func TestPostgresStore_PurgeExpired_StaleLeaseRelease(t *testing.T) {
 // --- Close --------------------------------------------------------------------
 
 func TestPostgresStore_Close_NilPoolSafe(t *testing.T) {
-	t.Parallel()
 	// Defensive coverage for the Close() pool-nil guard; a PostgresStore with
 	// a nil pool must not panic when Close is invoked.
 	s := &PostgresStore{pool: nil}
@@ -952,7 +899,6 @@ func TestPostgresStore_Close_NilPoolSafe(t *testing.T) {
 // thing unit tests with a mock pool cannot prove.
 
 func TestPostgresStore_Register_PersistsWebhookAndGuard(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -986,7 +932,6 @@ func TestPostgresStore_Register_PersistsWebhookAndGuard(t *testing.T) {
 }
 
 func TestPostgresStore_Register_NilConfigsReadBackNil(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "noconfig")
 
@@ -1004,7 +949,6 @@ func TestPostgresStore_Register_NilConfigsReadBackNil(t *testing.T) {
 // guard configs do: registering on one process and reading from a fresh one.
 
 func TestPostgresStore_Register_PersistsA2A(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -1041,7 +985,6 @@ func TestPostgresStore_Register_PersistsA2A(t *testing.T) {
 }
 
 func TestPostgresStore_Update_ClearsA2A(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "a2a-clear")
 
@@ -1066,7 +1009,6 @@ func TestPostgresStore_Update_ClearsA2A(t *testing.T) {
 }
 
 func TestPostgresStore_Update_PersistsChangedWebhook(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "updatecfg")
 	require.Nil(t, agent.Webhook)
@@ -1092,7 +1034,6 @@ func TestPostgresStore_Update_PersistsChangedWebhook(t *testing.T) {
 }
 
 func TestPostgresStore_Update_NilWebhookClears(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "clearinput")
 
@@ -1144,7 +1085,6 @@ func TestPostgresStore_Update_NilWebhookClears(t *testing.T) {
 // authoritative one; Register's own object still carries nanoseconds (that
 // render-side difference is pre-existing and out of this ticket's scope).
 func TestPostgresStore_Update_AdvancesLastSeenBothSides(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "updseen")
 	callerRegisteredAt := agent.RegisteredAt
@@ -1183,7 +1123,6 @@ func TestPostgresStore_Update_AdvancesLastSeenBothSides(t *testing.T) {
 // `null` (rather than SQL NULL) is the same absent config on the wire — no
 // error, no empty object.
 func TestPostgresStore_Get_StoredJSONNullReadsNil(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "jsonnull")
 
@@ -1202,7 +1141,6 @@ func TestPostgresStore_Get_StoredJSONNullReadsNil(t *testing.T) {
 }
 
 func TestPostgresStore_List_IncludesConfigs(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 
 	withConfig := newTestAgent(t, store, "listcfg")
