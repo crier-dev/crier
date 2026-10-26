@@ -10,7 +10,6 @@ import (
 )
 
 func TestPostgresA2AReplayContract(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	// Exercise the production policy wrapper and an independent pool, not only
 	// the concrete backend's process-local state.

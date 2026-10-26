@@ -17,7 +17,6 @@ import (
 // in-memory-only fix cannot prove them.
 
 func TestPostgresStore_TTL_NeverExpiresRoundTrip(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "ttl-never")
 
@@ -56,7 +55,6 @@ func TestPostgresStore_TTL_NeverExpiresRoundTrip(t *testing.T) {
 }
 
 func TestPostgresStore_TTL_RequestedLifetimeAndDefaultAreStored(t *testing.T) {
-	t.Parallel()
 	store := newTestStore(t)
 	agent := newTestAgent(t, store, "ttl-hour")
 

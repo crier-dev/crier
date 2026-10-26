@@ -18,7 +18,6 @@ import (
 // TestRunMigrations_CreatesTables verifies that RunMigrations applies the
 // embedded SQL migrations and creates the expected tables (agents, inbox_entries).
 func TestRunMigrations_CreatesTables(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -53,7 +52,6 @@ func TestRunMigrations_CreatesTables(t *testing.T) {
 // bookkeeping table (schema_migrations) was created with the correct version
 // and is not marked dirty.
 func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -76,7 +74,6 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 }
 
 func TestMigration014DownAndUpRoundTrip(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	db := openTestDB(ctx, t)
@@ -109,7 +106,6 @@ func TestMigration014DownAndUpRoundTrip(t *testing.T) {
 // no-op on an existing database, and then a routed dispatch would silently lose
 // the hints the polling router selects a model/provider from.
 func TestRunMigrations_InboxDispatchSelectionColumns(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -149,7 +145,6 @@ func TestRunMigrations_InboxDispatchSelectionColumns(t *testing.T) {
 // INT-A2A-001). A migration applied by a different name would be a no-op on an
 // existing database, so the columns — not the file — are what this asserts.
 func TestRunMigrations_AgentConfigColumns(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -177,7 +172,6 @@ func TestRunMigrations_AgentConfigColumns(t *testing.T) {
 // (a keyless agent) while still rejecting a non-null value that is not 32
 // bytes, and down-migrating restores the NOT NULL form.
 func TestRunMigrations_KeylessAgentsConstraint(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -222,7 +216,6 @@ func TestRunMigrations_KeylessAgentsConstraint(t *testing.T) {
 // The first call applies the migrations; the second call hits the
 // ErrNoChange path inside RunMigrations, which is absorbed and returns nil.
 func TestRunMigrations_Idempotent(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -237,7 +230,6 @@ func TestRunMigrations_Idempotent(t *testing.T) {
 // TestRunMigrations_EmptyConnString verifies that passing an empty connection
 // string returns an ErrInvalidStoreInput.
 func TestRunMigrations_EmptyConnString(t *testing.T) {
-	t.Parallel()
 	err := RunMigrations(context.Background(), "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidStoreInput)
@@ -246,7 +238,6 @@ func TestRunMigrations_EmptyConnString(t *testing.T) {
 // TestRunMigrations_InvalidConnString verifies that connecting to an
 // unreachable database returns an error (not ErrInvalidStoreInput).
 func TestRunMigrations_InvalidConnString(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
