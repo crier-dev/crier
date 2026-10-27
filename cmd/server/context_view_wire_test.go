@@ -194,6 +194,7 @@ func TestContextViewWireBodies(t *testing.T) {
 				"member_type":   "agent",
 				"member_id":     contextWireLate,
 				"context_share": map[string]string{"mode": "summary"},
+				"actor":         contextWirePeer,
 			}, nil)
 		require.Equal(t, http.StatusCreated, lateCode, "add late joiner: %s", lateRaw)
 

@@ -51,6 +51,7 @@ func buildAuditedSession(t *testing.T, h *apiHarness) string {
 		"member_type": "agent",
 		"member_id":   "atlas",
 		"role":        "observer",
+		"actor":       "atlas",
 	}, &struct{}{}, nil)
 	require.Equal(t, http.StatusCreated, code)
 	return created.ID
@@ -242,6 +243,7 @@ func TestRoleBadgesPerBackend(t *testing.T) {
 			code := h.do(t, http.MethodPost, "/sessions/"+id+"/participants", map[string]any{
 				"member_type": "agent",
 				"member_id":   "nimbus",
+				"actor":       "atlas",
 			}, &struct{}{}, nil)
 			require.Equal(t, http.StatusCreated, code)
 

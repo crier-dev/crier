@@ -71,7 +71,7 @@ func TestLateJoinWire(t *testing.T) {
 			// Later context changes remain separately explainable in seq order.
 			var changed map[string]any
 			require.Equal(t, http.StatusOK, h.do(t, http.MethodPut, "/sessions/"+id+"/participants/principal/human-default/context",
-				map[string]any{"mode": "since", "boundary_message_id": first}, &changed, nil))
+				map[string]any{"mode": "since", "boundary_message_id": first, "actor": fixAgentA}, &changed, nil))
 			assertLateJoinEvent(t, h, id, "human-default", "summary", edge, "")
 			assertLateJoinEvent(t, h, id, "human-default", "since", first, "")
 		})
@@ -122,7 +122,7 @@ func TestLateJoinEmptySession(t *testing.T) {
 			id := h.createRoom(t)
 			var member participantView
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-				map[string]any{"member_type": "agent", "member_id": "nimbus-2"}, &member, nil))
+				map[string]any{"member_type": "agent", "member_id": "nimbus-2", "actor": fixAgentA}, &member, nil))
 			require.NotNil(t, member.ContextShare)
 			require.Equal(t, ShareNone, member.ContextShare.Mode)
 			require.Empty(t, member.ContextShare.BoundaryMessageID)
@@ -130,7 +130,7 @@ func TestLateJoinEmptySession(t *testing.T) {
 			// Invalid since is not downgraded even in an empty session.
 			var refusal map[string]string
 			require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-				json.RawMessage(`{"member_type":"agent","member_id":"nimbus-3","context_share":"since"}`), &refusal, nil))
+				json.RawMessage(`{"member_type":"agent","member_id":"nimbus-3","actor":"atlas","context_share":"since"}`), &refusal, nil))
 		})
 	}
 }

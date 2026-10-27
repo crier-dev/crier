@@ -410,14 +410,15 @@ func (m *Member) RemoveRecord(seq int64, ts time.Time, actor AuthorRef, reason s
 // member's context share (§4.6 rule 3): a new record, never a rewrite.
 func (mc *MemberContext) Record(seq int64, ts time.Time) *Record {
 	rec := &Record{
-		V:            RecordFormatVersion,
-		Type:         RecordMemberContext,
-		SessionID:    mc.SessionID,
-		Seq:          seq,
-		TS:           ts.UTC(),
-		MemberType:   mc.MemberType,
-		MemberID:     mc.MemberID,
-		ContextShare: &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID},
+		V:                   RecordFormatVersion,
+		Type:                RecordMemberContext,
+		SessionID:           mc.SessionID,
+		Seq:                 seq,
+		TS:                  ts.UTC(),
+		MemberType:          mc.MemberType,
+		MemberID:            mc.MemberID,
+		ContextShare:        &ContextShare{Mode: mc.Mode, BoundaryMessageID: mc.BoundaryMessageID},
+		SenderIdentityBasis: mc.SenderIdentityBasis,
 	}
 	if mc.SetBy != "" {
 		rec.Actor = &AuthorRef{Agent: mc.SetBy}

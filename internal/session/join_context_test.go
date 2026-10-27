@@ -67,7 +67,7 @@ func TestSessionAPI_ContextShareDefaultSummary(t *testing.T) {
 			var fresh participantView
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"},
 				&fresh, nil))
 			// (d) the DEFAULT answer is recorded, not merely applied.
 			require.NotNil(t, fresh.ContextShare, "the default summary answer must be recorded on the join event")
@@ -103,7 +103,7 @@ func TestSessionAPI_ContextShareModes(t *testing.T) {
 			// confused with an undecided join.
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2",
 					ContextShare: &ContextShare{Mode: ShareNone}}, &struct{}{}, nil))
 			vNone := getContextView(t, h, id, string(MemberAgent), "nimbus-2")
 			require.True(t, vNone.Decided)
@@ -116,7 +116,7 @@ func TestSessionAPI_ContextShareModes(t *testing.T) {
 			// messages strictly AFTER the boundary are given.
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-3",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-3",
 					ContextShare: &ContextShare{Mode: ShareSince, BoundaryMessageID: root}}, &struct{}{}, nil))
 			vSince := getContextView(t, h, id, string(MemberAgent), "nimbus-3")
 			require.Equal(t, ShareSince, vSince.Share.Mode)
@@ -128,7 +128,7 @@ func TestSessionAPI_ContextShareModes(t *testing.T) {
 			// full: everything before the join.
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-4",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-4",
 					ContextShare: &ContextShare{Mode: ShareFull}}, &struct{}{}, nil))
 			vFull := getContextView(t, h, id, string(MemberAgent), "nimbus-4")
 			require.Equal(t, ShareFull, vFull.Share.Mode)
@@ -139,7 +139,7 @@ func TestSessionAPI_ContextShareModes(t *testing.T) {
 			var errBody map[string]string
 			require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-5",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-5",
 					ContextShare: &ContextShare{Mode: "everything"}}, &errBody, nil))
 			require.Equal(t, "INVALID_CONTEXT_SHARE", errBody["error"])
 		})
@@ -162,7 +162,7 @@ func TestSessionAPI_ContextShareLaterChange(t *testing.T) {
 
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2",
 					ContextShare: &ContextShare{Mode: ShareNone}}, &struct{}{}, nil))
 
 			// Change to `since root`, then to `full`. Each change is a new
@@ -179,7 +179,7 @@ func TestSessionAPI_ContextShareLaterChange(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, h.do(t, http.MethodPut,
 				"/sessions/"+id+"/participants/agent/nimbus-2/context",
-				setMemberContextRequest{Mode: ShareFull}, &struct{}{}, nil))
+				setMemberContextRequest{Mode: ShareFull, Actor: fixAgentA}, &struct{}{}, nil))
 			v2 := getContextView(t, h, id, string(MemberAgent), "nimbus-2")
 			require.Equal(t, ShareFull, v2.Share.Mode)
 			require.Equal(t, 2, v2.GivenCount)
@@ -232,7 +232,7 @@ func TestSessionAPI_ContextShareRefusals(t *testing.T) {
 			postText(t, h, id, fixAgentA, "root")
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"}, &struct{}{}, nil))
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"}, &struct{}{}, nil))
 
 			var errBody map[string]string
 			// A boundary that does not exist is refused, never silently recorded.
@@ -325,7 +325,7 @@ func TestSessionAPI_ContextShareBoundaryValidatedAllModes(t *testing.T) {
 			var addErr map[string]string
 			require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2",
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2",
 					ContextShare: &ContextShare{Mode: ShareSummary, BoundaryMessageID: bogus}},
 				&addErr, nil), "the add path already refuses an unknown boundary")
 			require.Equal(t, "CONTEXT_BOUNDARY_NOT_FOUND", addErr["error"])
@@ -335,7 +335,7 @@ func TestSessionAPI_ContextShareBoundaryValidatedAllModes(t *testing.T) {
 			// default answer so the PUT arms have a decided member to change.
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"},
 				&struct{}{}, nil))
 
 			// (AC 3) PUT with the unknown boundary under `summary` and `full`:
@@ -392,7 +392,7 @@ func TestSessionAPI_ContextShareBoundaryUnchangedForSince(t *testing.T) {
 			postText(t, h, id, fixAgentA, "root")
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"},
 				&struct{}{}, nil))
 
 			var sinceErr map[string]string
@@ -429,7 +429,7 @@ func TestSessionAPI_ContextShareBoundaryVerifiedAccepted(t *testing.T) {
 			postText(t, h, id, fixAgentB, "reply")
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"},
 				&struct{}{}, nil))
 
 			for _, mode := range []ContextShareMode{ShareSummary, ShareFull} {

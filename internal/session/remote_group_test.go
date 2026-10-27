@@ -99,7 +99,7 @@ func TestRemoteGroupRouting(t *testing.T) {
 			a.handler.opts.Deliverer = dispatch
 			room := createFederatedSession(t, a)
 			if !tc.withoutJoin {
-				status, body := a.do("POST", "/sessions/"+room+"/participants", `{"member_type":"agent","member_id":"remote:peer_b:atlas-b"}`, nil)
+				status, body := a.do("POST", "/sessions/"+room+"/participants", `{"member_type":"agent","member_id":"remote:peer_b:atlas-b","actor":"atlas-a"}`, nil)
 				require.Equal(t, http.StatusCreated, status, body)
 			}
 			request, err := json.Marshal(postMessageRequest{

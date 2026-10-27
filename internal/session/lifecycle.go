@@ -96,7 +96,11 @@ func systemEvents(st *State) []LifecycleEvent {
 		}
 		out = append(out, LifecycleEvent{Type: rec.Type, SessionID: rec.SessionID,
 			Seq: rec.Seq, TS: rec.TS, Actor: actor, MemberType: rec.MemberType,
-			MemberID: rec.MemberID, ContextShare: rec.ContextShare, Reason: rec.Reason, Text: text})
+			MemberID: rec.MemberID, ContextShare: rec.ContextShare, Reason: rec.Reason,
+			// A membership line states the ASSURANCE it was recorded with: the
+			// transcript never presents an identity claim as a proven one
+			// (DF-CRIER-470).
+			SenderIdentityBasis: rec.SenderIdentityBasis, Text: text})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out

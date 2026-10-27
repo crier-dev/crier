@@ -52,7 +52,7 @@ func TestRemoteTransportReceipt(t *testing.T) {
 			a := newInstance(t)
 			a.armPeerPolicy(federation.PeerPolicies{"peer": {Peer: "peer", URL: peer.URL, NamespacesAllow: []string{""}}})
 			room := createFederatedSession(t, a)
-			status, body := a.do("POST", "/sessions/"+room+"/participants", `{"member_type":"agent","member_id":"remote:peer:worker"}`, nil)
+			status, body := a.do("POST", "/sessions/"+room+"/participants", `{"member_type":"agent","member_id":"remote:peer:worker","actor":"operator"}`, nil)
 			require.Equal(t, 201, status, body)
 			status, body = a.do("POST", "/sessions/"+room+"/messages", `{"sender":"operator","payload":{"text":"receipt probe"}}`, nil)
 			require.Equal(t, 201, status, body)

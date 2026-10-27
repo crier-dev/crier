@@ -76,7 +76,7 @@ func TestRemote369NamespaceCredentialAndTranscript(t *testing.T) {
 			a.handler.SetFedClient(client)
 			status, body := a.do("POST", "/sessions", `{"id":"private-room","namespace":"private","created_by":{"agent":"sender"}}`, nil)
 			require.Equal(t, 201, status, body)
-			status, body = a.do("POST", "/sessions/private-room/participants", `{"member_type":"agent","member_id":"remote:b:target"}`, map[string]string{namespace.HeaderNamespace: "private"})
+			status, body = a.do("POST", "/sessions/private-room/participants", `{"member_type":"agent","member_id":"remote:b:target","actor":"sender"}`, map[string]string{namespace.HeaderNamespace: "private"})
 			require.Equal(t, 201, status, body)
 			headers := map[string]string{namespace.HeaderNamespaceToken: tc.token, namespace.HeaderNamespace: "private"}
 			status, body = a.do("POST", "/sessions/private-room/messages", `{"sender":"sender","payload":{"text":"crossing"}}`, headers)

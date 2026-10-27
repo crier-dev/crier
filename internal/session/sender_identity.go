@@ -2,11 +2,13 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -61,6 +63,36 @@ func (h *Handler) authorizeSender(w http.ResponseWriter, r *http.Request, author
 		return "", false
 	}
 	return SenderIdentityVerified, true
+}
+
+// authorizeMembershipWrite applies the one session gate a MEMBERSHIP change
+// owes (§5.2: `admin` is the action that manages "grants, bindings, scopes,
+// membership"; `send`/`invite` are how an ordinary member takes part). It is the
+// same gate, with the same subject, that a state transition enforces
+// (lifecycle.go) — a membership write changes WHO is in the room, so the weaker
+// send authority is not enough and a refusal writes nothing.
+//
+// An unarmed ACL is the shipped trust-by-reach posture, not a bypass invented
+// here: the state transition and the send path read it the same way.
+func (h *Handler) authorizeMembershipWrite(w http.ResponseWriter, ctx context.Context, sessionID string, author AuthorRef) bool {
+	if h.opts.Permissions == nil || !h.opts.Permissions.Armed() {
+		return true
+	}
+	res, err := h.opts.Permissions.MayDeliver(ctx, permissions.CheckInput{
+		Sender:  senderOf(author),
+		Action:  permissions.ActionAdmin,
+		Subject: permissions.Subject{Type: permissions.SubjectSession, Ref: sessionID},
+	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "PERMISSIONS_ERROR", err.Error())
+		return false
+	}
+	if !res.Allowed {
+		writeAPIError(w, http.StatusForbidden, "SESSION_MEMBERSHIP_FORBIDDEN",
+			"admin on the session is required to change its membership or a member's context share")
+		return false
+	}
+	return true
 }
 
 // Reuse the registry's verifier/status without publishing raw malformed proof

@@ -21,7 +21,7 @@ func TestSessionParticipantRejectsUnknownAgent(t *testing.T) {
 			h := newAPIHarness(t, store)
 			room := h.createRoom(t)
 			var body map[string]any
-			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodPost, "/sessions/"+room+"/participants", addParticipantRequest{MemberType: "agent", MemberID: "operator"}, &body, nil))
+			require.Equal(t, http.StatusNotFound, h.do(t, http.MethodPost, "/sessions/"+room+"/participants", addParticipantRequest{MemberType: "agent", MemberID: "operator", Actor: fixAgentA}, &body, nil))
 			require.Equal(t, "AGENT_NOT_FOUND", body["error"])
 			require.Contains(t, body["detail"], `"operator"`)
 			st, err := store.Load(context.Background(), room)
@@ -41,7 +41,7 @@ func TestSessionParticipantRegistryFailureIsNotMissing(t *testing.T) {
 	t.Parallel()
 	for _, lookup := range []AgentLookup{nil, failingAgentLookup{errors.New("registry unavailable")}, failingAgentLookup{nil}} {
 		h := NewHTTPHandler(NewJSONLStoreForTest(t), HTTPOptions{Agents: lookup})
-		_, err := h.addOrReaddMember(context.Background(), &Session{ID: "room"}, addParticipantRequest{MemberType: "agent", MemberID: "operator"}, "human")
+		_, err := h.addOrReaddMember(context.Background(), &Session{ID: "room"}, addParticipantRequest{MemberType: "agent", MemberID: "operator"}, "human", SenderIdentityClaimed)
 		require.Equal(t, http.StatusServiceUnavailable, statusForMemberError(err))
 		require.Equal(t, "AGENT_LOOKUP_UNAVAILABLE", codeForMemberError(err))
 	}

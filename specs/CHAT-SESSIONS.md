@@ -853,6 +853,26 @@ refuses since with no boundary in place, and renders the server's system-event t
 use the same API contract; the existing browser add control still addresses agent IDs only.
 The later-change API remains available; no later-change browser editor is claimed.
 
+**SHIPPED (DF-CRIER-470) — who made the membership change, and what they had to prove.**
+Both membership writes (`POST /sessions/{id}/participants` and
+`PUT .../participants/{member_type}/{member_id}/context`) reach the same ingress decision a
+message and a state transition reach, because both record an ACTOR:
+
+- the actor is the body's `actor`, else the `X-Agent-ID` header; a request naming NEITHER is
+  refused `400 AUTHOR_REQUIRED` and records nothing — an add is never stored as `actor: {}`;
+- a signed caller must BE the declared actor (`403 SESSION_SENDER_IDENTITY_MISMATCH`
+  otherwise), so one agent cannot assert another as the author of a join;
+- the assurance the request actually EARNED (`sender-identity-claimed` vs
+  `sender-identity-verified`) is server-stamped onto the `session.member.add` /
+  `session.member.context` record and surfaced in the write response and in transcript
+  `system_events`; a body that names its own basis is refused by the strict decoder;
+- the write additionally requires the `admin` action on the session (CHAT-PERMISSIONS.md
+  §5.2 — `admin` manages membership, which is a stronger authority than the `send` a message
+  needs), refused `403 SESSION_MEMBERSHIP_FORBIDDEN` on an armed ACL before anything is
+  written. Each membership record carries ITS OWN assurance; a projected share reports the one
+  on the newest record that set it, so the view and the record that produced it cannot
+  disagree.
+
 ### 4.7 Navigability — what the record must support (CR-CHAT-017, second half)
 
 The visual surface is `CHAT-INTERFACE.md` §3.8.2. The properties **these records must have**, so the UI is

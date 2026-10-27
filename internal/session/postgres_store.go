@@ -613,6 +613,10 @@ func (s *PostgresStore) Load(ctx context.Context, sessionID string) (*State, err
 			st.ContextEvents = append(st.ContextEvents, rec)
 		}
 	}
+	// The view table has no column for the ingress assurance a membership-context
+	// change recorded; the retained record does, so complete the projection from
+	// it (DF-CRIER-470).
+	st.restoreContextBasis(events)
 	// A transcript read from the view is completed the same way the log's is:
 	// a row that carries no thread key — thread_id '' from a generation before
 	// the field was stored (CR-FEAT-004), or a dump made by one — gets its key

@@ -3586,6 +3586,23 @@ paths:
         (policy wall). A joined remote participant is marked `remote: true` in
         the participant list and receives messages fanned out to the session
         through the shipped federation path.
+
+        WHO MADE THE CHANGE (DF-CRIER-470): a membership write records an actor,
+        so it reaches the same ingress decision a message and a state transition
+        reach. The actor is the body's `actor`, else the `X-Agent-ID` header; an
+        add with NEITHER is refused `400 AUTHOR_REQUIRED` and records nothing —
+        it is never stored with an empty actor. Session ingress honors
+        CR_REQUIRE_AGENT_SIG (default true): unsigned requests are refused `401
+        SESSION_SENDER_SIGNATURE_REQUIRED`, invalid proof is `401
+        SESSION_SENDER_SIGNATURE_INVALID`, and a proof that does not match the
+        declared actor is `403 SESSION_SENDER_IDENTITY_MISMATCH`. The assurance
+        the request actually EARNED is server-stamped onto the membership record
+        and reported as `sender_identity_basis` (`claimed` vs `verified`); the
+        body cannot name its own. A membership change additionally requires the
+        `admin` action on the session (specs/CHAT-PERMISSIONS.md §5.2) — the
+        authority a close/reopen needs, not merely the send authority a message
+        needs — so an armed ACL refuses an unpermitted caller `403
+        SESSION_MEMBERSHIP_FORBIDDEN` before anything is written.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
@@ -3616,7 +3633,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/AddParticipantResult"
         "400":
-          description: A malformed request (an unknown member_type, an absent member_id, or an invalid context_share)
+          description: |-
+            A malformed request — an unknown member_type, an absent member_id,
+            an invalid context_share, or a forged `sender_identity_basis`
+            (INVALID_REQUEST: the assurance is server-stamped, never payload) —
+            or no actor at all to record (AUTHOR_REQUIRED).
+        "401":
+          description: |-
+            The deployment requires a signed request and none was offered
+            (SESSION_SENDER_SIGNATURE_REQUIRED), or the offered proof did not
+            verify (SESSION_SENDER_SIGNATURE_INVALID). No record was written.
+        "403":
+          description: |-
+            The proof does not match the declared actor
+            (SESSION_SENDER_IDENTITY_MISMATCH), or the actor lacks `admin` on
+            this session (SESSION_MEMBERSHIP_FORBIDDEN). No record was written.
         "404":
           description: No such session in this realm (SESSION_NOT_FOUND)
         "409":
@@ -3747,6 +3778,14 @@ paths:
         event, never a rewrite of the join. A `since` change names an
         existing `boundary_message_id` (CONTEXT_BOUNDARY_NOT_FOUND
         otherwise). A closed session admits no change (SESSION_CLOSED).
+
+        This is a MEMBERSHIP change, so it owes what the add path owes
+        (DF-CRIER-470): an actor that can be established (`actor`, else
+        `X-Agent-ID`; neither is `400 AUTHOR_REQUIRED` and records nothing), the
+        session ingress decision that matches a signed caller to the declared
+        actor (`401`/`403` as on the add path), and the `admin` action on the
+        session (`403 SESSION_MEMBERSHIP_FORBIDDEN`) — recorded with the
+        server-stamped `sender_identity_basis` it earned.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
@@ -3776,7 +3815,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberContextState"
         "400":
-          description: "A malformed request: an unknown mode, or a `since` mode without a boundary message id (INVALID_CONTEXT_SHARE), or a boundary that does not exist (CONTEXT_BOUNDARY_NOT_FOUND)"
+          description: "A malformed request: an unknown mode, or a `since` mode without a boundary message id (INVALID_CONTEXT_SHARE), or a boundary that does not exist (CONTEXT_BOUNDARY_NOT_FOUND), or no actor at all to record (AUTHOR_REQUIRED)"
+        "401":
+          description: The deployment requires a signed request and none was offered (SESSION_SENDER_SIGNATURE_REQUIRED), or the offered proof did not verify (SESSION_SENDER_SIGNATURE_INVALID). No record was written.
+        "403":
+          description: The proof does not match the declared actor (SESSION_SENDER_IDENTITY_MISMATCH), or the actor lacks `admin` on this session (SESSION_MEMBERSHIP_FORBIDDEN). No record was written.
         "404":
           description: No such session or member in this realm (SESSION_NOT_FOUND / MEMBER_NOT_FOUND)
         "409":
@@ -5677,7 +5720,7 @@ components:
           description: Required with since; must exist in this session. Conflicting nested and top-level boundaries are rejected.
         actor:
           type: string
-          description: The agent id recording the change; falls back to the X-Agent-ID header.
+          description: The agent id recording the change; falls back to the X-Agent-ID header. A request naming no actor by either route is refused 400 AUTHOR_REQUIRED — a membership record always names who made it (DF-CRIER-470). The value is a CLAIM unless a verified signature binds it; the recorded assurance is reported as sender_identity_basis.
     SetMemberContextRequest:
       type: object
       required: [mode]
@@ -5691,7 +5734,7 @@ components:
           description: Required when mode is `since` — the messages after this id are what the member is given.
         actor:
           type: string
-          description: The agent id recording the change; falls back to the X-Agent-ID header.
+          description: The agent id recording the change; falls back to the X-Agent-ID header. A request naming no actor by either route is refused 400 AUTHOR_REQUIRED (DF-CRIER-470); the recorded assurance is reported as sender_identity_basis.
     MemberContextState:
       type: object
       required: [session_id, member_type, member_id, mode, set_at]
@@ -5711,6 +5754,10 @@ components:
           type: string
         set_by:
           type: string
+        sender_identity_basis:
+          type: string
+          enum: [sender-identity-claimed, sender-identity-verified]
+          description: Server-stamped ingress assurance this change was recorded with (DF-CRIER-470). Claimed means deployment-asserted attribution, not key-verified identity; absent on rows recorded before the field existed. Retained on the session.member.context record and completed from it when the row is projected.
         set_at:
           type: string
           format: date-time
@@ -5867,6 +5914,14 @@ components:
                   type: string
                 boundary_message_id:
                   type: string
+            sender_identity_basis:
+              type: string
+              enum: [sender-identity-claimed, sender-identity-verified]
+              description: |-
+                Server-stamped ingress assurance THIS write earned and recorded
+                (DF-CRIER-470). `claimed` means deployment-asserted attribution,
+                not key-verified identity; the request body cannot name its own
+                basis. The same value is retained on the membership record.
     TranscriptMessage:
       type: object
       required: [id, thread_id, seq, message_kind, author, audience, created_at]

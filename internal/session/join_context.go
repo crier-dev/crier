@@ -382,18 +382,36 @@ func (h *Handler) HandleSetMemberContext(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	resolveJoinShare(st, cs)
-	actor := strings.TrimSpace(req.Actor)
-	if actor == "" {
-		actor = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
+	// DF-CRIER-470: a context share is a membership decision, so it owes the
+	// same ingress decision and the same session `admin` gate an add does. An
+	// actor that cannot be established is REFUSED rather than recorded as an
+	// empty one (`set_by: ""` with no way to tell who granted the share).
+	claimed := strings.TrimSpace(req.Actor)
+	if claimed == "" {
+		claimed = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
+	}
+	author, ok := resolveAuthor(nil, claimed, "", "")
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "AUTHOR_REQUIRED",
+			"actor (an agent id), or the X-Agent-ID header, is required: a context-share change records who made it")
+		return
+	}
+	basis, allowed := h.authorizeSender(w, r, author)
+	if !allowed {
+		return
+	}
+	if !h.authorizeMembershipWrite(w, r.Context(), sess.ID, author) {
+		return
 	}
 	mc := &MemberContext{
-		SessionID:         sess.ID,
-		MemberType:        m.MemberType,
-		MemberID:          m.MemberID,
-		Mode:              cs.Mode,
-		BoundaryMessageID: cs.BoundaryMessageID,
-		SetBy:             actor,
-		SetAt:             h.now(),
+		SessionID:           sess.ID,
+		MemberType:          m.MemberType,
+		MemberID:            m.MemberID,
+		Mode:                cs.Mode,
+		BoundaryMessageID:   cs.BoundaryMessageID,
+		SetBy:               author.AgentID(),
+		SenderIdentityBasis: basis,
+		SetAt:               h.now(),
 	}
 	seq, err := h.store.NextSeq(r.Context(), sess.ID)
 	if err != nil {

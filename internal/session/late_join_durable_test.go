@@ -19,7 +19,7 @@ func lateJoinHistoryContract(t *testing.T, open func() Repository) {
 	first := postText(t, h, id, fixAgentA, "initial context")
 	var added participantView
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-		map[string]any{"member_type": "agent", "member_id": "nimbus-2"}, &added, nil))
+		map[string]any{"member_type": "agent", "member_id": "nimbus-2", "actor": fixAgentA}, &added, nil))
 	require.Equal(t, first, added.ContextShare.BoundaryMessageID)
 	postText(t, h, id, fixAgentA, "after join")
 	view := getContextView(t, h, id, "agent", "nimbus-2")
@@ -27,7 +27,7 @@ func lateJoinHistoryContract(t *testing.T, open func() Repository) {
 	assertLateJoinEvent(t, h, id, "nimbus-2", "summary", first, "")
 	var changed map[string]any
 	require.Equal(t, http.StatusOK, h.do(t, http.MethodPut, "/sessions/"+id+"/participants/agent/nimbus-2/context",
-		map[string]any{"mode": "since", "boundary_message_id": first}, &changed, nil))
+		map[string]any{"mode": "since", "boundary_message_id": first, "actor": fixAgentA}, &changed, nil))
 	require.NoError(t, store.Close())
 
 	// Open another handle on the durable data. A latest-share projection would

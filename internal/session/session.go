@@ -303,7 +303,13 @@ type MemberContext struct {
 	Mode              ContextShareMode `json:"mode"`
 	BoundaryMessageID string           `json:"boundary_message_id,omitempty"`
 	SetBy             string           `json:"set_by,omitempty"`
-	SetAt             time.Time        `json:"set_at"`
+	// SenderIdentityBasis is the ingress assurance the setting request earned,
+	// server-stamped by the handler that admitted it and retained on the
+	// session.member.context RECORD. The SQL view table has no column for it, so
+	// a projected share is completed from that record (restoreContextBasis); it
+	// is never accepted from a request (DF-CRIER-470).
+	SenderIdentityBasis string    `json:"sender_identity_basis,omitempty"`
+	SetAt               time.Time `json:"set_at"`
 }
 
 // AudienceTarget is one resolved address (§4.2). The RESOLVED tag is stored,
@@ -586,7 +592,31 @@ func (st *State) upsertContextShare(rec *Record, cs *ContextShare) {
 	mc.Mode = cs.Mode
 	mc.BoundaryMessageID = cs.BoundaryMessageID
 	mc.SetBy = actorID(rec.Actor)
+	mc.SenderIdentityBasis = rec.SenderIdentityBasis
 	mc.SetAt = rec.TS
+}
+
+// restoreContextBasis copies the ingress assurance the retained membership
+// RECORDS carry onto the projected shares. A Replay reads it straight off the
+// record; the SQL view table (chat_context_shares) has no column for it, so a
+// SQL Load completes the same projection from the record stream — otherwise the
+// two projections of one set of facts would disagree on a field that exists to
+// be trusted.
+//
+// A join (session.member.add) records the share the member was GIVEN and a later
+// change (session.member.context) replaces it, so both shapes contribute.
+// events must ascend by seq (loadLifecycle orders by seq), so the newest
+// record's value is the one that survives, which is the record the projected
+// share came from (DF-CRIER-470).
+func (st *State) restoreContextBasis(events []*Record) {
+	for _, rec := range events {
+		if rec.Type != RecordMemberAdd && rec.Type != RecordMemberContext {
+			continue
+		}
+		if mc := st.findContextShare(rec.MemberType, rec.MemberID); mc != nil {
+			mc.SenderIdentityBasis = rec.SenderIdentityBasis
+		}
+	}
 }
 
 func (st *State) findContextShare(mt MemberType, id string) *MemberContext {

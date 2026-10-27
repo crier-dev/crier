@@ -395,7 +395,7 @@ func TestSessionAPI_Membership(t *testing.T) {
 
 	var p participantView
 	require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-		addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2", Role: string(RoleObserver)},
+		addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2", Role: string(RoleObserver), Actor: fixAgentA},
 		&p, nil))
 	require.Equal(t, "nimbus-2", p.MemberID)
 	require.True(t, p.Active)
@@ -407,7 +407,7 @@ func TestSessionAPI_Membership(t *testing.T) {
 	// An unknown member_type is refused with its named error.
 	var errBody map[string]string
 	require.Equal(t, http.StatusBadRequest, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-		addParticipantRequest{MemberType: "robot", MemberID: "x"}, &errBody, nil))
+		addParticipantRequest{MemberType: "robot", MemberID: "x", Actor: fixAgentA}, &errBody, nil))
 	require.Equal(t, "INVALID_MEMBER", errBody["error"])
 }
 
@@ -428,7 +428,7 @@ func TestSessionAPI_ClosedSessionRefusesWrites(t *testing.T) {
 	require.Equal(t, "SESSION_CLOSED", errBody["error"])
 
 	require.Equal(t, http.StatusConflict, h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-		addParticipantRequest{MemberType: string(MemberAgent), MemberID: fixAgentB}, &errBody, nil))
+		addParticipantRequest{MemberType: string(MemberAgent), MemberID: fixAgentB, Actor: fixAgentA}, &errBody, nil))
 	require.Equal(t, "SESSION_CLOSED", errBody["error"])
 }
 

@@ -112,7 +112,7 @@ func TestFederatedRoomRemoteParticipantCrosses(t *testing.T) {
 	// (a) A member of B joins a session on A as a REMOTE participant.
 	sessID := createFederatedSession(t, a)
 	status, body := a.do("POST", "/sessions/"+sessID+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","role":"member"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","role":"member","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusCreated, status, "add remote participant: %s", body)
 
 	// (d) The participant view names the remote participant as REMOTE.
@@ -169,7 +169,7 @@ func TestFederatedRoomPerPeerRefusal(t *testing.T) {
 		"peer_b": {Peer: "peer_b", URL: b.srv.URL, SelfAs: "peer_a", NamespacesAllow: nil},
 	})
 	status, body := a.do("POST", "/sessions/"+sessID+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusForbidden, status, "wholesale refusal: %s", body)
 	require.Contains(t, body, "FED_NAMESPACE_NOT_PERMITTED")
 
@@ -183,7 +183,7 @@ func TestFederatedRoomPerPeerRefusal(t *testing.T) {
 	})
 	// The admitted peer joins and receives.
 	status, body = a2.do("POST", "/sessions/"+a2s+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusCreated, status, "admitted peer joins: %s", body)
 	status, _ = a2.do("POST", "/sessions/"+a2s+"/messages",
 		`{"payload":{"text":"for the admitted peer"},"sender":"atlas-a"}`, nil)
@@ -195,14 +195,14 @@ func TestFederatedRoomPerPeerRefusal(t *testing.T) {
 	// A remote member of a peer whose policy does not admit this session's
 	// namespace is refused AT THE WALL — per-namespace, named.
 	status, body = a2.do("POST", "/sessions/"+a2s+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_ghost:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_ghost:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusForbidden, status, "per-namespace refusal: %s", body)
 	require.Contains(t, body, "FED_NAMESPACE_NOT_PERMITTED")
 
 	// An UNKNOWN peer is refused with FED_PEER_UNTRUSTED — never silently
 	// admitted, never a 404.
 	status, body = a2.do("POST", "/sessions/"+a2s+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_unknown:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_unknown:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusForbidden, status)
 	require.Contains(t, body, "FED_PEER_UNTRUSTED")
 }
@@ -215,7 +215,7 @@ func TestFederatedRoomNoPolicyNoRemoteJoin(t *testing.T) {
 	a := newInstance(t)
 	sessID := createFederatedSession(t, a)
 	status, body := a.do("POST", "/sessions/"+sessID+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusForbidden, status, "no-policy posture: %s", body)
 	require.Contains(t, body, "FED_PEER_UNTRUSTED")
 }
@@ -249,7 +249,7 @@ func TestDeliverRemoteWithoutFedClientRefusesNamed(t *testing.T) {
 	a.handler.SetFedClient(nil) // the case under test: the remote leg is unwired
 	sessID := createFederatedSession(t, a)
 	status, body := a.do("POST", "/sessions/"+sessID+"/participants",
-		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b"}`, nil)
+		`{"member_type":"agent","member_id":"remote:peer_b:atlas-b","actor":"atlas-a"}`, nil)
 	require.Equal(t, http.StatusCreated, status, "%s", body)
 	status, body = a.do("POST", "/sessions/"+sessID+"/messages",
 		`{"payload":{"text":"unwired"},"sender":"atlas-a"}`, nil)

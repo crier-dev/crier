@@ -267,7 +267,7 @@ func TestReAddWithExplicitShareChangeIsRecorded(t *testing.T) {
 			// record a second time.
 			var same readdParticipantResult
 			code := h.do(t, http.MethodPost, "/sessions/"+id+"/participants",
-				map[string]any{"member_type": "agent", "member_id": peer,
+				map[string]any{"member_type": "agent", "member_id": peer, "actor": fixAgentA,
 					"context_share": string(ShareFull)}, &same, nil)
 			if againAdds, againContexts, ok := logRecordCounts(t, store, id, peer); ok {
 				require.Equal(t, adds, againAdds)

@@ -325,7 +325,7 @@ func TestSessionFanoutWebhookReplyDoesNotFanout(t *testing.T) {
 		}, nil)
 		require.Equal(t, http.StatusCreated, code, "%s", raw)
 		code, raw = sessionDo(t, http.DefaultClient, http.MethodPost, base+"/sessions/"+room+"/participants", map[string]string{
-			"member_type": "agent", "member_id": agent, "role": "member",
+			"member_type": "agent", "member_id": agent, "role": "member", "actor": "speaker",
 		}, nil)
 		require.Equal(t, http.StatusCreated, code, "%s", raw)
 	}

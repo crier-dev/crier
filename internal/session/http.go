@@ -424,6 +424,11 @@ type addParticipantResponse struct {
 	// ContextSharePrevious is the share this request REPLACED, present only on
 	// memberActionUpdated: an applied re-add never changes a grant silently.
 	ContextSharePrevious *ContextShare `json:"context_share_previous,omitempty"`
+	// SenderIdentityBasis is the ingress assurance this write EARNED and
+	// recorded (sender-identity-claimed / -verified). It is server-stamped, so
+	// a 201 states what the caller actually proved about itself rather than
+	// echoing the identity it asserted (DF-CRIER-470).
+	SenderIdentityBasis string `json:"sender_identity_basis,omitempty"`
 }
 
 // createSessionRequest is the POST /sessions body (§1.4).
@@ -775,6 +780,15 @@ func (h *Handler) HandleListParticipants(w http.ResponseWriter, r *http.Request)
 // change the stored context share has to NAME that share — an absent
 // `context_share` never means "replace the grant with the join default"
 // (DF-CRIER-482).
+//
+// A membership write records an ACTOR, so it owes the same ingress decision a
+// message and a state transition make (DF-CRIER-470): the actor is resolved the
+// same way, `authorizeSender` refuses a signature that does not match the
+// declared actor, the recorded line carries the resulting
+// `sender_identity_basis`, and an actor that cannot be established at all is
+// REFUSED instead of being stored as `actor: {}`. It also passes the session's
+// `admin` gate — the one a close/reopen enforces — before anything is written,
+// because membership is who is IN the room, not merely who may speak.
 func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	_, sess, ok := h.loadScoped(w, r)
 	if !ok {
@@ -789,14 +803,32 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	actor := strings.TrimSpace(req.Actor)
-	if actor == "" {
-		actor = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
+	// DF-CRIER-470: the identity comes from the request ingress, not from the
+	// payload — `actor` names the agent the way `sender` does on a send, and the
+	// X-Agent-ID header is the fallback it always was. Neither is trusted on its
+	// own: authorizeSender makes the declared actor agree with a verified
+	// signature, and the basis it returns is what the record keeps.
+	claimed := strings.TrimSpace(req.Actor)
+	if claimed == "" {
+		claimed = strings.TrimSpace(r.Header.Get(registry.HeaderAgentID))
+	}
+	author, ok := resolveAuthor(nil, claimed, "", "")
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "AUTHOR_REQUIRED",
+			"actor (an agent id), or the X-Agent-ID header, is required: a membership change records who made it")
+		return
+	}
+	basis, allowed := h.authorizeSender(w, r, author)
+	if !allowed {
+		return
+	}
+	if !h.authorizeMembershipWrite(w, r.Context(), sess.ID, author) {
+		return
 	}
 
 	// The response is the recorded fact, not the request echoed — read back
 	// from the store, including the late-join context answer (§4.6 D10).
-	out, err := h.addOrReaddMember(r.Context(), sess, req, actor)
+	out, err := h.addOrReaddMember(r.Context(), sess, req, author.AgentID(), basis)
 	if err != nil {
 		writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
 		return
@@ -1670,6 +1702,10 @@ type memberPlan struct {
 	// resolveJoinShare), not the raw request value.
 	Share  *ContextShare
 	Reason string
+	// Basis is the ingress assurance the joining request earned
+	// (sender-identity-claimed / -verified), server-stamped by the handler that
+	// admitted it. It rides on the RECORD, never on the request (DF-CRIER-470).
+	Basis string
 }
 
 // composeMember validates one membership request that needs no room history and
@@ -1755,7 +1791,10 @@ func checkMemberBoundary(st *State, sessionID string, p *memberPlan) error {
 	return nil
 }
 
-// appendMember writes an already-validated membership as the next record.
+// appendMember writes an already-validated membership as the next record. The
+// record carries the ingress assurance the request earned, so a membership line
+// can never be read as proof of an identity the caller did not establish
+// (DF-CRIER-470).
 func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan) error {
 	seq, err := h.store.NextSeq(ctx, sess.ID)
 	if err != nil {
@@ -1763,6 +1802,7 @@ func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan
 	}
 	rec := p.Member.AddRecord(seq, p.Member.AddedAt, p.Share)
 	rec.Reason = p.Reason
+	rec.SenderIdentityBasis = p.Basis
 	return h.store.Append(ctx, rec)
 }
 
@@ -1789,11 +1829,12 @@ func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan
 // remove+add pair, never an in-place edit. The response reports the recorded
 // role, so a differing `role` in the body is visible rather than silently
 // applied.
-func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addParticipantRequest, actor string) (*addParticipantResponse, error) {
+func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addParticipantRequest, actor, basis string) (*addParticipantResponse, error) {
 	plan, err := h.composeMember(sess, req, actor)
 	if err != nil {
 		return nil, err
 	}
+	plan.Basis = basis
 	st, err := h.store.Load(ctx, sess.ID)
 	if err != nil {
 		return nil, err
@@ -1807,13 +1848,13 @@ func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addPa
 		if err := h.appendMember(ctx, sess, plan); err != nil {
 			return nil, err
 		}
-		return h.addParticipantView(ctx, sess.ID, plan.Member.MemberType, plan.Member.MemberID, memberActionAdded, nil)
+		return h.addParticipantView(ctx, sess.ID, plan.Member.MemberType, plan.Member.MemberID, memberActionAdded, nil, basis)
 	}
 
 	current := contextShareFor(st, existing.MemberType, existing.MemberID)
 	namedShare := req.ContextShare != nil || strings.TrimSpace(req.ContextBoundaryMessageID) != ""
 	if !namedShare || sharesEqual(current, plan.Share) {
-		return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUnchanged, nil)
+		return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUnchanged, nil, basis)
 	}
 
 	// An explicit change. It is recorded as session.member.context — a new
@@ -1825,13 +1866,14 @@ func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addPa
 		return nil, err
 	}
 	mc := &MemberContext{
-		SessionID:         sess.ID,
-		MemberType:        existing.MemberType,
-		MemberID:          existing.MemberID,
-		Mode:              plan.Share.Mode,
-		BoundaryMessageID: plan.Share.BoundaryMessageID,
-		SetBy:             actor,
-		SetAt:             at,
+		SessionID:           sess.ID,
+		MemberType:          existing.MemberType,
+		MemberID:            existing.MemberID,
+		Mode:                plan.Share.Mode,
+		BoundaryMessageID:   plan.Share.BoundaryMessageID,
+		SetBy:               actor,
+		SenderIdentityBasis: basis,
+		SetAt:               at,
 	}
 	rec := mc.Record(seq, at)
 	rec.Reason = reAddShareChangeReason(current)
@@ -1839,7 +1881,7 @@ func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addPa
 		return nil, err
 	}
 	previous := shareOf(current)
-	return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUpdated, previous)
+	return h.addParticipantView(ctx, sess.ID, existing.MemberType, existing.MemberID, memberActionUpdated, previous, basis)
 }
 
 // reAddShareChangeReason states the change an operator will read on the audit
@@ -1877,7 +1919,7 @@ func sharesEqual(current *MemberContext, want *ContextShare) bool {
 // addParticipantView reads the membership back from the store and renders the
 // POST /sessions/{id}/participants body: the recorded fact, never the request
 // echoed.
-func (h *Handler) addParticipantView(ctx context.Context, sessionID string, mt MemberType, id, action string, previous *ContextShare) (*addParticipantResponse, error) {
+func (h *Handler) addParticipantView(ctx context.Context, sessionID string, mt MemberType, id, action string, previous *ContextShare, basis string) (*addParticipantResponse, error) {
 	st, err := h.store.Load(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -1900,6 +1942,7 @@ func (h *Handler) addParticipantView(ctx context.Context, sessionID string, mt M
 		Changed:              action != memberActionUnchanged,
 		Action:               action,
 		ContextSharePrevious: previous,
+		SenderIdentityBasis:  basis,
 	}
 	return out, nil
 }

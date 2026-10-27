@@ -270,8 +270,19 @@ func TestTaskInvokeCheckedPerTarget(t *testing.T) {
 
 	// The stranger's session-send is granted (a member may talk) but its
 	// invoke on the target is not — the task must still be refused.
+	//
+	// Adding a member is a MEMBERSHIP write, so it owes the session's admin
+	// authority (DF-CRIER-470); the room's owner holds it, seeded here so what
+	// this test measures stays the per-target invoke rule below.
+	h.seedGrant(t, &permissions.Grant{
+		ID: "g_admin_" + room, Kind: "grant", Principal: "prin_owner",
+		Subject:   permissions.Subject{Type: permissions.SubjectSession, Ref: room},
+		Actions:   []permissions.Action{permissions.ActionAdmin},
+		GrantedBy: "prin_owner",
+	})
 	_ = h.do(t, http.MethodPost, "/sessions/"+room+"/participants", map[string]any{
 		"member_type": "principal", "member_id": "prin_stranger", "role": "member",
+		"actor": fixAgentA,
 	}, nil, nil)
 
 	var refused struct {

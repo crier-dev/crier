@@ -115,7 +115,7 @@ func TestSessionAPI_ContextViewNeverClaimsPostJoinMessages(t *testing.T) {
 			// The join itself: the default answer pins its edge to pre2.
 			require.Equal(t, http.StatusCreated, h.do(t, http.MethodPost,
 				"/sessions/"+id+"/participants",
-				addParticipantRequest{MemberType: string(MemberAgent), MemberID: "nimbus-2"},
+				addParticipantRequest{MemberType: string(MemberAgent), Actor: fixAgentA, MemberID: "nimbus-2"},
 				&struct{}{}, nil))
 			post := postText(t, h, id, fixAgentA, "recorded AFTER the join")
 
