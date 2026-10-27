@@ -17,7 +17,14 @@
       "brief": "/tmp/crier-20261027-1931-INT-CI-017-brief.txt",
       "dispatch": "/tmp/crier-20261027-1931-dispatch.sh",
       "process_session": "proc_528057553ed4",
-      "status": "running"
+      "status": "complete",
+      "commit_hash": "ebd2c2b6d6abb8dd6c0123ac456deb4a22ecb2b7",
+      "merge": "fast-forward merged as ebd2c2b6",
+      "guard": "PASS",
+      "ci": "pending exact-head; completed duplicate 40570443147 success"
     }
-  ]
+  ],
+  "finished_at": "2026-10-27T20:35:00Z",
+  "recovery_status": "complete",
+  "recovery_note": "Recovered: stale-base branch gated and rebased; fresh worker commit ebd2c2b6 merged and pushed to origin/main and gitlab/main. Local gates and five 11/11 selftests passed. Exact-head CI pending; GitReins task state complete but no matching verdict artifact was available before bounded cleanup."
 }
