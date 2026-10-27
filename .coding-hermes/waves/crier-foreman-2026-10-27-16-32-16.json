@@ -9,5 +9,6 @@
     {"task_id":"README-010","worktree":"/home/kara/worktrees/crier-README-010","branch":"wt/README-010","base":"origin/main","brief":"/tmp/crier-tick-20261027-163216-README-010-brief.txt","dispatch":"step-3.7-flash@stepfun","disposition":"stalled/no-usable-diff; foreman-direct trivial fix"},
     {"task_id":"README-011","worktree":"/home/kara/worktrees/crier-README-011","branch":"wt/README-011","base":"origin/main","brief":"/tmp/crier-tick-20261027-163216-README-011-brief.txt","dispatch":"step-3.7-flash@stepfun","disposition":"worker produced uncommitted one-line diff; foreman verifies and commits"}
   ],
-  "note":"Manifest written after dispatch because the initial dispatch orchestration omitted the required pre-dispatch manifest; no board data was discarded. Subsequent closeout preserves exact worker dispositions."
+  "note":"Manifest written after dispatch because the initial dispatch orchestration omitted the required pre-dispatch manifest; no board data was discarded. Subsequent closeout preserves exact worker dispositions.",
+  "finished_at":"2026-10-27T18:06:35Z"
 }
