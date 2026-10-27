@@ -180,3 +180,13 @@ storage denial, UI gating states and delayed reads are injected test fixtures,
 not real upstream failures. This does not test PostgreSQL, restart durability,
 production permissions, or every browser. Temporary evidence and scratch server
 logs are retained; cleanup of old artifacts remains the operator's responsibility.
+
+> SUPERSEDED 2026-10-27 (DF-CRIER-333 / DF-CRIER-335, commit `92b0ec0e`): the
+> token-protected `/chat` limit above no longer holds. `scripts/chat-ui-browser.cjs`
+> now also drives a REAL browser session — 401 with the DF-CRIER-444
+> fronting-requirement page and no panel without a front; the live panel through a
+> front that injects the header on the wire, whose OWN protected `GET /sessions`
+> returned a token-created record; the token in neither page source nor
+> localStorage/sessionStorage/cookies. The front in that arm is a harness stand-in:
+> WHICH fronting arrangement ships is still the open DF-CRIER-333 owner ruling.
+> Evidence: `docs/dogfood/screenshots-2026-10-27/README.md`.
