@@ -114,7 +114,12 @@
 #           and reports how many candidates it skipped.
 #   ARM E — every candidate occupied fails closed (exit 1): the budget is named,
 #           and every attempted port is listed with the holder that took it —
-#           never a silent pick of a port somebody else owns.
+#           never a silent pick of a port somebody else owns. Its three
+#           candidates are a FRESH self-picked run of consecutive ports (not
+#           ARM D's fixture run), each squatted with proven ownership before
+#           the selector runs; a fixture candidate lost in the pick->bind
+#           window rotates to a fresh base (bounded) instead of failing the
+#           arm (INT-CI-017).
 #   ARM F — the EXPLICIT port argument is authoritative: an occupied explicit
 #           port fails closed naming that port only (no rotation to a free
 #           candidate), and a free explicit port is used verbatim even while
@@ -132,6 +137,7 @@
 # child is the same selftest CI runs. Budgets are overridable:
 # PG_SELFTEST_DECOY_TRIES (rotation attempts, default 5) and
 # PG_SELFTEST_BIND_TRIES (bounded bind wait per attempt, default 50 x 0.1s).
+# PG_SELFTEST_ARM_E_TRIES bounds ARM E's fresh-base fixture tries (default 3).
 #
 # shellcheck shell=bash disable=SC2155,SC2317
 
@@ -540,6 +546,73 @@ _pg_selftest_free_run() {
     fi
     tries=$((tries + 1))
   done
+  return 1
+}
+
+# _pg_selftest_squat_exact <port> <log> — ONE _pg_selftest_squat attempt, no
+# retry: returns 1 when the port could not be taken (its reason is in
+# _pg_SELFTEST_TRY_REASON via _pg_selftest_decoy_ready). Retrying the SAME
+# candidate would be wrong — a squat that failed because another process took
+# the port stays failed — so the ARM E retry moves to a fresh base instead.
+_pg_selftest_squat_exact() { # <port> <log>
+  _pg_SELFTEST_TRY_REASON=""
+  _pg_selftest_squat "$1" "$2"
+}
+
+# _pg_selftest_arm_e_prepare <log> <reserved-lo> <reserved-hi> — pick a FRESH
+# run of 3 consecutive free ports and squat every one of them with proven
+# ownership, so the exhausted budget of ARM E is exercised with all intended
+# candidates occupied and attributable to pids this selftest started. The base
+# is picked AFTER the preceding arms have run (never reused from ARM D's
+# fixture), so the pick->bind window lost on a busy runner (CI run 40569294063:
+# a candidate stolen or a slow bind judged dead) costs a fresh base, not the
+# arm. Bases overlapping the RESERVED range (ARM D's fixture run and ARM F's
+# free explicit port) are refused: ARM F must still see that port free, and a
+# squat there would be a self-inflicted fixture collision (INT-CI-017).
+#   _pg_SELFTEST_ARM_E_BASE   the base of the 3 occupied candidates
+#   _pg_SELFTEST_ARM_E_PIDS   the three holder pids, whitespace-separated
+#   _pg_SELFTEST_ARM_E_TRIES  bases tried (" :p :p …"), for the failure report
+# Every pid in _pg_SELFTEST_ARM_E_PIDS is registered in _pg_SELFTEST_SQUAT_PIDS
+# (by _pg_selftest_squat) and is killed by the EXIT trap. Returns 0 when all
+# three candidates are provably ours, 1 when every fresh base was lost.
+_pg_selftest_arm_e_prepare() { # <log> <reserved-lo> <reserved-hi>
+  local log="$1" rlo="$2" rhi="$3" tries="${PG_SELFTEST_ARM_E_TRIES:-3}" t=0 base=0 j=0
+  local pids="" rc=0
+  _pg_SELFTEST_ARM_E_BASE=""
+  _pg_SELFTEST_ARM_E_PIDS=""
+  _pg_SELFTEST_ARM_E_TRIES=""
+  while [ "$t" -lt "$tries" ]; do
+    base="$(_pg_selftest_free_run 3)" || base=""
+    if [ -z "$base" ]; then
+      _pg_SELFTEST_ARM_E_TRIES="$_pg_SELFTEST_ARM_E_TRIES none(free-run)"
+      t=$((t + 1))
+      continue
+    fi
+    if [ "$base" -le "$rhi" ] && [ "$((base + 2))" -ge "$rlo" ]; then
+      _pg_SELFTEST_ARM_E_TRIES="$_pg_SELFTEST_ARM_E_TRIES :$base(reserved $rlo..$rhi)"
+      t=$((t + 1))
+      continue
+    fi
+    _pg_SELFTEST_ARM_E_TRIES="$_pg_SELFTEST_ARM_E_TRIES :$base"
+    pids=""
+    rc=0
+    j=0
+    while [ "$j" -lt 3 ]; do
+      _pg_selftest_squat_exact "$((base + j))" "$log" || { rc=1; break; }
+      pids="$pids $_pg_SELFTEST_SQUAT_PID"
+      j=$((j + 1))
+    done
+    if [ "$rc" -eq 0 ]; then
+      _pg_SELFTEST_ARM_E_BASE="$base"
+      _pg_SELFTEST_ARM_E_PIDS="$pids"
+      return 0
+    fi
+    # A lost candidate poisons the run (a gap would let the selector pick a
+    # free port): the squats already taken are this selftest's own, but the
+    # next base is picked afresh so leave them to the EXIT trap and move on.
+    t=$((t + 1))
+  done
+  echo "port-guard selftest: FAIL: ARM E could not occupy $tries fresh candidate base(s) (bases tried:${_pg_SELFTEST_ARM_E_TRIES:- none}) — every fixture candidate must be held by a listener this selftest owns" >&2
   return 1
 }
 
@@ -1267,31 +1340,36 @@ SHIM
       fi
 
       # ── ARM E: every candidate occupied fails closed, each one named ────────
-      local s_rc2=0 s_rc3=0 e_pids="" e_out="" e_rc=0 e_miss="" e_pmiss="" e_port="" e_p=""
-      _pg_selftest_squat "$((rot_base + 1))" "$rot_log"
-      s_rc2=$?
-      e_pids="$_pg_SELFTEST_SQUAT_PID"
-      _pg_selftest_squat "$((rot_base + 2))" "$rot_log"
-      s_rc3=$?
-      e_pids="$e_pids $_pg_SELFTEST_SQUAT_PID"
-      if [ "$s_rc2" -ne 0 ] || [ "$s_rc3" -ne 0 ]; then
-        echo "port-guard selftest: FAIL: ARM E PREMISE BROKEN — could not squat :$((rot_base + 1))/:$((rot_base + 2)) with listeners this selftest owns (rc=$s_rc2/$s_rc3)" >&2
+      # The fixture is NOT ARM D's run: it is a FRESH run of 3 consecutive
+      # ports picked and squatted here, AFTER ARM D has completed — re-squatting
+      # ARM D's neighbours re-races the same pick->bind window on a busy runner
+      # (CI run 40569294063: :39593 still held by ARM D's squatter, :39594 lost
+      # in the window) and breaks the arm's premise instead of proving the
+      # exhausted path. Every holder here is a listener this selftest started
+      # and asserted ownership of (never an unbound decoy, never a foreign pid).
+      local e_pids="" e_out="" e_rc=0 e_miss="" e_pmiss="" e_port="" e_p=""
+      local e_base="" e_ready=1
+      _pg_selftest_arm_e_prepare "$rot_log" "$rot_base" "$((rot_base + 3))" || e_ready=0
+      if [ "$e_ready" -ne 1 ]; then
+        echo "port-guard selftest: FAIL: ARM E PREMISE BROKEN — no fresh 3-candidate fixture could be occupied by listeners this selftest owns (bases tried:${_pg_SELFTEST_ARM_E_TRIES:- none})" >&2
         fails=$((fails + 1))
       else
-        e_out="$( ( select_scratch_port "" "$rot_base" "selftest-exhaust" 3 "SELFTEST_PORT"
+        e_base="$_pg_SELFTEST_ARM_E_BASE"
+        e_pids="$_pg_SELFTEST_ARM_E_PIDS"
+        e_out="$( ( select_scratch_port "" "$e_base" "selftest-exhaust" 3 "SELFTEST_PORT"
                     printf 'SELECTED=%s\n' "$PORT_GUARD_SELECTED" ) 2>&1 )" || e_rc=$?
-        for e_port in "$rot_base" "$((rot_base + 1))" "$((rot_base + 2))"; do
+        for e_port in "$e_base" "$((e_base + 1))" "$((e_base + 2))"; do
           printf '%s\n' "$e_out" | grep -q ":$e_port — holder pid" || e_miss="$e_miss :$e_port"
         done
-        for e_p in $squat_pid $e_pids; do
+        for e_p in $e_pids; do
           printf '%s\n' "$e_out" | grep -q "holder pid $e_p," || e_pmiss="$e_pmiss $e_p"
         done
         if [ "$e_rc" -ne 1 ]; then
           echo "port-guard selftest: FAIL: ARM E: an exhausted candidate budget exited $e_rc, not 1 — it must fail closed with the guard's own exit code" >&2
           echo "  output: $e_out" >&2
           fails=$((fails + 1))
-        elif ! printf '%s\n' "$e_out" | grep -q "all 3 scratch-port candidate(s) from :$rot_base are in use"; then
-          echo "port-guard selftest: FAIL: ARM E: the refusal did not name the 3-candidate budget and its base :$rot_base" >&2
+        elif ! printf '%s\n' "$e_out" | grep -q "all 3 scratch-port candidate(s) from :$e_base are in use"; then
+          echo "port-guard selftest: FAIL: ARM E: the refusal did not name the 3-candidate budget and its base :$e_base" >&2
           echo "  output: $e_out" >&2
           fails=$((fails + 1))
         elif [ -n "$e_miss" ]; then
@@ -1307,7 +1385,7 @@ SHIM
           echo "  output: $e_out" >&2
           fails=$((fails + 1))
         else
-          echo "PASS: ARM E: an exhausted candidate budget fails closed (exit 1, all 3 candidates and their holder pids named, nothing selected)"
+          echo "PASS: ARM E: an exhausted candidate budget fails closed (exit 1, all 3 fresh candidates :$e_base..$((e_base + 2)) and their holder pids$e_pids named, nothing selected)"
         fi
       fi
 
