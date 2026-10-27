@@ -667,7 +667,7 @@ func (h *Handler) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 	pending := &State{Session: sess}
 	plans := make([]*memberPlan, 0, len(req.Members))
 	for _, m := range req.Members {
-		plan, err := h.composeMember(sess, m, creator.AgentID())
+		plan, err := h.composeMember(sess, m, creator)
 		if err != nil {
 			writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
 			return
@@ -828,7 +828,7 @@ func (h *Handler) HandleAddParticipant(w http.ResponseWriter, r *http.Request) {
 
 	// The response is the recorded fact, not the request echoed — read back
 	// from the store, including the late-join context answer (§4.6 D10).
-	out, err := h.addOrReaddMember(r.Context(), sess, req, author.AgentID(), basis)
+	out, err := h.addOrReaddMember(r.Context(), sess, req, author, basis)
 	if err != nil {
 		writeAPIError(w, statusForMemberError(err), codeForMemberError(err), err.Error())
 		return
@@ -1702,6 +1702,11 @@ type memberPlan struct {
 	// resolveJoinShare), not the raw request value.
 	Share  *ContextShare
 	Reason string
+	// Actor is the caller that performed the add, as the record must name it
+	// (agent, principal or principal-as-agent). It is resolved from the request
+	// ingress — for a create, the creator that declared the members
+	// (DF-CRIER-465).
+	Actor AuthorRef
 	// Basis is the ingress assurance the joining request earned
 	// (sender-identity-claimed / -verified), server-stamped by the handler that
 	// admitted it. It rides on the RECORD, never on the request (DF-CRIER-470).
@@ -1712,7 +1717,7 @@ type memberPlan struct {
 // composes the record it would append. Everything here is state-free apart from
 // the prospective session (its id and realm), which is why the create path can
 // run it before the room exists.
-func (h *Handler) composeMember(sess *Session, req addParticipantRequest, actor string) (*memberPlan, error) {
+func (h *Handler) composeMember(sess *Session, req addParticipantRequest, actor AuthorRef) (*memberPlan, error) {
 	mt := MemberType(strings.TrimSpace(req.MemberType))
 	switch mt {
 	case MemberAgent, MemberPrincipal:
@@ -1766,9 +1771,13 @@ func (h *Handler) composeMember(sess *Session, req addParticipantRequest, actor 
 		MemberID:   id,
 		Role:       role,
 		AddedAt:    h.now(),
-		AddedBy:    actor,
+		AddedBy:    actorID(&actor),
 	}
-	return &memberPlan{Member: m, Share: &share}, nil
+	if !actor.IsZero() {
+		recorded := actor
+		m.AddedByActor = &recorded
+	}
+	return &memberPlan{Member: m, Share: &share, Actor: actor}, nil
 }
 
 // checkMemberBoundary resolves a composed member's context share against the
@@ -1795,7 +1804,23 @@ func checkMemberBoundary(st *State, sessionID string, p *memberPlan) error {
 // record carries the ingress assurance the request earned, so a membership line
 // can never be read as proof of an identity the caller did not establish
 // (DF-CRIER-470).
+//
+// It is the ONE production write path for a join, and it REFUSES an add whose
+// actor could not be established (DF-CRIER-465): a membership line that cannot
+// say who performed the add is not a weaker record, it is a false one — the
+// live measurement behind this row was three joins, two of them stored as
+// `"actor": {}`, which reads like a successful write of an unnamed action.
 func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan) error {
+	actor := p.Actor
+	if actor.IsZero() {
+		actor = p.Member.actorOfAdd()
+	}
+	if actor.IsZero() {
+		return &memberError{status: http.StatusBadRequest, code: "AUTHOR_REQUIRED",
+			msg: fmt.Sprintf("no actor for adding %s %q: a membership record must name who performed the add (agent, principal, or X-Agent-ID header)",
+				p.Member.MemberType, p.Member.MemberID)}
+	}
+	p.Actor = actor
 	seq, err := h.store.NextSeq(ctx, sess.ID)
 	if err != nil {
 		return err
@@ -1829,7 +1854,7 @@ func (h *Handler) appendMember(ctx context.Context, sess *Session, p *memberPlan
 // remove+add pair, never an in-place edit. The response reports the recorded
 // role, so a differing `role` in the body is visible rather than silently
 // applied.
-func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addParticipantRequest, actor, basis string) (*addParticipantResponse, error) {
+func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addParticipantRequest, actor AuthorRef, basis string) (*addParticipantResponse, error) {
 	plan, err := h.composeMember(sess, req, actor)
 	if err != nil {
 		return nil, err
@@ -1871,7 +1896,7 @@ func (h *Handler) addOrReaddMember(ctx context.Context, sess *Session, req addPa
 		MemberID:            existing.MemberID,
 		Mode:                plan.Share.Mode,
 		BoundaryMessageID:   plan.Share.BoundaryMessageID,
-		SetBy:               actor,
+		SetBy:               actorID(&actor),
 		SenderIdentityBasis: basis,
 		SetAt:               at,
 	}

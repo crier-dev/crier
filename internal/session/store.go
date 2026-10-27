@@ -372,8 +372,13 @@ func (s *Session) CreateRecord(seq int64, ts time.Time) *Record {
 
 // AddRecord renders the session.member.add line (§5.1) and records the
 // late-join context answer when one is given (§4.6 rule 1).
+//
+// The line carries the FULL actor reference the writer established
+// (DF-CRIER-465): a membership event that cannot say who performed the add is
+// the defect, so the renderer never flattens a principal into an agent id and
+// never writes an empty `actor: {}`.
 func (m *Member) AddRecord(seq int64, ts time.Time, share *ContextShare) *Record {
-	actor := m.AddedBy
+	actor := m.actorOfAdd()
 	rec := &Record{
 		V:            RecordFormatVersion,
 		Type:         RecordMemberAdd,
@@ -385,8 +390,8 @@ func (m *Member) AddRecord(seq int64, ts time.Time, share *ContextShare) *Record
 		Role:         m.Role,
 		ContextShare: share,
 	}
-	if actor != "" {
-		rec.Actor = &AuthorRef{Agent: actor}
+	if !actor.IsZero() {
+		rec.Actor = &actor
 	}
 	return rec
 }

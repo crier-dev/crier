@@ -275,6 +275,31 @@ type Member struct {
 	RemovedAt  *time.Time `json:"removed_at,omitempty"`
 	AddedBy    string     `json:"added_by,omitempty"`
 	RemovedBy  string     `json:"removed_by,omitempty"`
+	// AddedByActor is the actor REFERENCE the add event records — agent,
+	// principal or principal-as-agent — as the record carries it. AddedBy stays
+	// the flattened id the view columns hold (chat_session_members.added_by is
+	// one TEXT column per the §5.2 schema); this field keeps the KIND, so an
+	// operator (a principal) adding a member is not re-read as an agent of the
+	// same name (DF-CRIER-465).
+	//
+	// It is a projection detail derived from the record, never a wire field:
+	// it is excluded from the state's canonical JSON so a view and a log can
+	// never diverge over a value one of them cannot reconstruct (a share-less
+	// add is not retained in chat_session_lifecycle).
+	AddedByActor *AuthorRef `json:"-"`
+}
+
+// actorOfAdd is the actor reference an add event records: the full reference
+// the writer established when there is one, else AddedBy re-read as an agent id
+// for callers that only carry the flattened projection.
+func (m *Member) actorOfAdd() AuthorRef {
+	if m.AddedByActor != nil && !m.AddedByActor.IsZero() {
+		return *m.AddedByActor
+	}
+	if m.AddedBy != "" {
+		return AuthorRef{Agent: m.AddedBy}
+	}
+	return AuthorRef{}
 }
 
 // ActiveAt reports whether the member is present at time t (§2.3).
@@ -573,6 +598,14 @@ func (st *State) upsertMember(rec *Record) {
 	m.Role = rec.Role
 	m.AddedAt = rec.TS
 	m.AddedBy = actorID(rec.Actor)
+	// The id alone cannot say whether the actor was an agent or a principal;
+	// the retained record can, so the projection keeps it (DF-CRIER-465).
+	if rec.Actor != nil && !rec.Actor.IsZero() {
+		actor := *rec.Actor
+		m.AddedByActor = &actor
+	} else {
+		m.AddedByActor = nil
+	}
 	// A re-add is a NEW event, never a rollback (§2.4 rule 5): it clears the
 	// removal so the join/leave/join sequence is the honest record.
 	m.RemovedAt = nil
@@ -615,6 +648,25 @@ func (st *State) restoreContextBasis(events []*Record) {
 		}
 		if mc := st.findContextShare(rec.MemberType, rec.MemberID); mc != nil {
 			mc.SenderIdentityBasis = rec.SenderIdentityBasis
+		}
+	}
+}
+
+// restoreMemberActors copies the actor REFERENCE the retained member-add
+// records carry onto the projected members. The view column added_by is one id
+// string, so a SQL Load cannot tell a principal from an agent of the same name;
+// the record can, and the projection must not disagree with the record that
+// produced it (DF-CRIER-465, the same completion DF-CRIER-470 applied to the
+// context-share basis). events ascend by seq, so a re-add's newer actor wins —
+// which is the add the projected row came from.
+func (st *State) restoreMemberActors(events []*Record) {
+	for _, rec := range events {
+		if rec.Type != RecordMemberAdd || rec.Actor == nil || rec.Actor.IsZero() {
+			continue
+		}
+		if m := st.findMember(rec.MemberType, rec.MemberID); m != nil {
+			actor := *rec.Actor
+			m.AddedByActor = &actor
 		}
 	}
 }

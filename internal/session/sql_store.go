@@ -561,6 +561,10 @@ func (s *SQLStore) Load(ctx context.Context, sessionID string) (*State, error) {
 	// change recorded; the retained record does, so complete the projection from
 	// it (DF-CRIER-470).
 	st.restoreContextBasis(events)
+	// Same completion for the actor REFERENCE of a join: added_by is one id
+	// string, the retained record says whether that id is an agent or a
+	// principal (DF-CRIER-465).
+	st.restoreMemberActors(events)
 	// A transcript read from the view is completed the same way the log's is:
 	// a row that carries no thread key — thread_id '' from a generation before
 	// the field was stored (CR-FEAT-004), or a dump made by one — gets its key
