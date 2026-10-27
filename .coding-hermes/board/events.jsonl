@@ -1918,3 +1918,7 @@
 {"id": 1909, "event_type": "task_created", "task_id": "README-009", "actor": "foreman", "detail": "{\"id\":\"README-009\",\"status\":\"pending\"}", "tick_number": null, "timestamp": "2026-10-27T15:23:58Z"}
 {"id": 1910, "event_type": "task_created", "task_id": "README-010", "actor": "foreman", "detail": "{\"id\":\"README-010\",\"status\":\"pending\"}", "tick_number": null, "timestamp": "2026-10-27T15:23:58Z"}
 {"id": 1911, "event_type": "task_created", "task_id": "README-011", "actor": "foreman", "detail": "{\"id\":\"README-011\",\"status\":\"pending\"}", "tick_number": null, "timestamp": "2026-10-27T15:23:59Z"}
+{"id": 1912, "event_type": "task_completed", "task_id": "README-010", "actor": "foreman", "detail": "{\"status\":\"complete\"}", "tick_number": null, "timestamp": "2026-10-27T17:23:15Z"}
+{"id": 1913, "event_type": "task_completed", "task_id": "README-011", "actor": "foreman", "detail": "{\"status\":\"complete\"}", "tick_number": null, "timestamp": "2026-10-27T17:23:15Z"}
+{"id": 1914, "event_type": "task_completed", "task_id": "README-010", "actor": "foreman", "detail": "{\"status\":\"complete\",\"commit\":\"e27caa58\",\"wave\":\"crier-foreman-2026-10-27-16-32-16\",\"block\":\"README-011\"}", "tick_number": null, "timestamp": "2026-10-27T17:24:10Z"}
+{"id": 1915, "event_type": "task_completed", "task_id": "README-011", "actor": "foreman", "detail": "{\"status\":\"complete\",\"commit\":\"e27caa58\",\"wave\":\"crier-foreman-2026-10-27-16-32-16\",\"block\":\"README-011\"}", "tick_number": null, "timestamp": "2026-10-27T17:24:10Z"}
