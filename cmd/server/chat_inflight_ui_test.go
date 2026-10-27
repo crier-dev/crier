@@ -36,11 +36,19 @@ func TestChatClientInFlightProgressSurface(t *testing.T) {
 		`state.sendWatch = { session:id, key:payload.idempotency_key || ""`,
 		`state.sendWatch.settled = true`,
 		`setInterval(watchSendProgress, 1000)`,
+		// DF-CRIER-467: the panel matches the request's OWN key only. A keyless
+		// ticket is named and refused instead of borrowing a transcript message,
+		// and every send — the explicit-task path included — carries a key.
+		`if (!ticket.key) {`,
+		`No per-request delivery record exists for this send yet: it was sent without an idempotency key`,
+		`const recorded = messages.find(m => m.idempotency_key === ticket.key);`,
+		`payload.idempotency_key = pendingMessageRequest.key;`,
+		`const fingerprint = JSON.stringify({id, namespace:state.namespace, payload, task:!!task});`,
+		`if (task && !inProgress) pendingMessageRequest = null;`,
 		// Everything rendered is a SERVER value.
 		`progressSeconds(pass.elapsed_ms)`,
 		`progressSeconds(pass.budget_ms)`,
 		`recorded.dispatch_live`,
-		`const recorded = ticket.key ? messages.find(m => m.idempotency_key === ticket.key)`,
 		`outcomes.map(outcomeLine)`,
 		// The spinner stops when the panel is no longer in the in-flight state.
 		`$("send-progress-spinner").hidden = !spinning`,
@@ -56,7 +64,9 @@ func TestChatClientInFlightProgressSurface(t *testing.T) {
 	}
 	// No second clock: the page must not render an elapsed time of its own, and
 	// must not carry a decorative countdown that runs regardless of the server.
-	for _, forbidden := range []string{`countdown`, `elapsed++`, `elapsedMs++`, `setInterval(() => { $("send-progress-text")`} {
+	// DF-CRIER-467: a positional match is exactly the defect — the newest
+	// transcript message is not this request's record.
+	for _, forbidden := range []string{`countdown`, `elapsed++`, `elapsedMs++`, `setInterval(() => { $("send-progress-text")`, `messages[messages.length - 1]`} {
 		if strings.Contains(html, forbidden) {
 			t.Errorf("embedded chat must not build an in-flight claim the server has not measured: %q", forbidden)
 		}

@@ -1253,14 +1253,22 @@ async function send(event) {
       }
     }
     resetAudienceWarning();
-    if (!task) {
-      const fingerprint = JSON.stringify({id, namespace:state.namespace, payload});
-      if (pendingMessageRequest?.fingerprint !== fingerprint) {
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        pendingMessageRequest = {fingerprint, key:Array.from(bytes, b => b.toString(16).padStart(2,"0")).join("")};
-      }
-      payload.idempotency_key = pendingMessageRequest.key;
+    // DF-CRIER-467: EVERY send carries its own request key — the explicit-task
+    // path included, which used to reach the POST with key "". The key is the
+    // ONLY thing that identifies this request's record in the transcript: with
+    // no key the progress panel cannot tell its own record from any other
+    // message, and the only remaining match would be positional (the last
+    // message in the session) — i.e. it would report another message's
+    // delivery as this request's outcome. POST /tasks records this key on the
+    // task message and replays it on a retry, so the key is real on both routes.
+    // `task` is part of the fingerprint so the same draft sent once as a
+    // message and then as a task never reuses a key across the two intents.
+    const fingerprint = JSON.stringify({id, namespace:state.namespace, payload, task:!!task});
+    if (pendingMessageRequest?.fingerprint !== fingerprint) {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      pendingMessageRequest = {fingerprint, key:Array.from(bytes, b => b.toString(16).padStart(2,"0")).join("")};
     }
+    payload.idempotency_key = pendingMessageRequest.key;
     postStarted = true;
     // DF-CRIER-414: hand this send to the composer's in-flight watcher. This
     // line publishes the TICKET only; the watcher itself lives further down and
@@ -1275,6 +1283,12 @@ async function send(event) {
     const retryable = !task && outcomes.length > 0 && outcomes.every(o => o.outcome === "refused" || o.outcome === "failed" || o.outcome === "budget_cut");
     const inProgress = outcomes.some(o => o.outcome === "in_progress");
     if (!task && !retryable && !inProgress) pendingMessageRequest = null;
+    // DF-CRIER-467: a TASK's key is released on the same principle — once the
+    // server has answered this send, an unchanged draft clicked again is a new
+    // task, not a silent replay of the recorded one. A lost response (the catch
+    // below) keeps the key, so its retry replays the row the server may already
+    // have recorded instead of minting a second task.
+    if (task && !inProgress) pendingMessageRequest = null;
     const refused = outcomes.some(o => o.outcome === "refused");
     const negative = refused || outcomes.some(negativeOutcome);
     // Keeping a draft is not permission to re-deliver. Retry eligibility and
@@ -1581,12 +1595,22 @@ async function watchSendProgress() {
     showSendProgress($("send-progress-text").textContent + "\nThis panel stopped watching: " + reason + ". The text above is the last reading, not a current delivery verdict. Refresh the transcript.", true, false);
   };
   try {
+    // DF-CRIER-467: a ticket with no idempotency key has NO per-request record
+    // that this panel could identify. It used to fall back to the last message
+    // in the transcript, which reported an earlier, unrelated message's
+    // delivery as this request's outcome. Name the reason and stop watching:
+    // position is not identity, so there is nothing truthful to wait for.
+    if (!ticket.key) {
+      ticket.done = true;
+      showSendProgress("No per-request delivery record exists for this send yet: it was sent without an idempotency key, so this panel cannot identify its own record in the transcript and will not report another message's delivery as this request's outcome. Refresh the transcript to check this task.", false, false);
+      return;
+    }
     // Always read before deciding to stop: a browser clock cannot say whether
     // a server budget expired, and a terminal fact wins over old live evidence.
     const body = await call(sessionPath(ticket.session, "messages"));
     if (state.sendWatch !== ticket || ticket.done) return;
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const recorded = ticket.key ? messages.find(m => m.idempotency_key === ticket.key) : messages[messages.length - 1];
+    const recorded = messages.find(m => m.idempotency_key === ticket.key);
     if (!recorded) { if (ticket.settled) { ticket.done = true; clearSendProgress(); } else if (observationEnded()) stopWatching(); return; }
     ticket.lastRecord = recorded;
     if (progressRecordedOutcome(recorded)) {
@@ -1620,7 +1644,10 @@ async function watchSendProgress() {
   } catch (error) {
     if (state.sendWatch !== ticket || ticket.done) return;
     const diagnostic = error.parseFailure ? "Could not parse the server's answer (HTTP " + error.status + ")." : "Could not read delivery progress — " + error.message;
-    const cachedRecord = (ticket.key ? state.messages.find(m => m.idempotency_key === ticket.key) : null) || ticket.lastRecord;
+    // DF-CRIER-467: the cache is keyed on this request's own key only. A ticket
+    // with no key has no cached record either — `lastRecord` is only ever set
+    // from a key-matched read, and must never stand in for a positional match.
+    const cachedRecord = ticket.key ? (state.messages.find(m => m.idempotency_key === ticket.key) || ticket.lastRecord) : null;
     const cached = cachedRecord && ticket.lastRecord?.dispatch_live ? {...cachedRecord, dispatch_live:ticket.lastRecord.dispatch_live} : cachedRecord;
     // A parse error is a read failure, not a pending or failed delivery. Keep
     // the exact server-recorded failure if another transcript read obtained it.
