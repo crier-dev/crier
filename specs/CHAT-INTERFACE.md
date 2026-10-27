@@ -298,6 +298,19 @@ execution after a timeout at a remote runtime.
 A different key appends a new message. An absent/empty key preserves the append-on-every-send
 contract. The same key in another session is independent. Realm/auth checks still precede replay.
 
+**The shipped client keys BOTH routes (DF-CRIER-467).** The composer sends its per-request
+key on `POST /sessions/{id}/tasks` as well as on `POST /sessions/{id}/messages`; the task
+route honours it under the same contract above (CHAT-ADDRESSING §2.5, DF-CRIER-351),
+so a lost response is retried as the SAME task instead of minting a second one. The in-flight
+progress panel identifies its record by that key ALONE. A ticket with no key has no
+per-request record it could identify, so the panel names the reason
+(`No per-request delivery record exists for this send yet: it was sent without an idempotency
+key …`) and stops — it never matches the newest transcript message, which is what made a task
+send report an unrelated message's delivery as its own outcome. Proven by
+`scripts/chat-inflight-truth.cjs` (`keyless ticket never borrows another message delivery`,
+red on the pre-change page), `TestChatTaskSendCarriesRequestKey` and
+`TestChatClientInFlightProgressSurface`.
+
 The repository locks the session/key before looking up the transcript and holds it through the
 intent, fan-out and final outcome update. Independent SQLite/JSONL handles and processes share
 an OS advisory file lock (released on process death); PostgreSQL uses a database advisory lock

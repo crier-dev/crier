@@ -155,6 +155,35 @@ const cases = [
     assert.match(c.line({target: 'local', attempts: 0}), /class.*not reported/i);
     assert.doesNotMatch(c.line({target: 'local', attempts: 0}), /yet|waiting/);
   }],
+  // DF-CRIER-467: the explicit-task send used to reach its POST with key "", and
+  // the watcher then fell back to the LAST transcript message — so an earlier,
+  // unrelated delivery was printed as this request's outcome. A keyless ticket
+  // has no per-request record to identify: it must say so and stop, never match
+  // by position.
+  ['keyless ticket never borrows another message delivery', async c => {
+    c.state.sendWatch = {...c.state.sendWatch, key: ''};
+    c.response({messages: [{idempotency_key: 'earlier-send', outcomes: [{target: 'bad-bot', outcome: 'delivered', retryable: false}]}]});
+    await c.poll();
+    assert.match(c.text(), /No per-request delivery record exists/i);
+    assert.match(c.text(), /without an idempotency key/i);
+    assert.doesNotMatch(c.text(), /Delivery finished|bad-bot: delivered/i);
+    assert.equal(c.element('send-progress-spinner').hidden, true);
+    assert.equal(c.state.sendWatch.done, true, 'a keyless ticket has nothing truthful left to poll for');
+    assert.equal(c.reads(), 0, 'a keyless ticket must not read the transcript at all, so it cannot borrow');
+  }],
+  // The positive control for the same rule: a KEYED ticket reads its own record,
+  // and does so over a later message that a positional match would have chosen.
+  ['keyed ticket reads its own record, not the newest message', async c => {
+    c.state.sendWatch = {...c.state.sendWatch, key: 'mine'};
+    c.response({messages: [
+      {idempotency_key: 'mine', outcomes: [{target: 'mine-bot', outcome: 'delivered', retryable: false}]},
+      {idempotency_key: 'theirs', outcomes: [{target: 'other-bot', outcome: 'failed', retryable: false}]}
+    ]});
+    await c.poll();
+    assert.match(c.text(), /mine-bot: delivered/);
+    assert.doesNotMatch(c.text(), /other-bot/);
+    assert.equal(c.reads(), 1);
+  }],
 ];
 (async () => {
   let failures = 0;
