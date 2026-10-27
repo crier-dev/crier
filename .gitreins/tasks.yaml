@@ -3029,3 +3029,11 @@ tasks:
   status: complete
   created_at: '2026-10-25T08:19:53.506000+00:00'
   completed_at: '2026-10-25T09:08:22.212811+00:00'
+- id: INT-CI-017
+  title: Deterministic ARM E port guard selftest
+  criteria:
+  - The ARM E port-guard selftest is deterministic, make port-guard-selftest passes,
+    and exact-head CI Build and Test is green.
+  status: complete
+  created_at: '2026-10-27T20:51:32.983129+00:00'
+  completed_at: '2026-10-27T20:51:49.938752+00:00'
