@@ -556,6 +556,10 @@ _pg_selftest_squat() {
   [ -n "$port" ] || return 1
   _pg_selftest_listener_start "$port" "$log" || return 2
   pid="$_pg_SELFTEST_LISTENER_PID"
+  # Give python3/nc a moment to bind before we start the ownership check.
+  # On busy CI runners python3 initialization + port binding can take >5s,
+  # which was the class of failure this selftest hit (INT-CI-016).
+  sleep 0.5
   _pg_SELFTEST_LISTENER_PID="$saved" # the squat set owns this one, not the decoy path
   if _pg_selftest_decoy_ready "$port" "$pid" "$log"; then
     _pg_SELFTEST_SQUAT_PID="$pid"
