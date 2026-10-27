@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-10-27-21-55-13",
+  "project": "crier",
+  "mode": "serial-fallback",
+  "wave_budget": 12,
+  "slots": 1,
+  "slots_reason": "nproc 16 with tick-start loadavg 7.77-11.14; the loaded-box formula requires a one-worker fallback, and the selected block had no implementable independent row.",
+  "block": "DF-CRIER-484",
+  "selected_rows": ["DF-CRIER-333", "DF-CRIER-335"],
+  "workers": [],
+  "reason": "DF-CRIER-333 is owner-gated on the authentication arrangement; DF-CRIER-335 is a completion/meta row whose remaining acceptance depends on that decision. No worker was dispatched.",
+  "base_sha": "bc3d12065c845334a590dc0f53c0fc17aaa9069e",
+  "local_evidence": {
+    "boardctl_validate": "PASS with 404 legacy warnings",
+    "build": "PASS",
+    "vet": "PASS",
+    "tests": "PASS 30 packages",
+    "gitreins_guard": "PASS full",
+    "browser_selftest": "SKIP rc 77: Playwright/Chromium unavailable"
+  },
+  "remote_ci": "blocked: GitHub API rate limit HTTP 403; exact recent run list unavailable this tick",
+  "remote_parity": "origin/main == gitlab/main == bc3d1206; 0/0 before closeout",
+  "created_at": "2026-10-27T22:00:00Z"
+}
