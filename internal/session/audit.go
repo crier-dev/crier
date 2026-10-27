@@ -341,9 +341,16 @@ func BuildPermissionMatrix(st *State, now time.Time, grants []PermissionsGrantVi
 			Allowed:    map[string]bool{},
 			Source:     map[string]string{},
 		}
+		// Every column gets a cell: true is a tick, false is a dash. A denied
+		// cell is PRESENT and false, never an absent key — an absent key is
+		// indistinguishable from "not reported", which is exactly the
+		// distinction the operator panel must draw (DF-CRIER-473). A sparse
+		// map made a member's `admin: denied` render as `admin: not reported`
+		// in the shipped page and contradicted this endpoint's own declared
+		// body ("one cell per column", docs/openapi.yaml SessionPermissionRow).
 		for _, col := range MatrixActions {
+			row.Allowed[col] = bundle[col]
 			if bundle[col] {
-				row.Allowed[col] = true
 				row.Source[col] = "role"
 			}
 		}

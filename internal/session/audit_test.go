@@ -219,6 +219,19 @@ func TestPermissionMatrixPerBackend(t *testing.T) {
 			require.True(t, observer.Allowed["read"], "an observer reads")
 			require.False(t, observer.Allowed["send"], "read never implies send (§5.2)")
 			require.False(t, observer.Allowed["admin"])
+			// One cell per column on the WIRE: a denied cell is present and
+			// false, never an absent key. A sparse map is indistinguishable
+			// from "not reported" — which is how the shipped panel rendered a
+			// member's admin cell before this was pinned (the browser harness
+			// asserted `admin: denied` and read `admin: not reported`).
+			require.Len(t, observer.Allowed, len(matrix.Actions), "every column is a cell")
+			require.Len(t, owner.Allowed, len(matrix.Actions), "every column is a cell")
+			for _, col := range matrix.Actions {
+				require.Contains(t, observer.Allowed, col, "denied cell %q must be present, not absent", col)
+				require.Contains(t, owner.Allowed, col, "granted cell %q must be present", col)
+			}
+			require.NotContains(t, observer.Source, "send", "a denied cell names no source")
+			require.NotContains(t, observer.Source, "admin", "a denied cell names no source")
 			require.NotEqual(t, owner.Role, observer.Role,
 				"the two principals' roles are distinguishable")
 		})

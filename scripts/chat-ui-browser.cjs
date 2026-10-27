@@ -15,6 +15,7 @@ const path = require('node:path');
 const net = require('node:net');
 const {randomBytes} = require('node:crypto');
 const {pathToFileURL} = require('node:url');
+const http = require('node:http');
 // Unique by default: a failed repeat must not leave a previous PASS report.
 const evidence = process.env.CHAT_EVIDENCE || fs.mkdtempSync(path.join(os.tmpdir(),'cr-chat-browser-evidence-'));
 fs.mkdirSync(evidence,{recursive:true});
@@ -22,6 +23,8 @@ const apiChecks = [], browserChecks = [];
 function verified(action) { browserChecks.push(action); console.log('BROWSER VERIFIED: '+action); }
 function skip(reason) { console.error('SKIP: '+reason+'; exit code 77 (no browser assertions ran)'); process.exitCode=77; }
 const processes = [], tempdirs = [];
+// Listeners this harness starts in-process (the DF-CRIER-333 front); closed, not killed.
+const closers = [];
 let browser;
 async function freePort() {
   const server = net.createServer();
@@ -62,6 +65,33 @@ async function api(base, method, endpoint, body, headers = {}) {
 }
 async function waitIdle(page) { await page.waitForFunction(() => !state.sending && !state.busy && document.getElementById('refresh-state').textContent.startsWith('Last HTTP refresh')); }
 async function refresh(page) { await page.locator('#refresh').click(); await waitIdle(page); }
+// DF-CRIER-333 — the FRONT, modelled as a real proxy process.
+// A browser cannot attach a Bearer header on ordinary navigation and the panel
+// deliberately sends none, so a protected deployment must be FRONTED by an
+// authenticating layer. This is that layer: it holds the credential in its own
+// memory and adds the header to every upstream request, so neither the page
+// source nor any browser storage ever sees it. It is a harness stand-in for the
+// deployment's arrangement — WHICH arrangement ships stays the owner's decision
+// (DF-CRIER-333); this arm proves the acceptance's browser evidence without
+// taking that decision.
+async function startFront(upstream, token) {
+  const target = new URL(upstream);
+  const port = await freePort();
+  const front = http.createServer((req, res) => {
+    const headers = {...req.headers, authorization: 'Bearer ' + token};
+    delete headers.host;
+    const forwarded = http.request({host:target.hostname,port:target.port,method:req.method,path:req.url,headers}, upstreamRes => {
+      const out = {...upstreamRes.headers};
+      delete out['transfer-encoding']; delete out.connection;
+      res.writeHead(upstreamRes.statusCode, out); upstreamRes.pipe(res);
+    });
+    forwarded.on('error', error => { res.writeHead(502,{'Content-Type':'text/plain'}); res.end('front upstream error: ' + error.message); });
+    req.pipe(forwarded);
+  });
+  await new Promise((resolve,reject) => front.once('error',reject).listen(port,'127.0.0.1',resolve));
+  closers.push(() => front.close());
+  return 'http://127.0.0.1:' + port;
+}
 async function run() {
   let chromium;
   try { require.resolve('playwright'); }
@@ -79,7 +109,7 @@ async function run() {
   console.log('BROWSER: real headless Chromium at '+executablePath);
   console.log('FIXTURES: temporary JSONL sessions, in-memory registry, generated agents/messages; no production records.');
   console.log('INJECTIONS: matrix registry/hostile data, storage denial, UI-state gates, canned HTTP faults and delayed reads are test-only, not live server behavior.');
-  console.log('LIMITATIONS: no agent runtime executes the task; completion supplies observed evidence through the row input and Complete button. Protected /chat checks are HTTP fetches, not browser sign-in.');
+  console.log('LIMITATIONS: no agent runtime executes the task; completion supplies observed evidence through the row input and Complete button. Protected /chat is checked BOTH by HTTP fetch and by a real browser session: refused 401 without a front, the live panel through one (DF-CRIER-333). WHICH fronting arrangement ships is the open owner decision, so the front here is a harness process.');
   const base = await start();
   // These are deliberately identified as test records, not demo product data.
   const operator = 'ui-test-operator', agent = 'ui-test-recipient';
@@ -461,14 +491,46 @@ async function run() {
   const locked = await fetch(protectedBase+'/chat'); assert.equal(locked.status,401);
   const authorized = await fetch(protectedBase+'/chat',{headers:{Authorization:'Bearer '+token}}); assert.equal(authorized.status,200);
   assert.match(await authorized.text(),/data-ui-revision="CR-CHAT-038"/);
+  // ── DF-CRIER-333: an AUTHENTICATED BROWSER SESSION, not a fetch ──
+  // Arm 1 (negative): a browser with no front is refused, and the refusal is the
+  // legible DF-CRIER-444 page — not the panel and not a blank.
+  const noFrontContext = await browser.newContext({viewport:{width:1280,height:900}});
+  const noFrontPage = await noFrontContext.newPage();
+  const noFrontNav = await noFrontPage.goto(protectedBase+'/chat');
+  assert.equal(noFrontNav.status(),401,'a browser cannot reach /chat without a front');
+  assert.match(await noFrontPage.locator('body').innerText(),/fronting arrangement/,'the 401 names the fronting requirement');
+  assert.equal(await noFrontPage.locator('[data-ui-revision]').count(),0,'the refusal is not the panel');
+  await noFrontPage.screenshot({path:path.join(evidence,'chat-authenticated-401-no-front.png'),fullPage:true});
+  await noFrontContext.close();
+  // Arm 2 (positive): the SAME browser THROUGH a front gets the real panel, and
+  // the panel's OWN protected read returns live server data — so this is a
+  // browser session carrying the credential, not a Node fetch.
+  const frontedRecord = await (await fetch(protectedBase+'/sessions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({title:'Fronted browser channel',kind:'channel',created_by:{agent:operator}})})).json();
+  const front = await startFront(protectedBase, token);
+  const frontedContext = await browser.newContext({viewport:{width:1280,height:900}});
+  const frontedPage = await frontedContext.newPage();
+  const fronted = await frontedPage.goto(front+'/chat');
+  assert.equal(fronted.status(),200,'the front supplies the credential the browser cannot');
+  await waitIdle(frontedPage);
+  assert.equal(await frontedPage.locator('[data-ui-revision]').getAttribute('data-ui-revision'),'CR-CHAT-038','the fronted browser loads the real panel');
+  assert.equal(await frontedPage.locator(`[data-session="${frontedRecord.id}"]`).count(),1,"the panel's own protected GET /sessions returned the token-created record: the front's header reached the real server");
+  // Arm 3: the credential is in neither the page source nor browser storage.
+  const frontedHTML = await frontedPage.content();
+  const frontedStorage = await frontedPage.evaluate(() => ({local:{...localStorage},session:{...sessionStorage},cookie:document.cookie}));
+  assert.ok(!frontedHTML.includes(token),'the token is not in the page source');
+  assert.ok(!JSON.stringify(frontedStorage).includes(token),'the token is in neither localStorage, sessionStorage nor cookies');
+  await frontedPage.screenshot({path:path.join(evidence,'chat-authenticated-front-1280.png'),fullPage:true});
+  await frontedContext.close();
+  verified("DF-CRIER-333: a real browser is refused 401 with the fronting-requirement page and no panel without a front; through a real front it loads the panel whose OWN protected GET /sessions returned a token-created record, with the token in neither page source nor localStorage/sessionStorage/cookies");
   assert.deepEqual(errors,[]);
   verified(base+'/chat: attribution opt-in/reload/forget/storage denial; thread isolation and reply; addressing vs task intent; refusal and draft retention; stale-read isolation; no DOM XSS; create and participant forms; empty search; zero-recipient confirmation; controls and transcript reachable at 390/768/1280; no page errors');
-  const report = {apiChecks,browserChecks,protectedBase,limitations:['No runtime task execution; evidence describes harness observations only','Complete uses observed harness evidence, not an agent runtime result','Auth boundary is Node HTTP fetch, not browser login','Capability matrix, transport failures, hostile responses and storage denial use test-only fixtures','CHAT_MATRIX_ONLY=1 omits full-suite checks'],method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status},completion,checks:['participant datalist + browser POST + API roster readback; verbatim refusal','Claim and evidence-bearing Complete buttons; empty input real 409; owner mismatch real 409; exact evidence API readback and refreshed task DOM; both action gates use composer reason','zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click','opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths']};
+  const report = {apiChecks,browserChecks,protectedBase,limitations:['No runtime task execution; evidence describes harness observations only','Complete uses observed harness evidence, not an agent runtime result',"The credential-bearing front is a HARNESS process standing in for the deployment's fronting arrangement; WHICH arrangement ships is the open owner decision (DF-CRIER-333)",'Capability matrix, transport failures, hostile responses and storage denial use test-only fixtures','CHAT_MATRIX_ONLY=1 omits full-suite checks'],method:'Real headless Chromium, stock Go binary with embedded HTML; scratch JSONL sessions and in-memory registry. Faults are explicitly browser-intercepted test responses.',base,measurements,pageErrors:errors,authBoundary:{noHeader:locked.status,bearerHeader:authorized.status,browserNoFront:noFrontNav.status(),browserFronted:fronted.status(),frontedPanelOwnProtectedRead:true,tokenInPageSourceOrStorage:false},completion,checks:['participant datalist + browser POST + API roster readback; verbatim refusal','Claim and evidence-bearing Complete buttons; empty input real 409; owner mismatch real 409; exact evidence API readback and refreshed task DOM; both action gates use composer reason','zero-recipient first click zero POSTs; changed draft rearms; second click records; added agent receives on first click','opt-in off by default; unsaved reload re-gates','one attribution-only tab key; reload applies it; selected-session composer enabled','Forget and uncheck clear immediately; independent tab forgets','storage denial keeps attribution usable','initial members and plain-send outcome read back from API','rendered server data','thread isolation and reply API readback','addressing creates no task','explicit task API readback','real delivery refusal','401/403/500 retain draft','read failure disables send','stale request isolation','no DOM XSS','create form readback','empty search','controls fit all three widths','authenticated browser session through a real front: 401 + fronting-requirement page without one, live panel with one, the panel\'s own protected GET /sessions returning a token-created record, token in neither page source nor storage']};
   fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2)); console.log('PASS: full browser suite and 3 viewport checks; exit code 0. Evidence: '+evidence);
 }
 run().catch(error => {console.error('FAIL: browser harness; exit code 1'); console.error(error); process.exitCode=1;}).finally(async () => {
   if (browser) await browser.close();
+  for (const close of closers) close();
   for (const proc of processes) { proc.kill('SIGTERM'); await Promise.race([new Promise(r => proc.once('exit',r)),new Promise(r => setTimeout(r,3000))]); if (proc.exitCode === null) proc.kill('SIGKILL'); }
   // Keep scratch logs on failure for attribution; never clean shared paths.
   if (process.exitCode === 1 && tempdirs.length) console.error('Scratch server logs: '+tempdirs.join(', '));
