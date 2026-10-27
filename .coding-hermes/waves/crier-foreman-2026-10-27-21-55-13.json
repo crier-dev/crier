@@ -20,5 +20,6 @@
   },
   "remote_ci": "blocked: GitHub API rate limit HTTP 403; exact recent run list unavailable this tick",
   "remote_parity": "origin/main == gitlab/main == bc3d1206; 0/0 before closeout",
-  "created_at": "2026-10-27T22:00:00Z"
+  "created_at": "2026-10-27T22:00:00Z",
+  "finished_at": "2026-10-27T22:14:21Z"
 }
