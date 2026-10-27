@@ -280,33 +280,33 @@ WARN fan-out: skipping target (delivery refused) — other targets retain their 
 
 ## Quick Start
 
-### Install prebuilt binaries (only when release assets are published)
+### Install prebuilt binaries (v0.2.0 release assets)
 
-The release workflow publishes 8 assets only after its build and upload steps
-complete: cross-compiled `crier` and `crier-mcp` executables for linux/amd64,
-linux/arm64 and darwin/arm64, plus the installer and a `SHA256SUMS` manifest.
-They are bare static executables, not archives — nothing is tarred or zipped.
-The prebuilt installer requires that complete asset set. The existing
-`v0.1.0-rc2` tag has no uploaded assets, so the installer currently fails closed
-when it cannot fetch `SHA256SUMS`; use the from-source fallback below instead.
+Release `v0.2.0` publishes 8 assets, the complete set: cross-compiled `crier`
+and `crier-mcp` executables for linux/amd64, linux/arm64 and darwin/arm64,
+plus the installer and a `SHA256SUMS` manifest. They are bare static
+executables, not archives — nothing is tarred or zipped. The installer has
+been verified against these release assets, including checksum verification.
+For a release without its complete asset set, or for an offline build, use the
+from-source fallback below.
 
 > Installing onto a machine with none of the prerequisites — no Go, no `curl`,
 > no git? [INSTALL.md](INSTALL.md) is the step-by-step guide for that box, and it
 > records what was measured on one.
 
-Once a release has those assets, this command fetches the pair for the current
-machine, verifies each binary against the manifest, and installs both into
+This command fetches the pair for the current machine, verifies each binary
+against the manifest, and installs both into
 `$HOME/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh
 ```
 
-To pin a release that has published assets or install somewhere else (`sh -s --`
-passes the flags through the pipe):
+To pin the published release or install somewhere else (`sh -s --` passes the
+flags through the pipe):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.1.0-rc2 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.2.0 --dir "$HOME/bin"
 ```
 
 The installer REFUSES an unverified download: a missing manifest, a manifest
