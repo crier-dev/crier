@@ -2549,7 +2549,7 @@ The doctor is read-only; it does not prevent later hook changes or Git's explici
 
 All core primitives are implemented and tested:
 
-- **Relay** — Thread-safe in-memory pub/sub, 90.1% coverage, 7/7 GitReins PASS
+- **Relay** — Thread-safe in-memory pub/sub, 91.4% coverage, 7/7 GitReins PASS
 - **Mesh** — P2P WebSocket connections ported from Hivemind, 8/8 GitReins PASS
 - **Registry + Inboxes** — Net-new, 78.8% coverage, 8/8 GitReins PASS
 - **Persistence** — PostgreSQL backend for registry + inboxes via `CR_DATABASE_URL`; verified live that agents (webhook + guard config included), and undelivered messages survive a server restart
