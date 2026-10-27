@@ -3029,11 +3029,3 @@ tasks:
   status: complete
   created_at: '2026-10-25T08:19:53.506000+00:00'
   completed_at: '2026-10-25T09:08:22.212811+00:00'
-- id: README-009
-  title: Update README installer release guidance
-  criteria:
-  - README install section names v0.2.0 assets, removes the stale no-assets claim,
-    preserves source fallback, and make docs-check passes
-  status: complete
-  created_at: '2026-10-27T16:42:53.649697+00:00'
-  completed_at: '2026-10-27T16:55:37.653049+00:00'
