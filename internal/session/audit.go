@@ -169,7 +169,12 @@ func StateAuditEvents(st *State) []AuditEvent {
 			MemberID:   m.MemberID,
 			Role:       m.Role,
 		}
-		if m.AddedBy != "" {
+		if m.AddedByActor != nil && !m.AddedByActor.IsZero() {
+			// The recorded reference says whether the actor was an agent or a
+			// principal; never re-label a principal as an agent of the same
+			// name (DF-CRIER-465).
+			ev.Actor = *m.AddedByActor
+		} else if m.AddedBy != "" {
 			ev.Actor = AuthorRef{Agent: m.AddedBy}
 		}
 		out = append(out, ev)

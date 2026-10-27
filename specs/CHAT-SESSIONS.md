@@ -192,6 +192,30 @@ Consequences, both load-bearing:
 2. **A replay is idempotent** by `(session_id, seq)`; a duplicate `add` for the same member and role is a
    no-op, not a second row.
 
+**SHIPPED (DF-CRIER-465) — every `session.member.add` names who performed it.**
+The `actor` on an add is not decorative: it is the only thing that makes "who put
+this member here" answerable, and the session creator is not always the adder. The
+record keeps the FULL actor reference — `agent`, `principal`, or `principal` +
+`as_agent` — never a flattened id that would re-read a principal as an agent of the
+same name.
+
+- **Create path.** `POST /sessions` declares its initial members, and every
+  `session.member.add` it writes carries the CREATOR (`created_by`) as its actor —
+  including a principal creator, whose agent id is empty. An add is never written
+  with `actor: {}`.
+- **Add path.** `POST /sessions/{id}/participants` records the caller established by
+  the ingress decision (§4.6, DF-CRIER-470): the body `actor`, else the `X-Agent-ID`
+  header, with the assurance (`sender-identity-claimed` / `-verified`) it earned.
+- **No actor, no record.** A membership write whose actor cannot be established is
+  REFUSED (`400 AUTHOR_REQUIRED`) before anything is appended, so a membership line
+  that cannot name who made it does not exist rather than reading like a silent
+  success. This is the shared append choke point, not a per-route check: a create
+  that somehow reached it without a creator is refused the same way.
+- **The view keeps the kind.** `chat_session_members.added_by` is one id string
+  (§5.2), so the SQL adapters complete the projection from the retained record
+  exactly as they complete the context-share basis (DF-CRIER-470): the audit read
+  reports the recorded reference, not an agent-shaped guess.
+
 ### 2.4 What happens to a removed member
 
 Five rules, in order:
