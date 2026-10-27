@@ -1,0 +1,17 @@
+{
+  "tick_id": "crier-foreman-2026-10-27-08-48-47",
+  "block": "DF-CRIER-483",
+  "block_drive": "P0-5ready-99pct",
+  "mode": "wave",
+  "wave_size": 5,
+  "slots": 5,
+  "slots_reason": "nproc 16, loadavg 7.07 at census -> ceil(7.07)=8, 16-8=8, min(6,8)=6, 5 tasks -> 5 slots",
+  "rows": [
+    {"id": "DF-CRIER-335", "worktree": "/home/kara/worktrees/crier-DF-CRIER-335", "branch": "wt/DF-CRIER-335", "base_sha": "4d2e49d2"},
+    {"id": "DF-CRIER-333", "worktree": "/home/kara/worktrees/crier-DF-CRIER-333", "branch": "wt/DF-CRIER-333", "base_sha": "4d2e49d2"},
+    {"id": "DF-CRIER-465", "worktree": "/home/kara/worktrees/crier-DF-CRIER-465", "branch": "wt/DF-CRIER-465", "base_sha": "4d2e49d2"},
+    {"id": "DF-CRIER-467", "worktree": "/home/kara/worktrees/crier-DF-CRIER-467", "branch": "wt/DF-CRIER-467", "base_sha": "4d2e49d2"},
+    {"id": "DF-CRIER-471", "worktree": "/home/kara/worktrees/crier-DF-CRIER-471", "branch": "wt/DF-CRIER-471", "base_sha": "4d2e49d2"}
+  ],
+  "finished_at": "2026-10-27T10:00:00Z"
+}
