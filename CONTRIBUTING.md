@@ -237,6 +237,7 @@ Before opening a PR, confirm each of these. CI will check most of them — runni
 - [ ] Public API or wire-protocol changes are reflected in `docs/openapi.yaml` and the relevant spec under `docs/specs/`.
 - [ ] New behaviour has at least one test. Bug fixes include a regression test that fails on `main` and passes on the branch.
 - [ ] Commit messages are imperative and scoped: `fix: cap relay subscriber count` not `updates`.
+- [ ] Work that closes a boarded row carries a `ch:trace` marker naming the row, its evidence, its witness and the commit, and closes with a `STATUS:` / `TIER:` / `EVIDENCE:` block — see [`docs/traceability-doctrine.md`](docs/traceability-doctrine.md).
 - [ ] PR description links the relevant issue and summarises the user-visible change.
 
 ### What we won't merge

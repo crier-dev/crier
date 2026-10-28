@@ -2489,6 +2489,7 @@ Two opt-in live-inspection surfaces (`DF-CRIER-142`); both are **off by default*
 | [`docs/mesh-protocol.md`](docs/mesh-protocol.md) | Mesh wire protocol — framing, message types, correlation contract, worked example |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | OpenAPI 3.1 API specification |
 | [`docs/integration-guide.md`](docs/integration-guide.md) | End-to-end integration guide — auth modes, signing, inbox lifecycle, mesh, Postgres |
+| [`docs/traceability-doctrine.md`](docs/traceability-doctrine.md) | Repository traceability doctrine (DOC-5) — the `ch:trace` marker and its eleven fields, the evidence/witness rules, the row → commit → verdict binding, and the `STATUS:` / `TIER:` / `EVIDENCE:` close-out contract |
 | [`docs/federated-peer-auth.md`](docs/federated-peer-auth.md) | Federated peer auth (CR-CHAT-024) — the signed-forward recipe: keys, `CR_FED_AUTH_FILE`/`CR_FED_SELF_KEY_FILE`/`CR_FED_PEERS_FILE` on both relays, the exact `<METHOD>\n<path>\n<unix-seconds>` transcript with a copy-paste `printf`/`openssl` sign command, the verbatim refusal bodies, and an offline verify one-liner. Companion: [`docs/federated-rooms.md`](docs/federated-rooms.md) (remote participants + per-peer policy) |
 | [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) | Agent-ecosystem reference stack — setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops, troubleshooting (CR-FEAT-022) |
 | [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) | Message guard spec (CR-SPEC-002) — verdict contract, policies, providers, kanban output |
