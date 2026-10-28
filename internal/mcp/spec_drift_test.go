@@ -239,6 +239,21 @@ var excludedOperations = map[string]string{
 	// mapping would add no coverage. Reclassify if the bridge ever derives its
 	// registration URL from the agent id.
 	"registryRegisterAgentByID": "POST /agents/{id} — \"Register an agent (id in the path)\" (DF-CRIER-302): the same registration registryRegisterAgent already covers, spelled with the id in the path for a caller that has it there; the bridge's RemoteStore registers at POST /agents and addresses agents by tool argument, not by route. Reclassify if the bridge ever builds its registration URL from the agent id.",
+
+	// CR-FEAT-030 — the OPT-IN detection and containment surface. Excluded as
+	// a GROUP, for two independent reasons that both still hold: the bridge's
+	// RemoteStore exposes no detection call (the delivery log, the alert
+	// buffer, the planted canaries and the quarantine set all live in the relay
+	// process's own detector), so a tool would have nothing to call; and these
+	// are operator surfaces a shared message credential must not reach — the
+	// canary tokens are planted secrets, and the kill-switch is the most
+	// powerful call on the bus. Reclassify as a group if the bridge ever grows
+	// a detector surface AND an operator credential.
+	"deliveryLogGet":    "GET /delivery-log — \"Read a page of the signed delivery log (opt-in)\": the log lives in the relay process's detector (internal/detect), which RemoteStore does not expose, and it names every sender and target on the bus — an operator forensics surface, not an agent-messaging verb. Reclassify when the bridge grows a detector surface.",
+	"deliveryLogVerify": "GET /delivery-log/verify — \"Re-verify the delivery log file, chain and signatures (opt-in)\": a fresh read of the log FILE and its ed25519 chain, held by the relay's own detector; the bridge has no log handle, so a tool could not execute it. Reclassify when the bridge grows a detector surface.",
+	"alertsGet":         "GET /alerts — \"List the alert signals that have tripped (opt-in)\": the alert buffer and the per-sender baselines live in the relay process (internal/detect), which RemoteStore does not expose. Reclassify when the bridge grows a detector surface.",
+	"canariesGet":       "GET /canaries — \"Read the planted canary tokens (opt-in)\": the tokens are PLANTED SECRETS, served readable only so an operator can plant them; a bridge identity holding the shared message token must not be able to read them. Operator-only, same rationale as the trust surface above.",
+	"killSwitchPost":    "POST /agents/{id}/kill-switch — \"Contain one agent in a single call — the kill-switch (opt-in)\": the most powerful call on the bus (webhook pause + lease revoke + quarantine + unregister in one request); a bridge identity holding the shared message token must never be able to aim it. Operator-only; reclassify if the bridge ever grows an operator-credential surface.",
 }
 
 // specRef is one spec operation's REST coordinates, for actionable messages.

@@ -31,6 +31,21 @@ tags:
     description: "Named agent groups (CR-CHAT-013, D8): a curated, editable roster of agents addressed as `@team:x`, that ONE message fans out to — every CURRENT member, through the same shipped fan-out path. Deliberately NOT a capability target (`@cap:y`), which stays the dynamic round-robin pool over live holders: a named group's audience is enumerable and recordable BEFORE the send, a capability's holder is decided at delivery time."
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
+  - name: detection
+    description: |
+      OPT-IN detection and containment (CR-FEAT-030, specs/DETECTION.md): the
+      signed delivery log and its verification, the advisory alert signals,
+      the planted canary tokens, and the one-call kill-switch.
+
+      All five routes exist ONLY while CR_DETECT_ENABLED is true. With the flag
+      unset they are not registered at all — each answers 404 like any unknown
+      path — and the delivery path is byte-identical to a build without this
+      layer (no log file, no key, no hook).
+
+      Nothing in this family is auth-exempt: every route requires the
+      operator's CR_AUTH_TOKEN Bearer credential (middleware.Auth), and the
+      kill-switch — the most powerful call on the bus — is the reason that
+      rule exists.
 paths:
   /trust/anchors:
     post:
@@ -4809,6 +4824,374 @@ paths:
           description: No wait is recorded under this key.
         "503":
           description: "`DAGGER_UNCONFIGURED` — no dagger bridge is wired (CR_DAGGER_URL unset)."
+  /delivery-log:
+    get:
+      operationId: deliveryLogGet
+      tags: [detection]
+      summary: Read a page of the signed delivery log (opt-in)
+      description: |
+        The signed delivery records — who sent what to whom, when, and the
+        verdict the bus reached — together with the chain verification of the
+        whole FILE and the honest window accounting the page came from
+        (specs/DETECTION.md §3 and §6).
+
+        OPT-IN: this operation exists only while CR_DETECT_ENABLED is true.
+        Unset, the path is not registered at all and answers 404 like any
+        unknown path, and the delivery path is byte-identical to a build
+        without the layer.
+
+        AUTH: the operator's `Authorization: Bearer <CR_AUTH_TOKEN>` token
+        (middleware.Auth). The log names every sender and target on the bus,
+        so it is not auth-exempt.
+
+        `limit` (default 100, maximum 1000) and `kind`
+        (delivery|alert|containment) are HONORED or REFUSED, never ignored: a
+        non-integer, a value outside 1..1000, or an unknown kind answers 400
+        naming the bound.
+
+        `records` is a bounded page of the in-memory window; `total` is the
+        number of records in the FILE as of the last append, so a window can
+        never be mistaken for the whole log. `verify` is the full-file report,
+        recomputed for this request. Each record is signed with the server's
+        ed25519 key and chained through `prev_hash`: a rewrite or deletion is
+        what the verify route reports.
+
+        With no CR_DETECT_LOG configured the route still answers 200 — with
+        `enabled` true, `log` null, an empty `records` list and a `detail`
+        saying nothing is persisted (alerts and containment keep working).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: |
+            How many records to return, 1..1000. Default 100. A non-integer, 0,
+            a negative value or a value above 1000 answers 400 rather than
+            being clamped — an operator asking for 5000 is told the bound.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: kind
+          in: query
+          required: false
+          description: |
+            Restrict the page to one record kind. Omitted means every kind; an
+            unknown value answers 400 instead of returning an empty page.
+          schema:
+            type: string
+            enum: [delivery, alert, containment]
+      responses:
+        "200":
+          description: |
+            A page of the log, with the file total, the in-memory window size,
+            the append-only contract and the full-file verification report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionLogPage"
+        "400":
+          description: |
+            A refused parameter, named exactly: `limit must be 1..1000` for a
+            non-integer or out-of-range limit, `kind must be one of
+            delivery|alert|containment` for an unknown kind.
+        "401":
+          description: |
+            Missing or invalid operator credential: `missing Authorization
+            header`, `authorization scheme must be Bearer`, or `invalid token`.
+        "404":
+          description: |
+            CR_DETECT_ENABLED is not set, so this route is not registered. The
+            404 is the opt-in boundary, not a missing log — an enabled server
+            with no CR_DETECT_LOG answers 200 with `log` null.
+        "500":
+          description: |
+            `internal server error` — a handler panic answered by
+            middleware.Recovery. No detection outcome is reported as a 500: an
+            unconfigured log is a 200 with `log` null, and a log that does not
+            verify is reported in `verify` here (and by the verify route), not
+            as a server fault.
+  /delivery-log/verify:
+    get:
+      operationId: deliveryLogVerify
+      tags: [detection]
+      summary: Re-verify the delivery log file, chain and signatures (opt-in)
+      description: |
+        A fresh read of the FILE — never the in-memory window — re-verifying
+        every record's ed25519 signature, its 1-based position and the hash
+        chain (specs/DETECTION.md §3.3 and §6). This is the restart-survival
+        check: a record appended before a restart is verified the same way as
+        one appended after it, and it is the route that sees a record appended
+        or edited by another process after this server opened the log.
+
+        OPT-IN: registered only while CR_DETECT_ENABLED is true; unset, it
+        answers 404 as an unregistered path.
+
+        AUTH: the operator's `Authorization: Bearer <CR_AUTH_TOKEN>` token.
+
+        The route takes no parameters (a query string or body is ignored and
+        nothing is silently reinterpreted), so there is no 400 arm: its
+        refuse-to-read-as-healthy arm is 409. A log that does not verify is a
+        live FINDING, not a server fault — 409 carries the report with `ok`
+        false, `first_bad_seq` and `error` naming the first record that fails,
+        so a dashboard cannot mistake a tampered log for a healthy 200.
+
+        With no CR_DETECT_LOG configured the route answers 200 with `enabled`
+        true, `log` null, `ok` false and a `detail` saying there is no log to
+        verify — absent is stated, never rendered as verified.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: |
+            The full-file verification report (`ok` true and `entries`
+            counted), or — with no log configured — the explicit absent-log
+            body.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DetectionLogVerifyReport"
+                  - $ref: "#/components/schemas/DetectionLogAbsent"
+        "401":
+          description: |
+            Missing or invalid operator credential: `missing Authorization
+            header`, `authorization scheme must be Bearer`, or `invalid token`.
+        "404":
+          description: |
+            CR_DETECT_ENABLED is not set, so this route is not registered.
+        "409":
+          description: |
+            A log that does not verify (`ok` false) — an edited, deleted,
+            reordered or foreign-signed record. The body names the first bad
+            sequence number and the failure, and the file itself is the record
+            of record. Not a 500: tampering is an answerable finding.
+        "500":
+          description: |
+            `internal server error` — a handler panic answered by
+            middleware.Recovery. A read error from the log file is reported in
+            the body (`ok` false with `error`), not as a server fault.
+  /alerts:
+    get:
+      operationId: alertsGet
+      tags: [detection]
+      summary: List the alert signals that have tripped (opt-in)
+      description: |
+        Every baseline signal that has tripped, oldest first, with the
+        thresholds in force and the detector's counters
+        (specs/DETECTION.md §4 and §6). All four signals are ADVISORY: nothing
+        is contained automatically, and containment is an explicit operator
+        call to the kill-switch.
+
+        OPT-IN: registered only while CR_DETECT_ENABLED is true; unset, it
+        answers 404 as an unregistered path.
+
+        AUTH: the operator's `Authorization: Bearer <CR_AUTH_TOKEN>` token.
+
+        One alert per (signal, agent) per window — a sustained spike is one
+        alert, not one per message. Baselines are per SENDER and observe
+        accepted outreach only, so a delivery refused because the agent is
+        already contained is recorded in the log but never counted toward a
+        baseline (a contained agent would otherwise look like a permanent
+        spike). Deliveries with no claimed sender are recorded but not
+        baselined.
+
+        `?signal=` filters by signal name and is validated, not ignored: an
+        unknown value answers 400 instead of an empty list that reads as
+        "nothing tripped".
+
+        The `thresholds` block is the configuration actually in force (the
+        defaults are 5 distinct targets in 60s, 3 first-ever peers in 60s, 3
+        messages in 01:00-05:00 UTC, and 1 touched canary token; payloads above
+        64KiB are not scanned for canary tokens).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: signal
+          in: query
+          required: false
+          description: |
+            Restrict the list to one signal. Omitted means every signal; an
+            unknown value answers 400 rather than an empty page.
+          schema:
+            type: string
+            enum: [fanout_spike, new_peer_burst, odd_hour_volume, canary_trip]
+      responses:
+        "200":
+          description: |
+            The alerts that tripped (possibly none — `count` 0 with an empty
+            list, which is the healthy answer), the thresholds in force, and
+            the detector's counters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionAlertsResponse"
+        "400":
+          description: |
+            An unknown signal, named back in the refusal:
+            `unknown signal "<value>"`.
+        "401":
+          description: |
+            Missing or invalid operator credential: `missing Authorization
+            header`, `authorization scheme must be Bearer`, or `invalid token`.
+        "404":
+          description: |
+            CR_DETECT_ENABLED is not set, so this route is not registered.
+        "500":
+          description: |
+            `internal server error` — a handler panic answered by
+            middleware.Recovery. No detection outcome is reported as a 500.
+  /canaries:
+    get:
+      operationId: canariesGet
+      tags: [detection]
+      summary: Read the planted canary tokens (opt-in)
+      description: |
+        The planted canary tokens, each with the agent id that stands for it,
+        and the count (specs/DETECTION.md §6 and §7). A canary is a string
+        planted where an exfiltrating agent would find it — a file on the host,
+        an env var, an agent's memory — and its appearance anywhere it does not
+        belong is itself the finding. Crier watches the one channel it owns: a
+        delivery ADDRESSED to a canary id, or one whose payload carries a canary
+        token, trips `canary_trip` (critical).
+
+        OPT-IN: registered only while CR_DETECT_ENABLED is true; unset, it
+        answers 404 as an unregistered path.
+
+        AUTH: the operator's `Authorization: Bearer <CR_AUTH_TOKEN>` token —
+        deliberately the same trust level as the kill-switch. The tokens are
+        READABLE because an operator has to know them to plant one; that is the
+        feature, not a leak.
+
+        The route takes no parameters, so it has no 400 arm: there is nothing
+        to validate and nothing is silently ignored.
+
+        CR_CANARY_TOKENS pins the tokens; unset, the server generates two at
+        boot, logs them at startup and serves them here. Generated canaries
+        rotate per boot, so pin them to plant them somewhere durable.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: |
+            The planted canaries (id plus token), the count, and the contract:
+            what trips a canary and how the tokens are produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionCanariesResponse"
+        "401":
+          description: |
+            Missing or invalid operator credential: `missing Authorization
+            header`, `authorization scheme must be Bearer`, or `invalid token`.
+        "404":
+          description: |
+            CR_DETECT_ENABLED is not set, so this route is not registered.
+        "500":
+          description: |
+            `internal server error` — a handler panic answered by
+            middleware.Recovery. No detection outcome is reported as a 500.
+  /agents/{id}/kill-switch:
+    post:
+      operationId: killSwitchPost
+      tags: [detection]
+      summary: Contain one agent in a single call — the kill-switch (opt-in)
+      description: |
+        ONE call performs four containment actions on the agent, in this order,
+        and the ORDER is the contract (specs/DETECTION.md §5):
+
+        1. `pause_webhooks` — the outbound webhook lane stops and what it had
+           queued is dropped. First, so nothing keeps leaving after the call.
+        2. `revoke_leases` — the unacked messages it had claimed go back to the
+           queue; an ACKed message is never resurrected and no message is
+           deleted. The count is the forensic answer to "what did it have in
+           hand?".
+        3. `quarantine` — the delivery path refuses both directions with
+           `403 AGENT_QUARANTINED` (`side` sender or target), before a message
+           id is minted, before federation and before the guard.
+        4. `unregister` — the registry row is removed, idempotently: an absent
+           row is reported as such, not as a failure.
+
+        Every action carries its own status — `ok`, `unsupported` or `error` —
+        and `contained` is true only when the actions that make the agent
+        harmless all succeeded. `unsupported` is a real third state: a store
+        that cannot revoke leases says so, and the response carries a warning.
+        A partial containment can never read as a clean one.
+
+        An agent id that was never registered is NOT a 404: the call answers
+        200 and the `unregister` step reports that there was no registry row to
+        remove (the quarantine still applies). The 404 on this path is the
+        opt-in boundary only.
+
+        OPT-IN: registered only while CR_DETECT_ENABLED is true; unset, the
+        path answers 404 and no containment is possible through it.
+
+        AUTH: the operator's `Authorization: Bearer <CR_AUTH_TOKEN>` token.
+        This is the most powerful call on the bus; it is deliberately not
+        auth-exempt, and containment is never automatic — no alert contains an
+        agent on its own.
+
+        What it does NOT do, stated so an operator does not over-trust it: a
+        webhook POST already in flight is not recalled, and the outbound pause
+        is per-process (the quarantine and the row removal are the states that
+        survive a restart). The whole call and its outcome are also recorded in
+        the delivery log as one `containment` record.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: |
+            The agent to contain — the id the bus knows it by. It need not be
+            registered: containment is refused to nobody, and an absent row is
+            reported inside the response rather than as a 404.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: |
+          Optional. The operator's stated reason, recorded in the delivery log
+          as part of the containment entry. The bounded size is BYTES on the
+          wire (512 of them), not characters.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KillSwitchRequest"
+      responses:
+        "200":
+          description: |
+            The containment report: every step, in contract order, with its own
+            status, plus `contained` and `warnings`. A partial containment is
+            reported as `contained` false with the failed steps named — never as
+            a clean 200 with no detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContainmentReport"
+        "400":
+          description: |
+            A refused body, named exactly: `kill-switch body must be <= 512
+            bytes` when the body exceeds the bound, `invalid json` when it does
+            not parse, `unreadable body` when it cannot be read. Nothing is
+            contained when the body is refused.
+        "401":
+          description: |
+            Missing or invalid operator credential: `missing Authorization
+            header`, `authorization scheme must be Bearer`, or `invalid token`.
+            Containment does not begin on a refused credential.
+        "404":
+          description: |
+            CR_DETECT_ENABLED is not set, so this route is not registered. An
+            unknown AGENT id is not a 404 — see the 200 arm.
+        "500":
+          description: |
+            `internal server error` — a handler panic answered by
+            middleware.Recovery. A containment step that fails is reported in
+            the body (`actions[].status` `error` with `contained` false), not
+            as a server fault.
 
 components:
   parameters:
@@ -7352,3 +7735,389 @@ components:
         error:
           type: string
           description: The refusal code, e.g. FED_OPERATOR_REQUIRED, FED_INVALID_REQUEST, FED_NO_LINK, FED_PEER_REVOKED, FED_BAD_SIGNATURE, FED_HANDSHAKE_REQUIRED, FED_HANDSHAKE_EXPIRED, FED_HANDSHAKE_NONCE_INVALID, FED_HANDSHAKE_SELF, FED_HANDSHAKE_REPLAY, FED_HANDSHAKE_BUSY, FED_HANDSHAKE_OUT_OF_ORDER or FED_HANDSHAKE_NONCE_MISMATCH.
+
+    # --- CR-FEAT-030 — detection & containment (OPT-IN) ---------------------
+    # The wire shapes of the five detection routes. They are the structs
+    # internal/detect and cmd/server/detection.go actually serialize, field for
+    # field; specs/DETECTION.md is the normative contract for their meaning.
+    DetectionLogEntry:
+      type: object
+      description: |
+        One signed delivery-log record — one per delivery outcome, plus one per
+        alert and one per containment call (specs/DETECTION.md §3.1).
+      required: [seq, at, kind, prev_hash, hash, signature, key_id]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+          description: |
+            1-based position in this file, contiguous. A hole in the sequence is
+            itself the finding — the verify route names the first bad one.
+        at:
+          type: string
+          description: RFC 3339 UTC timestamp of the record.
+        kind:
+          type: string
+          enum: [delivery, alert, containment]
+          description: Which of the three record families this is.
+        sender:
+          type: string
+          description: The identity the request claimed, as crier saw it.
+        target:
+          type: string
+          description: The agent the delivery was addressed to (containment records carry the contained agent here).
+        message_id:
+          type: string
+          description: The message id the bus minted, when one was minted.
+        verdict:
+          type: string
+          description: |
+            What the bus decided, measured from the status the caller actually
+            received (a branch that returned early is still logged). The
+            closed wire vocabulary is specs/DETECTION.md §3.2 — inbox_accepted,
+            webhook_accepted, webhook_failed, federation_held,
+            federation_failed, guard_blocked, quarantined, agent_not_found,
+            rate_limited, rejected, unspecified — extended by the 403 family of
+            specs/CHAT-SESSIONS.md §3.2. Spelled out rather than enum-bound
+            because that vocabulary is defined by the cited specs, not here.
+        transport:
+          type: string
+          enum: [inbox, webhook, federation]
+          description: The lane the observation came from, when it applies.
+        signal:
+          type: string
+          enum: [fanout_spike, new_peer_burst, odd_hour_volume, canary_trip]
+          description: The alert signal, on an alert record.
+        detail:
+          type: string
+          description: |
+            The alert detail, the containment summary, or a forbidden
+            delivery's original response error (the raw body when no string
+            error can be decoded).
+        prev_hash:
+          type: string
+          description: |
+            The predecessor's hash, inside this record's own hash — so deleting,
+            reordering or editing a record breaks the chain from that point on.
+            The genesis value for seq 1.
+        hash:
+          type: string
+          description: Lowercase hex sha256 of the record with `hash` and `signature` blanked.
+        signature:
+          type: string
+          description: Hex ed25519 signature by the server's log key over `hash` (128 hex chars).
+        key_id:
+          type: string
+          description: The id of the signing key — a record signed by another key fails verification.
+    DetectionLogVerifyReport:
+      type: object
+      description: |
+        The full-file verification report: a fresh read of the log FILE,
+        re-verifying every record's signature, its position and the chain. A
+        log that does not verify is answered 409, not 200.
+      required: [path, entries, ok, key_id]
+      properties:
+        path:
+          type: string
+          description: The log file this report was produced from.
+        entries:
+          type: integer
+          description: How many lines were read (and verified, when `ok` is true).
+        ok:
+          type: boolean
+          description: True only when every record verified. False is a live finding.
+        first_bad_seq:
+          type: integer
+          description: The 1-based sequence number of the first record that failed. Present only when `ok` is false.
+        error:
+          type: string
+          description: |-
+            The failure, in the form `line <n>: <reason>` (for example
+            `line 12: signature does not verify`). Present only when `ok` is
+            false.
+        key_id:
+          type: string
+          description: The id of the key every record had to verify against.
+    DetectionLogAbsent:
+      type: object
+      description: |
+        The answer when the server is detection-enabled but no CR_DETECT_LOG is
+        configured: there is no log to read or verify, and the body says so
+        instead of rendering an empty file as a healthy one.
+      required: [enabled, log, ok, detail]
+      properties:
+        enabled:
+          type: boolean
+          description: Always true — the route answered, so the feature is on.
+        log:
+          type: [object, "null"]
+          description: Always null — the field is named so its absence is explicit rather than a missing key.
+        ok:
+          type: boolean
+          description: Always false on this arm. There is nothing verified, so nothing may read as verified.
+        detail:
+          type: string
+          description: The stated reason — there is no log configured to verify.
+    DetectionLogPage:
+      type: object
+      description: |
+        One bounded page of the delivery log, with the accounting that makes the
+        page honest: the FILE total and the in-memory window size are separate
+        numbers, so a window is never mistaken for the whole log
+        (specs/DETECTION.md §3.4).
+      required: [enabled, records]
+      properties:
+        enabled:
+          type: boolean
+          description: Always true — the route answered, so the feature is on.
+        log:
+          type: [object, "null"]
+          description: |
+            Present (null) only when no CR_DETECT_LOG is configured. When a log
+            exists the page carries `path` instead, and this member is absent.
+        detail:
+          type: string
+          description: The stated reason on the no-log arm — alerts and containment work, nothing is persisted.
+        path:
+          type: string
+          description: The log file the page came from.
+        total:
+          type: integer
+          description: Records in the FILE as of the last append — the true total, not the page size.
+        window:
+          type: integer
+          description: Records held in the in-memory window (never more than the last 10000); the file is the record of record.
+        limit:
+          type: integer
+          description: The page bound that was applied to this request.
+        kind:
+          type: string
+          enum: ["", delivery, alert, containment]
+          description: The kind filter that was applied; the empty string means every kind.
+        verify:
+          $ref: "#/components/schemas/DetectionLogVerifyReport"
+        records:
+          type: array
+          description: |
+            Up to `limit` records from the window, oldest first (newest last),
+            filtered by `kind`. Empty is a valid answer on a fresh log.
+          items:
+            $ref: "#/components/schemas/DetectionLogEntry"
+        key_id:
+          type: string
+          description: The id of the key that signs the log.
+        append_only:
+          type: string
+          description: |
+            The contract in one sentence: each record is signed with the
+            server's ed25519 key and chained (prev_hash); a rewrite or deletion
+            fails the verify route.
+    DetectionAlert:
+      type: object
+      description: One baseline signal that tripped. Advisory only — nothing is contained automatically.
+      required: [id, at, signal, agent, severity, detail]
+      properties:
+        id:
+          type: string
+          description: The alert's id.
+        at:
+          type: string
+          description: RFC 3339 UTC timestamp of when it tripped.
+        signal:
+          type: string
+          enum: [fanout_spike, new_peer_burst, odd_hour_volume, canary_trip]
+          description: Which of the four documented signals tripped.
+        agent:
+          type: string
+          description: The sender whose baseline tripped (for canary_trip, the involved agent).
+        severity:
+          type: string
+          enum: [critical, warning]
+          description: critical for fanout_spike, new_peer_burst and canary_trip; warning for odd_hour_volume.
+        detail:
+          type: string
+          description: Human-readable account of what the signal saw.
+        evidence:
+          type: object
+          additionalProperties: true
+          description: |
+            The measurements behind the alert, per signal: distinct_targets,
+            targets, window_seconds, threshold (fanout_spike); new_peers,
+            targets, window_seconds, threshold (new_peer_burst);
+            quiet_hours_utc, messages, threshold (odd_hour_volume); canary_id,
+            target, message_id, verdict (canary_trip).
+    DetectionThresholds:
+      type: object
+      description: The windows and thresholds actually in force on this server (defaults unless the CR_DETECT_* variables say otherwise).
+      properties:
+        fanout_spike:
+          type: object
+          properties:
+            window_seconds:
+              type: integer
+            distinct_targets:
+              type: integer
+        new_peer_burst:
+          type: object
+          properties:
+            window_seconds:
+              type: integer
+            new_peers:
+              type: integer
+        odd_hour_volume:
+          type: object
+          properties:
+            quiet_hours_utc:
+              type: string
+              description: "The UTC window, as HH:00-HH:00. An equal pair disables the signal."
+            messages:
+              type: integer
+        canary_trip:
+          type: object
+          properties:
+            tokens_touched:
+              type: integer
+        max_payload_scan:
+          type: integer
+          description: Payloads above this many bytes are not scanned for canary tokens (the address check still applies).
+    DetectionStats:
+      type: object
+      description: The detector's counters — what it has observed and what it currently holds.
+      required: [observed, verdicts, alerts, quarantined_agents, canaries, log_entries]
+      properties:
+        observed:
+          type: integer
+          description: Deliveries observed since boot.
+        verdicts:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Count per delivery verdict (the same vocabulary the log records).
+        alerts:
+          type: integer
+          description: Alerts currently held.
+        quarantined_agents:
+          type: integer
+          description: Agents currently quarantined.
+        canaries:
+          type: integer
+          description: Canary tokens planted on this boot.
+        log_path:
+          type: string
+          description: The log file, when one is configured.
+        log_entries:
+          type: integer
+          description: Records in the file as of the last append.
+        last_error:
+          type: string
+          description: The last detector-side error, when there is one — stated rather than swallowed.
+    DetectionAlertsResponse:
+      type: object
+      required: [alerts, count, thresholds, stats]
+      properties:
+        alerts:
+          type: array
+          description: Every alert that tripped, oldest first, after any `signal` filter.
+          items:
+            $ref: "#/components/schemas/DetectionAlert"
+        count:
+          type: integer
+          description: How many alerts this answer carries. 0 with an empty list is the healthy answer.
+        thresholds:
+          $ref: "#/components/schemas/DetectionThresholds"
+        stats:
+          $ref: "#/components/schemas/DetectionStats"
+    DetectionCanary:
+      type: object
+      description: One planted canary token with the agent id that stands for it.
+      required: [id, token]
+      properties:
+        id:
+          type: string
+          description: The canary's agent id — derived from the token, so it is stable across restarts and can be denylisted.
+        token:
+          type: string
+          description: The planted secret itself. Readable on purpose — an operator has to know it to plant it.
+    DetectionCanariesResponse:
+      type: object
+      required: [canaries, count, detail]
+      properties:
+        canaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectionCanary"
+        count:
+          type: integer
+        detail:
+          type: string
+          description: |
+            What trips a canary (a delivery addressed to a canary id, or one
+            carrying the token in its payload) and how the tokens are produced —
+            generated per boot unless CR_CANARY_TOKENS pins them.
+    ContainmentAction:
+      type: object
+      description: One containment step, with what it really did.
+      required: [action, status]
+      properties:
+        action:
+          type: string
+          enum: [pause_webhooks, revoke_leases, quarantine, unregister]
+          description: The step. The ORDER of these is the contract (specs/DETECTION.md §5).
+        status:
+          type: string
+          enum: [ok, unsupported, error]
+          description: |
+            ok — it ran. unsupported — the wired store or driver cannot perform
+            it (an honest third state, reported as a warning). error — it
+            failed, and `contained` is then false.
+        count:
+          type: integer
+          description: What the step affected — queued deliveries dropped (pause_webhooks) or leases released (revoke_leases).
+        detail:
+          type: string
+          description: What actually happened, in words — including "already quarantined" on an idempotent re-run.
+    ContainmentReport:
+      type: object
+      description: The outcome of one kill-switch call — the whole answer to "what did that one call actually do?".
+      required: [agent_id, at, actions, contained]
+      properties:
+        agent_id:
+          type: string
+          description: The agent the call addressed.
+        at:
+          type: string
+          description: RFC 3339 UTC timestamp of the call.
+        reason:
+          type: string
+          description: The operator's stated reason, when one was sent.
+        actions:
+          type: array
+          description: |
+            Every step, in contract order — pause_webhooks, revoke_leases,
+            quarantine, unregister. A step that was skipped is still reported
+            (as unsupported), so the list is never silently short.
+          items:
+            $ref: "#/components/schemas/ContainmentAction"
+        contained:
+          type: boolean
+          description: |
+            True only when the actions that make the agent harmless all
+            succeeded. False means a partial containment — which is why
+            `warnings` exists.
+        warnings:
+          type: array
+          description: One line per action that did not fully succeed. A partial containment can never read as a clean one.
+          items:
+            type: string
+    KillSwitchRequest:
+      type: object
+      description: The optional kill-switch body.
+      properties:
+        reason:
+          type: string
+          description: |
+            The operator's stated reason, recorded in the delivery log as part
+            of the containment entry. The bound is 512 BYTES of request body,
+            enforced before parsing (a larger body is refused with 400 and
+            nothing is contained).
+
