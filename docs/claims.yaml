@@ -432,8 +432,15 @@ claims:
     # router has served since the tick-451 phase-1 salvage: POST
     # /agents/{agentid}/class was registered and counted by COUNT-ROUTER-PATHS
     # but absent from this document, so the pair is 54 / 64.
-    quote: "58 paths"
-    expect: 58
+    # The trust surface (/trust/anchors, /trust/delegations, /trust/verify)
+    # landed after this ledger's last line, so the MEASURED pair at DOC-3 was
+    # 58 / 75 — recorded here rather than papered over. DOC-3 then declared the
+    # five opt-in detection paths the router has registered since CR-FEAT-030
+    # (GET /delivery-log, GET /delivery-log/verify, GET /alerts, GET /canaries,
+    # POST /agents/{id}/kill-switch — one operation each, OPT-IN at runtime but
+    # declared operations in the document all the same), so the pair is 63 / 80.
+    quote: "63 paths"
+    expect: 63
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -469,9 +476,12 @@ claims:
     # so the count was 64. DF-CRIER-302 added the id-in-path spelling of
     # registration (registryRegisterAgentByID — a new METHOD on the
     # already-declared /agents/{id} path, so the PATH count is unchanged at 54
-    # while this one moves), so the count is 65.
-    quote: "75 operations"
-    expect: 75
+    # while this one moves), so the count is 65. The trust surface landed after
+    # that line, so the MEASURED count at DOC-3 was 75; DOC-3 declared the five
+    # opt-in detection operations (deliveryLogGet, deliveryLogVerify, alertsGet,
+    # canariesGet, killSwitchPost), so the count is 80.
+    quote: "80 operations"
+    expect: 80
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
