@@ -112,18 +112,21 @@ var excludedOperations = map[string]string{
 	// holding the shared message token must never be able to mint principals,
 	// bindings or grants. Operator-only; reclassify if the bridge ever grows
 	// an admin-credential surface.
-	"mintPrincipal":       "POST /principals — \"Mint a principal\" (CR-CHAT-007): admin-token-gated; a bridge identity holds the message token, not the admin token, so a tool would always be refused 403 MANAGEMENT_FORBIDDEN.",
-	"createBinding":       "POST /bindings — \"Record a binding\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
-	"createGrant":         "POST /grants — \"Create a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
-	"revokeGrant":         "POST /grants/{grantid}/revoke — \"Tombstone a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
-	"healthCheck":         "GET /health — server liveness probe (spec tag \"health\": \"Server liveness, build identity and effective runtime posture\"); an operator/load-balancer surface, not an agent-messaging verb.",
-	"buildVersion":        "GET /version — \"Build identity of the running server\" (same identity `crier -version` prints and the startup log carries); an operator/CLI concern, not an agent-messaging verb.",
-	"runtimeStatus":       "GET /status — \"Effective runtime posture (auth, guard, registry backend, build identity)\"; operator-only and deliberately NOT auth-exempt, so it is not something a bridge identity should fetch on a tool call.",
-	"relayPublish":        "POST /relay/publish — \"Publish an event to a topic\": fire-and-forget topic fan-out (a publish to an empty topic is dropped by design), addressed to subscribers rather than to an agent's durable inbox.",
-	"relaySubscribe":      "GET /relay/subscribe/{topic} — \"Subscribe to a topic or wildcard pattern via WebSocket\": a streaming client surface; the bridge already owns its WebSocket transport and exposes the content lane through the inbox tools.",
-	"relayListTopics":     "GET /relay/topics — \"List active topics\" with subscriber counts; relay operational census, not an agent-messaging verb.",
-	"fedListPeers":        "GET /fed/peers — \"List federation peers (local relay first, then linked relays with their agents)\" (CR-FEAT-006); cross-relay topology for operators, and each link is fetched live from that relay's own GET /agents.",
-	"registryUpdateAgent": "PATCH /agents/{id} — \"Partially update an agent's registration (self-configuration directive, spec §7)\", requiring the per-agent ed25519 signature headers; the crier-mcp bridge has no tool for it yet, so it is uncovered — not an agent-messaging verb; reclassify when the bridge grows a tool for it.",
+	"mintPrincipal":             "POST /principals — \"Mint a principal\" (CR-CHAT-007): admin-token-gated; a bridge identity holds the message token, not the admin token, so a tool would always be refused 403 MANAGEMENT_FORBIDDEN.",
+	"createBinding":             "POST /bindings — \"Record a binding\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"createGrant":               "POST /grants — \"Create a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"revokeGrant":               "POST /grants/{grantid}/revoke — \"Tombstone a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"healthCheck":               "GET /health — server liveness probe (spec tag \"health\": \"Server liveness, build identity and effective runtime posture\"); an operator/load-balancer surface, not an agent-messaging verb.",
+	"buildVersion":              "GET /version — \"Build identity of the running server\" (same identity `crier -version` prints and the startup log carries); an operator/CLI concern, not an agent-messaging verb.",
+	"runtimeStatus":             "GET /status — \"Effective runtime posture (auth, guard, registry backend, build identity)\"; operator-only and deliberately NOT auth-exempt, so it is not something a bridge identity should fetch on a tool call.",
+	"relayPublish":              "POST /relay/publish — \"Publish an event to a topic\": fire-and-forget topic fan-out (a publish to an empty topic is dropped by design), addressed to subscribers rather than to an agent's durable inbox.",
+	"relaySubscribe":            "GET /relay/subscribe/{topic} — \"Subscribe to a topic or wildcard pattern via WebSocket\": a streaming client surface; the bridge already owns its WebSocket transport and exposes the content lane through the inbox tools.",
+	"relayListTopics":           "GET /relay/topics — \"List active topics\" with subscriber counts; relay operational census, not an agent-messaging verb.",
+	"fedListPeers":              "GET /fed/peers — \"List federation peers (local relay first, then linked relays with their agents)\" (CR-FEAT-006); cross-relay topology for operators, and each link is fetched live from that relay's own GET /agents.",
+	"federationPatchPeer":       "PATCH /fed/peers/{id} — \"Update a pinned federation peer's state, direction or label (operator only)\" (DF-CRIER-363): operator-credential-gated peer lifecycle, and the record lives in the server's fsync'd peer store; a bridge identity holds the message token, not the operator credential, so a tool would always be refused 403 FED_OPERATOR_REQUIRED.",
+	"federationHandshakeStart":  "POST /fed/handshake/start — \"Open a mutual instance handshake\" (DF-CRIER-363): instance-identity key proof against an operator-pinned peer, operator-gated, with process-local single-use challenges; it authenticates RELAYS, not agents, so it is not an agent-messaging verb for the bridge.",
+	"federationHandshakeFinish": "POST /fed/handshake/finish — \"Close a mutual instance handshake and link the peer\" (DF-CRIER-363): consumes the pending challenge the server itself minted, so the bridge's RemoteStore (no challenge state) could not execute it; operator-gated instance identity, not an agent-messaging verb.",
+	"registryUpdateAgent":       "PATCH /agents/{id} — \"Partially update an agent's registration (self-configuration directive, spec §7)\", requiring the per-agent ed25519 signature headers; the crier-mcp bridge has no tool for it yet, so it is uncovered — not an agent-messaging verb; reclassify when the bridge grows a tool for it.",
 	// CR-CHAT-034 — the delivery-wait surface. The deliver-and-wait verb
 	// BLOCKS an HTTP request for up to 120 s and the wait state is held in
 	// the server's own registry; the bridge's stdio tool call has no
