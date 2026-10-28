@@ -24,7 +24,7 @@ tags:
   - name: mesh
     description: WebSocket peer mesh — connect and list peers.
   - name: federation
-    description: Cross-relay federation peer list.
+    description: "Cross-relay federation: the peer list, plus the OPT-IN operator-managed instance lifecycle (CR_FED_RECORDS_FILE) — pin a peer, patch its state/direction/label, and run the mutual instance handshake that links it. Every lifecycle operation is operator-gated and absent unless the peer store is configured."
   - name: sessions
     description: "Chat sessions (CR-CHAT-019): the session object, the ordered cross-agent transcript, membership and fan-out into a session, per specs/CHAT-INTERFACE.md §4. Every surface is realm-scoped, and a message sent into a session is delivered through the SHIPPED inbox path — there is no second delivery path."
   - name: groups
@@ -869,6 +869,165 @@ paths:
                                 description: Advertised agent capabilities
                                 items:
                                   type: string
+
+  # ── Federation instance lifecycle (opt-in, DF-CRIER-363) ──
+  #
+  # These operations exist ONLY when CR_FED_RECORDS_FILE names the operator
+  # peer store (`auto` picks federation-peers.json beside the hold/instance-key
+  # files). Unset means the routes are never registered and the router answers
+  # 404 — the documented posture, not a bug. Every one of them is gated by the
+  # deployment bearer PLUS the operator credential (CR_PERMISSIONS_ADMIN_TOKEN
+  # when configured, otherwise CR_AUTH_TOKEN) sent in X-Crier-Fed-Operator; the
+  # gate fails closed when no operator credential exists. The admin token used
+  # as the Authorization bearer by itself is refused 403 by the deployment
+  # middleware, which accepts it on the permissions management surface only.
+  /fed/peers/{id}:
+    patch:
+      operationId: federationPatchPeer
+      tags: [federation]
+      summary: Update a pinned federation peer's state, direction or label (operator only)
+      description: |-
+        Patches ONE operator-pinned peer record. `public_key`, `key_id` and
+        `url` are IMMUTABLE: they are fixed by the operator at creation and are
+        not accepted here (an unknown property is a 400 FED_INVALID_REQUEST, the
+        body decoder rejects unknown fields). Only `state`, `direction` and
+        `label` may change, and an omitted member leaves that field as it was;
+        every accepted patch re-stamps `updated_at`.
+
+        `state: "revoked"` is terminal for credentials: it stamps `revoked_at`
+        and the peer's key no longer authenticates or links anything.
+        `state: "linked"` is REFUSED with 400 FED_HANDSHAKE_REQUIRED unless the
+        record is already linked — a handshake (POST /fed/handshake/start then
+        POST /fed/handshake/finish) is the only path that promotes a pending
+        peer to linked, so an operator cannot vouch for a key they never proved.
+
+        An UNKNOWN `{id}` is 400 FED_NO_LINK, not 404: the surface answers in
+        federation refusal codes, and the peer store is a small operator
+        document rather than a REST resource collection. 404 means only that
+        this opt-in surface is not mounted (CR_FED_RECORDS_FILE unset).
+        Requires `Authorization: Bearer <CR_AUTH_TOKEN>` (401 when missing or
+        invalid) plus the operator credential (403 FED_OPERATOR_REQUIRED).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The peer's instance id, exactly as pinned by the operator on creation (never rewritten by a patch).
+          schema: {type: string}
+        - name: X-Crier-Fed-Operator
+          in: header
+          required: false
+          description: The operator credential (CR_PERMISSIONS_ADMIN_TOKEN when configured, otherwise CR_AUTH_TOKEN) for the federation management gate. Required alongside the deployment bearer; omitted or wrong is 403 FED_OPERATOR_REQUIRED, and the gate fails closed when the server holds no operator credential at all.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FederationPeerPatch'}
+      responses:
+        "200":
+          description: The stored record after the patch, as reported by the peer store (state, direction, label and re-stamped updated_at; omitted linked_at/revoked_at are absent until the lifecycle sets them).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederationPeerRecord'}
+        "400":
+          description: "FED_INVALID_REQUEST (malformed JSON, an unknown property — including an attempt to patch the immutable public_key/key_id/url — or a body over 16 KiB), FED_NO_LINK (unknown peer id), FED_HANDSHAKE_REQUIRED (state=linked on a peer that never completed a handshake), or a store validation message (id empty or padded, key_id not matching public_key, direction not inbound|outbound|both, state not pending|linked|revoked, url not a canonical http(s) base URL)."
+        "401": {description: "No Authorization header, a non-Bearer scheme, or a token that is neither the deployment bearer nor a recognized management credential (middleware refusal, before the federation gate runs)."}
+        "403": {description: "FED_OPERATOR_REQUIRED — the operator credential is absent, or is not the configured operator token. Also raised as a plain-text JSON refusal when the admin token is presented AS the Authorization bearer on this non-management path."}
+        "404": {description: "This peer lifecycle surface is not mounted on this server: CR_FED_RECORDS_FILE is unset, so the router registered no /fed route beyond the discovery GET /fed/peers."}
+  /fed/handshake/start:
+    post:
+      operationId: federationHandshakeStart
+      tags: [federation]
+      summary: Open a mutual instance handshake — return the responder half of the transcript (operator only)
+      description: |-
+        Step 1 of the two-way instance handshake (specs/CHAT-FEDERATION.md
+        §5.2). The caller presents the INITIATOR's instance id, public key, key
+        id and a 32-byte nonce; the server answers with its own half of the
+        canonical JSON transcript plus its ed25519 signature over exactly those
+        bytes. The transcript is `{method, path, timestamp, initiator_id,
+        initiator_key_id, initiator_nonce, responder_id, responder_key_id,
+        responder_nonce}` — method/path domain-separate it from delivery auth,
+        and both signatures cover exactly those bytes, never the enclosing wire
+        object.
+
+        The request is bound to an OPERATOR-PINNED peer, never trust-on-first-
+        use: `instance_id` must already exist in the peer store with the SAME
+        `public_key` and `key_id`, or the call is refused FED_NO_LINK /
+        FED_BAD_SIGNATURE. Timestamps are limited to ±30 s, nonces are 32 bytes
+        of hex and single-use per initiator, and the pending-challenge table is
+        process-local, bounded to 4096 entries and 30 s — a restart drops every
+        challenge (fail closed).
+
+        The same operator gate as the peer-patch operation applies. Requires
+        `Authorization: Bearer <CR_AUTH_TOKEN>` (401 when missing or invalid)
+        plus the operator credential (403 FED_OPERATOR_REQUIRED).
+      parameters:
+        - name: X-Crier-Fed-Operator
+          in: header
+          required: false
+          description: The operator credential (CR_PERMISSIONS_ADMIN_TOKEN when configured, otherwise CR_AUTH_TOKEN) for the federation management gate. Required alongside the deployment bearer; omitted or wrong is 403 FED_OPERATOR_REQUIRED.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FederationHandshakeStart'}
+      responses:
+        "200":
+          description: The responder half of the handshake — the canonical transcript the initiator must sign, and this server's ed25519 signature over it (initiator_signature is absent at this step).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederationHandshakeProof'}
+        "400": {description: "FED_INVALID_REQUEST — malformed JSON, an unknown or missing field, or a body over 16 KiB. The body decoder rejects unknown fields, so a misspelled transcript member is a refusal rather than a silently ignored input."}
+        "401": {description: "No Authorization header, a non-Bearer scheme, or an invalid token (middleware refusal, before the federation gate runs)."}
+        "403":
+          description: "The named federation refusal: FED_OPERATOR_REQUIRED (operator credential absent or wrong), FED_HANDSHAKE_EXPIRED (timestamp outside ±30 s), FED_HANDSHAKE_NONCE_INVALID (nonce is not 32 bytes of hex), FED_HANDSHAKE_SELF (instance_id is this relay), FED_NO_LINK (no operator-pinned peer with that id), FED_PEER_REVOKED (the peer's state is revoked), FED_BAD_SIGNATURE (public_key/key_id do not match the pinned peer), FED_HANDSHAKE_REPLAY (this initiator nonce is already pending), FED_HANDSHAKE_BUSY (4096 pending challenges)."
+        "404": {description: "This peer lifecycle surface is not mounted on this server: CR_FED_RECORDS_FILE is unset."}
+  /fed/handshake/finish:
+    post:
+      operationId: federationHandshakeFinish
+      tags: [federation]
+      summary: Close a mutual instance handshake and link the peer (operator only)
+      description: |-
+        Step 2 of the two-way instance handshake (specs/CHAT-FEDERATION.md
+        §5.2). The caller posts back the transcript it received from
+        POST /fed/handshake/start plus ITS OWN ed25519 signature over the same
+        canonical bytes, and this relay responds with the peer record now
+        promoted to `state: linked` and stamped `linked_at`. Run the exchange
+        in BOTH directions before traffic crosses.
+
+        Both proofs are verified here: the initiator's signature against the
+        peer's PINNED key and the server's own signature against its instance
+        key. A challenge is consumed BEFORE signature validation, so a failed
+        guess can never be retried against the same nonce. The peer's key and
+        key id are re-read from the store under the mutation lock, so a revoke
+        that lands mid-exchange still wins.
+
+        The same operator gate as the peer-patch operation applies. Requires
+        `Authorization: Bearer <CR_AUTH_TOKEN>` (401 when missing or invalid)
+        plus the operator credential (403 FED_OPERATOR_REQUIRED).
+      parameters:
+        - name: X-Crier-Fed-Operator
+          in: header
+          required: false
+          description: The operator credential (CR_PERMISSIONS_ADMIN_TOKEN when configured, otherwise CR_AUTH_TOKEN) for the federation management gate. Required alongside the deployment bearer; omitted or wrong is 403 FED_OPERATOR_REQUIRED.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FederationHandshakeProof'}
+      responses:
+        "200":
+          description: The peer record after the link — state linked, key id rechecked under the mutation lock, linked_at stamped.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederationPeerRecord'}
+        "400": {description: "FED_INVALID_REQUEST — malformed JSON, an unknown or missing field, or a body over 16 KiB."}
+        "401": {description: "No Authorization header, a non-Bearer scheme, or an invalid token (middleware refusal, before the federation gate runs)."}
+        "403":
+          description: "The named federation refusal: FED_OPERATOR_REQUIRED (operator credential absent or wrong), FED_HANDSHAKE_OUT_OF_ORDER (no pending challenge for this responder nonce — start was never run, or the process restarted), FED_HANDSHAKE_REPLAY (the challenge was already consumed), FED_HANDSHAKE_EXPIRED (challenge older than 30 s, or transcript timestamp outside ±30 s), FED_HANDSHAKE_NONCE_MISMATCH (the transcript does not match the pending challenge byte for byte), FED_NO_LINK (no operator-pinned peer with that initiator id), FED_PEER_REVOKED (the peer is revoked), FED_BAD_SIGNATURE (either proof fails, or the pinned key id no longer matches)."
+        "404": {description: "This peer lifecycle surface is not mounted on this server: CR_FED_RECORDS_FILE is unset."}
 
   # ── Agent Registry ──
   /agents:
@@ -7056,3 +7215,140 @@ components:
           type: integer
         omitted_count:
           type: integer
+    FederationPeerRecord:
+      type: object
+      description: One operator-pinned federation instance record (DF-CRIER-363). `public_key`, `key_id` and `url` are pinned at creation and never rewritten; `linked_at`/`revoked_at` are absent until the lifecycle stamps them.
+      required: [id, public_key, key_id, url, direction, state, label, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Instance id supplied by the operator; the {id} a PATCH addresses.
+        public_key:
+          type: string
+          description: Pinned ed25519 public key (hex-encoded). Immutable.
+        key_id:
+          type: string
+          description: Derived key id (hex sha256 prefix of the public key) — the value a handshake transcript carries as initiator_key_id/responder_key_id.
+        url:
+          type: string
+          format: uri
+          description: Canonical http(s) base URL of the peer instance. Immutable.
+        direction:
+          type: string
+          enum: [inbound, outbound, both]
+          description: Recorded direction of the link. Recorded only — no per-peer policy evaluation is implemented by this slice.
+        state:
+          type: string
+          enum: [pending, linked, revoked]
+          description: Lifecycle state. `pending` is a declared peer that has not completed a handshake, `linked` is only reachable through the handshake, `revoked` is terminal for credentials.
+        label:
+          type: string
+          description: Free-form operator label; the one member a PATCH may always rewrite.
+        created_at:
+          type: string
+          format: date-time
+          description: Creation stamp (server clock, UTC).
+        updated_at:
+          type: string
+          format: date-time
+          description: Stamped on creation and re-stamped by every accepted patch.
+        linked_at:
+          type: string
+          format: date-time
+          description: Stamp of the handshake that promoted this peer to linked. Absent until then.
+        revoked_at:
+          type: string
+          format: date-time
+          description: Stamp of the patch that revoked this peer. Absent unless revoked.
+    FederationPeerPatch:
+      type: object
+      description: The ONLY members a PATCH /fed/peers/{id} accepts. The body decoder rejects unknown fields, so public_key/key_id/url cannot be patched even accidentally; an omitted member leaves that field unchanged and an empty object is accepted (it re-stamps updated_at).
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum: [pending, linked, revoked]
+          description: New lifecycle state. `linked` is refused with 400 FED_HANDSHAKE_REQUIRED unless the peer is already linked — only a handshake promotes pending to linked. `revoked` stamps revoked_at and ends the peer's credential.
+        direction:
+          type: string
+          enum: [inbound, outbound, both]
+          description: New recorded direction.
+        label:
+          type: string
+          description: New operator label.
+    FederationHandshakeStart:
+      type: object
+      description: Step-1 request — the initiator's half of a mutual instance handshake. `instance_id` must already be an operator-pinned peer whose public_key and key_id match exactly (no trust on first use).
+      additionalProperties: false
+      required: [instance_id, public_key, key_id, nonce, timestamp]
+      properties:
+        instance_id:
+          type: string
+          description: Initiator instance id; refused FED_HANDSHAKE_SELF when it names this relay and FED_NO_LINK when no pinned record exists.
+        public_key:
+          type: string
+          description: Initiator ed25519 public key, hex-encoded; must equal the pinned value (else FED_BAD_SIGNATURE).
+        key_id:
+          type: string
+          description: Initiator key id; must equal the pinned value (else FED_BAD_SIGNATURE).
+        nonce:
+          type: string
+          description: 32 bytes of hex (64 characters) — a single-use initiator nonce, refused FED_HANDSHAKE_NONCE_INVALID otherwise and FED_HANDSHAKE_REPLAY when already pending.
+          pattern: '^[0-9a-fA-F]{64}$'
+        timestamp:
+          type: integer
+          description: Unix seconds. Limited to ±30 s of server time (else FED_HANDSHAKE_EXPIRED); the same timestamp is signed inside the transcript.
+    FederationHandshakeTranscript:
+      type: object
+      description: The canonical JSON transcript both sides sign — exactly these bytes, never the enclosing wire object. Method and path domain-separate it from delivery auth.
+      required: [method, path, timestamp, initiator_id, initiator_key_id, initiator_nonce, responder_id, responder_key_id, responder_nonce]
+      properties:
+        method:
+          type: string
+          description: Always POST — the finish step the proof is for.
+        path:
+          type: string
+          description: Always /fed/handshake/finish.
+        timestamp:
+          type: integer
+          description: The initiator's Unix-seconds timestamp, echoed from the start request.
+        initiator_id:
+          type: string
+          description: Initiator instance id.
+        initiator_key_id:
+          type: string
+          description: Initiator key id, as pinned.
+        initiator_nonce:
+          type: string
+          description: The initiator's single-use nonce (32 bytes of hex).
+        responder_id:
+          type: string
+          description: This relay's own instance id.
+        responder_key_id:
+          type: string
+          description: This relay's own key id.
+        responder_nonce:
+          type: string
+          description: This relay's newly generated single-use nonce (32 bytes of hex); it names the pending challenge a finish consumes.
+    FederationHandshakeProof:
+      type: object
+      description: The two-half proof object. POST /fed/handshake/start RETURNS it with initiator_signature absent; POST /fed/handshake/finish requires it WITH initiator_signature, and both signatures are verified over the transcript's canonical bytes.
+      additionalProperties: false
+      required: [transcript, responder_signature]
+      properties:
+        transcript:
+          $ref: '#/components/schemas/FederationHandshakeTranscript'
+        responder_signature:
+          type: string
+          description: The responding relay's ed25519 signature over the transcript bytes, hex-encoded. Verified against the server's own instance key at finish.
+        initiator_signature:
+          type: string
+          description: The initiator's ed25519 signature over the same transcript bytes, hex-encoded. Required by finish (absent in the start response); a proof that fails either signature is refused FED_BAD_SIGNATURE.
+    FederationError:
+      type: object
+      description: The federation surface's refusal body — one machine-readable `error` token. The operations above enumerate the tokens each can emit.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: The refusal code, e.g. FED_OPERATOR_REQUIRED, FED_INVALID_REQUEST, FED_NO_LINK, FED_PEER_REVOKED, FED_BAD_SIGNATURE, FED_HANDSHAKE_REQUIRED, FED_HANDSHAKE_EXPIRED, FED_HANDSHAKE_NONCE_INVALID, FED_HANDSHAKE_SELF, FED_HANDSHAKE_REPLAY, FED_HANDSHAKE_BUSY, FED_HANDSHAKE_OUT_OF_ORDER or FED_HANDSHAKE_NONCE_MISMATCH.
