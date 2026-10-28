@@ -20,6 +20,20 @@ An empty/unset value disables this gate. Duplicate pairs are harmless.
 Handler configuration validates the same grammar and a rejected configuration
 leaves its prior policy intact. Configuration is startup-only, not hot-reloaded.
 
+A nonempty allowlist ALSO requires `CR_SERVICE_DELIVERY_AUDIENCE` — the server
+refuses to start without it. The audience is an opaque relay name, not a
+secret: pick one stable value per relay (e.g. `internal` or
+`partner-integrators`) and configure the same value on the server and every
+service client. Each protected delivery must carry it as the `X-Crier-Audience`
+header; a missing, empty or mismatched header is refused `401 service delivery
+audience missing or mismatched` before the allowlist pair is even consulted.
+Signing clients fold the audience into the signed transcript as a fifth line
+(`audience:<value>` appended to the four-line form below), so a signature made
+for one audience does not verify on another: `clients/python/crier_client.py`
+reads `CR_SERVICE_DELIVERY_AUDIENCE` itself, and the crier-mcp bridge signs
+with the value it is given. With an empty/unset allowlist the variable has no
+effect.
+
 Register each sender's Ed25519 public key via `POST /agents` and keep its private
 key with that service. Existing IDs cannot be re-registered with a different
 key. Provision IDs/keys over a trusted channel before enabling consumers:
