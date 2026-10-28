@@ -903,6 +903,11 @@ Because the server enforces per-agent signatures by default
 key. It registers its own identity on startup, so there is no manual
 registration step: start the server and run the bridge.
 
+**Service Delivery Authorization.** When the server uses directed service delivery
+(`CR_SERVICE_DELIVERY_ALLOWLIST`), the bridge must also know the relay audience
+to sign requests correctly. Set `CR_SERVICE_DELIVERY_AUDIENCE` to the same value
+configured on the server.
+
 ```bash
 # Run the MCP bridge against the remote server (all four vars are read at startup)
 export CRIER_HTTP_URL=http://localhost:8767
@@ -917,6 +922,8 @@ export CRIER_AGENT_PRIVATE_KEY_FILE=$HOME/.config/crier/mcp-agent.key
 # alias for the same shared secret (setting only CR_AUTH_TOKEN works — the
 # bridge logs which variable it used, and warns if both are set to different
 # values, in which case CRIER_AUTH_TOKEN wins).
+# Required when the server uses CR_SERVICE_DELIVERY_ALLOWLIST:
+# export CR_SERVICE_DELIVERY_AUDIENCE=<audience-name>
 make build-mcp && ./bin/crier-mcp
 ```
 
