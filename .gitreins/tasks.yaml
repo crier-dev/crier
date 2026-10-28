@@ -3037,3 +3037,31 @@ tasks:
   status: complete
   created_at: '2026-10-27T20:51:32.983129+00:00'
   completed_at: '2026-10-27T21:11:53.418204+00:00'
+- id: DOC-4
+  title: Document CR_SERVICE_DELIVERY_AUDIENCE for operators and integrators
+  criteria:
+  - Add CR_SERVICE_DELIVERY_AUDIENCE to README.md Configuration table with description,
+    relation to CR_SERVICE_DELIVERY_ALLOWLIST, required/optional behavior, example
+    value; add to crier-mcp --help if applicable; run make docs-check; verify variable
+    appears in help output
+  status: complete
+  created_at: '2026-10-28T01:20:06.319885+00:00'
+  completed_at: '2026-10-28T01:31:30.207563+00:00'
+- id: DOC-5
+  title: Add the repository traceability doctrine
+  criteria:
+  - Create docs/traceability-doctrine.md defining marker format (ch:trace row/spec/wave/test/doc/evidence/witness/verdict/commit/memory),
+    evidence/witness rules, row/commit/verdict binding, close-out STATUS/TIER/EVIDENCE
+    contract; add link from docs index; verify file exists, grep finds ch:trace markers,
+    make docs-check passes
+  status: in_progress
+  created_at: '2026-10-28T01:20:06.787979+00:00'
+- id: DOC-6
+  title: Document POST federation peer creation in OpenAPI
+  criteria:
+  - Add POST /fed/peers to docs/openapi.yaml with operationId federationPeerCreate,
+    auth/operator gate, request schema, response schema/statuses, named refusal responses;
+    run make generate; run make docs-check; rerun audit script proving POST /fed/peers
+    no longer missing
+  status: pending
+  created_at: '2026-10-28T01:20:07.400582+00:00'

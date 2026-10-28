@@ -1,0 +1,15 @@
+{
+  "tick_id": "crier-foreman-2026-10-28-01-11-51",
+  "block": "DOC-6",
+  "mode": "wave",
+  "slots": 6,
+  "slots_reason": "nproc 16, loadavg 5.09 -> max(1, min(6, 16-ceil(5.09))) = 6; WAVE_BUDGET=12",
+  "rows": ["DOC-2", "DOC-3", "DOC-4", "DOC-5", "DOC-6"],
+  "worktrees": {
+    "DOC-2": "/home/kara/worktrees/crier-DOC-2",
+    "DOC-3": "/home/kara/worktrees/crier-DOC-3",
+    "DOC-4": "/home/kara/worktrees/crier-DOC-4",
+    "DOC-5": "/home/kara/worktrees/crier-DOC-5",
+    "DOC-6": "/home/kara/worktrees/crier-DOC-6"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "tick_id": "crier-foreman-2026-10-28-02-05-39",
+  "block": "DOC-6",
+  "mode": "wave-recovery-serial",
+  "recovered_wave": "crier-foreman-2026-10-28-01-11-51",
+  "slots": 1,
+  "slots_reason": "nproc 16, tick-start loadavg 33.3 -> max(1, min(6, 16-ceil(33.3))) = 1 slot; WAVE_BUDGET=1 (loaded box => serial, one worker)",
+  "rows": ["DOC-5"],
+  "worktrees": {
+    "DOC-5": "/home/kara/worktrees/crier-DOC-5"
+  },
+  "briefs": {
+    "DOC-5": "/tmp/crier-t-recovery-DOC-5-brief.txt"
+  },
+  "workers": {
+    "DOC-5": {"model": "deepseek-v4-flash", "provider": "deepseek-foreman", "branch": "wt/DOC-5", "pid": 161393}
+  },
+  "recovered": {
+    "DOC-2": "already merged on main as 8b7edc88 (merge 518f6d2a); board closed this tick",
+    "DOC-3": "rebased onto main from a stale base, union-resolved count conflicts, merged as 496e671a",
+    "DOC-4": "worker produced no diff; GitReins tier-2 judge FAIL/INCOMPLETE, verdict 68e23087; row stays pending",
+    "DOC-6": "no diff produced; row stays pending"
+  }
+}
