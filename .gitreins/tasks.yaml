@@ -3054,8 +3054,9 @@ tasks:
     evidence/witness rules, row/commit/verdict binding, close-out STATUS/TIER/EVIDENCE
     contract; add link from docs index; verify file exists, grep finds ch:trace markers,
     make docs-check passes
-  status: in_progress
+  status: complete
   created_at: '2026-10-28T01:20:06.787979+00:00'
+  completed_at: '2026-10-28T02:31:01.011867+00:00'
 - id: DOC-6
   title: Document POST federation peer creation in OpenAPI
   criteria:
