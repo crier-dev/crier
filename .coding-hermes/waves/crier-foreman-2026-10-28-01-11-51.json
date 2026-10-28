@@ -4,12 +4,27 @@
   "mode": "wave",
   "slots": 6,
   "slots_reason": "nproc 16, loadavg 5.09 -> max(1, min(6, 16-ceil(5.09))) = 6; WAVE_BUDGET=12",
-  "rows": ["DOC-2", "DOC-3", "DOC-4", "DOC-5", "DOC-6"],
+  "rows": [
+    "DOC-2",
+    "DOC-3",
+    "DOC-4",
+    "DOC-5",
+    "DOC-6"
+  ],
   "worktrees": {
     "DOC-2": "/home/kara/worktrees/crier-DOC-2",
     "DOC-3": "/home/kara/worktrees/crier-DOC-3",
     "DOC-4": "/home/kara/worktrees/crier-DOC-4",
     "DOC-5": "/home/kara/worktrees/crier-DOC-5",
     "DOC-6": "/home/kara/worktrees/crier-DOC-6"
+  },
+  "finished_at": "2026-10-28T19:10:00Z",
+  "recovery_tick": "crier-foreman-2026-10-28-19-00-15",
+  "recovery_result": {
+    "DOC-2": "merged 8b7edc88 (verified ancestor of origin/main)",
+    "DOC-3": "merged 496e671a (verified ancestor of origin/main)",
+    "DOC-4": "judge FAIL/INCOMPLETE verdict 68e23087 \u2014 zero-diff worker, re-dispatching",
+    "DOC-5": "merged 29fd5b64 (verified ancestor of origin/main)",
+    "DOC-6": "never dispatched \u2014 zero-commit worktree reaped, dispatching fresh"
   }
 }
