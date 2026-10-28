@@ -18,7 +18,7 @@
     "DOC-5": "/home/kara/worktrees/crier-DOC-5",
     "DOC-6": "/home/kara/worktrees/crier-DOC-6"
   },
-  "finished_at": "2026-10-28T19:10:00Z",
+  "finished_at": "2026-10-28T19:35:00-05:00",
   "recovery_tick": "crier-foreman-2026-10-28-19-00-15",
   "recovery_result": {
     "DOC-2": "merged 8b7edc88 (verified ancestor of origin/main)",
@@ -26,5 +26,12 @@
     "DOC-4": "judge FAIL/INCOMPLETE verdict 68e23087 \u2014 zero-diff worker, re-dispatching",
     "DOC-5": "merged 29fd5b64 (verified ancestor of origin/main)",
     "DOC-6": "never dispatched \u2014 zero-commit worktree reaped, dispatching fresh"
+  },
+  "outcome": {
+    "DOC-2": "merged-prior",
+    "DOC-3": "merged-prior",
+    "DOC-4": "merged-recovery",
+    "DOC-5": "merged-prior",
+    "DOC-6": "pending-next-tick"
   }
 }
