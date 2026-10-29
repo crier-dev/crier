@@ -1,0 +1,20 @@
+{
+  "tick_id": "crier-foreman-2026-10-29-03-43-10",
+  "project": "crier",
+  "block": "DOC-6",
+  "mode": "serial-fallback",
+  "wave_budget": 12,
+  "slots": 1,
+  "slots_reason": "nproc 16, loadavg 2.40/6.71/8.19; formula max(1,min(6,16-ceil(2.40)))=6, but selected block has one ready row, so serial fallback",
+  "rows": [
+    {
+      "task_id": "DOC-6",
+      "worktree": "/home/kara/worktrees/crier-DOC-6",
+      "branch": "wt/DOC-6",
+      "base_sha": "46380a97",
+      "brief": "/tmp/crier-2026-10-29-03-43-10-DOC-6-brief.txt",
+      "depends_on": [],
+      "files_expected": ["docs/openapi.yaml", "cmd/server/openapi.yaml"]
+    }
+  ]
+}
