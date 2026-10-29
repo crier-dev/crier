@@ -13,7 +13,7 @@ package mcp
 // the one-line justification per entry is the reason a future reader needs.
 //
 // The relationship is MANY-TO-MANY, not one tool per operation: 19 tools
-// exercise 16 covered spec operations, 47 operations are explicitly excluded,
+// exercise 16 covered spec operations, 48 operations are explicitly excluded,
 // and several tools share an operation (deliver_message and send_message both
 // deliver to the durable inbox; retrieve_inbox and get_messages both retrieve it;
 // get_messages and ack_messages both ack it). This guard therefore checks the
@@ -123,6 +123,7 @@ var excludedOperations = map[string]string{
 	"relaySubscribe":            "GET /relay/subscribe/{topic} — \"Subscribe to a topic or wildcard pattern via WebSocket\": a streaming client surface; the bridge already owns its WebSocket transport and exposes the content lane through the inbox tools.",
 	"relayListTopics":           "GET /relay/topics — \"List active topics\" with subscriber counts; relay operational census, not an agent-messaging verb.",
 	"fedListPeers":              "GET /fed/peers — \"List federation peers (local relay first, then linked relays with their agents)\" (CR-FEAT-006); cross-relay topology for operators, and each link is fetched live from that relay's own GET /agents.",
+	"federationCreatePeer":      "POST /fed/peers — \"Pin a federation peer instance (operator only)\" (DF-CRIER-363): operator-credential-gated peer lifecycle, and the record lives in the server's fsync'd peer store; a bridge identity holds the message token, not the operator credential, so a tool would always be refused 403 FED_OPERATOR_REQUIRED. Same rationale as federationPatchPeer.",
 	"federationPatchPeer":       "PATCH /fed/peers/{id} — \"Update a pinned federation peer's state, direction or label (operator only)\" (DF-CRIER-363): operator-credential-gated peer lifecycle, and the record lives in the server's fsync'd peer store; a bridge identity holds the message token, not the operator credential, so a tool would always be refused 403 FED_OPERATOR_REQUIRED.",
 	"federationHandshakeStart":  "POST /fed/handshake/start — \"Open a mutual instance handshake\" (DF-CRIER-363): instance-identity key proof against an operator-pinned peer, operator-gated, with process-local single-use challenges; it authenticates RELAYS, not agents, so it is not an agent-messaging verb for the bridge.",
 	"federationHandshakeFinish": "POST /fed/handshake/finish — \"Close a mutual instance handshake and link the peer\" (DF-CRIER-363): consumes the pending challenge the server itself minted, so the bridge's RemoteStore (no challenge state) could not execute it; operator-gated instance identity, not an agent-messaging verb.",
