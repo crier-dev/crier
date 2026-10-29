@@ -22,21 +22,34 @@ jobs:
         with:
           go-version: "1.26.9"
       # Pin the real validator source, not a warn-only hook or a skip-on-missing shim.
+      #
+      # QA-CRIER-48: two arms, because a cross-repo checkout is the only step
+      # that runs the action for real (act re-uses the mounted workspace for a
+      # same-repo checkout) and it refuses to start with an empty token — under
+      # act an omitted token died with `Input required and not supplied: token`.
+      # With a runner token (GitHub always has one) the action gets an explicit
+      # credential. Without one (act / clean-machine emulation) the same pinned
+      # PUBLIC commit is fetched anonymously, so the leg needs no credential at
+      # all; either arm asserts the exact pinned SHA before anything builds it.
       - name: Checkout pinned boardctl
+        if: ${{ github.token != '' }}
         uses: actions/checkout@v5
         with:
-          # QA-CRIER-48: a cross-repo checkout is the one shape that runs the
-          # action for real instead of re-using the already-mounted workspace,
-          # and it refuses to run without a token — under act (the clean-machine
-          # CI emulation) an omitted token died with `Input required and not
-          # supplied: token`. Name the credential explicitly; on GitHub both
-          # operands resolve to the same installation token, and on a fork PR
-          # (where secrets are empty) github.token is the read-only fallback.
           token: ${{ secrets.GITHUB_TOKEN || github.token }}
           repository: coding-hermes/boardctl
           ref: d2c0278a8ce0a2226b32a7a7c16ebe7c3c56450a
           path: .ci-boardctl
           persist-credentials: false
+      - name: Checkout pinned boardctl anonymously (no runner token — act)
+        if: ${{ github.token == '' }}
+        run: |
+          set -euo pipefail
+          git init -q .ci-boardctl
+          git -C .ci-boardctl remote add origin https://github.com/coding-hermes/boardctl
+          git -C .ci-boardctl -c credential.helper= fetch -q --depth 1 origin \
+            d2c0278a8ce0a2226b32a7a7c16ebe7c3c56450a
+          git -C .ci-boardctl checkout -q FETCH_HEAD
+          test "$(git -C .ci-boardctl rev-parse HEAD)" = d2c0278a8ce0a2226b32a7a7c16ebe7c3c56450a
       - name: Build required boardctl
         working-directory: .ci-boardctl
         run: go build -o "$RUNNER_TEMP/boardctl" ./cmd/boardctl
