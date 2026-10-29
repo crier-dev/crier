@@ -291,13 +291,23 @@ A2A is an EXTRA: default-off, additive-only, two-half gate.
     router skips before calling out. A missing key is fast and says why; it is
     not a 10s stall (measured 2026-09-23).
 15. `schema_template: "openai-compatible"` hard-codes `{{payload.text}}` — a
-    payload without a `text` key now **fails the delivery loudly** (DF-CRIER-279:
-    the render error names `payload.text`, nothing is POSTed, and a blocking
-    delivery returns the error to the sender instead of a `content:""` reply).
-    Use `generic-custom` / `custom_schema` when your payload shape is anything
-    else, or give the placeholder an explicit `|default:` in a `custom_schema`
-    body.
-16. **A "restart" that never took over the port answers you anyway.** A second
+   payload without a `text` key now **fails the delivery loudly** (DF-CRIER-279:
+   the render error names `payload.text`, nothing is POSTed, and a blocking
+   delivery returns the error to the sender instead of a `content:""` reply).
+   Use `generic-custom` / `custom_schema` when your payload shape is anything
+   else, or give the placeholder an explicit `|default:` in a `custom_schema`
+   body.
+16. The embedded `/chat` page is a public-API client, not a login surface. With
+   `CR_AUTH_TOKEN` set, ordinary browser navigation to `/chat` cannot attach a
+   Bearer header and is refused; the current owner decision is DF-CRIER-333.
+   In a trusted local-dev posture, set `CR_AUTH_TOKEN` unset and
+   `CR_REQUIRE_AGENT_SIG=false`, register agents first, then apply an acting ID
+   in the page. The acting ID is attribution, not cryptographic authentication.
+   A message can be accepted into an inbox without being executed or answered:
+   the UI should read `Addressed · no execution` and show the per-target
+   accepted receipt; task state is recorded at send time and is not live worker
+   progress. Verified in the 2026-10-29 real-browser run against ca27c855.
+17. **A "restart" that never took over the port answers you anyway.** A second
     `./bin/crier -port 8767` on a held port logs `server failed: another
     process already holds this port` to ITS OWN output and exits; the old
     process keeps serving and the old pidfile stays on disk. After any
