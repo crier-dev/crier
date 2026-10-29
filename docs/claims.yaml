@@ -443,6 +443,9 @@ claims:
     # GET /delivery-log/verify, GET /alerts, GET /canaries,
     # POST /agents/{id}/kill-switch — one operation each, OPT-IN at runtime but
     # declared operations in the document all the same), so the pair is 66 / 83.
+    # DOC-6 then documented the peer-creation method the router has served since
+    # DF-CRIER-363 (POST /fed/peers — one operation on the ALREADY-declared
+    # /fed/peers path, so this count is unchanged at 66).
     quote: "66 paths"
     expect: 66
     xfail: null
@@ -486,9 +489,12 @@ claims:
     # federationHandshakeStart, federationHandshakeFinish), each on its own NEW
     # path, so the count was 78; DOC-3 declared the five opt-in detection
     # operations (deliveryLogGet, deliveryLogVerify, alertsGet, canariesGet,
-    # killSwitchPost), so the count is 83.
-    quote: "83 operations"
-    expect: 83
+    # killSwitchPost), so the count is 83. DOC-6 documented the peer-creation
+    # operation the router has served since DF-CRIER-363
+    # (federationCreatePeer — a new METHOD on the already-declared /fed/peers
+    # path), so the count is 84.
+    quote: "84 operations"
+    expect: 84
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count

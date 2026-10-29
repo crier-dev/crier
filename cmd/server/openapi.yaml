@@ -884,6 +884,46 @@ paths:
                                 description: Advertised agent capabilities
                                 items:
                                   type: string
+    post:
+      operationId: federationCreatePeer
+      tags: [federation]
+      summary: Pin a federation peer instance (operator only)
+      description: |-
+        Creates ONE operator-pinned peer record in the lifecycle store. The
+        caller supplies `id`, `public_key` (hex ed25519), `url`, `direction`
+        and an optional `label`; `key_id` is DERIVED (hex sha256 prefix of the
+        public key) and `state` starts at `pending` — a record only reaches
+        `linked` through the handshake (POST /fed/handshake/start then
+        POST /fed/handshake/finish), never by declaring it. `public_key`,
+        `key_id` and `url` are immutable after creation; only a PATCH of
+        `state`, `direction` or `label` can change a record afterwards.
+
+        A duplicate id is refused FED_PEER_EXISTS and a url another record
+        already pins is refused FED_PEER_URL_EXISTS. Requires
+        `Authorization: Bearer *** (401 when missing or invalid) plus the
+        operator credential (403 FED_OPERATOR_REQUIRED).
+      parameters:
+        - name: X-Crier-Fed-Operator
+          in: header
+          required: false
+          description: The operator credential (CR_PERMISSIONS_ADMIN_TOKEN when configured, otherwise CR_AUTH_TOKEN) for the federation management gate. Required alongside the deployment bearer; omitted or wrong is 403 FED_OPERATOR_REQUIRED, and the gate fails closed when the server holds no operator credential at all.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FederationPeerCreate'}
+      responses:
+        "201":
+          description: The stored record as created — key_id derived from the pinned public key, state pending, created_at/updated_at stamped (linked_at/revoked_at are absent until the lifecycle sets them).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FederationPeerRecord'}
+        "400":
+          description: "FED_INVALID_REQUEST (malformed JSON, an unknown property, or a body over 16 KiB), FED_PEER_EXISTS (the id is already pinned), FED_PEER_URL_EXISTS (another record already pins that url), or a store validation message (id empty or padded, public_key not 32 bytes of hex, direction not inbound|outbound|both, url not a canonical http(s) base URL)."
+        "401": {description: "No Authorization header, a non-Bearer scheme, or a token that is neither the deployment bearer nor a recognized management credential (middleware refusal, before the federation gate runs)."}
+        "403": {description: "FED_OPERATOR_REQUIRED — the operator credential is absent, or is not the configured operator token. Also raised as a plain-text JSON refusal when the admin token is presented AS the Authorization bearer on this non-management path."}
+        "404": {description: "This peer lifecycle surface is not mounted on this server: CR_FED_RECORDS_FILE is unset, so the router registered no /fed route beyond the discovery GET /fed/peers."}
 
   # ── Federation instance lifecycle (opt-in, DF-CRIER-363) ──
   #
@@ -7643,6 +7683,29 @@ components:
           type: string
           format: date-time
           description: Stamp of the patch that revoked this peer. Absent unless revoked.
+    FederationPeerCreate:
+      type: object
+      description: The ONLY members a POST /fed/peers accepts. The body decoder rejects unknown fields, so key_id cannot be supplied (it is derived from public_key) and state cannot be declared (a record starts pending and only a handshake links it).
+      additionalProperties: false
+      required: [id, public_key, url, direction]
+      properties:
+        id:
+          type: string
+          description: Instance id to pin; refused FED_PEER_EXISTS when already pinned. Empty, whitespace-padded ids or ids containing / CR LF or tab are refused.
+        public_key:
+          type: string
+          description: The peer instance's ed25519 public key, hex-encoded (32 bytes / 64 hex chars); refused when not valid hex of that length. key_id is derived from it and immutable.
+        url:
+          type: string
+          format: uri
+          description: Canonical http(s) base URL of the peer instance; refused FED_PEER_URL_EXISTS when another record already pins it, and refused when it is not a canonical http(s) base URL.
+        direction:
+          type: string
+          enum: [inbound, outbound, both]
+          description: Recorded direction of the link. Recorded only — no per-peer policy evaluation is implemented by this slice.
+        label:
+          type: string
+          description: Free-form operator label; omitted starts the record with an empty label.
     FederationPeerPatch:
       type: object
       description: The ONLY members a PATCH /fed/peers/{id} accepts. The body decoder rejects unknown fields, so public_key/key_id/url cannot be patched even accidentally; an omitted member leaves that field unchanged and an empty object is accepted (it re-stamps updated_at).
