@@ -14,6 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
           # The shrink gate compares HEAD with its first parent (DF-CRIER-426).
           fetch-depth: 2
       - name: Set up Go
@@ -24,6 +25,14 @@ jobs:
       - name: Checkout pinned boardctl
         uses: actions/checkout@v5
         with:
+          # QA-CRIER-48: a cross-repo checkout is the one shape that runs the
+          # action for real instead of re-using the already-mounted workspace,
+          # and it refuses to run without a token — under act (the clean-machine
+          # CI emulation) an omitted token died with `Input required and not
+          # supplied: token`. Name the credential explicitly; on GitHub both
+          # operands resolve to the same installation token, and on a fork PR
+          # (where secrets are empty) github.token is the read-only fallback.
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
           repository: coding-hermes/boardctl
           ref: d2c0278a8ce0a2226b32a7a7c16ebe7c3c56450a
           path: .ci-boardctl
@@ -49,6 +58,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Set up Go ${{ matrix.go-version }}
         uses: actions/setup-go@v6
@@ -368,6 +379,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -396,6 +409,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -414,6 +429,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -435,6 +452,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Set up Go
         uses: actions/setup-go@v6

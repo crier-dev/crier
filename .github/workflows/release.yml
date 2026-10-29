@@ -65,6 +65,7 @@ jobs:
       - name: Check out the tagged commit
         uses: actions/checkout@v5
         with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
           fetch-depth: 0
 
       - name: Set up Go 1.26.9
