@@ -31,6 +31,11 @@ const requiredLiveIDs = [
 ];
 const fixtures = {
   '/agents': {agents: []}, '/sessions': {sessions: []},
+  // /groups is a route the page reads on every refresh (loadGroups). Without a fixture
+  // here it is recorded as an UNEXPECTED request, which made this audit red on a page
+  // that was merely reading a real route — a stale allowlist, not an accessibility
+  // defect. The empty roster is the honest fixture for "a server that has no groups".
+  '/groups': {groups: []},
   '/principals': {items: []}, '/bindings': {items: []}, '/grants': {items: []},
   '/fed/peers': {peers: []}, '/trust/anchors': {anchors: []},
   '/status': {health: 'ok', agents_online: 0, agents_total: 0, auth_enabled: false,
