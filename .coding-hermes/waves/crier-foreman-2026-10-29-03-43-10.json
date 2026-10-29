@@ -14,7 +14,13 @@
       "base_sha": "46380a97",
       "brief": "/tmp/crier-2026-10-29-03-43-10-DOC-6-brief.txt",
       "depends_on": [],
-      "files_expected": ["docs/openapi.yaml", "cmd/server/openapi.yaml"]
+      "files_expected": [
+        "docs/openapi.yaml",
+        "cmd/server/openapi.yaml"
+      ]
     }
-  ]
+  ],
+  "finished_at": "2026-10-29T07:08:12Z",
+  "recovery_status": "already-complete",
+  "recovery_note": "DOC-6 was completed in the originating tick (commit 3b6e8d87, verdict 93e056be). Worktree and branch already removed. Manifest closed by recovery tick 07-05-53."
 }
