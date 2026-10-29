@@ -2403,21 +2403,21 @@ Stop and remove with `docker compose down`; add `-v` to drop the `pgdata` volume
 
 ## API
 
-The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **66 paths** and **84 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
+The full API is documented in [`docs/openapi.yaml`](docs/openapi.yaml) — an OpenAPI 3.1 spec with **67 paths** and **85 operations** (a path carries one entry per HTTP method, so the two counts differ) across the operation groups below. Every count in this README names its unit; measure them yourself:
 
 ```bash
-grep -c '^  /' docs/openapi.yaml                                    # 66 paths
-grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 84 operations
-grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 55 router paths
+grep -c '^  /' docs/openapi.yaml                                    # 67 paths
+grep -cE '^    (get|post|put|patch|delete):' docs/openapi.yaml      # 85 operations
+grep -oE 'HandleFunc\("[^"]+"' cmd/server/main.go | sort -u | wc -l # 56 router paths
 ```
 
-The router registers **55 distinct paths in `cmd/server/main.go`**: 50 always-on paths (including the close/reopen state route of DF-CRIER-446) and five opt-in detection paths. The session audit/permission reads are registered through `session.RegisterAuditRoutes`; the nine opt-in dagger control/delivery-wait routes are registered from `cmd/server/daggerctl.go`, so neither family is included in that one-file router count. The OpenAPI document counts paths and operations separately, as measured above.
+The router registers **56 distinct paths in `cmd/server/main.go`**: 51 always-on paths (including the close/reopen state route of DF-CRIER-446) and five opt-in detection paths. The session audit/permission reads are registered through `session.RegisterAuditRoutes`; the nine opt-in dagger control/delivery-wait routes are registered from `cmd/server/daggerctl.go`, so neither family is included in that one-file router count. The OpenAPI document counts paths and operations separately, as measured above.
 
 | Group | Endpoints | Description |
 |-------|-----------|-------------|
 | **Health** | `GET /health` | Service health check |
 | **Version** | `GET /version` | Build identity of the running server (version, commit, build time, dirty) — public like `/health` |
-| **Status** | `GET /status` | Effective runtime posture (auth, signature requirement, guard switch, registry backend, build identity) — authenticated, not auth-exempt |
+| **Status** | `GET /status`, `GET /status/completed` | Effective runtime posture (auth, signature requirement, guard switch, registry backend, build identity) — authenticated, not auth-exempt; and the work-queue completion verdict (inbox empty, no pending leases) |
 | **Relay** | `POST /relay/publish`, `GET /relay/subscribe/{topic}`, `GET /relay/topics` | Pub/sub |
 | **Mesh** | `GET /mesh/connect/{agentID}`, `GET /mesh/peers` | P2P connections |
 | **Federation** | `GET /fed/peers` | Relay-to-relay federation peer listing (CR-FEAT-006) |
@@ -2478,6 +2478,35 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 - `build` is byte-for-byte the object `GET /version` serves — the same `internal/buildinfo` source, nested rather than flattened.
 - **No secret or connection value is ever serialized**: not `CR_AUTH_TOKEN`, not `CR_DATABASE_URL` (only the backend name), not `CR_WEBHOOK_SECRET`, not `CR_FED_TOKEN`, and no guard provider credential or base URL.
 - `GET /status` is **not** auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header and answers `401` without it. The exempt-path list in `internal/middleware/auth.go` is unchanged at five paths — `/health` and `/version` stay public because "up?" and "which build?" must be answerable without a token; the enforced-posture answer is not.
+
+### Work-queue completion — `GET /status/completed` (DF-CRIER-335)
+
+`GET /status` reports the queue, but it leaves every caller to decide what "done" means: an empty inbox batch (an empty `messages` array) only says nothing was claimable *for that caller*. `GET /status/completed` states the definition once, on the server, and reports the facts it is derived from, so no two clients can disagree about it:
+
+- The relay counts as **complete** only when both conditions hold: `inbox_empty` (`queue_depth.pending == 0` — nothing unacknowledged and unexpired is queued) AND `no_pending_leases` (`queue_depth.leased == 0` — no message is held under a live lease). `completed` is the conjunction; the two conditions are published beside it so a false verdict explains itself without a second request.
+- An **unmeasured** queue is never complete. When the serving store cannot report a depth (a remote proxy), `queue_depth` is `null`, both conditions and `completed` are `false`, and `reason` says `"queue depth unavailable"` — the same null-not-zero rule `GET /status` applies to its own `queue_depth`.
+- When work remains, `reason` names it: `"inbox not empty"`, `"leases outstanding"`, or both.
+- "Complete" here is about the **relay's work queue**, never an A2A task state: `TASK_STATE_COMPLETED` is reported on the task surfaces and is not inferred from this verdict.
+- The verdict is read **per request** (`Cache-Control: no-store`). The server also samples it on a timer (30s) and logs each **transition** — one line when the queue drains, one when it stops being drained — so an operator reading the log sees completion happen without polling. An unchanged verdict is not re-logged, and an unmeasured queue is never logged as complete.
+- Like `GET /status` it is **not** auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header.
+
+```bash
+curl -s -H "Authorization: Bearer ***" localhost:8767/status/completed | python3 -m json.tool
+```
+
+```json
+{
+  "completed": false,
+  "inbox_empty": false,
+  "no_pending_leases": false,
+  "queue_depth": {
+    "pending": 3,
+    "leased": 2,
+    "oldest_age_s": 12
+  },
+  "reason": "inbox not empty and leases outstanding"
+}
+```
 
 ## Observability (metrics & profiling)
 
@@ -2566,7 +2595,7 @@ All core primitives are implemented and tested:
 - **Message guard** — LLM prompt-injection guard at the delivery choke point (CR-FEAT-010..014): structured verdicts, fail-open with per-policy fail-closed, X-Crier-Guard-* headers, provider failover, opt-in kanban cards
 - **Detection & containment** — an opt-in detection layer (CR-FEAT-030, `CR_DETECT_ENABLED`): an append-only ed25519-signed delivery log that survives restarts and refuses to start on a rewritten history, per-sender behaviour alerts (`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`), a single-call kill-switch (pause webhooks + revoke leases + quarantine + unregister, each reported) and canary tokens. Verified live by `TestDetectionCatchesAndContainsACompromisedAgent`
 - **Namespaces (realms)** — a realm dimension on agents and messages with per-realm policy (auth posture, rate limits, guard settings, retention; CR-FEAT-029): relay topics are realm-scoped, a message's realm comes from its target's row and a crossing claim is refused, and the relay's rate limit is keyed per (realm, agent) so one realm's flood cannot spend another's budget. Undeclared = the one implicit namespace, byte-identical to the server before it. Verified live by `TestCRFEAT029TwoNamespacesDoNotShareFate` / `TestCRFEAT029MessageCannotCrossNamespaces` / `TestCRFEAT029SingleNamespaceIsByteIdentical`
-- **API** — 55 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 50 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session close/reopen state route of DF-CRIER-446 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007 + the 3 trust paths of DF-CRIER-362) plus the 5 opt-in detection routes — documented as 61 paths / 78 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged; DOC-2 added the three opt-in federation lifecycle paths — `PATCH /fed/peers/{id}`, `POST /fed/handshake/start`, `POST /fed/handshake/finish` — which the spec declared nowhere before) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
+- **API** — 56 router paths registered in `cmd/server/main.go` (`HandleFunc`) — 51 always-on (18 API + 3 spec-hosting + the `/chat` web client page of CR-CHAT-009 + the session close/reopen state route of DF-CRIER-446 + the session-API paths of CR-CHAT-019/CR-CHAT-016/CR-CHAT-028/CR-CHAT-017/CR-CHAT-029 + the 2 group paths of CR-CHAT-013 + the 3 task paths of CR-CHAT-030 + the 2 task read routes of DF-CRIER-304 (`GET /sessions/{id}/tasks` lists them at their current state; its single-task sibling takes the task id in the path, so the read path count rises by one) + the dual-output read of CR-CHAT-031 + the 4 permission-management paths of CR-CHAT-007 + the 3 trust paths of DF-CRIER-362 + the completion verdict route of DF-CRIER-335 (`GET /status/completed`)) plus the 5 opt-in detection routes — documented as 67 paths / 85 operations in `docs/openapi.yaml` (DF-CRIER-302 added the id-in-path registration `POST /agents/{id}`, a new METHOD on an already-registered path, so the path count is unchanged; DOC-2 added the three opt-in federation lifecycle paths — `PATCH /fed/peers/{id}`, `POST /fed/handshake/start`, `POST /fed/handshake/finish` — which the spec declared nowhere before) (the 3 audit/permission read paths of CR-CHAT-021 are registered through `session.RegisterAuditRoutes` from `internal/session`, and the 9 further opt-in dagger control routes — the six of CR-CHAT-033 plus the three delivery-wait routes of CR-CHAT-034 — are registered from `cmd/server/daggerctl.go` and named there), wired with middleware and graceful shutdown
 - **CI** — GitHub Actions, matrix build Go 1.26.9
 
 Coverage numbers above are measured fresh per change (`go test -short -count=1 -cover ./internal/<pkg>`); the ≥70% gate lives in `make coverage-check`.

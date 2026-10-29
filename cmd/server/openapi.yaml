@@ -605,6 +605,88 @@ paths:
         "401":
           description: Missing or invalid bearer token — /status is not auth-exempt (CR_AUTH_TOKEN is set and no valid Authorization Bearer header was sent)
 
+  # ── Runtime posture: work-queue completion (DF-CRIER-335) ──
+  # The definition of "complete" the control panel asks about, stated once on
+  # the server instead of left to every client to conjoin from GET /status:
+  #   completed = inbox_empty AND no_pending_leases
+  # An UNMEASURED queue is never complete — queue_depth is null and both
+  # conditions are false. Like /status this path is NOT auth-exempt.
+  /status/completed:
+    get:
+      operationId: statusCompleted
+      tags: [health]
+      summary: Whether the relay's work queue is complete (inbox empty, no pending leases)
+      description: |-
+        The relay's completion verdict, derived on the server from the SAME live
+        queue measurement GET /status reports:
+
+        - `completed` is true only when `inbox_empty` AND `no_pending_leases`
+          both hold, i.e. `queue_depth.pending == 0` and `queue_depth.leased == 0`.
+          Nothing is left to deliver and no message is held under a live lease.
+        - `inbox_empty` is the first condition alone; `no_pending_leases` the
+          second. They are published beside the verdict so a caller can explain a
+          false without a second request.
+        - `queue_depth` is the measurement the verdict was derived from — same
+          shape and units as GET /status. It is null when the serving store cannot
+          report a depth (a remote proxy), and then both conditions and
+          `completed` are false with `reason` naming the absence: an unmeasured
+          queue is never reported as complete.
+        - `reason` names why `completed` is false and is omitted when it is true.
+
+        "Complete" here is about the RELAY'S WORK QUEUE, not an A2A task state —
+        `TASK_STATE_COMPLETED` is reported on the task surfaces and is never
+        inferred from this verdict. The answer is read per request
+        (Cache-Control: no-store); the server also samples it on a timer and logs
+        each transition, so a drained queue is visible in the log without polling.
+
+        Not auth-exempt: requires `Authorization: Bearer *** when CR_AUTH_TOKEN is
+        set, exactly like GET /status.
+      responses:
+        "200":
+          description: The live completion verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [completed, inbox_empty, no_pending_leases, queue_depth]
+                properties:
+                  completed:
+                    type: boolean
+                    description: True only when inbox_empty AND no_pending_leases; never true for an unmeasured queue
+                    example: true
+                  inbox_empty:
+                    type: boolean
+                    description: queue_depth.pending == 0 — no unacknowledged, unexpired message is queued
+                    example: true
+                  no_pending_leases:
+                    type: boolean
+                    description: queue_depth.leased == 0 — no message is held under a live lease
+                    example: true
+                  queue_depth:
+                    type: object
+                    nullable: true
+                    description: The measurement the verdict was derived from; null when the serving store cannot report a depth
+                    required: [pending, leased, oldest_age_s]
+                    properties:
+                      pending:
+                        type: integer
+                        description: Un-acknowledged, un-expired messages across all inboxes (leased messages included)
+                        example: 0
+                      leased:
+                        type: integer
+                        description: How many of pending are currently held under a live lease
+                        example: 0
+                      oldest_age_s:
+                        type: integer
+                        description: Age in whole seconds of the oldest pending message; 0 when nothing is queued
+                        example: 0
+                  reason:
+                    type: string
+                    enum: [queue depth unavailable, inbox not empty, leases outstanding, inbox not empty and leases outstanding]
+                    description: Why completed is false; absent (omitted) when completed is true
+        "401":
+          description: Missing or invalid bearer token — /status/completed is not auth-exempt (CR_AUTH_TOKEN is set and no valid Authorization Bearer header was sent)
+
   # ── Relay: Pub/Sub ──
   /relay/publish:
     post:

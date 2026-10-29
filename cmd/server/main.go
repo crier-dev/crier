@@ -1012,6 +1012,18 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
 		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture)).Methods("GET")
 
+	// DF-CRIER-335: GET /status/completed states the relay's completion
+	// definition once — completed = (pending == 0) AND (leased == 0) — instead
+	// of leaving every client to conjoin the two numbers GET /status reports.
+	// It reads the SAME depth reader /status samples (a measurement per
+	// request, never a cache), and it inherits the middleware chain unchanged:
+	// the auth-exempt list is untouched, so with CR_AUTH_TOKEN set it requires
+	// the Bearer header exactly like /status. The background observer below
+	// logs the transitions through the same reader, so the log line and the
+	// endpoint can never disagree about the state they are describing.
+	statusCompletionReader := newQueueDepthReader(regStore)
+	r.HandleFunc("/status/completed", newStatusCompletedHandler(statusCompletionReader)).Methods("GET")
+
 	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
 	// OPT-IN extra, and the only A2A surface any row of this series has
 	// registered so far. It exists ONLY while CR_A2A_ENABLED is true, so with
@@ -1181,6 +1193,18 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		}
 	}()
 
+	// DF-CRIER-335: the completion observer. It samples the SAME reader
+	// GET /status/completed serves and logs each TRANSITION — entering
+	// "complete" (nothing pending, no lease outstanding) and leaving it — so an
+	// operator reading the log sees the queue drain without polling the
+	// endpoint. An unchanged verdict logs nothing; an unmeasured queue (a store
+	// that cannot report a depth) never counts as complete. The context is
+	// cancelled on the graceful-shutdown path beside the purge loop, so the
+	// observer never outlives the server it is describing.
+	completionCtx, completionCancel := context.WithCancel(context.Background())
+	defer completionCancel()
+	go newCompletionWatcher(statusCompletionReader, slog.Default()).run(completionCtx)
+
 	// Graceful shutdown. The signal handler was registered at the TOP of run
 	// (QA-CRIER-17) so it is installed for every path that can return early,
 	// not just the ones that get this far; the wait goroutine starts here,
@@ -1199,6 +1223,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		defer cancel()
 
 		purgeCancel()
+		completionCancel()
 		meshSvc.Stop()
 		if fedHold != nil {
 			// Stop the federation retry worker before the store closes: it

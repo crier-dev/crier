@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -575,6 +576,216 @@ func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueD
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// ---------- GET /status/completed (DF-CRIER-335) ----------
+//
+// The control panel's "completion" state was ambiguous: GET /status reports the
+// live queue measurement, but a client reading an empty inbox batch (an empty
+// `messages` array) cannot tell "the relay has nothing left to deliver" from
+// "nothing is queued for ME", and every operator wanting the wider answer had to
+// conjoin `pending` and `leased` by hand, per read. This endpoint states the
+// definition ONCE, on the server, and reports the facts it is derived from, so
+// no caller re-derives it differently:
+//
+//	completed          = inbox_empty AND no_pending_leases
+//	inbox_empty        = (pending == 0)   // nothing unacknowledged, unexpired
+//	no_pending_leases  = (leased == 0)    // no message held under a live lease
+//
+// "Complete" here is a statement about the RELAY'S WORK QUEUE — nothing left to
+// deliver — not an A2A task state. `TaskStateCompleted` is a different
+// vocabulary with different evidence, and it is reported on the task surfaces;
+// this word is never a proxy for it.
+//
+// An UNMEASURED queue is never complete. When the serving store cannot report a
+// depth (a remote proxy, or a failed read) both conditions are false,
+// `queue_depth` is null and `reason` names the absence — the same reading
+// GET /status gives by serializing `queue_depth` as null rather than 0. A store
+// that cannot answer must not be able to report "done".
+//
+// Auth: like GET /status, this path is NOT on the auth-exempt list, so with
+// CR_AUTH_TOKEN set it requires the Bearer header. It reports the shape of the
+// work queue, which is operational data, not the public health question.
+
+// Completion reasons as they appear in the wire body. They are stable strings a
+// caller may branch on, so a rename is a wire change.
+const (
+	// completionReasonUnmeasured: no depth could be read at all. Never combined
+	// with completed=true — an unmeasured queue is not an empty one.
+	completionReasonUnmeasured = "queue depth unavailable"
+	// completionReasonInboxPending: at least one message is unacknowledged and
+	// unexpired, so there is work left to deliver.
+	completionReasonInboxPending = "inbox not empty"
+	// completionReasonLeasesOutstanding: at least one message is held under a
+	// live lease. A leased message is still queued (Pending counts it), so this
+	// reason stands alone only if a backend ever reports leases without queued
+	// messages — reported honestly rather than folded away.
+	completionReasonLeasesOutstanding = "leases outstanding"
+	// completionReasonPendingAndLeased: both conditions fail.
+	completionReasonPendingAndLeased = "inbox not empty and leases outstanding"
+)
+
+// statusCompletion is the wire contract of GET /status/completed. The two
+// condition booleans are published BESIDE the single `completed` verdict so a
+// caller can explain a false without a second request, and `queue_depth` is the
+// same object (same shape, same units) GET /status reports, so the two surfaces
+// cannot disagree about the numbers they are both derived from.
+type statusCompletion struct {
+	// Completed is true only when both conditions hold. It is never true for an
+	// unmeasured queue.
+	Completed bool `json:"completed"`
+	// InboxEmpty is the first condition: pending == 0.
+	InboxEmpty bool `json:"inbox_empty"`
+	// NoPendingLeases is the second condition: leased == 0.
+	NoPendingLeases bool `json:"no_pending_leases"`
+	// QueueDepth is the live measurement the verdict was derived from — null
+	// when the serving store cannot report, exactly as in GET /status. Null is
+	// what makes InboxEmpty/NoPendingLeases/Completed false together.
+	QueueDepth *statusQueueDepth `json:"queue_depth"`
+	// Reason names why Completed is false; empty (omitted) when it is true.
+	Reason string `json:"reason,omitempty"`
+}
+
+// deriveCompletion states the definition above as code. It takes the ALREADY
+// RENDERED measurement (statusQueueDepthValue's output) rather than the raw
+// registry reading, so both endpoints render the same numbers one way and a nil
+// measurement has exactly one meaning: unmeasured.
+func deriveCompletion(q *statusQueueDepth) statusCompletion {
+	c := statusCompletion{QueueDepth: q}
+	if q == nil {
+		c.Reason = completionReasonUnmeasured
+		return c
+	}
+	c.InboxEmpty = q.Pending == 0
+	c.NoPendingLeases = q.Leased == 0
+	c.Completed = c.InboxEmpty && c.NoPendingLeases
+	switch {
+	case !c.InboxEmpty && !c.NoPendingLeases:
+		c.Reason = completionReasonPendingAndLeased
+	case !c.InboxEmpty:
+		c.Reason = completionReasonInboxPending
+	case !c.NoPendingLeases:
+		c.Reason = completionReasonLeasesOutstanding
+	}
+	return c
+}
+
+// newStatusCompletedHandler returns the GET /status/completed handler. read is
+// consulted PER REQUEST from the same reader GET /status samples, so a caller
+// cannot read a cached verdict, and an unwired reader (nil) reports the
+// documented unmeasured answer instead of a fabricated completion.
+func newStatusCompletedHandler(read queueDepthReader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		depth, _ := statusQueueDepthValue(read)
+		resp := deriveCompletion(depth)
+		// A live verdict: the answer changes as the queue drains.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// completionPollInterval is how often the background observer samples the
+// completion state. It is a constant, not a knob: the loop logs TRANSITIONS, so
+// its whole cost is one store read per interval, and an unset-by-everyone
+// configuration key would be worse than a documented number.
+const completionPollInterval = 30 * time.Second
+
+// completionWatcher samples the completion state and logs each TRANSITION —
+// entering "complete" and leaving it. It is the loop, not a second source of
+// truth: it reads through the same queueDepthReader GET /status/completed
+// serves, and it keeps nothing but the previous verdict, so it cannot disagree
+// with an HTTP read taken at the same instant.
+//
+// The first sample logs only when it is already complete (an operator wants to
+// know "nothing is queued" as soon as the process can say it); repeating an
+// unchanged verdict logs nothing, so a drained relay is one line, not one line
+// every interval.
+type completionWatcher struct {
+	read     queueDepthReader
+	log      *slog.Logger
+	interval time.Duration
+	last     *bool
+}
+
+// newCompletionWatcher returns an unwired-until-run watcher. A nil reader is
+// allowed: the loop then observes "unmeasured" every interval, which is never a
+// completion transition, so a server without a depth-capable store stays silent
+// rather than logging a state it could not measure.
+func newCompletionWatcher(read queueDepthReader, log *slog.Logger) *completionWatcher {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &completionWatcher{read: read, log: log, interval: completionPollInterval}
+}
+
+// sample takes one observation and logs it when the verdict CHANGED (or when the
+// first observation is already complete). The returned token names what was
+// logged — "complete", "incomplete" or "" for none — so tests assert on the
+// transition logic instead of parsing log text.
+func (w *completionWatcher) sample() (statusCompletion, string) {
+	depth, _ := statusQueueDepthValue(w.read)
+	c := deriveCompletion(depth)
+	event := ""
+	switch {
+	case w.last == nil:
+		// First observation: only a complete queue is worth a line; an
+		// incomplete one is the normal state and would be noise.
+		if c.Completed {
+			event = "complete"
+		}
+	case !*w.last && c.Completed:
+		event = "complete"
+	case *w.last && !c.Completed:
+		event = "incomplete"
+	}
+	verdict := c.Completed
+	w.last = &verdict
+	switch event {
+	case "complete":
+		w.log.Info("work queue complete — inbox empty and no pending leases",
+			"pending", pendingOf(c), "leased", leasedOf(c))
+	case "incomplete":
+		w.log.Info("work queue no longer complete",
+			"pending", pendingOf(c), "leased", leasedOf(c), "reason", c.Reason)
+	}
+	return c, event
+}
+
+// pendingOf / leasedOf read the counts off the verdict's own measurement, so a
+// log line cannot quote a number the served body does not carry.
+func pendingOf(c statusCompletion) int {
+	if c.QueueDepth == nil {
+		return 0
+	}
+	return c.QueueDepth.Pending
+}
+
+func leasedOf(c statusCompletion) int {
+	if c.QueueDepth == nil {
+		return 0
+	}
+	return c.QueueDepth.Leased
+}
+
+// run samples every interval until ctx is cancelled — the graceful-shutdown
+// path cancels it beside the expired-message purge loop, so the watcher never
+// outlives the server it observes.
+func (w *completionWatcher) run(ctx context.Context) {
+	interval := w.interval
+	if interval <= 0 {
+		interval = completionPollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.sample()
+		}
 	}
 }
 

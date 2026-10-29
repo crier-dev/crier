@@ -201,6 +201,27 @@ claims:
     quote: "GET /status"
     expect: "/status"
     xfail: null
+  # DF-CRIER-335: the control panel's completion state is not a caller-side
+  # derivation any more. The endpoints below anchor the SERVER-SIDE definition
+  # (the README sentences that state it, quoted exactly) and probe the route
+  # live, so deleting the definition — or the endpoint it describes — fails the
+  # gate. The two anchors are the two halves of the definition:
+  #   ROUTE-README-STATUS-COMPLETED           → completed = inbox_empty AND no_pending_leases
+  #   ROUTE-README-STATUS-COMPLETED-UNKNOWN   → an unmeasured queue is never complete
+  # The executable proof of the conjunction itself is the unit suite
+  # (cmd/server/status_completed_test.go), not a docs probe.
+  - id: ROUTE-README-STATUS-COMPLETED
+    kind: route
+    doc: README.md
+    quote: "The relay counts as **complete** only when both conditions hold"
+    expect: "/status/completed"
+    xfail: null
+  - id: ROUTE-README-STATUS-COMPLETED-UNKNOWN
+    kind: route
+    doc: README.md
+    quote: "An **unmeasured** queue is never complete"
+    expect: "/status/completed"
+    xfail: null
   - id: ROUTE-README-REGISTER
     kind: route
     doc: README.md
@@ -446,8 +467,10 @@ claims:
     # DOC-6 then documented the peer-creation method the router has served since
     # DF-CRIER-363 (POST /fed/peers — one operation on the ALREADY-declared
     # /fed/peers path, so this count is unchanged at 66).
-    quote: "66 paths"
-    expect: 66
+    # DF-CRIER-335 declared GET /status/completed (the relay's work-queue
+    # completion verdict), one new path, so the count is 67.
+    quote: "67 paths"
+    expect: 67
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -493,8 +516,10 @@ claims:
     # operation the router has served since DF-CRIER-363
     # (federationCreatePeer — a new METHOD on the already-declared /fed/peers
     # path), so the count is 84.
-    quote: "84 operations"
-    expect: 84
+    # DF-CRIER-335 declared statusCompleted (GET /status/completed), one new
+    # operation, so the count is 85.
+    quote: "85 operations"
+    expect: 85
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -559,8 +584,10 @@ claims:
     # registered-but-undeclared paths are the 5 opt-in detection routes and the
     # 4 non-API routes /chat + /openapi.json + /openapi.yaml + /docs). This
     # number is a measurement of main.go, which the document edit does not move.
-    quote: "55 router paths"
-    expect: 55
+    # DF-CRIER-335 registered GET /status/completed, one more path in main.go,
+    # so the count is 56.
+    quote: "56 router paths"
+    expect: 56
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count
