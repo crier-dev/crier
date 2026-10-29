@@ -262,6 +262,26 @@ jobs:
           make gofmt-check
           make gofmt-selftest
 
+      # QA-CRIER-47: the arm above reads Go source; this one reads the artifact
+      # that is actually SERVED. cmd/server/chat.html shipped with two unresolved
+      # merge-conflict blocks from the DF-CRIER-449 groups merge, so the /chat page
+      # was a JavaScript syntax error — and every gate that ran was green over it
+      # (the truth harnesses eval named function REGIONS in isolation, the browser
+      # harnesses SKIP with exit 77 when Playwright is absent, the Go suite only
+      # go:embed's the file). This extracts EVERY inline <script> block of the page
+      # and runs `node --check` on each, and rejects a page-wide conflict marker
+      # (including one in the HTML body, which no per-block parse can see). A
+      # rejection names the failing block's page line offset, a page with zero
+      # inline blocks exits 2 rather than reporting a vacuous PASS, and node ships
+      # preinstalled on this runner. The selftest then proves the gate still
+      # rejects a marker / plain syntax error / body marker and still accepts the
+      # shipped page — with no Playwright dependency, so it exits 0 here instead of
+      # taking the exit 77 skip the browser harnesses take.
+      - name: Chat page whole-page JavaScript parse (node --check)
+        run: |
+          make chat-js-check
+          make chat-js-selftest
+
       # CR-GAP-069: a runnable demo (or an ad-hoc dogfood script) that backgrounds a
       # DF-CRIER-335: the control-panel loop's definition of done requires the
       # 390/768/1280 responsive check to be a make target AND a CI step over
