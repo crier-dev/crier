@@ -157,6 +157,40 @@ done
 add_asset "install.sh"
 [ -z "$missing" ] || fail "the asset set is missing:${missing} — rebuild it with 'make release-artifacts VERSION=${VERSION}' (every release target must ship, plus install.sh)"
 add_asset "SHA256SUMS"
+
+# ── The set must be the manifest, PLUS the manifest itself ──────────────────
+# SHA256SUMS is the SET's own manifest, not a member of the set it covers:
+# scripts/release-artifacts.sh writes it from the output directory and skips the
+# file itself, because a manifest that hashed itself could never be verified
+# (circular). So SHA256SUMS is the one asset this script publishes that the
+# manifest cannot name — it rides IN the set, it is not covered BY it.
+#
+# Comparing the two sets without that exemption rejects a perfectly CORRECT set.
+# Measured: .github/workflows/release.yml run 39539975561 (tag v0.2.0) exited 1
+# on "Release v0.2.0 carries asset(s) SHA256SUMS does not know:SHA256SUMS" with
+# all 8 assets attached and a fresh download verifying `sha256sum -c` cleanly —
+# a red tag-CI on the one commit that must be green (RELEASE-010).
+#
+# This arm and the one in .github/workflows/release.yml are the same rule;
+# `make release-upload-selftest` drives BOTH against the same fixtures, so they
+# cannot drift apart.
+MANIFEST="$RELEASE_OUTDIR/SHA256SUMS"
+manifest_names="$(awk '{n=split($2, a, "/"); print a[n]}' "$MANIFEST" | LC_ALL=C sort -u)"
+[ -n "$manifest_names" ] || fail "${MANIFEST} names no assets — a manifest that covers nothing verifies nothing, so the asset set cannot be checked against it"
+covered=""
+for asset in $ASSETS; do
+  name="$(basename "$asset")"
+  # THE EXEMPTION: the manifest rides in the set, it is not covered by it.
+  [ "$name" = "SHA256SUMS" ] && continue
+  covered="${covered}${covered:+$'\n'}${name}"
+done
+covered="$(printf '%s\n' "$covered" | LC_ALL=C sort -u)"
+unknown="$(comm -13 <(printf '%s\n' "$manifest_names") <(printf '%s\n' "$covered") | sed '/^$/d')"
+[ -z "$unknown" ] || fail "the asset set would publish asset(s) SHA256SUMS does not know:$(printf ' %s' $unknown) — SHA256SUMS is the set's own manifest and cannot name itself, so every OTHER asset must be covered by it; rebuild the set with 'make release-artifacts VERSION=${VERSION}'"
+uncarried="$(comm -23 <(printf '%s\n' "$manifest_names") <(printf '%s\n' "$covered") | sed '/^$/d')"
+[ -z "$uncarried" ] || fail "SHA256SUMS names asset(s) this upload does not carry:$(printf ' %s' $uncarried) — the published manifest would point a downloader at files that are not attached"
+note "set matches SHA256SUMS: $(printf '%s\n' "$manifest_names" | wc -l) covered asset(s) + SHA256SUMS itself"
+
 for asset in $ASSETS; do
   note "$(printf '%-34s' "$(basename "$asset")") $(wc -c < "$asset" | awk '{printf "%.1f MB", $1/1048576}')"
 done

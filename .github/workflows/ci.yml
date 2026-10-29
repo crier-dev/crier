@@ -147,6 +147,19 @@ jobs:
       - name: Release front door (asset set + clean-box install)
         run: make install-path-selftest
 
+      # RELEASE-010: the tag publisher's set check. release.yml uploads
+      # SHA256SUMS with the asset set and then compared the two sets for
+      # EQUALITY — which a manifest can never satisfy about itself — so run
+      # 39539975561 (tag v0.2.0) red-ed on a CORRECT release and every future
+      # cut would too. This step drives both implementations of the corrected
+      # rule (scripts/release-upload.sh and the verification block extracted
+      # from release.yml and executed with `bash -e`) against the same fixtures:
+      # a correct set passes, an unknown asset is refused by name, a missing
+      # manifest asset is refused by name, and a NEUTER proof shows the
+      # exemption is load-bearing. No network, no keys, nothing published.
+      - name: Release asset-set check (correct set accepted, unknown asset refused)
+        run: make release-upload-selftest
+
       # INT-CI-001: ONE transient ssh/scp reset on the deploy leg used to kill the
       # whole bunker-e2e battery with no retry and no attribution — run 35302932314
       # lost the `blocking` cell, and every probe in it, before a single request was

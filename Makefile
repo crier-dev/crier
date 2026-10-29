@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -78,6 +78,7 @@ help:
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
 	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
+	@echo "  release-upload-selftest  RELEASE-010: prove the tag publisher's set check ACCEPTS a correct asset set (every manifest asset + SHA256SUMS, which the manifest cannot name) and still REFUSES an unknown asset — drives release-upload.sh AND the workflow's own verification block, with a NEUTER proof"
 	@echo "  chat-ui-browser-selftest  DF-CRIER-335: the real-browser chat panel suite (responsive 390/768/1280) plus its rejection-path controls via scripts/chat-ui-browser-selftest.cjs — rc 0 pass, 1 regression, 77 named skip when playwright/Chromium/the built server are absent"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -835,6 +836,22 @@ release-upload:
 # No network, no docker, no keys; ports come from the shared selector.
 install-path-selftest:
 	bash scripts/install-path-selftest.sh
+
+# release-upload-selftest — RELEASE-010: the tag publisher's proof. The workflow
+# uploads SHA256SUMS with the asset set and then compared the two sets for
+# EQUALITY, so a CORRECT release red-ed ("carries asset(s) SHA256SUMS does not
+# know:SHA256SUMS", run 39539975561 / tag v0.2.0) and every future cut would too.
+# SHA256SUMS is the manifest, not one of the files it covers, so the comparison
+# must demand "every manifest asset is attached, SHA256SUMS itself is exempt, and
+# anything else the manifest does not name is still fatal". This drives BOTH
+# implementations of that rule — scripts/release-upload.sh and the verification
+# block extracted from .github/workflows/release.yml (executed with bash -e, the
+# way Actions runs it) — against the same fixtures: a correct set passes, an
+# unknown asset is refused by name, a missing manifest asset is refused by name,
+# and a NEUTER proof (the exemption removed) reproduces the v0.2.0 red, so the
+# green cannot be vacuous. No network, no keys, nothing published.
+release-upload-selftest:
+	bash scripts/release-upload-selftest.sh
 
 # DF-CRIER-335: the loop's definition of done requires the responsive check at
 # 390/768/1280 to be a make target and a CI step over
