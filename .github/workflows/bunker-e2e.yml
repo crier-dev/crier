@@ -24,6 +24,8 @@ jobs:
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
       - name: Build image
         run: docker build -t ghcr.io/crier-dev/crier:${{ github.sha }} -t ghcr.io/crier-dev/crier:latest .
       - name: Login to GHCR
@@ -50,6 +52,8 @@ jobs:
       SINK_URL: ${{ secrets.SINK_URL }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
       - name: Ensure bunker agent exists + heartbeat
         run: |
           "$HOME/go/bin/bunker" info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
@@ -83,6 +87,8 @@ jobs:
       OPENCODE_HOST_PORT: "29102"
     steps:
       - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
       - name: Sanity — docker compose plugin present (DF-CRIER-187)
         run: |
           . scripts/lib/require-docker-compose.sh && require_docker_compose
