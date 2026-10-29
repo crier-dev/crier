@@ -37,7 +37,9 @@
 #   --clobber: an existing asset never gets silently overwritten.
 # - The run ends by diffing the Release's attached assets against
 #   dist/SHA256SUMS — `assets: []` (the exact defect CR-FEAT-028 set out to
-#   close) or a partial upload is a RED run, never a silent one.
+#   close) or a partial upload is a RED run, never a silent one. SHA256SUMS is
+#   the manifest, not one of the files it covers, so it is exempt from the
+#   unknown-asset arm while still being REQUIRED on the Release (RELEASE-010).
 #
 # Permissions are least-privilege: `contents: write` is all publishing needs
 # (that scope covers Release objects and their assets); nothing else is
@@ -115,25 +117,41 @@ jobs:
         run: bash scripts/release-upload.sh
 
       # The acceptance for DF-CRIER-291 is assets ON the Release object, so the
-      # last word is GitHub's: every asset named by SHA256SUMS must be attached,
-      # and nothing else may be. A release with the object and no assets is the
-      # exact defect this workflow closes — it stays a loud failure here.
-      - name: Verify the Release carries exactly the manifest assets
+      # last word is GitHub's: every asset named by SHA256SUMS must be attached.
+      #
+      # SHA256SUMS ITSELF is exempt from the unknown-asset arm — it is the
+      # MANIFEST, not a file the manifest covers. `make release-artifacts` writes
+      # it from the output directory and skips the file itself (a manifest that
+      # hashed itself could never be verified), so it can never name itself; yet
+      # scripts/release-upload.sh uploads it with the set, because a release
+      # without a manifest cannot be verified by scripts/install.sh.
+      #
+      # Comparing the two sets WITHOUT that exemption rejected a CORRECT asset
+      # set: run 39539975561 (tag v0.2.0) exited 1 on
+      # "::error::Release v0.2.0 carries asset(s) SHA256SUMS does not know:SHA256SUMS"
+      # with all 8 assets attached and a fresh download verifying `sha256sum -c`
+      # cleanly — every future tag cut would red on this step (RELEASE-010). The
+      # same rule lives in scripts/release-upload.sh; `make
+      # release-upload-selftest` drives both arms against the same fixtures.
+      - name: Verify the Release carries every manifest asset
         env:
           GH_TOKEN: ${{ github.token }}
           CRIER_REPO: ${{ github.repository }}
         run: |
           manifest="dist/SHA256SUMS"
           [ -f "${manifest}" ] || { echo "::error::${manifest} is missing — the asset set was never built"; exit 1; }
-          manifest_names="$(awk '{n=split($2, a, "/"); print a[n]}' "${manifest}" | LC_ALL=C sort)"
+          manifest_names="$(awk '{n=split($2, a, "/"); print a[n]}' "${manifest}" | LC_ALL=C sort -u)"
           [ -n "${manifest_names}" ] || { echo "::error::${manifest} names no assets"; exit 1; }
-          attached="$(gh release view "${VERSION}" --repo "${CRIER_REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort)" || exit 1
-          if [ -z "${attached}" ]; then
+          attached_all="$(gh release view "${VERSION}" --repo "${CRIER_REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort -u)" || exit 1
+          if [ -z "${attached_all}" ]; then
             echo "::error::Release ${VERSION} carries NO assets (assets: []) — the exact defect this workflow exists to close"
             exit 1
           fi
+          # SHA256SUMS is the manifest itself: carried by the Release, never
+          # listed inside itself. Drop it before the unknown-asset arm.
+          attached="$(printf '%s\n' "${attached_all}" | grep -vx 'SHA256SUMS' || true)"
           missing="$(comm -23 <(printf '%s\n' "${manifest_names}") <(printf '%s\n' "${attached}"))"
-          unexpected="$(comm -13 <(printf '%s\n' "${manifest_names}") <(printf '%s\n' "${attached}"))"
+          unexpected="$(comm -13 <(printf '%s\n' "${manifest_names}") <(printf '%s\n' "${attached}") | sed '/^$/d')"
           if [ -n "${missing}" ]; then
             echo "::error::Release ${VERSION} is missing manifest asset(s):$(echo "${missing}" | tr '\n' ' ')"
             exit 1
@@ -142,5 +160,9 @@ jobs:
             echo "::error::Release ${VERSION} carries asset(s) SHA256SUMS does not know:$(echo "${unexpected}" | tr '\n' ' ')"
             exit 1
           fi
-          echo "==> Release ${VERSION} carries every manifest asset:"
-          printf '%s\n' "${attached}" | sed 's/^/      /'
+          if ! printf '%s\n' "${attached_all}" | grep -qx 'SHA256SUMS'; then
+            echo "::error::Release ${VERSION} carries no SHA256SUMS — without the manifest no download can be verified (scripts/install.sh fails closed against it)"
+            exit 1
+          fi
+          echo "==> Release ${VERSION} carries every manifest asset ($(printf '%s\n' "${manifest_names}" | wc -l) covered) plus the SHA256SUMS manifest itself:"
+          printf '%s\n' "${attached_all}" | sed 's/^/      /'

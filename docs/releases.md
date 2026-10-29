@@ -103,6 +103,15 @@ only when you know why they differ), and then either CREATES the Release object
 link against the previous tag — or uploads onto the one that already exists. It
 never pushes or moves a git tag: §3 is still a hand command.
 
+`SHA256SUMS` is uploaded **with** the set but is never listed **inside** it (a
+manifest that hashed itself could never be verified), so the set/manifest
+comparison every publish path runs allows exactly one asset the manifest does not
+name — the manifest itself — while still refusing any *other* unknown asset and
+any manifest asset that is not attached. `make release-upload-selftest` proves
+that rule on both implementations (this script and the `release.yml` verification
+step), with a neuter proof that removing the exemption reproduces the v0.2.0 red
+(`RELEASE-010`).
+
 Two things it will not decide for you:
 
 - **`--prerelease` (`PRERELEASE=1`)**: a prerelease is EXCLUDED from
@@ -143,6 +152,13 @@ make install-path-selftest
 It needs no network, no docker and no keys; the publish command itself is driven
 against a `gh` PATH shim there, so the real upload is the one step this
 repo cannot test without publishing something.
+
+The publish-time set check (a correct set carrying `SHA256SUMS` is accepted, an
+unknown asset is still refused, and the exemption is proven load-bearing) is:
+
+```bash
+make release-upload-selftest
+```
 
 ## Gate requirements
 

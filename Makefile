@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -63,8 +63,6 @@ help:
 	@echo "  make-docker-selftest  Prove that checker still rejects a broken Makefile/malformed Dockerfile and accepts a clean set (DF-CRIER-209)"
 	@echo "  gofmt-check       Check every tracked .go file with gofmt (go vet does not read formatting) — a drifting file fails (DF-CRIER-189)"
 	@echo "  gofmt-selftest    Prove that checker still rejects a drifting .go file and accepts a clean one, incl. a neuter proof (DF-CRIER-189)"
-	@echo "  chat-js-check     Parse EVERY inline <script> block of cmd/server/chat.html with node --check and reject a merge-conflict marker — the served page cannot ship as a JS syntax error (QA-CRIER-47)"
-	@echo "  chat-js-selftest  Prove that gate still rejects a conflict marker / plain syntax error / body marker, accepts the shipped page and its marker-free control, and refuses a zero-block run — no Playwright (QA-CRIER-47)"
 	@echo "  demo-cleanup-check  Fail when a tracked shell script spawns a crier server without an EXIT-trap cleanup + port-ownership assertion (CR-GAP-069)"
 	@echo "  demo-cleanup-selftest  Prove that checker still rejects a trap-less / unowned server spawn and accepts the real tree, incl. a neuter proof (CR-GAP-069)"
 	@echo "  orphan-sweep-check  Prove the tick-start orphan sweep still classifies dogfood-* / /tmp-compose containers and reports the low-scratch :8767 leak class plus every in-range port holder with pid + age (default range 8000-29000), fails closed on a missing/failing tool, and never invokes a mutating verb — with stub docker/ss, so it needs neither (DF-CRIER-281)"
@@ -80,6 +78,7 @@ help:
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
 	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
+	@echo "  release-upload-selftest  RELEASE-010: prove the tag publisher's set check ACCEPTS a correct asset set (every manifest asset + SHA256SUMS, which the manifest cannot name) and still REFUSES an unknown asset — drives release-upload.sh AND the workflow's own verification block, with a NEUTER proof"
 	@echo "  chat-ui-browser-selftest  DF-CRIER-335: the real-browser chat panel suite (responsive 390/768/1280) plus its rejection-path controls via scripts/chat-ui-browser-selftest.cjs — rc 0 pass, 1 regression, 77 named skip when playwright/Chromium/the built server are absent"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -397,45 +396,6 @@ gofmt-check:
 
 gofmt-selftest:
 	bash scripts/check-gofmt.sh --selftest
-
-# QA-CRIER-47: another arm of the gate family — and the one whose subject is the
-# ARTIFACT that is actually SERVED rather than a source file's syntax. cmd/server/chat.html
-# shipped TWO unresolved merge-conflict blocks (`<<<<<<< HEAD` / `=======` / `>>>>>>>`) from
-# daecd07, the DF-CRIER-449 groups merge, so the served /chat page was a JavaScript
-# syntax error — and every gate that ran reported green over it: chat-refusal-truth
-# (41/41) and chat-lifecycle-truth (24/24) extract named function REGIONS by string
-# index and eval them in isolation, so a marker outside those regions is invisible
-# to them; chat-management-browser and chat-ui-browser-selftest SKIP (exit 77) when
-# Playwright is absent, which is the normal CI shape; the Go suite only EMBEDS the
-# file (go:embed compiles the marker bytes happily); e2e-battery never parses the
-# page JS. NOTHING parsed the page whole, so a page that could not execute shipped.
-#
-# chat-js-check parses it whole: it extracts EVERY inline <script> block (its own
-# awk extractor — single-line blocks, wrapped open tags and multiple blocks per
-# page all handled) and runs `node --check` on each, and it rejects a page-wide
-# merge-conflict marker, which no per-block parse can see when the marker sits in
-# the HTML body. A rejection names the failing block's PAGE LINE OFFSET (both the
-# block's first content line and the page line node's own report maps to), not a
-# line in a temp file that no longer exists. An external (src=) block and a
-# non-JavaScript type= block are SKIPPED with a printed reason, never silently; a
-# run that extracts ZERO inline JavaScript blocks exits 2 and prints no ACCEPT
-# line, so a page whose <script> tag moved can never report a vacuous green. A
-# missing node is exit 2, named — never a silent skip.
-#
-# chat-js-selftest proves the gate still bites on fixtures it creates under
-# ${TMPDIR:-/tmp}: a bare conflict marker in an inline block is REJECTed with its
-# page line named, the SAME fixture with only its marker lines removed is ACCEPTed
-# (the causal control), a marker-free plain syntax error is REJECTed, a marker in
-# the HTML body is REJECTed, the SHIPPED cmd/server/chat.html is ACCEPTed, and a
-# zero-block page and an external-only page each exit 2 with no ACCEPT line. It
-# needs bash + node + awk + grep: no Playwright, no browser, no network, so it
-# exits 0 on a clean tree rather than taking the exit 77 skip the browser harnesses
-# take.
-chat-js-check:
-	bash scripts/check-chat-js.sh
-
-chat-js-selftest:
-	bash scripts/check-chat-js-selftest.sh
 
 # CR-GAP-069: the fifth arm, and the only one whose subject is a PROCESS LIFE rather
 # than a file's syntax. The dogfood federation demo leaked two orphan crier servers
@@ -876,6 +836,22 @@ release-upload:
 # No network, no docker, no keys; ports come from the shared selector.
 install-path-selftest:
 	bash scripts/install-path-selftest.sh
+
+# release-upload-selftest — RELEASE-010: the tag publisher's proof. The workflow
+# uploads SHA256SUMS with the asset set and then compared the two sets for
+# EQUALITY, so a CORRECT release red-ed ("carries asset(s) SHA256SUMS does not
+# know:SHA256SUMS", run 39539975561 / tag v0.2.0) and every future cut would too.
+# SHA256SUMS is the manifest, not one of the files it covers, so the comparison
+# must demand "every manifest asset is attached, SHA256SUMS itself is exempt, and
+# anything else the manifest does not name is still fatal". This drives BOTH
+# implementations of that rule — scripts/release-upload.sh and the verification
+# block extracted from .github/workflows/release.yml (executed with bash -e, the
+# way Actions runs it) — against the same fixtures: a correct set passes, an
+# unknown asset is refused by name, a missing manifest asset is refused by name,
+# and a NEUTER proof (the exemption removed) reproduces the v0.2.0 red, so the
+# green cannot be vacuous. No network, no keys, nothing published.
+release-upload-selftest:
+	bash scripts/release-upload-selftest.sh
 
 # DF-CRIER-335: the loop's definition of done requires the responsive check at
 # 390/768/1280 to be a make target and a CI step over
