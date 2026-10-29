@@ -183,7 +183,7 @@ main { min-width:0; display:flex; flex-direction:column; }
     <summary>Connection &amp; identity</summary>
     <form id="identity-form" class="stack">
       <label>Acting agent ID <span class="req">(required to send)</span><input id="agent" placeholder="Your existing agent ID" autocomplete="off"></label>
-      <p id="identity-gate" class="gate" role="status">Sending and channel creation need an acting agent ID. It is attribution, not a login. <button type="button" id="use-suggested" class="ghost">Use <span id="suggested-id"></span></button></p>
+      <p id="identity-gate" class="gate" role="status">Sending and channel creation need an acting agent ID. It is attribution, not a login. <span id="identity-suggestion-status">Loading registered agents…</span><button type="button" id="use-suggested" class="ghost" hidden>Use registered agent: <span id="suggested-id"></span></button></p>
       <label class="remember-choice"><input id="remember-agent" type="checkbox" aria-describedby="remember-disclosure">Remember this attribution ID on this device</label>
       <p id="remember-disclosure" class="note">Stored only in this browser tab; attribution, not a login. Only the ID is saved, never credentials, a namespace or a conversation. Reloads keep it; closing the tab ends this opt-in.</p>
       <div id="remember-note" hidden><p id="remember-status" class="note" role="status"></p><button type="button" id="forget-agent" class="ghost">Forget</button></div>
@@ -1136,6 +1136,31 @@ function renderPosture(b) {
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.health === "degraded" || b.health === "down");
   notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
 }
+function clearIdentitySuggestion() {
+  state.suggestedAgent = null;
+  $("suggested-id").textContent = "";
+  $("use-suggested").hidden = true;
+  $("use-suggested").removeAttribute("aria-label");
+  $("identity-suggestion-status").textContent = "Loading registered agents…";
+}
+function setIdentitySuggestion(agent, unavailable = false) {
+  const button = $("use-suggested");
+  const status = $("identity-suggestion-status");
+  state.suggestedAgent = agent?.id ? agent : null;
+  if (state.suggestedAgent) {
+    $("suggested-id").textContent = state.suggestedAgent.id;
+    status.textContent = "A registered agent is available:";
+    button.hidden = false;
+    button.setAttribute("aria-label", "Use registered agent " + state.suggestedAgent.id);
+    return;
+  }
+  $("suggested-id").textContent = "";
+  button.hidden = true;
+  button.removeAttribute("aria-label");
+  status.textContent = unavailable
+    ? "Registered agents could not be loaded. Enter an existing agent ID only; this page does not register IDs."
+    : "No registered agent is available. Enter an existing agent ID; this page does not register IDs.";
+}
 async function refresh() {
   if (state.sending) return;
   const generation = ++state.generation, id = state.current;
@@ -1146,7 +1171,7 @@ async function refresh() {
   notice("refresh-state", "Refreshing recorded state…");
   const valid = () => generation === state.generation;
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
-  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); renderDirectory(); }, e => { state.agents = []; renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
+  const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); setIdentitySuggestion(state.agents[0]); renderDirectory(); }, e => { state.agents = []; setIdentitySuggestion(null, true); renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
   const reads = [registry,
     read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
     read("/status", b => {
@@ -1393,9 +1418,7 @@ $("create-form").addEventListener("submit", async event => {
   } catch(e) { unavailable("create-result",e); }
   finally { state.sending = false; state.busy = false; updateComposer(); }
 });
-const SUGGESTED_ID = "browser-" + Math.random().toString(36).slice(2, 8);
-$("suggested-id").textContent = SUGGESTED_ID;
-$("use-suggested").addEventListener("click", () => { if (state.sending) return; $("agent").value = SUGGESTED_ID; $("identity-form").requestSubmit(); });
+$("use-suggested").addEventListener("click", () => { const agent = state.suggestedAgent; if (state.sending || !agent || !state.agents.some(item => item.id === agent.id)) return; $("agent").value = agent.id; $("identity-form").requestSubmit(); });
 $("identity-form").addEventListener("submit", event => {
   event.preventDefault(); if (state.sending) return;
   if ($("text").value && !window.confirm("Discard the unsent draft and change identity or realm?")) return;
@@ -1404,7 +1427,7 @@ $("identity-form").addEventListener("submit", event => {
   rememberAttribution();
   $("initial-members").innerHTML = "";
   state.expandedBranches = new Set(); state.locationMessage = null;
-  state.current = null; state.session = null; state.sessionRead = "not-selected"; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; state.sessions = []; state.groups = []; state.group = null;
+  state.current = null; state.session = null; state.sessionRead = "not-selected"; state.reply = null; state.branch = false; state.thread = ""; state.messages = []; state.agents = []; clearIdentitySuggestion(); state.sessions = []; state.groups = []; state.group = null;
   renderDirectory(); notice("capability-matrix","Loading registry…");
   notice("groups-count","Loading GET /groups…"); notice("groups","Loading named groups…"); notice("group-roster","Select a group to read its roster."); notice("group-result","");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
