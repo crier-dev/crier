@@ -236,6 +236,14 @@ func (b *logBuffer) messages() []string {
 	return out
 }
 
+// recordsCopy returns the captured records so a test can assert on the FIELDS a
+// line carries, not only its text.
+func (b *logBuffer) recordsCopy() []slog.Record {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]slog.Record(nil), b.records...)
+}
+
 // TestCompletionWatcherLogsTransitions drives the observer through the real
 // sequence a relay takes: drained → a delivery → drained again. It pins that
 // ENTERING completion is logged once (not once per interval), that LEAVING it is
@@ -306,7 +314,20 @@ func TestCompletionWatcherLosingTheMeasurementIsNotSticky(t *testing.T) {
 	// And it stays silent while it remains unmeasured.
 	_, event = watcher.sample()
 	assert.Empty(t, event)
-	assert.Len(t, sink.messages(), 2)
+	require.Len(t, sink.messages(), 2)
+
+	// The leaving-completion line must not invent counts for a queue nobody
+	// read: it carries the reason and NO pending/leased attribute.
+	recs := sink.recordsCopy()
+	require.Len(t, recs, 2)
+	attrs := map[string]string{}
+	recs[1].Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	assert.NotContains(t, attrs, "pending", "an unmeasured queue must not log a fabricated pending count")
+	assert.NotContains(t, attrs, "leased")
+	assert.Equal(t, completionReasonUnmeasured, attrs["reason"])
 }
 
 // TestCompletionWatcherFirstObservationIncompleteIsSilent: a server that boots

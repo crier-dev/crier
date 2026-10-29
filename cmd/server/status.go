@@ -744,29 +744,28 @@ func (w *completionWatcher) sample() (statusCompletion, string) {
 	w.last = &verdict
 	switch event {
 	case "complete":
-		w.log.Info("work queue complete — inbox empty and no pending leases",
-			"pending", pendingOf(c), "leased", leasedOf(c))
+		w.log.Info("work queue complete — inbox empty and no pending leases", completionCountAttrs(c)...)
 	case "incomplete":
-		w.log.Info("work queue no longer complete",
-			"pending", pendingOf(c), "leased", leasedOf(c), "reason", c.Reason)
+		w.log.Info("work queue no longer complete", completionReasonAttrs(c)...)
 	}
 	return c, event
 }
 
-// pendingOf / leasedOf read the counts off the verdict's own measurement, so a
-// log line cannot quote a number the served body does not carry.
-func pendingOf(c statusCompletion) int {
+// completionCountAttrs names the numbers the served body carries, and emits
+// NOTHING when the queue could not be measured: a log line must not invent
+// `pending=0` for a queue nobody read.
+func completionCountAttrs(c statusCompletion) []any {
 	if c.QueueDepth == nil {
-		return 0
+		return nil
 	}
-	return c.QueueDepth.Pending
+	return []any{"pending", c.QueueDepth.Pending, "leased", c.QueueDepth.Leased}
 }
 
-func leasedOf(c statusCompletion) int {
-	if c.QueueDepth == nil {
-		return 0
-	}
-	return c.QueueDepth.Leased
+// completionReasonAttrs is completionCountAttrs plus the reason, because the
+// reason is sometimes the only fact available (the unmeasured arm) and is always
+// the explanation of the verdict.
+func completionReasonAttrs(c statusCompletion) []any {
+	return append(completionCountAttrs(c), "reason", c.Reason)
 }
 
 // run samples every interval until ctx is cancelled — the graceful-shutdown
