@@ -1,0 +1,52 @@
+{
+  "tick_id": "crier-foreman-2026-10-29-07-31-39",
+  "block": "QA-CRIER-51",
+  "mode": "wave",
+  "slots": 4,
+  "created_at": "2026-10-29T07:31:39-05:00",
+  "workers": [
+    {
+      "task_id": "QA-CRIER-47",
+      "priority": "P0",
+      "title": "chat.html merge-conflict markers + JS parse gate",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-47",
+      "branch": "wt/QA-CRIER-47",
+      "brief": "/tmp/crier-t484-brief-QA-CRIER-47.txt",
+      "status": "landed",
+      "merged_commit": "46fae31a"
+    },
+    {
+      "task_id": "QA-CRIER-50",
+      "priority": "P1",
+      "title": "fresh-install toolsd-only artifact check",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-50",
+      "branch": "wt/QA-CRIER-50",
+      "brief": "/tmp/crier-t484-brief-QA-CRIER-50.txt",
+      "status": "landed",
+      "merged_commit": "1696d598"
+    },
+    {
+      "task_id": "RELEASE-010",
+      "priority": "P1",
+      "title": "tag publisher self-check rejects SHA256SUMS",
+      "worktree": "/home/kara/worktrees/crier-RELEASE-010",
+      "branch": "wt/RELEASE-010",
+      "brief": "/tmp/crier-t484-brief-RELEASE-010.txt",
+      "status": "landed",
+      "merged_commit": "4a6eb500"
+    },
+    {
+      "task_id": "QA-CRIER-48",
+      "priority": "P2",
+      "title": "act CI leg actions/checkout missing token",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-48",
+      "branch": "wt/QA-CRIER-48",
+      "brief": "/tmp/crier-t484-brief-QA-CRIER-48.txt",
+      "status": "landed",
+      "merged_commit": "b4b8ed54"
+    }
+  ],
+  "finished_at": "2026-10-29T09:35:00-05:00",
+  "outcome": "recovery_closeout_all_landed",
+  "note": "all 4 branches already ancestors of main at recovery time; zero-diff verification; rows closed with actual commit hashes"
+}
