@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -40,6 +40,7 @@ help:
 	@echo "  test-short        Unit tests only — skips integration, no Docker required"
 	@echo "  test-integration  PostgreSQL-backed registry tests (requires Docker)"
 	@echo "  lint              Static analysis (go vet ./...)"
+	@echo "  go-mod-tidy-check Run go mod tidy in a disposable tracked-tree copy and reject go.mod/go.sum drift"
 	@echo "  coverage          Run tests and print total coverage"
 	@echo "  coverage-html     Generate coverage.html"
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold — fail-closed: a failed suite or missing/unparseable data is a refusal (QA-CRIER-34), never a PASS"
@@ -121,6 +122,13 @@ test-integration:
 
 lint:
 	go vet ./...
+
+# QA-CRIER-46: verify module metadata is tidy without mutating the developer
+# tree. The archive contains the current tracked source, while the explicit
+# copies below include the caller's current go.mod/go.sum (which may be staged
+# but not committed yet). Tidy must leave both files byte-identical.
+go-mod-tidy-check:
+	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; git archive --format=tar HEAD | tar -xf - -C "$$tmp"; cp go.mod go.sum "$$tmp/"; cp go.mod "$$tmp/go.mod.before"; cp go.sum "$$tmp/go.sum.before"; (cd "$$tmp" && go mod tidy); if ! cmp -s "$$tmp/go.mod.before" "$$tmp/go.mod" || ! cmp -s "$$tmp/go.sum.before" "$$tmp/go.sum"; then echo "go mod tidy check: FAIL (go.mod/go.sum drift)" >&2; diff -u "$$tmp/go.mod.before" "$$tmp/go.mod" || true; diff -u "$$tmp/go.sum.before" "$$tmp/go.sum" || true; exit 1; fi; echo "go mod tidy check: PASS (go.mod/go.sum unchanged)"
 
 run: build
 	./bin/crier -pidfile $(PIDFILE)
