@@ -33,6 +33,23 @@ import (
 // A store that cannot open is a boot error, never a silent absence of the
 // surface — an operator who selected CR_SESSION_BACKEND=sqlite must not get a
 // server that quietly serves no sessions.
+// groupStoreForSessionStore selects the named-group backend that belongs to
+// the already-open session backend. PostgreSQL and SQLite expose Groups over
+// their own database handle; JSONL remains the file-backed pairing for the
+// JSONL session store.
+func groupStoreForSessionStore(sessStore session.Repository, groupRoot string) (session.GroupStore, error) {
+	switch st := sessStore.(type) {
+	case *session.PostgresStore:
+		return st.Groups(), nil
+	case *session.SQLStore:
+		return st.Groups(), nil
+	case *session.JSONLStore:
+		return session.NewJSONLGroupStore(groupRoot)
+	default:
+		return nil, fmt.Errorf("session backend %T has no matching group backend", sessStore)
+	}
+}
+
 func openSessionAPI(
 	cfg config.Config,
 	registryStore registry.Store,
@@ -57,17 +74,14 @@ func openSessionAPI(
 	// migration step. A store that cannot open is a boot error rather than a
 	// surface that silently serves no groups — the same rule openSessionAPI
 	// applies to the session store.
-	var groupStore session.GroupStore
-	switch st := sessStore.(type) {
-	case *session.SQLStore:
-		groupStore = st.Groups()
-	default:
-		gs, err := session.NewJSONLGroupStore(cfg.Session.GroupRoot)
-		if err != nil {
-			return nil, nil, fmt.Errorf("group api: %w", err)
-		}
-		groupStore = gs
+	groupStore, err := groupStoreForSessionStore(sessStore, cfg.Session.GroupRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("group api: %w", err)
 	}
+
+	// Keep this selection tied to the session store's concrete backend. In
+	// particular, PostgresStore has its own Groups implementation over the same
+	// pool; falling through to JSONL would silently split session-scoped state.
 
 	h := session.NewHTTPHandler(sessStore, session.HTTPOptions{
 		Deliverer:             registry.NewSessionDeliverer(dispatcher),
