@@ -3066,3 +3066,19 @@ tasks:
     no longer missing
   status: pending
   created_at: '2026-10-28T01:20:07.400582+00:00'
+- id: QA-CRIER-46
+  title: go.mod tidy gate
+  criteria:
+  - 'QA-CRIER-46: go.mod is tidy-clean and Makefile has a verified go mod tidy gate;
+    preserve unrelated files and provide traceability evidence.'
+  status: complete
+  created_at: '2026-10-30T22:00:14.716197+00:00'
+  completed_at: '2026-10-30T22:15:52.706398+00:00'
+- id: QA-CRIER-52
+  title: contention-safe session tests
+  criteria:
+  - 'QA-CRIER-52: eliminate fixed-wall-clock contention failures in the named tests
+    and prove the focused and full-suite acceptance without weakening the contract.'
+  status: complete
+  created_at: '2026-10-30T22:00:16.132812+00:00'
+  completed_at: '2026-10-30T22:15:53.025503+00:00'

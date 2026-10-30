@@ -1,0 +1,43 @@
+{
+  "tick_id": "crier-foreman-2026-10-30-21-51-20",
+  "block_id": "QA-CRIER-52",
+  "wave_id": "crier-foreman-2026-10-30-21-51-20",
+  "mode": "wave",
+  "wave_budget": 10,
+  "slots": 5,
+  "slots_reason": "nproc=16, tick-start loadavg=10.38; max(1,min(6,16-ceil(10.38)))=5; two independent implementation rows selected from the same ranked block family.",
+  "base_sha": "3af1d193f5c08cbb7b4659a357074c78b85b5ecd",
+  "workers": [
+    {
+      "task_id": "QA-CRIER-46",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-46-tick-20261030",
+      "branch": "wt/QA-CRIER-46-tick-20261030",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "scope": ["go.mod", "go.sum", "Makefile"],
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-30-21-51-20-QA-CRIER-46-brief.txt"
+    },
+    {
+      "task_id": "QA-CRIER-52",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-52-tick-20261030",
+      "branch": "wt/QA-CRIER-52-tick-20261030",
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "scope": ["cmd/server/session_restart_test.go", "internal/session/task_idempotency_test.go", "related timing helpers/tests only"],
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-30-21-51-20-QA-CRIER-52-brief.txt"
+    }
+  ],
+  "selection": {
+    "resume_first": "block_drive selected QA-CRIER-52 as the top block; its five ready rows were verified independent for this wave.",
+    "excluded": ["DF-CRIER-333 owner decision", "DF-CRIER-335 meta/completion row", "RELEASE-009 release/external CI gate", "QA-CRIER-49 and QA-CRIER-51 share the bunker harness seam and were not mixed into this code wave"],
+    "premise": "QA-CRIER-46 has a committed stale direct/indirect go.mod classification; prior c5b9a1d1 is not an ancestor of current main. QA-CRIER-52 names two current contention-sensitive tests."
+  },
+  "gitreins": {
+    "QA-CRIER-46": "created and started in control root before dispatch",
+    "QA-CRIER-52": "created and started in control root before dispatch"
+  },
+  "off_by_one": {
+    "discover": ["go-test-fixed-wall-clock-contention", "chaos-disconnect-vacuous-evidence"],
+    "result": "not_found for both; corpus hit 0262-go-testing-load-flake used as mechanism guidance for the contention row; no new non-trivial fix submission yet."
+  }
+}
