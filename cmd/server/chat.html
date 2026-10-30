@@ -1285,7 +1285,11 @@ async function send(event) {
   try {
     // Re-read membership rather than trust a potentially stale 15-second poll.
     // Session audience excludes the sender; explicit agent routing overrides it.
-    if (!recipient) {
+    // A selected named group is an explicit addressable target, even when none
+    // of its members belong to this session. The server resolves @team mentions
+    // against the current group roster; do not mistake that for note-to-self.
+    const hasGroupRecipient = !!state.selectedGroup && draft.split(/\s+/).includes("@team:" + state.selectedGroup);
+    if (!recipient && !hasGroupRecipient) {
       const roster = await call(sessionPath(id,"participants"));
       renderParticipants(roster);
       const audience = state.participants.filter(p => p.active && p.member_type === "agent" && p.member_id !== state.agent).map(p => p.member_id).sort();
