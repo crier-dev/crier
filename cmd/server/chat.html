@@ -244,6 +244,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
         <label>Intent<select id="intent" disabled><option value="message">Message</option><option value="task">Explicit task</option></select></label>
         <button id="send-button" class="primary" disabled>Send message</button>
       </div>
+      <p id="group-recipient" class="note" role="status" hidden>Selected group target: <strong id="group-recipient-name"></strong> <button id="clear-group-recipient" type="button" class="ghost">Remove group target</button></p>
     </form>
     <p id="composer-hint" class="note composer-hint">A tag addresses; it never executes. Recipient selects delivery. Only “Explicit task” requests work. Replies stay in their recorded thread. Ctrl/⌘ + Enter sends.</p>
     <p id="sender-authority" class="note composer-hint" role="status">Send authority: unknown until runtime posture is read. This browser cannot sign agent requests. Acting ID is attribution, not key verification; browser authentication is an open owner decision (DF-CRIER-333).</p>
@@ -279,10 +280,10 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
     <div id="groups" class="note">Loading named groups…</div>
     <form id="group-create-form" class="stack">
       <label>Group name<input id="group-name" required autocomplete="off" aria-describedby="group-help" placeholder="team"></label>
-      <label>Member agent IDs<input id="group-members" autocomplete="off" aria-describedby="group-help" placeholder="atlas, nimbus"></label>
+      <label>Member agent IDs<input id="group-members" autocomplete="off" aria-describedby="group-help" placeholder="Enter registered agent IDs"></label>
       <button id="group-create" type="submit" class="ghost" disabled>Create group</button>
     </form>
-    <p id="group-help" class="note">A name is addressable as @team:name (an ident: a letter, digit or _ first, then letters, digits, _ . -). A member is an agent id; separate members with commas or spaces. Creating records the acting agent ID as created_by, so apply one in Connection &amp; identity first — attribution, not authentication.</p>
+    <p id="group-help" class="note">A name is addressable as @team:name (an ident: a letter, digit or _ first, then letters, digits, _ . -). Enter exact existing agent IDs, separated by commas or spaces; the server validates membership IDs. No example IDs are provided. Creating records the acting agent ID as created_by, so apply one in Connection &amp; identity first — attribution, not authentication.</p>
     <p id="group-result" role="status"></p>
     <div id="group-roster" class="note">Select a group to read its roster.</div>
     <p class="note">Counts are measured from the returned roster, never placeholders. A group is a roster address, not an agent credential: it is not listed among agents and cannot send as one. Membership edits (PATCH /groups/{name}/members) are API-only and unavailable here.</p>
@@ -327,7 +328,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessionRead:"not-selected", sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, groupBusy:false };
+const state = { current:null, session:null, sessionRead:"not-selected", sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, selectedGroup:null, groupBusy:false };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -788,6 +789,19 @@ function updateClassControls() {
   notice("class-read-reason", reason);
   $("class-read-reason").hidden = !reason;
 }
+function renderSelectedGroup() {
+  const panel = $("group-recipient");
+  panel.hidden = !state.selectedGroup;
+  $("group-recipient-name").textContent = state.selectedGroup ? "@team:" + state.selectedGroup : "";
+}
+function removeSelectedGroup() {
+  const name = state.selectedGroup;
+  if (!name) return;
+  const token = "@team:" + name;
+  $("text").value = $("text").value.split(/\s+/).filter(part => part !== token).join(" ");
+  state.selectedGroup = null;
+  renderSelectedGroup();
+}
 function renderHeader() {
   const s = state.session;
   $("conversation-title").textContent = s ? s.title || s.id : "Choose a conversation";
@@ -989,19 +1003,27 @@ async function readGroup(name) {
   try { renderGroupRoster(await call("/groups/" + encodeURIComponent(name))); }
   catch (e) { notice("group-roster", "Could not read the @team:" + name + " roster — " + e.message, true); }
 }
-// The named-group picker: it inserts the group's address token, it never sends and
-// never turns the group into a sender. A capability (@cap:) stays distinct.
+// The named-group picker selects exactly one composer target, never an
+// additional recipient alongside a previous individual selection.
 function addressGroup(name) {
   if (!name || state.sending) return;
   const composer = $("text");
   // A disabled composer with no stated reason reads as a broken control: name the
   // one unmet precondition instead of silently writing into a disabled field.
   if (composer.disabled) { notice("group-result", "Open an open conversation first (Pick a channel / Create channel): the picker writes the @team:" + name + " address into that session's composer.", true); return; }
+  const previousRecipient = $("recipient").value;
+  if (state.selectedGroup) removeSelectedGroup();
+  // The picker is a sole-target action. Remove any older team-address tokens
+  // before inserting its one selected target so the POST cannot fan out wider.
+  const draftWithoutGroups = composer.value.replace(/(^|\s)@team:\S+/g, " ").replace(/\s{2,}/g, " ").trim();
+  state.selectedGroup = name;
+  $("recipient").value = "";
+  renderSelectedGroup();
   const token = "@team:" + name + " ";
-  const draft = composer.value;
-  composer.value = draft && !/\s$/.test(draft) ? draft + " " + token : draft + token;
+  composer.value = draftWithoutGroups && !/\s$/.test(draftWithoutGroups) ? draftWithoutGroups + " " + token : draftWithoutGroups + token;
   composer.focus();
-  notice("group-result", "Inserted @team:" + name + " into the composer. Addressing a group fans ONE message out to every CURRENT member.");
+  const replaced = previousRecipient ? " Replaced individual recipient " + previousRecipient + "; it will not receive this send." : "";
+  notice("group-result", "Selected @team:" + name + " as the sole explicit composer recipient; the current roster is resolved on send." + replaced);
 }
 function renderPermissions(body) {
   const actions = Array.isArray(body.actions) ? body.actions : [...new Set((body.rows || []).flatMap(r => r.allowed && typeof r.allowed === "object" ? Object.keys(r.allowed) : []))];
@@ -1205,6 +1227,7 @@ function openSession(id) {
   state.current = id; state.session = null; state.sessionRead = "pending"; state.messages = []; state.systemEvents = []; state.reply = null; state.branch = false; state.thread = "";
   $("participant-context-share").value = "summary"; $("participant-context-boundary").value = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
+  state.selectedGroup = null; renderSelectedGroup();
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
   // DF-CRIER-414: the in-flight panel belongs to the conversation that was open
   // when the send started, so a switch stops watching it rather than reporting
@@ -1376,6 +1399,20 @@ $("groups").addEventListener("click", e => {
   if (read) { void readGroup(read.dataset.groupRead); return; }
   const address = e.target.closest("[data-group-address]");
   if (address) addressGroup(address.dataset.groupAddress);
+});
+$("clear-group-recipient").addEventListener("click", removeSelectedGroup);
+$("recipient").addEventListener("change", () => {
+  if (state.selectedGroup && $("recipient").value) {
+    removeSelectedGroup();
+    notice("group-result", "Removed the group target because an individual recipient was selected.");
+  }
+});
+$("text").addEventListener("input", () => {
+  if (state.selectedGroup && !$("text").value.split(/\s+/).includes("@team:" + state.selectedGroup)) {
+    state.selectedGroup = null;
+    renderSelectedGroup();
+    notice("group-result", "The selected group target was removed from the draft.");
+  }
 });
 $("group-create-form").addEventListener("submit", async event => {
   event.preventDefault();
