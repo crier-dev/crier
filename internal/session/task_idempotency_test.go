@@ -14,6 +14,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
+
+	"github.com/crier-dev/crier/internal/testsupport"
 )
 
 // These exercise the real task routes and durable stores, including a fresh
@@ -286,7 +288,7 @@ func runTaskRequestIdempotencyConcurrent(t *testing.T, backends []localBackend) 
 			go func() { firstDone <- post(routers[0]) }()
 			select {
 			case <-d.started:
-			case <-time.After(5 * time.Second):
+			case <-time.After(testsupport.HangGuard(t)):
 				t.Fatal("first task never reached delivery")
 			}
 			secondDone := make(chan *httptest.ResponseRecorder, 1)
@@ -295,7 +297,7 @@ func runTaskRequestIdempotencyConcurrent(t *testing.T, backends []localBackend) 
 			case w := <-secondDone:
 				require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 				require.JSONEq(t, `{"error":"a delivery with this idempotency_key is already in progress"}`, w.Body.String())
-			case <-time.After(5 * time.Second):
+			case <-time.After(testsupport.HangGuard(t)):
 				t.Fatal("in-flight retry must return 409 without waiting for delivery")
 			}
 			require.Equal(t, int32(1), d.calls.Load())
@@ -305,7 +307,7 @@ func runTaskRequestIdempotencyConcurrent(t *testing.T, backends []localBackend) 
 			case w := <-firstDone:
 				require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
-			case <-time.After(5 * time.Second):
+			case <-time.After(testsupport.HangGuard(t)):
 				t.Fatal("first task did not finish")
 			}
 			w := post(routers[1])

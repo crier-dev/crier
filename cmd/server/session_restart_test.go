@@ -23,6 +23,10 @@ func TestSessionRequestReplayAcrossProcesses(t *testing.T) {
 	for _, backend := range []string{"sqlite", "jsonl"} {
 		for _, route := range []string{"messages", "tasks"} {
 			t.Run(backend+"/"+route, func(t *testing.T) {
+				// Each restart arm owns its process and storage root. Let the
+				// independent arms join the package's parallel batch instead of
+				// making a loaded host serialize all child boots.
+				parallelBoot(t)
 				var calls atomic.Int32
 				hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					calls.Add(1)
