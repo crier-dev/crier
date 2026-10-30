@@ -984,9 +984,14 @@ function renderGroupRoster(g) {
     '<p class="note">Created by ' + esc(g.created_by || "not reported") + ' · last edited by ' + esc(g.updated_by || "not reported") + '</p>' +
     '<p class="note">Read fresh from GET /groups/' + esc(g.name) + ': the next send to it resolves the members current at that moment, not this snapshot.</p></div>';
 }
-async function loadGroups() {
-  try { renderGroups(await call("/groups")); }
+async function loadGroups(generation = state.generation, realm = state.namespace) {
+  const valid = () => generation === state.generation && realm === state.namespace;
+  try {
+    const body = await call("/groups");
+    if (valid()) renderGroups(body);
+  }
   catch (e) {
+    if (!valid()) return;
     state.groups = [];
     if (e.serverCode === "GROUPS_UNCONFIGURED") {
       // A deployment posture, neither an empty roster nor a page failure.
@@ -1185,7 +1190,7 @@ function setIdentitySuggestion(agent, unavailable = false) {
 }
 async function refresh() {
   if (state.sending) return;
-  const generation = ++state.generation, id = state.current;
+  const generation = ++state.generation, id = state.current, realm = state.namespace;
   state.busy = true;
   // Fail closed while this refresh's authority read is pending or fails.
   state.permissionsArmed = null; updateLifecycleControls();
@@ -1209,7 +1214,7 @@ async function refresh() {
       state.managementSurface = typeof b.management_surface === "string" ? b.management_surface : null;
       renderPosture(b); updateComposer();
     }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; state.managementSurface = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
-    loadGroups()];
+    loadGroups(generation, realm)];
   if (id) {
     reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.sessionRead = "read"; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.sessionRead = e.status >= 400 && e.status < 500 ? "refused" : "failed"; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
