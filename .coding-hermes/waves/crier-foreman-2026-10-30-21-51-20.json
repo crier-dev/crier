@@ -14,7 +14,11 @@
       "branch": "wt/QA-CRIER-46-tick-20261030",
       "model": "glm-5.3-flash",
       "provider": "zai-glm",
-      "scope": ["go.mod", "go.sum", "Makefile"],
+      "scope": [
+        "go.mod",
+        "go.sum",
+        "Makefile"
+      ],
       "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-30-21-51-20-QA-CRIER-46-brief.txt"
     },
     {
@@ -23,13 +27,22 @@
       "branch": "wt/QA-CRIER-52-tick-20261030",
       "model": "gpt-5.6-luna",
       "provider": "openai-codex",
-      "scope": ["cmd/server/session_restart_test.go", "internal/session/task_idempotency_test.go", "related timing helpers/tests only"],
+      "scope": [
+        "cmd/server/session_restart_test.go",
+        "internal/session/task_idempotency_test.go",
+        "related timing helpers/tests only"
+      ],
       "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-30-21-51-20-QA-CRIER-52-brief.txt"
     }
   ],
   "selection": {
     "resume_first": "block_drive selected QA-CRIER-52 as the top block; its five ready rows were verified independent for this wave.",
-    "excluded": ["DF-CRIER-333 owner decision", "DF-CRIER-335 meta/completion row", "RELEASE-009 release/external CI gate", "QA-CRIER-49 and QA-CRIER-51 share the bunker harness seam and were not mixed into this code wave"],
+    "excluded": [
+      "DF-CRIER-333 owner decision",
+      "DF-CRIER-335 meta/completion row",
+      "RELEASE-009 release/external CI gate",
+      "QA-CRIER-49 and QA-CRIER-51 share the bunker harness seam and were not mixed into this code wave"
+    ],
     "premise": "QA-CRIER-46 has a committed stale direct/indirect go.mod classification; prior c5b9a1d1 is not an ancestor of current main. QA-CRIER-52 names two current contention-sensitive tests."
   },
   "gitreins": {
@@ -37,7 +50,33 @@
     "QA-CRIER-52": "created and started in control root before dispatch"
   },
   "off_by_one": {
-    "discover": ["go-test-fixed-wall-clock-contention", "chaos-disconnect-vacuous-evidence"],
+    "discover": [
+      "go-test-fixed-wall-clock-contention",
+      "chaos-disconnect-vacuous-evidence"
+    ],
     "result": "not_found for both; corpus hit 0262-go-testing-load-flake used as mechanism guidance for the contention row; no new non-trivial fix submission yet."
+  },
+  "finished_at": "2026-10-31T04:42:48-05:00",
+  "recovery": {
+    "verified_at": "2026-10-31T04:42:48-05:00",
+    "main_sha": "bea1b9f2b0fa145cd994f964fff3d02354e3831b",
+    "workers_landed": [
+      {
+        "task_id": "QA-CRIER-46",
+        "commit": "c43582c9894e0eaf5b6b918bf2e44fc0f1946524",
+        "status": "merged"
+      },
+      {
+        "task_id": "QA-CRIER-52",
+        "commit": "ec9b760a32ba3de3e924bee770467e03c0953f2d",
+        "status": "merged"
+      }
+    ],
+    "gates": {
+      "build": "PASS",
+      "vet": "PASS",
+      "test": "PASS"
+    },
+    "remote_ci": "unverified (gh run list returned empty or error)"
   }
 }
