@@ -1,0 +1,31 @@
+{
+  "tick_id": "crier-foreman-2026-10-31-22-41-41",
+  "block": "QA-CRIER-52",
+  "mode": "wave",
+  "wave_budget": 12,
+  "slots": 6,
+  "slots_reason": "nproc=16 and tick-start loadavg=5.84 yielded max(1,min(6,16-ceil(5.84)))=6; two mutually independent rows were selected from the same block after seam review.",
+  "base": "ddc7ce1930c8d978d1a857dd34affa2b7ad4c779",
+  "tasks": [
+    {
+      "task_id": "RELEASE-009",
+      "worktree": "/home/kara/worktrees/crier-RELEASE-009",
+      "branch": "wt/RELEASE-009",
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-31-22-41-41-RELEASE-009-brief.txt",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "files_seam": "CHANGELOG/release tooling; no overlap with QA harness"
+    },
+    {
+      "task_id": "QA-CRIER-49",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-49",
+      "branch": "wt/QA-CRIER-49",
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-31-22-41-41-QA-CRIER-49-brief.txt",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "files_seam": "chaos-disconnect evidence harness; no overlap with release tooling"
+    }
+  ],
+  "independence_proof": "No depends_on edges are present on either selected row. RELEASE-009 edits release/changelog surfaces; QA-CRIER-49 edits chaos-disconnect harness/evidence surfaces. QA-CRIER-51 was excluded because it shares the chaos-disconnect seam with QA-CRIER-49.",
+  "created_before_dispatch": true
+}
