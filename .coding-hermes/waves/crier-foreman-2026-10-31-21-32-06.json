@@ -1,0 +1,45 @@
+{
+  "tick_id": "crier-foreman-2026-10-31-21-32-06",
+  "block_id": "QA-CRIER-52",
+  "wave_id": "crier-foreman-2026-10-31-21-32-06",
+  "mode": "wave",
+  "wave_budget": 12,
+  "slots": 2,
+  "slots_reason": "nproc=16 and tick-start loadavg=6.03 yielded max(1,min(6,16-ceil(6.03)))=6; two ready rows selected because only RELEASE-009 and QA-CRIER-49 are mutually independent in the selected block's ready set without shared file seams. QA-CRIER-51 shares the bunker chaos-disconnect seam with QA-CRIER-49 and is deferred.",
+  "base_sha": "5d36b62d8addb99d5f5ccbe24b2e299544aeb4e2",
+  "workers": [
+    {
+      "task_id": "RELEASE-009",
+      "worktree": "/home/kara/worktrees/crier-RELEASE-009",
+      "branch": "wt/RELEASE-009",
+      "base_sha": "5d36b62d8addb99d5f5ccbe24b2e299544aeb4e2",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "scope": ["CHANGELOG.md", "release preparation evidence only"],
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-31-21-32-06-RELEASE-009-brief.txt"
+    },
+    {
+      "task_id": "QA-CRIER-49",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-49",
+      "branch": "wt/QA-CRIER-49",
+      "base_sha": "5d36b62d8addb99d5f5ccbe24b2e299544aeb4e2",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "scope": ["QA/disconnect harness paths discovered in the worktree", "regression tests and evidence contract only"],
+      "brief": "/home/kara/.hermes/tmp/crier-foreman-2026-10-31-21-32-06-QA-CRIER-49-brief.txt"
+    }
+  ],
+  "selection": {
+    "resume_first": "block_drive selected QA-CRIER-52 as the highest-ranked ready block; its effective pending rows are RELEASE-009, QA-CRIER-49, and QA-CRIER-51.",
+    "independence": "RELEASE-009 changes release preparation surfaces; QA-CRIER-49 changes the chaos-disconnect evidence contract. No depends_on edges exist among these rows and their file seams are disjoint. QA-CRIER-51 is not in this wave because it shares the chaos-disconnect harness seam with QA-CRIER-49.",
+    "excluded": ["QA-CRIER-51 shared chaos-disconnect seam", "DF-CRIER-333 owner decision", "DF-CRIER-335 completion/meta row", "DF-CRIER-491 and DF-CRIER-492 from the other block"]
+  },
+  "gitreins": {
+    "RELEASE-009": "created and started in control root before dispatch",
+    "QA-CRIER-49": "created and started in control root before dispatch"
+  },
+  "off_by_one": {
+    "classes": ["release-preparation", "chaos-disconnect-vacuous-evidence"],
+    "result": "exact discovery returned not_found for both; no non-trivial fix was designed by the foreman"
+  }
+}
