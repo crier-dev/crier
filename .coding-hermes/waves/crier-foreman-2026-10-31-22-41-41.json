@@ -27,5 +27,8 @@
     }
   ],
   "independence_proof": "No depends_on edges are present on either selected row. RELEASE-009 edits release/changelog surfaces; QA-CRIER-49 edits chaos-disconnect harness/evidence surfaces. QA-CRIER-51 was excluded because it shares the chaos-disconnect seam with QA-CRIER-49.",
-  "created_before_dispatch": true
+  "created_before_dispatch": true,
+  "finished_at": "2026-10-31T23:40:13Z",
+  "recovery_status": "already-landed-reconciled",
+  "recovery_note": "Both worker commits were already reachable from current main; no merge performed. Main gates and row-specific acceptance checks passed locally. Rows remain pending because release publication/exact-head bunker-e2e and fresh clean-machine QA evidence are still open. Preserved worktrees and branches were removed after verification."
 }

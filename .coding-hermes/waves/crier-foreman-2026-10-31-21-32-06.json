@@ -41,5 +41,8 @@
   "off_by_one": {
     "classes": ["release-preparation", "chaos-disconnect-vacuous-evidence"],
     "result": "exact discovery returned not_found for both; no non-trivial fix was designed by the foreman"
-  }
+  },
+  "finished_at": "2026-10-31T23:40:13Z",
+  "recovery_status": "already-landed-reconciled",
+  "recovery_note": "Both worker commits were already reachable from current main; no merge performed. Main gates and row-specific acceptance checks passed locally. Rows remain pending because release publication/exact-head bunker-e2e and fresh clean-machine QA evidence are still open. Preserved worktrees and branches were removed after verification."
 }
