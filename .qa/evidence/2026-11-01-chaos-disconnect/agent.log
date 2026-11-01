@@ -1,0 +1,29 @@
+Task: QA-CRIER-49
+Agent id: qa49-202611010215 (not created)
+
+Repository CI workflow inspected: .github/workflows/bunker-e2e.yml declares BUNKER_SERVER and BUNKER_HOST from GitHub secrets; those values were unavailable in this local environment. Configured candidate server aliases are bunker-las-01 through bunker-las-04. No claim is made that either attempted alias is the CI secret value.
+
+Spawn attempt 1:
+Command: bunker spawn qa49-202611010215 --server bunker-las-01 --ttl 24h
+Result: failed; unavailable: dial tcp 100.78.165.52:19090: connect: connection refused.
+
+Server reachability checks:
+- bunker-las-01: unavailable, connection refused.
+- bunker-las-02: responsive; agent lookup returned not_found before spawn attempt.
+- bunker-las-03: responsive; agent lookup returned not_found before spawn attempt.
+- bunker-las-04: request timed out.
+
+Spawn attempt 2:
+Command: bunker spawn qa49-202611010215 --server bunker-las-02 --ttl 24h
+Result: failed at stage slice-limits: containment landing did not converge within 5 reads; memory.swap.max was "max", expected "0" (bar swap).
+
+No agent reached running state; no heartbeat, repository staging, module-cache warmup, network cut, or remote suite execution was performed. TTL would have been 24h if creation succeeded.
+
+Local verification:
+- `bash -n .qa/chaos-probes/chaos-disconnect.sh`: PASS.
+- `go test ./internal/ci -count=1 -v`: PASS; includes the three chaos evidence-contract subtests.
+- Empty evidence validation with `bash .qa/chaos-probes/chaos-disconnect.sh --validate . /tmp/qa49-empty-disc-20261101.log`: exit 1, expected `FAIL: repository suite is available but disconnect evidence is empty`.
+- Copied-back placeholder validation with `bash .qa/chaos-probes/chaos-disconnect.sh --validate . .qa/evidence/2026-11-01-chaos-disconnect/disc.log`: exit 0. This checks argument handling and non-empty evidence only; it does not upgrade the placeholder to a real run.
+- `go build ./...`: PASS.
+- `go vet ./...`: PASS.
+- `go test ./... -count=1 -timeout 60s -p 1`: PASS.

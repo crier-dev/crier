@@ -1,0 +1,7 @@
+# QA-CRIER-49 evidence status
+
+The regression gate was exercised locally. `bash -n .qa/chaos-probes/chaos-disconnect.sh` passed, and `go test ./internal/ci -count=1 -v` passed, including `TestChaosDisconnectEvidenceContract` and its three cases: available-suite empty-evidence refusal, command/result recording, and explicit UNVERIFIED when no test path exists. A direct empty-file validation using the documented argument order exited 1 with `FAIL: repository suite is available but disconnect evidence is empty`.
+
+The clean JIT acceptance run is NOT VERIFIED. No agent was created, no source was staged remotely, and no network cut or disconnect suite run occurred. An attempt to spawn `qa49-202611010215` on `bunker-las-01` failed because the server refused the connection. A follow-up spawn on reachable `bunker-las-02` failed at `slice-limits`: containment did not converge because `memory.swap.max` was `max` rather than the required `0`. The workflow's `BUNKER_SERVER` and `BUNKER_HOST` values are GitHub secrets and were not available in this local environment, so the CI server could not be confirmed. See `agent.log` and `cut-proof.log` for exact outcomes.
+
+`disc.log` is an explicit UNVERIFIED placeholder, not evidence of a chaos-disconnect run. The acceptance criterion requiring a fresh clean JIT run remains outstanding. The CLI parsing fix in `.qa/chaos-probes/chaos-disconnect.sh` makes the documented `--validate [repo] [log]` form work while retaining the pre-existing `[repo] --validate [log]` form; the regression test now exercises the documented order.
