@@ -476,7 +476,36 @@ jobs:
           cmp cmd/server/openapi.yaml docs/openapi.yaml
 
       - name: Validate docs/openapi.yaml and served /openapi.json
-        run: go test -short -count=1 -run 'TestOpenAPI|TestDocsClaims' ./cmd/server
+        run: go test -short -count=1 -run 'TestOpenAPI|TestDocsClaims|TestREADMEOpenAPIInventoryMatchesSpec' ./cmd/server
+
+      # DF-CRIER-492: README.md's API inventory sentence ("documented as 66
+      # paths / 84 operations in `docs/openapi.yaml`") is hand-maintained prose
+      # and it HAD drifted — it said 61 / 78 while the spec declared 66 / 84, so
+      # the front page under-sold the documented surface and nothing noticed. The
+      # step above now names the Go arm (TestREADMEOpenAPIInventoryMatchesSpec)
+      # explicitly instead of relying on the build job's blanket `go test ./...`;
+      # this step adds the operator-visible arm over the SAME two files with an
+      # INDEPENDENT parser, so the two implementations must agree — a
+      # disagreement is itself a signal that one of them is wrong. The checker
+      # counts METHOD keys only, checks every occurrence of the sentence, and
+      # fails closed (a missing file, a missing interpreter, an interpreter
+      # without PyYAML, an unparseable spec or a spec with zero paths is exit 2 —
+      # never a PASS). PyYAML is provisioned here EXPLICITLY rather than assumed
+      # of the runner image: a venv keeps it out of the system interpreter, and a
+      # failed provision fails the step instead of being swallowed by `|| true`.
+      # The selftest then proves the checker still rejects a drifted README on
+      # this runner (over-counted operations, wrong path count, missing and
+      # duplicated sentences) and still refuses an empty/unparseable/missing
+      # spec, including a NEUTER proof, so this green cannot be vacuous.
+      - name: README API inventory drift check (independent arm + selftest)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/readme-api-venv"
+          "$RUNNER_TEMP/readme-api-venv/bin/python" -m pip install \
+            --disable-pip-version-check --quiet pyyaml
+          export README_API_PYTHON="$RUNNER_TEMP/readme-api-venv/bin/python"
+          make readme-api-check
+          make readme-api-selftest
 
   acceptance-matrix:
     name: Release acceptance matrix (built artifacts)
