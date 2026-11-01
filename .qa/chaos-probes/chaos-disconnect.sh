@@ -3,6 +3,10 @@
 # The caller owns applying/removing the cut; this script owns truthful evidence.
 set -uo pipefail
 
+# Exempt loopback from the dead proxy so Python clients (which respect HTTP_PROXY
+# for loopback unlike Go net/http) can still reach the loopback test server.
+export no_proxy=127.0.0.1,localhost
+
 log=${DISC_LOG:-disc.log}
 
 # Accept the documented --validate [repo] [log] form, while preserving the
