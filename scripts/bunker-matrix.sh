@@ -78,12 +78,21 @@ Options
   --server <name>   bunker server name (remote mode)
   --sink <url>      webhook sink URL for the blocking cell (both modes)
   --skip-build      remote mode only: reuse the last image tarball
+  --network-mode MODE
+                    remote mode only: the network-isolation mode this battery
+                    ASSUMES the agent has. Before the first cell the run proves
+                    it with scripts/bunker-isolation-gate.sh (INT-CI-020) and
+                    ABORTS when the boundary is not verified — a battery that
+                    trusts an unenforced flag proves its cut with full egress.
+                    shared | systemd | procvis | hidepid. Omit it and the
+                    matrix behaves exactly as before.
   -h, --help        this help
 
 Environment
   BUNKER_BIN          bunker CLI override (default $HOME/go/bin/bunker)
   BUNKER_AGENT        fallback for --agent (remote mode)
   BUNKER_SERVER       fallback for --server (remote mode)
+  BUNKER_NETWORK_MODE fallback for --network-mode (remote mode)
   DEEPSEEK_API_KEY    guard key for the guard-on cell (falls back to a grep of
                       ~/.hermes/.env); without it a local run skips guard-on
   EVIDENCE            JSONL evidence path (default /tmp/bunker-matrix-<ts>.jsonl)
@@ -116,10 +125,11 @@ SERVER=""
 SINK=""
 SKIP_BUILD=0
 LOCAL_MODE=0
+NETWORK_MODE="${BUNKER_NETWORK_MODE:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --host|--port|--agent|--server|--sink)
+    --host|--port|--agent|--server|--sink|--network-mode)
       if [[ $# -lt 2 ]]; then
         echo "bunker-matrix: option $1 requires a value (try --help)" >&2
         exit 1
@@ -133,6 +143,7 @@ while [[ $# -gt 0 ]]; do
         --agent) AGENT=$2 ;;
         --server) SERVER=$2 ;;
         --sink) SINK=$2 ;;
+        --network-mode) NETWORK_MODE=$2 ;;
       esac
       shift ;;
     --skip-build) SKIP_BUILD=1 ;;
@@ -180,6 +191,28 @@ if [[ $LOCAL_MODE -eq 0 ]]; then
   [[ -n "$SERVER" ]] || SERVER="${BUNKER_SERVER:-}"
   if [[ -z "$AGENT" || -z "$SERVER" ]]; then
     fatal "remote mode needs a bunker agent and server: pass --agent <agent> --server <server> (or set BUNKER_AGENT/BUNKER_SERVER) — for a crier you already run, use --local instead"
+  fi
+fi
+
+# ── network-isolation gate (INT-CI-020) ──────────────────────────────────────
+# A battery that proves its cut by the FLAG value proves nothing: on a daemon
+# that predates the network-isolation surface (0.1.x) `bunker spawn --network-mode
+# systemd` is accepted, exits 0, and creates an agent with full egress. When the
+# caller states the mode the battery ASSUMES, prove it here — before the first
+# cell — and refuse the run when it cannot be verified. Fail closed: an
+# unverifiable boundary is not an absent requirement.
+if [[ -n "$NETWORK_MODE" && $LOCAL_MODE -eq 1 ]]; then
+  echo "note: --network-mode is a remote-mode flag; ignored with --local"
+  NETWORK_MODE=""
+fi
+if [[ -n "$NETWORK_MODE" ]]; then
+  case "$NETWORK_MODE" in
+    shared|systemd|procvis|hidepid) ;;
+    *) fatal "invalid --network-mode '$NETWORK_MODE' (valid: shared systemd procvis hidepid)" ;;
+  esac
+  if ! BUNKER_BIN="$BUNKER" bash "$REPO/scripts/bunker-isolation-gate.sh" \
+      verify --agent "$AGENT" --server "$SERVER" --mode "$NETWORK_MODE"; then
+    fatal "network isolation NOT verified for agent '$AGENT' on server '$SERVER' (the run assumes --network-mode $NETWORK_MODE): refusing to run the battery — a battery whose cut is proven by the flag value runs with full egress. See docs/bunker-runbook.md"
   fi
 fi
 

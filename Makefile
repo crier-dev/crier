@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -56,6 +56,7 @@ help:
 	@echo "  load-soak-under-load  Run the soak under scripts/load-repro.sh burners — the burners-alongside artifact (CR-FEAT-033)"
 	@echo "  load-soak-selftest  Prove the soak's caps refuse, the gate skips, the budget bounds, the run verifies itself and leaves nothing behind — incl. a NEUTER proof (CR-FEAT-033)"
 	@echo "  bunker-matrix-selftest  Prove the bunker-matrix argument surface, its --local safety and its remote refusal — no docker, no bunker, no network (DF-CRIER-81)"
+	@echo "  bunker-isolation-gate-selftest  Prove the network-isolation gate refuses an unenforced/unreported boundary and destroys what it cannot verify — stub bunker CLI, no host, no network (INT-CI-020)"
 	@echo "  bunker-matrix-verdict-check  Drive the matrix's extracted verdict fn through the QA-CRIER-36 contract table (all-skipped -> 2) — no server, no network"
 	@echo "  bunker-matrix-verdict-selftest  Prove that checker still rejects a wrong verdict table / missing function / re-introduced bare test, incl. a neuter proof (QA-CRIER-36)"
 	@echo "  shell-yaml-check  Check every tracked shell script (bash -n) and .github/workflows/*.yml (actionlint, or the PyYAML fallback) — DF-CRIER-206"
@@ -319,6 +320,17 @@ load-soak-selftest: build
 # no network, fully deterministic.
 bunker-matrix-selftest:
 	bash scripts/bunker-matrix-selftest.sh
+
+# INT-CI-020: `bunker spawn --network-mode systemd` is a MODE NAME, not a
+# boundary. On a daemon that predates the network-isolation surface (measured:
+# bunker-las-03, bunkerd 0.1.4) the flag is accepted, the spawn exits 0 and the
+# agent keeps full egress — so a battery that proves its cut by the flag value
+# proves nothing. scripts/bunker-isolation-gate.sh verifies the boundary from
+# the outside (daemon read-back + in-agent probes) and refuses/destroys when it
+# cannot; this selftest drives every verdict arm through a stub bunker CLI.
+# No host, no network, no docker.
+bunker-isolation-gate-selftest:
+	bash scripts/bunker-isolation-gate-selftest.sh
 
 # QA-CRIER-36: scripts/bunker-matrix.sh used to end in the bare test
 # `[[ $FAIL -eq 0 ]]`, so a run in which EVERY cell was skipped exited 0 — a

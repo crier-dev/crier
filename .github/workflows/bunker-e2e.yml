@@ -59,6 +59,20 @@ jobs:
           "$HOME/go/bin/bunker" info "$BUNKER_AGENT" --server "$BUNKER_SERVER" >/dev/null 2>&1 \
             || "$HOME/go/bin/bunker" spawn "$BUNKER_AGENT" --server "$BUNKER_SERVER" --ttl 720h
           "$HOME/go/bin/bunker" heartbeat "$BUNKER_AGENT" --server "$BUNKER_SERVER"
+      # INT-CI-020: prove the isolation this battery ASSUMES before deploying
+      # anything. The flag alone is not a boundary — on a daemon that predates
+      # the network-isolation surface `bunker spawn --network-mode systemd` is
+      # accepted and silently ignored, so the battery would measure the host.
+      # Opt-in (BUNKER_NETWORK_MODE): unset means the workflow makes no
+      # isolation claim, and the gate is not run.
+      - name: Verify network isolation (opt-in)
+        run: |
+          if [ -z "${BUNKER_NETWORK_MODE:-}" ]; then
+            echo "BUNKER_NETWORK_MODE unset — the battery makes no isolation claim; gate not run"
+            exit 0
+          fi
+          bash scripts/bunker-isolation-gate.sh verify \
+            --agent "$BUNKER_AGENT" --server "$BUNKER_SERVER" --mode "$BUNKER_NETWORK_MODE"
       - name: Deploy container to bunker + run config-matrix battery
         run: |
           bash scripts/bunker-matrix.sh --host "$BUNKER_HOST" --port 30011 \
