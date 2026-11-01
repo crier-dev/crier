@@ -377,7 +377,21 @@ function restoreAttribution() {
 }
 function esc(value) { const el = document.createElement("span"); el.textContent = String(value ?? ""); return el.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function author(ref) { return ref && (ref.principal ? ref.principal + (ref.as_agent ? " as " + ref.as_agent : "") : ref.agent || ref.system) || "Unknown author"; }
-function messageText(m) { return typeof m.payload?.text === "string" ? m.payload.text : JSON.stringify(m.payload ?? null, null, 2); }
+function taskLifecycleText(m) {
+  if (m.message_kind !== "task" || !m.task) return "";
+  // Keep the creation instruction when it has displayable text. Lifecycle
+  // transitions are status records, so their action and actor must remain
+  // visible even when the payload is intentionally empty or only evidence.
+  if (m.task.state === "open" && typeof m.payload?.text === "string" && m.payload.text.trim()) return "";
+  const actor = author(m.author);
+  const action = m.task.state === "open" ? "created" : m.task.state === "claimed" ? "claimed" : m.task.state === "done" ? "completed" : m.task.state === "running" ? "started" : m.task.state === "failed" ? "failed" : m.task.state;
+  return "Task " + action + " by " + actor;
+}
+function messageText(m) {
+  const lifecycle = taskLifecycleText(m);
+  if (lifecycle) return lifecycle;
+  return typeof m.payload?.text === "string" ? m.payload.text : JSON.stringify(m.payload ?? null, null, 2);
+}
 function stamp(value) { if (!value) return "Time unavailable"; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
 function avatar(id) { return esc(Array.from(id || "?").slice(0,2).join("").toUpperCase()); }
 function errorText(body) { const e = body?.error; return (typeof e === "string" ? e : [e?.code,e?.message,e?.detail].filter(Boolean).join(": ")) || body?.detail || "Server returned an error"; }

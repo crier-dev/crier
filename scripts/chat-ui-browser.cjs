@@ -270,7 +270,11 @@ async function run() {
   let wire = await response, result = await wire.json(); await waitIdle(page);
   assert.equal(wire.status(),201,JSON.stringify(result)); assert.equal(result.state,'claimed'); assert.equal(result.owner,agent);
   transitions.push({state:result.state,owner:result.owner});
-  verified('UI Claim button POST '+base+taskPath+'/claim -> 201; owner '+agent);
+  assert.doesNotMatch(await page.locator('#transcript').innerText(),/(^|\n)\s*\{\}\s*(\n|$)/,'claimed task must not render bare {} in transcript');
+  assert.doesNotMatch(await page.locator('#branch-rail').innerText(),/(^|\n)\s*\{\}\s*(\n|$)/,'claimed task must not render bare {} in branch rail');
+  assert.match(await page.locator('#transcript').innerText(),new RegExp('Task claimed by '+agent));
+  assert.match(await page.locator('#branch-rail').innerText(),new RegExp('Task claimed by '+agent));
+  verified('UI Claim button POST '+base+taskPath+'/claim -> 201; owner '+agent+'; transcript and branch rail name the claimant');
   assert.equal(await page.locator('[data-task-action="claim"]').count(),0);
   assert.equal(await page.locator('[data-task-evidence]').count(),1,'claimed task must expose a real completion evidence input');
   await assertActionGates('complete');
@@ -314,6 +318,10 @@ async function run() {
   wire = await response; result = await wire.json(); await waitIdle(page);
   assert.equal(wire.status(),201,'UI Complete POST '+taskPath+'/complete: '+JSON.stringify(result));
   assert.equal(result.state,'done'); assert.equal(result.owner,agent);
+  assert.doesNotMatch(await page.locator('#transcript').innerText(),/(^|\n)\s*\{\}\s*(\n|$)/,'completed task must not render bare {} in transcript');
+  assert.doesNotMatch(await page.locator('#branch-rail').innerText(),/(^|\n)\s*\{\}\s*(\n|$)/,'completed task must not render bare {} in branch rail');
+  assert.match(await page.locator('#transcript').innerText(),new RegExp('Task completed by '+agent));
+  assert.match(await page.locator('#branch-rail').innerText(),new RegExp('Task completed by '+agent));
   const completionBody = JSON.parse(wire.request().postData());
   assert.equal(completionBody.actor,agent); assert.deepEqual(completionBody.payload,taskEvidence);
   const stored = await api(base,'GET',taskPath);
