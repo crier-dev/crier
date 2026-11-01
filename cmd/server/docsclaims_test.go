@@ -417,6 +417,53 @@ func loadClaimsFile(t *testing.T, repoRoot string) claimsFile {
 	return set
 }
 
+// TestREADMEOpenAPIInventoryMatchesSpec pins the human-readable API inventory
+// sentence to the canonical OpenAPI document. The existing COUNT-OPENAPI claims
+// re-measure the source counts, while this check proves README's inventory line
+// carries those same values; changing either count or the sentence shape fails.
+func TestREADMEOpenAPIInventoryMatchesSpec(t *testing.T) {
+	repoRoot := resolveRepoRoot(t)
+	readme, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	spec, err := os.ReadFile(filepath.Join(repoRoot, "docs", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read docs/openapi.yaml: %v", err)
+	}
+	var doc struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(spec, &doc); err != nil {
+		t.Fatalf("parse docs/openapi.yaml: %v", err)
+	}
+	if len(doc.Paths) == 0 {
+		t.Fatal("docs/openapi.yaml declares no paths; inventory check would be vacuous")
+	}
+	methods := map[string]bool{"get": true, "post": true, "put": true, "patch": true, "delete": true, "head": true, "options": true, "trace": true}
+	operations := 0
+	for _, item := range doc.Paths {
+		for method := range item {
+			if methods[strings.ToLower(method)] {
+				operations++
+			}
+		}
+	}
+	pattern := regexp.MustCompile(`documented as ([0-9]+) paths / ([0-9]+) operations in ` + "`docs/openapi\\.yaml`")
+	matches := pattern.FindAllSubmatch(readme, -1)
+	if len(matches) == 0 {
+		t.Fatalf("README.md has no API inventory sentence matching %q", pattern.String())
+	}
+	for _, match := range matches {
+		if got := string(match[1]); got != strconv.Itoa(len(doc.Paths)) {
+			t.Errorf("README API path count = %s, docs/openapi.yaml = %d", got, len(doc.Paths))
+		}
+		if got := string(match[2]); got != strconv.Itoa(operations) {
+			t.Errorf("README API operation count = %s, docs/openapi.yaml = %d", got, operations)
+		}
+	}
+}
+
 // ---------- booting the real server (mirrors TestOpenAPIServed exactly) ----------
 
 // docsClaimsInstanceKey writes a fresh ed25519 instance key in the PEM form the
