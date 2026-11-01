@@ -190,8 +190,7 @@ func TestManagementPostureUnwiredIsNotAuthorizedOrCacheable(t *testing.T) {
 
 func renderManagementPosture(t *testing.T, body []byte, want string) string {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	require.NoError(t, err, "node is required to exercise the embedded renderer")
+	node := nodeOrSkip(t)
 	source := string(chatClientHTML)
 	start := strings.Index(source, "function renderPosture(")
 	end := strings.Index(source, "async function refresh()")

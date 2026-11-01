@@ -12,8 +12,7 @@ import (
 )
 
 func TestChatLateJoinTruth(t *testing.T) {
-	node, err := exec.LookPath("node")
-	require.NoError(t, err, "node is required to exercise the shipped late-join client")
+	node := nodeOrSkip(t)
 	out, err := exec.Command(node, filepath.Join("..", "..", "scripts", "chat-late-join-truth.cjs")).CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	require.Contains(t, string(out), "RESULT 12/12 passed")

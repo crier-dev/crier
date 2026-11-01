@@ -37,8 +37,7 @@ func TestFederation391BootChild(t *testing.T) {
 
 func federation391HTML(t *testing.T, status []byte, want string) {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	require.NoError(t, err, "node is required to execute the shipped posture renderer")
+	node := nodeOrSkip(t)
 	source := string(chatClientHTML)
 	start := strings.Index(source, "function renderPosture(b) {")
 	end := strings.Index(source, "async function refresh() {")

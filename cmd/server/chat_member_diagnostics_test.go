@@ -10,8 +10,7 @@ import (
 )
 
 func TestChatMemberDeliveryDiagnostics(t *testing.T) {
-	node, err := exec.LookPath("node")
-	require.NoError(t, err, "node is required for the embedded client behavior test")
+	node := nodeOrSkip(t)
 	source := string(chatClientHTML)
 	if path := os.Getenv("DF347_CHAT_CONTROL"); path != "" {
 		b, err := os.ReadFile(path)

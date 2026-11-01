@@ -113,10 +113,7 @@ func TestChatTrustBasisServedMap(t *testing.T) {
 }
 
 func TestChatTrustBasisRenderer(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal("node is required to execute the basis renderer")
-	}
+	node := nodeOrSkip(t)
 	source := string(chatClientHTML)
 	start := strings.Index(source, "const basisWords = ")
 	if start < 0 {

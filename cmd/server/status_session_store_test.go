@@ -69,8 +69,7 @@ func TestSessionStoreLocation(t *testing.T) {
 
 // Execute the shipped renderer and assert its sentence, not a source substring.
 func TestSessionStorePostureRenderer(t *testing.T) {
-	node, err := exec.LookPath("node")
-	require.NoError(t, err)
+	node := nodeOrSkip(t)
 	path := filepath.Join(t.TempDir(), "operator sessions.db")
 	cfg := config.Config{Session: config.SessionConfig{Backend: "sqlite", SQLitePath: path}}
 	body := httptestRecorder(t, cfg, "memory")

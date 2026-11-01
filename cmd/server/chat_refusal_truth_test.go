@@ -13,8 +13,7 @@ import (
 
 // DF-CRIER-459: run the same selectable-file harness used for RED evidence in CI.
 func TestChatRefusalTruth(t *testing.T) {
-	node, err := exec.LookPath("node")
-	require.NoError(t, err, "node is required to exercise the shipped client")
+	node := nodeOrSkip(t)
 	out, err := exec.Command(node, filepath.Join("..", "..", "scripts", "chat-refusal-truth.cjs")).CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	t.Log(string(out))
