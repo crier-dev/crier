@@ -168,6 +168,10 @@ main() {
   cp "$TRANSPORT_LIB" "$SB/scripts/lib/transport-retry.sh"
   cp "$MATRIX_SRC" "$SB/scripts/bunker-matrix.sh"
   chmod +x "$SB/scripts/bunker-matrix.sh"
+  # INT-CI-020: the matrix delegates --network-mode to the isolation gate, so
+  # the sandbox carries a byte-identical copy of it too (arm 6b drives it).
+  cp "$SELFTEST_DIR/bunker-isolation-gate.sh" "$SB/scripts/bunker-isolation-gate.sh"
+  chmod +x "$SB/scripts/bunker-isolation-gate.sh"
   # POISON bunker-deploy.sh: any deployment attempt is loud (POISON-DEPLOY on
   # stderr), countable (canary file) and fatal (exit 42, the leg's own code).
   {
@@ -270,6 +274,26 @@ main() {
     ok "REMOTE-ENV-GATE: BUNKER_AGENT/BUNKER_SERVER satisfy the gate and the deploy leg really reaches bunker-deploy.sh (canary + POISON-DEPLOY, matrix exits $rc)"
   else
     bad "REMOTE-ENV-GATE: rc=$rc (want nonzero); canary: $([[ -e "$TMP/canary-deploy" ]] && echo present || echo absent); stderr: $(head -c 200 "$TMP/remote-env.err")"
+  fi
+
+  # ── 6b: --network-mode is PROVEN before the first cell (INT-CI-020) ─────────
+  # The poison bunker runs in pass mode (exit 0, prints nothing), so the gate
+  # cannot read a "Net mode:" line and fails CLOSED; the matrix must therefore
+  # refuse the battery BEFORE any deploy. This is the "no false cut" contract:
+  # an unverifiable boundary aborts the run instead of being assumed.
+  rm -f "$TMP/canary-deploy"
+  : > "$TMP/canary-bunker"
+  rc="$(run_matrix "$TMP/netmode-refuse" \
+    POISON_BUNKER_MODE=pass POISON_BUNKER_LOG="$TMP/canary-bunker" \
+    BUNKER_AGENT=ci-agent BUNKER_SERVER=ci-server \
+    -- --host 127.0.0.1 --port 29999 --network-mode systemd)"
+  if [[ "$rc" -ne 0 ]] \
+    && [[ ! -e "$TMP/canary-deploy" ]] \
+    && grep -q -- "network isolation NOT verified" "$TMP/netmode-refuse.err" \
+    && grep -q "^info ci-agent" "$TMP/canary-bunker"; then
+    ok "NETWORK-MODE-GATE: an unverifiable boundary aborts the battery before any deploy (gate ran info, deploy canary absent, rc $rc)"
+  else
+    bad "NETWORK-MODE-GATE: rc=$rc; canary: $([[ -e "$TMP/canary-deploy" ]] && echo present || echo absent); stderr: $(head -c 200 "$TMP/netmode-refuse.err")"
   fi
 
   # ── the local battery: start the fake crier, drive --local at it ────────────

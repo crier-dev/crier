@@ -345,6 +345,13 @@ stack is shipped to it in three steps: prebuild locally → ship directory + ima
 load and up. Replace `my-lab` with your agent name, `<host>` with its tailnet IP, and use the
 agent's key (`~/.bunker/keys/my-lab`).
 
+**Network isolation is a request, not proof.** `bunker spawn --network-mode systemd` is
+accepted — and silently ignored — by any daemon that predates the network-isolation surface,
+so an agent created that way keeps full egress. Never prove containment by the flag:
+[bunker-runbook.md](bunker-runbook.md) carries the per-server matrix, and
+`scripts/bunker-isolation-gate.sh verify --agent <id> --server <name> --mode <mode>` is the
+fail-closed check to run before a battery claims its cut (exit 1 = UNVERIFIED).
+
 ### 4.1 Ship the stack
 
 ```bash
@@ -635,5 +642,8 @@ Compose v2.40.3; the same profile-less `down -v` immediately before it removed n
   key-mode battery evidence from the live bunker deployment.
 - `scripts/bunker-deploy.sh` / `scripts/bunker-matrix.sh` — single-relay deploy + config
   matrix batteries.
+- `docs/bunker-runbook.md` + `scripts/bunker-isolation-gate.sh` — network-isolation support
+  matrix per bunker server and the fail-closed boundary gate (INT-CI-020); the matrix's
+  `--network-mode` flag runs it before the first cell.
 - `.github/workflows/bunker-e2e.yml` — CI contract (§5).
 - `specs/LLM-MESSAGE-GUARD.md` (CR-SPEC-002) — guard verdict contract, policies, providers.

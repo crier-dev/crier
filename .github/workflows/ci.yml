@@ -251,6 +251,13 @@ jobs:
           # no server and no network; the selftest keeps the checker honest.
           make bunker-matrix-verdict-check
           make bunker-matrix-verdict-selftest
+          # INT-CI-020: the network-isolation gate. A battery that trusts
+          # `--network-mode systemd` without proving it runs with full egress on
+          # any daemon that predates the isolation surface (measured on
+          # bunker-las-03). 24 hermetic arms drive the gate through a stub
+          # bunker CLI — no host, no network, no docker.
+          make bunker-isolation-gate-selftest
+          make bunker-matrix-selftest
 
       # DF-CRIER-278: the tier-2 judge's input budget is the most expensive knob in
       # the repo, and a board-only diff has nothing in it a larger budget would
