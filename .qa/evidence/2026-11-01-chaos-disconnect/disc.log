@@ -1,0 +1,61 @@
+COMMAND: (cd /home/bunker-qa49-batt2-20261101/qa49 && go test ./... -count=1 -timeout 60s -p 1)
+go: downloading github.com/stretchr/testify v1.12.1
+go: downloading github.com/pashagolub/pgxmock/v5 v5.2.0
+go: downloading go.yaml.in/yaml/v3 v3.0.5
+ok  	github.com/crier-dev/crier/cmd/crier-mcp	5.160s
+ok  	github.com/crier-dev/crier/cmd/server	34.313s
+ok  	github.com/crier-dev/crier/config	0.042s
+?   	github.com/crier-dev/crier/examples/sqlite-quickstart	[no test files]
+ok  	github.com/crier-dev/crier/examples/ws-mesh-demo	16.627s
+ok  	github.com/crier-dev/crier/internal/a2a	0.009s
+ok  	github.com/crier-dev/crier/internal/addressing	0.003s
+ok  	github.com/crier-dev/crier/internal/buildinfo	0.003s
+ok  	github.com/crier-dev/crier/internal/chat	0.002s
+ok  	github.com/crier-dev/crier/internal/ci	0.025s
+ok  	github.com/crier-dev/crier/internal/daggerctl	2.315s
+ok  	github.com/crier-dev/crier/internal/detect	0.012s
+ok  	github.com/crier-dev/crier/internal/dispatchlive	0.004s
+ok  	github.com/crier-dev/crier/internal/federation	1.272s
+ok  	github.com/crier-dev/crier/internal/guard	15.421s
+ok  	github.com/crier-dev/crier/internal/httperr	0.003s
+ok  	github.com/crier-dev/crier/internal/mcp	6.828s
+ok  	github.com/crier-dev/crier/internal/mesh	7.438s
+ok  	github.com/crier-dev/crier/internal/metrics	0.007s
+ok  	github.com/crier-dev/crier/internal/middleware	0.008s
+ok  	github.com/crier-dev/crier/internal/namespace	0.004s
+ok  	github.com/crier-dev/crier/internal/permissions	0.009s
+ok  	github.com/crier-dev/crier/internal/pidfile	0.110s
+ok  	github.com/crier-dev/crier/internal/ratelimit	0.606s
+--- FAIL: TestServiceDeliveryPythonInterop (0.58s)
+    service_auth_python_test.go:51: 
+        	Error Trace:	/home/bunker-qa49-batt2-20261101/qa49/internal/registry/service_auth_python_test.go:51
+        	Error:      	Received unexpected error:
+        	            	exit status 1
+        	Test:       	TestServiceDeliveryPythonInterop
+        	Messages:   	Traceback (most recent call last):
+        	            	  File "<string>", line 8, in <module>
+        	            	    accepted = c.deliver("router", {"task": "python signed delivery"}, sender="scheduler", idempotency_key="py-dispatch")
+        	            	  File "/home/bunker-qa49-batt2-20261101/qa49/internal/registry/../../clients/python/crier_client.py", line 1003, in deliver
+        	            	    _, parsed = self._raw_request(
+        	            	                ~~~~~~~~~~~~~~~~~^
+        	            	        "POST", "/agents/%s/inbox" % urllib.parse.quote(agent_id, safe=""), body=body,
+        	            	        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        	            	        signed=bool(self.agent_id and sender == self.agent_id),
+        	            	        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        	            	    )
+        	            	    ^
+        	            	  File "/home/bunker-qa49-batt2-20261101/qa49/internal/registry/../../clients/python/crier_client.py", line 895, in _raw_request
+        	            	    raise CrierError(
+        	            	    ...<4 lines>...
+        	            	    ) from None
+        	            	crier_client.CrierError: HTTP 0 (/agents/router/inbox): cannot reach the crier server at http://127.0.0.1:35355: [Errno 111] Connection refused
+FAIL
+FAIL	github.com/crier-dev/crier/internal/registry	8.938s
+ok  	github.com/crier-dev/crier/internal/relay	7.085s
+ok  	github.com/crier-dev/crier/internal/session	2.681s
+ok  	github.com/crier-dev/crier/internal/strictjson	0.003s
+ok  	github.com/crier-dev/crier/internal/testsupport	2.209s
+ok  	github.com/crier-dev/crier/internal/trust	0.013s
+ok  	github.com/crier-dev/crier/internal/webhook	16.707s
+FAIL
+RESULT: FAIL (exit 1)

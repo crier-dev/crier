@@ -1,0 +1,12 @@
+attempt-4-cut-proof
+2026-10-31T20:39:08-07:00
+CONTROL command: env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy curl -m 5 -sS https://proxy.golang.org
+CONTROL rc=0
+2026-10-31T20:39:09-07:00
+CUT command: HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 curl -m 5 -sS https://proxy.golang.org
+CUT rc=7
+curl: (7) Failed to connect to 127.0.0.1 port 9 after 0 ms: Could not connect to server
+2026-10-31T20:39:09-07:00
+LOOPBACK command: curl -m 2 -sS http://127.0.0.1:1/
+LOOPBACK rc=7
+curl: (7) Failed to connect to 127.0.0.1 port 1 after 0 ms: Could not connect to server

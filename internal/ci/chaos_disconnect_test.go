@@ -28,7 +28,7 @@ func TestChaosDisconnectEvidenceContract(t *testing.T) {
 		if err := os.WriteFile(log, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command("bash", script, repo, "--validate", log)
+		cmd := exec.Command("bash", script, "--validate", repo, log)
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 		out, err := cmd.CombinedOutput()
 		if err == nil || !strings.Contains(string(out), "suite is available but disconnect evidence is empty") {

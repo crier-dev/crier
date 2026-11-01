@@ -3,8 +3,19 @@
 # The caller owns applying/removing the cut; this script owns truthful evidence.
 set -uo pipefail
 
-repo=${1:-.}
 log=${DISC_LOG:-disc.log}
+
+# Accept the documented --validate [repo] [log] form, while preserving the
+# original [repo] --validate [log] form for existing callers.
+if [[ ${1:-} == "--validate" ]]; then
+  repo=${2:-.}
+  evidence=${3:-$log}
+elif [[ ${2:-} == "--validate" ]]; then
+  repo=${1:-.}
+  evidence=${3:-$log}
+else
+  repo=${1:-.}
+fi
 repo=$(cd "$repo" 2>/dev/null && pwd) || { echo "UNVERIFIED: repository path unavailable: $repo" >&2; exit 2; }
 
 suite_available() {
@@ -24,8 +35,8 @@ validate_evidence() {
   fi
 }
 
-if [[ ${2:-} == "--validate" ]]; then
-  validate_evidence "${3:-$log}"
+if [[ ${1:-} == "--validate" || ${2:-} == "--validate" ]]; then
+  validate_evidence "$evidence"
   exit $?
 fi
 
