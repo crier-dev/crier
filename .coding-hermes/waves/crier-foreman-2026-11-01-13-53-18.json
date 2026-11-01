@@ -1,0 +1,44 @@
+{
+  "tick_id": "crier-foreman-2026-11-01-13-53-18",
+  "block": "INT-CI-020",
+  "mode": "wave",
+  "wave_size": 2,
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg=9.03, formula slots = max(1, min(6, 16-ceil(9.03))) = 6",
+  "workers": [
+    {
+      "task_id": "INT-CI-020",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-020",
+      "branch": "wt/INT-CI-020",
+      "brief": "/tmp/crier-brief-INT-CI-020.txt"
+    },
+    {
+      "task_id": "DF-CRIER-492",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-492",
+      "branch": "wt/DF-CRIER-492",
+      "brief": "/tmp/crier-brief-DF-CRIER-492.txt"
+    }
+  ],
+  "finished_at": "2026-11-01T19:45:00Z",
+  "recovery": {
+    "status": "complete",
+    "canonical_head": "3f63b5a5ec41b945f118ad70282584cfa0b98de7",
+    "workers": {
+      "INT-CI-020": {
+        "branch_tip": "6e82614ba363652c2df3149bf7d820bd42c1ce37",
+        "branch_gate": "PASS",
+        "merged_commit": "f4ff331e",
+        "judge": "PASS bd473ee2; merged-tree verdict commit 3f63b5a5ec41b945f118ad70282584cfa0b98de7"
+      },
+      "DF-CRIER-492": {
+        "branch_tip": "4d6eae4c69cfc0e34e4b416cac1e23392e036661",
+        "branch_gate": "PASS",
+        "merged_commit": "3f63b5a5",
+        "judge": "PASS 3793ea86; merged-tree verdict commit 3f63b5a5ec41b945f118ad70282584cfa0b98de7"
+      }
+    },
+    "local_gate": "PASS: gitreins guard --full; go build ./...; go vet ./...; go test ./... -count=1 on recovery control tree",
+    "remote_parity": "origin/main == gitlab/main == 3f63b5a5ec41b945f118ad70282584cfa0b98de7",
+    "remaining": "No recovery workers remain; unrelated canonical checkout residue preserved and not mutated."
+  }
+}
