@@ -22,7 +22,7 @@
   "finished_at": "2026-11-01T19:45:00Z",
   "recovery": {
     "status": "complete",
-    "canonical_head": "ff702cb6cb5d19e106d176a2f5e3315b13fa5506",
+    "canonical_head": "82c62af4fba0ae8e6215f4ec70219937a3de476d",
     "workers": {
       "INT-CI-020": {
         "branch_tip": "6e82614ba363652c2df3149bf7d820bd42c1ce37",
@@ -38,7 +38,7 @@
       }
     },
     "local_gate": "PASS: gitreins guard --full; go build ./...; go vet ./...; go test ./... -count=1 on recovery control tree",
-    "remote_parity": "origin/main == gitlab/main == ff702cb6cb5d19e106d176a2f5e3315b13fa5506; 0/0",
+    "remote_parity": "origin/main == gitlab/main == 82c62af4fba0ae8e6215f4ec70219937a3de476d; 0/0",
     "remaining": "No recovery workers remain; unrelated canonical checkout residue preserved and not mutated."
   }
 }
