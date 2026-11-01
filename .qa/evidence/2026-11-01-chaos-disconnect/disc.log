@@ -1,6 +1,9 @@
-ATTEMPT: 2
-AGENT: qa49-probe-20261101 on bunker-las-03
-NETWORK_CUT: NOT APPLIED (unshare -n denied; iptables unavailable; see cut-proof.log)
-COMMAND: (not run) DISC_LOG=qa49/disc.log bash .qa/chaos-probes/chaos-disconnect.sh qa49
-RESULT: UNVERIFIED (battery not run; no suite exit code under cut)
-SETUP: Go 1.26.9 installed in agent home; go mod download PASS; go build ./... PASS.
+ATTEMPT: 3
+AGENT: qa49-batt-20261101 on bunker-las-03
+SPAWN_REQUEST: bunker spawn qa49-batt-20261101 --server bunker-las-03 --network-mode systemd --ttl 6h
+NETWORK_CUT: NOT VERIFIED — external probe succeeded (see cut-proof.log)
+REPOSITORY_SUITE: AVAILABLE — Go 1.26.9; offline `GOPROXY=off GOFLAGS=-mod=mod GOMODCACHE="$HOME/qa49/modcache" go build ./...` exited 0 at 2026-10-31T20:23:58-07:00
+COMMAND: (NOT RUN) `DISC_LOG=qa49/disc.log bash .qa/chaos-probes/chaos-disconnect.sh qa49`
+RESULT: BLOCKED before battery — `curl -m 5 -sS https://proxy.golang.org >/dev/null` exited 0 at 2026-10-31T20:24:07-07:00 and again at 2026-10-31T20:24:47-07:00; no network-cut evidence exists.
+SUITE_EXIT_CODE_UNDER_CUT: unavailable (battery deliberately not run without a proven cut).
+TEARDOWN: bunker destroy succeeded; agent removed.
