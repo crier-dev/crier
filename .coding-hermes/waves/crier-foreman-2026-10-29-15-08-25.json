@@ -1,0 +1,26 @@
+{
+  "tick_id": "crier-foreman-2026-10-29-15-08-25",
+  "block_id": "DF-CRIER-484",
+  "rows": [
+    {
+      "id": "DF-CRIER-333",
+      "title": "Browser access under CR_AUTH_TOKEN has no sign-in path",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-333.txt"
+    },
+    {
+      "id": "DF-CRIER-335",
+      "title": "Crier control-panel completion loop — definition of done",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-335.txt"
+    }
+  ],
+  "slots_used": 2,
+  "host_load_at_dispatch": "4.72",
+  "cores": 16,
+  "finished_at": 1793292978.391494,
+  "finish_reason": "aborted-no-dispatch",
+  "recovered_rows": []
+}

@@ -1,0 +1,27 @@
+{
+  "tick_id": "crier-foreman-2026-10-29-18-03-48",
+  "block": "DF-CRIER-486",
+  "mode": "serial-fallback",
+  "wave_budget": 10,
+  "slots": 1,
+  "slots_reason": "nproc=16, tick-start loadavg=21.66; max(1, min(6, 16-ceil(21.66))) = 1",
+  "selection": "block_drive selected DF-CRIER-486; DF-CRIER-333 is owner-blocked and DF-CRIER-335 is blocked on it, so DF-CRIER-485 is the next ready implementation row",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-485",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-485",
+      "branch": "wt/DF-CRIER-485",
+      "base_sha": "e7e1c457d0a2bd36dbe9ac51bb38507817d6a51c",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "brief_path": "/tmp/crier-foreman-2026-10-29-18-03-48-DF-CRIER-485-brief.txt",
+      "dispatch_path": "/tmp/crier-foreman-2026-10-29-18-03-48-DF-CRIER-485-dispatch.sh",
+      "attempts": 2,
+      "status": "failed-zero-diff",
+      "gitreins_task": "DF-CRIER-485",
+      "outcome": "No implementation commit. Attempt 1 stalled with the Hermes state DB locked; attempt 2 stalled with no source progress. Both were terminated after verifying zero implementation diff."
+    }
+  ],
+  "merge_order": ["DF-CRIER-485"],
+  "finished_at": "2026-10-29T18:42:04Z"
+}

@@ -1,0 +1,39 @@
+{
+  "tick_id": "crier-foreman-2026-10-30-XXXX-XX-XX",
+  "block_id": "DF-CRIER-486",
+  "rows": [
+    {
+      "id": "DF-CRIER-333",
+      "title": "Browser access under CR_AUTH_TOKEN has no sign-in path",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-333.txt"
+    },
+    {
+      "id": "DF-CRIER-335",
+      "title": "Crier control-panel completion loop — definition of done",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-335.txt"
+    },
+    {
+      "id": "DF-CRIER-485",
+      "title": "On the postgres backend, named groups are written to a local...",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-485.txt"
+    },
+    {
+      "id": "DF-CRIER-484",
+      "title": "Block DF-CRIER-486 remaining work",
+      "worktree": null,
+      "branch": null,
+      "brief_path": "/tmp/brief-DF-CRIER-484.txt"
+    }
+  ],
+  "slots_used": 4,
+  "host_load_at_dispatch": "4.72",
+  "cores": 16,
+  "finished_at": "2026-11-01T04:10:00Z",
+  "finish_reason": "closed by tick crier-foreman-2026-11-01-02-14-15: template-name artifact (literal XXXX tick id); zero workers were dispatched from this manifest (worktree/branch null on every row); its rows DF-CRIER-333 and DF-CRIER-335 remain live on the board (owner-blocked / dependent completion loop)."
+}

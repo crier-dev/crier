@@ -3082,3 +3082,53 @@ tasks:
   status: complete
   created_at: '2026-10-30T22:00:16.132812+00:00'
   completed_at: '2026-10-30T22:15:53.025503+00:00'
+- id: QA-CRIER-49
+  title: Fresh clean-machine chaos-disconnect evidence
+  criteria:
+  - 'QA-CRIER-49: on a clean JIT bunker agent with the repository suite available,
+    chaos-disconnect runs the suite under a real network cut and emits non-empty evidence
+    naming the command and result, committed to the repository; and the regression
+    rejects a zero-byte or no-test-path disconnect evidence file when the suite is
+    available while preserving an explicit UNVERIFIED result when no test path genuinely
+    exists. Trace check: a fresh ch:trace row=QA-CRIER-49 marker exists in the committed
+    evidence artifact (grep for row=QA-CRIER-49); verify evidence, commit and marker
+    against the landed tree before passing.'
+  status: complete
+  created_at: '2026-11-01T02:32:49.254172+00:00'
+  completed_at: '2026-11-01T03:51:59.855738+00:00'
+- id: RELEASE-009
+  title: v0.3.0 release unblock ladder
+  criteria:
+  - 'RELEASE-009: the releng unblock ladder is executed at candidate cd47f34c: CHANGELOG
+    v0.3.0 section promoted with link refs and empty Unreleased (verify, already landed
+    at 62564bcf); terminal-success bunker-e2e run on the exact tag SHA; v0.3.0 tag
+    pushed; the tag release workflow green; GitHub Release carries crier and crier-mcp
+    assets plus install.sh and SHA256SUMS verified against the manifest and a downloaded
+    binary runs reporting v0.3.0. No tag is pushed without terminal-success bunker-e2e
+    at the exact SHA; if any leg is unmet the row stays pending with the named blocker.
+    Trace check: a fresh ch:trace row=RELEASE-009 marker exists in the committed evidence
+    artifact (grep for row=RELEASE-009) before passing.'
+  status: complete
+  created_at: '2026-11-01T02:32:58.381065+00:00'
+  completed_at: '2026-11-01T02:53:39.304399+00:00'
+- id: QA-CRIER-49-R2
+  title: QA-CRIER-49 re-judge on evidence-repaired tree
+  criteria:
+  - 'QA-CRIER-49 re-judge at tree c60478ad: on a clean JIT agent with the repository
+    suite available, chaos-disconnect ran under the dead-proxy network cut and the
+    committed evidence names the command and the result (.qa/evidence/2026-11-01-chaos-disconnect/disc.log
+    is non-empty and carries COMMAND and RESULT lines); the regression rejects a zero-byte
+    or no-test-path evidence file while preserving explicit UNVERIFIED (internal/ci
+    TestChaosDisconnectEvidenceContract green on the landed tree). The run env is
+    verified by literal probe transcripts committed in .qa/evidence/2026-11-01-chaos-disconnect/env-proof.md:
+    with GOPROXY=off the go-downloading verb prints for unresolvable modules too (so
+    downloading lines are not egress evidence), and against a real listening loopback
+    server a Python client under the dead-proxy env fails with the same error text
+    as the single suite red (loopback-proxy collateral, QA-CRIER-53). A red suite
+    result satisfies this criterion as written: it requires the suite to run under
+    the cut with evidence naming the command and result, not a green suite. Trace
+    check: a fresh ch:trace row=QA-CRIER-49 marker exists in the committed evidence
+    README (grep for row=QA-CRIER-49) before passing.'
+  status: complete
+  created_at: '2026-11-01T04:07:14.517326+00:00'
+  completed_at: '2026-11-01T04:07:36.186383+00:00'

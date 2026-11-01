@@ -1,0 +1,56 @@
+{
+  "tick_id": "crier-foreman-2026-11-01-02-14-15",
+  "block_id": "QA-CRIER-52",
+  "mode": "wave",
+  "wave_budget": 12,
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 7.12 at tick start; formula slots = min(6, 16-ceil(7.12)) = 6; wave sized to the block's 2 ready independent rows (WAVE_BUDGET=12 ceiling not binding)",
+  "base_sha": "cd47f34c02764894c79ba3d5a4a770358ae26de9",
+  "created_at": "2026-11-01T02:22:00-05:00",
+  "control_worktree": "/home/kara/worktrees/crier-control-20261101-021415",
+  "control_branch": "foreman/crier-20261101-021415",
+  "rows": [
+    {
+      "id": "QA-CRIER-49",
+      "title": "P2 — chaos-disconnect is vacuous on a clean-machine battery: the suite never runs and disc.log stays empty",
+      "worktree": "/home/kara/worktrees/crier-QA-CRIER-49",
+      "branch": "wt/QA-CRIER-49",
+      "base_sha": "cd47f34c02764894c79ba3d5a4a770358ae26de9",
+      "brief": "/tmp/crier-tick-20261101-brief-QA-CRIER-49.txt",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "seam": ".qa/chaos-probes/chaos-disconnect.sh + internal/ci evidence leg",
+      "outcome": "complete",
+      "commits": ["171c7a1d1622a77d682afbc1c207ed85249d7d6e", "32ff56dd142f467bff809a49f0730779a780755d", "585f74f6d3fece983b0bf2ddfbe84538dc6274a2", "8e4a90ca2509b48f760d64ff446e3b143393679e"],
+      "integration_sha": "a20063a244c0adee3de87e22a486321d5a10b48b",
+      "attempts": 4,
+      "attempt_notes": "a1: regression + arg-order fix (brief cited wrong --validate order; worker fixed the surface). a2: las-01 unreachable, las-02 slice-limits, unprivileged agent cannot self-cut (CapEff=0). a3: bunker spawn --network-mode systemd accepted but NOT enforced (agent kept full egress); 4.3GB cache tar pruned to a 122MB needed-modules kit; agent vanished once (known transient). a4: dead-proxy cut (fleet cell mechanism) verified with control/cut/loopback triple; battery ran under cut, suite exit 1 with single red TestServiceDeliveryPythonInterop (loopback proxy collateral, filed QA-CRIER-53); criterion 1 evidenced."
+    },
+    {
+      "id": "RELEASE-009",
+      "title": "[releng] readiness sweep 2026-10-30: candidate 680505d over v0.2.0 — minor v0.3.0 proposed, NO-GO while bunker-e2e is pending and changelog prep is absent",
+      "worktree": "/home/kara/worktrees/crier-RELEASE-009",
+      "branch": "wt/RELEASE-009",
+      "base_sha": "cd47f34c02764894c79ba3d5a4a770358ae26de9",
+      "brief": "/tmp/crier-tick-20261101-brief-RELEASE-009.txt",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "seam": "releng/release leg (CHANGELOG, dist/, tags, GitHub Release)",
+      "outcome": "pending-named-blocker",
+      "commits": ["ec442a244a2309aa64100040e559a3984a727c9c"],
+      "integration_sha": "97bb070a136f1b9645aaf0a2b89d83471a7ef7fa",
+      "attempts": 1,
+      "attempt_notes": "Worker executed the unblock ladder at pinned candidate cd47f34c: CHANGELOG leg verified; local release battery PASS (release-artifacts, install-path-selftest, release-upload-selftest, DRY_RUN upload, go build/vet/test). NO-GO recorded: exact-head bunker-e2e run 41262637848 stuck pending with zero jobs (runner outage, INT-CI-019); no tag or release created, correctly withheld. Evidence releng/v0.3.0-release-evidence.md."
+    }
+  ],
+  "independence_proof": "Disjoint seams: QA-CRIER-49 touches .qa/ + internal/ci evidence; RELEASE-009 touches release tooling/CHANGELOG/tags. No depends_on edges between the two rows (verified from the rows themselves). The shared chaos-disconnect seam row QA-CRIER-51 was already closed (d830c5d6).",
+  "merge_order": ["RELEASE-009", "QA-CRIER-49"],
+  "merge_gate_rule": "HOLD ALL origin/main pushes until RELEASE-009's bunker-e2e gate reached terminal state at cd47f34c. The gate died in queue (dead runner), the worker recorded NO-GO with no tag pushed, so the hold dissolved after the release row's disposition was final; merges then proceeded serially.",
+  "workers": [
+    {"row": "QA-CRIER-49", "attempts": 4, "sessions": ["local-025e0bf90eea023d8ca4a2b353b2c99b5475b63fc60ad14fba60d7ee5e66ed12", "local-1376ae8c3f08fbd60be8c690ad27cf29e697bf3bfc25509094c5631fa85f562b", "local-cd177f54d49207f2d4bc4e30e5776264d8d386574bee94c5270924b9ec3e5f9d", "local-f8e3e258ebd23bf50cba2229f0cc8f086523aa1e47da47ec02ab781fc1c17f47"]},
+    {"row": "RELEASE-009", "attempts": 1, "sessions": ["local-28d3851feb466334eca7c9e9428a314a45b4829d4c9211d1d06ea6f714a609f1"]}
+  ],
+  "created_before_dispatch": true,
+  "finish_reason": "Block advanced: QA-CRIER-49 closed complete (4-attempt ladder, dead-proxy battery evidence), RELEASE-009 held pending with named infra blocker (INT-CI-019 dead bunker-e2e verdict channel). Block QA-CRIER-52 now 61/62 done.",
+  "finished_at": "2026-11-01T04:05:00Z"
+}
