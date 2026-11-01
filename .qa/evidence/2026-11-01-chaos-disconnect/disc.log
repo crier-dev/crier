@@ -1,3 +1,6 @@
-UNVERIFIED: fresh clean JIT disconnect suite was not run; the required agent could not be provisioned.
-COMMAND: (not run; no agent/network-cut context was available)
-RESULT: UNVERIFIED (agent spawn failed before suite staging or execution)
+ATTEMPT: 2
+AGENT: qa49-probe-20261101 on bunker-las-03
+NETWORK_CUT: NOT APPLIED (unshare -n denied; iptables unavailable; see cut-proof.log)
+COMMAND: (not run) DISC_LOG=qa49/disc.log bash .qa/chaos-probes/chaos-disconnect.sh qa49
+RESULT: UNVERIFIED (battery not run; no suite exit code under cut)
+SETUP: Go 1.26.9 installed in agent home; go mod download PASS; go build ./... PASS.

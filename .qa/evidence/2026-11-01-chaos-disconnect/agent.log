@@ -1,29 +1,42 @@
-Task: QA-CRIER-49
-Agent id: qa49-202611010215 (not created)
+Task: QA-CRIER-49 attempt 2
+Agent: qa49-probe-20261101
+Server: bunker-las-03
 
-Repository CI workflow inspected: .github/workflows/bunker-e2e.yml declares BUNKER_SERVER and BUNKER_HOST from GitHub secrets; those values were unavailable in this local environment. Configured candidate server aliases are bunker-las-01 through bunker-las-04. No claim is made that either attempted alias is the CI secret value.
+1. Verify agent
+Command: bunker info qa49-probe-20261101 --server bunker-las-03
+Result: Status running; expires 2026-11-01T01:47:42-07:00. Network isolation was not reported by daemon.
 
-Spawn attempt 1:
-Command: bunker spawn qa49-202611010215 --server bunker-las-01 --ttl 24h
-Result: failed; unavailable: dial tcp 100.78.165.52:19090: connect: connection refused.
+2. Toolchain discovery
+Command: bunker exec qa49-probe-20261101 --server bunker-las-03 -- sh -lc 'go version; git --version; id; command -v iptables; command -v unshare; command -v curl'
+Result: `go: not found`; Git 2.47.3; uid 1001; unshare and curl present; iptables absent.
 
-Server reachability checks:
-- bunker-las-01: unavailable, connection refused.
-- bunker-las-02: responsive; agent lookup returned not_found before spawn attempt.
-- bunker-las-03: responsive; agent lookup returned not_found before spawn attempt.
-- bunker-las-04: request timed out.
+3. Stage repository source
+Local command: git archive --format=tar HEAD | gzip -1 > /tmp/qa49-attempt2-src.tgz; stat -c '%n %s bytes' /tmp/qa49-attempt2-src.tgz; sha256sum /tmp/qa49-attempt2-src.tgz
+Result: 44,914,234 bytes; SHA-256 2bb7f37ca0462824bcf65ab75d2ec29d0be92aa57b9528e2becd31da93237c26.
 
-Spawn attempt 2:
-Command: bunker spawn qa49-202611010215 --server bunker-las-02 --ttl 24h
-Result: failed at stage slice-limits: containment landing did not converge within 5 reads; memory.swap.max was "max", expected "0" (bar swap).
+First copy command: bunker cp /tmp/qa49-attempt2-src.tgz qa49-probe-20261101:qa49-src.tgz --server bunker-las-03
+Result: `bunker: scp: exit status 1`; remote file was truncated (24,545,280 bytes; gzip -t reported unexpected end of file). Retrying the same `bunker cp` returned the same error.
 
-No agent reached running state; no heartbeat, repository staging, module-cache warmup, network cut, or remote suite execution was performed. TTL would have been 24h if creation succeeded.
+Working staging command: bunker exec --server bunker-las-03 --stdin /tmp/qa49-attempt2-src.tgz qa49-probe-20261101 -- sh -lc 'cat > qa49-src.tgz && gzip -t qa49-src.tgz && stat -c "%n %s bytes" qa49-src.tgz'
+Result: `qa49-src.tgz 44914234 bytes`; gzip integrity check passed.
 
-Local verification:
-- `bash -n .qa/chaos-probes/chaos-disconnect.sh`: PASS.
-- `go test ./internal/ci -count=1 -v`: PASS; includes the three chaos evidence-contract subtests.
-- Empty evidence validation with `bash .qa/chaos-probes/chaos-disconnect.sh --validate . /tmp/qa49-empty-disc-20261101.log`: exit 1, expected `FAIL: repository suite is available but disconnect evidence is empty`.
-- Copied-back placeholder validation with `bash .qa/chaos-probes/chaos-disconnect.sh --validate . .qa/evidence/2026-11-01-chaos-disconnect/disc.log`: exit 0. This checks argument handling and non-empty evidence only; it does not upgrade the placeholder to a real run.
-- `go build ./...`: PASS.
-- `go vet ./...`: PASS.
-- `go test ./... -count=1 -timeout 60s -p 1`: PASS.
+4. Install required Go toolchain in agent home and build
+Initial combined command unpacked source before `cd qa49` existed; its ending result was `cd: can't cd to qa49` (exit 2). Go download and extraction had succeeded.
+
+Successful command: bunker exec qa49-probe-20261101 --server bunker-las-03 --timeout 300 -- sh -lc 'mkdir -p qa49 && tar -xzf qa49-src.tgz -C qa49 && export PATH="$HOME/go-bootstrap/go/bin:$PATH" && go version && git --version && cd qa49 && go mod download && go build ./...'
+Result: go version go1.26.9 linux/amd64; git version 2.47.3; `go mod download` and `go build ./...` both completed with exit 0 and no error output.
+
+5. Network-cut attempts
+Command: bunker exec qa49-probe-20261101 --server bunker-las-03 --timeout 60 -- sh -lc 'date -Is; curl -I -m 8 -sS https://proxy.golang.org >/dev/null; echo external_before_rc=$?; unshare -n sh -lc "ip link set lo up && date -Is && curl -I -m 5 -sS https://proxy.golang.org >/dev/null; echo external_cut_rc=\\$?; curl -m 5 -sS http://127.0.0.1:9 >/dev/null; echo loopback_cut_rc=\\$?"'
+Result: timestamp 2026-10-31T19:53:52-07:00; external_before_rc=0; unshare failed `Operation not permitted` (exec exit 1). No in-cut probe ran.
+
+Alternative command: bunker exec qa49-probe-20261101 --server bunker-las-03 --timeout 60 -- sh -lc 'iptables -I OUTPUT 1 -o lo -j ACCEPT; echo insert_loopback_rc=$?; iptables -I OUTPUT 2 -j DROP; echo insert_drop_rc=$?; iptables -S OUTPUT'
+Result: iptables not found; each invocation exit 127; no cut applied.
+
+Capability command: bunker exec qa49-probe-20261101 --server bunker-las-03 -- sh -lc 'command -v nft; command -v iptables; command -v ip6tables; command -v capsh; command -v setpriv; grep CapEff /proc/self/status; cat /proc/self/uid_map; cat /proc/self/gid_map'
+Result: only setpriv resolved (/usr/bin/setpriv); CapEff 0000000000000000; identity maps shown; agent is unprivileged uid 1001.
+
+Backup check: bunker status
+Result: bunker-mvp online, but reports shared host network namespace with no network isolation. No backup agent was spawned because this cannot satisfy the cut criterion.
+
+Battery: NOT RUN. Exact intended command was `DISC_LOG=qa49/disc.log bash .qa/chaos-probes/chaos-disconnect.sh qa49`; it requires the missing external-egress cut. No suite exit code under cut exists.

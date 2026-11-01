@@ -1,0 +1,3 @@
+UNVERIFIED: fresh clean JIT disconnect suite was not run; the required agent could not be provisioned.
+COMMAND: (not run; no agent/network-cut context was available)
+RESULT: UNVERIFIED (agent spawn failed before suite staging or execution)
