@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -46,6 +46,8 @@ help:
 	@echo "  coverage-check    Fail if coverage is below the 70% threshold — fail-closed: a failed suite or missing/unparseable data is a refusal (QA-CRIER-34), never a PASS"
 	@echo "  coverage-selftest Prove that gate still refuses a failed suite / stale profile / empty or unparseable coverage data, incl. neuter proofs (QA-CRIER-34)"
 	@echo "  docs-check        Execute prose claims in docs/claims.yaml against the live server — prose drift fails the build (CR-GAP-055)"
+	@echo "  readme-api-check  FAIL when README's API inventory sentence ('documented as N paths / M operations in docs/openapi.yaml') disagrees with a fresh parse of docs/openapi.yaml — an independent arm (PyYAML) beside the Go gate (DF-CRIER-492)"
+	@echo "  readme-api-selftest  Prove that check still rejects a drifted README (over-counted operations, wrong path count, missing and duplicated sentences) and refuses an empty/unparseable/missing spec or an interpreter without PyYAML, incl. a NEUTER proof (DF-CRIER-492)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
 	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10); its live cases SKIP, exit 0, when 'ss'/iproute2 is missing (QA-CRIER-40)"
 	@echo "  client-roundtrip-check  CR-FEAT-027: `crier keygen` + the Python and TypeScript clients through a full signed round-trip on a scratch port (no openssl, no xxd, no packages)"
@@ -192,6 +194,31 @@ coverage-selftest:
 
 docs-check:
 	go test -short -count=1 -run 'TestDocsClaims' ./cmd/server
+
+# DF-CRIER-492: README.md publishes a HAND-MAINTAINED API inventory sentence —
+# "documented as 66 paths / 84 operations in `docs/openapi.yaml`" — and nothing
+# kept it honest. It had already drifted to 61 / 78 while the spec declared
+# 66 / 84: the front page under-sold the documented surface, and every route
+# added to docs/openapi.yaml silently ages the sentence.
+#
+# Two arms pin it, and they must agree:
+#   * cmd/server/docsclaims_test.go TestREADMEOpenAPIInventoryMatchesSpec
+#     (yaml.v3, runs with `go test ./...` — the build job's Test step), and
+#   * scripts/check-readme-api-count.sh (PyYAML) behind this target, so the gate
+#     is an operator surface and a named CI step in the OpenAPI job rather than
+#     an unnamed test among a hundred others.
+# The script counts METHOD keys only (a path-level `parameters:`/`summary:` is
+# not an operation), checks EVERY occurrence of the sentence (a duplicated
+# stale paragraph is a failure, not just the first match), and fails CLOSED:
+# a missing/unreadable file, a missing interpreter, an interpreter without
+# PyYAML, an unparseable spec or a spec with zero paths is exit 2 — never a
+# PASS line. `make readme-api-selftest` proves all of it on fixtures under
+# ${TMPDIR:-/tmp} (including a NEUTER proof), so the green is earned.
+readme-api-check:
+	bash scripts/check-readme-api-count.sh
+
+readme-api-selftest:
+	bash scripts/check-readme-api-count.sh --selftest
 
 # QA-CRIER-9: the example harnesses refuse to run while their scratch port is
 # occupied and assert that the process answering /health is the one they started.
