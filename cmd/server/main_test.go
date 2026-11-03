@@ -121,12 +121,12 @@ func TestServerHealth(t *testing.T) {
 // with a fresh port when the server exits before /health — see
 // startTestServerWithEnv (INT-CI-014).
 //
-// INT-CI-022: a test that hands this port to a CHILD PROCESS must not assert
-// against it. A squatter that wins the window answers /health with 200 and
+// INT-CI-022: a test that hands a freePort() number to a CHILD PROCESS must not
+// assert against it. A squatter that wins the window answers /health with 200 and
 // then returns a foreign body, so the failure reads as a product bug
-// ("expected 201, got 200 {\"ok\":true}") instead of "we talked to a
-// stranger". Such tests pass CRIER_PORT=0 and wait for the child's own
-// pidfile — waitForChildBoundPort below is that handshake.
+// ("expected 201, got 200 {\"ok\":true}") instead of "we talked to a stranger".
+// Such tests pass CRIER_PORT=0 and wait for the child's own pidfile — the
+// process-child handshake in childboot_test.go (waitForBoundPort) is that wait.
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -137,60 +137,138 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-// childPortWait bounds how long a test waits for a spawned server child to
-// publish the port it bound. A cold child boot on a loaded host is a few
-// hundred milliseconds (a2aBootMeasuredCost); this is the ceiling, not the
-// expectation, and the failure path reports the child's own output.
-const childPortWait = 20 * time.Second
-
-// waitForChildBoundPort returns the port the spawned child ACTUALLY bound,
-// read from the pidfile the child writes immediately after its own
-// net.Listen succeeded, and refuses to return a port that is not provably
-// ours (INT-CI-022).
+// waitForChildBoundPort returns the port a spawned child ACTUALLY bound, read
+// from the pidfile the child writes only after its own net.Listen succeeded, and
+// refuses to return a port that is not provably ours (INT-CI-022).
 //
 // Why this and not freePort: freePort resolves a port, closes the listener and
-// returns the number, so between that close and the child's bind any process
-// on the host may take it — including another test binary's server. The child
-// then fails to bind and exits, while the parent's readiness poll is answered
-// by the thief: /health is 200 (every listener has one), and the next request
-// gets a foreign body. The resulting failure names the product
-// ("expected 201, got 200 {\"ok\":true}") and never the real cause. With
-// CRIER_PORT=0 there is no window at all: the kernel hands the port to the
-// child's own bind, and the pidfile — written only after that bind — is the
-// only place the parent ever learns it.
+// returns the number, so between that close and the child's bind any process on
+// the host may take it — including another test binary's server. The child then
+// fails to bind and exits, while the parent's readiness poll is answered by the
+// thief: /health is 200 (every listener has one), and the next request gets a
+// foreign body. With CRIER_PORT=0 there is no window at all: the kernel hands the
+// port to the child's own bind, and the pidfile — written only after that bind —
+// is the only place the parent ever learns it.
 //
 // The PID check is the identity proof and the diagnostic: a pidfile naming a
-// different process cannot describe our child, so the test fails naming both
-// pids instead of asserting against whatever is listening.
+// different process cannot describe our child, so the test fails naming both pids
+// instead of asserting against whatever is listening.
+//
+// INT-CI-023: the budget is planChildBoot's attempt budget, a child that is gone
+// is reported at once (pidfile.Alive is false for a zombie, so an unreaped dead
+// child is still caught), and an expiry carries the child's own log tail and the
+// pidfile it was waiting on instead of a bare "never wrote its pidfile".
 func waitForChildBoundPort(t *testing.T, pidPath string, childPID int, logPath string) int {
 	t.Helper()
-	deadline := time.Now().Add(childPortWait)
+	plan := planChildBoot(t)
+	name := fmt.Sprintf("child pid %d", childPID)
+	port, err := pidfileHandshake(name, pidPath, logPath, childPID, plan.Attempt, func() (bool, string) {
+		if !pidfile.Alive(childPID) {
+			return true, fmt.Sprintf("%s is gone before it published %s, so it died mid-boot (its "+
+				"exit status is reported by the caller that owns the process).\n%s",
+				name, pidPath, childLogDiagnosis(logPath))
+		}
+		return false, ""
+	})
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	return port
+}
+
+// waitForInProcessBoundPort returns the port the IN-PROCESS server actually
+// bound, read from the pidfile it writes only after its own listen succeeded
+// (INT-CI-022), or a diagnosis naming the attempt budget, the pidfile and — when
+// the server goroutine has already returned — its exit code.
+//
+// There is no per-attempt log FILE here on purpose: run() installs its logger on
+// os.Stderr, and redirecting the process-wide os.Stderr for a boot would corrupt
+// every t.Parallel test in this package. The boot path therefore reports what it
+// can observe (lifecycle, pidfile state, elapsed) and the spawned-child harness
+// that prints this child's own log tail is the parent (see
+// TestSQLiteRegistryProductionRestart).
+func waitForInProcessBoundPort(t *testing.T, run *runScopedServer, pidPath string, budget time.Duration) (int, error) {
+	t.Helper()
+	start := time.Now()
 	var lastErr error
 	for {
 		rec, err := pidfile.Read(pidPath)
 		switch {
 		case err == nil && rec.Port > 0:
-			if rec.PID != childPID {
-				t.Fatalf("pidfile %s records pid %d on port %d, but the child this test spawned is pid %d: "+
-					"port %d belongs to a FOREIGN listener, so every assertion below would be about the wrong server",
-					pidPath, rec.PID, rec.Port, childPID, rec.Port)
-			}
-			if !pidfile.Alive(childPID) {
-				t.Fatalf("child pid %d wrote %s but is no longer alive; child output:\n%s",
-					childPID, pidPath, fileTail(logPath, 2048))
-			}
-			return rec.Port
+			return rec.Port, nil
 		case err == nil:
-			lastErr = fmt.Errorf("pidfile %s exists but records no port yet", pidPath)
+			lastErr = fmt.Errorf("pidfile exists but records no port yet")
 		default:
 			lastErr = err
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("child pid %d never published the port it bound within %s (%v); "+
-				"the child's own output:\n%s", childPID, childPortWait, lastErr, fileTail(logPath, 2048))
+		select {
+		case <-run.done:
+			return 0, fmt.Errorf("the server exited with code %d before binding; waited on pidfile %s (%s). "+
+				"run() logs its startup lines to os.Stderr — the tail of this process's stderr carries them",
+				runExitCode(run.exitCode), pidPath, lastErr)
+		default:
+		}
+		if elapsed := time.Since(start); elapsed >= budget {
+			state := "absent"
+			if _, err := os.Stat(pidPath); err == nil {
+				state = "present but records no port"
+			}
+			return 0, fmt.Errorf("the server never published the port it bound within the %s attempt budget "+
+				"(waited %s): pidfile %s is %s (%v), and the server goroutine is still running, so it is stuck "+
+				"before or inside net.Listen — not in the pidfile handshake. run() logs to os.Stderr",
+				budget, elapsed.Round(time.Millisecond), pidPath, state, lastErr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// waitForInProcessHealth polls /health on the port this process bound and returns
+// once it answers 200, or a diagnosis on budget expiry / early exit.
+func waitForInProcessHealth(run *runScopedServer, baseURL string, budget, request time.Duration) error {
+	client := &http.Client{Timeout: request}
+	start := time.Now()
+	var lastErr error
+	for {
+		resp, err := client.Get(baseURL + "/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			lastErr = fmt.Errorf("GET /health answered %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-run.done:
+			return fmt.Errorf("the server exited with code %d after binding but before answering /health on %s: %v",
+				runExitCode(run.exitCode), baseURL, lastErr)
+		default:
+		}
+		if elapsed := time.Since(start); elapsed >= budget {
+			return fmt.Errorf("the server bound a port but never answered /health on %s within the %s attempt "+
+				"budget (waited %s): %v", baseURL, budget, elapsed.Round(time.Millisecond), lastErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// abandon stops a server whose boot attempt already failed, WITHOUT turning the
+// stop into a second test failure (run.stop reports a shutdown timeout as an
+// Errorf). A failed attempt must not leave a live listener or an open SQLite
+// handle behind for the retry to collide with.
+func (r *runScopedServer) abandon(timeout time.Duration) {
+	r.stopOnce.Do(func() {
+		select {
+		case <-r.done:
+			return
+		case r.shutdown <- syscall.SIGTERM:
+		}
+		select {
+		case <-r.done:
+		case <-time.After(timeout):
+		}
+	})
 }
 
 // fileTail returns up to n trailing bytes of path — a boot failure must carry
@@ -357,13 +435,26 @@ var deterministicTestEnv = map[string]string{
 // parallelBoot opts it in. Two boot hazards are handled:
 //
 //   - the freePort race (another process binds the port between freePort and
-//     the server's own bind): retried on a fresh port, three attempts total;
+//     the server's own bind): retried on a fresh port, childBootAttempts total;
 //   - the FOREIGN-ANSWERER race: a stolen port can make the /health poll
 //     answer with a DIFFERENT test's server (bind failed on ours, but the
 //     thief answers 200 on the same port). Each boot therefore carries its own
 //     CR_PIDFILE, which the server writes only after ITS OWN bind succeeded;
 //     if the pidfile is absent once /health answers, the answerer was not us
 //     and the boot retries.
+//
+// INT-CI-023: the retry used to be VACUOUS. lastErr was declared outside the
+// loop and never reset, so once attempt 1 set it the `if lastErr != nil { break }`
+// inside attempt 2's poll loop fired on its FIRST iteration: attempts 2 and 3
+// returned in microseconds without ever waiting for a pidfile, and the final
+// message reported attempt 1's error under the words "after 3 boot attempts".
+// That is exactly the recorded INT-CI-023 failure ("after 3 boot attempts ...
+// boot attempt 1 never wrote its pidfile"), and it is also why that message could
+// claim three attempts inside a child whose own -test.timeout was 40s: three real
+// 20s attempts cannot fit in 40s. Every attempt now owns its state, its pidfile,
+// its server and its own record in the failure text, a failed attempt's server is
+// abandoned before the retry starts, and the budgets come from planChildBoot so
+// the child's -test.timeout always exceeds the retry envelope it contains.
 func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 	t.Helper()
 
@@ -375,83 +466,56 @@ func startTestServerWithEnv(t *testing.T, extra map[string]string) string {
 		over[k] = v
 	}
 
+	plan := planChildBoot(t)
+	var failures []string
 	var lastErr error
-	lastPort := 0
 	var exitCode chan int
-	for attempt := 0; attempt < 3; attempt++ {
-		pidPath := filepath.Join(t.TempDir(), fmt.Sprintf("boot-%d.pid", attempt))
-		// CRIER_PORT=0: the server binds an ephemeral port ITSELF (no
-		// release-then-rebind window — the freePort race class is gone) and
-		// records the bound port in the pidfile. The harness polls the
-		// pidfile for the port, then /health for readiness.
+	lastPort := 0
+	for attempt := 1; attempt <= plan.Attempts; attempt++ {
+		// A fresh pidfile per attempt, and CRIER_PORT=0 so the server binds an
+		// ephemeral port ITSELF (the kernel hands it over — no
+		// release-then-rebind window for anyone to steal). The retry reuses
+		// neither the failed attempt's port nor its pidfile.
+		pidPath := filepath.Join(t.TempDir(), fmt.Sprintf("boot-attempt-%d.pid", attempt))
 		over["CRIER_PORT"] = "0"
 		over["CR_PIDFILE"] = pidPath
 		run := startRunScopedServerWithEnv(nil, envOverlay(over, nil))
+		// exitCode is the LAST attempt's run() channel: the final message must
+		// name run()'s exit code, and the census in signaldiag_test.go reads
+		// this line as TEXT, so the call is spelled runExitCode(exitCode).
 		exitCode = run.exitCode
 
-		// Phase 1: wait for OUR pidfile (written only after OUR bind).
-		var port int
-		pidDeadline := time.Now().Add(20 * time.Second)
-		for port == 0 {
-			if rec, err := pidfile.Read(pidPath); err == nil && rec.Port > 0 {
-				port = rec.Port
-				break
-			}
-			if time.Now().After(pidDeadline) {
-				lastErr = fmt.Errorf("boot attempt %d never wrote its pidfile", attempt+1)
-				break
-			}
-			select {
-			case <-run.done:
-				lastErr = fmt.Errorf("boot attempt %d exited before binding (exit code %d)",
-					attempt+1, runExitCode(exitCode))
-			default:
-			}
-			if lastErr != nil {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		if port == 0 {
+		port, err := waitForInProcessBoundPort(t, run, pidPath, plan.Attempt)
+		if err != nil {
+			run.abandon(5 * time.Second)
+			lastErr = err
+			failures = append(failures, fmt.Sprintf("attempt %d/%d: %v", attempt, plan.Attempts, err))
 			continue
 		}
 		lastPort = port
 		baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-		client := &http.Client{Timeout: 2 * time.Second}
-
-		booted := false
-		// Phase 2: readiness on the bound port — the answerer is provably
-		// ours because WE hold the bind (the kernel handed it to us).
-		deadline := time.Now().Add(20 * time.Second)
-		for !booted {
-			resp, err := client.Get(baseURL + "/health")
-			if err == nil {
-				resp.Body.Close()
-				booted = true
-				break
-			}
-			if time.Now().After(deadline) {
-				run.stop(t)
-				t.Fatalf("server did not start within 20s: %v", err)
-			}
-			select {
-			case <-run.done:
-				lastErr = fmt.Errorf("boot attempt %d exited before /health on port %d (exit code %d): %v",
-					attempt+1, port, runExitCode(exitCode), err)
-			default:
-			}
-			if lastErr != nil {
-				break
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-		if !booted {
+		if err := waitForInProcessHealth(run, baseURL, plan.Attempt, plan.Request); err != nil {
+			run.abandon(5 * time.Second)
+			lastErr = err
+			failures = append(failures, fmt.Sprintf("attempt %d/%d: %v", attempt, plan.Attempts, err))
 			continue
 		}
 		t.Cleanup(func() { run.stop(t) })
 		return baseURL
 	}
-	t.Fatalf("server exited before answering /health after 3 boot attempts on port %d: run() exit code %d (last error: %v)", lastPort, runExitCode(exitCode), lastErr)
+	// The fingerprintable shape is load-bearing AND its argument order is fixed:
+	// TestEveryHarnessExitSiteNamesTheRunExitCode renders this format with
+	// (port, exit code, error), so the port is the first verb, run()'s exit code
+	// the second. The attempt count and the per-attempt record ride beneath it,
+	// which keeps the line greppable for board fingerprints and the detail whole.
+	detail := fmt.Sprintf("%s: the server did not bootstrap in %d attempts.\n"+
+		"Each attempt waited %s (derived from a measured %s cold boot x%d, loadavg %.2f over %d CPUs, factor %.2f; "+
+		"childBootAttemptFloor %s, childBootAttemptCap %s). The server's own startup lines are os.Stderr — they are "+
+		"the tail of this process's stderr, and a spawned-child harness prints that tail for its child.\n\n%s",
+		childBootBudgetMarker, plan.Attempts, plan.Attempt, childBootMeasuredCost, childBootHeadroom,
+		plan.Load, plan.CPUs, plan.Factor, childBootAttemptFloor, childBootAttemptCap,
+		strings.Join(failures, "\n\n"))
+	t.Fatalf("server exited before answering /health on port %d: run() exit code %d (last error: %v)\n\n%s", lastPort, runExitCode(exitCode), lastErr, detail)
 	return ""
 }
 
