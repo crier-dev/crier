@@ -224,6 +224,16 @@ func (w *webhookRecorder) last() recordedPost {
 	return w.posts[len(w.posts)-1]
 }
 
+// snapshot copies the recorded POSTs, oldest first, so a caller can look for
+// the one it cares about without holding the recorder's lock.
+func (w *webhookRecorder) snapshot() []recordedPost {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]recordedPost, len(w.posts))
+	copy(out, w.posts)
+	return out
+}
+
 func mustReadAll(r *http.Request) []byte {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(r.Body)
@@ -241,6 +251,81 @@ func waitForPosts(t *testing.T, w *webhookRecorder, n int) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("webhook endpoint received %d POSTs, want %d", w.count(), n)
+}
+
+// acceptedMessageID decodes the message id a delivery accept names, so a test
+// can bind its webhook assertions to THE delivery it just made.
+func acceptedMessageID(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var dr struct {
+		ID string `json:"id"`
+	}
+	raw := rec.Body.Bytes()
+	if err := json.Unmarshal(raw, &dr); err != nil || dr.ID == "" {
+		t.Fatalf("the accept names no message id (err=%v): %s", err, raw)
+	}
+	return dr.ID
+}
+
+// waitForDeliveryPost polls until the recorder holds the POST for messageID
+// and returns THAT post — never merely "the most recent one" (INT-CI-022).
+//
+// Why this exists. waitForPosts only proves the endpoint was reached by
+// SOMETHING; wh.last() then asserts against whichever POST arrived last. When
+// the delivery is asynchronous, the two are not the same claim: the wait can
+// be satisfied by a POST this test did not cause (an envelope with no guard
+// metadata — a probe-shaped or stray POST on the endpoint), and the guard
+// assertions then fail against a delivery that was never this test's. That is
+// exactly the CI shape this replaces: every X-Crier-Guard-* header empty and
+// webhook.Envelope.Crier.Guard nil, while the code path that builds the
+// envelope cannot produce a nil guard for a webhook delivery (guard set,
+// target resolved, no namespace declared ⇒ the choke point always runs).
+//
+// Binding on the message id the accept named makes the selection independent
+// of arrival order and of anything else that touched the endpoint: the
+// assertions below still require the full X-Crier-Guard-* set and the envelope
+// metadata, they are just finally about the delivery this test made. A wait
+// that expires reports what the recorder actually holds, so a genuine
+// regression (the guard never runs) reads as itself instead of as a timeout.
+func waitForDeliveryPost(t *testing.T, w *webhookRecorder, messageID string) recordedPost {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		for _, post := range w.snapshot() {
+			var env webhook.Envelope
+			if err := json.Unmarshal(post.body, &env); err != nil {
+				continue
+			}
+			if env.Crier.MessageID == messageID {
+				return post
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no webhook POST for message %s within 3s; the recorder holds %d POST(s): %s",
+				messageID, w.count(), describePosts(w.snapshot()))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// describePosts names each recorded POST by the identity on the wire, so a
+// failed wait distinguishes "the endpoint was never reached" from "it was
+// reached by something that is not this delivery".
+func describePosts(posts []recordedPost) string {
+	if len(posts) == 0 {
+		return "none — the endpoint was never reached"
+	}
+	parts := make([]string, 0, len(posts))
+	for _, p := range posts {
+		var env webhook.Envelope
+		if err := json.Unmarshal(p.body, &env); err != nil {
+			parts = append(parts, fmt.Sprintf("{X-Crier-Event=%q body undecodable: %v}", p.headers.Get("X-Crier-Event"), err))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("{X-Crier-Event=%q message_id=%q kind=%q guard=%t}",
+			p.headers.Get("X-Crier-Event"), env.Crier.MessageID, env.Crier.Kind, env.Crier.Guard != nil))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ── tests ───────────────────────────────────────────────────────────────
@@ -367,8 +452,9 @@ func TestGuardDeliver_WebhookPOSTCarriesHeaders(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("deliver: %d %s", rec.Code, rec.Body.String())
 	}
-	waitForPosts(t, wh, 1)
-	post := wh.last()
+	// Assert against THE delivery this test made, not merely the last POST the
+	// endpoint happened to receive (INT-CI-022).
+	post := waitForDeliveryPost(t, wh, acceptedMessageID(t, rec))
 	if got := post.headers.Get("X-Crier-Guard-Decision"); got != "allow" {
 		t.Errorf("X-Crier-Guard-Decision = %q", got)
 	}
@@ -468,8 +554,7 @@ func TestGuardDeliver_FailOpenOnProviderDown(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("deliver: %d %s (fail-open must deliver)", rec.Code, rec.Body.String())
 	}
-	waitForPosts(t, wh, 1)
-	post := wh.last()
+	post := waitForDeliveryPost(t, wh, acceptedMessageID(t, rec))
 	if got := post.headers.Get("X-Crier-Guard-Decision"); got != "allow" {
 		t.Errorf("X-Crier-Guard-Decision = %q, want allow (fail-open)", got)
 	}
@@ -862,8 +947,7 @@ func TestGuardDeliver_ThreadIDPassesThroughEnvelope(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("deliver: %d %s", rec.Code, rec.Body.String())
 	}
-	waitForPosts(t, recorder, 1)
-	post := recorder.last()
+	post := waitForDeliveryPost(t, recorder, acceptedMessageID(t, rec))
 	var env webhook.Envelope
 	if err := json.Unmarshal(post.body, &env); err != nil {
 		t.Fatalf("decode outbound POST: %v", err)

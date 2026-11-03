@@ -217,12 +217,21 @@ func a2aChildLogTail(t *testing.T, logPath string) string {
 
 func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (string, int, func()) {
 	t.Helper()
-	port := freePort(t)
+	// INT-CI-022: the child binds its OWN ephemeral port (CRIER_PORT=0) and
+	// reports it in the pidfile written only after that bind. The pre-fix
+	// shape handed the child a freePort() number and asserted against it, so
+	// a squatter that won the close-then-bind window made this helper's
+	// /health poll succeed against a STRANGER — measured on this host as
+	// "a2a_restart_test.go:110 expected 200 actual 404 {\"error\":\"not
+	// found\"}": the squatter was another crier test server with no A2A
+	// route. Port identity now comes from the pidfile, which names the pid.
+	pidPath := filepath.Join(root, phase+".pid")
+	logPath := filepath.Join(root, phase+".log")
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestA2AReplayServerChild$", "-test.v", "-test.timeout=55s")
-	cmd.Env = append(os.Environ(), "CRIER390_ROOT="+root, "CRIER390_PORT="+strconv.Itoa(port), "CRIER390_BACKEND="+backend, "CRIER390_WINDOW="+window)
-	logPath := filepath.Join(root, phase+".log")
+	cmd.Env = append(os.Environ(), "CRIER390_ROOT="+root, "CRIER390_PORT=0", "CRIER390_PIDFILE="+pidPath,
+		"CRIER390_BACKEND="+backend, "CRIER390_WINDOW="+window)
 	log, err := os.Create(logPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = log.Close() })
@@ -235,6 +244,7 @@ func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (stri
 			_ = cmd.Wait()
 		}
 	})
+	port := waitForChildBoundPort(t, pidPath, cmd.Process.Pid, logPath)
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 5 * time.Second}
 	bootWindow := a2aBootWindow(t)
@@ -257,7 +267,7 @@ func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (stri
 		t.Fatalf("child did not boot within %s (backend=%s phase=%s); child log tail:\n%s",
 			bootWindow, backend, phase, a2aChildLogTail(t, logPath))
 	}
-	t.Logf("backend=%s %s phase: child booted (pid %d) in %s of the %s window",
+	t.Logf("backend=%s %s phase: child bound its port (pid %d) in %s of the %s window",
 		backend, phase, cmd.Process.Pid, time.Since(bootStart), bootWindow)
 	return base, cmd.Process.Pid, func() {
 		if stopped {
@@ -286,10 +296,11 @@ func TestA2AReplayServerChild(t *testing.T) {
 		backend = "" // Exercise the default deployment, not an explicit memory override.
 	}
 	for key, value := range map[string]string{
-		"CRIER_PORT": os.Getenv("CRIER390_PORT"), "CR_REGISTRY_BACKEND": backend, "CR_REGISTRY_SQLITE_PATH": filepath.Join(root, "registry.db"),
+		"CRIER_PORT": os.Getenv("CRIER390_PORT"), "CR_PIDFILE": os.Getenv("CRIER390_PIDFILE"),
+		"CR_REGISTRY_BACKEND": backend, "CR_REGISTRY_SQLITE_PATH": filepath.Join(root, "registry.db"),
 		"CR_IDEMPOTENCY_WINDOW_S": os.Getenv("CRIER390_WINDOW"),
 		"CR_DATABASE_URL":         "", "DATABASE_URL": "", "CRIER_DATABASE_URL": "", "CR_AUTH_TOKEN": "", "CR_GUARD_ENABLED": "false", "CR_REQUIRE_AGENT_SIG": "false", "CR_A2A_ENABLED": "true",
-		"CR_SESSION_BACKEND": "sqlite", "CR_SQLITE_PATH": filepath.Join(root, "sessions.db"), "CR_GROUP_ROOT": filepath.Join(root, "groups"), "CR_PIDFILE": "",
+		"CR_SESSION_BACKEND": "sqlite", "CR_SQLITE_PATH": filepath.Join(root, "sessions.db"), "CR_GROUP_ROOT": filepath.Join(root, "groups"),
 	} {
 		t.Setenv(key, value)
 	}

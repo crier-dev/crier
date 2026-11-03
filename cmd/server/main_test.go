@@ -120,6 +120,13 @@ func TestServerHealth(t *testing.T) {
 // between freePort and the server's own bind), so the boot helpers retry
 // with a fresh port when the server exits before /health — see
 // startTestServerWithEnv (INT-CI-014).
+//
+// INT-CI-022: a test that hands this port to a CHILD PROCESS must not assert
+// against it. A squatter that wins the window answers /health with 200 and
+// then returns a foreign body, so the failure reads as a product bug
+// ("expected 201, got 200 {\"ok\":true}") instead of "we talked to a
+// stranger". Such tests pass CRIER_PORT=0 and wait for the child's own
+// pidfile — waitForChildBoundPort below is that handshake.
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -128,6 +135,79 @@ func freePort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// childPortWait bounds how long a test waits for a spawned server child to
+// publish the port it bound. A cold child boot on a loaded host is a few
+// hundred milliseconds (a2aBootMeasuredCost); this is the ceiling, not the
+// expectation, and the failure path reports the child's own output.
+const childPortWait = 20 * time.Second
+
+// waitForChildBoundPort returns the port the spawned child ACTUALLY bound,
+// read from the pidfile the child writes immediately after its own
+// net.Listen succeeded, and refuses to return a port that is not provably
+// ours (INT-CI-022).
+//
+// Why this and not freePort: freePort resolves a port, closes the listener and
+// returns the number, so between that close and the child's bind any process
+// on the host may take it — including another test binary's server. The child
+// then fails to bind and exits, while the parent's readiness poll is answered
+// by the thief: /health is 200 (every listener has one), and the next request
+// gets a foreign body. The resulting failure names the product
+// ("expected 201, got 200 {\"ok\":true}") and never the real cause. With
+// CRIER_PORT=0 there is no window at all: the kernel hands the port to the
+// child's own bind, and the pidfile — written only after that bind — is the
+// only place the parent ever learns it.
+//
+// The PID check is the identity proof and the diagnostic: a pidfile naming a
+// different process cannot describe our child, so the test fails naming both
+// pids instead of asserting against whatever is listening.
+func waitForChildBoundPort(t *testing.T, pidPath string, childPID int, logPath string) int {
+	t.Helper()
+	deadline := time.Now().Add(childPortWait)
+	var lastErr error
+	for {
+		rec, err := pidfile.Read(pidPath)
+		switch {
+		case err == nil && rec.Port > 0:
+			if rec.PID != childPID {
+				t.Fatalf("pidfile %s records pid %d on port %d, but the child this test spawned is pid %d: "+
+					"port %d belongs to a FOREIGN listener, so every assertion below would be about the wrong server",
+					pidPath, rec.PID, rec.Port, childPID, rec.Port)
+			}
+			if !pidfile.Alive(childPID) {
+				t.Fatalf("child pid %d wrote %s but is no longer alive; child output:\n%s",
+					childPID, pidPath, fileTail(logPath, 2048))
+			}
+			return rec.Port
+		case err == nil:
+			lastErr = fmt.Errorf("pidfile %s exists but records no port yet", pidPath)
+		default:
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child pid %d never published the port it bound within %s (%v); "+
+				"the child's own output:\n%s", childPID, childPortWait, lastErr, fileTail(logPath, 2048))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fileTail returns up to n trailing bytes of path — a boot failure must carry
+// the child's own words instead of a bare timeout.
+func fileTail(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("(child log %s unreadable: %v)", path, err)
+	}
+	s := string(b)
+	if len(s) > n {
+		s = s[len(s)-n:]
+	}
+	if strings.TrimSpace(s) == "" {
+		return fmt.Sprintf("(child log %s is empty — the child produced no output before the wait expired)", path)
+	}
+	return s
 }
 
 // envOverlay is a config.Getenv over a per-test map. Lookups consult the map

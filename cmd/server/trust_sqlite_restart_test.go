@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -34,12 +33,26 @@ func TestSQLiteTrustProcessRestart(t *testing.T) {
 	var originalAnchor trust.ChainAnchor
 	for _, phase := range []string{"seed", "reopen"} {
 		t.Run(phase, func(t *testing.T) {
-			port := freePort(t)
+			// INT-CI-022: the child binds its OWN ephemeral port
+			// (CRIER_PORT=0) and reports it in the pidfile it writes only
+			// after that bind, so the parent never hands out a port a
+			// stranger can steal between a probe and the child's bind. The
+			// pidfile is also the identity proof: it names the child's pid,
+			// so the parent can never assert against a foreign listener
+			// that answers /health with 200 and then serves someone else's
+			// body (the CI failure this replaces read "expected 201,
+			// actual 200 {"ok":true}").
+			pidPath := filepath.Join(rootDir, phase+".pid")
+			logPath := filepath.Join(rootDir, phase+".log")
 			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSQLiteTrustServerChild$", "-test.v", "-test.timeout=40s")
-			cmd.Env = append(os.Environ(), "CRIER368_ROOT="+rootDir, "CRIER368_PORT="+strconv.Itoa(port))
-			log, err := os.Create(filepath.Join(rootDir, phase+".log"))
+			cmd.Env = append(os.Environ(),
+				"CRIER368_ROOT="+rootDir,
+				"CRIER368_PORT=0",
+				"CRIER368_PIDFILE="+pidPath,
+			)
+			log, err := os.Create(logPath)
 			require.NoError(t, err)
 			defer func() { _ = log.Close() }()
 			cmd.Stdout, cmd.Stderr = log, log
@@ -57,6 +70,7 @@ func TestSQLiteTrustProcessRestart(t *testing.T) {
 				}
 			}()
 			client := &http.Client{Timeout: time.Second}
+			port := waitForChildBoundPort(t, pidPath, cmd.Process.Pid, logPath)
 			base := fmt.Sprintf("http://127.0.0.1:%d", port)
 			require.Eventually(t, func() bool {
 				resp, err := client.Get(base + "/health")
@@ -125,10 +139,11 @@ func TestSQLiteTrustServerChild(t *testing.T) {
 		return
 	}
 	for key, value := range map[string]string{
-		"CRIER_PORT": os.Getenv("CRIER368_PORT"), "CR_REGISTRY_BACKEND": "sqlite", "CR_REGISTRY_SQLITE_PATH": filepath.Join(root, "trust.db"),
+		"CRIER_PORT": os.Getenv("CRIER368_PORT"), "CR_PIDFILE": os.Getenv("CRIER368_PIDFILE"),
+		"CR_REGISTRY_BACKEND": "sqlite", "CR_REGISTRY_SQLITE_PATH": filepath.Join(root, "trust.db"),
 		"CR_DATABASE_URL": "", "DATABASE_URL": "", "CRIER_DATABASE_URL": "", "CR_GUARD_ENABLED": "false",
 		"CR_AUTH_TOKEN": df297MessageToken, "CR_PERMISSIONS_ADMIN_TOKEN": df297AdminToken, "CR_PERMISSIONS_ENABLED": "false",
-		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": filepath.Join(root, "sessions"), "CR_GROUP_ROOT": filepath.Join(root, "groups"), "CR_PIDFILE": "",
+		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": filepath.Join(root, "sessions"), "CR_GROUP_ROOT": filepath.Join(root, "groups"),
 	} {
 		t.Setenv(key, value)
 	}
