@@ -9,15 +9,18 @@ package main
 //
 //	undelivered (stored)  → TASK_STATE_SUBMITTED
 //	retrieved (leased)    → TASK_STATE_WORKING
-//	unobserved ack        → entry REMOVED; no retained observation is TaskNotFoundError
+//	acked                 → PURGED: the entry is removed and crier keeps no
+//	                        tombstone, so a read is TaskNotFoundError (-32001)
 //	TTL elapsed           → TASK_STATE_FAILED
 //	TTL elapsed + swept   → TASK_STATE_FAILED, from the sweep's own record
-//	canceled              → TASK_STATE_CANCELED, the lease released and the entry closed
+//	canceled              → TASK_STATE_CANCELED, the lease released and the
+//	                        entry closed — and purged for every later operation
 //
-// plus the operations' own refusals: a cancel of a terminal task is
-// TaskNotCancelableError (-32002), a message aimed at a terminal task is
-// UnsupportedOperationError (-32004), a task id crier holds no record of is
-// TaskNotFoundError (-32001) — and NONE of them is a 200 pretending the
+// plus the operations' own refusals: a cancel of a task STILL IN THE STORE that
+// is already terminal is TaskNotCancelableError (-32002) while a cancel of a
+// purged one (never existed, already acked, already cancelled) is
+// TaskNotFoundError (-32001), a message aimed at a terminal task is
+// UnsupportedOperationError (-32004) — and NONE of them is a 200 pretending the
 // operation happened.
 //
 // The A2A state mapping this exercises is specs/A2A-OPTION.md §5.5.2; the
@@ -301,34 +304,41 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	}
 	tr.step("retrieve (lease) → leased", "GetTask = TASK_STATE_WORKING, state_basis="+a2a.StateBasisWorking)
 
-	// --- 5. acknowledged: the entry is REMOVED ------------------------------
+	// --- 5. acknowledged: the entry is REMOVED, and the task is PURGED ------
 	ackBody := fmt.Sprintf(`{"lease_id":%q,"message_ids":[%q]}`, leaseID, taskID)
 	if status, ackOut := signedAs(t, client, http.MethodPost, base,
 		"/agents/"+a2aLifecycleTenant+"/inbox/ack", a2aLifecycleTenant, priv, []byte(ackBody)); status != http.StatusNoContent {
 		t.Fatalf("ack = %d: %s", status, ackOut)
 	}
+	// Ack releases the lease and removes the entry. Crier keeps no tombstone for
+	// a released lease, so the task is no longer in the store and a read of it is
+	// TaskNotFoundError (-32001) — never a live WORKING state, and never an
+	// invented COMPLETED (§5.5.2, §3.1.5 for the same rule on a duplicate cancel).
 	status, body, _ = a2aRPC(t, client, base, getTaskBody(a2aLifecycleTenant, taskID, ""))
 	if status != http.StatusOK {
 		t.Fatalf("GetTask after an ack = %d: %s", status, body)
 	}
-	got = rpcResult(t, body)
-	if state := rpcTaskState(t, got); state != string(a2a.TaskStateWorking) {
-		t.Fatalf("GetTask after an ack = %s, want WORKING until an answer is observed", state)
+	ackCode, ackMessage := rpcError(t, body)
+	if ackCode != a2a.CodeTaskNotFoundError {
+		t.Fatalf("GetTask after an ack = %d (%s), want %d TaskNotFoundError: a released lease leaves no task to read",
+			ackCode, ackMessage, a2a.CodeTaskNotFoundError)
 	}
-	if basis := rpcTaskBasis(t, got); basis != a2a.StateBasisAcknowledged {
-		t.Errorf("state_basis = %q, want %q", basis, a2a.StateBasisAcknowledged)
+	if !strings.Contains(string(body), `"TASK_NOT_FOUND"`) {
+		t.Errorf("the not-found answer must name TASK_NOT_FOUND: %s", body)
 	}
-	tr.step("ack → entry removed, evidence retained", "GetTask = TASK_STATE_WORKING (acknowledged, no answer observed)")
+	if strings.Contains(string(body), "TASK_STATE_") {
+		t.Errorf("a purged task must never report a live state: %s", body)
+	}
+	tr.step("ack → entry removed, task purged", "GetTask = -32001 TaskNotFoundError naming TASK_NOT_FOUND (crier keeps no tombstone)")
 
 	status, body, _ = a2aRPC(t, client, base, listTasksBody(a2aLifecycleTenant, ""))
 	if status != http.StatusOK {
 		t.Fatalf("ListTasks after an ack = %d: %s", status, body)
 	}
-	listedTasks := rpcTasks(t, rpcResult(t, body))
-	if len(listedTasks) != 1 || listedTasks[0]["id"] != taskID || rpcTaskState(t, listedTasks[0]) != string(a2a.TaskStateWorking) {
-		t.Errorf("ListTasks after an ack = %v, want the consumed-but-unanswered WORKING task", listedTasks)
+	if listed := rpcTasks(t, rpcResult(t, body)); len(listed) != 0 {
+		t.Errorf("ListTasks after an ack = %v, want no tasks: a purged task is not in the store", listed)
 	}
-	tr.step("ack → ListTasks", "1 WORKING task (the queue is empty; acknowledgement is not an answer)")
+	tr.step("ack → ListTasks", "0 tasks (the queue is empty and the purged task is not listed)")
 
 	// --- 6. TTL elapsed: FAILED, from the entry itself -----------------------
 	expiredID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,
@@ -366,15 +376,19 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	tr.step("message → terminal task", fmt.Sprintf("REJECTED -32004 UnsupportedOperationError naming TASK_STATE_FAILED; queue_depth unchanged (%d)", before))
 
 	// --- 8. canceling a terminal task is REFUSED ---------------------------
+	// Regression pin: the task is STILL IN THE STORE (its entry is queued and
+	// past its TTL, the sweep has not taken it), so CancelTask is -32002. The
+	// -32001 arm is the purged task below, not this one.
 	status, body, _ = a2aRPC(t, client, base, cancelTaskBody(a2aLifecycleTenant, expiredID))
 	if status != http.StatusOK {
 		t.Fatalf("CancelTask = %d: %s", status, body)
 	}
 	code, message = rpcError(t, body)
 	if code != a2a.CodeTaskNotCancelableError {
-		t.Fatalf("CancelTask on a terminal task = %d (%s), want %d TaskNotCancelableError (§3.1.5)", code, message, a2a.CodeTaskNotCancelableError)
+		t.Fatalf("CancelTask on an in-store terminal task = %d (%s), want %d TaskNotCancelableError (§3.1.5)",
+			code, message, a2a.CodeTaskNotCancelableError)
 	}
-	tr.step("cancel → terminal task", "REJECTED -32002 TaskNotCancelableError (already FAILED)")
+	tr.step("cancel → terminal task", "REJECTED -32002 TaskNotCancelableError (in the store, already FAILED)")
 
 	// --- 9. canceling a LEASED task releases the lease and closes it --------
 	canceledID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,
@@ -411,22 +425,34 @@ func TestA2ATaskLifecycle_Transcript(t *testing.T) {
 	}
 	tr.step("cancel → retrieve/ack", "nothing claimable; the stale lease cannot ack (404)")
 
-	// The process retains cancellation evidence for returning observers too.
+	// The cancellation closed the entry, so the task is PURGED: crier keeps no
+	// open task here, and the retained cancellation record is evidence for the
+	// streams that observed it and for a durable audit trail — not a task a
+	// client can still address. A read is TaskNotFoundError (-32001), and so is a
+	// duplicate CancelTask (§3.1.5 permits exactly that for an already-purged
+	// task); a cancel of a task that is STILL in the store but terminal is the
+	// -32002 case asserted above.
 	status, body, _ = a2aRPC(t, client, base, getTaskBody(a2aLifecycleTenant, canceledID, ""))
 	if status != http.StatusOK {
 		t.Fatalf("GetTask after a cancel = %d: %s", status, body)
 	}
-	if state := rpcTaskState(t, rpcResult(t, body)); state != "TASK_STATE_CANCELED" {
-		t.Errorf("GetTask after cancel = %s, want TASK_STATE_CANCELED", state)
+	canceledReadCode, canceledReadMessage := rpcError(t, body)
+	if canceledReadCode != a2a.CodeTaskNotFoundError {
+		t.Errorf("GetTask after a cancel = %d (%s), want %d TaskNotFoundError: the entry is closed",
+			canceledReadCode, canceledReadMessage, a2a.CodeTaskNotFoundError)
 	}
 	status, body, _ = a2aRPC(t, client, base, cancelTaskBody(a2aLifecycleTenant, canceledID))
 	if status != http.StatusOK {
 		t.Fatalf("the duplicate CancelTask = %d: %s", status, body)
 	}
-	if code, message = rpcError(t, body); code != a2a.CodeTaskNotCancelableError {
-		t.Errorf("a duplicate CancelTask = %d (%s), want %d for a known canceled task", code, message, a2a.CodeTaskNotCancelableError)
+	if code, message = rpcError(t, body); code != a2a.CodeTaskNotFoundError {
+		t.Errorf("a duplicate CancelTask = %d (%s), want %d TaskNotFoundError for an already-purged task (§3.1.5)",
+			code, message, a2a.CodeTaskNotFoundError)
 	}
-	tr.step("cancel → read again", "GetTask = TASK_STATE_CANCELED; duplicate CancelTask = -32002 TaskNotCancelableError")
+	if strings.Contains(string(body), "TASK_NOT_CANCELABLE") {
+		t.Errorf("a duplicate cancel is a NOT-FOUND, not a second not-cancelable refund: %s", body)
+	}
+	tr.step("cancel → read again + duplicate cancel", "GetTask = -32001; duplicate CancelTask = -32001 TaskNotFoundError")
 
 	// --- 10. an OPEN task cannot be continued ------------------------------
 	liveID := taskIDOf(t, sentTask(t, rpcResult(t, mustA2AOK(t, client, base,

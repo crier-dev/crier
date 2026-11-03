@@ -433,6 +433,11 @@ func (h *a2aHandler) lifecycleEvidence(agentID, taskID string) (a2a.TaskEvidence
 }
 
 // getTask serves GetTask (§9.4.3).
+//
+// A task whose lease was released — acknowledged without an answer, or
+// cancelled — is not in the store: crier keeps no tombstone for a released
+// lease, so the read answers TaskNotFoundError (-32001) rather than inventing a
+// state from a task that is gone (§5.5.2, §5.5.4).
 func (h *a2aHandler) getTask(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
 	params, rpcErr := a2a.DecodeGetTaskParams(req.Params)
 	if rpcErr != nil {
@@ -447,6 +452,10 @@ func (h *a2aHandler) getTask(w http.ResponseWriter, r *http.Request, req *a2a.RP
 	ev, rpcErr := h.evidence(target.ID, params.ID)
 	if rpcErr != nil {
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+		return
+	}
+	if ev.Absent() {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, ev.NotFound(target.ID, params.ID)))
 		return
 	}
 	now := h.opts.now()
@@ -528,13 +537,22 @@ func (h *a2aHandler) listTasks(w http.ResponseWriter, r *http.Request, req *a2a.
 		return
 	}
 	for _, ev := range observed {
-		if !ev.RemovedAt.IsZero() {
-			refreshed, rpcErr := h.evidence(target.ID, ev.TaskID())
-			if rpcErr != nil {
-				h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
-				return
-			}
-			ev = refreshed
+		// The same output join GetTask applies, for EVERY retained record: an
+		// acknowledged task with observed output is COMPLETED and belongs in the
+		// listing, while one without output is purged and does not — the join has
+		// to happen before the absence rule is applied, or a completed task would
+		// be listed as absent and then dropped.
+		refreshed, rpcErr := h.evidence(target.ID, ev.TaskID())
+		if rpcErr != nil {
+			h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
+			return
+		}
+		ev = refreshed
+		if ev.Absent() {
+			// The listing is of the tasks the store HOLDS: a task whose lease
+			// was released (acknowledged without an answer, or cancelled) is
+			// not in it, exactly as GetTask answers TaskNotFoundError for it.
+			continue
 		}
 		state, basis, resolveErr := ev.Resolve(target.ID, ev.TaskID(), now)
 		if resolveErr != nil {
@@ -550,19 +568,31 @@ func (h *a2aHandler) listTasks(w http.ResponseWriter, r *http.Request, req *a2a.
 	}
 	// Use the same output join BEFORE filtering/ordering as GetTask; the output
 	// may arrive after Ack and changes both state and last-update timestamp.
-	for i := range items {
-		ev, rpcErr := h.evidence(target.ID, items[i].ID)
+	//
+	// A task that left the store between the two reads (its lease was released,
+	// or the sweep took it) is dropped here rather than listed with the state it
+	// had a moment ago: a listing must not report a task the store no longer
+	// holds. The join is also what lets a retained answer turn an acknowledged
+	// task into COMPLETED before the absence rule is applied to it.
+	live := items[:0]
+	for _, item := range items {
+		ev, rpcErr := h.evidence(target.ID, item.ID)
 		if rpcErr != nil {
 			h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 			return
 		}
-		state, basis, rpcErr := ev.Resolve(target.ID, items[i].ID, now)
+		if ev.Absent() {
+			continue
+		}
+		state, basis, rpcErr := ev.Resolve(target.ID, item.ID, now)
 		if rpcErr != nil {
 			continue
 		}
-		items[i].Evidence, items[i].State, items[i].Basis = ev, state, basis
-		items[i].StatusTimestamp = ev.StatusTimestamp(now)
+		item.Evidence, item.State, item.Basis = ev, state, basis
+		item.StatusTimestamp = ev.StatusTimestamp(now)
+		live = append(live, item)
 	}
+	items = live
 	page, rpcErr := a2a.BuildListPage(items, params)
 	if rpcErr != nil {
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
@@ -608,9 +638,16 @@ func listReadError(agentID string, err error) *a2a.RPCError {
 // pre-close snapshot and observation time in the same backend. This survives
 // handler replacement and PostgreSQL restart, not a fresh MemoryStore.
 //
-// A cancel aimed at a task in a terminal state is refused with
-// TaskNotCancelableError (§3.1.5), never answered with a 200 and a false
-// cancellation: there is no claim left to release and no entry left to close.
+// Two refusals, and the split between them is the whole point:
+//
+//   - a task NOT in the store — never existed, already acknowledged, already
+//     cancelled, or swept — is TaskNotFoundError (-32001): its lease was already
+//     released and there is no claim to release and no entry to close. §3.1.5
+//     permits exactly this for an already-purged task, so a DUPLICATE cancel is
+//     a not-found, not a second cancellation;
+//   - a task STILL in the store but already terminal (its TTL elapsed, the sweep
+//     has not taken it yet) is TaskNotCancelableError (-32002) (§3.1.5): the
+//     entry is here and the work cannot be canceled.
 func (h *a2aHandler) cancelTask(w http.ResponseWriter, r *http.Request, req *a2a.RPCRequest) {
 	params, rpcErr := a2a.DecodeCancelTaskParams(req.Params)
 	if rpcErr != nil {
@@ -627,11 +664,15 @@ func (h *a2aHandler) cancelTask(w http.ResponseWriter, r *http.Request, req *a2a
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 		return
 	}
+	if ev.Absent() {
+		// No record at all, or a record proving the lease was already released:
+		// there is no task here to cancel, and the message says exactly that.
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, ev.NotFound(target.ID, params.ID)))
+		return
+	}
 	now := h.opts.now()
 	state, _, rpcErr := ev.Resolve(target.ID, params.ID, now)
 	if rpcErr != nil {
-		// No record at all: there is no task here to cancel, and the message
-		// says exactly that.
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 		return
 	}
@@ -708,6 +749,10 @@ func (h *a2aHandler) subscribeToTask(w http.ResponseWriter, r *http.Request, req
 		h.writeRPC(w, a2a.ErrorResponse(req.ID, rpcErr))
 		return
 	}
+	if ev.Absent() {
+		h.writeRPC(w, a2a.ErrorResponse(req.ID, ev.NotFound(target.ID, params.ID)))
+		return
+	}
 	now := h.opts.now()
 	state, basis, rpcErr := ev.Resolve(target.ID, params.ID, now)
 	if rpcErr != nil {
@@ -746,8 +791,10 @@ func (h *a2aHandler) subscribeToTask(w http.ResponseWriter, r *http.Request, req
 // refuseTaskTarget answers a SendMessage that names a task (§3.4.2, §3.1.1):
 //
 //   - a task id crier holds no record of gets TaskNotFoundError — "the provided
-//     taskId does not correspond to an existing task" — which, after an ack,
-//     includes an acknowledged task if no observation was retained;
+//     taskId does not correspond to an existing task" — which includes a task
+//     whose lease was released and whose entry was closed (acknowledged without
+//     an answer, or cancelled): crier keeps no tombstone, so there is no task
+//     here to address (§5.5.2);
 //   - a task in a TERMINAL state gets UnsupportedOperationError, which §3.1.1
 //     and §3.1.2 make mandatory rather than optional: a message sent to a
 //     completed, failed, canceled or rejected task cannot be accepted, and this
@@ -760,6 +807,9 @@ func (h *a2aHandler) refuseTaskTarget(agentID, taskID string) *a2a.RPCError {
 	ev, rpcErr := h.evidence(agentID, id)
 	if rpcErr != nil {
 		return rpcErr
+	}
+	if ev.Absent() {
+		return ev.NotFound(agentID, id)
 	}
 	state, _, rpcErr := ev.Resolve(agentID, id, h.opts.now())
 	if rpcErr != nil {

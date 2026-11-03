@@ -75,11 +75,16 @@ func TestA2ATerminal_CancelDuringStream(t *testing.T) {
 				require.Contains(t, terminalStatusText(t, update), "canceled by request")
 				observer.waitClosed(t)
 			}
-			read := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-			require.Equal(t, string(a2a.TaskStateCanceled), rpcTaskState(t, read))
+			// The observers saw CANCELED; a NEW operation on the closed entry is a
+			// not-found, because the task is no longer in the store — the streams
+			// describe what they watched, they do not keep the task addressable.
+			_, readRaw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))
+			readCode, readMessage := rpcError(t, readRaw)
+			require.Equal(t, a2a.CodeTaskNotFoundError, readCode,
+				"a read after the cancel is -32001: %s", readMessage)
 			_, raw, _ := a2aRPC(t, http.DefaultClient, base, subscribeBody("terminal-agent", id))
 			code, _ := rpcError(t, raw)
-			require.Equal(t, a2a.CodeUnsupportedOperationError, code)
+			require.Equal(t, a2a.CodeTaskNotFoundError, code)
 		})
 	}
 }

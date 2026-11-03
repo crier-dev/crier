@@ -59,17 +59,22 @@ func TestA2APublishOutputWithoutStreamHTTP(t *testing.T) {
 	get := func() map[string]any {
 		return rpcResult(t, mustA2AOK(t, client, base, getTaskBody(agent, id, `"historyLength":0`)))
 	}
-	got := get()
-	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, got))
-	require.Equal(t, false, got["metadata"].(map[string]any)["crier"].(map[string]any)["answered"])
-	t.Logf("step 1 wall=%s SendMessage -> signed retrieve -> ack(204) -> GetTask: %s", time.Since(start), mustJSON361(t, got))
+	// Acked with no observed answer: the task is PURGED, so the read is
+	// TaskNotFoundError (-32001) — crier keeps no tombstone for a released lease.
+	// The point of this test still holds: the NEXT read, after a 202 publish with
+	// no stream open, must be COMPLETED from the retained output alone.
+	_, purgedRaw, _ := a2aRPC(t, client, base, getTaskBody(agent, id, `"historyLength":0`))
+	purgedCode, purgedMessage := rpcError(t, purgedRaw)
+	require.Equal(t, a2a.CodeTaskNotFoundError, purgedCode, purgedMessage)
+	require.Contains(t, string(purgedRaw), `"TASK_NOT_FOUND"`)
+	t.Logf("step 1 wall=%s SendMessage -> signed retrieve -> ack(204) -> GetTask: %s", time.Since(start), string(purgedRaw))
 
 	start = time.Now()
 	topic, ok := a2a.TaskTopic(id)
 	require.True(t, ok)
 	env := outputEnvelope(id, "answer")
 	require.Equal(t, http.StatusAccepted, publishOutputAs(t, base, agent, "", topic, env))
-	got = get() // Immediate read after 202, not an eventual/poll-until-green test.
+	got := get() // Immediate read after 202, not an eventual/poll-until-green test.
 	require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, got))
 	require.Equal(t, true, got["metadata"].(map[string]any)["crier"].(map[string]any)["answered"])
 	require.Len(t, got["artifacts"], 1)
@@ -86,18 +91,27 @@ func TestA2APublishOutputWithoutStreamHTTP(t *testing.T) {
 	require.Equal(t, got, get())
 	other := sentTask(t, rpcResult(t, mustA2AOK(t, client, base, sendMessageBody(agent, a2a.MethodSendMessage, "stream-361"))))
 	otherID := taskIDOf(t, other)
+	// A NEW subscription cannot be opened on a purged task (crier keeps no
+	// tombstone), so this stream is opened while the task is still queued and
+	// then outlives the ack — the case DF-CRIER-355/361 measures.
+	stream := openSSE(t, base, subscribeBody(agent, otherID))
+	opening := stream.next(t, "opening task")["task"].(map[string]any)
+	require.Equal(t, string(a2a.TaskStateSubmitted), rpcTaskState(t, opening))
 	code, raw = signedAs(t, client, http.MethodGet, base, "/agents/"+agent+"/inbox", agent, priv, nil)
 	require.Equal(t, http.StatusOK, code, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &inbox))
+	stream.nextStatus(t, string(a2a.TaskStateWorking))
 	code, raw = signedAs(t, client, http.MethodPost, base, "/agents/"+agent+"/inbox/ack", agent, priv, []byte(fmt.Sprintf(`{"lease_id":%q,"message_ids":[%q]}`, inbox.LeaseID, otherID)))
 	require.Equal(t, http.StatusNoContent, code, string(raw))
-	stream := openSSE(t, base, subscribeBody(agent, otherID))
-	opening := stream.next(t, "opening task")["task"].(map[string]any)
-	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, opening))
 	otherTopic, ok := a2a.TaskTopic(otherID)
 	require.True(t, ok)
 	require.Equal(t, http.StatusAccepted, publishOutputAs(t, base, agent, "", otherTopic, outputEnvelope(otherID, "answer")))
-	stream.next(t, "answer artifact")
+	for {
+		// Drain the ack's own status frame; the artifact is what this step needs.
+		if _, ok := stream.next(t, "answer artifact")["artifactUpdate"]; ok {
+			break
+		}
+	}
 	stream.nextStatus(t, string(a2a.TaskStateCompleted))
 	stream.waitClosed(t)
 	streamed := rpcResult(t, mustA2AOK(t, client, base, getTaskBody(agent, otherID, `"historyLength":0`)))
@@ -185,13 +199,19 @@ func TestA2APublishOutputScope(t *testing.T) {
 			_, recorded, err = store.TaskOutput("other", eventID)
 			require.NoError(t, err)
 			require.False(t, recorded)
-			got := rpcResult(t, mustA2AOK(t, http.DefaultClient, srv.URL, getTaskBody("owner", id, "")))
-			wantState := a2a.TaskStateWorking
 			if tc.want {
-				wantState = a2a.TaskStateCompleted
+				got := rpcResult(t, mustA2AOK(t, http.DefaultClient, srv.URL, getTaskBody("owner", id, "")))
+				require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, got))
+				require.Equal(t, true, got["metadata"].(map[string]any)["crier"].(map[string]any)["answered"])
+			} else {
+				// No qualifying output was retained, so the ack stands alone: an
+				// acknowledged task with no answer is PURGED, and the poll is a
+				// not-found rather than a WORKING task (crier keeps no tombstone).
+				_, raw, _ := a2aRPC(t, http.DefaultClient, srv.URL, getTaskBody("owner", id, ""))
+				code, message := rpcError(t, raw)
+				require.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+				require.NotContains(t, string(raw), "TASK_STATE_WORKING")
 			}
-			require.Equal(t, string(wantState), rpcTaskState(t, got))
-			require.Equal(t, tc.want, got["metadata"].(map[string]any)["crier"].(map[string]any)["answered"])
 			after, found, err := store.TaskObservation("owner", id)
 			require.NoError(t, err)
 			require.True(t, found)

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestA2APersistence_PostgresRestart(t *testing.T) {
 	t.Cleanup(store.Close)
 	registerStoreAgent(t, store, "terminal-agent", true)
 	base := reloadedA2AServer(t, store)
-	expected := make(map[string]map[string]any)
+	var released []string
 	for _, outcome := range []string{"ack", "cancel"} {
 		accepted := sentTask(t, rpcResult(t, mustA2AOK(t, http.DefaultClient, base,
 			sendMessageBody("terminal-agent", a2a.MethodSendMessage, "durable-"+outcome))))
@@ -50,10 +51,22 @@ func TestA2APersistence_PostgresRestart(t *testing.T) {
 			require.NoError(t, stream.body.Body.Close())
 		}
 		stream.waitClosed(t)
-		task := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-		require.Equal(t, string(state), rpcTaskState(t, task))
-		require.NotEmpty(t, task["history"], "the creating message must survive with its terminal evidence")
-		expected[id] = task
+		// The release is what the operation produced; the TASK itself is purged,
+		// so a read is TaskNotFoundError (-32001) while the evidence — the
+		// creating message included — stays in the inbox backend for observers.
+		_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))
+		code, message := rpcError(t, raw)
+		require.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+		require.Contains(t, string(raw), `"TASK_NOT_FOUND"`)
+		o, found, err := store.TaskObservation("terminal-agent", id)
+		require.NoError(t, err)
+		require.True(t, found)
+		var ev a2a.TaskEvidence
+		require.NoError(t, json.Unmarshal(o.Evidence, &ev))
+		require.NotNil(t, ev.Entry)
+		require.Contains(t, string(ev.Entry.Payload), "durable-"+outcome,
+			"the creating message survives in the retained evidence after the purge")
+		released = append(released, id)
 	}
 	// Closing the pool and reopening a store models an actual store reload, not
 	// merely a fresh HTTP handler sharing a process-local evidence map.
@@ -62,33 +75,35 @@ func TestA2APersistence_PostgresRestart(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(reopened.Close)
 	base = reloadedA2AServer(t, reopened)
-	for id, want := range expected {
-		got := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-		require.Equal(t, want, got, "state, timestamp, identity, context and history survive pool reopen")
-	}
-	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", "")))
-	require.Len(t, listing["tasks"], 2)
-	for _, raw := range listing["tasks"].([]any) {
-		task := raw.(map[string]any)
-		require.Equal(t, expected[task["id"].(string)], task)
-	}
-	// The SQL upsert cannot downgrade a terminal fact or rewrite its timestamp.
-	for id, want := range expected {
+	for _, id := range released {
+		// The PURGE is durable, never a reconstructed state: crier keeps no
+		// tombstone for a released lease, so the task stays absent after reload.
+		_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))
+		code, message := rpcError(t, raw)
+		require.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+		// The retained record survives the pool reopen, and it is not rewritten
+		// by a later unknown observation.
 		o, found, err := reopened.TaskObservation("terminal-agent", id)
 		require.NoError(t, err)
 		require.True(t, found)
+		observedAt := o.ObservedAt
 		o.Outcome = "unknown"
 		o.ObservedAt = time.Now().UTC()
 		require.NoError(t, reopened.RecordTaskObservation("terminal-agent", o))
-		got := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-		require.Equal(t, want, got)
+		after, found, err := reopened.TaskObservation("terminal-agent", id)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotEqual(t, "unknown", after.Outcome, "the SQL upsert cannot downgrade a terminal fact")
+		require.True(t, observedAt.Equal(after.ObservedAt), "nor rewrite its timestamp")
 	}
+	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", "")))
+	require.Empty(t, listing["tasks"], "a purged task is not listed, before or after the reload")
 	// Real SQL failure: a failed evidence insert must roll back cancellation's
 	// DELETE, leaving a retrievable entry rather than an invented CANCELED.
 	pool, err := pgxpool.New(ctx, url)
 	require.NoError(t, err)
 	defer pool.Close()
-	for id := range expected {
+	for _, id := range released {
 		_, err := pool.Exec(ctx, `DELETE FROM a2a_task_observations WHERE agent_id = $1 AND task_id = $2`, "terminal-agent", id)
 		require.NoError(t, err)
 		_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))

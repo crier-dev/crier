@@ -82,30 +82,28 @@ func testA2AAckEvidence(t *testing.T, store registry.Store) {
 			stale.Evidence, err = json.Marshal(ev)
 			require.NoError(t, err)
 			require.NoError(t, backend.RecordTaskObservation("terminal-agent", stale))
-			assertA2AAckEvidence(t, base, id, accepted)
-			assertA2AAckEvidence(t, reloadedA2AServer(t, store), id, accepted)
+			assertA2AAckEvidence(t, base, id)
+			assertA2AAckEvidence(t, reloadedA2AServer(t, store), id)
 		})
 	}
 }
 
-func assertA2AAckEvidence(t *testing.T, base, id string, accepted map[string]any) {
+// assertA2AAckEvidence pins what a read of an acknowledged task answers: the
+// acknowledgement is retained as lifecycle EVIDENCE (the stream uses it to keep
+// waiting for an answer), but the task itself is gone from the store. Crier keeps
+// no tombstone for a released lease, so GetTask and ListTasks answer
+// TaskNotFoundError (-32001) naming TASK_NOT_FOUND — never a live WORKING task
+// state, and never an invented COMPLETED.
+func assertA2AAckEvidence(t *testing.T, base, id string) {
 	t.Helper()
-	got := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "")))
-	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, got))
-	require.Equal(t, accepted["history"], got["history"], "original parts, metadata and context survive Ack")
-	require.Equal(t, accepted["contextId"], got["contextId"])
-	require.Equal(t, a2a.StateBasisAcknowledged, got["metadata"].(map[string]any)["crier"].(map[string]any)["state_basis"])
-	require.Equal(t, "the receiving agent acknowledged the message; no answer observed yet", terminalStatusText(t, got))
+	_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))
+	code, message := rpcError(t, raw)
+	require.Equal(t, a2a.CodeTaskNotFoundError, code,
+		"an acknowledged task with no answer is purged, so a read is -32001: %s", message)
+	require.Contains(t, string(raw), `"TASK_NOT_FOUND"`, "the refusal names the spec's own reason")
+	require.NotContains(t, string(raw), "TASK_STATE_WORKING", "a purged task never reports a live state")
 	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", "")))
-	matches := 0
-	for _, raw := range listing["tasks"].([]any) {
-		task := raw.(map[string]any)
-		if task["id"] == id {
-			matches++
-			require.Equal(t, got, task, "GetTask and ListTasks project the same evidence")
-		}
-	}
-	require.Equal(t, 1, matches, "ListTasks must contain one consumed-but-unanswered WORKING task")
+	require.Empty(t, rpcTasks(t, listing), "a purged task is not in the listing")
 }
 
 func TestA2AAckEvidenceMemory(t *testing.T) {

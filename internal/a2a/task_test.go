@@ -119,6 +119,151 @@ func TestTaskLifecycleStateMappingIsTheDocumentedTable(t *testing.T) {
 	}
 }
 
+// TestTaskLifecycleAReleasedLeaseIsPurged pins the absence rule every operation
+// applies (TaskEvidence.Absent / NotFound), which is the post-purge behaviour
+// the spec's §5.5.2 and §5.5.4 leave to the store:
+//
+//   - an ACKNOWLEDGED task with no observed answer is purged. Ack releases the
+//     lease and removes the entry, and crier keeps no tombstone for it, so a
+//     read is TaskNotFoundError (-32001) naming TASK_NOT_FOUND — never a live
+//     state, and never an invented COMPLETED;
+//   - a CANCELLED task is purged the same way: the entry is closed, so a
+//     duplicate CancelTask is -32001, which §3.1.5 permits explicitly for an
+//     already-purged task;
+//   - a task STILL in the store is addressable, including one that is already
+//     terminal — that is the case CancelTask answers -32002
+//     TaskNotCancelableError for.
+//
+// A retained answer is the ONE terminal record that outlives the release, so an
+// acknowledged task with observed output stays readable as COMPLETED.
+func TestTaskLifecycleAReleasedLeaseIsPurged(t *testing.T) {
+	acked := TaskEvidence{
+		Entry:          entryView("m-acked", lifecycleNow.Add(-time.Minute), "lease-1", nil, lifecycleNow.Add(time.Hour), `{"parts":[]}`),
+		AcknowledgedAt: lifecycleNow.Add(-30 * time.Second),
+	}
+	canceled := TaskEvidence{
+		Entry:      entryView("m-canceled", lifecycleNow.Add(-time.Minute), "", nil, lifecycleNow.Add(time.Hour), `{"parts":[]}`),
+		CanceledAt: lifecycleNow.Add(-30 * time.Second),
+	}
+	answered := TaskEvidence{
+		Entry:            entryView("m-answered", lifecycleNow.Add(-time.Minute), "lease-1", nil, lifecycleNow.Add(time.Hour), `{"parts":[]}`),
+		AcknowledgedAt:   lifecycleNow.Add(-30 * time.Second),
+		Answer:           &Artifact{Parts: []Part{TextPart("the answer")}},
+		AnswerObservedAt: lifecycleNow.Add(-20 * time.Second),
+	}
+	live := TaskEvidence{
+		Entry: entryView("m-live", lifecycleNow.Add(-time.Minute), "", nil, lifecycleNow.Add(time.Hour), `{"parts":[]}`),
+	}
+	expired := TaskEvidence{
+		Entry: entryView("m-expired", lifecycleNow.Add(-time.Hour), "", nil, lifecycleNow.Add(-time.Second), `{"parts":[]}`),
+	}
+
+	cases := []struct {
+		name       string
+		evidence   TaskEvidence
+		wantAbsent bool
+		// wantPurged distinguishes the two -32001 explanations: a released lease
+		// (crier observed what happened) from no record at all.
+		wantPurged bool
+		wantBasis  string
+	}{
+		{
+			name:       "an acknowledged task with no observed answer is purged",
+			evidence:   acked,
+			wantAbsent: true,
+			wantPurged: true,
+			wantBasis:  StateBasisAcknowledged,
+		},
+		{
+			name:       "a cancelled task is purged — a duplicate cancel is a not-found",
+			evidence:   canceled,
+			wantAbsent: true,
+			wantPurged: true,
+			wantBasis:  StateBasisCanceled,
+		},
+		{
+			name:     "an acknowledged task WITH a retained answer stays readable",
+			evidence: answered,
+		},
+		{
+			name:     "an entry the store still holds is addressable",
+			evidence: live,
+		},
+		{
+			name:     "an entry past its TTL is still in the store, so still addressable",
+			evidence: expired,
+		},
+		{
+			name:       "no record at all is the plain not-found",
+			evidence:   TaskEvidence{},
+			wantAbsent: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.evidence.Absent(); got != tc.wantAbsent {
+				t.Fatalf("Absent = %v, want %v", got, tc.wantAbsent)
+			}
+			if got := tc.evidence.Purged(); got != tc.wantPurged {
+				t.Fatalf("Purged = %v, want %v", got, tc.wantPurged)
+			}
+			rpcErr := tc.evidence.NotFound("agent-a", tc.evidence.TaskID())
+			if !tc.wantAbsent {
+				// NotFound is only ever written for absent evidence; a present
+				// task never reaches it (the projection is what an operation
+				// answers with).
+				return
+			}
+			if rpcErr.Code != CodeTaskNotFoundError {
+				t.Fatalf("NotFound code = %d, want %d (TaskNotFoundError)", rpcErr.Code, CodeTaskNotFoundError)
+			}
+			if reason := reasonOf(t, rpcErr); reason != ReasonTaskNotFound {
+				t.Fatalf("reason = %q, want %q", reason, ReasonTaskNotFound)
+			}
+			if !strings.Contains(rpcErr.Message, "not in agent") {
+				t.Errorf("a purged task's refusal must say the task is not in the inbox: %q", rpcErr.Message)
+			}
+			if tc.wantPurged {
+				info, ok := rpcErr.Data[0].(ErrorInfo)
+				if !ok {
+					t.Fatalf("a purged task's refusal must carry its ErrorInfo detail: %#v", rpcErr.Data)
+				}
+				if info.Metadata["state_basis"] != tc.wantBasis {
+					t.Errorf("state_basis = %q, want %q: the refusal must name the record that proved the release",
+						info.Metadata["state_basis"], tc.wantBasis)
+				}
+				if !strings.Contains(rpcErr.Message, "released lease") {
+					t.Errorf("a purged task's refusal must state WHY it is gone: %q", rpcErr.Message)
+				}
+			} else if !strings.Contains(rpcErr.Message, "no retained inbox, failure or observation record") {
+				t.Errorf("a task with no record must be refused as such: %q", rpcErr.Message)
+			}
+		})
+	}
+
+	// The answer case is the exception that must not be lost: the release alone
+	// proves nothing, but the release plus observed output is COMPLETED.
+	if state, basis, rpcErr := answered.Resolve("agent-a", answered.TaskID(), lifecycleNow); rpcErr != nil {
+		t.Fatalf("Resolve(acknowledged with output): %v", rpcErr)
+	} else if state != TaskStateCompleted || basis != StateBasisAcknowledged {
+		t.Errorf("acknowledged + output = %q (basis %q), want %q/%q", state, basis, TaskStateCompleted, StateBasisAcknowledged)
+	}
+
+	// The other half of the split: a task the store still holds that is already
+	// terminal is -32002 TaskNotCancelableError, never -32001. CancelTask decides
+	// this from the evidence, so pin both facts it uses.
+	state, _, rpcErr := expired.Resolve("agent-a", expired.TaskID(), lifecycleNow)
+	if rpcErr != nil {
+		t.Fatalf("Resolve(entry past its TTL): %v", rpcErr)
+	}
+	if !state.IsTerminal() {
+		t.Fatalf("an entry past its TTL resolved to %q; the in-store terminal case needs a terminal state", state)
+	}
+	if notCancelable := TaskNotCancelableError(expired.TaskID(), state); notCancelable.Code != CodeTaskNotCancelableError {
+		t.Errorf("TaskNotCancelableError code = %d, want %d", notCancelable.Code, CodeTaskNotCancelableError)
+	}
+}
+
 // TestTaskLifecycleAnUnexpiredNeverExpiringEntryIsNotFailed pins the zero-TTL
 // case: ttl_seconds=0 means NEVER expires (DF-CRIER-37), so a row whose
 // ExpiresAt is the zero time is SUBMITTED/WORKING and never FAILED — a

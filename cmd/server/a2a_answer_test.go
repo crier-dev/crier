@@ -49,9 +49,21 @@ func TestA2AAnswerObservedHTTP(t *testing.T) {
 	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, consumed))
 	require.Contains(t, terminalStatusText(t, consumed), "no answer observed yet")
 	var lastGetRaw []byte
+	var meta map[string]any
 	get := func() map[string]any {
 		lastGetRaw = mustA2AOK(t, client, base, getTaskBody(agent, id, `"historyLength":0`))
 		return rpcResult(t, lastGetRaw)
+	}
+	// assertPurged pins the post-release read: the acknowledgement is evidence a
+	// live stream keeps using, but the task is not in the store, so a POLL is
+	// TaskNotFoundError (-32001) — never an acknowledged-WORKING task, and never
+	// an invented COMPLETED (§5.5.2).
+	assertPurged := func() []byte {
+		_, raw, _ := a2aRPC(t, client, base, getTaskBody(agent, id, `"historyLength":0`))
+		code, message := rpcError(t, raw)
+		require.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+		require.Contains(t, string(raw), `"TASK_NOT_FOUND"`)
+		return raw
 	}
 	assertList := func(want map[string]any) {
 		listing := rpcResult(t, mustA2AOK(t, client, base, listTasksBody(agent, `"includeArtifacts":true,"historyLength":0`)))
@@ -63,16 +75,15 @@ func TestA2AAnswerObservedHTTP(t *testing.T) {
 		}
 		require.Equal(t, want, tasks[0])
 	}
-	noAnswer := get()
-	noAnswerRaw := append([]byte(nil), lastGetRaw...)
-	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, noAnswer))
-	meta := noAnswer["metadata"].(map[string]any)["crier"].(map[string]any)
-	require.Equal(t, false, meta["answered"])
-	require.Equal(t, a2a.StateBasisAcknowledged, meta["state_basis"])
-	require.NotContains(t, meta, "answer_observed_at")
-	assertList(noAnswer)
+	noAnswerRaw := append([]byte(nil), assertPurged()...)
+	lastGetRaw = noAnswerRaw
+	assertListEmpty := func() {
+		listing := rpcResult(t, mustA2AOK(t, client, base, listTasksBody(agent, `"includeArtifacts":true,"historyLength":0`)))
+		require.Empty(t, rpcTasks(t, listing), "a purged task is not listed")
+	}
+	assertListEmpty()
 	workingOnly := rpcResult(t, mustA2AOK(t, client, base, listTasksBody(agent, `"status":"TASK_STATE_WORKING"`)))
-	require.Len(t, rpcTasks(t, workingOnly), 1)
+	require.Empty(t, rpcTasks(t, workingOnly))
 	completedOnly := rpcResult(t, mustA2AOK(t, client, base, listTasksBody(agent, `"status":"TASK_STATE_COMPLETED"`)))
 	require.Empty(t, rpcTasks(t, completedOnly))
 
@@ -89,7 +100,9 @@ func TestA2AAnswerObservedHTTP(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, resp.Body.Close())
 		stream.next(t, "non-answer artifact")
-		require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, get()))
+		// A publish that is not this task's agent output does not resurrect the
+		// purged task: the poll is still the not-found, never a WORKING ticket.
+		assertPurged()
 	}
 	publishAgentAnswer(t, base, agent, id)
 	stream.next(t, "agent answer artifact")
@@ -101,6 +114,7 @@ func TestA2AAnswerObservedHTTP(t *testing.T) {
 	require.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, answered))
 	meta = answered["metadata"].(map[string]any)["crier"].(map[string]any)
 	require.Equal(t, true, meta["answered"])
+	require.Equal(t, a2a.StateBasisAcknowledged, meta["state_basis"])
 	require.NotEmpty(t, meta["answer_observed_at"])
 	artifact := answered["artifacts"].([]any)[0].(map[string]any)
 	require.Equal(t, "canary deployed", artifact["parts"].([]any)[0].(map[string]any)["text"])
@@ -126,10 +140,15 @@ func TestA2AAnswerNotInCreatingHistory(t *testing.T) {
 	_, lease, err := store.Retrieve("terminal-agent", time.Minute, 1)
 	require.NoError(t, err)
 	require.NoError(t, store.Ack("terminal-agent", lease, []string{id}))
-	task := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, "\"historyLength\":0")))
-	require.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, task))
-	require.NotContains(t, task, "history")
-	require.Contains(t, terminalStatusText(t, task), "no answer observed yet")
+	// An acknowledgement with no observed answer is a PURGE, not a WORKING task:
+	// crier keeps no tombstone, so there is no task — and therefore no history —
+	// to hand back. The refusal also never smuggles the creating message in as
+	// an answer, which was this test's original point.
+	_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, `"historyLength":0`))
+	code, message := rpcError(t, raw)
+	require.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+	require.NotContains(t, string(raw), "history")
+	require.Contains(t, string(raw), `"TASK_NOT_FOUND"`)
 	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
 }

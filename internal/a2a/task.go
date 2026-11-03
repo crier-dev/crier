@@ -5,8 +5,10 @@
 // entry. Its id is the entry's message id, its state is what crier's own store
 // can prove about that entry right now, and its terminal states are produced by
 // the operations crier already has — Retrieve leases (WORKING), Ack acknowledges
-// and removes (WORKING until output is observed), the TTL sweep removes and records (FAILED), and
-// CancelTask (this row) releases the lease and closes the entry (CANCELED).
+// and removes (the task is purged: a released lease is not an outcome), the TTL
+// sweep removes and records (FAILED), and
+// CancelTask (this row) releases the lease and closes the entry (CANCELED, and
+// purged for every later operation).
 //
 // Two rules shape everything here, because this is where an interop adapter
 // most easily lies about state:
@@ -339,8 +341,63 @@ func HasOutputParts(parts []Part) bool {
 	return present
 }
 
-// Present reports whether crier holds ANY record for this task id.
+// Present reports whether crier holds a record it can project a task from.
 func (e TaskEvidence) Present() bool { return e.Entry != nil || !e.DeadLetteredAt.IsZero() }
+
+// Purged reports whether crier's records prove that this task's lease was
+// RELEASED and its entry closed: an observed acknowledgement with no retained
+// answer, or a successful cancellation.
+//
+// A released lease ends the task's presence in the store, and crier keeps no
+// tombstone for it. An acknowledgement is a consumption, not an outcome — the
+// entry is gone and no terminal state was observed, so COMPLETED is never
+// invented from one (§5.5.2). A cancellation closes the entry, so nothing is
+// left open to address (§5.5.4); §3.1.5 explicitly permits TaskNotFoundError for
+// an already-purged task, including a duplicate cancel.
+//
+// A RETAINED ANSWER is separate evidence, never a purge: an acknowledgement
+// with observed agent output is COMPLETED and stays readable, which is the one
+// terminal state crier can prove after the entry is gone.
+func (e TaskEvidence) Purged() bool {
+	if !e.CanceledAt.IsZero() {
+		return true
+	}
+	return !e.AcknowledgedAt.IsZero() && !e.Answered()
+}
+
+// Absent reports whether a task-lifecycle operation must answer
+// TaskNotFoundError for this evidence: crier holds no record of the task at all,
+// or the only records it holds prove the task was purged.
+//
+// This is the ABSENCE rule the operations apply — GetTask, ListTasks,
+// CancelTask, SubscribeToTask and a message that names a task — and it is kept
+// apart from Resolve on purpose: Resolve stays the pure §5.5.2 mapping, so a
+// live stream that itself watched a lease being released can still describe the
+// task it was streaming. A READ of the same task is a read of a store that no
+// longer holds it, and answers TaskNotFoundError.
+func (e TaskEvidence) Absent() bool {
+	return e.Purged() || !e.Present()
+}
+
+// NotFound is the refusal for evidence an operation cannot address: the
+// purged-task refusal when crier holds proof of a release, the plain not-found
+// when it holds no record at all. Both are -32001 TaskNotFoundError naming
+// TASK_NOT_FOUND; only the explanation differs, so a client is never told a task
+// "does not exist" when what actually happened is that its lease was released.
+func (e TaskEvidence) NotFound(agentID, taskID string) *RPCError {
+	if e.Purged() {
+		return PurgedTaskError(taskID, agentID, e.purgeBasis())
+	}
+	return TaskNotFoundError(taskID, agentID)
+}
+
+// purgeBasis names the crier record that proves the release.
+func (e TaskEvidence) purgeBasis() string {
+	if !e.CanceledAt.IsZero() {
+		return StateBasisCanceled
+	}
+	return StateBasisAcknowledged
+}
 
 // TaskID is the task's id: crier's own message id (a task id the client sends
 // is resolved against this, never minted by the client — §3.4.2).
@@ -377,6 +434,13 @@ func (e TaskEvidence) TaskID() string {
 //     claim. The sweep will record the same outcome durably a moment later.
 //   - a CLOSED row proves acknowledgement, not output. Like an observed Ack,
 //     it remains WORKING until separate output evidence is present.
+//
+// Where that evidence came from matters as much as what it says. An observed
+// acknowledgement or cancellation proves the lease was RELEASED, so the task is
+// no longer in the store: the operations gate on TaskEvidence.Absent and answer
+// TaskNotFoundError (-32001) for it (§5.5.2, §5.5.4, §3.1.5). Resolve itself
+// stays the full mapping table because a live stream that watched the release is
+// describing what it saw, not reading a store that still holds the task.
 func (e TaskEvidence) Resolve(agentID, taskID string, now time.Time) (TaskState, string, *RPCError) {
 	if !e.CanceledAt.IsZero() {
 		return TaskStateCanceled, StateBasisCanceled, nil
@@ -762,6 +826,25 @@ func contextIDOf(item ListItem) string {
 // ---------------------------------------------------------------------------
 // The refusals this row adds (§5.5)
 // ---------------------------------------------------------------------------
+
+// PurgedTaskError is -32001 for a task whose records prove its lease was
+// released and its entry closed: it was acknowledged (and no answer was ever
+// observed) or it was cancelled. The task is no longer in the store, so every
+// task-lifecycle operation aimed at it is a not-found — §3.1.5 explicitly
+// permits exactly this for an already-purged task, including a duplicate
+// CancelTask.
+//
+// The reason is the same TASK_NOT_FOUND a completely unknown id gets: to an A2A
+// client both are "there is no such task here". Only the explanation differs,
+// and it is stated precisely because crier DID observe what happened — saying
+// "no record exists" would be a lie about a task whose release crier recorded.
+func PurgedTaskError(id, agentID, basis string) *RPCError {
+	return NewRPCError(CodeTaskNotFoundError, fmt.Sprintf(
+		"task %q is not in agent %q's inbox: its lease was released and its entry closed (%s), and crier keeps no tombstone for a released lease — an acknowledged task with no observed answer is purged rather than reported COMPLETED, and a cancelled task is closed rather than left addressable. The task may be acknowledged, cancelled, expired or invalid",
+		id, agentID, basis),
+		ErrorInfo{Type: ErrorInfoType, Reason: ReasonTaskNotFound, Domain: ErrorDomain,
+			Metadata: map[string]string{"taskId": id, "tenant": agentID, "state_basis": basis}})
+}
 
 // TaskNotFoundError is -32001 for a task with no inbox, dead-letter or retained
 // observation record. Missing evidence never licenses an invented outcome.

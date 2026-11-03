@@ -35,7 +35,9 @@ func TestA2APersistence_AckAfterStreamAndHandlerClose(t *testing.T) {
 	stream.nextStatus(t, string(a2a.TaskStateWorking))
 	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateWorking)
+	// The release is durable: a different handler over the same store still
+	// answers TaskNotFoundError, because crier keeps no tombstone for an ack.
+	assertStoredAbsent(t, reloadedA2AServer(t, store), id)
 }
 
 func TestA2APersistence_CancelAfterStreamAndHandlerClose(t *testing.T) {
@@ -44,7 +46,23 @@ func TestA2APersistence_CancelAfterStreamAndHandlerClose(t *testing.T) {
 	rpcResult(t, mustA2AOK(t, http.DefaultClient, base, cancelTaskBody("terminal-agent", id)))
 	stream.nextStatus(t, string(a2a.TaskStateCanceled))
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateCanceled)
+	// The closed entry is durable too: nothing left to read, cancel or list.
+	assertStoredAbsent(t, reloadedA2AServer(t, store), id)
+}
+
+// assertStoredAbsent pins the durability of a PURGE the way assertStoredTask
+// pins a readable state: after a handler change (or a store reload) the task is
+// still not in the store, so a read is TaskNotFoundError (-32001) naming
+// TASK_NOT_FOUND and the listing does not contain it. A retained lifecycle
+// record must never be reconstructed into CANCELED or COMPLETED by a later read.
+func assertStoredAbsent(t *testing.T, base, id string) {
+	t.Helper()
+	_, raw, _ := a2aRPC(t, http.DefaultClient, base, getTaskBody("terminal-agent", id, ""))
+	code, message := rpcError(t, raw)
+	require.Equal(t, a2a.CodeTaskNotFoundError, code, "a purge survives the handler change: %s", message)
+	require.Contains(t, string(raw), `"TASK_NOT_FOUND"`)
+	listing := rpcResult(t, mustA2AOK(t, http.DefaultClient, base, listTasksBody("terminal-agent", "")))
+	require.Empty(t, rpcTasks(t, listing), "a purged task is not in the listing")
 }
 
 func assertStoredTask(t *testing.T, base, id string, state a2a.TaskState) {
@@ -78,7 +96,10 @@ func TestA2APersistence_MemoryRestartHasNoEvidence(t *testing.T) {
 	rpcResult(t, mustA2AOK(t, http.DefaultClient, base, cancelTaskBody("terminal-agent", id)))
 	stream.nextStatus(t, string(a2a.TaskStateCanceled))
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateCanceled)
+	// A released lease is not a readable task in ANY handler: the same store
+	// answers -32001, and so does a fresh one (where the evidence is gone
+	// entirely). Neither invents CANCELED from absence.
+	assertStoredAbsent(t, reloadedA2AServer(t, store), id)
 	fresh := registry.NewMemoryStore()
 	registerStoreAgent(t, fresh, "terminal-agent", true)
 	_, raw, _ := a2aRPC(t, http.DefaultClient, reloadedA2AServer(t, fresh), getTaskBody("terminal-agent", id, ""))
@@ -103,7 +124,9 @@ func TestA2APersistence_AckDoesNotDependOnStreamWrite(t *testing.T) {
 	stream.nextStatus(t, string(a2a.TaskStateWorking))
 	require.NoError(t, stream.body.Body.Close())
 	stream.waitClosed(t)
-	assertStoredTask(t, reloadedA2AServer(t, store), id, a2a.TaskStateWorking)
+	// Ack committed its own evidence, so the purge is durable even though this
+	// store's observation WRITES fail (the stream's fallible hook is bypassed).
+	assertStoredAbsent(t, reloadedA2AServer(t, store), id)
 }
 
 func TestA2APersistence_StreamWriteFailureIsNotUnknown(t *testing.T) {

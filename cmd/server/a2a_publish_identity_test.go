@@ -128,16 +128,20 @@ func TestA2APublishIdentityHTTP(t *testing.T) {
 			raw, err = io.ReadAll(resp.Body)
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
-			got := rpcResult(t, mustA2AOK(t, client, base, getTaskBody(owner, id, `"historyLength":0`)))
-			meta := got["metadata"].(map[string]any)["crier"].(map[string]any)
+			_, rawGet, _ := a2aRPC(t, client, base, getTaskBody(owner, id, `"historyLength":0`))
 			if tc.refusal != "" {
 				assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(raw))
 				assert.Contains(t, string(raw), tc.refusal)
-				assert.Equal(t, string(a2a.TaskStateWorking), rpcTaskState(t, got))
-				assert.Equal(t, false, meta["answered"])
-				assert.NotContains(t, got, "artifacts")
-				t.Logf("spoof/refusal HTTP %d %s; GetTask %s", resp.StatusCode, strings.TrimSpace(string(raw)), mustJSON361(t, got))
+				// The refused publish retained no answer, so the ack stands alone
+				// and the task is PURGED: the poll is TaskNotFoundError, never an
+				// acknowledged-WORKING (or COMPLETED) task.
+				code, message := rpcError(t, rawGet)
+				assert.Equal(t, a2a.CodeTaskNotFoundError, code, message)
+				assert.NotContains(t, string(rawGet), "artifacts")
+				t.Logf("spoof/refusal HTTP %d %s; GetTask %s", resp.StatusCode, strings.TrimSpace(string(raw)), string(rawGet))
 			} else {
+				got := rpcResult(t, rawGet)
+				meta := got["metadata"].(map[string]any)["crier"].(map[string]any)
 				assert.Equal(t, http.StatusAccepted, resp.StatusCode, string(raw))
 				assert.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, got))
 				assert.Equal(t, true, meta["answered"])
@@ -151,10 +155,15 @@ func TestA2APublishIdentityHTTP(t *testing.T) {
 				t.Logf("GetTask %s", mustJSON361(t, got))
 			}
 			listing := rpcResult(t, mustA2AOK(t, client, base, listTasksBody(owner, `"includeArtifacts":true,"historyLength":0`)))
-			if _, present := got["artifacts"]; !present {
-				got["artifacts"] = []any{}
+			if tc.refusal != "" {
+				assert.Empty(t, rpcTasks(t, listing), "a purged task is not listed")
+			} else {
+				got := rpcResult(t, rawGet)
+				if _, present := got["artifacts"]; !present {
+					got["artifacts"] = []any{}
+				}
+				assert.Equal(t, []map[string]any{got}, rpcTasks(t, listing))
 			}
-			assert.Equal(t, []map[string]any{got}, rpcTasks(t, listing))
 			if conn != nil {
 				control, err := json.Marshal(map[string]any{"topic": topic, "event": outputEnvelope(id, "authorized control")})
 				require.NoError(t, err)
@@ -164,8 +173,19 @@ func TestA2APublishIdentityHTTP(t *testing.T) {
 				_, frame, err := conn.ReadMessage()
 				require.NoError(t, err)
 				assert.Contains(t, string(frame), "authorized control", "a refused publish must not fan out")
-				controlTask := rpcResult(t, mustA2AOK(t, client, base, getTaskBody(owner, id, `"historyLength":0`)))
-				assert.Contains(t, mustJSON361(t, controlTask), "authorized control", "a refused publish must not become immutable first output")
+				_, controlTaskRaw, _ := a2aRPC(t, client, base, getTaskBody(owner, id, `"historyLength":0`))
+				if tc.refusal != "" {
+					// The refused publish recorded nothing, so the owner's own
+					// control publish becomes the FIRST output — a real read, not
+					// the vacuous "absent because WORKING" this used to assert.
+					controlTask := rpcResult(t, controlTaskRaw)
+					assert.Equal(t, string(a2a.TaskStateCompleted), rpcTaskState(t, controlTask))
+					assert.Contains(t, mustJSON361(t, controlTask), "authorized control",
+						"the refused payload was never retained, so the control output is the first")
+				} else {
+					assert.NotContains(t, string(controlTaskRaw), "authorized control",
+						"the first retained output is immutable: a later publish cannot become it")
+				}
 			}
 		})
 	}
