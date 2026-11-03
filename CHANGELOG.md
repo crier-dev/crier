@@ -15,7 +15,252 @@ procedure, the gate requirements and the publish step are in
 
 ## [0.3.0] - 2026-10-31
 
-_Nothing yet._
+Range: `v0.2.0`..`v0.3.0` — 261 non-merge commits (6 `feat`, 54 `fix`,
+19 `docs`, 7 `test`, 1 `ci`, 1 `perf`, 92 `chore`, 69 board, plus
+qa/dogfood/foreman/wip/close). No `BREAKING CHANGE` footer and no `!` type
+token anywhere in the range, so this is a minor release. The entries below
+group those commits into user-visible changes rather than repeating every one:
+each names the item id and the commit it rests on.
+
+### Added
+
+- **Named groups in the console, with measured rosters** (DF-CRIER-449,
+  `daecd072`). The console creates through `POST /groups`, lists every group
+  in the realm through `GET /groups` with a count MEASURED from the roster the
+  server returned, reads one roster on demand through `GET /groups/{name}`
+  (members plus the recorded actors), and its picker inserts the
+  `@team:<name>` address into the composer. A named group is a curated roster
+  that ONE message fans out to — every CURRENT member, through the same
+  shipped fan-out path — and deliberately not a capability target: `@cap:y`
+  stays the dynamic round-robin pool over live holders. Membership EDITS
+  (`PATCH /groups/{name}/members`) remain API-only, and the panel says so
+  instead of showing a control that cannot work.
+
+- **Close and reopen a session, with the completion recorded as a durable
+  actor event** (DF-CRIER-446, `c6f3e079`). `POST /sessions/{id}/state` closes
+  and reopens a session; the `session.close` / `session.reopen` record retains
+  through JSONL, SQLite and both PostgreSQL adapters, with state, `closed_at`,
+  event and seq committing together, and the ordered `system_events` are
+  served to the no-build REST UI. Illegal transitions are refused exactly, a
+  stale close is refused, and the existing `SESSION_CLOSED` send diagnostic
+  stays byte-identical. Historical SQL state-only rows receive no fabricated
+  actor attribution.
+
+- **Late-join context choices — ask before sharing thread history**
+  (DF-CRIER-447, `37841743`). Adding a participant to a non-empty session
+  prompts for how much of the thread they receive — summary or full, with a
+  `context_boundary_message_id` marked `since` — and refuses a missing,
+  unknown or cross-session boundary BEFORE the member is added; an empty
+  session records none, with a nothing-to-share reason and no boundary. The
+  stored applied choice is echoed, generated history is pinned to its
+  inclusive message edge by seq, and server-authored event lines render in seq
+  order: join-event text is never invented from a client request.
+
+- **The depth rule in the browser** (DF-CRIER-448, `2efaec39`). Every message
+  offers Reply in thread and Branch from here; a branch takes `branch:true`
+  with a required, resolvable `parent_id` and becomes that child's own root
+  (own `thread_id`, no `parent_id`), while the existing thread record keeps
+  `parent_thread_id` plus `anchor_message_id`. Reply/branch links and the new
+  branch rail open the exact `message-<id>` — revealing a containing collapsed
+  group first, scrolling and focusing it — and mark the current message on
+  navigation and on transcript scroll. A collapse-depth selector (1-6, default
+  3 = `DEFAULT_THREAD_COLLAPSE_DEPTH`, matching the API's
+  `DefaultCollapseDepth`) renders branches at or beyond the threshold as index
+  cards stating exactly the count they withhold in the current filtered view;
+  `thread_depth` stays the server's deliberate-branch depth, never
+  `reply_depth`.
+
+- **A UAT promotion gate that refuses dirty or mismatched provenance**
+  (DF-CRIER-464, `f25f6268`). `scripts/deploy-ui-test.sh` probes the image's
+  binary BEFORE removing the old container, pins promotion to that immutable
+  image ID, and rejects unknown evidence printing the expected commit, the
+  reported commit and the dirty flag. The replacement clones the existing UAT
+  network aliases, persistent mounts, environment and restart/port settings,
+  enforces the canonical `/data/sessions.db` path and a token read from an
+  explicit file, verifies ownership and readiness, and requires three clean
+  matching live `/version` reads; a failed live verification removes the
+  unverified replacement, never its volume.
+
+- **A board close-as-merged gate** (DF-CRIER-452, `1174d894`). The board gate
+  that runs in the pre-commit hook and in CI now verifies, for every row a
+  diff newly closes, that the recorded `commit_hash` is an ancestor of
+  `main`/`origin/main`, and REFUSES the close when the hash is not an ancestor,
+  when it resolves to no commit, or when the close prose claims the work was
+  "already merged" while carrying no hash to prove it. It closed a real hole:
+  three rows read complete for a day against a commit that existed only on a
+  worker branch. Ordinary closes are unobstructed, rows already closed at HEAD
+  are never re-judged, and the scope line names the bases and counts on every
+  run.
+
+### Changed
+
+- **The console's posture line states configuration, not read outcomes**
+  (DF-CRIER-458, -459, -460, -461; `fd2b0dfb`, `db01477e`, `856dc286`,
+  `6b780c49`). A configured posture is named rather than coloured red,
+  same-cause refusals collapse, `enabled-unarmed` is no longer rendered as
+  "ACL live; reads refused" over a populated panel, and a lifecycle control now
+  states its authority requirement — an enabled button that cannot work was a
+  lie.
+
+- **The permission matrix is one cell per column** (`92b0ec0e`). A denied cell
+  is `false`, never an absent key, so an unreadable column can no longer read
+  as permission; the panel is proven in an authenticated browser session, not
+  just a Node fetch.
+
+- **The in-flight panel and watcher state only what the server said**
+  (DF-CRIER-455, -456; `c2530bb7`, `8adbf50d`). Client constants and parse
+  failures are no longer rendered as facts, and the watcher stops polling a
+  hidden tab and says it is paused.
+
+- **Group recipients are explicit** (DF-CRIER-487, -488, -489, -490;
+  `c4c80287`, `fdc0e2fd`, `5c1ced6c`). Group recipients are named explicitly
+  and the example IDs are gone, which prevents a stale extra delivery; an
+  explicit named-group recipient is honoured instead of raising a false
+  note-to-self warning; and a stale group response from another realm is
+  ignored, keeping the active roster authoritative.
+
+- **The chat page ships with a parse gate and a repeatable accessibility
+  audit** (QA-CRIER-47, DF-CRIER-450; `46fae31a`, `e55ab446`, `eca0e64a`,
+  `61a363d3`, `e7e1c457`). Merge-conflict markers that reached the tracked
+  page now fail a committed JS parse gate rather than a visitor; the console's
+  heading outline starts at `h2`, the three targets that fell under 24px are
+  fixed, and the audit that fails on both is committed. Task lifecycle
+  transitions render as human-readable lines instead of `{}` (DF-CRIER-491,
+  `894db375`).
+
+- **The documented surface is pinned to the served one** (DF-CRIER-492,
+  DOC-2, DOC-3, DOC-4, DOC-5, DOC-6; `9b997644`, `4d6eae4c`, `cd47f34c`,
+  `8b7edc88`, `496e671a`, `71786def`, `d629d638`, `5011d440`, `29fd5b64`).
+  The README's API inventory sentence is pinned to the OpenAPI counts and a
+  drift gate enforces it in `make` and in CI; the OpenAPI documents federation
+  peer creation, federation patch and handshake, and the detection and
+  containment routes; `CR_SERVICE_DELIVERY_AUDIENCE` is documented where an
+  operator sets it; and the repository traceability doctrine is written down.
+
+### Fixed
+
+- **Membership writes require an authenticated, admin-cleared actor**
+  (DF-CRIER-470, `a4c7f8ee`). `POST /sessions/{id}/participants` took the actor
+  from the body, fell back to the unauthenticated `X-Agent-ID` header, and
+  stored `actor: {}` when neither was present; `PUT .../context` did the same
+  for `set_by`. Neither handler called `authorizeSender` and neither passed the
+  `admin` gate a close/reopen enforces, so "member added by agent X" was a
+  claim any caller could make. Both now resolve the actor as the message and
+  state paths do, a signed caller must BE the declared actor
+  (`403 SESSION_SENDER_IDENTITY_MISMATCH`), an actor-less write is refused
+  `400 AUTHOR_REQUIRED` and writes nothing, and the assurance the request
+  earned is server-stamped onto the record.
+
+- **A member-add event names its actor, and a re-add is idempotent**
+  (DF-CRIER-465, DF-CRIER-482; `9b5addf4`, `e0c54891`). A principal-created
+  room recorded `actor: {}`; every member-add event now carries the actor, and
+  re-adding an existing participant no longer forks the membership record.
+
+- **`POST /sessions` is atomic** (DF-CRIER-481, DF-CRIER-471; `d0c2f75d`,
+  `a8e3dd1f`). A later member's invalid context share rolls the whole create
+  back or returns an error envelope, instead of leaving a partially created
+  session; the atomicity is pinned by a dedicated test.
+
+- **The context contract holds on every write path** (DF-CRIER-472;
+  `ff9a4453`, `12604cef`, `f39bf6e2`, `f92f77cb`, `f7343158`, `e575f6c3`). The
+  context boundary is validated for summary and full modes on all write paths;
+  the context view respects the join instant and no longer inflates the given
+  set; the GET error envelope is unified and divergence classified; `kind:team`
+  is refused `400 UNKNOWN_TARGET_KIND`; an empty audience has an explicit
+  outcome. The SQL view is applied in ONE transaction.
+
+- **The console withholds management values by what they look like, not by
+  what their key is called** (`60c91c01`). The previous guard was a field-name
+  vocabulary, so a key pasted into `display_name`, a record carrying
+  `apikey`/`auth`, or a raw 64-hex value under `digest` printed verbatim into a
+  screenshot. The guard now inspects values and nested shapes — key prefixes
+  (`sk-`, `ghp_`, `xox`, `AKIA`, `eyJ`, `PRIVATE KEY` envelopes), long hex and
+  base64 blobs, record-level `{secret:true}` markers and credential-envelope
+  shapes — and withholds them naming the REASON, never a sample of the value.
+  Publication stays explicit: a 64-hex value under a `fingerprint`/`digest`
+  name renders and is labelled "(published fingerprint)", and absent, empty and
+  withheld are three distinct renderings.
+
+- **Every ingress verdict value is retained** (DF-CRIER-457, `a04aab3c`).
+  Conflicting or duplicate verdict headers can no longer make the wire and the
+  audit disagree silently: all parsed values are retained, multiplicity is
+  marked, a conflicting set leaves the verdict empty, and the completed audit
+  records the final header values with their original key spellings (which
+  `net/http` folds away at the receiver).
+
+- **Chat state is distinguishable from missing state** (DF-CRIER-473, -474,
+  -468, -485, -486; `d51d4ec3`, `3a40d939`, `6e71013c`, `ec581f96`,
+  `6febe57a`). Absent and unknown chat state are different answers; session-wide
+  events are marked outside thread filters instead of disappearing behind them;
+  the agent-class read is disabled where the management credential cannot be
+  held; group writes go to the PostgreSQL group store rather than local JSONL;
+  and the identity suggestion is derived from the registry instead of being
+  fabricated.
+
+- **A task send and its progress panel cannot borrow each other's delivery**
+  (DF-CRIER-467, `c10dfb3f`). A task send carries its own request key, and the
+  progress panel never renders another message's delivery as its own.
+
+- **The board and doctor gates check the thing they name** (DF-CRIER-453,
+  -438, -439, -441; `bc679be8`, `34e72e22`). A board with zero nonblank records
+  is refused, because byte size cannot prove population, and the refusal reports
+  both file bytes and the record count. The doctor's probe now runs GIT's own
+  entrypoints and its bound actually bites: a probe-only tell no longer earns a
+  green, a missing `timeout` is exit 2, and a SIGTERM-trapping hook dies with
+  the bound.
+
+- **The tag publisher accepts a correct asset set** (RELEASE-010, `4a6eb500`).
+  It uploaded `SHA256SUMS` with the assets and then compared the set to the
+  manifest for EQUALITY — the manifest is not one of the files it covers,
+  because a manifest that hashed itself could never be verified — so every
+  future tag cut red on the one commit that must be green.
+
+- **The QA batteries fail closed** (INT-CI-020, QA-CRIER-49; `6e82614b`,
+  `5ed203e2`, `d830c5d6`, `ef8753e0`). A bunker agent spawned with an unenforced
+  network-isolation mode now fails the cut instead of proving "no egress" from a
+  flag value while running with full egress; an empty disconnect log is refused,
+  because it hid a skipped suite; a live-test dependency failure under a network
+  cut is classified UNVERIFIED rather than passing; and loopback is exempt from
+  the dead proxy.
+
+- **The CI suite is deterministic** (INT-CI-014, -015, -016, -017, QA-CRIER-45,
+  -46, -48, QA-CRIER-52; `2193d793`, `dd9b96ef`, `ee6250a3`, `43f3d00c`,
+  `ec9b760a`, `1176218f`, `ebd2c2b6`, `0974c733`, `c43582c9`, `b4b8ed54`,
+  `3b2e7777`, `d269fab0`). The within-package timeout that stalled the suite is
+  resolved and pinned by regression arms; the Postgres integration failure is
+  diagnosed; the port-guard ARM E is deterministic and the selftest waits for
+  its listener to bind; load-brittle wall-clock assertions are replaced with
+  budget-relative bounds; `x/sys` is a direct dependency with a module-tidiness
+  gate; and the pinned-boardctl and checkout steps carry the token they need.
+
+### Notes
+
+- Every entry above names the item id and the commit it rests on; the range was
+  counted from `git log --no-merges v0.2.0..HEAD`, not from a board summary.
+  `[0.2.0]` carries a `Range:` preamble followed by a single `### Added`
+  subsection; this entry keeps the preamble and the `### Notes` form
+  `[0.1.0-rc1]` established, and splits the body into `### Added`,
+  `### Changed` and `### Fixed` — the Keep a Changelog names this file's own
+  preamble declares — because this range's bulk is fixes, and carrying 54
+  fixes under `### Added` would misstate them.
+
+- The v0.3.0 readiness sweep (RELEASE-009) recorded a **NO-GO** on 2026-11-01
+  (`ec442a24`, `releng/v0.3.0-release-evidence.md`): the exact-candidate
+  bunker-e2e run stayed pending with zero jobs, so no tag and no Release object
+  were created. That record stands until a cut overrides it. The gates are
+  measured at the tag point (`make build && make lint && make test-short`, full
+  CI green on the same commit, the committed E2E battery — see
+  [docs/releases.md](docs/releases.md)) and are not claimed by this entry.
+
+- QA-CRIER-54: the clean-machine battery failed in the native suite because a
+  shipped chat lifecycle test required Node.js, which a Go project does not
+  provide. The Node-dependent tests now skip when Node is unavailable
+  (`09348e91`).
+
+- The structural promotion (`62564bcf`) moved the accumulated `[Unreleased]`
+  content into this section and reopened an empty `[Unreleased]`; this entry
+  supplies the content for the range, and the cut re-dates the heading to the
+  tag's own date.
 
 ## [0.2.0] - 2026-10-21
 
