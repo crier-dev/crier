@@ -21,7 +21,7 @@
       "status": "landed",
       "attempts": 2,
       "commit": "df336381dbc6834d47c0cfc24b65b2341f48c0d6 (rebased) + 34669a65 (criterion re-date fix)",
-      "verdict": "judge 5dc6f9a8 FAIL on the heading date alone (create-time criterion vs authorized rework; all other sub-requirements verified holding); one-line re-date landed at 34669a65; task start + judge --async job-780b4ed06bcd4a92b61b0b89c4a149e7 re-run; final verdict lands in .gitreins/history/2026-11-03/ (first verdict preserved at c8910118)"
+      "verdict": "judge 5dc6f9a8 FAIL on the heading date alone (create-time criterion vs authorized rework; all other sub-requirements verified holding); one-line re-date landed at 34669a65; task start + judge --async re-run returned INCOMPLETE on the iteration cap (600 reached; capped run preserved at 974bf431; pre-solve gitreins-tier2-iteration-cap-exceeded answer id 4257 confirmed the knob) and GITREINS_MAX_ITERATIONS=1200 re-judge 3 was dispatched; first verdict preserved at c8910118; final verdict lands in .gitreins/history/2026-11-03/"
     },
     {
       "task_id": "INT-CI-019-L3",
@@ -48,5 +48,6 @@
   "remote_parity": "origin/main == gitlab/main == 34669a65dbc6834d47c0cfc24b65b2341f48c0d6; origin/main..HEAD=0; left/right=0/0.",
   "trace": "ch:trace row=RELEASE-009 block=QA-CRIER-54 spec=none:board-acceptance-legs wave=crier-foreman-2026-11-03-01-48-30 test=go:build+go:vet+go:test doc=CHANGELOG.md evidence=local:judge-verdicts+4of4-spot-checks witness=none:foreman-reverify verdict=none:owner-gated-leg2 commit=34669a65dbc6834d47c0cfc24b65b2341f48c0d6 memory=/project/crier/tick/crier-foreman-2026-11-03-01-48-30",
   "pre_closeout_sha": "34669a65dbc6834d47c0cfc24b65b2341f48c0d6",
+  "first_published_bookkeeping_sha": "1c0fee948069d8d163cde143955a189f82623652",
   "finished_at": "2026-11-03T03:15:00Z"
 }
