@@ -73,7 +73,7 @@ The mapping is the normative contract for INT-A2A-002..006. Each row is
 | `AgentCard` (§4.4.1) | the agent registry row — `GET /agents/{id}` | The card is a **projection** of the row, not a second store. Discovery path `GET /.well-known/agent-card.json` (§8.2, §14.3) serves the same projection for the process's own identity. **SHIPPED (INT-A2A-002), §5.3.** |
 | `AgentSkill[]` (§4.4.5) | `agent.capabilities[]` | Each capability tag becomes a skill entry; the projection is one-way (crier's registry stays the source of truth). |
 | `SendMessage` (§9.4.1) | deliver — `POST /agents/{id}/inbox` | The A2A message becomes a crier delivery to the target agent. **SHIPPED (INT-A2A-003), §5.4** — the binding calls that route's own handler, so the guard, idempotency, detection, federation, webhook and inbox paths are the shipped ones. |
-| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted` = stored and unclaimed; `working` = leased; `completed` = acked with observed agent output; acknowledged without output remains `working`; `failed` = TTL elapsed unacknowledged (or the sweep recorded the expiry); `canceled` = closed by `CancelTask`. The crier entry id is the A2A `task.id`, and the mapping is the table in §5.5.2. **SHIPPED (INT-A2A-003 §5.4.5 for the streamed states, INT-A2A-004 §5.5 for the read operations)**: the states a send can observe are reported on the stream, and `GetTask`/`ListTasks`/`CancelTask` report and produce the same states from the same entry. |
+| `Task` + `TaskState` (§4.1.1, §4.1.3) | the inbox entry + its lease/ack lifecycle | `submitted` = stored and unclaimed; `working` = leased, or acknowledged on a stream that watched it; `completed` = acknowledged **and** an answer observed; `failed` = TTL elapsed unacknowledged (or the sweep recorded the expiry); `canceled` = closed by `CancelTask`, reported on that operation's own answer. A released lease — an acknowledgement with no observed answer, or a cancellation — leaves **no** readable task: the entry is purged, crier keeps no tombstone, and a read answers `TaskNotFoundError` while a stream that watched the release reports what it saw. The crier entry id is the A2A `task.id`, and the mapping is the table in §5.5.2. **SHIPPED (INT-A2A-003 §5.4.5 for the streamed states, INT-A2A-004 §5.5 for the read operations, DF-CRIER-493 for the purge)**: the states a send can observe are reported on the stream, and `GetTask`/`ListTasks`/`CancelTask` report and produce those states from the same entry for every task the store still holds or can prove by a retained answer. |
 | `SubscribeToTask` / `SendStreamingMessage` (SSE) (§9.4.2, §9.4.6) | relay WS subscribe | A2A's stream is the SSE view of the same subscription surface; the mesh is untouched. **SHIPPED (INT-A2A-003 §5.4.5 for `SendStreamingMessage`, INT-A2A-004 §5.5.1 for `SubscribeToTask`)** — one SSE adapter over `Relay.Subscribe` that also reports the task's own inbox lifecycle, reached both by a send that asked for a stream and by a subscription to an existing task id. |
 | `Part` — `text` \| `file` \| `data` — plus `Part.metadata` (§4.1.6) | crier message parts plus `alt`/`tags` | No new payload model: an A2A part maps onto the delivery payload's part metadata. **SHIPPED (INT-A2A-003), §5.4.4** — the mapping is lossless in both directions. |
 | `TaskPushNotificationConfig` (§4.3.1) | `webhook.Config` (url / retries / timeout / batch) | A2A push-notification config is expressed with the webhook fields crier already has; no second push mechanism, and no second configuration store. **SHIPPED (INT-A2A-005), §5.6** — the four §9.4.7 operations are a view over that config, and the §4.3.3 notification payload is the config's own schema. An inline `taskPushNotificationConfig` on a send is still REFUSED (§5.6.3) rather than silently accepted. |
@@ -434,8 +434,8 @@ never a re-telling of it.
 | `-32601` | `MethodNotFoundError` | any method but the ten this series serves — `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` and the four push-notification configuration operations (§5.6) — naming the row that lands the rest |
 | `-32602` | `InvalidParamsError` | a parameter this binding cannot honour: the missing tenant, a tenant that names no opted-in agent, a required message or task member, a part whose oneof is not exactly one member, a wrongly-typed metadata member, an unknown request-metadata key, a `pageSize` outside 1..100, an unknown `status` name, an unparseable `statusTimestampAfter`, a `pageToken` this server did not mint — and crier's own `400` from the delivery engine, with its message |
 | `-32603` | `InternalError` | crier could not complete the delivery (a `409` in-flight duplicate, a `5xx`), the delivery path was unreachable, or an inbox read failed for a reason that is not "the task is gone" |
-| `-32001` | `TaskNotFoundError` | the delivery engine answered `404` (the target agent is not on this relay or in its federation); or a task-lifecycle operation named a task id crier holds NO record of — including an acknowledged one if no observation was retained (§5.5.2) |
-| `-32002` | `TaskNotCancelableError` | `CancelTask` aimed at a task that is already terminal (§3.1.5, §5.5.4) |
+| `-32001` | `TaskNotFoundError` | the delivery engine answered `404` (the target agent is not on this relay or in its federation); or a task-lifecycle operation named a task that is not in the store — an id crier holds NO record of, or one whose lease was RELEASED and whose entry was closed (acknowledged with no observed answer, or cancelled), for which crier keeps no tombstone (§5.5.2, §5.5.4) |
+| `-32002` | `TaskNotCancelableError` | `CancelTask` aimed at a task that is STILL IN THE STORE and already terminal — its TTL elapsed and the sweep has not taken it, or a retained `ACKed` row with output (§3.1.5, §5.5.4). A task the store no longer holds is the `-32001` above, never this |
 | `-32003` | `PushNotificationNotSupportedError` | the agent has no push channel: a push-notification configuration operation against a row with no webhook (§5.6.3, §3.3.4), and an inline `configuration.taskPushNotificationConfig` on a send to such an agent |
 | `-32004` | `UnsupportedOperationError` | `message.taskId` (task continuation, §5.5.3); an inline `configuration.taskPushNotificationConfig` on a send to an agent that HAS a push channel (§5.6.3); a push configuration whose agent row carries a bring-your-own `custom_schema` (§5.6.4); a `SubscribeToTask` aimed at a terminal task (§9.4.6); or a task-lifecycle operation on a relay whose inbox backend cannot answer the read or the close it needs |
 | `-32009` | `VersionNotSupportedError` | `A2A-Version` names a version this server does not serve |
@@ -471,10 +471,13 @@ The stream carries **two** things, and says which is which:
    acknowledgement alone remains `WORKING` and explicitly says no answer was observed. `TASK_STATE_FAILED` still reports a present
    entry past its TTL, or a removed entry whose expiry sweep recorded a dead letter. Terminal
    states close the stream, as §3.1.2 requires.
-   - **Cancellation is recorded (DF-CRIER-330, DF-CRIER-340).** A successful `CancelTask`
-     atomically closes the entry and records its pre-close snapshot and observation time in the
-     inbox backend, scoped by agent and task id. Existing streams report CANCELED; GetTask and
-     ListTasks retain that answer after the stream closes. PostgreSQL persists it across restart;
+   - **Cancellation is recorded, and the task is gone (DF-CRIER-330, DF-CRIER-340, DF-CRIER-493).**
+     A successful `CancelTask` atomically closes the entry and records its pre-close snapshot and
+     observation time in the inbox backend, scoped by agent and task id. Existing streams report
+     CANCELED, and the `CancelTask` answer itself IS the `TASK_STATE_CANCELED` task; the entry is
+     closed, so a LATER `GetTask`/`ListTasks` answers `-32001 TaskNotFoundError` rather than
+     CANCELED — the retained record is evidence of what happened and what a stream watched, not a
+     task still in the store (§5.5.2, §5.5.4). PostgreSQL persists the record across restart;
      memory lasts only as long as the store instance. Full lifetime/absence rules are in §5.5.4.
    - **Removal is not acknowledgement.** Each stream registers `registry.InboxAckObserver` before
      its first Task frame. Both local backends notify only after a successful `Ack` (after commit
@@ -561,7 +564,10 @@ that SAME backend, keyed by `(agent_id, task_id)`: PostgreSQL table `a2a_task_ob
 (migration 015), or a map owned by `MemoryStore`. This is not a second delivery engine or a parallel
 database. Each record holds `observed_at`, `outcome` (`acknowledged`, `canceled`, or `unknown`), and
 an `evidence` JSON snapshot with the task id, payload, timestamps and observed fact. A task id remains
-crier's message id; no state is inferred solely from an entry's absence.
+crier's message id; no state is inferred solely from an entry's absence. What a record LICENSES is
+stated in §5.5.2: an `acknowledged` record with no retained answer and a `canceled` record both prove
+the lease was released, so the task is purged and its id answers `-32001 TaskNotFoundError` — a record
+is evidence of what happened, never a task kept readable (DF-CRIER-493).
 
 The binding decision of §2 applies unchanged (JSON-RPC 2.0, `POST /a2a`, PascalCase method names), and
 so does the gate: each operation names its target with `params.tenant` (the registry id the Agent Card
@@ -599,7 +605,11 @@ Details that are decisions rather than restatements:
   `nextPageToken` is always present and empty on the final page (§3.1.4).
 - **The listing is of the tasks crier's store holds** — the entries in that inbox PLUS retained
   observations, resolved exactly as `GetTask` resolves them and deduplicated by task id, ordered by
-  §3.1.4's status-timestamp rule. Retained terminal timestamps participate in filters and pagination. A message the expiry sweep
+  §3.1.4's status-timestamp rule. Retained terminal timestamps participate in filters and pagination.
+  A PURGED task is not listed: an acknowledged task with no observed answer, and a cancelled one,
+  have left the store and `GetTask` answers `-32001` for them, so the listing drops them rather than
+  reporting a state the store no longer holds. The one record that outlives a release and stays
+  readable is a retained ANSWER, listed as `TASK_STATE_COMPLETED` (§5.5.2). A message the expiry sweep
   removed is NOT listed (its task is no longer in the queue) even though `GetTask` still answers
   `FAILED` for it from the sweep's record (§5.5.2).
 - **`history` is the creating message** — crier stores one payload per task, so the history is bounded
@@ -623,7 +633,8 @@ Details that are decisions rather than restatements:
 **This is where an interop adapter most easily lies about state**, so the mapping is stated as the
 contract it is, is asserted one row at a time in `internal/a2a/task_test.go`, and is named on the wire:
 every task a read returns carries `metadata.crier.state_basis` — the crier record its state was read
-from.
+from. A refusal instead carries the record that proved the release, in
+`ErrorInfo.metadata.state_basis`, so an absence is never anonymous either.
 
 | crier's record | A2A `TaskState` | `state_basis` | read by |
 |---|---|---|---|
@@ -632,15 +643,18 @@ from.
 | an inbox entry, unacked, **past its TTL** (the sweep has not run yet) | `TASK_STATE_FAILED` | `inbox-entry-ttl-elapsed-unacked` | `Peek` |
 | an inbox entry the store reports as **closed** (`acked`), without observed output | `TASK_STATE_WORKING` | `inbox-entry-closed` | `Peek` |
 | **no entry**, and the expiry sweep recorded this message as a dead letter | `TASK_STATE_FAILED` | `dead-letter-recorded` | `DeadLetterLookup` |
-| a successful acknowledgement observed and retained, without observed output | `TASK_STATE_WORKING` | `acknowledgement-observed` | `GetTask`, `ListTasks`, streams |
+| an acknowledgement observed and retained, with **no** observed output — the lease was released and the entry removed (**purged**; crier keeps no tombstone) | **`-32001 TaskNotFoundError`** | `acknowledgement-observed`, in the refusal's `ErrorInfo` — never a readable `state_basis` | every operation (§5.5.3, §5.5.4); a stream that watched the release reported the `WORKING` it saw |
 | acknowledgement evidence **and** retained agent output | `TASK_STATE_COMPLETED` | `acknowledgement-observed` (or `inbox-entry-closed`) | `GetTask`, `ListTasks`, streams |
-| a successful `CancelTask` atomically recorded with the close | `TASK_STATE_CANCELED` | `canceled-by-request` | the operation's answer, `GetTask`, `ListTasks`, streams |
+| a successful `CancelTask` recorded with the close — the entry is closed (**purged**) | **`-32001 TaskNotFoundError`** for every later operation; `TASK_STATE_CANCELED` only on that operation's own answer | `canceled-by-request` | the `CancelTask` answer and existing streams; `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask` and a message naming it answer `-32001` |
 | a known task's disappearance observed without an ack or cancellation | `TASK_STATE_UNSPECIFIED` | `removed-outcome-unknown` | `GetTask`, `ListTasks`, streams |
 | **no entry**, no failure record, and no retained observation | **`-32001 TaskNotFoundError`** | *(no state)* | — |
 
 Four properties of that table are decisions, and each is stated so a client never has to infer it:
 
-1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence (or a retained `ACKed` row) AND observed agent output; an acknowledged task with no answer stays `TASK_STATE_WORKING` and explicitly says no answer was observed (DF-CRIER-355).**
+1. **`TASK_STATE_COMPLETED` requires acknowledgement evidence (or a retained `ACKed` row) AND observed agent output, and it is the ONE state a read still reports after the lease was released (DF-CRIER-355, DF-CRIER-493).**
+   An acknowledged task with no answer is PURGED, not readable: a read, a listing, a cancel, a
+   subscription and a message naming it all answer `-32001`, while the stream that watched the
+   acknowledgement reported the `WORKING` it observed and said no answer was observed.
    `metadata.crier.answered` is always explicit; `answer_observed_at` is present only with actual output.
    Request history, generated status text, arbitrary progress JSON and an output for a different task
    do not count as answers. With A2A enabled, the validated `POST /relay/publish` path synchronously
@@ -671,6 +685,11 @@ Four properties of that table are decisions, and each is stated so a client neve
    or PostgreSQL `DELETE ... RETURNING` plus observation upsert before transaction commit. Failure
    rolls back the deletion; no stream needs to be open. Unknown observations may be replaced by
    terminal evidence, never the reverse, including when a stream closes concurrently with Ack.
+   That retained acknowledgement is EVIDENCE, not an addressable task (DF-CRIER-493): with no
+   retained answer the task is purged, so `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`
+   and a `SendMessage` naming it all answer `-32001 TaskNotFoundError`, and the refusal names
+   `acknowledgement-observed` as the record that proved the release. Only acknowledgement PLUS
+   retained output keeps the task readable, as `TASK_STATE_COMPLETED`.
    Plain non-task acknowledgements remain hard-delete-only. Missing ids, foreign-inbox ids and
    wrong leases are rejected before any observation is written. A task known to a stream whose
    entry disappears without proof is UNSPECIFIED with the exact explanation:
@@ -693,7 +712,8 @@ Four properties of that table are decisions, and each is stated so a client neve
 `Task.status.timestamp` is crier's own timestamp for the state it reports, so §3.1.4's ordering is
 crier's ordering: a lease stamps the instant it was taken, an expiry stamps the instant that elapsed,
 a swept record stamps when the sweep recorded it, and an unclaimed message is as old as its delivery.
-`Task.status.message` also explains acknowledged-but-unanswered `WORKING` and answered `COMPLETED`.
+`Task.status.message` also explains acknowledged-but-unanswered `WORKING` (as a stream that observed
+the acknowledgement reports it) and answered `COMPLETED`.
 The completion timestamp is the later of acknowledgement and output observation, so list filters and
 ordering agree with GetTask; neither record's original timestamp is rewritten.
 
@@ -705,7 +725,7 @@ what it names (§3.4.2, §3.1.1):
 
 | what the task id names | answer | why |
 |---|---|---|
-| nothing crier holds a record of | `-32001 TaskNotFoundError` | §3.4.2: "Agents **MUST** return a `TaskNotFoundError` if the provided `taskId` does not correspond to an existing task". After an ack this includes an acknowledged task only if no observation was retained (§5.5.2). |
+| nothing crier holds a record of, or a task whose lease was RELEASED (acknowledged with no observed answer, or cancelled) | `-32001 TaskNotFoundError` | §3.4.2: "Agents **MUST** return a `TaskNotFoundError` if the provided `taskId` does not correspond to an existing task". A released lease leaves no task to address — crier keeps no tombstone — so an acknowledged-but-unanswered and a cancelled task are both this case (§5.5.2, §5.5.4). |
 | a task in a TERMINAL state (`COMPLETED`, `FAILED`, `CANCELED`, `REJECTED`) | `-32004 UnsupportedOperationError`, naming the state | §3.1.1/§3.1.2 make this mandatory: "Messages sent to Tasks that are in a terminal state cannot accept further messages." |
 | an OPEN task (`SUBMITTED`, `WORKING`) | `-32004 UnsupportedOperationError`, with the reason stated | crier cannot represent a continuation: a task IS its inbox entry (one message), and no primitive appends a message to an existing entry. Accepting it would deliver a message that lands as a **separate** task under a separate id — which is not a continuation, and the client would not recognise it. |
 
@@ -724,28 +744,42 @@ agent's own queue depth across the refusal.
 - a cancel reaches a **queued** message as well as a leased one. That is why the store capability this
   row added is a per-entry close rather than an `Ack` wrapper: `Ack` requires the caller to hold the
   lease, and an A2A client never holds one;
-- a cancel aimed at a **terminal** task is `-32002 TaskNotCancelableError` (§3.1.5) — never a `200`
+- a cancel aimed at a **terminal** task STILL IN THE STORE — its TTL elapsed and the sweep has not
+  taken it, or a retained `ACKed` row with output — is `-32002 TaskNotCancelableError` naming that
+  state (§3.1.5): the entry is here and the work cannot be canceled, so it is never a `200`
   reporting a cancellation that did not happen;
-- a cancel aimed at a task with **no record** is `-32001 TaskNotFoundError`. A duplicate cancel
-  in the same serving process is `-32002 TaskNotCancelableError` naming `TASK_STATE_CANCELED`,
-  because the inbox backend retains the successful cancellation evidence.
+- a cancel aimed at a task that is **not in the store** is `-32001 TaskNotFoundError`: an id that
+  never existed, one already acknowledged with no observed answer, or one already cancelled. A
+  DUPLICATE cancel is therefore a not-found, **not** a second `-32002` — the entry was closed,
+  crier keeps no tombstone for it, and §3.1.5 permits exactly this for an already-purged task
+  (DF-CRIER-493). The split is deliberate and both halves are pinned: `-32002` means "the task is
+  here and cannot be canceled", `-32001` means "there is no such task here".
 
-**Observer consistency (DF-CRIER-330, DF-CRIER-340).** Cancellation removes the entry and retains
-its pre-close snapshot and cancellation time in ONE backend transaction (or one memory-store lock).
-A failed evidence write rolls back the close; the request does not claim CANCELED. GetTask and
-ListTasks read that record even after all streams close or a different handler serves the request.
-SubscribeToTask refuses the known terminal task. A duplicate cancellation remains
-TaskNotCancelableError while evidence is retained. Persistence failure during streaming is an
-explicit JSON-RPC storage error, never a terminal success frame.
+**Observer consistency (DF-CRIER-330, DF-CRIER-340, DF-CRIER-493).** Cancellation removes the entry
+and retains its pre-close snapshot and cancellation time in ONE backend transaction (or one
+memory-store lock). A failed evidence write rolls back the close; the request does not claim
+CANCELED. That record outlives every stream and survives handler replacement (and, on PostgreSQL,
+restart), which is what lets the streams that watched the cancellation — and the audit trail — keep
+what happened. It is EVIDENCE, not a task that stays readable: the entry is closed, so `GetTask`,
+`ListTasks`, `CancelTask`, `SubscribeToTask` and a message naming the task all answer `-32001
+TaskNotFoundError`, with `canceled-by-request` in the refusal's `ErrorInfo` — and a DUPLICATE
+cancellation is that `-32001`, never a second `-32002`. A subscription to a task the store still
+HOLDS but that is already terminal is the other refusal (`-32004`, §5.5.1). Persistence failure
+during streaming is an explicit JSON-RPC storage error, never a terminal success frame.
 
-**Lifetime and absence (DF-CRIER-340).** There is NO automatic time-based expiry: observations are
-kept indefinitely until explicit store/database removal. Inbox TTL, ack deletion, stream budget,
-client disconnect and handler replacement do not remove them. PostgreSQL records survive pool
-reopen and server restart and are visible to other servers using that database. MemoryStore records
-last only as long as that store instance; a real process restart loses them along with the inbox and
-registry. After a memory restart (if the agent is re-registered), or after an operator deletes retained
-evidence, normal resolution applies: a live entry uses its state, a dead letter proves FAILED, and no
-remaining record yields TaskNotFoundError — NEVER COMPLETED or CANCELED from absence. An unknown
+**Lifetime and absence (DF-CRIER-340, DF-CRIER-493).** There is NO automatic time-based expiry:
+observations are kept indefinitely until explicit store/database removal. Inbox TTL, ack deletion,
+stream budget, client disconnect and handler replacement do not remove them. PostgreSQL records
+survive pool reopen and server restart and are visible to other servers using that database.
+MemoryStore records last only as long as that store instance; a real process restart loses them
+along with the inbox and registry. Retention is retention of EVIDENCE, not of an addressable task: an
+acknowledgement or cancellation record exists to explain the `-32001` (its `state_basis` names the
+release) and to let a stream describe what it watched — it never resurrects `WORKING` or `CANCELED`
+for a later read, and only a retained ANSWER keeps a task readable, as `TASK_STATE_COMPLETED`. After
+a memory restart (if the agent is re-registered), or after an operator deletes retained evidence,
+normal resolution applies: a live entry uses its state, a dead letter proves FAILED, and nothing else
+yields a state — a released lease answers the plain not-found instead of the purged one, and absence
+never yields COMPLETED or CANCELED either way. An unknown
 record is non-terminal and may be upgraded by later actual evidence; the first terminal observation
 and its timestamp are immutable. Retention includes the payload snapshot/history; operators must
 account for its storage and privacy lifetime when explicitly removing records.
@@ -774,7 +808,10 @@ This changes no schema, migration, HTTP envelope, or lease/ack removal semantics
 `TaskObservation`, `TaskObservations`, and atomic `CloseObservedTask`. Both local backends implement
 it; AuthorityStore forwards it without dropping the capability. The remote proxy cannot persist
 local observations and does not advertise this capability. Migration 015 adds the observation table
-in the SAME PostgreSQL database, without changing the inbox row or Ack semantics.
+in the SAME PostgreSQL database, without changing the inbox row or Ack semantics. A record written
+there is evidence ABOUT a task, not a copy of one: its `acknowledged` and `canceled` outcomes are what
+`TaskEvidence.Absent` declares absent (§5.5.2), and `CloseObservedTask` keeps the close and its record
+in one transaction.
 
 **No existing non-A2A crier wire surface changed to make this possible.** The inbox row's columns, `Ack`,
 `Retrieve`, `PurgeExpired`, the dead-letter destination, the long-poll notifier, the guard, delivery,
@@ -1121,9 +1158,9 @@ path (deliberate: the stream is an adapter OVER it).
 
 | Deliverable | Where |
 |---|---|
-| The state mapping, the request parameters, the ordering/cursor and the refusals | `internal/a2a/task.go` — `TaskEvidence` / `InboxView` and `Resolve` (the §5.5.2 table, as a pure function), `Task` (the projection, including `metadata.crier.state_basis`), `DecodeGetTaskParams` / `DecodeListTasksParams` / `DecodeCancelTaskParams` / `DecodeSubscribeToTaskParams`, `BuildListPage` with `EncodePageToken` / `DecodePageToken`, and the refusal constructors `TaskNotFoundError`, `TaskNotCancelableError`, `TerminalTaskMessageError`, `TaskContinuationUnsupportedError`, `SubscribeToTerminalTaskError`, `TaskCapabilityUnsupportedError` |
+| The state mapping, the request parameters, the ordering/cursor and the refusals | `internal/a2a/task.go` — `TaskEvidence` / `InboxView`, `Resolve` (the §5.5.2 table, as a pure function) and its absence rule `Purged` / `Absent` / `NotFound` (the `-32001` every operation answers for a released lease, with `purgeBasis`), `Task` (the projection, including `metadata.crier.state_basis`), `DecodeGetTaskParams` / `DecodeListTasksParams` / `DecodeCancelTaskParams` / `DecodeSubscribeToTaskParams`, `BuildListPage` with `EncodePageToken` / `DecodePageToken`, and the refusal constructors `PurgedTaskError`, `TaskNotFoundError`, `TaskNotCancelableError`, `TerminalTaskMessageError`, `TaskContinuationUnsupportedError`, `SubscribeToTerminalTaskError`, `TaskCapabilityUnsupportedError` |
 | The error code the row adds | `internal/a2a/rpc.go` — `CodeTaskNotCancelableError` (-32002), and the six method names (also in `task.go`) |
-| The operations, the evidence read and the task-id resolution | `cmd/server/a2a.go` — the dispatch, `evidence` (peek → dead-letter lookup), `getTask`, `listTasks`, `cancelTask`, `subscribeToTask`, `refuseTaskTarget`; the stream adapter is INT-A2A-003's, reused unchanged |
+| The operations, the evidence read and the task-id resolution | `cmd/server/a2a.go` — the dispatch, `evidence` (peek → dead-letter lookup → retained-answer join), the `Absent` gate every operation applies before it resolves a state, `getTask`, `listTasks`, `cancelTask`, `subscribeToTask`, `refuseTaskTarget`; the stream adapter is INT-A2A-003's, reused unchanged |
 | The store capabilities the reads and the close need | `internal/registry/inbox_list.go` (`InboxLister`), `internal/registry/inbox_close.go` (`InboxCloser`), `internal/registry/deadletter_lookup.go` (`DeadLetterLookup`) — all OPTIONAL, all implemented by both shipped backends, no migration |
 | The mapping's unit gate | `internal/a2a/task_test.go` — §5.5.2 row by row (record → state → basis), the zero-TTL case, the status timestamps, the task projection, the parameter strictness, the cursor (including its stability when the queue shrinks), the conditional `artifacts` member, and the refusal table |
 | The route's gate (booted server) | `cmd/server/a2a_lifecycle_test.go` — the lifecycle transcript (undelivered → leased → acked → expired → canceled, with every transition named), the terminal-state refusals with the queue measured across them, the queued-cancel case, pagination over a real store, the swept-task arm driven through `registry.Handler.PurgeExpired`, a live `SubscribeToTask`, the per-agent gate, and the switch-off 404 |
