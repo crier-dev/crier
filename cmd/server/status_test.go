@@ -119,7 +119,6 @@ var statusTopLevelKeys = []string{
 	"session_store_path",
 	"session_store_mount",
 	"session_store_ignored",
-	"a2a_enabled",
 	"require_agent_signature",
 	"webhook_signing",
 }
@@ -285,6 +284,50 @@ func assertStatusSchema(t *testing.T, body []byte) map[string]any {
 		t.Errorf("GET /status top-level keys = %v, want %v (the documented schema; update docs/openapi.yaml and this list together)", keys, want)
 	}
 	return got
+}
+
+// TestStatusCarriesNoA2AKey pins specs/A2A-OPTION.md §6.1 item 1 for the
+// posture route in BOTH switch positions: "GET /status's key set is pinned by
+// its own test, so the option adds no key there — the switch is deliberately
+// absent from /status". The option's own state is an opt-in EXTRA, not
+// posture, so CR_A2A_ENABLED must be invisible here: a server started with it
+// on reports the same key set as one started with it off, and no top-level key
+// of the response may begin with "a2a" either way. The assertion scans the RAW
+// body as well as the decoded key set, because the wire is what an operator
+// (and scripts/e2e-battery.sh) reads — a nested "a2a"-prefixed key would be
+// just as much a leak of the switch into the posture schema.
+func TestStatusCarriesNoA2AKey(t *testing.T) {
+	var shapes [2][]string
+	for i, tc := range []struct {
+		name    string
+		enabled bool
+	}{
+		{"switch off (default)", false},
+		{"switch on (CR_A2A_ENABLED=true)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Config{A2AEnabled: tc.enabled}
+			body := httptestRecorder(t, cfg, registryBackendMemory)
+			got := assertStatusSchema(t, body)
+
+			keys := make([]string, 0, len(got))
+			for key := range got {
+				keys = append(keys, key)
+				if strings.HasPrefix(key, "a2a") {
+					t.Errorf("GET /status carries the top-level key %q — the A2A switch must not appear in the posture schema (§6.1)", key)
+				}
+			}
+			sort.Strings(keys)
+			shapes[i] = keys
+
+			if strings.Contains(string(body), `"a2a`) {
+				t.Errorf("GET /status body contains an a2a-prefixed JSON key with the switch %s; body:\n%s", tc.name, body)
+			}
+		})
+	}
+	if !reflect.DeepEqual(shapes[0], shapes[1]) {
+		t.Errorf("GET /status key set moved with the A2A switch: off = %v, on = %v — §6.1 requires it to be identical in both positions", shapes[0], shapes[1])
+	}
 }
 
 // assertStatusBuild checks the nested build object against the resolved

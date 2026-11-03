@@ -341,8 +341,6 @@ type statusResponse struct {
 	// and postgres backends never open CR_REGISTRY_SQLITE_PATH, so a path set
 	// alongside them is named as ignored instead of implied durable.
 	RegistryStoreIgnored string `json:"registry_store_ignored"`
-	// A2AEnabled is the effective route-registration switch, not agent support.
-	A2AEnabled bool `json:"a2a_enabled"`
 	// RateLimitPerMinute is the effective relay publish budget; 0 means
 	// unlimited (CR_RATE_LIMIT_PER_MINUTE).
 	RateLimitPerMinute int `json:"rate_limit_per_minute"`
@@ -444,7 +442,6 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		ManagementSurface:                      managementSurface,
 		RegistryDurable:                        durable,
 		SessionBackend:                         cfg.ResolvedSessionBackend(),
-		A2AEnabled:                             cfg.A2AEnabled,
 		ServiceDeliveryAuthEnabled:             len(policy) > 0,
 		ServiceDeliveryAudiencePresent:         cfg.ServiceDeliveryAudience != "",
 		ServiceDeliveryProtectedRecipients:     len(policy),

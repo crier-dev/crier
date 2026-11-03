@@ -26,14 +26,14 @@ func TestStatusChatPosture(t *testing.T) {
 				require.Nil(t, body["registry_durable"], "unrecognized backend durability is unknown")
 			}
 			require.Equal(t, "sqlite", body["session_backend"])
-			require.Equal(t, true, body["a2a_enabled"])
+			require.NotContains(t, body, "a2a_enabled", "the A2A switch is deliberately absent from /status (A2A-OPTION.md 6.1)")
 			require.Equal(t, true, body["auth_enabled"])
 		})
 	}
 	var defaults map[string]any
 	require.NoError(t, json.Unmarshal(httptestRecorder(t, config.Config{}, "memory"), &defaults))
 	require.Equal(t, "jsonl", defaults["session_backend"])
-	require.Equal(t, false, defaults["a2a_enabled"])
+	require.NotContains(t, defaults, "a2a_enabled", "the A2A switch is deliberately absent from /status (A2A-OPTION.md 6.1)")
 	require.Equal(t, false, defaults["auth_enabled"])
 }
 
