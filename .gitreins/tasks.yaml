@@ -3179,3 +3179,13 @@ tasks:
   status: complete
   created_at: '2026-11-03T21:46:42.776029+00:00'
   completed_at: '2026-11-03T21:46:52.101202+00:00'
+- id: QA-CRIER-REVIEW-3
+  title: Bunker QA battery re-run for crier after the bunker-mvp disk reclaim
+  criteria:
+  - The bunker QA battery launched against crier HEAD 9f3bf2da on bunker-mvp produces
+    terminal per-cell verdicts in the tick evidence file, replacing the 2026-11-03
+    preflight-refusal UNVERIFIED state; the disk precondition is measured below the
+    94 percent admission gate; the row records the evidence path, the cell census
+    (pass/fail per cell) and the disk-fill attribution.
+  status: in_progress
+  created_at: '2026-11-03T22:20:24.413478+00:00'
