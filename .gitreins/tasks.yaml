@@ -3187,3 +3187,15 @@ tasks:
   status: complete
   created_at: '2026-11-03T13:04:49.427137+00:00'
   completed_at: '2026-11-03T14:50:05.913341+00:00'
+- id: DF-CRIER-495
+  title: Align A2A-OPTION.md 5.5.2/5.5.4 text with the landed purge semantics
+  criteria:
+  - 'specs/A2A-OPTION.md 5.5.2 and 5.5.4 describe the landed behavior at 281e68c9:
+    a purged entry (ack-without-answer or cancel) is absent so GetTask/ListTasks/SubscribeToTask/duplicate
+    CancelTask answer -32001 TaskNotFoundError per 3.1.5; a retained answer stays
+    COMPLETED; a cancel aimed at an IN-STORE terminal entry stays -32002. Only docs
+    files change; bash scripts/e2e-battery.sh stays 194 pass / 0 fail; CI docs jobs
+    stay green.'
+  status: complete
+  created_at: '2026-11-03T15:13:13.202291+00:00'
+  completed_at: '2026-11-03T15:25:21.102375+00:00'
