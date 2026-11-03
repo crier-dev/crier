@@ -1,0 +1,30 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-16-16-35",
+  "project": "crier",
+  "block": "DEPS (family block; DEPS-005 is its only open row). Resume target DF-CRIER-495 was re-verified as owner-gated and produced no dispatch.",
+  "mode": "serial-fallback",
+  "wave_id": "crier-foreman-2026-11-03-16-16-35",
+  "wave_size": 1,
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 9.60 -> ceil 10 -> 16-10=6, min(6,6)=6 formula slots; WAVE_BUDGET=7 (ceiling 6). Wave size 1 because NO block on this board carries two mutually independent actionable rows: DF-CRIER has only owner-gated rows (333 fully; 335's acceptance item (1) closes only when 333 is decided, item (2) already passes at HEAD), the three QA-CRIER rows are blocked on bunker-mvp disk, INT-CI-019 is BLOCKED-ON-OWNER and INT-CI-020 needs a live bunker host, and README-012..014 all edit the SAME file (README.md) so they are not independent. DEPS-005 is the highest-ranked actionable row.",
+  "base": "origin/main",
+  "base_sha": "cdedcec3",
+  "workers": [
+    {
+      "task_id": "DEPS-005",
+      "title": "GO-2026-6809: bump Go toolchain pins 1.26.9 -> 1.26.10 (crypto/x509 distrust of compromised intermediates)",
+      "worktree": "/home/kara/worktrees/crier-DEPS-005",
+      "branch": "wt/DEPS-005",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/tmp/crier-t1961-brief-DEPS-005.txt",
+      "scope": "go.mod, .github/workflows/{ci,full-tests,release}.yml, internal/ci/contracts_test.go (pinned expectation), README.md Go-floor lines, CONTRIBUTING.md",
+      "dispatched_at": "2026-11-03T16:16:35-05:00"
+    }
+  ],
+  "notes": [
+    "Resume-first check: the last foreman audit event (id 2004) named block DF-CRIER-495; that row is complete and its family's only remaining rows (DF-CRIER-333, DF-CRIER-335) are owner-gated. Verified, not assumed: DF-CRIER-335 acceptance item (1) still exits 1 printing DF-CRIER-333, and item (2) already prints matches in BOTH Makefile and ci.yml at HEAD. No worker was dispatched against the undecided contract; both rows stay pending with the exact owner action named.",
+    "Ownership: canonical checkout is READ-ONLY (live crier service PID 1659715 has cwd=/home/kara/crier). Residue classified, not adopted: untracked .vfs/graph/ = repo-local post-commit/post-merge 'hilo graph warm' cache (core.hooksPath=/home/kara/crier/.git/hooks, mtimes 2026-11-02); .gitreins/tasks.yaml carries a gitreins registry write that deletes the completed DF-CRIER-493/494/495 records and adds INT-CI-021 in_progress while the board has INT-CI-021 complete (premise conflict to disclose); .git/REBASE_HEAD proven stale (no rebase-merge/rebase-apply dirs, reflog moved 2026-11-03 10:56). All writes happen in this control worktree and in the worker worktree.",
+    "GitReins lifecycle created in the CONTROL worktree (task state lives where the task was created); the judge runs from there with --scan-root on the worker tree."
+  ]
+}
