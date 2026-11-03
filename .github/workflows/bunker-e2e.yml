@@ -6,11 +6,17 @@ on:
   schedule:
     - cron: "30 6 * * *" # nightly 06:30 UTC
 
-# Push runs still supersede stale push work, but event-scoped groups prevent a
-# push from cancelling a scheduled/manual run. Job-level groups below serialize
-# the bunker target and compose stack across those workflow groups.
+# INT-CI-019: bound the verdict channel. GitHub keeps at most one running plus
+# one pending run per concurrency group and cancels the older pending one, so a
+# per-ref group means a queued push is superseded by the next push instead of
+# stacking forever behind a runner that is not consuming work. The workflow name
+# is part of the group so it cannot collide with another workflow's group, and
+# the event class is part of it so a push never shares a cancellation domain
+# with — and so can never cancel — a scheduled/nightly or manual run.
+# cancel-in-progress is evaluated only for push events. Job-level groups below
+# serialize the bunker target and compose stack across those workflow groups.
 concurrency:
-  group: bunker-e2e-${{ github.event_name }}
+  group: bunker-e2e-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
