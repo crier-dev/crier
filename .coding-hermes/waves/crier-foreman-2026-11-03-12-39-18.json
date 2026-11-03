@@ -1,0 +1,62 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-12-39-18",
+  "block": "DF-CRIER-494",
+  "mode": "wave",
+  "wave_size": 2,
+  "slots": 5,
+  "wave_budget": 2,
+  "slots_reason": "nproc=16, loadavg 10.16 -> 16-11=5, min(6,5)=5 formula slots; WAVE_BUDGET=2 hard ceiling -> wave of 2; two mutually independent admissible rows (DF-CRIER-493 seam internal/a2a + cmd/server/a2a*.go; DF-CRIER-494 seam cmd/server/status*.go + chat propagation; disjoint files, no depends_on edges between them).",
+  "base_sha": "0087d8a9ade93597cd3347c1075e13ff56a596fa",
+  "base_ref": "origin/main",
+  "rows": [
+    "DF-CRIER-493",
+    "DF-CRIER-494"
+  ],
+  "workers": [
+    {
+      "task_id": "DF-CRIER-493",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-493",
+      "branch": "wt/DF-CRIER-493",
+      "base_sha": "0087d8a9ade93597cd3347c1075e13ff56a596fa",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t20261103-123918-brief-DF-CRIER-493.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "landed",
+      "attempts": 1,
+      "worker_commit": "440482e6",
+      "integration_commit": "9939645b",
+      "judged_at": "eac347c1752fb5faad3e2946af7146fd477563e6",
+      "verdict": "3a08bd99 PASS (COMPLETE)"
+    },
+    {
+      "task_id": "DF-CRIER-494",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-494",
+      "branch": "wt/DF-CRIER-494",
+      "base_sha": "0087d8a9ade93597cd3347c1075e13ff56a596fa",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t20261103-123918-brief-DF-CRIER-494.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "landed",
+      "attempts": 3,
+      "worker_commits": ["043de024", "c85ffda7"],
+      "integration_commits": ["eac347c1", "281e68c9"],
+      "judged_at": "281e68c997b2896a4c86fecca9b872ab965b9f8f",
+      "verdict": "8babb98c PASS (COMPLETE, governing; attempt-2 judge bdfba147 INCOMPLETE/merit preserved; flip artifacts dc3472a4 + 3d2aadcd disclosed)",
+      "rework": "attempt 1 stopped on fence/spec conflict with proven patch (5 files 48+/14-) saved at /home/kara/.hermes/cache/scratch/crier-w494-BLOCKED-proven.patch; attempt 2 landed under widened fence; judge bdfba147 reproduced chat-harness regression (chat-ui-browser-selftest exit 1); attempt 3 propagated the key removal to consumers with the panel A2A indicator re-sourced to the served page (zero new routes)."
+    }
+  ],
+  "resume": "resume-first: prior audit event 1997 named block QA-CRIER-54; row-level re-read classified its only pending row RELEASE-009 as STATUS: BLOCKED-ON-OWNER (foreman_note: owner must resolve INT-CI-019 runner restore-vs-retire before legs 2/4 and the v0.3.0 cut), so the resume condition 'still has ready rows' fails (block_drive ready=1 does not parse owner gates). Fell through to step 1d top-drivable DRIVE block: DF-CRIER-494 (P0, 488/492, two admissible independent code rows). QA-CRIER-54 remains blocked on the same named owner decision; no block switch mid-tick.",
+  "ownership": "main checkout READ-ONLY this tick (service pid 1659715 crier cwd=/home/kara/crier; captured residue: untracked .vfs/graph/ hook cache (repo-local post-commit hilo graph warm) + unstaged .gitreins/tasks.yaml append creating INT-CI-021 in_progress — bound to a dead producing run (2026-11-02 23:16 local), premise (run 41515246002 whole-board validation failure) closed stale-premise on the board at e9a1ae41; premise conflict disclosed, residue untouched and unstaged). All writes from control worktree /home/kara/crier-wt-ctrl-20261103-1239 at published tip 0087d8a9.",
+  "landed": {
+    "DF-CRIER-493": "9939645b (worker 440482e6) — fix(a2a): answer TaskNotFoundError -32001 for absent tasks across the lifecycle",
+    "DF-CRIER-494": "eac347c1 (worker 043de024) — fix(status): keep the a2a switch out of the /status posture (A2A-OPTION.md 6.1); 281e68c9 (worker c85ffda7) — fix(status): propagate the /status a2a key removal to the chat panel and its harness"
+  },
+  "local_gate": "PASS at 281e68c9: go build ./... ; go vet ./... ; go test ./... -count=1 -timeout 300s = 30 packages ok 0 FAIL; scripts/e2e-battery.sh = 194 pass / 0 fail (base was 189/5); scripts/chat-ui-browser-selftest.cjs = rc 0 (clean browser cell + 12 rejection cells + explicit skip cell); gofmt -l clean; deletions vs origin/main = 0.",
+  "remote_ci": "green at exact head 281e68c9: CI 41655147833 success, pages 41655148051 success; bunker-e2e 41655147839 queued (kara-main runner offline, INT-CI-019); supersede-on-push concurrency live-proven (stale run 41646049858 auto-cancelled).",
+  "remote_parity": "origin/main == gitlab/main == 281e68c997b2896a4c86fecca9b872ab965b9f8f; 0/0 post-push.",
+  "trace": "ch:trace row=DF-CRIER-493+DF-CRIER-494 block=DF-CRIER-494 spec=specs/A2A-OPTION.md#5.5.2+#6.1 wave=crier-foreman-2026-11-03-12-39-18 test=go:test-300s+scripts/e2e-battery.sh+scripts/chat-ui-browser-selftest.cjs doc=specs/CHAT-INTERFACE.md evidence=battery:194-0+selftest:rc0+github:41655147833 witness=gitreins:3a08bd99+8babb98c verdict=3a08bd99:PASS+8babb98c:PASS commit=0087d8a9ade93597cd3347c1075e13ff56a596fa memory=/project/crier/tick/crier-foreman-2026-11-03-12-39-18",
+  "status": "closed",
+  "created_at": "2026-11-03T13:07:03Z",
+  "pre_closeout_sha": "281e68c997b2896a4c86fecca9b872ab965b9f8f",
+  "finished_at": "2026-11-03T14:55:00Z"
+}

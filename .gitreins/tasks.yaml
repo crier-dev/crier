@@ -3153,3 +3153,37 @@ tasks:
   status: complete
   created_at: '2026-11-03T02:23:17.974909+00:00'
   completed_at: '2026-11-03T02:34:36.416231+00:00'
+- id: DF-CRIER-493
+  title: 'A2A task-lifecycle error semantics: post-ack reads and duplicate cancel
+    answer TaskNotFoundError -32001'
+  criteria:
+  - 'Acceptance: (1) the three named conformance cells of scripts/e2e-battery.sh PASS
+    at the fixed tree - after retrieve+ack the GetTask read answers TaskNotFoundError
+    naming TASK_NOT_FOUND (spec 5.5.2), the not-found error.code is the integer -32001
+    (never absent/empty), and a duplicate CancelTask on an already-purged task answers
+    -32001 per 3.1.5 while a cancel aimed at an in-store terminal task keeps -32002;
+    (2) those semantics are pinned by unit tests in internal/a2a or cmd/server; (3)
+    the battery other cells stay green at sibling tolerance (the two /status posture
+    cells belong to DF-CRIER-494 and may remain red) and go build ./... + go vet ./...
+    + go test ./... -count=1 -timeout 300s pass; only scope-fenced files changed,
+    scripts/e2e-battery.sh unmodified; commit body carries ch:trace row=DF-CRIER-493.'
+  status: complete
+  created_at: '2026-11-03T13:04:30.812886+00:00'
+  completed_at: '2026-11-03T13:38:37.691384+00:00'
+- id: DF-CRIER-494
+  title: /status posture must never carry an a2a-prefixed key (A2A-OPTION.md 6.1 deliberate
+    absence)
+  criteria:
+  - 'Acceptance: (1) both named non-regression cells of scripts/e2e-battery.sh PASS
+    at the fixed tree - GET /status body contains no a2a-prefixed JSON key with A2A
+    OFF and none with A2A ON either (the battery grep for quote-a2a must come up empty
+    in both positions); (2) the documented rule specs/A2A-OPTION.md 6.1 - the switch
+    is deliberately absent from the /status posture in BOTH positions - is pinned
+    by a test on the /status key set; (3) no other battery cell regresses at sibling
+    tolerance (the three A2A task-lifecycle conformance cells belong to DF-CRIER-493
+    and may remain red) and go build ./... + go vet ./... + go test ./... -count=1
+    -timeout 300s pass; only scope-fenced files changed, scripts/e2e-battery.sh unmodified;
+    commit body carries ch:trace row=DF-CRIER-494.'
+  status: complete
+  created_at: '2026-11-03T13:04:49.427137+00:00'
+  completed_at: '2026-11-03T14:50:05.913341+00:00'
