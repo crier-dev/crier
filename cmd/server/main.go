@@ -362,8 +362,10 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	r.HandleFunc("/openapi.yaml", handleOpenAPIYAML).Methods("GET")
 	r.HandleFunc("/docs", handleOpenAPIDocs).Methods("GET")
 	// CR-CHAT-009: the web chat client MVP — a client of the public API,
-	// served the same way /docs is (embedded, self-contained HTML).
-	r.HandleFunc("/chat", handleChatClient).Methods("GET")
+	// served the same way /docs is (embedded, self-contained HTML). DF-CRIER-494:
+	// the page is handed the boot's A2A switch so its posture sentence can report
+	// it truthfully without a /status key (A2A-OPTION.md §6.1) and without a route.
+	r.HandleFunc("/chat", handleChatClient(cfg.A2AEnabled)).Methods("GET")
 
 	// Relay pub/sub
 	relaySvc := relay.New(cfg.RateLimitPerMinute)

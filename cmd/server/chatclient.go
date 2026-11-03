@@ -13,6 +13,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 //go:embed chat.html
@@ -32,11 +33,37 @@ var chatClientHTML = func() []byte {
 	return bytes.Replace(chatClientSource, marker, append(append([]byte("const basisWords = "), words...), ';'), 1)
 }()
 
-// handleChatClient serves the embedded chat client page.
-func handleChatClient(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(chatClientHTML); err != nil {
-		http.Error(w, "cannot serve chat client", http.StatusInternalServerError)
+// chatA2ASwitchMarker is the authored assignment in chat.html that carries the
+// server's OPT-IN A2A switch into the panel's posture sentence (DF-CRIER-494).
+// It is a page-serve seam, not a route and not a /status key: specs/A2A-OPTION.md
+// §6.1 pins /status' key set and keeps the option's own state off that wire, so
+// the operator's "A2A: enabled/disabled" indicator is told the truth by the
+// server that serves the page (it knows config.A2AEnabled) instead of by a
+// posture read. One occurrence, replaced exactly once per boot below.
+const chatA2ASwitchMarker = "const servedA2AEnabled = /* a2a-enabled */ null;"
+
+// renderChatClient resolves that seam with the switch the server booted with.
+// The authored default (null) is what a page copied off disk reports: it was not
+// served by a crier server and therefore has no switch to state.
+func renderChatClient(a2aEnabled bool) []byte {
+	marker := []byte(chatA2ASwitchMarker)
+	if bytes.Count(chatClientHTML, marker) != 1 {
+		panic("chat: expected exactly one A2A switch marker in chat.html")
+	}
+	return bytes.Replace(chatClientHTML, marker, []byte("const servedA2AEnabled = "+strconv.FormatBool(a2aEnabled)+";"), 1)
+}
+
+// handleChatClient serves the embedded chat client page. The A2A switch is baked
+// in ONCE here, at wiring time: the page is static for the life of the process —
+// exactly like the trust-basis map — and the value is a boot configuration fact,
+// so no request can observe a different answer than the boot it reached.
+func handleChatClient(a2aEnabled bool) http.HandlerFunc {
+	page := renderChatClient(a2aEnabled)
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(page); err != nil {
+			http.Error(w, "cannot serve chat client", http.StatusInternalServerError)
+		}
 	}
 }
 

@@ -1168,9 +1168,29 @@ function renderPosture(b) {
     : "volume vs writable layer unknown — verify the storage mount";
   const sessionStore = reported(b.session_backend) + (typeof b.session_store_path === "string" && b.session_store_path ? " " + b.session_store_path : "") + " (" + sessionMount + ")";
   const auth = b.auth_enabled === false ? "disabled by configuration — CR_AUTH_TOKEN unset ⇒ auth_enabled:false; a configured posture, not a failure" : enabled(b.auth_enabled);
+  // DF-CRIER-494: the A2A switch is a SERVER fact baked into this page at serve
+  // time (config.A2AEnabled, injected by cmd/server/chatclient.go), never a
+  // /status field: specs/A2A-OPTION.md §6.1 keeps the option's own state out of
+  // the posture schema, so no a2a-prefixed key exists on that wire. It is
+  // therefore known as soon as the page arrives and does not follow the status
+  // read — an empty or failed /status leaves it reported, and a body that
+  // happens to carry an a2a key changes nothing. Only a page that was NOT
+  // served by a crier server (read off disk) has no switch to report.
+  const a2a = servedA2AEnabled === true ? "enabled" : servedA2AEnabled === false ? "disabled" : "unknown (page not served by a crier server)";
   notice("health", "Health: " + reported(b.health) + " · online: " + (b.agents_online ?? "unknown") + "/" + (b.agents_total ?? "unknown") + " · " + durability, b.health === "degraded" || b.health === "down");
-  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + enabled(b.a2a_enabled) + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
+  notice("posture", "Registry: " + reported(b.registry_backend) + " · " + durability + " · Session store: " + sessionStore + " · Auth: " + auth + " · A2A: " + a2a + " · Management: " + management + " · Federation: " + federation + " · Build: " + reported(b.build?.version) + " / " + reported(b.build?.commit) + (b.build?.modified === true ? " (modified)" : ""));
 }
+// DF-CRIER-494: the switch the renderer above reports. The AUTHORED value is
+// null — a page read straight off disk was not served by a crier server, so it
+// knows no switch — and cmd/server/chatclient.go replaces this exact assignment
+// with the boot's config.A2AEnabled before the page is written, which is the
+// whole reason the value never comes from /status (A2A-OPTION.md §6.1). It sits
+// INSIDE the renderer's own extracted region on purpose: the Go tests that
+// execute the posture renderer standalone take the text from the render function
+// up to the next refresh declaration, so a constant placed outside that window
+// would leave them with an undefined reference. (Kept free of those anchor
+// spellings so it cannot shorten their extraction.)
+const servedA2AEnabled = /* a2a-enabled */ null;
 function clearIdentitySuggestion() {
   state.suggestedAgent = null;
   $("suggested-id").textContent = "";

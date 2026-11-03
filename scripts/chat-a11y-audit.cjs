@@ -38,10 +38,13 @@ const fixtures = {
   '/groups': {groups: []},
   '/principals': {items: []}, '/bindings': {items: []}, '/grants': {items: []},
   '/fed/peers': {peers: []}, '/trust/anchors': {anchors: []},
+  // DF-CRIER-494: no a2a_enabled member — the real /status has none (A2A-OPTION.md
+  // 6.1) and the panel takes its A2A sentence from the serving page instead. A
+  // fixture carrying the retired key would audit a wire shape the server never emits.
   '/status': {health: 'ok', agents_online: 0, agents_total: 0, auth_enabled: false,
     registry_backend: 'memory', registry_durable: false, session_backend: 'memory',
     session_store_mount: 'memory', require_agent_signature: false,
-    management_surface: 'disabled', a2a_enabled: false,
+    management_surface: 'disabled',
     build: {version: 'audit-fixture', commit: 'not-a-live-server'}},
 };
 

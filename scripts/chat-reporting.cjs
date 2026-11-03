@@ -8,7 +8,13 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   const refresh = async () => { await page.locator('#refresh').click(); await idle(); };
   const memory = await (await fetch(base+'/status')).json();
   assert.equal(memory.registry_backend,'memory'); assert.equal(memory.registry_durable,false);
-  assert.equal(memory.session_backend,'jsonl'); assert.equal(memory.auth_enabled,false); assert.equal(memory.a2a_enabled,false); assert.equal(memory.management_surface,'disabled');
+  // DF-CRIER-494: the A2A switch is NOT on /status (specs/A2A-OPTION.md 6.1 pins
+  // that key set and keeps the option's own state out of the posture schema), so
+  // the panel reports it from the page the SERVER served — config.A2AEnabled baked
+  // in by cmd/server/chatclient.go. Assert BOTH halves on the live pair: the wires
+  // carry no a2a key, and the served page carries this boot's switch.
+  assert.equal(memory.session_backend,'jsonl'); assert.equal(memory.auth_enabled,false); assert.equal(memory.a2a_enabled,undefined,'/status must not carry the A2A switch (A2A-OPTION.md 6.1)'); assert.equal(memory.management_surface,'disabled');
+  assert.match(await page.content(),/const servedA2AEnabled = false;/,'the served page must carry the boot A2A switch (harness server runs with CR_A2A_ENABLED unset)');
   await page.locator('.identity').evaluate(el => el.open=false);
   assert.equal(await page.locator('#posture').isVisible(),true);
   assert.match(await page.locator('#health').innerText(),/Health: ok.*agents are lost on restart/);
@@ -40,9 +46,13 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   const measurements = [];
   for (const width of [390,768,1280]) {
     await page.setViewportSize({width,height:1000});
+    // The a2a_enabled member is deliberately left in this served body (DF-CRIER-494)
+    // as a NEGATIVE CONTROL: /status no longer carries the switch, the panel takes it
+    // from the page the server served, so the sentence below must keep saying
+    // "A2A: disabled" while the status body claims true.
     await page.route('**/status',route => route.fulfill({contentType:'application/json',body:JSON.stringify({...memory,registry_backend:'future-server-reported-backend',registry_durable:true,auth_enabled:true,a2a_enabled:true,build:{version:'long-build-version-'+ 'x'.repeat(80),commit:'a'.repeat(40)}})}));
     await refresh();
-    assert.match(await page.locator('#posture').innerText(),/future-server-reported-backend · durable.*Auth: enabled · A2A: enabled/);
+    assert.match(await page.locator('#posture').innerText(),/future-server-reported-backend · durable.*Auth: enabled · A2A: disabled/);
     const measure = await page.evaluate(() => ({viewport:innerWidth,overflow:Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)-innerWidth,postureOverflow:document.getElementById('posture').scrollWidth-document.getElementById('posture').clientWidth}));
     assert.equal(measure.overflow,0,JSON.stringify(measure)); assert.equal(measure.postureOverflow,0,JSON.stringify(measure));
     measurements.push(measure);
@@ -51,7 +61,9 @@ module.exports = async function reporting(page,base,evidence,start,session,opera
   }
   await page.route('**/status',route => route.fulfill({contentType:'application/json',body:'{}'}));
   await refresh();
-  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown (volume vs writable layer unknown — verify the storage mount) · Auth: unknown · A2A: unknown · Management: unknown · Federation: unknown · Build: unknown / unknown');
+  // A missing status body leaves every POSTURE field unknown — but not the A2A
+  // switch (DF-CRIER-494): it arrived with the page, so it is still reported.
+  assert.equal(await page.locator('#posture').innerText(),'Registry: unknown · durability: unknown · Session store: unknown (volume vs writable layer unknown — verify the storage mount) · Auth: unknown · A2A: disabled · Management: unknown · Federation: unknown · Build: unknown / unknown');
   assert.match(await page.locator('#health').innerText(),/^Health: unknown/);
   await page.unroute('**/status');
   await page.route('**/status',route => route.fulfill({status:503,contentType:'application/json',body:'{"error":"posture unavailable"}'}));

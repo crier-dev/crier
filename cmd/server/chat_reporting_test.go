@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,6 +38,72 @@ func TestStatusChatPosture(t *testing.T) {
 	require.Equal(t, "jsonl", defaults["session_backend"])
 	require.NotContains(t, defaults, "a2a_enabled", "the A2A switch is deliberately absent from /status (A2A-OPTION.md 6.1)")
 	require.Equal(t, false, defaults["auth_enabled"])
+}
+
+// TestChatPageCarriesA2ASwitch pins the RE-SOURCING of the panel's A2A
+// indicator (DF-CRIER-494). specs/A2A-OPTION.md §6.1 keeps the option's own
+// state off GET /status ("the switch is deliberately absent from /status"), so
+// the /chat posture sentence takes it from the page the server SERVES: the
+// handler resolves one authored seam per boot with config.A2AEnabled. This test
+// drives the REAL handler over a recorder, asserts the resolved page carries the
+// boot's switch (and no longer the authored seam), asserts /status carries no
+// a2a-prefixed key in the same boot, and then executes the shipped renderPosture
+// on that page to prove the sentence reads enabled/disabled from the page and is
+// NOT moved by an /status body that happens to carry the old key.
+func TestChatPageCarriesA2ASwitch(t *testing.T) {
+	node := nodeOrSkip(t)
+	marker := chatA2ASwitchMarker
+	require.Equal(t, 1, strings.Count(string(chatClientHTML), marker),
+		"the authored page must carry exactly one A2A switch injection seam")
+
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		want    string
+	}{
+		{"switch off (default)", false, "A2A: disabled"},
+		{"switch on (CR_A2A_ENABLED=true)", true, "A2A: enabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleChatClient(tc.enabled)(rec, httptest.NewRequest(http.MethodGet, "/chat", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			page := rec.Body.String()
+			require.Contains(t, page, "const servedA2AEnabled = "+strconv.FormatBool(tc.enabled)+";",
+				"the served page must carry the boot's A2A switch")
+			require.NotContains(t, page, marker,
+				"the served page must not retain the authored seam")
+
+			// The same boot's /status: no a2a-prefixed key, raw body included.
+			status := httptestRecorder(t, config.Config{A2AEnabled: tc.enabled}, registryBackendMemory)
+			require.NotContains(t, string(status), "a2a",
+				"/status must never carry the switch (A2A-OPTION.md 6.1)")
+
+			// Execute the SHIPPED renderPosture from the SERVED page, with the
+			// real /status body, then again with the switch's OPPOSITE injected
+			// into that body: the sentence must not move.
+			a := strings.Index(page, "function renderPosture(")
+			b := strings.Index(page, "async function refresh()")
+			require.Greater(t, b, a)
+			opposite := strconv.FormatBool(!tc.enabled)
+			cmd := exec.Command(node, "--input-type=commonjs")
+			cmd.Stdin = strings.NewReader(`
+const assert = require('node:assert/strict');
+const lines = {};
+const notice = (id, text) => { lines[id] = text; };
+` + page[a:b] + `
+const status = ` + string(status) + `;
+renderPosture(status);
+assert.ok(lines.posture.includes(` + strconv.Quote(tc.want) + `), 'served page must report the boot switch: '+lines.posture);
+renderPosture({...status, a2a_enabled: ` + opposite + `});
+assert.ok(lines.posture.includes(` + strconv.Quote(tc.want) + `), 'an /status a2a key must not move the sentence: '+lines.posture);
+console.log('served A2A switch rendered PASS');
+`)
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", out)
+			require.Contains(t, string(out), "served A2A switch rendered PASS")
+		})
+	}
 }
 
 // Execute the embedded production functions, not copies of their predicates.

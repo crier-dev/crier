@@ -187,13 +187,27 @@ claimed by that harness evidence.
 
 The embedded `/chat` page shows an always-visible Runtime posture block directly below its
 Health header, outside Connection & identity. It consumes `/status` fields `registry_backend`,
-`registry_durable`, `session_backend`, `auth_enabled`, `a2a_enabled` and `build.version` /
+`registry_durable`, `session_backend`, `auth_enabled` and `build.version` /
 `build.commit` (plus `build.modified`). Registry durability is reported by the server: false
 for memory, true for file-backed SQLite/PostgreSQL, null for an unknown backend. A non-durable
 registry is described beside Health as "agents are lost on restart". Session backend and
 registry durability are independent facts; durable session storage does not preserve memory
 agents. Missing fields render "unknown"; a failed status read replaces stale posture with an
 explicit unknown/error. No backend compatibility list is maintained in the client.
+
+The A2A sentence is the one posture statement that does NOT come from `/status` (DF-CRIER-494).
+Clause 1 of the A2A option's non-regression contract ([`specs/A2A-OPTION.md`](A2A-OPTION.md) §6)
+makes the switch "deliberately absent from `/status`": that route carries no a2a-prefixed key in
+either switch position, and its key set is pinned without one. So the panel is told the truth by
+the server that SERVES it — `cmd/server/chatclient.go` resolves one authored seam in the embedded
+page with the boot's `config.A2AEnabled` before the page is written, and the sentence reads
+"A2A: enabled" or "A2A: disabled" from that served value. This adds no route (the A2A option's
+route table is unchanged) and no JSON key (no documented surface gained a member). Because the
+switch arrives with the page, it is still reported when the status read is empty or fails, and an
+`/status` body that happens to carry an `a2a_enabled` member cannot move it — `scripts/chat-reporting.cjs`
+pins both halves against a live browser and `cmd/server/chat_reporting_test.go` executes the
+shipped renderer to pin the same. A page copied off disk was not served by a crier server and so
+reports the switch as unknown rather than guessing.
 
 Send notices count each exact outcome name separately (for example `leased: 1; refused: 1`),
 without changing outcomes or HTTP message shapes. Only `delivered` contributes to the server's
