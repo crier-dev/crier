@@ -3153,49 +3153,29 @@ tasks:
   status: complete
   created_at: '2026-11-03T02:23:17.974909+00:00'
   completed_at: '2026-11-03T02:34:36.416231+00:00'
-- id: DF-CRIER-493
-  title: 'A2A task-lifecycle error semantics: post-ack reads and duplicate cancel
-    answer TaskNotFoundError -32001'
+- id: INT-CI-021
+  title: Whole-board validation fails on main run 41515246002
   criteria:
-  - 'Acceptance: (1) the three named conformance cells of scripts/e2e-battery.sh PASS
-    at the fixed tree - after retrieve+ack the GetTask read answers TaskNotFoundError
-    naming TASK_NOT_FOUND (spec 5.5.2), the not-found error.code is the integer -32001
-    (never absent/empty), and a duplicate CancelTask on an already-purged task answers
-    -32001 per 3.1.5 while a cancel aimed at an in-store terminal task keeps -32002;
-    (2) those semantics are pinned by unit tests in internal/a2a or cmd/server; (3)
-    the battery other cells stay green at sibling tolerance (the two /status posture
-    cells belong to DF-CRIER-494 and may remain red) and go build ./... + go vet ./...
-    + go test ./... -count=1 -timeout 300s pass; only scope-fenced files changed,
-    scripts/e2e-battery.sh unmodified; commit body carries ch:trace row=DF-CRIER-493.'
-  status: complete
-  created_at: '2026-11-03T13:04:30.812886+00:00'
-  completed_at: '2026-11-03T13:38:37.691384+00:00'
-- id: DF-CRIER-494
-  title: /status posture must never carry an a2a-prefixed key (A2A-OPTION.md 6.1 deliberate
-    absence)
+  - 'The Whole-board validation job in CI run 41515246002 at commit 589ea7df failed
+    at step ''Validate the whole checked-out board''. Investigate the validator (.github/workflows/ci.yml
+    or scripts/board-validate.sh), reproduce the failure locally with the same boardctl
+    version and validation logic, identify the root cause (board schema drift, validator
+    bug, or data issue), fix it, and verify the fix passes both locally and in a fresh
+    CI run. Acceptance: (1) The validator failure is reproduced or explicitly classified
+    with exact logs; (2) The fix is committed and pushed; (3) A fresh exact-head CI
+    run reaches success with Whole-board validation passing.'
+  status: in_progress
+  created_at: '2026-11-03T04:16:32.213233+00:00'
+- id: INT-CI-022
+  title: 'CI Coverage job flakes at exact head e9a1ae41: trust restart and guard webhook
+    tests fail under coverage only'
   criteria:
-  - 'Acceptance: (1) both named non-regression cells of scripts/e2e-battery.sh PASS
-    at the fixed tree - GET /status body contains no a2a-prefixed JSON key with A2A
-    OFF and none with A2A ON either (the battery grep for quote-a2a must come up empty
-    in both positions); (2) the documented rule specs/A2A-OPTION.md 6.1 - the switch
-    is deliberately absent from the /status posture in BOTH positions - is pinned
-    by a test on the /status key set; (3) no other battery cell regresses at sibling
-    tolerance (the three A2A task-lifecycle conformance cells belong to DF-CRIER-493
-    and may remain red) and go build ./... + go vet ./... + go test ./... -count=1
-    -timeout 300s pass; only scope-fenced files changed, scripts/e2e-battery.sh unmodified;
-    commit body carries ch:trace row=DF-CRIER-494.'
+  - 'A1: failure class identified with exact logs (port-collision TOCTOU in trust_sqlite_restart_test.go
+    child binding, guard-decision metadata timing in TestGuardDeliver_WebhookPOSTCarriesHeaders,
+    or a named code defect), reproduced at least once under coverage or explicitly
+    classified CI-only with cited evidence. A2: a hardening or fix lands and the two
+    named tests pass under go test -short -count=5 -coverprofile for their packages.
+    A3: five consecutive exact-head CI runs show the Coverage job green.'
   status: complete
-  created_at: '2026-11-03T13:04:49.427137+00:00'
-  completed_at: '2026-11-03T14:50:05.913341+00:00'
-- id: DF-CRIER-495
-  title: Align A2A-OPTION.md 5.5.2/5.5.4 text with the landed purge semantics
-  criteria:
-  - 'specs/A2A-OPTION.md 5.5.2 and 5.5.4 describe the landed behavior at 281e68c9:
-    a purged entry (ack-without-answer or cancel) is absent so GetTask/ListTasks/SubscribeToTask/duplicate
-    CancelTask answer -32001 TaskNotFoundError per 3.1.5; a retained answer stays
-    COMPLETED; a cancel aimed at an IN-STORE terminal entry stays -32002. Only docs
-    files change; bash scripts/e2e-battery.sh stays 194 pass / 0 fail; CI docs jobs
-    stay green.'
-  status: complete
-  created_at: '2026-11-03T15:13:13.202291+00:00'
-  completed_at: '2026-11-03T15:25:21.102375+00:00'
+  created_at: '2026-11-03T21:46:42.776029+00:00'
+  completed_at: '2026-11-03T21:46:52.101202+00:00'

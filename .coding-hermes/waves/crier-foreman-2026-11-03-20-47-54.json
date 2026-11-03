@@ -1,0 +1,36 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-20-47-54",
+  "mode": "serial-fallback",
+  "block": "INT-CI-022 family (INT-CI-019 owner-blocked, INT-CI-020 out-of-repo bunker CLI, INT-CI-022 verification-only after a70dd9bc landed, INT-CI-023 actionable)",
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 1m 8.42 -> ceil 9 -> 16-9=7 -> min(6,7)=6 formula slots; WAVE_BUDGET=12 is the ceiling, not an obligation. Wave size 1 because the resumed block carries exactly ONE actionable in-repo implementation row: INT-CI-019 is BLOCKED-ON-OWNER (self-hosted runner kara-main disabled since 2026-10-19, needs an owner restore-or-retire decision), INT-CI-020's fix surface is the bunker CLI which lives outside this repo (/home/kara/deployBunker/bunker, binary at ~/.local/bin/bunker; grep for NetworkMode in crier returns zero files), and INT-CI-022 is verification-only because its implementation commit a70dd9bc already landed in tick 1963.",
+  "wave_id": "crier-foreman-2026-11-03-20-47-54",
+  "dispatched_at": "2026-11-03T20:52:00-05:00",
+  "board_parity": {
+    "note": "workdir was 6 commits BEHIND origin/main at tick start (board sha 95fbf3e0 vs origin 6e45c04d); fast-forwarded before any board write",
+    "tasks_sha_after_ff": "6e45c04d4756bd50e1ab99da66f72ebb502557974c07e413dd143dfcb16b83f9",
+    "events_sha_after_ff": "3bf34c4bb8bff80e65258a6e7f72b73b38c73ef95548ebc98446f052e075b9a9"
+  },
+  "workers": [
+    {
+      "task_id": "INT-CI-023",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-023",
+      "branch": "wt/INT-CI-023",
+      "base": "origin/main",
+      "base_sha": "104a2096",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-tick-20261103-2047/brief-INT-CI-023.txt",
+      "status": "dispatched"
+    }
+  ],
+  "foreman_direct": [
+    "INT-CI-022 verification-only closeout: re-run the row's own AC2 acceptance command on the merged tree, count consecutive exact-head Coverage greens, then flip the row."
+  ],
+  "skipped_blocks": {
+    "QA-CRIER-54 / RELEASE-009": "top-ranked by block_drive (98% done) but not resumed-first; RELEASE-009 is blocked on the INT-CI-019 runner decision plus a terminal exact-head bunker-e2e",
+    "QA-CRIER-REVIEW-3 / QA-CRIER-README-1 / QA-CRIER-RELENG-1": "host-blocked: bunker-mvp disk at 100% refuses every battery launch",
+    "DF-CRIER-498 / DF-CRIER-499": "clean-machine family, not this block; DF-CRIER-498 classification lives in the shared harness ~/.hermes/scripts/bunker-qa.sh (outside this repo)",
+    "README-012/013/014": "P4/P5 docs, all three touch README.md so they are NOT mutually independent"
+  }
+}
