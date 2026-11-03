@@ -1,16 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -25,6 +20,7 @@ import (
 // SQLite retains it. Both must state their actual guarantee on the send wire.
 func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
+	plan := planChildBoot(t)
 	for _, backend := range []string{"sqlite", "memory"} {
 		t.Run(backend, func(t *testing.T) {
 			root := t.TempDir()
@@ -39,7 +35,7 @@ func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 					registerA2AAgent(t, base, "restart-a2a", true, nil)
 				}
 				post := func(key string) map[string]any {
-					return replaySendTask(t, base, key)
+					return replaySendTask(t, plan, base, key)
 				}
 				task := post("restart-message")
 				id := task["id"].(string)
@@ -52,7 +48,7 @@ func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 				}
 				assertReplayCard(t, base, durability, registry.DefaultIdempotencyWindow.Seconds())
 				assertReplayLabel(t, task, durability, replay, registry.DefaultIdempotencyWindow.Seconds())
-				require.Len(t, replayListTasks(t, base), 1)
+				require.Len(t, replayListTasks(t, plan, base), 1)
 				if phase == "send" {
 					firstID, firstTask = id, task
 					retry := post("restart-message")
@@ -71,7 +67,7 @@ func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 				}
 				if phase == "replay" {
 					require.NotEqual(t, id, post("another-message")["id"])
-					require.Len(t, replayListTasks(t, base), 2)
+					require.Len(t, replayListTasks(t, plan, base), 2)
 				}
 				stop()
 			}
@@ -81,17 +77,18 @@ func TestA2AReplayAcrossProcessRestart(t *testing.T) {
 
 func TestA2AReplayWindowReportedAfterExpiry(t *testing.T) {
 	parallelBoot(t) // subprocess/snapshot boot: parent-side env-free (INT-CI-014)
+	plan := planChildBoot(t)
 	for _, backend := range []string{"sqlite", "memory"} {
 		t.Run(backend, func(t *testing.T) {
 			base, _, stop := bootA2AReplayChild(t, t.TempDir(), backend, "window", "1")
 			defer stop()
 			registerA2AAgent(t, base, "restart-a2a", true, nil)
-			first := replaySendTask(t, base, "expired-message")
+			first := replaySendTask(t, plan, base, "expired-message")
 			// Real production config and wall clock: no fake store or replay decision.
 			time.Sleep(2 * time.Second)
-			second := replaySendTask(t, base, "expired-message")
+			second := replaySendTask(t, plan, base, "expired-message")
 			require.NotEqual(t, first["id"], second["id"])
-			require.Len(t, replayListTasks(t, base), 2)
+			require.Len(t, replayListTasks(t, plan, base), 2)
 			durability := "process"
 			if backend == "sqlite" {
 				durability = "durable"
@@ -103,9 +100,13 @@ func TestA2AReplayWindowReportedAfterExpiry(t *testing.T) {
 	}
 }
 
-func replaySendTask(t *testing.T, base, key string) map[string]any {
+func replaySendTask(t *testing.T, plan childBootPlan, base, key string) map[string]any {
 	t.Helper()
-	client := &http.Client{Timeout: 5 * time.Second}
+	// INT-CI-023: the request budget is derived, not the old flat 5s. The
+	// recorded INT-CI-023 a2a failure was this call's client timing out at
+	// exactly 5s against a LIVE server at loadavg 33.34 — a saturated host
+	// delaying a request, not a boot that never happened.
+	client := &http.Client{Timeout: plan.Request}
 	code, body, _ := a2aRPC(t, client, base, sendMessageBody("restart-a2a", a2a.MethodSendMessage, key))
 	require.Equal(t, 200, code, "%s", body)
 	t.Logf("messageId=%s actual_body=%s", key, body)
@@ -114,9 +115,9 @@ func replaySendTask(t *testing.T, base, key string) map[string]any {
 	return task
 }
 
-func replayListTasks(t *testing.T, base string) []any {
+func replayListTasks(t *testing.T, plan childBootPlan, base string) []any {
 	t.Helper()
-	_, raw, _ := a2aRPC(t, &http.Client{Timeout: 5 * time.Second}, base,
+	_, raw, _ := a2aRPC(t, &http.Client{Timeout: plan.Request}, base,
 		`{"jsonrpc":"2.0","id":2,"method":"ListTasks","params":{"tenant":"restart-a2a"}}`)
 	return rpcResult(t, raw)["tasks"].([]any)
 }
@@ -136,85 +137,18 @@ func assertReplayLabel(t *testing.T, task map[string]any, durability, replay str
 }
 
 // The child boots the production server from a cold start (exec + test-binary
-// startup + run()); MEASURED on this host (16 CPUs) at one-minute loadavg
-// 13-15, GET /health first answers ~0.3-0.4 s after exec, so a healthy boot
-// costs a few hundred milliseconds. A FIXED 25 s Eventually window failed on
-// 2026-10-19 (DF-CRIER-425) at one-minute loadavg 19-25: the child's boot
-// exceeded the window under host contention and a scheduling delay presented
-// exactly like a behavioural regression, with only "Condition never satisfied"
-// and none of the child's output.
-//
-// The window is therefore DERIVED from the measurement instead of picked: 10x
-// the measured boot cost, scaled by the host's runnable queue per CPU above
-// one queue per CPU (a cold process boot is mostly scheduling, and its wall
-// clock grows with the queue), floored at 5 s so an idle host keeps real
-// headroom, and capped at 50 s to stay clear of the child's own
-// -test.timeout=55s, after which the child would die under us and the poll
-// would report a harness limit as a boot failure. The derivation is logged and
-// a timeout failure carries the child's log tail, so a future failure states
-// its own conditions instead of repeating an unexplained number.
-const (
-	a2aBootMeasuredCost   = 400 * time.Millisecond // measured healthy child boot on this host
-	a2aBootBudgetMultiple = 10                     // headroom over that measurement (=> 4s unloaded)
-	a2aBootFloor          = 5 * time.Second        // idle-host headroom
-	a2aBootCeiling        = 50 * time.Second       // under the child's own -test.timeout=55s
-)
+// startup + run()). The budget is no longer a hand-picked constant: it comes from
+// planChildBoot (childboot_test.go), which derives every wait from ONE measured
+// cold boot (childBootMeasuredCost: measured here as n=8 min 193ms / median 425ms
+// / max 512ms at loadavg 23.75) scaled by the host's runnable queue per CPU. The
+// previous fixed 25s Eventually window failed on 2026-10-19 (DF-CRIER-425) at
+// loadavg 19-25; the replacement 400ms x10 derivation then used a measurement of
+// the wrong phase and its log line reported the /health poll (sub-millisecond) as
+// "bound its port". Both are fixed: the wait is one shared attempt budget, and the
+// log line reports the real exec-to-port time.
 
-// a2aBootWindow derives this run's child-boot window from the measured cost
-// and the host's current load, and LOGS the derivation.
-func a2aBootWindow(t *testing.T) time.Duration {
-	t.Helper()
-	load, factor := -1.0, 1.0
-	cpus := runtime.NumCPU()
-	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
-		if fields := strings.Fields(string(raw)); len(fields) > 0 {
-			if parsed, perr := strconv.ParseFloat(fields[0], 64); perr == nil {
-				load = parsed
-			}
-		}
-	}
-	// A boot whose wall clock is mostly scheduling grows with the runnable
-	// queue per CPU; at or below one queue per CPU the host is not contended
-	// and the factor stays 1.
-	if load >= 0 && cpus > 0 && load > float64(cpus) {
-		factor = load / float64(cpus)
-	}
-	window := time.Duration(float64(a2aBootMeasuredCost) * float64(a2aBootBudgetMultiple) * factor)
-	if window < a2aBootFloor {
-		window = a2aBootFloor
-	}
-	if window > a2aBootCeiling {
-		window = a2aBootCeiling
-	}
-	if load >= 0 {
-		t.Logf("a2a child boot window: %s = measured %s x%d, loadavg=%.2f over %d CPUs (factor %.2f, floor %s, ceiling %s)",
-			window, a2aBootMeasuredCost, a2aBootBudgetMultiple, load, cpus, factor, a2aBootFloor, a2aBootCeiling)
-	} else {
-		t.Logf("a2a child boot window: %s = measured %s x%d (loadavg unavailable, factor 1.00, floor %s, ceiling %s)",
-			window, a2aBootMeasuredCost, a2aBootBudgetMultiple, a2aBootFloor, a2aBootCeiling)
-	}
-	return window
-}
-
-// a2aChildLogTail returns the last ~2KB of the child's combined stdout/stderr
-// log, so a boot failure names what the child actually printed instead of
-// "Condition never satisfied".
-func a2aChildLogTail(t *testing.T, logPath string) string {
-	t.Helper()
-	logs, err := os.ReadFile(logPath)
-	if err != nil {
-		return fmt.Sprintf("(child log %s unreadable: %v)", logPath, err)
-	}
-	s := string(logs)
-	if len(s) > 2048 {
-		s = s[len(s)-2048:]
-	}
-	if strings.TrimSpace(s) == "" {
-		return "(child log empty — the child produced no output before the window expired)"
-	}
-	return s
-}
-
+// bootA2AReplayChild boots the production server child and returns its base URL,
+// its pid and a stop function that asserts the shutdown contract.
 func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (string, int, func()) {
 	t.Helper()
 	// INT-CI-022: the child binds its OWN ephemeral port (CRIER_PORT=0) and
@@ -225,65 +159,49 @@ func bootA2AReplayChild(t *testing.T, root, backend, phase, window string) (stri
 	// "a2a_restart_test.go:110 expected 200 actual 404 {\"error\":\"not
 	// found\"}": the squatter was another crier test server with no A2A
 	// route. Port identity now comes from the pidfile, which names the pid.
-	pidPath := filepath.Join(root, phase+".pid")
-	logPath := filepath.Join(root, phase+".log")
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
-	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestA2AReplayServerChild$", "-test.v", "-test.timeout=55s")
-	cmd.Env = append(os.Environ(), "CRIER390_ROOT="+root, "CRIER390_PORT=0", "CRIER390_PIDFILE="+pidPath,
-		"CRIER390_BACKEND="+backend, "CRIER390_WINDOW="+window)
-	log, err := os.Create(logPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = log.Close() })
-	cmd.Stdout, cmd.Stderr = log, log
-	require.NoError(t, cmd.Start())
-	stopped := false
-	t.Cleanup(func() {
-		if !stopped {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
+	//
+	// INT-CI-023: the boot is retried up to plan.Attempts times, each attempt a
+	// FRESH child process with its own pidfile and log (attempt N of 3 is named
+	// in every failure), the failed attempt is killed before the retry starts,
+	// and a child that dies mid-boot is reported immediately with its exit code
+	// and its own log tail instead of burning the rest of the budget.
+	plan := planChildBoot(t)
+	child, base := bootChildWithRetry(t, plan, func(attempt int) childSpawnSpec {
+		spec := childSpawnSpec{
+			Attempt:    attempt,
+			Root:       root,
+			Name:       fmt.Sprintf("%s-attempt-%d", phase, attempt),
+			RunPattern: "^TestA2AReplayServerChild$",
+			Timeout:    plan.Timeout,
 		}
+		spec.Env = []string{
+			"CRIER390_ROOT=" + root,
+			"CRIER390_PORT=0",
+			"CRIER390_PIDFILE=" + spec.pidPath(),
+			"CRIER390_BACKEND=" + backend,
+			"CRIER390_WINDOW=" + window,
+		}
+		return spec
 	})
-	port := waitForChildBoundPort(t, pidPath, cmd.Process.Pid, logPath)
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
-	bootWindow := a2aBootWindow(t)
-	bootStart := time.Now()
-	// Poll manually instead of require.Eventually so the timeout failure can
-	// carry the child's log tail, read at failure time.
-	booted := false
-	for deadline := time.Now().Add(bootWindow); time.Now().Before(deadline); {
-		resp, err := client.Get(base + "/health")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				booted = true
-				break
-			}
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	if !booted {
-		t.Fatalf("child did not boot within %s (backend=%s phase=%s); child log tail:\n%s",
-			bootWindow, backend, phase, a2aChildLogTail(t, logPath))
-	}
-	t.Logf("backend=%s %s phase: child bound its port (pid %d) in %s of the %s window",
-		backend, phase, cmd.Process.Pid, time.Since(bootStart), bootWindow)
-	return base, cmd.Process.Pid, func() {
+
+	stopped := false
+	stop := func() {
 		if stopped {
 			return
 		}
-		// Signal the explicit child PID, never the package test process.
-		require.NotEqual(t, os.Getpid(), cmd.Process.Pid)
-		require.NoError(t, syscall.Kill(cmd.Process.Pid, syscall.SIGTERM))
-		err := cmd.Wait()
 		stopped = true
-		require.NoError(t, err)
-		logs, err := os.ReadFile(logPath)
+		// Signal the explicit child PID, never the package test process.
+		require.NotEqual(t, os.Getpid(), child.cmd.Process.Pid)
+		require.NoError(t, syscall.Kill(child.cmd.Process.Pid, syscall.SIGTERM))
+		require.NoError(t, child.awaitExit(plan.Ctx), "child did not exit within %s of SIGTERM", plan.Ctx)
+		require.NoError(t, child.waitErrValue())
+		logs, err := os.ReadFile(child.logPath)
 		require.NoError(t, err)
 		require.Contains(t, string(logs), "signal=terminated")
-		t.Logf("backend=%s boot=%s pid=%d SIGTERM -> exit 0", backend, phase, cmd.Process.Pid)
+		t.Logf("backend=%s boot=%s pid=%d SIGTERM -> exit 0 (attempt budget %s)",
+			backend, phase, child.cmd.Process.Pid, plan.Attempt)
 	}
+	return base, child.cmd.Process.Pid, stop
 }
 
 func TestA2AReplayServerChild(t *testing.T) {
