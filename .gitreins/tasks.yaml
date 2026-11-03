@@ -3132,3 +3132,24 @@ tasks:
   status: complete
   created_at: '2026-11-01T04:07:14.517326+00:00'
   completed_at: '2026-11-01T04:07:36.186383+00:00'
+- id: RELEASE-009-L1
+  title: CHANGELOG v0.3.0 prep (RELEASE-009 leg 1)
+  criteria:
+  - CHANGELOG.md contains a dated '## [0.3.0] - 2026-11-03' section holding the former
+    Unreleased content and a reopened empty '## [Unreleased]' section; link references
+    updated (Unreleased compares v0.3.0...HEAD, 0.3.0 compares v0.2.0...v0.3.0 in
+    the file's existing style); git diff --check clean; commit body carries a ch:trace
+    row=RELEASE-009 marker; only CHANGELOG.md changed.
+  status: in_progress
+  created_at: '2026-11-03T02:23:17.141204+00:00'
+  completed_at: '2026-11-03T02:52:12.668929+00:00'
+- id: INT-CI-019-L3
+  title: bunker-e2e supersede-on-push concurrency (INT-CI-019 leg 3)
+  criteria:
+  - .github/workflows/bunker-e2e.yml gains a top-level concurrency block with a per-ref
+    group including the workflow name and cancel-in-progress true only for push events;
+    the workflow still parses as valid YAML; no existing job, trigger, or step altered;
+    commit body carries a ch:trace row=INT-CI-019 marker; only that file changed.
+  status: complete
+  created_at: '2026-11-03T02:23:17.974909+00:00'
+  completed_at: '2026-11-03T02:34:36.416231+00:00'

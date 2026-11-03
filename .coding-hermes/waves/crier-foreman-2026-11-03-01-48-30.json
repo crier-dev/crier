@@ -1,0 +1,52 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-01-48-30",
+  "block": "QA-CRIER-54",
+  "mode": "wave",
+  "wave_size": 2,
+  "slots": 6,
+  "wave_budget": 12,
+  "slots_reason": "nproc=16, loadavg=4.24 -> 16-5=11, min(6,11)=6 formula slots; wave capped at 2 because the resumed block's chain has exactly 2 mutually independent dispatchable rows (RELEASE-009 leg 1, INT-CI-019 leg 3); both rows carry named owner blockers for their remaining legs.",
+  "base_sha": "f68f0edbee322edb178e87fdc82fac8b31dce2fe",
+  "base_ref": "origin/main",
+  "workers": [
+    {
+      "task_id": "RELEASE-009-L1",
+      "row": "RELEASE-009",
+      "scope": "acceptance leg 1: CHANGELOG v0.3.0 prep commit",
+      "worktree": "/home/kara/worktrees/crier-RELEASE-009-leg1",
+      "branch": "wt/RELEASE-009-leg1",
+      "brief": "/tmp/crier-t20261103-014830-brief-RELEASE-009-L1.md",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "landed",
+      "attempts": 2,
+      "commit": "df336381dbc6834d47c0cfc24b65b2341f48c0d6 (rebased) + 34669a65 (criterion re-date fix)",
+      "verdict": "judge 5dc6f9a8 FAIL on the heading date alone (create-time criterion vs authorized rework; all other sub-requirements verified holding); one-line re-date landed at 34669a65; task start + judge --async job-780b4ed06bcd4a92b61b0b89c4a149e7 re-run; final verdict lands in .gitreins/history/2026-11-03/ (first verdict preserved at c8910118)"
+    },
+    {
+      "task_id": "INT-CI-019-L3",
+      "row": "INT-CI-019",
+      "scope": "acceptance leg 3: bunker-e2e.yml supersede-on-push concurrency",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-019",
+      "branch": "wt/INT-CI-019",
+      "brief": "/tmp/crier-t20261103-014830-brief-INT-CI-019-L3.md",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "landed",
+      "attempts": 1,
+      "commit": "7d0801b9b7a3909e068ca33d66ed7b54e13f2154",
+      "verdict": "PASS/COMPLETE (tier1 PASS; verdict 92aac142 at 7d0801b9; foreground task complete wedged on a self-matching pgrep poll loop and was reaped, judge --async job-074f95ef95d54f11abf53f86c268b842 completed)"
+    }
+  ],
+  "rows": ["RELEASE-009", "INT-CI-019"],
+  "resume": "block QA-CRIER-54 named by prior tick crier-foreman-2026-11-02-22-22-30 (still had ready rows); wave pool = block rows + depends_on rows per drive contract section 1e; no depends_on edges between the two wave rows (verified from the rows); different files (CHANGELOG.md vs .github/workflows/bunker-e2e.yml).",
+  "status": "closed",
+  "created_at": "2026-11-03T02:21:42Z",
+  "blocker": "INT-CI-019 leg 1 (owner decision: restore vs retire the kara-main self-hosted runner) gates RELEASE-009 legs 2/4; the v0.3.0 cut and INT-CI-019 leg 2 follow that decision.",
+  "local_gate": "PASS (go build ./...; go vet ./...; go test ./... -count=1 -timeout 300s -p 4 = 30/30 packages ok) on merged tree df336381; gofmt clean.",
+  "remote_ci": "green at 7d0801b9 (CI 41566909200 all 6 jobs success incl. Whole-board validation; bunker-e2e 41566909286 CANCELLED by the df336381 push — live proof of the landed supersede concurrency); at 34669a65 CI 41567517734 in_progress at closeout, pages 41567517844 success, bunker-e2e 41567517866 queued (bounded).",
+  "remote_parity": "origin/main == gitlab/main == 34669a65dbc6834d47c0cfc24b65b2341f48c0d6; origin/main..HEAD=0; left/right=0/0.",
+  "trace": "ch:trace row=RELEASE-009 block=QA-CRIER-54 spec=none:board-acceptance-legs wave=crier-foreman-2026-11-03-01-48-30 test=go:build+go:vet+go:test doc=CHANGELOG.md evidence=local:judge-verdicts+4of4-spot-checks witness=none:foreman-reverify verdict=none:owner-gated-leg2 commit=34669a65dbc6834d47c0cfc24b65b2341f48c0d6 memory=/project/crier/tick/crier-foreman-2026-11-03-01-48-30",
+  "pre_closeout_sha": "34669a65dbc6834d47c0cfc24b65b2341f48c0d6",
+  "finished_at": "2026-11-03T03:15:00Z"
+}
