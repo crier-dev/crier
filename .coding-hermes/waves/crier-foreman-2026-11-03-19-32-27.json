@@ -1,0 +1,29 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-19-32-27",
+  "mode": "serial-fallback",
+  "block": "INT-CI-022 (family block: INT-CI-019 owner-blocked, INT-CI-020 needs a live host, INT-CI-022 actionable)",
+  "slots": 1,
+  "slots_reason": "nproc=16, loadavg 15.64 -> ceil 16 -> 16-16=0 -> max(1,min(6,0))=1 formula slot; WAVE_BUDGET=5 is the ceiling, not an obligation. Wave size 1 also because the block carries exactly one actionable ready row (INT-CI-019 BLOCKED-ON-OWNER disabled self-hosted runner; INT-CI-020 needs a live bunker-las-03 host).",
+  "wave_id": "crier-foreman-2026-11-03-19-32-27",
+  "dispatched_at": "2026-11-03T14:45:00-05:00",
+  "workers": [
+    {
+      "task_id": "INT-CI-022",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-022",
+      "branch": "wt/INT-CI-022",
+      "base": "origin/main",
+      "base_sha": "d8bab0f2",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-tick-20261103/brief-INT-CI-022.txt",
+      "status": "dispatched"
+    }
+  ],
+  "skipped_blocks": {
+    "RELEASE-009 / QA-CRIER-54 block": "top-ranked (98% done) but STATUS BLOCKED-ON-OWNER: needs the INT-CI-019 runner decision plus a terminal exact-head bunker-e2e, then the v0.3.0 cut",
+    "QA-CRIER-REVIEW-3 / QA-CRIER-README-1 / QA-CRIER-RELENG-1": "host-blocked: bunker-mvp disk at 100% refuses every battery launch",
+    "DF-CRIER-496 / DF-CRIER-497": "NOT dispatched: both rows already carry a live external implementation (worktree commits cab84ad0 @13:59, a8e2ba2f @14:23) with gitreins `judge DF-CRIER-496` and `task complete DF-CRIER-497` processes running in their own worktrees - duplicate dispatch forbidden",
+    "DF-CRIER-498": "battery-cell classification lives in the shared harness ~/.hermes/scripts/bunker-qa.sh (outside this repo); not dispatchable to a crier worker",
+    "README-012/013/014": "P4/P5 docs, same file, lower value than the actionable P2 CI flake at the same readiness"
+  }
+}
