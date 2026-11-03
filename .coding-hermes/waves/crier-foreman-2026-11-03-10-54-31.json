@@ -19,7 +19,8 @@
   "local_gate": "PASS (go build ./...; go vet ./...; make test-short all packages ok; gofmt clean) at e9a1ae41; E2E battery 189/5 (filed DF-CRIER-493/494).",
   "remote_ci": "RED/FLAKE at e9a1ae41 (run 41589253515 Coverage job; same-run Build & Test green; filed INT-CI-022); bunker-e2e 41589253519 queued (runner offline).",
   "remote_parity": "origin/main == gitlab/main == e9a1ae416366a1dd9004efcf02cef66b066b5781; 0/0 pre-tick.",
-  "trace": "ch:trace row=RELEASE-009 block=QA-CRIER-54 spec=none:owner-gated-release wave=none:verification-only test=go:build+go:vet+make:test-short+e2e-battery doc=releng/v0.3.0-release-evidence.md evidence=github:41589253515+battery:/tmp/crier-t20261103-105431-battery.log witness=none:foreman-reverify verdict=none:owner-gated commit=e9a1ae416366a1dd9004efcf02cef66b066b5781 memory=/project/crier/tick/crier-foreman-2026-11-03-10-54-31",
+  "trace": "ch:trace row=RELEASE-009 block=QA-CRIER-54 spec=none:owner-gated-release wave=none:verification-only test=go:build+go:vet+make:test-short+e2e-battery doc=releng/v0.3.0-release-evidence.md evidence=github:41589253515+battery:/tmp/crier-t20261103-105431-battery.log witness=none:foreman-reverify verdict=none:owner-gated commit=b24a592e60bb847b582feafcdcb02e2a547cb50a memory=/project/crier/tick/crier-foreman-2026-11-03-10-54-31",
   "pre_closeout_sha": "e9a1ae416366a1dd9004efcf02cef66b066b5781",
-  "finished_at": "2026-11-03T11:49:10.622Z"
+  "finished_at": "2026-11-03T11:49:10.622Z",
+  "first_published_bookkeeping_sha": "b24a592e60bb847b582feafcdcb02e2a547cb50a"
 }
