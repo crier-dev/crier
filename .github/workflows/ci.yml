@@ -67,6 +67,15 @@ jobs:
     strategy:
       matrix:
         go-version: ["1.26.10"]
+    # DF-CRIER-496: every leg below runs with the toolchain the matrix pins and
+    # NO silent toolchain switch. With the default GOTOOLCHAIN=auto, Go downloads
+    # whatever go.mod asks for and a drifted pin looks healthy on the runner while
+    # a clean/offline machine fails closed — exactly the bunker-las-03 shape this
+    # row records (bootstrap installed go1.26.5 against `go 1.26.10`). Pinned to
+    # `local`, a matrix that falls below the go.mod floor fails HERE, by name,
+    # instead of being papered over by a fetch.
+    env:
+      GOTOOLCHAIN: local
 
     steps:
       - name: Checkout
@@ -78,6 +87,18 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
+
+      # DF-CRIER-496: the toolchain-floor gate, as its OWN step so a shortfall is
+      # visible as itself (never folded into an aggregate). The floor is READ from
+      # go.mod's `go` directive — there is no duplicated constant in the repo — and
+      # the check names the required and running versions plus the bootstrap that
+      # must install at or above the floor. The selftest then proves the check
+      # still REJECTS a simulated go1.26.5 (the measured shape) and still accepts a
+      # toolchain at or above the floor: PATH shims only, no network, ~0.3s.
+      - name: Toolchain floor (go.mod vs running go)
+        run: |
+          make toolchain-check
+          make toolchain-selftest
 
       # INT-CI-008: validate the checked-in payloads used by every ecosystem
       # registration entrypoint against the production strict webhook decoder.

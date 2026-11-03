@@ -108,6 +108,53 @@ see `warning: both GOPATH and GOROOT are the same directory`, you unpacked into
 `$HOME` (giving `GOROOT=$HOME/go`); fix it with `export GOPATH="$HOME/gopath"`
 rather than moving the toolchain.
 
+#### The floor belongs to `go.mod`, and an offline box has no fallback
+
+The required version lives in **one** place, this tree's `go.mod`
+(`go 1.26.10`); nothing in the repo keeps a second copy of it. A toolchain below
+that floor cannot build this module *offline* — and the default
+`GOTOOLCHAIN=auto` hides the shortfall, because Go silently downloads the
+toolchain `go.mod` asks for. That works on a networked box and fails wherever the
+download cannot happen: a pinned `GOTOOLCHAIN=local`, `GOPROXY=off`, a
+disconnect/chaos test, an air-gapped host, or a provisioning bootstrap that
+installed an older toolchain on the image. There the build stops with:
+
+```
+go: go.mod requires go >= 1.26.10 (running go 1.26.5; GOTOOLCHAIN=local)
+```
+
+Check before you build — the repository ships the gate, so you do not have to
+read `go.mod` and compare versions by eye:
+
+```sh
+make toolchain-check
+# toolchain-check: OK — running go1.26.10 satisfies the module floor go 1.26.10
+```
+
+A toolchain below the floor is **exit 1**, with an actionable message naming the
+required version, the running version, and the fix; a missing `go`, a
+missing/unreadable `go.mod` or an unparseable version is **exit 2** — it never
+reports OK over input it could not read.
+
+The check judges the toolchain that is actually **installed** (it probes with
+`GOTOOLCHAIN=local`), not the one a plain `go version` reports. That distinction
+is the whole point: under the default `GOTOOLCHAIN=auto`, `go version` in a
+module directory prints the toolchain Go *selected* — possibly one it just
+downloaded — so a machine whose bootstrap installed an older toolchain still
+looks healthy while an offline or pinned build of the same tree fails. Measured
+on the host this gate was written from: `go version` -> `go1.26.10` while
+`GOTOOLCHAIN=local go version` -> `go1.26.5`. Wiring note: `make build` and
+`make lint` are deliberately NOT gated on it — the gate is its own named verdict
+(`make toolchain-check`), so a lint run never hides a toolchain shortfall.
+
+**Remediation:** install a Go toolchain at or above the floor and put it first on
+`PATH`, then re-run `make toolchain-check`. If you provision machines
+automatically (image build, cloud-init, a `bunker`-style agent bootstrap), that
+bootstrap must install **at or above** the `go.mod` floor — it cannot rely on `go`
+downloading the right toolchain for it, because the machine it provisions may
+have no network when the build runs. `make toolchain-selftest` proves the gate
+still rejects a simulated go1.26.5 against today's floor.
+
 `git` and `make` are also Path B prerequisites:
 
 ```sh
@@ -180,6 +227,7 @@ is the Go toolchain's, in §2.2.)
 ```sh
 git clone --depth 1 https://github.com/crier-dev/crier.git
 cd crier
+make toolchain-check   # Go 1.26.10+ — the floor is read from go.mod, see §2.2
 make build build-mcp
 ```
 

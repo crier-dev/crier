@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -32,6 +32,8 @@ CRIER_LDFLAGS := -X $(BUILDINFO_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Comm
 help:
 	@echo "Available targets:"
 	@echo "  build             Compile the main server binary into bin/crier"
+	@echo "  toolchain-check   Compare the running Go toolchain with the floor READ from go.mod's \`go\` directive — OK, or an actionable FAIL naming both versions and the bootstrap that must install at or above the floor (DF-CRIER-496)"
+	@echo "  toolchain-selftest  Prove that check still rejects a simulated go1.26.5 against today's floor, accepts a toolchain at/above it, derives the floor from go.mod, and fails closed on unreadable input — PATH shims only, no network (DF-CRIER-496)"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
 	@echo "  build-front       Compile the authenticating front into bin/crier-front (DF-CRIER-333)"
 	@echo "  front-e2e         Prove the shipped front makes /chat usable: direct 401, fronted panel, real send, token absent from page source/storage (DF-CRIER-333)"
@@ -95,6 +97,15 @@ help:
 	@echo "Config is env-driven (CRIER_PORT, CR_DATABASE_URL, CR_AUTH_TOKEN, CR_REQUIRE_AGENT_SIG) — see README.md."
 	@echo "The server binary also takes CLI flags: ./bin/crier --help prints full usage, -port overrides CRIER_PORT, -db-url overrides CR_DATABASE_URL, -version prints the build identity (version, commit, dirty marker)."
 
+# DF-CRIER-496: the toolchain floor is a NAMED gate (`make toolchain-check`), a
+# named CI step, and the first command INSTALL.md's build path runs — but it is
+# deliberately NOT a prerequisite of this recipe. On a host whose provisioning
+# installed a toolchain below the floor (this dev box: `GOTOOLCHAIN=local go
+# version` -> go1.26.5 against a `go 1.26.10` module) `make build` still succeeds
+# via GOTOOLCHAIN=auto, and making it a prerequisite would red every lane that
+# shares the box for a host-provisioning gap — the half this repository does not
+# own. Once the provisioning half is fixed, wiring it here is a one-word change:
+# `build: toolchain-check`.
 build:
 	go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier ./cmd/server
 
@@ -136,8 +147,56 @@ test-short:
 test-integration:
 	go test -tags=integration -count=1 -timeout 5m ./internal/registry
 
+# DF-CRIER-496: `lint` keeps its documented meaning (go vet only). The toolchain
+# floor is `toolchain-check` below — a separate, named verdict — so a lint run
+# never reports (or hides) a toolchain shortfall, and vice versa. Run both in a
+# bootstrap/gate: `make toolchain-check lint`.
 lint:
 	go vet ./...
+
+# DF-CRIER-496: THE TOOLCHAIN FLOOR GATE.
+#
+# WHY IT EXISTS. go.mod's `go` directive is a hard requirement, and GOTOOLCHAIN's
+# default (`auto`) HIDES a violation on every networked box by silently
+# downloading the required toolchain. Measured on a fresh bunker-las-03 agent
+# (2026-11-03, tree aee2d9e2): the provisioning bootstrap installed go 1.26.5
+# while go.mod had been raised to `go 1.26.10`, and the chaos-disconnect cell —
+# which applies the documented offline cut (GOPROXY=off, GOTOOLCHAIN=local) —
+# failed closed with exactly
+#
+#     go: go.mod requires go >= 1.26.10 (running go 1.26.5; GOTOOLCHAIN=local)
+#
+# and no make target, CI step or documented floor could say so before the build.
+#
+# scripts/toolchain-check.sh reads the floor from go.mod's `go` directive (and a
+# `toolchain` directive when the file has one) — there is no second constant to
+# drift — and judges the toolchain that is actually INSTALLED, probed with
+# GOTOOLCHAIN=local. That probe pin is load-bearing: under GOTOOLCHAIN=auto a
+# plain `go version` reports the toolchain Go SELECTED (possibly just
+# downloaded), so a machine whose bootstrap installed an older toolchain prints
+# a healthy version and the shortfall surfaces only on an offline/pinned host.
+# MEASURED on this dev box while writing this gate: `go version` -> go1.26.10,
+# `GOTOOLCHAIN=local go version` -> go1.26.5, because 1.26.10 was fetched into
+# the module cache. Then:
+#   exit 0  one OK line naming the installed version and the floor;
+#   exit 1  an actionable FAIL naming the required version, the running version,
+#           the provisioning bootstrap that must install at or above the floor,
+#           and the GOTOOLCHAIN=local refusal an offline build will hit;
+#   exit 2  REFUSED (no go, no/unreadable go.mod, no `go` directive, an
+#           unparseable version) — never a green over input it could not read.
+# It downloads nothing, switches no toolchain and mutates nothing.
+#
+# toolchain-selftest is the regression: PASS at and above the floor, FAIL for a
+# simulated go1.26.5 (the measured shape, via a PATH shim that delegates every
+# other subcommand to the real go), the floor provably READ from go.mod (a
+# raised floor changes the verdict), fail-closed refusals, and a NEUTER proof
+# that the below-floor verdict is load-bearing. PATH shims only, no network,
+# well under a second.
+toolchain-check:
+	@bash scripts/toolchain-check.sh
+
+toolchain-selftest:
+	@bash scripts/toolchain-check-selftest.sh
 
 # QA-CRIER-46: verify module metadata is tidy without mutating the developer
 # tree. The archive contains the current tracked source, while the explicit
