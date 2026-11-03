@@ -13,7 +13,7 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-31
+## [0.3.0] - 2026-11-03
 
 Range: `v0.2.0`..`v0.3.0` — 261 non-merge commits (6 `feat`, 54 `fix`,
 19 `docs`, 7 `test`, 1 `ci`, 1 `perf`, 92 `chore`, 69 board, plus
