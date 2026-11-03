@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -33,6 +33,8 @@ help:
 	@echo "Available targets:"
 	@echo "  build             Compile the main server binary into bin/crier"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
+	@echo "  build-front       Compile the authenticating front into bin/crier-front (DF-CRIER-333)"
+	@echo "  front-e2e         Prove the shipped front makes /chat usable: direct 401, fronted panel, real send, token absent from page source/storage (DF-CRIER-333)"
 	@echo "  mcp               Build and run the MCP bridge in one command (stdio; the documented launcher — its stdout carries only JSON-RPC frames)"
 	@echo "  run               Build and run the server (default :8767, pidfile $(PIDFILE))"
 	@echo "  stop              Stop the server started by make run (reads $(PIDFILE); no pidfile = nothing to stop, exit 0)"
@@ -105,6 +107,17 @@ build:
 # `make mcp-stdout-check` gates this; do not drop the `@` or re-prefix the recipe.
 build-mcp:
 	@go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-mcp ./cmd/crier-mcp
+# The shipped authenticating front (DF-CRIER-333). An auth-enabled relay demands
+# `Authorization: Bearer` on every non-exempt path, including a browser's GET
+# /chat; this process holds the credential and injects it on the wire so the token
+# never reaches page source, cookies or localStorage. See docs/fronting-auth.md.
+build-front:
+	@go build -ldflags "$(CRIER_LDFLAGS)" -o bin/crier-front ./cmd/crier-front
+
+# DF-CRIER-333 acceptance drive. Expects a relay with CR_AUTH_TOKEN set and a
+# crier-front in front of it; rc 77 (named skip) when playwright is absent.
+front-e2e:
+	@node scripts/chat-front-e2e.cjs
 
 # DF-CRIER-137: the same launcher as ONE command, so a client config does not
 # need a shell `&&`. Each recipe line runs in its own shell, so `exec` replaces

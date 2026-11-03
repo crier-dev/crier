@@ -749,9 +749,13 @@ non-exempt path) directly in a browser is refused `401` — `/chat` answers with
 readable page explaining the refusal, everything else with the bare JSON. That is
 the server working as configured, not a bug: an unauthenticated browser
 deployment must be **fronted** by an authenticating layer that supplies the
-credential for it. The fronting mechanism itself is a deliberate, still-open
-decision (DF-CRIER-333); until it lands, drive crier from its API clients, which
-send the header themselves.
+credential for it. That layer ships with this repo: `make build-front` produces
+`bin/crier-front`, which holds `CR_AUTH_TOKEN` and injects the Bearer on the wire
+so a browser can use `/chat` without the token ever reaching page source,
+cookies or storage — the arrangement DF-CRIER-333 asked the owner to decide.
+See [`docs/fronting-auth.md`](docs/fronting-auth.md) for the run line, the
+systemd unit, and the three commands that verify a deployment. Drive crier from
+its API clients instead when you want the header sent by the caller itself.
 
 A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except the **five exempt paths** — `/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` (the list is the switch in `internal/middleware/auth.go`) — needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped. Measured on a running server: all five answer `200` with no token, and `GET /agents` answers `401`:
 
