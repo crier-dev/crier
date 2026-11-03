@@ -24,6 +24,12 @@ deterministically and without any provider call:
              runner — so no component can be left on its own default. It also
              re-states the five-runner claim (all of them source the library and
              select their port).
+  degraded   the skip contract below, proven: re-runs the live cases under PATH
+             directories that really lack `ss` / `curl` / all of them and asserts
+             exit 0 with a named SKIP per missing tool and `wiring` still PASSing,
+             then re-runs the same PATH with the guard NEUTERED (must go non-zero)
+             and a broken runner source through `wiring` (must fail). Needs no
+             ambient tool itself, so it runs on the box that is missing them.
   rotate     LIVE: the FIRST default candidate is squatted by a listener this
              selftest owns; the runner must name that candidate and its holder,
              rotate to the next candidate, run to its own PASS on the port it
@@ -52,16 +58,28 @@ and ws-mesh-demo drives only this repo's own Go client.
 Usage:
     python3 examples/scratch-port-rotation-selftest.py [--case NAME]... [--list]
 
-Exit status: 0 only when every check behaved; 1 when a check failed; 2 when a
-prerequisite tool is missing (the selftest never reports a green it did not earn).
+Exit status: 0 when every case that RAN behaved — that includes a run where
+cases were skipped for a missing ambient tool; 1 when a case that ran failed. The
+selftest never reports a green it did not earn, and a skip is never a silent one.
 
-`ss` (iproute2) is NOT one of those prerequisites (QA-CRIER-40, mirroring the
-QA-CRIER-37 skip-guard in `scripts/lib/port-guard.sh`): it is an ambient tool a
-scratch runner may simply not ship (the act container catthehacker/ubuntu has no
-iproute2), and exiting 2 there would report a broken RUNNER as a broken PRODUCT.
-When it is missing the live cases that need it are SKIPPED BY NAME and the run
-still exits 0, while the `wiring` case — which only reads the runners' source —
-keeps running, so a skip never becomes a silent empty green.
+Ambient-tool gaps are SKIPS, not failures (QA-CRIER-40, DF-CRIER-497, mirroring
+the QA-CRIER-37 skip-guard in `scripts/lib/port-guard.sh`). Every case declares
+the harness tools it needs (`CASE_TOOLS`, taken from each runner's own
+"Requirements:" header), and a tool PATH cannot resolve drops exactly the cases
+that declare it — BY NAME, with the missing tool and a one-line remediation on
+stdout — while the run still exits 0. Exiting non-zero there reports a broken
+RUNNER as a broken PRODUCT and reds a pipeline on a commit that cannot affect
+the harness; `ss` (iproute2) is only the first tool of that class the act
+container catthehacker/ubuntu does not ship. Nothing here needs `go`, `curl`,
+`openssl` or `sha256sum` either when only `wiring` is left, and `wiring` (source
+invariants) plus `degraded` (the contract below) declare no ambient tool at all
+— so a degraded run always still proves something real.
+
+`degraded` re-runs the live cases under PATH directories that really lack a tool
+and asserts the skip contract end to end, including two red arms (the guard
+neutered, and a broken runner source), so this gate cannot rot into a green that
+skips everything.
+
 
 The live runners are also handed the go toolchain the ambient environment already
 resolved (see `go_cache_env()`), because the gateway case starts its runner with a
@@ -110,6 +128,7 @@ ALL_RUNNERS = {
 
 CASES = [
     "wiring",
+    "degraded",
     "federation-rotate",
     "federation-exhaust",
     "federation-explicit",
@@ -121,14 +140,78 @@ CASES = [
     "ws-mesh-explicit",
 ]
 
-# Cases that need `ss` (iproute2): every live arm starts a shipped runner, and
-# scripts/lib/port-guard.sh refuses to run any of its consumers without it — `ss`
-# is how a guard finds the holder of an occupied port (the library's exit-2
-# refusal is pinned by the port-guard selftest's ARM H). The rotate and exhaust
-# arms also assert with it that a squatted candidate is really occupied. The
-# `wiring` case reads the runners' source and needs no ambient tool at all, so it
-# still runs when `ss` is missing (QA-CRIER-40).
-NEEDS_SS = frozenset(name for name in CASES if name != "wiring")
+# ── what each case needs from the RUNNER, never from the product ─────────────
+# Every shipped runner starts its scratch service from a bash script that builds
+# and runs the relay with `go`, polls it with `curl`, and finds the port holder
+# with `ss`. Beyond that shared set each runner shells out to more: federation
+# signs its agent keys with `openssl` and starts a stdlib helper with `python3`,
+# ws-mesh derives its registry public_key with `sha256sum`. Each entry below is
+# taken from that runner's own "Requirements:" header and from the `for tool in
+# ...` guard it runs, so this table cannot drift from what the arm really calls.
+#
+# `wiring` reads source and `degraded` builds its own PATH: neither needs an
+# ambient tool, so both keep running in EVERY degraded mode — a skip is never a
+# silent empty green.
+_RUNNER_TOOLS = frozenset({"bash", "go", "curl", "ss"})
+_FEDERATION_TOOLS = _RUNNER_TOOLS | {"python3", "openssl"}
+_GATEWAY_TOOLS = _RUNNER_TOOLS | {"python3"}
+_WS_MESH_TOOLS = _RUNNER_TOOLS | {"sha256sum"}
+CASE_TOOLS: dict[str, frozenset[str]] = {
+    "wiring": frozenset(),
+    "degraded": frozenset(),
+    "federation-rotate": _FEDERATION_TOOLS,
+    "federation-exhaust": _FEDERATION_TOOLS,
+    "federation-explicit": _FEDERATION_TOOLS,
+    "gateway-rotate": _GATEWAY_TOOLS,
+    "gateway-exhaust": _GATEWAY_TOOLS,
+    "gateway-explicit": _GATEWAY_TOOLS,
+    "ws-mesh-rotate": _WS_MESH_TOOLS,
+    "ws-mesh-exhaust": _WS_MESH_TOOLS,
+    "ws-mesh-explicit": _WS_MESH_TOOLS,
+}
+
+# How a missing tool is announced. The `ss` wording is the one QA-CRIER-40 pinned
+# for the act container; the rest follow its shape exactly (tool, why the case
+# cannot run, one-line remediation) so every degraded mode reads the same.
+TOOL_NOTES: dict[str, tuple[str, str, str]] = {
+    "ss": ("'ss' (iproute2)",
+           "the runners find the port holder with it and refuse without it",
+           "Install the iproute2 package on this runner (Debian/Ubuntu: apt-get install -y iproute2)"),
+    "curl": ("'curl'",
+             "the runners poll their own scratch services with it and refuse without it",
+             "Install curl on this runner (Debian/Ubuntu: apt-get install -y curl)"),
+    "openssl": ("'openssl'",
+                "federation-demo signs its agent keys with it and refuses without it",
+                "Install the openssl package on this runner (Debian/Ubuntu: apt-get install -y openssl)"),
+    "sha256sum": ("'sha256sum' (coreutils)",
+                  "ws-mesh-demo derives its registry public_key with it and refuses without it",
+                  "Install coreutils on this runner (Debian/Ubuntu: apt-get install -y coreutils)"),
+    "python3": ("'python3'",
+                "the live arms start a stdlib Python helper with it",
+                "Install python3 on this runner (Debian/Ubuntu: apt-get install -y python3)"),
+    "go": ("'go' (toolchain)",
+           "every live arm builds the relay it measures",
+           "Install a Go toolchain (the version go.mod's go directive names) on this runner"),
+    "bash": ("'bash'",
+             "the runners are shell scripts this selftest executes",
+             "Install bash on this runner (Debian/Ubuntu: apt-get install -y bash)"),
+}
+
+
+def ambient_gaps(selected: list[str], which=shutil.which) -> dict[str, list[str]]:
+    """Missing ambient tools, each mapped to the cases that cannot run without it.
+
+    `which` is injected so the planner is exercisable without touching PATH. A
+    tool is "missing" only when PATH cannot resolve it: the answer decides
+    between a named SKIP and an arm that really runs.
+    """
+    gaps: dict[str, list[str]] = {}
+    for name in selected:
+        for tool in sorted(CASE_TOOLS.get(name, frozenset())):
+            if which(tool) is None:
+                gaps.setdefault(tool, []).append(name)
+    return gaps
+
 
 
 # --------------------------------------------------------------- result plumbing
@@ -643,6 +726,56 @@ def case_wiring(work: Path) -> CaseResult:
     return res
 
 
+# ------------------------------------------------------- degraded-mode case
+
+DEGRADED_TIMEOUT_S = 300
+DEGRADED_ARMS = (
+    "no-ss",
+    "no-curl",
+    "no-ambient-tools",
+    "neuter-guard-off",
+    "wiring-product-failure",
+)
+
+
+def case_degraded() -> CaseResult:
+    """The skip contract itself, proven under PATHs that really lack the tool.
+
+    A skip is a claim about what cannot run, and an unproven claim is how a
+    harness ends up green because nothing ran. This case re-runs the live cases
+    through `examples/scratch-port-rotation-degraded-selftest.py`, which builds
+    PATH directories that symlink the whole ambient PATH minus one tool — and,
+    in a second arm, minus all of them — and asserts what the driver then does:
+    exit 0, one SKIP line per missing tool naming it and every case it took
+    down, and the tool-free `wiring` case still running to its own PASS. Its two
+    red arms keep that green honest: the same restricted PATH with the
+    skip-guard neutered must go non-zero, and a broken runner source must still
+    fail `wiring`.
+
+    `degraded` declares no ambient tool of its own — it reuses the interpreter
+    it is already running under — so this contract is checked on the very box
+    that is missing the tools.
+    """
+    res = CaseResult("degraded")
+    module = HERE / "scratch-port-rotation-degraded-selftest.py"
+    if not module.is_file():
+        res.check(False, "the degraded-mode regression is present and runnable", str(module))
+        return res
+    try:
+        proc = subprocess.run([sys.executable, str(module)], cwd=str(REPO),
+                              capture_output=True, text=True, timeout=DEGRADED_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as exc:
+        res.check(False, "the degraded-mode regression ran", str(exc))
+        return res
+    out = proc.stdout + proc.stderr
+    tail = out.strip().splitlines()[-1] if out.strip() else "no output"
+    res.check(proc.returncode == 0, "the degraded-mode regression passes (exit 0)",
+              f"exit {proc.returncode}: {tail}")
+    for arm in DEGRADED_ARMS:
+        res.check(f"PASS: {arm}" in out, f"arm proved under a real restricted PATH: {arm}")
+    return res
+
+
 # --------------------------------------------------------------- live arms
 
 @dataclass
@@ -988,39 +1121,35 @@ def main() -> int:
             print(name)
         return 0
 
-    required = ["bash", "go", "python3", "curl", "openssl", "sha256sum"]
-    missing = [tool for tool in required if shutil.which(tool) is None]
-    if missing:
-        print(f"scratch-port-rotation-selftest: missing prerequisite tool(s): {', '.join(missing)}",
-              file=sys.stderr)
-        return 2
-
     selected = args.case or CASES
 
-    # ── ambient-tool skip-guard (QA-CRIER-40) ───────────────────────────────────
-    # `ss` (iproute2) is deliberately NOT in that prerequisite list: this selftest is
-    # a self-check of the harness, a scratch runner may simply ship no iproute2 (the
-    # act container catthehacker/ubuntu has none), and exiting 2 there reports a
-    # broken RUNNER as a broken PRODUCT — it reds a pipeline on a commit that cannot
-    # affect the harness (the QA-CRIER-37 class, at this cell's own gate). So the
-    # cases that need `ss` are skipped BY NAME and the run still exits 0. The library
-    # is untouched: every consumer still refuses without `ss` (exit 2), pinned by the
-    # port-guard selftest's ARM H. The `wiring` case needs no ambient tool and keeps
-    # running, so a skip is never a silent empty green either.
+    # ── ambient-tool skip-guard (QA-CRIER-40, DF-CRIER-497) ─────────────────────
+    # This selftest is a self-check of the HARNESS, and a scratch runner may simply
+    # ship no iproute2 (the act container catthehacker/ubuntu has none) — or no
+    # curl, no openssl, no coreutils. Aborting with exit 2 there reports a broken
+    # RUNNER as a broken PRODUCT, and reds a pipeline on a commit that cannot
+    # affect the harness (the QA-CRIER-37 class, at this cell's own gate). So a
+    # tool PATH cannot resolve drops EXACTLY the cases that declare it, prints one
+    # SKIP line per missing tool naming it and the cases it took down, and the run
+    # still exits 0. The library is untouched: every consumer still refuses
+    # without `ss` (exit 2), pinned by the port-guard selftest's ARM H. `wiring`
+    # and `degraded` declare no ambient tool, so at least one case always runs and
+    # a skip can never be a silent empty green.
+    gaps = ambient_gaps(selected)
     skipped: list[str] = []
-    if shutil.which("ss") is None:
-        skipped = [name for name in selected if name in NEEDS_SS]
-        selected = [name for name in selected if name not in NEEDS_SS]
-        if skipped:
-            print(f"SKIP: scratch-port-rotation-selftest — 'ss' (iproute2) is not on PATH; the "
-                  f"{len(skipped)} live case(s) that need it cannot run (the runners find the port "
-                  f"holder with it and refuse without it): {', '.join(skipped)}. Install the "
-                  f"iproute2 package on this runner (Debian/Ubuntu: apt-get install -y iproute2) "
-                  f"to run them.")
-        if not selected:
-            print("scratch-port-rotation-selftest: no case left to run — SKIP, exit 0 (a missing "
-                  "ambient tool is not a product failure)")
-            return 0
+    for tool in sorted(gaps):
+        cases = gaps[tool]
+        label, reason, remediation = TOOL_NOTES.get(
+            tool, (f"'{tool}'", "the selected case(s) need it", f"Install {tool} on this runner"))
+        print(f"SKIP: scratch-port-rotation-selftest — {label} is not on PATH; the "
+              f"{len(cases)} case(s) that need it cannot run ({reason}): "
+              f"{', '.join(cases)}. {remediation} to run them.")
+        skipped += [name for name in cases if name not in skipped]
+    selected = [name for name in selected if name not in skipped]
+    if not selected:
+        print("scratch-port-rotation-selftest: no case left to run — SKIP, exit 0 (a missing "
+              "ambient tool is not a product failure)")
+        return 0
 
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="scratch-port-rotation-") as tmp:
@@ -1028,6 +1157,8 @@ def main() -> int:
         for name in selected:
             if name == "wiring":
                 results.append(case_wiring(work / "wiring"))
+            elif name == "degraded":
+                results.append(case_degraded())
             elif name == "federation-rotate":
                 results.append(case_federation_rotate(work / "fed-rotate"))
             elif name == "federation-exhaust":
@@ -1051,7 +1182,8 @@ def main() -> int:
             results[-1].report()
 
     failed = [r for r in results if r.failed or not r.checks]
-    skip_note = (f", {len(skipped)} case(s) skipped for a missing 'ss' (iproute2)" if skipped else "")
+    skip_note = (f", {len(skipped)} case(s) skipped for missing ambient tool(s): "
+                 f"{', '.join(sorted(gaps))}" if skipped else "")
     if failed:
         print(f"scratch-port-rotation-selftest: {len(results) - len(failed)}/{len(results)} case(s) "
               f"behaved — FAIL{skip_note}")
