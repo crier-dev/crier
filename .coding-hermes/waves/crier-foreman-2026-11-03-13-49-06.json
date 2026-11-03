@@ -1,0 +1,46 @@
+{
+  "tick_id": "crier-foreman-2026-11-03-13-49-06",
+  "project": "crier",
+  "block": "DF-CRIER-498 (clean-machine family: DF-CRIER-496 / 497 / 498 filed from the 2026-11-03 full battery on bunker-las-03)",
+  "mode": "wave",
+  "wave_id": "crier-foreman-2026-11-03-13-49-06",
+  "wave_size": 2,
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 1m=8.80 -> ceil 9 -> 16-9=7 -> min(6,7)=6 formula slots; WAVE_BUDGET=10 -> 6. Wave size 2 because only two of the block's three rows have an in-repo fix surface; DF-CRIER-498 (no Docker daemon on a fresh bunker agent) is a fleet provisioning harness defect (bunker-qa.sh lives outside this repo) and stays pending as an infrastructure blocker.",
+  "base": "origin/main",
+  "base_sha": "d8bab0f2",
+  "workers": [
+    {
+      "task_id": "DF-CRIER-497",
+      "title": "act CI simulation fails at the scratch-port rotation selftest on a clean agent, taking the whole ci-pass cell down",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-497",
+      "branch": "wt/DF-CRIER-497",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-tick-20260928/brief-DF-CRIER-497.txt",
+      "scope": "examples/scratch-port-rotation-selftest.py (+ docs only if the fix requires it); MUST NOT touch Makefile, README.md, go.mod, scripts/lib/port-guard.sh, .github/workflows/ci.yml"
+    },
+    {
+      "task_id": "DF-CRIER-496",
+      "title": "A clean machine cannot build after the Go 1.26.10 floor: the provisioned toolchain is 1.26.5 and GOTOOLCHAIN=local refuses",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-496",
+      "branch": "wt/DF-CRIER-496",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-tick-20260928/brief-DF-CRIER-496.txt",
+      "scope": "in-repo toolchain-floor enforcement only: Makefile, .github/workflows/ci.yml, docs/*.md, go.mod (toolchain directive only if needed), scripts/* toolchain check; MUST NOT touch examples/, README.md, scripts/lib/port-guard.sh"
+    }
+  ],
+  "not_dispatched": [
+    {
+      "task_id": "DF-CRIER-498",
+      "reason": "The missing Docker daemon is provisioned by the fleet harness ~/.hermes/scripts/bunker-qa.sh (rootless dockerd install path, lines ~2229-2290) on the bunker agent, not by any tracked file in this repo. A worker in this worktree cannot reach or fix it, and the row's own acceptance permits classifying the cells as a named harness gap instead. Left pending as BLOCKED-ON-INFRASTRUCTURE with the exact harness coordinates recorded in the tick's audit event."
+    }
+  ],
+  "notes": [
+    "Resume-first check: the last audit event (id 2012, tick 1961) named block 'DEPS (family block; DEPS-005 was its only open row)'. DEPS-005 is complete, that block has no ready row, so the DF-CRIER family (rows filed at 18:32Z today) is the selection.",
+    "block_drive ranked QA-CRIER-54 / QA-CRIER-REVIEW-3 / QA-CRIER-README-1 / QA-CRIER-RELENG-1 above this block, but every one of those rows is either STATUS BLOCKED-ON-OWNER (RELEASE-009 legs 2/4 on INT-CI-019) or blocked on the bunker-mvp host disk at 100%. block_drive does not parse owner gates; none of them is dispatchable.",
+    "Canonical checkout is READ-ONLY (live crier service cwd inside the repo; untracked .vfs/graph/ is the repo-local post-commit 'hilo graph warm' cache; .git/REBASE_HEAD proven stale by the four-signal reflog recipe; .gitreins/tasks.yaml carries an unattributed registry rewrite). All writes happen in the control worktree and in the two worker worktrees.",
+    "Local main was 0 ahead / 3 behind origin/main at tick start; fast-forwarded to d8bab0f2 before selection."
+  ]
+}
