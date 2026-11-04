@@ -3283,5 +3283,6 @@ tasks:
     bash scripts/lib/port-guard.sh --selftest exits 0 in 10 consecutive runs and under
     parallel load; bash -n and shellcheck clean; a forced-failure arm prints the named
     SETUP error and exits nonzero; no bare rc=1 message remains.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-04T18:48:58.517784+00:00'
+  completed_at: '2026-11-04T19:35:15.842768+00:00'
