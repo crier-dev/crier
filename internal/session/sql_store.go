@@ -137,6 +137,13 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("session %s store: apply schema: commit: %w", s.dialect.Name(), err)
 	}
+	// Columns added after the first schema must reach a database that already
+	// exists; CREATE TABLE IF NOT EXISTS will not add them.
+	for _, stmt := range sessionAddedColumns {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("session %s store: add column: %w", s.dialect.Name(), err)
+		}
+	}
 	return nil
 }
 
@@ -352,18 +359,20 @@ func (s *SQLStore) projectSessionCreate(ctx context.Context, rec *Record) error 
 	}
 	_, err = s.exec(ctx, `
 		INSERT INTO chat_sessions
-			(id, namespace, kind, title, created_by, created_at, state, closed_at, retention_seconds, group_id, visibility)
-		VALUES (?,?,?,?,?,?,'open',NULL,?,?,?)
+			(id, namespace, kind, title, created_by, created_at, state, closed_at, retention_seconds, group_id, visibility, harness, harness_session_id)
+		VALUES (?,?,?,?,?,?,'open',NULL,?,?,?,?,?)
 		ON CONFLICT (id) DO UPDATE SET
-			namespace         = excluded.namespace,
-			kind              = excluded.kind,
-			title             = excluded.title,
-			created_by        = excluded.created_by,
-			retention_seconds = excluded.retention_seconds,
-			group_id          = excluded.group_id,
-			visibility        = excluded.visibility`,
+			namespace          = excluded.namespace,
+			kind               = excluded.kind,
+			title              = excluded.title,
+			created_by         = excluded.created_by,
+			retention_seconds  = excluded.retention_seconds,
+			group_id           = excluded.group_id,
+			visibility         = excluded.visibility,
+			harness            = excluded.harness,
+			harness_session_id = excluded.harness_session_id`,
 		rec.SessionID, rec.Namespace, string(kind), rec.Title, string(createdBy), encTime(rec.TS),
-		nullInt(rec.RetentionSeconds), rec.Group, rec.Visibility)
+		nullInt(rec.RetentionSeconds), rec.Group, rec.Visibility, rec.Harness, rec.HarnessSessionID)
 	if err != nil {
 		return fmt.Errorf("project session.create: %w", err)
 	}
@@ -639,13 +648,15 @@ func (s *SQLStore) loadSession(ctx context.Context, sessionID string) (*Session,
 		closedAt        sql.NullString
 		retention       sql.NullInt64
 		grp, visibility string
+		harnessName     string
+		harnessSessID   string
 	)
 	err := s.queryRow(ctx, `
 		SELECT id, namespace, kind, title, created_by, created_at, state, closed_at,
-		       retention_seconds, group_id, visibility
+		       retention_seconds, group_id, visibility, harness, harness_session_id
 		FROM chat_sessions WHERE id = ?`, sessionID).Scan(
 		&sess.ID, &sess.Namespace, &kind, &sess.Title, &createdBy, &createdAt, &state,
-		&closedAt, &retention, &grp, &visibility)
+		&closedAt, &retention, &grp, &visibility, &harnessName, &harnessSessID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
@@ -659,6 +670,8 @@ func (s *SQLStore) loadSession(ctx context.Context, sessionID string) (*Session,
 	sess.State = SessionState(state)
 	sess.Group = grp
 	sess.Visibility = visibility
+	sess.Harness = harnessName
+	sess.HarnessSessionID = harnessSessID
 	if sess.CreatedAt, err = decTime(createdAt); err != nil {
 		return nil, err
 	}

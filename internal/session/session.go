@@ -260,6 +260,12 @@ type Session struct {
 	// surgery.
 	Group      string `json:"group,omitempty"`
 	Visibility string `json:"visibility,omitempty"`
+	// Harness names the adapter bound to this session (COURIER-HARNESS §4.3)
+	// and HarnessSessionID is the id in THAT harness. Empty means store-only,
+	// which is the default: a session that never asked for push delivery
+	// behaves exactly as it did before this field existed.
+	Harness          string `json:"harness,omitempty"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
 }
 
 // Member is one participant with exactly one role (§2.1, §2.3). Membership is
@@ -523,8 +529,10 @@ func (st *State) apply(rec *Record) error {
 			// Group and Visibility are recorded on the create line and must
 			// survive the fold: a session's privacy (CR-CHAT-019, §4 row 13)
 			// is meaningless if replay drops it.
-			Group:      rec.Group,
-			Visibility: rec.Visibility,
+			Group:            rec.Group,
+			Visibility:       rec.Visibility,
+			Harness:          rec.Harness,
+			HarnessSessionID: rec.HarnessSessionID,
 		}
 		if rec.Kind == "" {
 			s.Kind = DefaultKind

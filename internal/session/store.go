@@ -75,6 +75,10 @@ type Record struct {
 	RetentionSeconds *int       `json:"retention_seconds,omitempty"`
 	Group            string     `json:"group,omitempty"`
 	Visibility       string     `json:"visibility,omitempty"`
+	// Harness and HarnessSessionID bind the session to a harness adapter
+	// (COURIER-HARNESS §4.3). Absent on a store-only session.
+	Harness          string `json:"harness,omitempty"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
 
 	// --- member.add / member.context / member.remove ---
 	MemberType   MemberType    `json:"member_type,omitempty"`
@@ -371,6 +375,8 @@ func (s *Session) CreateRecord(seq int64, ts time.Time) *Record {
 		RetentionSeconds: s.RetentionSeconds,
 		Group:            s.Group,
 		Visibility:       s.Visibility,
+		Harness:          s.Harness,
+		HarnessSessionID: s.HarnessSessionID,
 	}
 }
 

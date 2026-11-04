@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/detect"
+	"github.com/crier-dev/crier/internal/harness"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -281,6 +282,11 @@ type Config struct {
 	// registered at all, so a deployment that does not control DAGs serves
 	// exactly the surface it served before this feature existed.
 	Dagger DaggerConfig
+	// Harness holds the harness-delivery block (COURIER-HARNESS §4.1). Delivery
+	// is OFF by default, and nothing in this block can fail startup: a
+	// malformed adapter block disables that adapter and records the reason in
+	// Harness.Warnings.
+	Harness harness.Config
 }
 
 // DaggerConfig is the dagger control surface's posture (CR-CHAT-033).
@@ -550,6 +556,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	}
 	cfg := Config{
 		Port:               8767,
+		Harness:            harness.LoadConfig(getenv),
 		AuthToken:          getenv("CR_AUTH_TOKEN"),
 		LogLevel:           "info",
 		LogFormat:          "text",

@@ -54,7 +54,9 @@ var sqliteSchemaStatements = []string{
 		closed_at         TEXT NULL,
 		retention_seconds INTEGER NULL,
 		group_id          TEXT NOT NULL DEFAULT '',
-		visibility        TEXT NOT NULL DEFAULT ''
+		visibility        TEXT NOT NULL DEFAULT '',
+		harness           TEXT NOT NULL DEFAULT '',
+		harness_session_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE TABLE IF NOT EXISTS chat_session_members (
 		session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -210,7 +212,9 @@ var postgresSchemaStatements = []string{
 		closed_at         TEXT NULL,
 		retention_seconds INTEGER NULL,
 		group_id          TEXT NOT NULL DEFAULT '',
-		visibility        TEXT NOT NULL DEFAULT ''
+		visibility        TEXT NOT NULL DEFAULT '',
+		harness           TEXT NOT NULL DEFAULT '',
+		harness_session_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE TABLE IF NOT EXISTS chat_session_members (
 		session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,

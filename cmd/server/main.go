@@ -180,6 +180,11 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	if len(args) > 0 && args[0] == "keygen" {
 		return runKeygen(args[1:], os.Stdout)
 	}
+	// `crier harness list|probe` is a read-only reporting surface
+	// (COURIER-HARNESS §4.4): it probes binaries and never starts the server.
+	if len(args) > 0 && args[0] == "harness" {
+		return runHarness(args[1:], os.Stdout, os.Stderr, getenv)
+	}
 
 	help, showVersion, stop, port, dbURL, pidfilePath, err := parseArgs(args, os.Stdout)
 	if err != nil {
@@ -1588,6 +1593,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "Usage:")
 	fmt.Fprintln(out, "  crier [flags]")
 	fmt.Fprintln(out, "  crier keygen [flags]        generate an ed25519 keypair + the agent config (no openssl, no xxd)")
+	_, _ = fmt.Fprintln(out, "  crier harness list|probe    probe the configured harness adapters (read-only; no delivery)")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Flags:")
 	fs.PrintDefaults()

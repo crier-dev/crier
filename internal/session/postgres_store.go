@@ -55,7 +55,9 @@ var SchemaStatements = []string{
 		closed_at         TIMESTAMPTZ NULL,
 		retention_seconds INTEGER NULL,
 		group_id          TEXT NOT NULL DEFAULT '',
-		visibility        TEXT NOT NULL DEFAULT ''
+		visibility        TEXT NOT NULL DEFAULT '',
+		harness           TEXT NOT NULL DEFAULT '',
+		harness_session_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE TABLE IF NOT EXISTS chat_session_members (
 		session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -215,6 +217,13 @@ func (s *PostgresStore) ApplySchema(ctx context.Context) error {
 			return fmt.Errorf("session postgres store: apply schema: %w", err)
 		}
 	}
+	// Columns added after the first schema must reach a database that already
+	// exists; CREATE TABLE IF NOT EXISTS will not add them.
+	for _, stmt := range sessionAddedColumns {
+		if _, err := s.requestExecutor().Exec(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("session postgres store: add column: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -368,18 +377,20 @@ func (s *PostgresStore) projectSessionCreate(ctx context.Context, rec *Record) e
 	}
 	_, err = s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_sessions
-			(id, namespace, kind, title, created_by, created_at, state, closed_at, retention_seconds, group_id, visibility)
-		VALUES ($1,$2,$3,$4,$5,$6,'open',NULL,$7,$8,$9)
+			(id, namespace, kind, title, created_by, created_at, state, closed_at, retention_seconds, group_id, visibility, harness, harness_session_id)
+		VALUES ($1,$2,$3,$4,$5,$6,'open',NULL,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET
-			namespace         = EXCLUDED.namespace,
-			kind              = EXCLUDED.kind,
-			title             = EXCLUDED.title,
-			created_by        = EXCLUDED.created_by,
-			retention_seconds = EXCLUDED.retention_seconds,
-			group_id          = EXCLUDED.group_id,
-			visibility        = EXCLUDED.visibility`,
+			namespace          = EXCLUDED.namespace,
+			kind               = EXCLUDED.kind,
+			title              = EXCLUDED.title,
+			created_by         = EXCLUDED.created_by,
+			retention_seconds  = EXCLUDED.retention_seconds,
+			group_id           = EXCLUDED.group_id,
+			visibility         = EXCLUDED.visibility,
+			harness            = EXCLUDED.harness,
+			harness_session_id = EXCLUDED.harness_session_id`,
 		rec.SessionID, rec.Namespace, string(kind), rec.Title, createdBy, rec.TS.UTC(),
-		rec.RetentionSeconds, rec.Group, rec.Visibility)
+		rec.RetentionSeconds, rec.Group, rec.Visibility, rec.Harness, rec.HarnessSessionID)
 	if err != nil {
 		return fmt.Errorf("project session.create: %w", err)
 	}
@@ -648,13 +659,15 @@ func (s *PostgresStore) loadSession(ctx context.Context, sessionID string) (*Ses
 		closedAt      *time.Time
 		vis           string
 		grp           string
+		harnessName   string
+		harnessSessID string
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, namespace, kind, title, created_by, created_at, state, closed_at,
-		       retention_seconds, group_id, visibility
+		       retention_seconds, group_id, visibility, harness, harness_session_id
 		FROM chat_sessions WHERE id = $1`, sessionID).Scan(
 		&sess.ID, &sess.Namespace, &kind, &sess.Title, &createdByJSON, &sess.CreatedAt, &state,
-		&closedAt, &retention, &grp, &vis)
+		&closedAt, &retention, &grp, &vis, &harnessName, &harnessSessID)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
@@ -674,6 +687,8 @@ func (s *PostgresStore) loadSession(ctx context.Context, sessionID string) (*Ses
 	sess.RetentionSeconds = retention
 	sess.Group = grp
 	sess.Visibility = vis
+	sess.Harness = harnessName
+	sess.HarnessSessionID = harnessSessID
 	if len(createdByJSON) > 0 && !bytes.Equal(createdByJSON, []byte("null")) {
 		if err := json.Unmarshal(createdByJSON, &sess.CreatedBy); err != nil {
 			return nil, fmt.Errorf("load session created_by: %w", err)
