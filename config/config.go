@@ -483,8 +483,9 @@ type DetectionConfig struct {
 	CanaryTokens []string
 }
 
-// ObservabilityConfig holds the opt-in live-inspection surfaces
-// (DF-CRIER-142). Neither surface is auth-exempt: with CR_AUTH_TOKEN set
+// ObservabilityConfig holds the live-inspection surfaces
+// (DF-CRIER-142): pprof is opt-in, metrics is on by default. Neither
+// surface is auth-exempt: with CR_AUTH_TOKEN set
 // they require the Bearer header like every other authenticated route;
 // with auth off they are open. The exempt-path list in
 // internal/middleware/auth.go is unchanged.
@@ -493,7 +494,10 @@ type ObservabilityConfig struct {
 	// (CR_ENABLE_PPROF). Default false.
 	EnablePProf bool
 	// EnableMetrics registers GET /metrics (Prometheus text format) when
-	// true (CR_ENABLE_METRICS). Default false.
+	// true (CR_ENABLE_METRICS). Default TRUE (MON-CRIER-001): the series
+	// list is static, documented and discloses no secret, while a deployed
+	// server answering 404 on /metrics is indistinguishable from a broken
+	// one. CR_ENABLE_METRICS=false still turns the surface off.
 	EnableMetrics bool
 }
 
@@ -660,6 +664,13 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			MaxConnIdleTime: 5 * time.Minute,
 			ConnectTimeout:  10 * time.Second,
 		},
+		// MON-CRIER-001 (spec §4.1): /metrics is ON by default. The series
+		// list is static and documented, so the surface discloses nothing an
+		// operator has not already published; leaving it opt-in meant every
+		// deployed crier answered 404, which is the one reading that cannot be
+		// told apart from a broken endpoint. CR_ENABLE_METRICS=false remains
+		// the operator override (§2.4 G1).
+		Observability: ObservabilityConfig{EnableMetrics: true},
 	}
 
 	if v := getenv("CR_LOG_LEVEL"); v != "" {
@@ -1203,8 +1214,9 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	cfg.Guard.DefaultPolicy = getenv("CR_GUARD_DEFAULT_POLICY")
 
 	// Opt-in live-inspection surfaces (DF-CRIER-142). Same tolerant bool
-	// dialect as CR_REQUIRE_AGENT_SIG / CR_GUARD_ENABLED; default false, so
-	// an unset flag leaves the surface unregistered (404).
+	// dialect as CR_REQUIRE_AGENT_SIG / CR_GUARD_ENABLED. PPROF stays off
+	// unless set; METRICS defaults ON (MON-CRIER-001) and a set value —
+	// true/false/0/no … — overrides that default in either direction.
 	if v := getenv("CR_ENABLE_PPROF"); v != "" {
 		parsed, err := parseTolerantBool("CR_ENABLE_PPROF", v)
 		if err != nil {

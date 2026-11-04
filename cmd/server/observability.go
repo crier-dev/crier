@@ -18,10 +18,11 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// DF-CRIER-142: crier's two opt-in live-inspection surfaces. Both are
-// registered ONLY when their env flag is on (CR_ENABLE_PPROF /
-// CR_ENABLE_METRICS, default false → the paths answer 404 like any
-// unregistered route). Neither path is added to the auth-exempt list in
+// DF-CRIER-142: crier's two live-inspection surfaces. GET /metrics is
+// registered by default (MON-CRIER-001; CR_ENABLE_METRICS=false turns it off)
+// and GET /debug/pprof/* only when CR_ENABLE_PPROF is on — a disabled surface
+// answers 404 like any unregistered route. Neither path is added to the
+// auth-exempt list in
 // internal/middleware/auth.go: with CR_AUTH_TOKEN set they require the
 // Bearer header like every other authenticated route; with auth off they
 // are open. All handlers are net/http/pprof constructors wired onto the
@@ -75,6 +76,15 @@ type observabilityDeps struct {
 	// the store that actually serves, so the gauges report the queue of the
 	// backend answering — memory or postgres — and never a copied number.
 	queueDepth queueDepthReader
+	// storeBackend is the registry backend run() selected (the same value
+	// GET /status reports), used as the bounded `backend` label on
+	// crier_store_healthy (MON-CRIER-001).
+	storeBackend string
+	// storeHealth is the serving store's live health probe — the same seam
+	// GET /status grades its health word with (nil when the backend exposes
+	// no HealthReporter, which crier_store_healthy then grades through the
+	// queue-depth read instead).
+	storeHealth healthProbe
 }
 
 // registerObservabilityGauges registers the composition-layer gauges whose
@@ -105,6 +115,7 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			return float64(n)
 		})
 	registerQueueDepthGauges(deps.queueDepth)
+	registerIdentityGauges(deps)
 }
 
 // registerQueueDepthGauges exposes the store-wide inbox queue (CR-FEAT-035):

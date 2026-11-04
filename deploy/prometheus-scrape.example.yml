@@ -1,0 +1,33 @@
+# Prometheus scrape job for crier — paste under scrape_configs: in the fleet
+# Prometheus config (fleet-monitor: /root/fleet-monitoring/prometheus/prometheus.yml)
+# and reload. Reference: docs/observability-spec.md §4.2 (MON-CRIER-001).
+#
+# /metrics is served on a bare boot: CR_ENABLE_METRICS defaults to true and both
+# shipped units (deploy/crier.service, deploy/crier.user.service) also set it
+# explicitly. CR_ENABLE_METRICS=false on the target leaves the path 404 and this
+# job reports up=0 — set the flag on the server, not in this file.
+#
+# /metrics is NOT auth-exempt (internal/middleware/auth.go). With CR_AUTH_TOKEN
+# set the scrape MUST carry the bearer, so the authorization block below is part
+# of the job, not an optional extra:
+#   - auth ON  + credentials_file present  -> 200
+#   - auth ON  + missing/empty file        -> 401 on every scrape (up=0)
+#   - auth OFF + credentials_file present  -> 200 (the header is simply ignored)
+# The file holds the CR_AUTH_TOKEN value, 0600, outside the Prometheus config:
+#   install -m 0600 /dev/null /root/fleet-monitoring/secrets/crier-token
+#   printf '%s' '<the CR_AUTH_TOKEN value>' > /root/fleet-monitoring/secrets/crier-token
+- job_name: crier
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  scheme: http
+  authorization:
+    type: Bearer
+    credentials_file: /root/fleet-monitoring/secrets/crier-token
+  static_configs:
+    - targets: ['crier.example.internal:8767']   # <crier-host>:<CRIER_PORT>, default 8767
+      labels:
+        # Target labels only — never duplicate these as series labels.
+        host: crier
+        product: crier
+        service: crier-bus

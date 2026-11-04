@@ -4,8 +4,11 @@
 // The tests boot the REAL server via run(nil) (same harness style as
 // TestServerHealth / bootDocsClaimsServer) three ways:
 //
-//   - flags OFF      → GET /metrics and GET /debug/pprof/ are 404 (the
-//     surfaces simply do not exist — same answer as any unknown path).
+//   - pprof unset    → GET /debug/pprof/ is 404 (the surface simply does not
+//     exist — same answer as any unknown path). GET /metrics is now served by
+//     default (MON-CRIER-001); its 404 arm is the explicit
+//     CR_ENABLE_METRICS=false opt-out asserted below, and the default-on half
+//     lives in metrics_identity_test.go.
 //   - metrics ON     → 200, the v0.0.4 text content type, and all seven
 //     series present, each with HELP and TYPE lines.
 //   - pprof ON       → the index is 200 and /debug/pprof/heap?debug=1 is
@@ -113,10 +116,12 @@ func get(t *testing.T, client *http.Client, url, bearer string) (int, string, st
 	return resp.StatusCode, resp.Header.Get("Content-Type"), string(b)
 }
 
-// TestObservabilityDisabledByDefault: no flags → both surfaces 404.
+// TestObservabilityDisabledByDefault: pprof unset → 404; metrics only when an
+// operator turns it OFF (MON-CRIER-001 flipped the default to ON, and
+// TestMetricsServedByDefault in metrics_identity_test.go pins that half).
 func TestObservabilityDisabledByDefault(t *testing.T) {
 	t.Setenv("CR_ENABLE_PPROF", "")
-	t.Setenv("CR_ENABLE_METRICS", "")
+	t.Setenv("CR_ENABLE_METRICS", "false")
 	baseURL := bootObservabilityServer(t)
 	client := &http.Client{Timeout: 2 * time.Second}
 

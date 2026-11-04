@@ -417,8 +417,8 @@ func TestStatusReportsTheSelectedBackend(t *testing.T) {
 // production defaults rather than from a hand-written Config literal: with a
 // scrubbed environment, auth is DISABLED (no token), per-agent signatures are
 // REQUIRED (secure by default), the guard is ON, the registry is in-memory,
-// federation and webhook signing are off, and neither inspection surface is
-// registered.
+// federation and webhook signing are off, metrics IS registered (MON-CRIER-001
+// flipped that default) and pprof is not.
 func TestStatusDefaultsFromConfigLoad(t *testing.T) {
 	scrubStatusEnv(t)
 
@@ -450,7 +450,7 @@ func TestStatusDefaultsFromConfigLoad(t *testing.T) {
 		{"webhook_signing", false},
 		{"federation_enabled", false},
 		{"federation_hold_queue", federationHoldQueueNone},
-		{"metrics_enabled", false},
+		{"metrics_enabled", true},
 		{"pprof_enabled", false},
 	} {
 		if got[want.key] != want.want {

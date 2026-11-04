@@ -253,7 +253,7 @@ claims:
   - id: ROUTE-README-METRICS
     kind: route
     doc: README.md
-    quote: "GET /metrics` (`CR_ENABLE_METRICS=true`)"
+    quote: "- `GET /metrics` — the Prometheus text exposition format"
     expect: "/metrics"
     xfail: null
   - id: ROUTE-README-PPROF
