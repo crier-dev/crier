@@ -3260,3 +3260,15 @@ tasks:
   status: complete
   created_at: '2026-11-04T14:27:33.822257+00:00'
   completed_at: '2026-11-04T14:56:03.245838+00:00'
+- id: CRIER-OBS-1
+  title: 'Instrument harness delivery: ingress -> agent dispatch metrics'
+  criteria:
+  - 1) The ingress->harness dispatch path emits a counter of deliveries by harness
+    and by state (dispatched/failed) plus a duration histogram labelled by harness.
+    2) A failed dispatch is countable with its error class, not only visible in a
+    log line. 3) The series appear on GET /metrics of a booted server and are covered
+    by a test that asserts the family names and at least one labelled sample after
+    a real dispatch through a fake adapter. 4) The four adapter comments claiming
+    names are used in metrics become true or are corrected.
+  status: in_progress
+  created_at: '2026-11-04T15:49:16.185830+00:00'

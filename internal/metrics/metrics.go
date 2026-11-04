@@ -14,7 +14,7 @@
 // real histogram rather than a pile of unknown series.
 //
 // Series ownership follows the code that increments them: registry, relay,
-// webhook, guard and cmd/server each construct their own counters on Default
+// webhook, guard, harness and cmd/server each construct their own counters on Default
 // at package init, while gauges whose objects live in the composition layer
 // (federation hold depth, live WS subscribers, build identity, store health,
 // guard circuit/inflight) are registered from cmd/server. Registration is
