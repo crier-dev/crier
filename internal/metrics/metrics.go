@@ -79,7 +79,7 @@ func (c *Counter) value() float64 { return math.Float64frombits(c.val.Load()) }
 var discarded = &Counter{}
 
 // CounterVec is a counter partitioned by label values (e.g.
-// http_requests_total{code="200"}). Children are created on first use.
+// crier_http_requests_total{code="200"}). Children are created on first use.
 type CounterVec struct {
 	name       string
 	help       string
@@ -375,10 +375,9 @@ type gaugeFuncLabel struct {
 
 // series is one exposable entity: metadata plus zero or more samples.
 //
-// writeWith renders the samples under the given family name: the series' own
-// name for the legacy family, or its namespaced alias (MON-CRIER-005). The
-// samples themselves are identical either way — only the name in front of them
-// changes, which is what makes the dual-emit window a rename and not a copy.
+// writeWith renders the samples under the given family name — the name the
+// series was registered with, which is the only name it is served under
+// (MON-CRIER-007 closed the MON-CRIER-005 dual-emit window).
 type series interface {
 	meta() (name, help, typ string)
 	writeWith(b *strings.Builder, name string)
@@ -506,35 +505,19 @@ func (s *gaugeFuncLabelSeries) writeWith(b *strings.Builder, name string) {
 // Registry holds an ordered set of series and renders them in the Prometheus
 // text exposition format. Safe for concurrent use.
 //
-// # Namespacing aliases
+// # Namespacing
 //
-// MON-CRIER-005 namespaces the exposition: every series must identify its
-// product (observability-spec §2.4 G2 / §3.1). Live dashboards already key on
-// the legacy names, so the migration is a DATED, DUAL-EMIT window rather than a
-// break: Registry.Alias(legacy, namespaced) registers a second family name over
-// the SAME series. The alias renders the identical samples, help and type at
-// render() time — it is a name, not a copy, so the two names can never drift
-// apart, no counter is incremented twice, and no increment site changes.
-//
-// The alias is resolved at RENDER time (not captured at Alias time), so a
-// gauge the composition layer re-registers on a second in-process boot keeps
-// rendering through its alias: the alias follows the live series, not the one
-// that happened to exist when Alias was called.
+// Every series identifies its product under the crier_<subsystem>_<thing>_<unit>
+// convention (observability-spec §2.4 G2 / §3.1). The MON-CRIER-005 dual-emit
+// window that served the pre-rename bare names beside their crier_* twins was
+// closed by MON-CRIER-007: a family renders under exactly the name it was
+// registered with, and there is no second-name (alias) surface left to
+// register. Registering a bare name is therefore a real, exposed series — the
+// regression test in cmd/server fails if one comes back.
 type Registry struct {
 	mu     sync.RWMutex
 	series []series
 	byName map[string]series
-	// aliases are second names for already-registered series, in registration
-	// order: render() writes a family's aliases directly after the family
-	// itself. See Registry.Alias.
-	aliases []aliasName
-}
-
-// aliasName is one dual-emit alias: the registered (legacy) series it mirrors
-// and the namespaced name it renders under.
-type aliasName struct {
-	legacy string
-	name   string
 }
 
 // NewRegistry returns an empty registry.
@@ -659,48 +642,8 @@ func (r *Registry) RegisterGaugeFuncLabel(name, help, labelName string, fn func(
 	r.add(&gaugeFuncLabelSeries{g: gaugeFuncLabel{name: name, help: help, labelName: labelName, fn: fn}})
 }
 
-// Alias registers namespacedName as a second exposition name for the series
-// already registered as legacyName: the alias renders the SAME samples, help and
-// type under the new name (MON-CRIER-005 dual-emit window, observability-spec
-// §3.1). It is a NAME, not a copy — nothing is counted twice and no increment
-// site is touched.
-//
-// Three properties the alias must inherit from registration, because the
-// exposition is served by a process that may boot the server more than once:
-//
-//   - Idempotent: aliasing the same pair twice adds nothing, so repeated boots
-//     never render the family twice.
-//   - A no-op when the names are equal: a series whose legacy name already
-//     matches its namespaced name is emitted ONCE (the brief's rule — never
-//     duplicate identical lines).
-//   - Resolved at render time: the alias follows whatever series currently
-//     holds legacyName, so a gauge the composition layer re-registers per boot
-//     keeps aliasing the LIVE callback.
-//
-// Resolution is lazy, so Alias may be called before the series is registered.
-// If namespacedName is itself registered as a real series later, that real
-// series wins and the alias is dropped (add does that), so no family is ever
-// rendered twice.
-func (r *Registry) Alias(legacyName, namespacedName string) {
-	if legacyName == "" || namespacedName == "" || legacyName == namespacedName {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.byName[namespacedName]; ok {
-		return // a real series already owns the name; the alias would duplicate it
-	}
-	for _, a := range r.aliases {
-		if a.legacy == legacyName && a.name == namespacedName {
-			return
-		}
-	}
-	r.aliases = append(r.aliases, aliasName{legacy: legacyName, name: namespacedName})
-}
-
-// add appends s, replacing any same-name series in place (locked caller). A
-// real series registered under a name an alias had claimed evicts that alias:
-// the exposition never renders one family twice.
+// add appends s, replacing any same-name series in place (locked caller): the
+// exposition never renders one family twice.
 func (r *Registry) add(s series) {
 	name, _, _ := s.meta()
 	if old, ok := r.byName[name]; ok {
@@ -714,35 +657,17 @@ func (r *Registry) add(s series) {
 		r.series = append(r.series, s)
 	}
 	r.byName[name] = s
-	kept := r.aliases[:0]
-	for _, a := range r.aliases {
-		if a.name != name {
-			kept = append(kept, a)
-		}
-	}
-	r.aliases = kept
 }
 
 // render writes the whole exposition: every registered series' HELP/TYPE
-// metadata (even with zero samples — the series list is the contract), then
-// its samples in deterministic order, then any dual-emit alias of that family
-// under its namespaced name (MON-CRIER-005).
-//
-// A family is rendered ONCE into a buffer and the alias re-emits those exact
-// bytes under the other name. That is not a micro-optimisation: a gauge's
-// callback is evaluated per render, and several of this process's gauges have
-// observable side effects (the inbox queue gauges perform a store read and
-// count a failed read once per scrape). Re-evaluating them for the alias would
-// read the store twice per scrape and double the error counter — the exposition
-// would report on itself. One evaluation, two names.
+// metadata (even with zero samples — the series list is the contract), then its
+// samples in deterministic order. Each family renders under exactly the name it
+// was registered with — there is no second-name surface (MON-CRIER-007 closed
+// the MON-CRIER-005 dual-emit window).
 func (r *Registry) render() string {
 	r.mu.RLock()
 	series := make([]series, len(r.series))
 	copy(series, r.series)
-	aliasNames := make(map[string][]string, len(r.aliases))
-	for _, a := range r.aliases {
-		aliasNames[a.legacy] = append(aliasNames[a.legacy], a.name)
-	}
 	r.mu.RUnlock()
 
 	var b strings.Builder
@@ -753,39 +678,6 @@ func (r *Registry) render() string {
 		s.writeWith(&samples, name)
 		rendered := samples.String()
 		b.WriteString(rendered)
-		for _, alias := range aliasNames[name] {
-			writeFamily(&b, alias, help, typ)
-			b.WriteString(renameFamily(rendered, name, alias))
-		}
-	}
-	return b.String()
-}
-
-// renameFamily re-emits an already-rendered sample block under a different
-// family name: every line of a family's block begins with that family's name
-// (a counter with " ", a vec with "{", a histogram with "_"), so the swap is a
-// prefix replacement on each line. It is never a search-and-replace over label
-// values, and it never re-evaluates the series.
-func renameFamily(rendered, from, to string) string {
-	if rendered == "" || from == to {
-		return rendered
-	}
-	var b strings.Builder
-	b.Grow(len(rendered) + len(to)*4)
-	for len(rendered) > 0 {
-		nl := strings.IndexByte(rendered, '\n')
-		var line string
-		if nl < 0 {
-			line, rendered = rendered, ""
-		} else {
-			line, rendered = rendered[:nl+1], rendered[nl+1:]
-		}
-		if strings.HasPrefix(line, from) {
-			b.WriteString(to)
-			b.WriteString(line[len(from):])
-			continue
-		}
-		b.WriteString(line)
 	}
 	return b.String()
 }

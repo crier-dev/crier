@@ -431,8 +431,8 @@ curl -s -X POST $BASE/agents/bob/inbox -H 'Content-Type: application/json' \
 # C. Queue depth is readable where operators look: GET /status carries
 #    "queue_depth":{"pending":N,"leased":M,"oldest_age_s":S} beside
 #    "global_rate_limit_per_minute", and GET /metrics (CR_ENABLE_METRICS=true)
-#    exposes the same numbers as inbox_queue_depth / inbox_queue_leased /
-#    inbox_queue_oldest_age_seconds plus inbox_shed_total{scope}.
+#    exposes the same numbers as crier_inbox_queue_depth / crier_inbox_queue_leased /
+#    crier_inbox_queue_oldest_age_seconds plus crier_inbox_shed_total{scope}.
 
 # D. The global budget, when set (CR_RATE_LIMIT_GLOBAL_PER_MINUTE=N): the N+1th
 #    delivery inside the minute answers 429 with a Retry-After header and a

@@ -152,7 +152,7 @@ order is the contract:
 
 1. **`pause_webhooks`** — the agent's outbound webhook lane stops and what it
    had queued is dropped (dead-lettered the way v1 dead-letters: one structured
-   log line, counted in `webhook_deliveries_total{outcome="dropped"}`). It runs
+   log line, counted in `crier_webhook_deliveries_total{outcome="dropped"}`). It runs
    FIRST so nothing keeps leaving after the call.
 2. **`revoke_leases`** — the unacked messages the agent had claimed go back to
    the queue; an ACKed message is never resurrected, and no message is deleted.

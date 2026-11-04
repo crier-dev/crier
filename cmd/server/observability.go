@@ -46,15 +46,8 @@ import (
 // Registered at package scope so the series exists from the first scrape; the
 // recording middleware itself is installed only when the metrics surface is
 // enabled.
-var httpRequestsTotal = metrics.Default.NewCounterVec("http_requests_total",
+var httpRequestsTotal = metrics.Default.NewCounterVec("crier_http_requests_total",
 	"HTTP requests processed by the server, by response status code and mux route template (route=\"unmatched\" = no route matched).", "code", "route")
-
-func init() {
-	// MON-CRIER-005: the namespaced twin of every legacy series, rendered from
-	// the same samples (observability-spec §3.1). The legacy names stay until
-	// the documented dual-emit window closes — see README §Observability.
-	metrics.Default.Alias("http_requests_total", "crier_http_requests_total")
-}
 
 // routeLabelUnmatched is the single bounded `route` value for a request the mux
 // never routed: no template exists to name, and the raw path must never become
@@ -173,7 +166,7 @@ type observabilityDeps struct {
 // previous fn, so a second boot in the same process rebinds to the new
 // objects.
 func registerObservabilityGauges(deps observabilityDeps) {
-	metrics.Default.RegisterGaugeFunc("federation_held_current",
+	metrics.Default.RegisterGaugeFunc("crier_federation_held_current",
 		"Federated deliveries currently held at this relay awaiting link recovery (0 when no federation links are configured).",
 		func() float64 {
 			if deps.fedHold == nil {
@@ -181,9 +174,7 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(deps.fedHold.Pending())
 		})
-	// MON-CRIER-005 dual-emit: the namespaced twin of the legacy family.
-	metrics.Default.Alias("federation_held_current", "crier_federation_held_current")
-	metrics.Default.RegisterGaugeFunc("ws_subscribers",
+	metrics.Default.RegisterGaugeFunc("crier_ws_subscribers",
 		"Live WebSocket subscribers: relay topic subscribers plus connected mesh peers, summed.",
 		func() float64 {
 			n := 0
@@ -195,7 +186,6 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(n)
 		})
-	metrics.Default.Alias("ws_subscribers", "crier_ws_subscribers")
 	registerQueueDepthGauges(deps.queueDepth, deps.storeBackend)
 	registerIdentityGauges(deps)
 	// MON-CRIER-004: the subsystem-state series (webhook backlog, federation
@@ -281,19 +271,15 @@ func registerQueueDepthGauges(read queueDepthReader, storeBackend string) {
 		}
 	}
 
-	metrics.Default.RegisterGaugeFunc("inbox_queue_depth",
+	metrics.Default.RegisterGaugeFunc("crier_inbox_queue_depth",
 		"Inbox messages queued and unacknowledged across all agents (leased messages included), read from the serving store. NaN when the store cannot report a depth.",
 		sample(func(d registry.QueueDepth) float64 { return float64(d.Pending) }, true))
-	metrics.Default.RegisterGaugeFunc("inbox_queue_leased",
-		"How many of inbox_queue_depth are currently held under a live lease. NaN when the store cannot report a depth.",
+	metrics.Default.RegisterGaugeFunc("crier_inbox_queue_leased",
+		"How many of crier_inbox_queue_depth are currently held under a live lease. NaN when the store cannot report a depth.",
 		sample(func(d registry.QueueDepth) float64 { return float64(d.Leased) }, false))
-	metrics.Default.RegisterGaugeFunc("inbox_queue_oldest_age_seconds",
+	metrics.Default.RegisterGaugeFunc("crier_inbox_queue_oldest_age_seconds",
 		"Age of the oldest unacknowledged, unexpired inbox message, in seconds (0 when nothing is queued). NaN when the store cannot report a depth.",
 		sample(func(d registry.QueueDepth) float64 { return d.OldestAge.Seconds() }, false))
-	// MON-CRIER-005 dual-emit: the namespaced twin of each queue gauge.
-	metrics.Default.Alias("inbox_queue_depth", "crier_inbox_queue_depth")
-	metrics.Default.Alias("inbox_queue_leased", "crier_inbox_queue_leased")
-	metrics.Default.Alias("inbox_queue_oldest_age_seconds", "crier_inbox_queue_oldest_age_seconds")
 }
 
 // registerPProf mounts the net/http/pprof surface on the gorilla mux:
@@ -312,7 +298,7 @@ func registerPProf(r *mux.Router) {
 	}
 }
 
-// countRequests wraps the mux with the http_requests_total recorder: every
+// countRequests wraps the mux with the crier_http_requests_total recorder: every
 // response, whatever its status (including 404s the mux itself produces),
 // increments the counter under its status code and its matched route template.
 // Installed only when the metrics surface is enabled.

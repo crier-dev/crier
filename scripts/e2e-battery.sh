@@ -772,8 +772,8 @@ ceq "chaos: the held response names the target agent" "$FED_REMOTE" "$(jfield "$
 ceq "chaos: the held response names the configured CR_FED_MAX_HOLD_S" "$CHAOS_HOLD_S" "$(jfield "$WORKDIR/chaos-held1.json" max_hold_s)"
 [ -n "$HELD1_ID" ] || cfatal "chaos held id" "the 202 held body carried no message id"
 creq "$FEDA" GET /metrics
-MET_HELD1="$(printf '%s' "$CBODY" | awk '/^federation_held_current /{print $2; exit}')"
-ceq "chaos: the source queue holds exactly the one partitioned delivery (federation_held_current)" 1 "$MET_HELD1"
+MET_HELD1="$(printf '%s' "$CBODY" | awk '/^crier_federation_held_current /{print $2; exit}')"
+ceq "chaos: the source queue holds exactly the one partitioned delivery (crier_federation_held_current)" 1 "$MET_HELD1"
 
 # ── 4. recovery: the link comes back and the held delivery drains ────────────
 if ! start_link_proxy; then
@@ -783,10 +783,10 @@ echo "      link restored (proxy pid $PROXY_PID) — waiting for the retry worke
 DRAINED=0
 for _ in $(seq 1 30); do # ≤ 15s, well inside several retry windows
   creq "$FEDA" GET /metrics
-  [ "$(printf '%s' "$CBODY" | awk '/^federation_held_current /{print $2; exit}')" = "0" ] && { DRAINED=1; break; }
+  [ "$(printf '%s' "$CBODY" | awk '/^crier_federation_held_current /{print $2; exit}')" = "0" ] && { DRAINED=1; break; }
   sleep 0.5
 done
-ceq "chaos: the held delivery was RETRIED and drained on recovery (federation_held_current -> 0)" 1 "$DRAINED"
+ceq "chaos: the held delivery was RETRIED and drained on recovery (crier_federation_held_current -> 0)" 1 "$DRAINED"
 creq "$FEDB" GET "/agents/$FED_REMOTE/inbox"
 printf '%s' "$CBODY" > "$WORKDIR/chaos-b-recovered.json"
 ccheck "chaos: the recovered delivery is retrievable on the peer (200)" 200 '"lease_id"'
@@ -851,7 +851,7 @@ sleep 2.5 # one more retry-worker tick: a re-run sweep must not report twice
 creq "$FEDA" GET "/agents/$FED_SENDER/inbox"
 ccheck "chaos: no SECOND receipt after another sweep tick (sender inbox empty)" 200 '"messages":[]'
 creq "$FEDA" GET /metrics
-ceq "chaos: the source queue is empty after the terminal case (federation_held_current)" 0 "$(printf '%s' "$CBODY" | awk '/^federation_held_current /{print $2; exit}')"
+ceq "chaos: the source queue is empty after the terminal case (crier_federation_held_current)" 0 "$(printf '%s' "$CBODY" | awk '/^crier_federation_held_current /{print $2; exit}')"
 ceq "chaos: exactly ONE terminal FEDERATION_FAILED was emitted (source relay log)" 1 "$(grep -c 'held delivery failed' "$WORKDIR/chaos-a.log" 2>/dev/null || true)"
 creq "$FEDB" GET "/agents/$FED_REMOTE/inbox/stats"
 ccheck "chaos: the failed delivery never reached the peer (peer inbox empty)" 200 '"queue_depth":0'

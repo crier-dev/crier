@@ -32,7 +32,7 @@ func (d *Driver) Paused(agentID string) bool {
 //     request cannot be un-sent);
 //   - dropped deliveries are DEAD-LETTERED the way v1 dead-letters everything
 //     else — one structured log line each, counted in
-//     webhook_deliveries_total{outcome="dropped"} — not written to a file;
+//     crier_webhook_deliveries_total{outcome="dropped"} — not written to a file;
 //   - the pause is per-process. A restart forgets it, which is why the
 //     kill-switch also quarantines the agent in the detector and unregisters
 //     its registry row: those are the states that survive.

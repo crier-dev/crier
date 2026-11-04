@@ -22,14 +22,14 @@ import (
 // rejection; dropped = the delivery left the queue without a POST attempt
 // (agent gone or retries exhausted). One child per outcome, incremented at
 // the exact site that decides it — the counter set is the audit trail.
-var webhookOutcomeTotal = metrics.Default.NewCounterVec("webhook_deliveries_total",
+var webhookOutcomeTotal = metrics.Default.NewCounterVec("crier_webhook_deliveries_total",
 	"Webhook push deliveries by terminal outcome (delivered/failed/deadlettered/dropped).", "outcome")
 
 // webhookAttemptsTotal counts outbound attempts by their 1-based ordinal for the
 // delivery they belong to (MON-CRIER-004, observability-spec §3.3): attempt=1 is
 // the first try (the first drain of a queued item, or the first blocking
 // attempt), attempt=n is the n-th. It is the rate complement of
-// webhook_deliveries_total{outcome}: the outcome counter says what happened, this
+// crier_webhook_deliveries_total{outcome}: the outcome counter says what happened, this
 // one says how much retrying it took.
 //
 // The `attempt` label is a BOUNDED bucket (see attemptLabel): the retry ceiling
@@ -48,10 +48,6 @@ func init() {
 	for attempt := 1; attempt <= attemptSeed; attempt++ {
 		webhookAttemptsTotal.With(strconv.Itoa(attempt))
 	}
-	// MON-CRIER-005 dual-emit: the namespaced twin of webhook_deliveries_total
-	// (observability-spec §3.1) — same samples and outcome children, no
-	// increment change.
-	metrics.Default.Alias("webhook_deliveries_total", "crier_webhook_deliveries_total")
 }
 
 // attemptLabel renders the bounded `attempt` label value for one attempt.
@@ -551,7 +547,7 @@ func (d *Driver) enqueue(agentID string, env *Envelope, retries int, rid string,
 // QueueDepth reports how many deliveries are waiting for redelivery in the
 // driver's queue (MON-CRIER-004). It is the depth of the retry/backoff backlog
 // only: an in-flight POST and a buffered batch are not queued yet, and the
-// caller-visible delivery count lives in webhook_deliveries_total.
+// caller-visible delivery count lives in crier_webhook_deliveries_total.
 func (d *Driver) QueueDepth() int {
 	if d == nil || d.queue == nil {
 		return 0
@@ -607,7 +603,7 @@ func (d *Driver) redeliverLoop() {
 
 // drainQueue attempts every queued item once; permanent failures and
 // retry-exhausted items are dropped with a log (dead-letter v1 = log + event).
-// Every terminal outcome increments webhook_deliveries_total{outcome}
+// Every terminal outcome increments crier_webhook_deliveries_total{outcome}
 // (DF-CRIER-142): delivered / failed (requeued) / deadlettered / dropped.
 func (d *Driver) drainQueue() {
 	items := d.queue.PopBatch(100)

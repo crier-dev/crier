@@ -32,28 +32,17 @@ import (
 // Metrics owned by the ownership surfaces (DF-CRIER-142's series-ownership
 // rule: the code that increments them registers them).
 var (
-	expiredMessagesTotal = metrics.Default.NewCounter("expired_messages_total",
+	expiredMessagesTotal = metrics.Default.NewCounter("crier_inbox_expired_total",
 		"Messages removed from an inbox by the TTL expiry sweep.")
-	deadLetteredMessagesTotal = metrics.Default.NewCounter("dead_lettered_messages_total",
+	deadLetteredMessagesTotal = metrics.Default.NewCounter("crier_inbox_deadlettered_total",
 		"Expired messages recorded in a dead-letter destination.")
-	expiryReceiptsTotal = metrics.Default.NewCounter("expiry_receipts_total",
+	expiryReceiptsTotal = metrics.Default.NewCounter("crier_inbox_expiry_receipts_total",
 		"MESSAGE_EXPIRED receipts written into a sender's inbox.")
-	idempotentReplaysTotal = metrics.Default.NewCounter("idempotent_replays_total",
+	idempotentReplaysTotal = metrics.Default.NewCounter("crier_delivery_idempotent_replay_total",
 		"Deliveries answered from an idempotency key's recorded accept instead of storing a message.")
-	transfersTotal = metrics.Default.NewCounter("transfers_total",
+	transfersTotal = metrics.Default.NewCounter("crier_inbox_transfers_total",
 		"Messages moved between inboxes by a transfer/reassign.")
 )
-
-// MON-CRIER-005 dual-emit: the namespaced twin of each ownership/retention
-// series (observability-spec §3.1). Same samples, second name, no increment
-// site touched; the legacy names retire with the documented window.
-func init() {
-	metrics.Default.Alias("expired_messages_total", "crier_inbox_expired_total")
-	metrics.Default.Alias("dead_lettered_messages_total", "crier_inbox_deadlettered_total")
-	metrics.Default.Alias("expiry_receipts_total", "crier_inbox_expiry_receipts_total")
-	metrics.Default.Alias("idempotent_replays_total", "crier_delivery_idempotent_replay_total")
-	metrics.Default.Alias("transfers_total", "crier_inbox_transfers_total")
-}
 
 // transferRequest is the JSON body for POST /agents/{id}/inbox/transfer.
 type transferRequest struct {

@@ -250,12 +250,12 @@ func TestCRFEAT035_QueueDepthIsVisibleWhereOperatorsLook(t *testing.T) {
 		t.Fatalf("GET /metrics: status %d", status)
 	}
 	for _, want := range []string{
-		"# TYPE inbox_queue_depth gauge",
-		"# TYPE inbox_queue_leased gauge",
-		"# TYPE inbox_queue_oldest_age_seconds gauge",
-		"inbox_queue_depth " + strconv.Itoa(delivered),
-		"inbox_queue_leased 1",
-		"# TYPE inbox_shed_total counter",
+		"# TYPE crier_inbox_queue_depth gauge",
+		"# TYPE crier_inbox_queue_leased gauge",
+		"# TYPE crier_inbox_queue_oldest_age_seconds gauge",
+		"crier_inbox_queue_depth " + strconv.Itoa(delivered),
+		"crier_inbox_queue_leased 1",
+		"# TYPE crier_inbox_shed_total counter",
 	} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("GET /metrics is missing %q:\n%s", want, metrics)
@@ -397,7 +397,7 @@ func TestCRFEAT035_QueueDepthGaugeIsNaNWhenTheStoreCannotReport(t *testing.T) {
 
 	registerQueueDepthGauges(nil, "proxy")
 	body := renderMetrics(t)
-	for _, name := range []string{"inbox_queue_depth", "inbox_queue_leased", "inbox_queue_oldest_age_seconds"} {
+	for _, name := range []string{"crier_inbox_queue_depth", "crier_inbox_queue_leased", "crier_inbox_queue_oldest_age_seconds"} {
 		if !strings.Contains(body, name+" NaN") {
 			t.Errorf("%s must render NaN when no store can report, body:\n%s", name, body)
 		}

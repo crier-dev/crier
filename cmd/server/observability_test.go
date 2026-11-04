@@ -16,8 +16,8 @@
 //     test client would have to slurp).
 //
 // The live-increment test then drives register → deliver → retrieve → relay
-// publish against the enabled server and asserts deliveries_total,
-// http_requests_total{code="200"} and relay_events_total actually ADVANCE
+// publish against the enabled server and asserts crier_delivery_accepted_total,
+// crier_http_requests_total{code="200"} and crier_relay_events_total actually ADVANCE
 // between two scrapes — the wiring is proven live, not stubbed.
 package main
 
@@ -34,16 +34,18 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// observabilitySeries is the seven-series contract from DF-CRIER-142. Every
-// name must appear in the exposition with a # TYPE line.
+// observabilitySeries is the seven-series contract from DF-CRIER-142, under the
+// namespaced names MON-CRIER-005 introduced and MON-CRIER-007 made the only
+// names (the bare pre-rename names are retired). Every name must appear in the
+// exposition with a # TYPE line.
 var observabilitySeries = []string{
-	"deliveries_total",
-	"webhook_deliveries_total",
-	"guard_decisions_total",
-	"federation_held_current",
-	"relay_events_total",
-	"ws_subscribers",
-	"http_requests_total",
+	"crier_delivery_accepted_total",
+	"crier_webhook_deliveries_total",
+	"crier_guard_decisions_total",
+	"crier_federation_held_current",
+	"crier_relay_events_total",
+	"crier_ws_subscribers",
+	"crier_http_requests_total",
 }
 
 // bootObservabilityServer is TestServerHealth's harness with observability
@@ -158,14 +160,14 @@ func TestMetricsEnabled(t *testing.T) {
 	}
 	// The two labelled series carry their label name in the TYPE/HELP
 	// block; sample lines appear once traffic flows (next test).
-	if !strings.Contains(body, "# TYPE http_requests_total counter") {
-		t.Errorf("http_requests_total must be a counter; body:\n%s", body)
+	if !strings.Contains(body, "# TYPE crier_http_requests_total counter") {
+		t.Errorf("crier_http_requests_total must be a counter; body:\n%s", body)
 	}
-	if !strings.Contains(body, "# TYPE federation_held_current gauge") {
-		t.Errorf("federation_held_current must be a gauge; body:\n%s", body)
+	if !strings.Contains(body, "# TYPE crier_federation_held_current gauge") {
+		t.Errorf("crier_federation_held_current must be a gauge; body:\n%s", body)
 	}
-	if !strings.Contains(body, "# TYPE ws_subscribers gauge") {
-		t.Errorf("ws_subscribers must be a gauge; body:\n%s", body)
+	if !strings.Contains(body, "# TYPE crier_ws_subscribers gauge") {
+		t.Errorf("crier_ws_subscribers must be a gauge; body:\n%s", body)
 	}
 }
 
@@ -191,7 +193,7 @@ func metricValue(body, name string) float64 {
 // labeledMetricValue sums every sample of name whose label set CONTAINS
 // label="value" — the exposition spells `name{code="200",route="…"}`, so the
 // match must not assume the label is the only one (MON-CRIER-005 added the
-// route label to http_requests_total). Summing mirrors the PromQL reading of
+// route label to crier_http_requests_total). Summing mirrors the PromQL reading of
 // `sum(name{label="value"})` and returns -1 when no sample carries the pair.
 func labeledMetricValue(body, name, label, value string) float64 {
 	needle := fmt.Sprintf(`%s=%q`, label, value)
@@ -232,8 +234,8 @@ func labeledMetricValue(body, name, label, value string) float64 {
 }
 
 // TestMetricsIncrementOnLiveTraffic: drive register → deliver → relay
-// publish against the enabled server; deliveries_total,
-// http_requests_total{code="200"} and relay_events_total must ADVANCE
+// publish against the enabled server; crier_delivery_accepted_total,
+// crier_http_requests_total{code="200"} and crier_relay_events_total must ADVANCE
 // between two scrapes. (Retrieve is signature-gated by default; deliver and
 // publish are not — the accept paths carrying the counters need no
 // signature.)
@@ -245,9 +247,9 @@ func TestMetricsIncrementOnLiveTraffic(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	_, _, before := get(t, client, baseURL+"/metrics", "")
-	dBefore := metricValue(before, "deliveries_total")
-	rBefore := labeledMetricValue(before, "http_requests_total", "code", "200")
-	pBefore := metricValue(before, "relay_events_total")
+	dBefore := metricValue(before, "crier_delivery_accepted_total")
+	rBefore := labeledMetricValue(before, "crier_http_requests_total", "code", "200")
+	pBefore := metricValue(before, "crier_relay_events_total")
 	if dBefore < 0 || rBefore < 0 || pBefore < 0 {
 		t.Fatalf("first scrape missing a baseline (deliveries=%v http200=%v relay=%v);\n%s",
 			dBefore, rBefore, pBefore, before)
@@ -284,24 +286,24 @@ func TestMetricsIncrementOnLiveTraffic(t *testing.T) {
 	pubResp.Body.Close()
 
 	_, _, after := get(t, client, baseURL+"/metrics", "")
-	dAfter := metricValue(after, "deliveries_total")
-	rAfter := labeledMetricValue(after, "http_requests_total", "code", "200")
-	pAfter := metricValue(after, "relay_events_total")
+	dAfter := metricValue(after, "crier_delivery_accepted_total")
+	rAfter := labeledMetricValue(after, "crier_http_requests_total", "code", "200")
+	pAfter := metricValue(after, "crier_relay_events_total")
 
 	if !(dAfter > dBefore) {
-		t.Errorf("deliveries_total did not advance on a live delivery: before=%v after=%v", dBefore, dAfter)
+		t.Errorf("crier_delivery_accepted_total did not advance on a live delivery: before=%v after=%v", dBefore, dAfter)
 	}
 	if !(rAfter > rBefore) {
-		t.Errorf("http_requests_total{code=\"200\"} did not advance on live 200 traffic: before=%v after=%v", rBefore, rAfter)
+		t.Errorf("crier_http_requests_total{code=\"200\"} did not advance on live 200 traffic: before=%v after=%v", rBefore, rAfter)
 	}
 	if !(pAfter > pBefore) {
-		t.Errorf("relay_events_total did not advance on a live publish: before=%v after=%v", pBefore, pAfter)
+		t.Errorf("crier_relay_events_total did not advance on a live publish: before=%v after=%v", pBefore, pAfter)
 	}
 }
 
 // TestWebhookOutcomeMetricIncrements drives the fifth counter live: an
 // agent with a real webhook sink receives one async delivery, and
-// webhook_deliveries_total{outcome="delivered"} must ADVANCE between two
+// crier_webhook_deliveries_total{outcome="delivered"} must ADVANCE between two
 // scrapes (the drain loop posts in the background, so the assertion polls
 // the exposition with a bounded deadline).
 func TestWebhookOutcomeMetricIncrements(t *testing.T) {
@@ -319,7 +321,7 @@ func TestWebhookOutcomeMetricIncrements(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	_, _, before := get(t, client, baseURL+"/metrics", "")
-	deliveredBefore := labeledMetricValue(before, "webhook_deliveries_total", "outcome", "delivered")
+	deliveredBefore := labeledMetricValue(before, "crier_webhook_deliveries_total", "outcome", "delivered")
 	if deliveredBefore < 0 {
 		deliveredBefore = 0 // child not yet created
 	}
@@ -353,12 +355,12 @@ func TestWebhookOutcomeMetricIncrements(t *testing.T) {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		_, _, scrape := get(t, client, baseURL+"/metrics", "")
-		deliveredAfter := labeledMetricValue(scrape, "webhook_deliveries_total", "outcome", "delivered")
+		deliveredAfter := labeledMetricValue(scrape, "crier_webhook_deliveries_total", "outcome", "delivered")
 		if deliveredAfter > deliveredBefore {
 			return // advanced — live wiring proven
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("webhook_deliveries_total{outcome=\"delivered\"} did not advance within 20s: before=%v after=%v;\n%s",
+			t.Fatalf("crier_webhook_deliveries_total{outcome=\"delivered\"} did not advance within 20s: before=%v after=%v;\n%s",
 				deliveredBefore, deliveredAfter, scrape)
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -436,7 +438,7 @@ func TestGuardDecisionsMetricIncrements(t *testing.T) {
 	regResp.Body.Close()
 
 	_, _, before := get(t, client, baseURL+"/metrics", "")
-	blocksBefore := labeledMetricValue(before, "guard_decisions_total", "decision", "block")
+	blocksBefore := labeledMetricValue(before, "crier_guard_decisions_total", "decision", "block")
 	if blocksBefore < 0 {
 		blocksBefore = 0 // child not yet created — the series metadata is what exists
 	}
@@ -459,9 +461,9 @@ func TestGuardDecisionsMetricIncrements(t *testing.T) {
 	// deliver), so assert the counter ADVANCED by this test's block, not an
 	// absolute value.
 	_, _, scrape := get(t, client, baseURL+"/metrics", "")
-	blocksAfter := labeledMetricValue(scrape, "guard_decisions_total", "decision", "block")
+	blocksAfter := labeledMetricValue(scrape, "crier_guard_decisions_total", "decision", "block")
 	if !(blocksAfter > blocksBefore) {
-		t.Errorf("guard_decisions_total{decision=\"block\"} did not advance: before=%v after=%v;\n%s",
+		t.Errorf("crier_guard_decisions_total{decision=\"block\"} did not advance: before=%v after=%v;\n%s",
 			blocksBefore, blocksAfter, scrape)
 	}
 }

@@ -81,11 +81,12 @@ func TestMetricsLatency_AllFourSeriesRenderOnIdleBoot(t *testing.T) {
 		}
 	}
 
-	// MON-CRIER-005 owns the rename: the unprefixed series must be untouched
-	// by this row.
-	for _, want := range []string{"# TYPE http_requests_total counter", "# TYPE webhook_deliveries_total counter"} {
+	// MON-CRIER-007 closed the MON-CRIER-005 dual-emit window: these families
+	// are served under their namespaced names only, and this row must not
+	// disturb them.
+	for _, want := range []string{"# TYPE crier_http_requests_total counter", "# TYPE crier_webhook_deliveries_total counter"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("legacy series changed by this row: missing %q", want)
+			t.Errorf("a series this row does not own changed: missing %q", want)
 		}
 	}
 }

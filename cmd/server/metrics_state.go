@@ -66,8 +66,8 @@ func registerWebhookBacklogGauges(d *webhook.Driver) {
 // registerFederationHoldAgeGauge adds the AGE of the hold queue beside the
 // existing depth gauge (G10 in the audit; crier_federation_held_age_seconds in
 // §3.3): "holding 40 messages for 20 minutes" and "holding 40 for 20 seconds"
-// render identically on a depth-only surface. The legacy unprefixed
-// federation_held_current is left exactly as registered — this row adds a
+// render identically on a depth-only surface. The depth gauge
+// crier_federation_held_current is left exactly as registered — this row adds a
 // series, it renames nothing.
 func registerFederationHoldAgeGauge(m *federation.HoldManager) {
 	metrics.Default.RegisterGaugeFunc("crier_federation_held_age_seconds",
