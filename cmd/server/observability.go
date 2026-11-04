@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"log/slog"
 	"math"
 	"net"
@@ -32,11 +33,70 @@ import (
 // hijacked.
 
 // httpRequestsTotal counts every request through the mux by response status
-// (DF-CRIER-142). Registered at package scope so the series exists from the
-// first scrape; the recording middleware itself is installed only when the
-// metrics surface is enabled.
+// code and by route (DF-CRIER-142; MON-CRIER-005 added the route label). The
+// route label is the mux PATH TEMPLATE (/agents/{id}/inbox) — bounded by the
+// route table — never the raw path, URL or query, which carry unbounded agent
+// and message ids (observability-spec §3.4). A request the mux did not route
+// (its 404/405 fallbacks, a path-clean redirect) carries the single bounded
+// literal "unmatched", so a scrape can be told apart from real traffic and an
+// operator can ask which route is erroring:
+//
+//	sum by (route) (rate(crier_http_requests_total{code=~"5.."}[5m]))
+//
+// Registered at package scope so the series exists from the first scrape; the
+// recording middleware itself is installed only when the metrics surface is
+// enabled.
 var httpRequestsTotal = metrics.Default.NewCounterVec("http_requests_total",
-	"HTTP requests processed by the server, by response status code.", "code")
+	"HTTP requests processed by the server, by response status code and mux route template (route=\"unmatched\" = no route matched).", "code", "route")
+
+func init() {
+	// MON-CRIER-005: the namespaced twin of every legacy series, rendered from
+	// the same samples (observability-spec §3.1). The legacy names stay until
+	// the documented dual-emit window closes — see README §Observability.
+	metrics.Default.Alias("http_requests_total", "crier_http_requests_total")
+}
+
+// routeLabelUnmatched is the single bounded `route` value for a request the mux
+// never routed: no template exists to name, and the raw path must never become
+// a label. (The request-duration histogram in internal/middleware spells the
+// same case "other"; this counter uses the literal MON-CRIER-005 specifies.)
+const routeLabelUnmatched = "unmatched"
+
+// requestRouteKey is the context key under which countRequests hands the
+// per-request route holder to captureRequestRoute.
+type requestRouteKey struct{}
+
+// requestRoute is the per-request holder the route is recorded into. One
+// goroutine serves the request end to end, so the write in the middleware
+// happens-before the read after ServeHTTP returns.
+type requestRoute struct{ label string }
+
+// captureRequestRoute is the r.Use middleware that records the matched route
+// template. gorilla/mux composes r.Use middlewares INSIDE Router.Match and
+// invokes them with the request it has already enriched (requestWithRoute), so
+// mux.CurrentRoute(r) — and therefore GetPathTemplate() — is readable here and
+// only here. It cannot be read by the outer countRequests wrapper: mux derives
+// a NEW request for its handlers, so the wrapper's copy never sees the route.
+func captureRequestRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if holder, ok := r.Context().Value(requestRouteKey{}).(*requestRoute); ok {
+			holder.label = routeTemplate(r)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// routeTemplate renders the bounded `route` label: the mux path template that
+// served the request, or routeLabelUnmatched. It never returns a raw path — no
+// query string, no agent id, no message id.
+func routeTemplate(r *http.Request) string {
+	if rt := mux.CurrentRoute(r); rt != nil {
+		if tpl, err := rt.GetPathTemplate(); err == nil && tpl != "" {
+			return tpl
+		}
+	}
+	return routeLabelUnmatched
+}
 
 // registerObservability mounts /metrics and /debug/pprof/* on r per the
 // flags, and installs the request-counting middleware around the mux. It is
@@ -47,6 +107,10 @@ func registerObservability(r *mux.Router, cfg observabilityFlags, deps observabi
 	var h http.Handler = r
 	if cfg.EnableMetrics {
 		r.Handle("/metrics", metrics.Handler())
+		// The recorder needs the matched route, which only mux's own middleware
+		// chain can see (see captureRequestRoute); the outer wrapper counts
+		// everything, including the requests no route matched.
+		r.Use(captureRequestRoute)
 		h = countRequests(r)
 		slog.Info("observability: metrics enabled", "path", "/metrics",
 			"format", "prometheus text 0.0.4", "auth", "not exempt (requires Bearer when CR_AUTH_TOKEN is set)")
@@ -117,6 +181,8 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(deps.fedHold.Pending())
 		})
+	// MON-CRIER-005 dual-emit: the namespaced twin of the legacy family.
+	metrics.Default.Alias("federation_held_current", "crier_federation_held_current")
 	metrics.Default.RegisterGaugeFunc("ws_subscribers",
 		"Live WebSocket subscribers: relay topic subscribers plus connected mesh peers, summed.",
 		func() float64 {
@@ -129,6 +195,7 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(n)
 		})
+	metrics.Default.Alias("ws_subscribers", "crier_ws_subscribers")
 	registerQueueDepthGauges(deps.queueDepth, deps.storeBackend)
 	registerIdentityGauges(deps)
 	// MON-CRIER-004: the subsystem-state series (webhook backlog, federation
@@ -223,6 +290,10 @@ func registerQueueDepthGauges(read queueDepthReader, storeBackend string) {
 	metrics.Default.RegisterGaugeFunc("inbox_queue_oldest_age_seconds",
 		"Age of the oldest unacknowledged, unexpired inbox message, in seconds (0 when nothing is queued). NaN when the store cannot report a depth.",
 		sample(func(d registry.QueueDepth) float64 { return d.OldestAge.Seconds() }, false))
+	// MON-CRIER-005 dual-emit: the namespaced twin of each queue gauge.
+	metrics.Default.Alias("inbox_queue_depth", "crier_inbox_queue_depth")
+	metrics.Default.Alias("inbox_queue_leased", "crier_inbox_queue_leased")
+	metrics.Default.Alias("inbox_queue_oldest_age_seconds", "crier_inbox_queue_oldest_age_seconds")
 }
 
 // registerPProf mounts the net/http/pprof surface on the gorilla mux:
@@ -243,13 +314,20 @@ func registerPProf(r *mux.Router) {
 
 // countRequests wraps the mux with the http_requests_total recorder: every
 // response, whatever its status (including 404s the mux itself produces),
-// increments the counter under its status code. Installed only when the
-// metrics surface is enabled.
+// increments the counter under its status code and its matched route template.
+// Installed only when the metrics surface is enabled.
+//
+// The route travels from captureRequestRoute (inside the mux, where the match
+// is known) to here (outside it, where the status is final) through a request
+// context value. A request that never reached a matched handler leaves the
+// holder at routeLabelUnmatched — the bounded answer, never the raw path.
 func countRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route := &requestRoute{label: routeLabelUnmatched}
+		r = r.WithContext(context.WithValue(r.Context(), requestRouteKey{}, route))
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		httpRequestsTotal.With(strconv.Itoa(rec.status)).Inc()
+		httpRequestsTotal.With(strconv.Itoa(rec.status), route.label).Inc()
 	})
 }
 

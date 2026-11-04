@@ -48,6 +48,10 @@ func init() {
 	for attempt := 1; attempt <= attemptSeed; attempt++ {
 		webhookAttemptsTotal.With(strconv.Itoa(attempt))
 	}
+	// MON-CRIER-005 dual-emit: the namespaced twin of webhook_deliveries_total
+	// (observability-spec §3.1) — same samples and outcome children, no
+	// increment change.
+	metrics.Default.Alias("webhook_deliveries_total", "crier_webhook_deliveries_total")
 }
 
 // attemptLabel renders the bounded `attempt` label value for one attempt.

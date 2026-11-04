@@ -188,20 +188,47 @@ func metricValue(body, name string) float64 {
 	return -1
 }
 
-// labeledMetricValue parses "name{label=\"value\"} number".
+// labeledMetricValue sums every sample of name whose label set CONTAINS
+// label="value" — the exposition spells `name{code="200",route="…"}`, so the
+// match must not assume the label is the only one (MON-CRIER-005 added the
+// route label to http_requests_total). Summing mirrors the PromQL reading of
+// `sum(name{label="value"})` and returns -1 when no sample carries the pair.
 func labeledMetricValue(body, name, label, value string) float64 {
-	prefix := fmt.Sprintf("%s{%s=%q}", name, label, value)
+	needle := fmt.Sprintf(`%s=%q`, label, value)
+	total := -1.0
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, prefix+" ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				if v, err := strconv.ParseFloat(fields[len(fields)-1], 64); err == nil {
-					return v
-				}
+		if !strings.HasPrefix(line, name+"{") {
+			continue
+		}
+		end := strings.Index(line, "}")
+		if end < 0 {
+			continue
+		}
+		labels := strings.Split(line[len(name)+1:end], ",")
+		matched := false
+		for _, pair := range labels {
+			if pair == needle {
+				matched = true
+				break
 			}
 		}
+		if !matched {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			continue
+		}
+		if total < 0 {
+			total = 0
+		}
+		total += v
 	}
-	return -1
+	return total
 }
 
 // TestMetricsIncrementOnLiveTraffic: drive register → deliver → relay

@@ -13,6 +13,29 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+### Added
+
+- **Namespaced Prometheus series, served beside the legacy names for a dated
+  dual-emit window** (MON-CRIER-005, `docs/observability-spec.md` §3.1).
+  Every series now also emits under `crier_<subsystem>_<thing>_<unit>`
+  (`deliveries_total` → `crier_delivery_accepted_total`,
+  `http_requests_total` → `crier_http_requests_total`, … — the full 18-pair
+  table is in the README §Observability). The twin is an ALIAS in
+  `internal/metrics` rendered from the SAME series at scrape time, not a second
+  counter: samples, help and type are identical by construction, no increment
+  site changed, and a family renders once per scrape (a gauge callback is never
+  evaluated twice, so the inbox queue is still read once and a failed depth read
+  is still counted once). Legacy names are NOT removed here.
+  `http_requests_total` also gained the bounded `route` label — the gorilla/mux
+  path template, or the single literal `unmatched` when no route matched — on
+  both names, so `sum by (route) (rate(crier_http_requests_total{code=~"5.."}[5m]))`
+  returns a per-route error rate and `/metrics` scrapes are distinguishable from
+  real traffic. **Dual-emit window opened 2026-11-04**; it closes only when
+  `v0.4.0` has shipped, no dashboard/alert has referenced a legacy name for 30
+  consecutive days, and a release scrapes zero legacy families — or on the
+  operator's decision by 2027-05-04. Deleting the legacy names is a separate
+  change with its own row.
+
 ## [0.3.0] - 2026-11-03
 
 Range: `v0.2.0`..`v0.3.0` — 261 non-merge commits (6 `feat`, 54 `fix`,
