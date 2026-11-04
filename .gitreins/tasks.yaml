@@ -3215,3 +3215,27 @@ tasks:
     with a bounded set. Spec: docs/observability-spec.md 3.3.'
   status: in_progress
   created_at: '2026-11-04T07:28:07.761855+00:00'
+- id: MON-CRIER-005
+  title: Namespace the 18 metrics series to crier_* with dual-emit and add a route
+    label to the HTTP request counter
+  criteria:
+  - internal/metrics renders >=18 crier_* series while the 18 legacy names still emit
+    (documented dual-emit window); http_requests_total and crier_http_requests_total
+    both carry a bounded route label from the mux template; go build ./... and go
+    vet ./... pass; go test ./internal/metrics/... ./cmd/server/... pass; README Observability
+    + CHANGELOG record the window and the mapping from docs/observability-spec.md
+    3.1
+  status: in_progress
+  created_at: '2026-11-04T13:19:04.031253+00:00'
+- id: MON-CRIER-006
+  title: Add an orphaned-server-children guard so a harness that walks 19xxx ports
+    cannot leak crier servers past its run
+  criteria:
+  - a new in-repo guard counts crier server processes whose parent is gone and exits
+    1 above a threshold, with a selftest proving PASS on a clean host and FAIL on
+    a seeded orphan set; the guard is wired into the repo gate surface (make target
+    and the e2e/acceptance teardown); its header documents the 2026-11-04 leak (361
+    orphans, 7.84 GB RSS, ports 19001..19273) and names the spawning component by
+    path; go build ./... and go vet ./... pass and the guard selftest exits 0
+  status: in_progress
+  created_at: '2026-11-04T13:19:48.521968+00:00'

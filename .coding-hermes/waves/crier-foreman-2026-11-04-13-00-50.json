@@ -1,0 +1,33 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-13-00-50",
+  "block": "MON-CRIER",
+  "block_title": "Observability: metrics namespacing + orphan server containment",
+  "mode": "wave",
+  "slots": 6,
+  "slots_reason": "nproc=16, loadavg 1m=9.58 -> max(1,min(6,16-ceil(9.58)))=6; WAVE_BUDGET=12 ceiling; block has 2 ready rows",
+  "resume": "prior tick crier-foreman-2026-11-04-09-13-51 named block MON-CRIER with MON-CRIER-005 and MON-CRIER-006 still ready -> resumed, not re-sampled",
+  "base": "3037f236",
+  "worker_lane": "deepseek-v4-flash / deepseek-foreman (project-documented crier worker lane; prior tick used glm-5.3-flash and both workers stalled with zero writes)",
+  "rows": [
+    {
+      "id": "MON-CRIER-005",
+      "title": "Namespace the 18 metrics series to crier_* with dual-emit and add a route label to the HTTP request counter",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-005",
+      "branch": "wt/MON-CRIER-005",
+      "base": "3037f236",
+      "files_seam": "internal/metrics/metrics.go, cmd/server/observability.go, package registration sites, README, CHANGELOG",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-04-13-00-50/brief-MON-CRIER-005.txt"
+    },
+    {
+      "id": "MON-CRIER-006",
+      "title": "Add an orphaned-server-children guard so a harness that walks 19xxx ports cannot leak crier servers past its run",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-006",
+      "branch": "wt/MON-CRIER-006",
+      "base": "3037f236",
+      "files_seam": "scripts/lib/orphan-server-guard.sh (new), Makefile, e2e/acceptance teardown, docs",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-04-13-00-50/brief-MON-CRIER-006.txt"
+    }
+  ],
+  "independence": "no depends_on edges between the two rows (MON-CRIER-006 depends_on=[]; MON-CRIER-005 depends_on=null); disjoint file seams verified against the tree at 3037f236 (metrics/cmd-server Go surface vs scripts+Makefile shell surface)",
+  "merge_order": ["MON-CRIER-005", "MON-CRIER-006"]
+}
