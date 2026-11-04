@@ -88,7 +88,7 @@ func openSessionAPI(
 	namespaces *namespace.Registry,
 	perms *permissions.Checker,
 	grantEvents func(context.Context, string) ([]session.PermissionsGrantView, error),
-) (session.Store, *session.Handler, *reads.HTTPHandler, error) {
+) (session.Repository, *session.Handler, *reads.HTTPHandler, error) {
 	sessStore, err := session.OpenStore(context.Background(), cfg.ResolvedSessionBackend(), session.StoreOptions{
 		SQLitePath:  cfg.Session.SQLitePath,
 		LogRoot:     cfg.Session.LogRoot,

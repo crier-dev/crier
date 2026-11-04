@@ -31,6 +31,8 @@ tags:
     description: "Named agent groups (CR-CHAT-013, D8): a curated, editable roster of agents addressed as `@team:x`, that ONE message fans out to — every CURRENT member, through the same shipped fan-out path. Deliberately NOT a capability target (`@cap:y`), which stays the dynamic round-robin pool over live holders: a named group's audience is enumerable and recordable BEFORE the send, a capability's holder is decided at delivery time."
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
+  - name: ingress
+    description: "Push ingress (CRIER-INGRESS-1, specs/COURIER-INGRESS.md): ONE call that pushes a message to exactly one of three destinations — an existing session, a NEW session created from a template, or an agent inbox. A session message is appended through the same session store the /sessions routes write, and an inbox push goes through the same delivery path POST /agents/{id}/inbox uses (capability form included) — there is no second append and no second delivery path."
   - name: detection
     description: |
       OPT-IN detection and containment (CR-FEAT-030, specs/DETECTION.md): the
@@ -664,6 +666,85 @@ paths:
           description: INVALID_REQUEST (bad `since`/`limit`) or TAGS_QUERY_TOO_BROAD (limit above the maximum).
         "401":
           description: The relay requires a bearer token and none (or a wrong one) was presented.
+  /ingress/messages:
+    post:
+      operationId: ingressPushMessage
+      tags: [ingress]
+      summary: Push a message to a session, a new session, or an agent inbox
+      description: |
+        COURIER-INGRESS (specs/COURIER-INGRESS.md §2): one endpoint, three
+        destinations, selected by `mode` — never defaulted:
+
+          * `session`      append to an existing session. The append is the
+                           same repository write the session send route makes,
+                           so the message appears in that session's transcript
+                           with the same record shape (kind, author, audience,
+                           thread, tags);
+          * `new_session`  create a session from `target.template`, join its
+                           members, and append the message. The author
+                           auto-joins with the permissions a normal
+                           create+join grants;
+          * `inbox`        deliver to an agent's durable inbox, or — with
+                           `target.capability` — to the holder the capability
+                           selector picks. This is the SAME delivery path
+                           POST /agents/{id}/inbox uses: same entry id, same
+                           lease/ack semantics, same guard.
+
+        `delivery` reports where the message went beyond the durable store.
+        With no harness adapter configured (COURIER-HARNESS §4) it is
+        `{"mode":"store","state":"stored"}` — the message is in the session (or
+        the inbox) and every reader gets it from there.
+
+        Errors are the §5 catalog. Two codes are additive and named rather than
+        folded into a neighbour: INGRESS_EMPTY_MESSAGE (§6: neither text nor
+        payload), INGRESS_SESSION_CLOSED (CHAT-SESSIONS §1.3), and
+        INGRESS_PAYLOAD_TOO_LARGE (§2.1 bounds payload at 256 KiB).
+      parameters:
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            Caller-chosen key (COURIER-INGRESS §2.1; `body.idempotency_key` is
+            accepted too — two DIFFERENT keys on one request are refused). A
+            replay with the same key and an identical request returns the
+            ORIGINAL body with its original status and creates nothing; the same
+            key with a different request is 409 INGRESS_KEY_REUSED.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngressRequest"
+      responses:
+        "200":
+          description: The message was appended to an EXISTING session (mode=session). A keyed replay of a session push answers 200 with the original body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngressResult"
+        "201":
+          description: A session was created and the message appended (mode=new_session), or an inbox entry was stored (mode=inbox).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngressResult"
+        "400":
+          description: INGRESS_INVALID_JSON (bad JSON, an unknown field, or two different idempotency keys), INGRESS_MODE_REQUIRED, INGRESS_MODE_UNKNOWN, INGRESS_SESSION_REQUIRED, INGRESS_TEMPLATE_REQUIRED, INGRESS_TEMPLATE_INVALID, INGRESS_AGENT_REQUIRED, INGRESS_AUTHOR_REQUIRED, INGRESS_TASK_KIND_REFUSED, INGRESS_TAGS_INVALID, INGRESS_EMPTY_MESSAGE, INGRESS_NAMESPACE_UNKNOWN.
+        "401":
+          description: The relay requires a bearer token and none (or a wrong one) was presented, or the realm's namespace token was absent or wrong (INGRESS_NAMESPACE_UNAUTHORIZED).
+        "403":
+          description: INGRESS_MODE_DISABLED (the mode is excluded by ingress.allowed_modes) or INGRESS_AUTHOR_NOT_MEMBER (mode=session and the author is neither a participant nor permitted to post).
+        "404":
+          description: INGRESS_SESSION_NOT_FOUND (mode=session, including a session in another realm) or INGRESS_AGENT_UNKNOWN (mode=inbox and no registered agent — or no holder of the named capability).
+        "409":
+          description: INGRESS_KEY_REUSED (the idempotency key already means a different request), INGRESS_REPLY_TOO_DEEP (the thread does not exist in that session, or a fresh session has no thread to reply into), or INGRESS_SESSION_CLOSED.
+        "413":
+          description: INGRESS_BODY_TOO_LARGE (the body exceeds ingress.max_body_bytes, default 1 MiB) or INGRESS_PAYLOAD_TOO_LARGE (the payload exceeds 256 KiB).
+        "500":
+          description: INGRESS_STORE_ERROR — a backend append or delivery failed. Nothing is claimed delivered; a keyed retry resumes rather than duplicating.
   /relay/publish:
     post:
       operationId: relayPublish
@@ -5630,6 +5711,174 @@ components:
         is refused with 401 "body digest mismatch". Absent the header, the
         3-line contract above is unchanged.
   schemas:
+    IngressRequest:
+      type: object
+      description: |
+        The POST /ingress/messages body (COURIER-INGRESS §2.1). One struct,
+        `mode` selects the destination; the three target spellings are
+        mutually exclusive. Decoding is STRICT: an unknown field is
+        INGRESS_INVALID_JSON.
+      required: [mode, author]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [session, new_session, inbox]
+          description: The destination. Unknown values are refused (INGRESS_MODE_UNKNOWN), never defaulted to session.
+        target:
+          type: object
+          description: The destination coordinates. Exactly one spelling applies per mode.
+          additionalProperties: false
+          properties:
+            session_id:
+              type: string
+              description: mode=session — the session to append to.
+            template:
+              $ref: "#/components/schemas/SessionTemplate"
+            agent_id:
+              type: string
+              description: mode=inbox — the agent whose durable inbox receives the message.
+            capability:
+              type: string
+              description: mode=inbox — a capability instead of an agent id; the registry picks the holder (round-robin over live holders) and the response names it in `outcomes[].target`.
+        author:
+          type: object
+          description: Who produced the message — the same AuthorRef shape the session send route takes. Required; a message records its author.
+          additionalProperties: false
+          properties:
+            agent:
+              type: string
+            principal:
+              type: string
+            as_agent:
+              type: string
+        kind:
+          type: string
+          enum: [plain, addressed]
+          default: plain
+          description: Message kind (CHAT-SESSIONS §4.4). `task` is REFUSED here (INGRESS_TASK_KIND_REFUSED) — task creation stays on POST /sessions/{id}/tasks.
+        text:
+          type: string
+          description: The message prose. Folded into the payload as `payload.text` unless the payload already carries one. Empty is allowed only when `payload` is present.
+        tags:
+          type: array
+          description: COURIER-TAGS §2.1 tags. Validated here with the same grammar the session send route uses; an invalid tag is INGRESS_TAGS_INVALID and nothing is written.
+          maxItems: 16
+          items:
+            type: string
+            pattern: "^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?(:[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?)?$"
+        payload:
+          type: object
+          description: Opaque JSON carried with the message (at most 256 KiB). Required to be an object, matching the inbox delivery contract.
+        reply_to_thread:
+          type: string
+          description: |
+            mode=session only — attach the message to this thread's ROOT. A
+            reply stays in its thread (CHAT-SESSIONS §4.5), so this never
+            deepens one; a thread that is not in the session, or any use on
+            mode=new_session, is INGRESS_REPLY_TOO_DEEP.
+        idempotency_key:
+          type: string
+          description: The same key the Idempotency-Key header carries. Two DIFFERENT keys on one request are refused.
+    IngressResult:
+      type: object
+      description: The COURIER-INGRESS §2.1 response body.
+      required: [mode, message_id, created_session, delivery]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [session, new_session, inbox]
+        session_id:
+          type: string
+          description: The session the message landed in. Absent for mode=inbox, which never touches a session.
+        message_id:
+          type: string
+          description: The session message id, or — for mode=inbox — the inbox entry id the delivery path stored (the id a later ack names).
+        seq:
+          type: integer
+          description: The transcript sequence the message carries. Absent for mode=inbox.
+        outcomes:
+          type: array
+          description: |
+            One result per destination. `result` is the ingress vocabulary and
+            `outcome` carries the same value in the session vocabulary; both
+            are emitted so a client written against either section reads it.
+          items:
+            type: object
+            required: [target, result]
+            properties:
+              target:
+                type: string
+              member_type:
+                type: string
+                enum: [agent, principal]
+              member_id:
+                type: string
+              result:
+                type: string
+                enum: [delivered, accepted, held, queued, refused, failed, budget_cut, canned]
+              outcome:
+                type: string
+                description: The same value as `result`, named as the session DeliveryOutcome names it.
+              inbox_entry_id:
+                type: string
+              reason:
+                type: string
+              code:
+                type: string
+                description: "Additive diagnostic. INGRESS_STORED marks a session message that is durable in the transcript without an inbox write — which is what `accepted` means on this surface."
+        created_session:
+          type: boolean
+          description: True exactly when THIS call created the session (mode=new_session). A keyed replay of that call answers with the original body, so it stays true.
+        delivery:
+          type: object
+          description: Where the message went beyond the durable store. With no harness adapter configured (COURIER-HARNESS §4) it is {"mode":"store","state":"stored"}.
+          required: [mode, state]
+          properties:
+            mode:
+              type: string
+              enum: [store, harness]
+            harness:
+              type: string
+            state:
+              type: string
+              enum: [stored, dispatched, failed]
+            error:
+              type: string
+              description: Present when state=failed. Storage is the contract; dispatch is best-effort and reported honestly (a failed dispatch does not fail the call and does not roll back the write).
+    SessionTemplate:
+      type: object
+      description: The minimum a new session needs (COURIER-INGRESS §2.2). Memory is NOT a step — a member joins with whatever context the runtime grants it.
+      required: [title]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: Required; an empty title is INGRESS_TEMPLATE_INVALID.
+        kind:
+          type: string
+          enum: [channel, direct]
+          default: channel
+        namespace:
+          type: string
+          description: The realm the session lives in. An undeclared namespace is INGRESS_TEMPLATE_INVALID. Absent means the request's realm (X-Crier-Namespace).
+        members:
+          type: array
+          description: Initial participants. The author auto-joins as well, so a message it posts is one it can read back.
+          items:
+            type: object
+            required: [member_type, member_id]
+            properties:
+              member_type:
+                type: string
+                enum: [agent, principal]
+              member_id:
+                type: string
+              role:
+                type: string
+                enum: [owner, member, observer]
+                default: member
     TrustAnchor:
       type: object
       required: [id, public_key, label]

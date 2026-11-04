@@ -447,9 +447,10 @@ claims:
     # DF-CRIER-363 (POST /fed/peers — one operation on the ALREADY-declared
     # /fed/peers path, so this count is unchanged at 66).
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
-    # its /unread sibling (COURIER-TAGS §3).
-    quote: "69 paths"
-    expect: 69
+    # its /unread sibling (COURIER-TAGS §3). CRIER-INGRESS-1 declared the
+    # /ingress/messages path (COURIER-INGRESS §4), so the count is 70.
+    quote: "70 paths"
+    expect: 70
     xfail: null
   - id: COUNT-OPENAPI-OPERATIONS
     kind: count
@@ -496,9 +497,10 @@ claims:
     # (federationCreatePeer — a new METHOD on the already-declared /fed/peers
     # path), so the count is 84.
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
-    # its /unread sibling (COURIER-READS §3).
-    quote: "88 operations"
-    expect: 88
+    # its /unread sibling (COURIER-READS §3). CRIER-INGRESS-1 added the one
+    # POST /ingress/messages operation (COURIER-INGRESS §4), so the count is 89.
+    quote: "89 operations"
+    expect: 89
     xfail: null
   - id: COUNT-MCP-TOOLS
     kind: count
@@ -564,9 +566,11 @@ claims:
     # 4 non-API routes /chat + /openapi.json + /openapi.yaml + /docs). This
     # number is a measurement of main.go, which the document edit does not move.
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
-    # its /unread sibling (COURIER-READS §3).
-    quote: "58 router paths"
-    expect: 58
+    # its /unread sibling (COURIER-READS §3). CRIER-INGRESS-1 registered
+    # POST /ingress/messages in main.go's authenticated subrouter, so the count
+    # is 59 (54 always-on: the ingress path is always on, not opt-in).
+    quote: "59 router paths"
+    expect: 59
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

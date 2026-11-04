@@ -856,6 +856,16 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	}
 	defer func() { _ = sessStore.Close() }()
 
+	// Push ingress (CRIER-INGRESS-1): the three-destination push surface,
+	// built over the SAME session store and registry dispatcher as the routes
+	// above. It is always on; CR_INGRESS_MAX_BODY_BYTES and
+	// CR_INGRESS_ALLOWED_MODES can bound it but cannot remove it.
+	ingressHandler, err := openIngress(cfg, sessStore, registryHandler, nsReg, permsChecker)
+	if err != nil {
+		slog.Error("initialize ingress api", "error", err)
+		return 1
+	}
+
 	// DF-CRIER-414: feed the session handler's in-flight view from the webhook
 	// driver's own per-attempt observations, so a composer can say "delivery in
 	// flight, 2s of the 30s budget, target unreachable" instead of looking
@@ -926,6 +936,13 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// into a private room. The tag FILTERS (?tag= / ?tags_any=) ride the
 	// existing read routes above rather than adding a second transcript route.
 	r.HandleFunc("/tags", sessHandler.HandleListTags).Methods("GET")
+	// Push ingress (CRIER-INGRESS-1, specs/COURIER-INGRESS.md §4): ONE call
+	// that pushes a message to an existing session, a session created from a
+	// template, or an agent inbox. Registered here, inside the authenticated
+	// subrouter, so it inherits the same bearer check as /sessions and is NOT
+	// part of the public path list. Its writes go through the same session
+	// repository and the same inbox delivery path the routes above use.
+	r.HandleFunc("/ingress/messages", ingressHandler.ServeHTTP).Methods("POST")
 	// Read cursors (CRIER-READS-1, specs/COURIER-READS.md §3.1): who has read
 	// what, and what is unread for a member. A cursor is per (session, member)
 	// and monotonic; `reads` is a read receipt, never a delivery guarantee and

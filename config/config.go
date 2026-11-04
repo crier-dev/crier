@@ -287,6 +287,29 @@ type Config struct {
 	// malformed adapter block disables that adapter and records the reason in
 	// Harness.Warnings.
 	Harness harness.Config
+	// Ingress tunes the push-ingress surface (CRIER-INGRESS-1,
+	// specs/COURIER-INGRESS.md §4). Nothing here is required: the defaults are
+	// the spec's — a 1 MiB body and all three modes.
+	Ingress IngressConfig
+}
+
+// IngressConfig is the push-ingress posture (COURIER-INGRESS §4).
+//
+// The surface itself is always on (it is registered in the authenticated
+// subrouter beside /sessions), so this config can only bound a request or
+// DISABLE a mode a deployment does not want a caller to use.
+type IngressConfig struct {
+	// MaxBodyBytes is CR_INGRESS_MAX_BODY_BYTES: the raw request-body cap, and
+	// the bound INGRESS_BODY_TOO_LARGE reports. Zero resolves to
+	// ingress.DefaultMaxBodyBytes (1 MiB). Values must be positive; a
+	// non-positive or non-integer value is a startup error rather than a
+	// silently ignored setting.
+	MaxBodyBytes int
+	// AllowedModes is CR_INGRESS_ALLOWED_MODES: a comma-separated subset of
+	// session,new_session,inbox. Empty (the default) means all three. A mode
+	// excluded here is refused 403 INGRESS_MODE_DISABLED, never defaulted to
+	// another destination.
+	AllowedModes []string
 }
 
 // DaggerConfig is the dagger control surface's posture (CR-CHAT-033).
@@ -764,6 +787,37 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	cfg.Session.GroupRoot = strings.TrimSpace(getenv("CR_GROUP_ROOT"))
 	if cfg.Session.GroupRoot == "" {
 		cfg.Session.GroupRoot = DefaultGroupRoot
+	}
+	// Push ingress (CRIER-INGRESS-1, COURIER-INGRESS §4). Both settings are
+	// optional and additive: unset means the spec's defaults, so no existing
+	// deployment changes behaviour. A value that cannot be honoured is a
+	// startup error — an operator must never be told a cap or a mode
+	// restriction is in force when the server silently ignored it.
+	if v := strings.TrimSpace(getenv("CR_INGRESS_MAX_BODY_BYTES")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return cfg, fmt.Errorf("invalid CR_INGRESS_MAX_BODY_BYTES: %q (want a positive number of bytes)", v)
+		}
+		cfg.Ingress.MaxBodyBytes = n
+	}
+	if v := strings.TrimSpace(getenv("CR_INGRESS_ALLOWED_MODES")); v != "" {
+		modes := make([]string, 0, 3)
+		for _, raw := range strings.Split(v, ",") {
+			mode := strings.ToLower(strings.TrimSpace(raw))
+			if mode == "" {
+				continue
+			}
+			switch mode {
+			case "session", "new_session", "inbox":
+				modes = append(modes, mode)
+			default:
+				return cfg, fmt.Errorf("invalid CR_INGRESS_ALLOWED_MODES: %q is not one of session, new_session, inbox", mode)
+			}
+		}
+		if len(modes) == 0 {
+			return cfg, fmt.Errorf("invalid CR_INGRESS_ALLOWED_MODES: %q names no mode (want session, new_session, inbox)", v)
+		}
+		cfg.Ingress.AllowedModes = modes
 	}
 
 	// Per-backend defaults, so the one switch is enough to run: a deployment

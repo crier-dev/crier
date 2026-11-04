@@ -2070,18 +2070,35 @@ func (h *Handler) loadOpenScoped(w http.ResponseWriter, r *http.Request) (*Sessi
 // X-Crier-Namespace / X-Crier-Namespace-Token convention the relay and the
 // registry use, so the realm wall is one rule across surfaces (§4 row 38).
 func (h *Handler) realm(r *http.Request, bodyNamespace string) (string, error) {
+	return RealmRule(r, bodyNamespace, h.opts.Namespaces)
+}
+
+// RealmRule is the ONE realm rule a request is held to: the body's namespace
+// when it names one, else the X-Crier-Namespace header, canonicalized and then
+// checked against the declared policies and the realm's auth posture.
+//
+// It is exported because a surface that composes with this store from another
+// package (internal/ingress, COURIER-INGRESS §4) must answer the SAME question
+// with the SAME rule — a second spelling of "which realm is this" is exactly
+// the drift the namespace wall exists to prevent. The rule is unchanged from
+// the handler method it was extracted from: an undeclared name is
+// ErrUnknownNamespace, a wrong token is ErrUnauthorized, and "" is the default
+// realm.
+func RealmRule(r *http.Request, bodyNamespace string, reg *namespace.Registry) (string, error) {
 	name := strings.TrimSpace(bodyNamespace)
-	if name == "" {
+	if name == "" && r != nil {
 		name = strings.TrimSpace(r.Header.Get(namespace.HeaderNamespace))
 	}
 	canonical := namespace.Canonical(name)
 	if canonical != "" {
-		if _, ok := h.opts.Namespaces.Lookup(canonical); !ok {
+		if _, ok := reg.Lookup(canonical); !ok {
 			return "", namespace.ErrUnknownNamespace
 		}
 	}
-	if err := h.opts.Namespaces.CheckAuth(canonical, r.Header.Get(namespace.HeaderNamespaceToken)); err != nil {
-		return "", err
+	if r != nil {
+		if err := reg.CheckAuth(canonical, r.Header.Get(namespace.HeaderNamespaceToken)); err != nil {
+			return "", err
+		}
 	}
 	return canonical, nil
 }
