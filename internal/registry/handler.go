@@ -33,7 +33,7 @@ import (
 // deliveriesTotal counts accepted inbox deliveries (DF-CRIER-142): one Inc
 // per delivery that lands somewhere durable — the inbox store (201) or a
 // webhook transport accept (202/200). Rejections (400/403/404/…) do not
-// count: they are visible on http_requests_total{code} instead.
+// count: they are visible on http_requests_total{code,route} instead.
 var deliveriesTotal = metrics.Default.NewCounter("deliveries_total",
 	"Inbox deliveries accepted (stored to inbox or accepted for webhook push).")
 
@@ -42,6 +42,16 @@ var deliveriesTotal = metrics.Default.NewCounter("deliveries_total",
 // the three decisions the pipeline's switch already distinguishes.
 var guardDecisionsTotal = metrics.Default.NewCounterVec("guard_decisions_total",
 	"LLM message-guard verdicts by decision (allow/block/sanitize).", "decision")
+
+// MON-CRIER-005 dual-emit (observability-spec §3.1): each legacy series keeps
+// its name and samples while a namespaced crier_* twin is served from the SAME
+// series. An alias is a name, not a copy — no increment site changes and no
+// sample is counted twice — and the legacy names are deleted only when the
+// documented window closes (see README §Observability).
+func init() {
+	metrics.Default.Alias("deliveries_total", "crier_delivery_accepted_total")
+	metrics.Default.Alias("guard_decisions_total", "crier_guard_decisions_total")
+}
 
 // registerRequest is the JSON body for POST /agents.
 type registerRequest struct {

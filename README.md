@@ -2521,10 +2521,64 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 
 Two live-inspection surfaces (`DF-CRIER-142`). `GET /metrics` is **on by default** (an unset `CR_ENABLE_METRICS` registers it; set `CR_ENABLE_METRICS=false` to leave the path answering `404`); `GET /debug/pprof/` stays **opt-in** (`CR_ENABLE_PPROF=true`):
 
-- `GET /metrics` — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `capability_routed_total` (capability-routed deliveries that resolved to a holder), `capability_unheld_total` (refused with `NO_CAPABLE_AGENT`), `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, `crier_up` (constant 1 while the process serves), `crier_build_info{version,commit,dirty}` (the same build identity `GET /version` serves), `crier_store_healthy{backend}` (1 when the serving store answers its health probe, 0 when it answers unhealthy, `NaN` when the backend exposes no probe this layer can consult), `crier_start_time_seconds` (unix seconds of process start — uptime is `time()` minus it), `inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds` (gauges, `NaN` when the serving store cannot report a depth), `inbox_shed_total{scope}` (what the global ingest budget refused), and `http_requests_total{code}`. Scrape job: [`deploy/prometheus-scrape.example.yml`](deploy/prometheus-scrape.example.yml).
+- `GET /metrics` — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `capability_routed_total` (capability-routed deliveries that resolved to a holder), `capability_unheld_total` (refused with `NO_CAPABLE_AGENT`), `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, `crier_up` (constant 1 while the process serves), `crier_build_info{version,commit,dirty}` (the same build identity `GET /version` serves), `crier_store_healthy{backend}` (1 when the serving store answers its health probe, 0 when it answers unhealthy, `NaN` when the backend exposes no probe this layer can consult), `crier_start_time_seconds` (unix seconds of process start — uptime is `time()` minus it), `inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds` (gauges, `NaN` when the serving store cannot report a depth), `inbox_shed_total{scope}` (what the global ingest budget refused), and `http_requests_total{code,route}`. Scrape job: [`deploy/prometheus-scrape.example.yml`](deploy/prometheus-scrape.example.yml).
 - `GET /debug/pprof/` (`CR_ENABLE_PPROF=true`) — the standard Go profiling index plus the named profiles (`heap`, `goroutine`, `block`, `mutex`, `threadcreate`, `profile`, `symbol`, `trace`, `cmdline`).
 
 **Neither path is auth-exempt**: they are served like any other authenticated route — with `CR_AUTH_TOKEN` set they require `Authorization: Bearer <token>`; with auth disabled they are open. The exempt-path list in `internal/middleware/auth.go` is unchanged. Exposure note: the pprof surface reveals runtime internals (stacks, heap) — enable it only on trusted networks.
+
+### Namespaced metric names and the dual-emit window (MON-CRIER-005)
+
+Every series now identifies its product. The convention is
+`crier_<subsystem>_<thing>_<unit>` (`docs/observability-spec.md` §3), and it
+matters in a shared Prometheus: an unprefixed `http_requests_total` collides with
+conventional client instrumentation and no series says which product emitted it.
+
+The rename is **dual-emit, not a break** — dashboards and alerts that key on the
+legacy names keep working. Both names are rendered from the SAME series (an alias
+in `internal/metrics`, not a second counter), so their samples can never drift
+apart, and no increment site changed:
+
+| Legacy (still served) | Namespaced twin |
+|---|---|
+| `deliveries_total` | `crier_delivery_accepted_total` |
+| `guard_decisions_total{decision}` | `crier_guard_decisions_total{decision}` |
+| `webhook_deliveries_total{outcome}` | `crier_webhook_deliveries_total{outcome}` |
+| `capability_routed_total` | `crier_capability_routed_total` |
+| `capability_unheld_total` | `crier_capability_unheld_total` |
+| `expired_messages_total` | `crier_inbox_expired_total` |
+| `dead_lettered_messages_total` | `crier_inbox_deadlettered_total` |
+| `expiry_receipts_total` | `crier_inbox_expiry_receipts_total` |
+| `idempotent_replays_total` | `crier_delivery_idempotent_replay_total` |
+| `transfers_total` | `crier_inbox_transfers_total` |
+| `relay_events_total` | `crier_relay_events_total` |
+| `http_requests_total{code,route}` | `crier_http_requests_total{code,route}` |
+| `federation_held_current` | `crier_federation_held_current` |
+| `ws_subscribers` | `crier_ws_subscribers` |
+| `inbox_queue_depth` | `crier_inbox_queue_depth` |
+| `inbox_queue_leased` | `crier_inbox_queue_leased` |
+| `inbox_queue_oldest_age_seconds` | `crier_inbox_queue_oldest_age_seconds` |
+| `inbox_shed_total{scope}` | `crier_inbox_shed_total{scope}` |
+
+`http_requests_total` also gained the bounded `route` label — the gorilla/mux
+**path template** (`/agents/{id}/inbox`), never the raw path, URL or query, so
+the label domain is the route table (~66 templates). A request the router never
+matched (its 404/405 fallbacks, a path-clean redirect) carries the single literal
+`unmatched`. That answers "which route is erroring" and separates `/metrics`
+scrapes from real traffic:
+
+```promql
+sum by (route) (rate(crier_http_requests_total{code=~"5.."}[5m]))
+```
+
+**Window.** Started 2026-11-04 (this change). Both names are served for the whole
+window; the legacy names are deleted only when the window closes, and closing is
+a separate change with its own row. Proposed close trigger, all three required:
+(a) `v0.4.0` has shipped, and (b) no fleet dashboard, alert rule or scrape-derived
+query has referenced a legacy name for 30 consecutive days (checked against the
+Prometheus/Grafana configs and the fleet's alert files), and (c) a release is cut
+in which `curl -s <host>:8767/metrics | grep -cE '^(deliveries_total|http_requests_total|ws_subscribers|inbox_queue_' ` is 0 on every deployed relay. If those are not met by **2027-05-04** (six months), the window closes anyway on the operator's decision recorded in the release notes — an unclosed rename is worse than a noisy one.
+
+ch:trace row=MON-CRIER-005 spec=docs/observability-spec.md#3.1 wave=.coding-hermes/waves/crier-foreman-2026-11-04-13-00-50.json test=internal/metrics/metrics_test.go::TestAliasRendersSameSamplesUnderBothNames doc=README.md#observability prompt=none:worker-brief evidence="curl -s http://127.0.0.1:18767/metrics | grep -cE '^crier_'" witness=none:not-pushed verdict=none:pending-tier2 commit=none:worker memory=none:worker
 
 ## Documentation
 

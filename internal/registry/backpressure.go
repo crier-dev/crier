@@ -77,6 +77,12 @@ const globalRateLimitShedError = "RATE_LIMITED_GLOBAL"
 var inboxShedTotal = metrics.Default.NewCounterVec("inbox_shed_total",
 	"Deliveries refused by the inbox ingest budget before any transport or store work, by scope.", "scope")
 
+// MON-CRIER-005 dual-emit: the namespaced twin of the shed counter
+// (observability-spec §3.1) — same samples and the same bounded `scope` label.
+func init() {
+	metrics.Default.Alias("inbox_shed_total", "crier_inbox_shed_total")
+}
+
 // shedResponse is the wire body of a shed delivery: 429 with a named error, the
 // scope that refused it, the budget in force and the same wait the Retry-After
 // header carries (so a client that logs only the body still learns the backoff).

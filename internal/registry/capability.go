@@ -105,6 +105,13 @@ var capabilityRoutedTotal = metrics.Default.NewCounter("capability_routed_total"
 var capabilityUnheldTotal = metrics.Default.NewCounter("capability_unheld_total",
 	"Capability-routed deliveries refused with NO_CAPABLE_AGENT (no agent on this relay holds the capability).")
 
+// MON-CRIER-005 dual-emit: the namespaced twins of the two capability series
+// (observability-spec §3.1) — same samples, second name, no increment change.
+func init() {
+	metrics.Default.Alias("capability_routed_total", "crier_capability_routed_total")
+	metrics.Default.Alias("capability_unheld_total", "crier_capability_unheld_total")
+}
+
 // routedTarget returns the holder id an accept should report, and "" for a
 // by-id delivery — whose body must stay byte-identical to what it always was
 // (CR-FEAT-026 acceptance). Both fields therefore travel together or not at all.

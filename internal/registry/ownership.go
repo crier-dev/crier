@@ -44,6 +44,17 @@ var (
 		"Messages moved between inboxes by a transfer/reassign.")
 )
 
+// MON-CRIER-005 dual-emit: the namespaced twin of each ownership/retention
+// series (observability-spec §3.1). Same samples, second name, no increment
+// site touched; the legacy names retire with the documented window.
+func init() {
+	metrics.Default.Alias("expired_messages_total", "crier_inbox_expired_total")
+	metrics.Default.Alias("dead_lettered_messages_total", "crier_inbox_deadlettered_total")
+	metrics.Default.Alias("expiry_receipts_total", "crier_inbox_expiry_receipts_total")
+	metrics.Default.Alias("idempotent_replays_total", "crier_delivery_idempotent_replay_total")
+	metrics.Default.Alias("transfers_total", "crier_inbox_transfers_total")
+}
+
 // transferRequest is the JSON body for POST /agents/{id}/inbox/transfer.
 type transferRequest struct {
 	// TargetAgentID is the destination inbox (required).
