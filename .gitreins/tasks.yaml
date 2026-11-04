@@ -3190,3 +3190,15 @@ tasks:
   status: complete
   created_at: '2026-11-03T22:20:24.413478+00:00'
   completed_at: '2026-11-03T23:19:47.948070+00:00'
+- id: QA-CRIER-REVIEW-4
+  title: bunker QA orphan watchdog + two-phase collect adoption
+  criteria:
+  - 'On a live bunker host: (1) collect from a NEW process after the launching wrapper
+    exits adopts the agent or reaps with evidence preserved, never refuses for 2h;
+    (2) a watchdog pass over >=3 dead-owner locks destroys each agent and removes
+    its lock with a per-agent receipt naming quarantined evidence path and destroy
+    rc; (3) evidence-preservation failure is reported per agent with the exact failing
+    command and rc; (4) after a full battery cycle agent-home count and du are unchanged'
+  status: complete
+  created_at: '2026-11-04T01:47:10.732490+00:00'
+  completed_at: '2026-11-04T01:47:23.461375+00:00'
