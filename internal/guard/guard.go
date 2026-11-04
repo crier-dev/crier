@@ -134,6 +134,25 @@ func New(opts Options) (*Guard, error) {
 	return g, nil
 }
 
+// Inflight reports guard checks currently holding the router's concurrency
+// semaphore (MON-CRIER-003). Nil-safe: the composition layer passes a nil
+// *Guard when the guard is disabled, and the gauge must read 0, not panic.
+func (g *Guard) Inflight() int {
+	if g == nil || g.router == nil {
+		return 0
+	}
+	return g.router.Inflight()
+}
+
+// OpenProviders reports, per bounded provider label, whether its circuit is
+// open (MON-CRIER-003). Nil-safe like Inflight.
+func (g *Guard) OpenProviders() map[string]bool {
+	if g == nil || g.router == nil {
+		return map[string]bool{}
+	}
+	return g.router.OpenProviders()
+}
+
 // Close stops the kanban worker (CR-FEAT-014). Idempotent; safe to call
 // from server shutdown and test cleanup. No-op when kanban is disabled.
 func (g *Guard) Close() {

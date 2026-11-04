@@ -568,6 +568,9 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// are registered (spec §2.2). CR_GUARD_ENABLED=false skips the guard
 	// entirely (nil filter = disabled).
 	var guardFilter guard.Filter
+	// MON-CRIER-003: the observability gauges read the same guard instance;
+	// nil while disabled, which the gauge callbacks render as 0.
+	var guardStats guardMetricsReader
 	if cfg.Guard.Enabled {
 		// CR-FEAT-014/009: the kanban card writer (fire-and-forget output
 		// option, spec §8). Cards are only produced when a policy opts in via
@@ -614,6 +617,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		}
 		defer gf.Close()
 		guardFilter = gf
+		guardStats = gf
 		slog.Info("message guard", "enabled", true, "model", cfg.Guard.Model,
 			"timeout", cfg.Guard.Timeout, "max_concurrent", cfg.Guard.MaxConcurrent,
 			"circuit_threshold", cfg.Guard.CircuitThreshold, "kanban_queue", cfg.Guard.KanbanQueueSize,
@@ -1206,6 +1210,8 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		// never a DSN.
 		storeBackend: regBackend,
 		storeHealth:  statusHealthProbe,
+		// MON-CRIER-003: guard circuit/inflight state (nil when disabled).
+		guardStats: guardStats,
 	})
 
 	// INT-CI-014: a CRIER_PORT of 0 binds an ephemeral port (" :0") — the

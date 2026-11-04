@@ -253,3 +253,48 @@ func TestConcurrentScrapeAndIncrement(t *testing.T) {
 		t.Fatalf("vec child after concurrent increments = %v, want 1600", got)
 	}
 }
+
+// TestGaugeFuncLabelSamples pins the labelled fail-open gauge primitive
+// (MON-CRIER-003): one sample per label value, deterministic order,
+// evaluated at scrape time, and re-registration replacing the callback.
+func TestGaugeFuncLabelSamples(t *testing.T) {
+	reg := NewRegistry()
+	values := map[string]float64{"b": 1, "a": 0}
+	reg.RegisterGaugeFuncLabel("provider_open", "help text", "provider",
+		func() map[string]float64 { return values })
+
+	body, _ := scrapeBody(t, reg)
+	if !strings.Contains(body, "# TYPE provider_open gauge") {
+		t.Fatalf("labelled gauge missing its TYPE line:\n%s", body)
+	}
+	for _, want := range []string{
+		`provider_open{provider="a"} 0` + "\n",
+		`provider_open{provider="b"} 1` + "\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("exposition missing %q:\n%s", want, body)
+		}
+	}
+	// Deterministic (sorted) sample order across scrapes.
+	if strings.Index(body, `{provider="a"}`) > strings.Index(body, `{provider="b"}`) {
+		t.Fatalf("samples are not sorted by label value:\n%s", body)
+	}
+
+	// Values are read at scrape time, not at registration.
+	values["a"] = 1
+	body, _ = scrapeBody(t, reg)
+	if !strings.Contains(body, `provider_open{provider="a"} 1`) {
+		t.Fatalf("gauge did not re-evaluate at scrape time:\n%s", body)
+	}
+
+	// Re-registering the name replaces the callback (no duplicate series).
+	reg.RegisterGaugeFuncLabel("provider_open", "help text", "provider",
+		func() map[string]float64 { return map[string]float64{"z": 7} })
+	body, _ = scrapeBody(t, reg)
+	if strings.Contains(body, `{provider="a"}`) || !strings.Contains(body, `provider_open{provider="z"} 7`) {
+		t.Fatalf("re-registered gauge did not replace the previous callback:\n%s", body)
+	}
+	if got := strings.Count(body, "# TYPE provider_open gauge"); got != 1 {
+		t.Fatalf("# TYPE provider_open appears %d times, want 1:\n%s", got, body)
+	}
+}

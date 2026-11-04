@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -104,6 +105,13 @@ type Router struct {
 	sem       chan struct{}
 	timeout   time.Duration
 	logf      func(msg string, args ...any)
+
+	// providerKeys remembers which circuit keys (base_url + " " + model)
+	// belong to which provider name, so the circuit-open gauge can be
+	// labelled by the bounded provider enum instead of by a URL. Guarded by
+	// keysMu; presets is read-only after NewRouter and needs no lock.
+	keysMu       sync.Mutex
+	providerKeys map[string]map[string]struct{}
 }
 
 // NewRouter builds a router from options (zero values → spec defaults).
@@ -145,6 +153,63 @@ func NewRouter(opts RouterOptions) *Router {
 	}
 }
 
+// Inflight reports how many guard checks currently hold the concurrency
+// semaphore. len on a buffered channel is the same value the 2s acquire wait
+// contends on — no parallel counter to drift from it (MON-CRIER-003).
+func (r *Router) Inflight() int { return len(r.sem) }
+
+// OpenProviders reports, for every bounded provider label value, whether any
+// of its circuits is currently open. Labels are the provider enum only — the
+// circuit key (base_url + model) never leaves the process, so a
+// policy-supplied endpoint cannot leak into the exposition.
+func (r *Router) OpenProviders() map[string]bool {
+	out := make(map[string]bool, len(r.presets)+1)
+	for name := range r.presets {
+		out[name] = false
+	}
+	out["custom"] = false
+
+	r.keysMu.Lock()
+	keys := make(map[string][]string, len(r.providerKeys))
+	for provider, set := range r.providerKeys {
+		ks := make([]string, 0, len(set))
+		for k := range set {
+			ks = append(ks, k)
+		}
+		keys[provider] = ks
+	}
+	r.keysMu.Unlock()
+
+	for provider, ks := range keys {
+		for _, k := range ks {
+			if r.circuit.IsOpen(k) {
+				out[provider] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// noteProviderKey records that key is one of provider's circuit keys, so the
+// circuit-open gauge can resolve provider -> open without knowing a base URL.
+// Provider names here are bounded by the router's own admission: an unknown
+// provider is skipped before its key is computed, and "custom" is the single
+// policy-supplied class.
+func (r *Router) noteProviderKey(provider, key string) {
+	r.keysMu.Lock()
+	defer r.keysMu.Unlock()
+	if r.providerKeys == nil {
+		r.providerKeys = make(map[string]map[string]struct{})
+	}
+	set := r.providerKeys[provider]
+	if set == nil {
+		set = make(map[string]struct{})
+		r.providerKeys[provider] = set
+	}
+	set[key] = struct{}{}
+}
+
 // Check runs the policy chain: for each ProviderSpec in order, resolve
 // preset defaults + env key, skip if the circuit is open, call Complete.
 // First success wins. All failed → ErrAllProvidersFailed (the guard-error
@@ -163,6 +228,9 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 	case r.sem <- struct{}{}:
 		defer func() { <-r.sem }()
 	case <-time.After(2 * time.Second):
+		// MON-CRIER-003: the saturation fail-open is counted here, at the
+		// only site that returns it.
+		saturatedTotal.Inc()
 		return "", "", "", ErrConcurrencySaturated
 	case <-ctx.Done():
 		return "", "", "", ctx.Err()
@@ -267,6 +335,7 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 		}
 
 		key := baseURL + " " + model
+		r.noteProviderKey(spec.Provider, key)
 		apiKey := ""
 		if strings.HasPrefix(apiKeyRef, "env:") {
 			apiKey = r.lookupEnv(strings.TrimPrefix(apiKeyRef, "env:"))
@@ -348,8 +417,12 @@ func (r *Router) Check(ctx context.Context, p Policy, sysPrompt, userMsg string)
 	}
 
 	if !anyKey {
+		// MON-CRIER-003: both arms that end the chain are counted — the
+		// no-key arm is the one where the guard never even attempted a call.
+		allProvidersFailedTotal.Inc()
 		return "", "", "", fmt.Errorf("%w: no provider api key", ErrAllProvidersFailed)
 	}
+	allProvidersFailedTotal.Inc()
 	return "", "", "", fmt.Errorf("%w: %v", ErrAllProvidersFailed, lastErr)
 }
 

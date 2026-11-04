@@ -96,6 +96,10 @@ type observabilityDeps struct {
 	// no HealthReporter, which crier_store_healthy then grades through the
 	// queue-depth read instead).
 	storeHealth healthProbe
+	// guardStats is the live LLM guard (MON-CRIER-003): nil when the guard
+	// is disabled, in which case its gauges render 0 rather than a
+	// fabricated circuit/inflight reading.
+	guardStats guardMetricsReader
 }
 
 // registerObservabilityGauges registers the composition-layer gauges whose
@@ -130,6 +134,8 @@ func registerObservabilityGauges(deps observabilityDeps) {
 	// MON-CRIER-004: the subsystem-state series (webhook backlog, federation
 	// hold age, detection containment).
 	registerStateGauges(deps)
+	// MON-CRIER-003: guard circuit/inflight fail-open state.
+	registerGuardGauges(deps.guardStats)
 }
 
 // storeQueueDepthReadErrors counts scrapes where the serving store reported no
