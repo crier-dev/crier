@@ -291,6 +291,43 @@ type Config struct {
 	// specs/COURIER-INGRESS.md §4). Nothing here is required: the defaults are
 	// the spec's — a 1 MiB body and all three modes.
 	Ingress IngressConfig
+	// MCP holds the crier-mcp bridge's nudge posture (CRIER-MCP-NUDGE,
+	// specs/COURIER-MCP-NUDGE.md §4). The nudge informs, it never reads:
+	// these settings only decide whether the surface is offered at all and
+	// whether a session-start line is prepended to delivered text.
+	MCP MCPConfig
+}
+
+// MCPConfig is the crier-mcp bridge's posture.
+//
+// The bridge itself is a separate binary that reads the SAME config, so this
+// block is served to both processes: cmd/crier-mcp registers the nudge
+// tools/resource/prompt from it, and cmd/server's harness delivery uses
+// Nudge.SessionStart for the prefix.
+type MCPConfig struct {
+	Nudge NudgeConfig
+}
+
+// NudgeConfig is the unread-nudge posture (§4):
+//
+//	mcp.nudge.enabled       CR_MCP_NUDGE_ENABLED        default true
+//	mcp.nudge.max_count     CR_MCP_NUDGE_MAX_COUNT      default 999
+//	mcp.nudge.session_start CR_MCP_NUDGE_SESSION_START  default false
+//
+// session_start is opt-in because a prefix changes the agent's prompt, which
+// is a product decision, not a default: with it unset the delivered text is
+// byte-identical to a build without this feature.
+type NudgeConfig struct {
+	// Enabled registers courier_unread_summary, courier_unread_list, the
+	// courier://inbox/{agent_id}/unread resource and the courier_nudge
+	// prompt. False removes the surface entirely.
+	Enabled bool
+	// MaxCount is the largest count the nudge reports; a bigger total is
+	// rendered "<max>+".
+	MaxCount int
+	// SessionStart prepends the one-line hint to the text a harness adapter
+	// delivers.
+	SessionStart bool
 }
 
 // IngressConfig is the push-ingress posture (COURIER-INGRESS §4).
@@ -586,6 +623,11 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		RateLimitPerMinute: 100,
 		InboxMaxBodyBytes:  1 << 20,
 		RequireAgentSig:    true,
+		// CRIER-MCP-NUDGE §4: the nudge surface is ON by default (it is
+		// read-only counts), while the session-start prefix is OFF — a
+		// prefix changes an agent's prompt, so arming it is the deployment's
+		// decision.
+		MCP: MCPConfig{Nudge: NudgeConfig{Enabled: true, MaxCount: 999}},
 		Webhook: WebhookConfig{
 			Timeout:            30 * time.Second,
 			MaxRetries:         5,
@@ -636,6 +678,31 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		default:
 			return cfg, fmt.Errorf("invalid CR_LOG_FORMAT: %q (want text/json)", v)
 		}
+	}
+
+	// CRIER-MCP-NUDGE §4: mcp.nudge.*. A value that cannot be honoured is a
+	// startup error, never a silently ignored setting — an operator who
+	// disabled the nudge surface must get it disabled.
+	if v := strings.TrimSpace(getenv("CR_MCP_NUDGE_ENABLED")); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("invalid CR_MCP_NUDGE_ENABLED: %q (want a boolean)", v)
+		}
+		cfg.MCP.Nudge.Enabled = b
+	}
+	if v := strings.TrimSpace(getenv("CR_MCP_NUDGE_MAX_COUNT")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_MCP_NUDGE_MAX_COUNT: %q (want a positive integer)", v)
+		}
+		cfg.MCP.Nudge.MaxCount = n
+	}
+	if v := strings.TrimSpace(getenv("CR_MCP_NUDGE_SESSION_START")); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("invalid CR_MCP_NUDGE_SESSION_START: %q (want a boolean)", v)
+		}
+		cfg.MCP.Nudge.SessionStart = b
 	}
 
 	// Port

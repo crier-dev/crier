@@ -17,6 +17,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
+	"github.com/crier-dev/crier/internal/harness"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/webhook"
 )
@@ -58,6 +59,21 @@ type MCPServer struct {
 	// refuse with the CRIER_HTTP_URL gate.
 	dagger daggerctl.Control
 
+	// courier is the read side of the nudge (CRIER-MCP-NUDGE). Nil means this
+	// process has no session store wired: the summary then reports the
+	// agent-inbox count alone rather than inventing session rows.
+	courier CourierSource
+	// harness is the adapter registry the read-only harness_list /
+	// harness_probe tools report on (COURIER-HARNESS §4.4). Nil = no
+	// adapters configured in this process.
+	harness *harness.Registry
+	// operatorScope permits reading ANOTHER agent's unread summary
+	// (NUDGE_SCOPE_DENIED otherwise).
+	operatorScope bool
+	// nudgeDisabled removes the nudge tool/resource/prompt surface entirely
+	// (mcp.nudge.enabled=false). Zero value = enabled.
+	nudgeDisabled bool
+
 	mu       sync.Mutex
 	buffered []*registry.InboxEntry // pulled by ask_agent polling, unseen by the harness
 }
@@ -94,6 +110,21 @@ type Options struct {
 	// DaggerToken is the bearer token the auto-built dagger REST client
 	// presents to the Crier server. It is ignored when Dagger is set.
 	DaggerToken string
+	// Courier answers the unread nudge (CRIER-MCP-NUDGE). Nil means this
+	// process cannot see session state and the summary reports the
+	// agent-inbox count alone. Build it with a *Courier over the registry
+	// store, session repository and read-cursor service.
+	Courier CourierSource
+	// Harness is the adapter registry behind harness_list / harness_probe
+	// (COURIER-HARNESS §4.4). Nil = both tools report an empty list.
+	Harness *harness.Registry
+	// OperatorScope permits reading another agent's unread summary. Default
+	// false: a bridge answers only for its own identity (NUDGE_SCOPE_DENIED).
+	OperatorScope bool
+	// NudgeDisabled is mcp.nudge.enabled=false: the nudge tool, resource and
+	// prompt are not registered at all. The zero value leaves the surface
+	// enabled (the shipped default).
+	NudgeDisabled bool
 }
 
 // New creates an MCPServer backed by the given Store.
@@ -111,6 +142,10 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 		allowKeylessAgent: opts.AllowKeylessAgents,
 		agentID:           opts.AgentID,
 		httpURL:           strings.TrimSuffix(opts.HTTPURL, "/"),
+		courier:           opts.Courier,
+		harness:           opts.Harness,
+		operatorScope:     opts.OperatorScope,
+		nudgeDisabled:     opts.NudgeDisabled,
 	}
 	if remote, ok := store.(*registry.RemoteStore); ok {
 		// RemoteStore is not a local append: it signs and POSTs to the
@@ -170,6 +205,16 @@ func (s *MCPServer) registerTools() {
 	s.tools["resume_run"] = s.handleResumeRun
 	s.tools["rewind_run"] = s.handleRewindRun
 	s.tools["run_skill"] = s.handleRunSkill
+	// CRIER-MCP-NUDGE (§2.1): the nudge informs. The summary carries counts
+	// only; the list is the explicit, bounded read the nudge names.
+	if !s.nudgeDisabled {
+		s.tools["courier_unread_summary"] = s.handleCourierUnreadSummary
+		s.tools["courier_unread_list"] = s.handleCourierUnreadList
+	}
+	// COURIER-HARNESS §4.4, carried into this row: read-only adapter
+	// introspection. There is deliberately NO delivery tool.
+	s.tools["harness_list"] = s.handleHarnessList
+	s.tools["harness_probe"] = s.handleHarnessProbe
 }
 
 // Serve runs the stdio JSON-RPC loop. Blocks until shutdown.
@@ -229,6 +274,25 @@ func (s *MCPServer) dispatch(ctx context.Context, req *jsonRPCRequest) *jsonRPCR
 		return s.handleToolsList(req)
 	case "tools/call":
 		return s.handleToolsCall(ctx, req)
+	// CRIER-MCP-NUDGE (§2.1): the resource and prompt halves of the nudge.
+	case "resources/list":
+		return s.resultResponse(req.ID, s.handleResourcesList())
+	case "resources/templates/list":
+		return s.resultResponse(req.ID, s.handleResourceTemplatesList())
+	case "resources/read":
+		result, err := s.handleResourcesRead(req.Params)
+		if err != nil {
+			return s.errorResponse(req.ID, -32602, err.Error())
+		}
+		return s.resultResponse(req.ID, result)
+	case "prompts/list":
+		return s.resultResponse(req.ID, s.handlePromptsList())
+	case "prompts/get":
+		result, err := s.handlePromptsGet(req.Params)
+		if err != nil {
+			return s.errorResponse(req.ID, -32602, err.Error())
+		}
+		return s.resultResponse(req.ID, result)
 	default:
 		return s.errorResponse(req.ID, -32601, fmt.Sprintf("method not found: %s", req.Method))
 	}
@@ -244,7 +308,9 @@ func (s *MCPServer) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 				Version: serverVersion(),
 			},
 			Capabilities: serverCapabilities{
-				Tools: toolsCapability{},
+				Tools:     toolsCapability{},
+				Resources: resourcesCapability{},
+				Prompts:   promptsCapability{},
 			},
 		},
 		ID: req.ID,
@@ -305,7 +371,7 @@ func (s *MCPServer) handleToolsCall(ctx context.Context, req *jsonRPCRequest) *j
 // calls anything (DF-CRIER-153). The prerequisites themselves are owned by
 // toolPrerequisites in prereqs.go, which the startup report reads too.
 func (s *MCPServer) toolDefinitions() []toolDefinition {
-	return []toolDefinition{
+	defs := []toolDefinition{
 		{
 			Name:        "register_agent",
 			Description: "Register a new agent with an ed25519 public key and optional capabilities. public_key is required unless the server runs with signature enforcement disabled (CR_REQUIRE_AGENT_SIG=false), in which case it may be omitted to register a keyless agent.",
@@ -404,7 +470,43 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 			Description: "Run a skill registered with the dagger executor and return the new run's id and record. Requires CRIER_HTTP_URL (the Crier server base URL exposing the /dagger control routes).",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"The agent the run is started for — the inbox a terminal outcome is delivered to"},"skill":{"type":"string","description":"Name of a skill registered with the executor"},"args":{"type":"object","description":"Optional skill arguments (opaque JSON)"}},"required":["agent_id","skill"]}`),
 		},
+		// CRIER-MCP-NUDGE (§2.1): counts only. The summary's whole point is
+		// that it never returns a message body, so the schema has no way to
+		// ask for one.
+		{
+			Name:        "courier_unread_summary",
+			Description: "How much courier mail is waiting for this agent: total unread, counts by tag category, the oldest unread timestamp and per-session counts. COUNTS ONLY — it never returns message text. Answers for the bridge's own identity (require CRIER_AGENT_ID) unless agent_id is supplied — another agent's counts need an operator scope, otherwise NUDGE_SCOPE_DENIED. An unregistered agent answers total:0, not an error. Read-only: it never marks anything read. Session counts need the session backend this process can read (CR_SESSION_BACKEND / CR_SESSION_LOG_ROOT).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent to report on (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the count to one courier session"}},"required":[]}`),
+		},
+		{
+			Name:        "courier_unread_list",
+			Description: "Read the unread courier messages (message_id, session_id, author, tags, text, seq) — the \"read them\" the nudge names. Bounded: default 20, maximum 100 (an over-max limit is clamped). Defaults to the bridge's own identity (requires CRIER_AGENT_ID) unless agent_id is supplied. Read-only: it does not mark read, lease or ack anything.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent whose unread messages to read (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the list to one courier session"},"limit":{"type":"integer","description":"Maximum messages to return (default 20, max 100; over-max is clamped)","default":20,"minimum":1,"maximum":100}},"required":[]}`),
+		},
+		// COURIER-HARNESS §4.4: read-only adapter introspection, no delivery.
+		{
+			Name:        "harness_list",
+			Description: "List the harness adapters this process knows, with the capability each Probe measured (available, version, binary, features, reason). Read-only: there is no delivery tool — a message is delivered by ingress, not by an MCP client.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+		},
+		{
+			Name:        "harness_probe",
+			Description: "Probe ONE harness adapter and report its capability (available, version, binary, features, reason for unavailability). An unregistered name answers HARNESS_UNKNOWN naming the known adapters. Read-only.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Adapter name, as reported by harness_list"}},"required":["name"]}`),
+		},
 	}
+
+	if s.nudgeDisabled {
+		kept := defs[:0]
+		for _, def := range defs {
+			if def.Name == "courier_unread_summary" || def.Name == "courier_unread_list" {
+				continue
+			}
+			kept = append(kept, def)
+		}
+		defs = kept
+	}
+	return defs
 }
 
 func (s *MCPServer) errorResponse(id any, code int, message string) *jsonRPCResponse {
@@ -413,6 +515,12 @@ func (s *MCPServer) errorResponse(id any, code int, message string) *jsonRPCResp
 		Error:   &rpcError{Code: code, Message: message},
 		ID:      id,
 	}
+}
+
+// resultResponse wraps a successful result for a method that answers with a
+// plain JSON body (the resource and prompt surface).
+func (s *MCPServer) resultResponse(id any, result any) *jsonRPCResponse {
+	return &jsonRPCResponse{JSONRPC: "2.0", Result: result, ID: id}
 }
 
 func (s *MCPServer) writeError(id any, code int, message string) {

@@ -10,9 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/buildinfo"
+	"github.com/crier-dev/crier/internal/harness"
+	"github.com/crier-dev/crier/internal/harness/build"
 	"github.com/crier-dev/crier/internal/mcp"
 	"github.com/crier-dev/crier/internal/registry"
 )
@@ -161,6 +165,11 @@ func run(args []string) int {
 		}
 		defer closeDelivery()
 	}
+	// CRIER-MCP-NUDGE: the nudge's read side. It never fails startup — a
+	// session store that cannot open leaves the agent-inbox counts working.
+	courier, closeCourier := openCourier(cfg, store, slog.Default())
+	defer closeCourier()
+
 	server := mcp.NewWithOptions(store, mcp.Options{
 		DeliveryHandler: deliveryHandler,
 		AgentID:         os.Getenv(mcp.EnvAgentID),
@@ -177,6 +186,19 @@ func run(args []string) int {
 		// holds no run records of its own — a run started here is visible on
 		// the server (and in the thread) immediately.
 		DaggerToken: identity.Token,
+		// CRIER-MCP-NUDGE: the counts-only unread surface, plus the read-only
+		// harness introspection carried over from COURIER-HARNESS §4.4.
+		Courier: courier,
+		// The session-start hint is armed from the SAME config block the
+		// server reads: the prefix is off by default, and the counts come
+		// from the nudge source above so both halves agree.
+		Harness: build.RegistryWithNudge(cfg.Harness, harness.NudgeHint{
+			SessionStart: cfg.MCP.Nudge.SessionStart,
+			MaxCount:     cfg.MCP.Nudge.MaxCount,
+			Counts:       mcp.SessionStartCounts(courier, os.Getenv(mcp.EnvAgentID)),
+		}),
+		OperatorScope: envBool(slog.Default(), mcp.EnvOperatorScope),
+		NudgeDisabled: !cfg.MCP.Nudge.Enabled,
 	})
 
 	// DF-CRIER-153: in the default in-process mode several advertised tools
@@ -199,6 +221,24 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// envBool reads a boolean environment switch. An unset variable is false; a
+// value that cannot be parsed is logged and treated as false, because the
+// secure default (no operator scope) is the safe one.
+func envBool(logger *slog.Logger, name string) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("ignoring a non-boolean environment switch", "name", name, "value", raw)
+		}
+		return false
+	}
+	return v
 }
 
 // modeName labels the store mode the bridge started in, for the startup tool
@@ -411,7 +451,25 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "                              (X-Agent-Ts/X-Agent-Sig on every request) for servers with")
 	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=true (the secure default). Key material")
 	fmt.Fprintln(out, "                              is never logged.")
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Courier unread nudge (CRIER-MCP-NUDGE):")
+	_, _ = fmt.Fprintln(out, "  courier_unread_summary / courier_unread_list, the resource")
+	_, _ = fmt.Fprintln(out, "  courier://inbox/{agent_id}/unread and the courier_nudge prompt report")
+	_, _ = fmt.Fprintln(out, "  UNREAD COUNTS. The summary never returns message text; the list is the")
+	_, _ = fmt.Fprintln(out, "  explicit, bounded (20/100) read the nudge names. Nothing is marked read.")
+	_, _ = fmt.Fprintln(out, "  CR_MCP_NUDGE_ENABLED          false removes the whole surface (default true)")
+	_, _ = fmt.Fprintln(out, "  CR_MCP_NUDGE_MAX_COUNT        largest count reported, then \"<max>+\" (default 999)")
+	_, _ = fmt.Fprintln(out, "  CR_MCP_NUDGE_SESSION_START    prepend the one-line hint to delivered text (default false)")
+	_, _ = fmt.Fprintln(out, "  CRIER_OPERATOR_SCOPE          true permits reading ANOTHER agent's summary")
+	_, _ = fmt.Fprintln(out, "  CR_SESSION_BACKEND / CR_SESSION_LOG_ROOT / CR_SESSION_SQLITE_PATH point")
+	_, _ = fmt.Fprintln(out, "                                the nudge at the server's session transcripts")
+	_, _ = fmt.Fprintln(out, "                                and read cursors; unset, the counts cover the")
+	_, _ = fmt.Fprintln(out, "                                agent inbox only.")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Harness introspection (COURIER-HARNESS 4.4): harness_list and harness_probe")
+	_, _ = fmt.Fprintln(out, "  report what each configured harness adapter can do. Read-only: there is no")
+	_, _ = fmt.Fprintln(out, "  delivery tool — delivery is an ingress action, not an agent action.")
+	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Dagger control (CR-CHAT-033 — needs CRIER_HTTP_URL, like mesh_peers):")
 	_, _ = fmt.Fprintln(out, "  The server exposes /dagger/runs when it runs with CR_DAGGER_URL set. The")
 	_, _ = fmt.Fprintln(out, "  bridge then offers create_run / run_status / cancel_run / resume_run /")

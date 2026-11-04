@@ -14,6 +14,10 @@ const (
 	EnvHTTPURL = "CRIER_HTTP_URL"
 	// EnvMeshURL is the WebSocket mesh endpoint; mesh_request needs it.
 	EnvMeshURL = "CRIER_MESH_URL"
+	// EnvOperatorScope arms cross-agent nudge reads (CRIER-MCP-NUDGE §5):
+	// without it a bridge answers only for its own identity and any other
+	// agent_id is NUDGE_SCOPE_DENIED.
+	EnvOperatorScope = "CRIER_OPERATOR_SCOPE"
 )
 
 // toolPrerequisite is one tool's environment gate: EVERY listed variable must
@@ -58,6 +62,11 @@ var toolPrerequisites = []toolPrerequisite{
 	{Tool: "resume_run", EnvVars: []string{EnvHTTPURL}},
 	{Tool: "rewind_run", EnvVars: []string{EnvHTTPURL}},
 	{Tool: "run_skill", EnvVars: []string{EnvHTTPURL}},
+	// CRIER-MCP-NUDGE: with no bridge identity the nudge tools can answer only
+	// for an agent_id the caller spells out in every call; the default scope —
+	// "my own mail" — does not exist, so the startup report says so.
+	{Tool: "courier_unread_summary", EnvVars: []string{EnvAgentID}},
+	{Tool: "courier_unread_list", EnvVars: []string{EnvAgentID}},
 }
 
 // UnavailableTools returns the tools that cannot work in a server built with

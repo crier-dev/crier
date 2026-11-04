@@ -12,12 +12,14 @@ package mcp
 // exclusion set below is where that decision is written down and enforced, and
 // the one-line justification per entry is the reason a future reader needs.
 //
-// The relationship is MANY-TO-MANY, not one tool per operation: 19 tools
-// exercise 16 covered spec operations, 48 operations are explicitly excluded,
+// The relationship is MANY-TO-MANY, not one tool per operation: 23 tools
+// exercise 17 covered spec operations, 48 operations are explicitly excluded,
 // and several tools share an operation (deliver_message and send_message both
 // deliver to the durable inbox; retrieve_inbox and get_messages both retrieve it;
-// get_messages and ack_messages both ack it). This guard therefore checks the
-// ACCOUNTING in all four drift directions rather than equality of names.
+// get_messages and ack_messages both ack it; courier_unread_summary and
+// courier_unread_list both read one member's unread state). This guard
+// therefore checks the ACCOUNTING in all four drift directions rather than
+// equality of names.
 //
 // STRICT EQUALITY (every tool name == an operationId) was the premise the first
 // attempt at this row started from, and it was measured RED at HEAD — the tool
@@ -84,6 +86,31 @@ var toolCoverage = map[string][]string{
 	"resume_run": {"daggerResumeRun"},
 	"rewind_run": {"daggerRewindRun"},
 	"run_skill":  {"daggerRunSkill"},
+	// CRIER-MCP-NUDGE — the nudge surface. Both tools read the same
+	// member-scoped unread state the REST read routes serve; the summary adds
+	// the agent-inbox queue depth (the same number inboxStats answers), and
+	// the list is the bounded body form of unreadMessages.
+	"courier_unread_summary": {"inboxStats", "unreadMessages"},
+	"courier_unread_list":    {"unreadMessages"},
+	// No REST counterpart at all: classified in toolsWithNoSpecOperation
+	// below, with the reason the empty mapping is correct.
+	"harness_list":  {},
+	"harness_probe": {},
+}
+
+// toolsWithNoSpecOperation is the ALTERNATIVE classification for a tool that has
+// no REST counterpart at all, with the reason. Assertion (e) requires every
+// toolCoverage entry that maps to nothing to appear here, so an empty mapping
+// is a recorded decision rather than an unclassified hole.
+//
+// These are the harness tools carried over from COURIER-HARNESS §4.4: they
+// introspect adapters that live in the bridge's own process (harness.Registry
+// over the configured binaries), so there is no crier REST operation for them
+// to exercise. The harness surface is deliberately read-only: delivery is an
+// ingress action, and no tool here can start a turn.
+var toolsWithNoSpecOperation = map[string]string{
+	"harness_list":  "COURIER-HARNESS §4.4 read-only adapter census: probes the adapters registered in THIS process (binaries + flags), which no crier REST route serves; it never delivers and never starts a session.",
+	"harness_probe": "COURIER-HARNESS §4.4 read-only adapter probe: same process-local surface as harness_list, one adapter at a time; no delivery verb exists by design.",
 }
 
 // excludedOperations is the ratified exclusion set: every spec operation crier-mcp
@@ -307,13 +334,34 @@ func readSpecOperations(t *testing.T) map[string]specRef {
 	return ops
 }
 
+// TestMCPToolDriftGate is the §7.9 acceptance name for this gate: the four
+// tools this row added appear in BOTH the advertised inventory and the
+// drift-pinned coverage table (TestSpecToolDrift above proves the accounting is
+// complete; this leg names what the row is accountable for).
+func TestMCPToolDriftGate(t *testing.T) {
+	advertised := map[string]bool{}
+	for _, def := range New(registry.NewMemoryStore()).toolDefinitions() {
+		advertised[def.Name] = true
+	}
+	for _, name := range []string{"courier_unread_summary", "courier_unread_list", "harness_list", "harness_probe"} {
+		if !advertised[name] {
+			t.Errorf("%q is not advertised by tools/list", name)
+		}
+		if _, ok := toolCoverage[name]; !ok {
+			t.Errorf("%q has no toolCoverage classification", name)
+		}
+	}
+}
+
 // TestSpecToolDrift holds the crier-mcp tool surface and docs/openapi.yaml
-// accountable to each other in all four drift directions:
+// accountable to each other in all five drift directions:
 //
 //	(a) a tool advertised by toolDefinitions() with no toolCoverage entry
 //	(b) a toolCoverage entry naming a tool the server does not advertise
 //	(c) a toolCoverage value naming an operationId the spec no longer has
 //	(d) a spec operation neither covered by some tool nor explicitly excluded
+//	(e) a toolCoverage entry that maps to NO operationId without a recorded
+//	    reason in toolsWithNoSpecOperation (and a reason naming a ghost tool)
 func TestSpecToolDrift(t *testing.T) {
 	ops := readSpecOperations(t)
 
@@ -329,7 +377,7 @@ func TestSpecToolDrift(t *testing.T) {
 		}
 	}
 
-	var untrackedTools, ghostTools, staleRefs, unclassified []string
+	var untrackedTools, ghostTools, staleRefs, unclassified, unexplainedTools []string
 
 	// (a) every advertised tool is accounted for by the table.
 	for name := range tools {
@@ -361,11 +409,33 @@ func TestSpecToolDrift(t *testing.T) {
 			unclassified = append(unclassified, id+" ("+ops[id].method+" "+ops[id].path+")")
 		}
 	}
+	// (e) a tool that maps to no operation must say why in
+	// toolsWithNoSpecOperation, and that table must not name a tool that is
+	// gone or one that actually covers operations.
+	for name, ids := range toolCoverage {
+		if len(ids) > 0 {
+			continue
+		}
+		if _, ok := toolsWithNoSpecOperation[name]; !ok {
+			unexplainedTools = append(unexplainedTools, name+" (empty toolCoverage, no toolsWithNoSpecOperation reason)")
+		}
+	}
+	for name := range toolsWithNoSpecOperation {
+		ids, ok := toolCoverage[name]
+		if !ok {
+			unexplainedTools = append(unexplainedTools, name+" (reason recorded for a tool with no toolCoverage entry)")
+			continue
+		}
+		if len(ids) > 0 {
+			unexplainedTools = append(unexplainedTools, name+" (claims no spec operation but toolCoverage maps it)")
+		}
+	}
 
 	sort.Strings(untrackedTools)
 	sort.Strings(ghostTools)
 	sort.Strings(staleRefs)
 	sort.Strings(unclassified)
+	sort.Strings(unexplainedTools)
 
 	if len(untrackedTools) > 0 {
 		t.Errorf("crier-mcp advertises tool(s) with no toolCoverage entry: [%s] — map each to the spec operationId(s) it exercises", strings.Join(untrackedTools, " "))
@@ -378,5 +448,8 @@ func TestSpecToolDrift(t *testing.T) {
 	}
 	if len(unclassified) > 0 {
 		t.Errorf("docs/openapi.yaml operation(s) neither covered by a tool nor in excludedOperations: [%s] — classify each (add a toolCoverage value, or an excludedOperations entry with its reason)", strings.Join(unclassified, " "))
+	}
+	if len(unexplainedTools) > 0 {
+		t.Errorf("tool(s) with an unrecorded coverage gap: [%s] — an empty toolCoverage entry needs a toolsWithNoSpecOperation reason, and that reason must not outlive the tool", strings.Join(unexplainedTools, " "))
 	}
 }

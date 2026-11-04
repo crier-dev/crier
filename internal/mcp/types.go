@@ -45,10 +45,23 @@ type serverInfo struct {
 }
 
 type serverCapabilities struct {
-	Tools toolsCapability `json:"tools"`
+	Tools     toolsCapability     `json:"tools"`
+	Resources resourcesCapability `json:"resources"`
+	Prompts   promptsCapability   `json:"prompts"`
 }
 
 type toolsCapability struct{}
+
+// resourcesCapability / promptsCapability are the nudge's non-tool surfaces
+// (CRIER-MCP-NUDGE §2.1). Subscribe/listChanged are false: the counts are read
+// on demand, never pushed.
+type resourcesCapability struct {
+	Subscribe bool `json:"subscribe"`
+}
+
+type promptsCapability struct {
+	ListChanged bool `json:"listChanged"`
+}
 
 // MCP tool call types.
 
@@ -219,10 +232,52 @@ type MeshRequestOutput struct {
 	TraceID    string         `json:"trace_id"`
 }
 
+// Courier nudge tool inputs (CRIER-MCP-NUDGE §2.1). Both tools answer for the
+// caller's own member id unless an explicit agent_id is supplied, and an
+// explicit one is refused with NUDGE_SCOPE_DENIED unless operator scope is
+// armed.
+
+// CourierUnreadSummaryInput is courier_unread_summary's arguments. Counts only:
+// there is deliberately no way to ask it for text.
+type CourierUnreadSummaryInput struct {
+	AgentID   string `json:"agent_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// CourierUnreadListInput is courier_unread_list's arguments. Limit is bounded
+// (default 20, max 100) and over-max values are clamped.
+type CourierUnreadListInput struct {
+	AgentID   string `json:"agent_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+// Harness tool input (COURIER-HARNESS §4.4): harness_list takes no arguments,
+// harness_probe names one adapter.
+type HarnessProbeInput struct {
+	Name string `json:"name"`
+}
+
+// HarnessEntry is one row of harness_list: the adapter name and the Capability
+// its Probe measured. Read-only; there is no delivery tool by design.
+type HarnessEntry struct {
+	Name      string          `json:"name"`
+	Available bool            `json:"available"`
+	Version   string          `json:"version,omitempty"`
+	Binary    string          `json:"binary,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Features  map[string]bool `json:"features,omitempty"`
+}
+
+// HarnessListOutput is harness_list's body: name, then the measured capability.
+type HarnessListOutput struct {
+	Harnesses []HarnessEntry `json:"harnesses"`
+	Count     int            `json:"count"`
+}
+
 // Dagger control tool inputs (CR-CHAT-033). The outputs are daggerctl's own
 // RunRecord, so the tool result, the REST body and the stored JSONL line are
 // one shape.
-
 type CreateRunInput struct {
 	AgentID string `json:"agent_id"`
 	Prompt  string `json:"prompt"`

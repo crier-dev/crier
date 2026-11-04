@@ -968,7 +968,7 @@ signing `METHOD\n<path>\n<unix-seconds>` — the query string is excluded.
 
 #### MCP tools
 
-The MCP server exposes **19 tools** (measured live via a `tools/list` stdio
+The MCP server exposes **23 tools** (measured live via a `tools/list` stdio
 exchange). The argument names below are the properties of each tool's
 `InputSchema` in `internal/mcp/server.go`; `*` marks a required argument.
 
@@ -993,6 +993,10 @@ exchange). The argument names below are the properties of each tool's
 | `resume_run` | `run_id`* |
 | `rewind_run` | `run_id`*, `node_id`* |
 | `run_skill` | `agent_id`*, `skill`*, `args` (opaque JSON) |
+| `courier_unread_summary` | `agent_id` (default: the bridge's own identity), `session_id` — counts only, never message text |
+| `courier_unread_list` | `agent_id`, `session_id`, `limit` (int 1-100, default `20`; over-max clamps) |
+| `harness_list` | _none_ |
+| `harness_probe` | `name`* |
 
 Unknown arguments are rejected: a member of `arguments` that is not one of the
 tool's declared properties is a normal tool error naming it — `invalid
@@ -1026,19 +1030,21 @@ request, and a server running with signature enforcement on
 | `mesh_peers` | `CRIER_HTTP_URL` | queries `GET /mesh/peers` on that server |
 | `mesh_request` | `CRIER_MESH_URL`, `CRIER_AGENT_ID` | the bridge opens its own WebSocket connection only when both are set |
 | `create_run`, `run_status`, `cancel_run`, `resume_run`, `rewind_run`, `run_skill` | `CRIER_HTTP_URL` | the dagger control tools (CR-CHAT-033): they drive the run records the **server** holds through its dagger control routes, so the server must also run with `CR_DAGGER_URL` set — `crier` never executes a DAG itself |
+| `courier_unread_summary`, `courier_unread_list` | `CRIER_AGENT_ID` | the unread nudge (CRIER-MCP-NUDGE): they answer for the bridge's own identity unless `agent_id` is supplied, and another agent's counts need `CRIER_OPERATOR_SCOPE=true` (otherwise `NUDGE_SCOPE_DENIED`). Session counts also need the session backend the bridge can read (`CR_SESSION_BACKEND`, `CR_SESSION_LOG_ROOT`, `CR_SESSION_SQLITE_PATH`); without it the counts cover the agent inbox only |
+| `harness_list`, `harness_probe` | _nothing_ | COURIER-HARNESS §4.4 read-only adapter introspection. There is deliberately **no** delivery tool — delivery is an ingress action, not an agent action |
 
-With no environment at all — the default in-process stdio mode — ten tools
+With no environment at all — the default in-process stdio mode — twelve tools
 cannot work, and startup says exactly which:
 
 ```text
-INFO MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them mode=in-process tools=19 available_tools=9 unavailable_tools="[get_messages ask_agent mesh_peers mesh_request create_run run_status cancel_run resume_run rewind_run run_skill]" missing_env="[CRIER_AGENT_ID CRIER_HTTP_URL CRIER_MESH_URL]"
+INFO MCP tool surface: some advertised tools cannot work in this mode — set the missing environment variables to enable them mode=in-process tools=23 available_tools=11 unavailable_tools="[get_messages ask_agent mesh_peers mesh_request create_run run_status cancel_run resume_run rewind_run run_skill courier_unread_summary courier_unread_list]" missing_env="[CRIER_AGENT_ID CRIER_HTTP_URL CRIER_MESH_URL]"
 ```
 
 ##### A worked stdio session
 
 Every tool is a JSON-RPC frame on stdin and one response line on stdout — no MCP
 client, no server, no environment variables, because an unconfigured `crier-mcp`
-serves the same 19 tools from an in-process store. The two tools below are from
+serves the same 23 tools from an in-process store. The two tools below are from
 the _nothing_ row above (`register_agent`, `list_agents`), so this whole session
 is copy-pasteable as-is; a tool whose row names environment needs it first.
 

@@ -507,8 +507,10 @@ claims:
     doc: TESTERS.md
     # CR-CHAT-033 added the six dagger control tools (create_run, run_status,
     # cancel_run, resume_run, rewind_run, run_skill), so 13 -> 19.
-    quote: "19 tools"
-    expect: 19
+    # CRIER-MCP-NUDGE added courier_unread_summary, courier_unread_list,
+    # harness_list and harness_probe, so 19 -> 23.
+    quote: "23 tools"
+    expect: 23
     xfail: null
   # CR-GAP-057: the README now publishes the same MCP inventory (a tools table
   # with per-tool arguments). Same id and the same live probe (a real tools/list
@@ -517,8 +519,8 @@ claims:
   - id: COUNT-MCP-TOOLS
     kind: count
     doc: README.md
-    quote: "19 tools"
-    expect: 19
+    quote: "23 tools"
+    expect: 23
     xfail: null
   - id: COUNT-ROUTER-PATHS
     kind: count

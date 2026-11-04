@@ -14,6 +14,26 @@ const DefaultTimeout = 900 * time.Second
 // DefaultMaxConcurrent bounds in-flight deliveries when config does not say.
 const DefaultMaxConcurrent = 4
 
+// NudgeHint is the session-start hint's wiring (CRIER-MCP-NUDGE, §2.2): when
+// SessionStart is true and Counts is set, Deliver prepends nudgePrefix to the
+// message text it hands the adapter.
+//
+// It is a hook rather than a store dependency because the courier stores the
+// numbers live in (inboxes + read cursors) are not the harness package's to
+// know. The default — the zero value — is OFF: no hook, no prefix, and the
+// delivered text is byte-identical to a build without this feature.
+type NudgeHint struct {
+	// SessionStart is mcp.nudge.session_start. Default false: a prefix
+	// changes the agent's prompt, and that is a per-deployment product
+	// decision, not a default.
+	SessionStart bool
+	// MaxCount is mcp.nudge.max_count. Zero means NudgeMaxCountDefault.
+	MaxCount int
+	// Counts answers (total unread, categories) for the message about to be
+	// delivered. Nil with SessionStart true delivers no prefix.
+	Counts func(ctx context.Context, msg Message) (total int, categories []string)
+}
+
 // RegistryOptions is what a caller wires from config. Zero values take the
 // documented defaults, so a Registry built with no options still behaves.
 type RegistryOptions struct {
@@ -34,6 +54,9 @@ type RegistryOptions struct {
 	// whose implementation is a later row (pi, codex). They are registered
 	// with a Capability that says so, so a caller never sees "unknown".
 	KnownUnavailable map[string]string
+	// Nudge is the session-start unread hint (CRIER-MCP-NUDGE). The zero
+	// value is OFF, which is the shipped default.
+	Nudge NudgeHint
 }
 
 // Registry resolves a harness name to an adapter, serialises deliveries per
@@ -49,6 +72,7 @@ type Registry struct {
 	sem       chan struct{}
 	perSess   keyedMutex
 	now       func() time.Time
+	nudge     NudgeHint
 	delivered uint64
 }
 
@@ -84,6 +108,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		timeout:  timeout,
 		sem:      make(chan struct{}, maxConcurrent),
 		now:      now,
+		nudge:    opts.Nudge,
 	}
 	for name, reason := range opts.KnownUnavailable {
 		r.adapters[name] = unavailableAdapter{name: name, reason: reason}
@@ -211,7 +236,8 @@ func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) Receipt {
 
 	sess := req.SessionRef
 	sess.Harness = name
-	rc, err := adapter.Deliver(deliveryCtx, sess, req.Message)
+	msg := r.applyNudgeHint(deliveryCtx, req.Message)
+	rc, err := adapter.Deliver(deliveryCtx, sess, msg)
 	if err != nil {
 		// A returned error is reserved for "the call could not be attempted";
 		// the harness-side vocabulary has no better word for it than

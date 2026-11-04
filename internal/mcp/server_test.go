@@ -684,8 +684,8 @@ func TestToolsList(t *testing.T) {
 	if err := json.Unmarshal(result["tools"], &tools); err != nil {
 		t.Fatalf("unmarshal tools array: %v", err)
 	}
-	if len(tools) != 19 {
-		t.Fatalf("expected 19 tools, got %d", len(tools))
+	if len(tools) != 23 {
+		t.Fatalf("expected 23 tools, got %d", len(tools))
 	}
 }
 

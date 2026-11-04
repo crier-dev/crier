@@ -604,7 +604,7 @@ Migrations apply automatically on startup. With the Postgres backend, agents
 and undelivered messages survive server restarts; without
 `CR_DATABASE_URL` everything is process-lifetime only — the demo-only in-memory
 backend, explicitly not the configuration §1 documents. The MCP server
-(`make build-mcp && ./bin/crier-mcp`, stdio, 13 tools) shares the same
+(`make build-mcp && ./bin/crier-mcp`, stdio, 23 tools) shares the same
 backend, so agents registered over HTTP are visible over MCP and vice versa.
 
 ### 6.1 Remote MCP mode (crier-mcp against a running server)
