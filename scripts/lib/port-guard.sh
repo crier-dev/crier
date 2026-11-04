@@ -111,7 +111,10 @@
 #
 #   ARM D — a FIRST-candidate collision is rotated past: the selection walks on
 #           to the next candidate, names the squatted port AND its holder pid,
-#           and reports how many candidates it skipped.
+#           and reports how many candidates it skipped. The base it rotates
+#           from is squatted with proven ownership, so a base lost in the
+#           pick->bind window (stolen, or a bind judged dead) rotates to a fresh
+#           base instead of failing the arm (INT-CI-024).
 #   ARM E — every candidate occupied fails closed (exit 1): the budget is named,
 #           and every attempted port is listed with the holder that took it —
 #           never a silent pick of a port somebody else owns. Its three
@@ -137,7 +140,15 @@
 # child is the same selftest CI runs. Budgets are overridable:
 # PG_SELFTEST_DECOY_TRIES (rotation attempts, default 5) and
 # PG_SELFTEST_BIND_TRIES (bounded bind wait per attempt, default 50 x 0.1s).
-# PG_SELFTEST_ARM_E_TRIES bounds ARM E's fresh-base fixture tries (default 3).
+# PG_SELFTEST_ARM_E_TRIES bounds ARM E's fresh-base fixture tries (default 3),
+# and PG_SELFTEST_ROT_BASE_TRIES bounds the ARM D/E/F fixture's fresh-base tries
+# (default 3). The rotation fixture needs ONE run of 4 consecutive ports: its
+# base is squatted under proven ownership for ARM D to collide with and ARM F to
+# find occupied, with base+3 free for ARM F's explicit port. A base lost in the
+# pick->bind window is rotated to a FRESH base (never re-squatted) instead of
+# reding the three arms (INT-CI-024); when every try is lost the fixture reports
+# a named SETUP failure on stderr — never a PREMISE BROKEN result — and the
+# three rotation checks still count as failures.
 #
 # shellcheck shell=bash disable=SC2155,SC2317
 
@@ -553,7 +564,9 @@ _pg_selftest_free_run() {
 # retry: returns 1 when the port could not be taken (its reason is in
 # _pg_SELFTEST_TRY_REASON via _pg_selftest_decoy_ready). Retrying the SAME
 # candidate would be wrong — a squat that failed because another process took
-# the port stays failed — so the ARM E retry moves to a fresh base instead.
+# the port stays failed — so both fresh-base prepare helpers
+# (_pg_selftest_arm_e_prepare, _pg_selftest_rot_prepare) move to a fresh base
+# instead.
 _pg_selftest_squat_exact() { # <port> <log>
   _pg_SELFTEST_TRY_REASON=""
   _pg_selftest_squat "$1" "$2"
@@ -613,6 +626,55 @@ _pg_selftest_arm_e_prepare() { # <log> <reserved-lo> <reserved-hi>
     t=$((t + 1))
   done
   echo "port-guard selftest: FAIL: ARM E could not occupy $tries fresh candidate base(s) (bases tried:${_pg_SELFTEST_ARM_E_TRIES:- none}) — every fixture candidate must be held by a listener this selftest owns" >&2
+  return 1
+}
+
+# _pg_selftest_rot_prepare <log> — pick a FRESH run of 4 consecutive free ports
+# and squat the BASE of that run with proven ownership, so ARM D has a
+# first-candidate collision to rotate past and ARM F has a free explicit port at
+# base+3. The pick->bind window is unguarded on a busy runner (CI run
+# 41889075219: the picked base was stolen, or a slow bind was judged dead), and
+# one lost base used to red all three rotation arms, so a lost base now costs a
+# FRESH base instead — the shape _pg_selftest_arm_e_prepare already uses for ARM
+# E (INT-CI-017), applied to the ARM D/E/F fixture (INT-CI-024).
+#   _pg_SELFTEST_ROT_BASE   the base of the 4-port reserved run
+#   _pg_SELFTEST_ROT_PID    the holder pid of that base (proven ours)
+#   _pg_SELFTEST_ROT_TRIES  " :p(reason) …" every base tried, for the report
+# A base whose squat failed is left to the EXIT trap (the listener
+# _pg_selftest_squat started was already killed by it) and the next base is
+# picked afresh; only a FULLY squatted base is returned. The reserved range is
+# re-verified free by every fresh pick, so a base abandoned on a foreign holder
+# can never widen the window ARM D and ARM F assert on. Returns 0 on success, 1
+# when every fresh base was lost (the caller reports a SETUP failure).
+_pg_selftest_rot_prepare() { # <log>
+  local log="$1" tries="${PG_SELFTEST_ROT_BASE_TRIES:-3}" t=0 base=""
+  _pg_SELFTEST_ROT_BASE=""
+  _pg_SELFTEST_ROT_PID=""
+  _pg_SELFTEST_ROT_TRIES=""
+  _pg_SELFTEST_ROT_LOST=0
+  while [ "$t" -lt "$tries" ]; do
+    base="$(_pg_selftest_free_run 4)" || base=""
+    if [ -z "$base" ]; then
+      _pg_SELFTEST_ROT_TRIES="$_pg_SELFTEST_ROT_TRIES none(free-run)"
+      _pg_SELFTEST_ROT_LOST=$((_pg_SELFTEST_ROT_LOST + 1))
+      t=$((t + 1))
+      continue
+    fi
+    if _pg_selftest_squat_exact "$base" "$log"; then
+      _pg_SELFTEST_ROT_TRIES="$_pg_SELFTEST_ROT_TRIES :$base"
+      _pg_SELFTEST_ROT_BASE="$base"
+      _pg_SELFTEST_ROT_PID="$_pg_SELFTEST_SQUAT_PID"
+      return 0
+    fi
+    _pg_SELFTEST_ROT_TRIES="$_pg_SELFTEST_ROT_TRIES :$base(${_pg_SELFTEST_TRY_REASON:-unknown reason})"
+    _pg_SELFTEST_ROT_LOST=$((_pg_SELFTEST_ROT_LOST + 1))
+    t=$((t + 1))
+  done
+  {
+    echo "port-guard selftest: FAIL: ARM D/E/F SETUP — could not build the rotation fixture: all $tries fresh base(s) tried were lost (bases tried:${_pg_SELFTEST_ROT_TRIES:- none}) — the base must be held by a listener this selftest owns"
+    echo "  PG_SELFTEST_ROT_BASE_TRIES (currently $tries) bounds the fresh-base tries; the fixture needs ONE run of 4 consecutive ports (ARM D's occupied base, its next candidate, and ARM F's free explicit port at base+3)"
+    echo "  this is a SETUP failure of the selftest fixture, NOT a PREMISE BROKEN result — the rotation contract was never exercised, so the three rotation checks count as failures"
+  } >&2
   return 1
 }
 
@@ -1281,27 +1343,24 @@ SHIM
   # failure by contract, so every call runs in a subshell whose status — plus the
   # SELECTED=/SKIPPED= lines that subshell prints — is the assertion.
   if [ "$arms_skipped" -eq 0 ]; then
-    local rot_base="" rot_log="" squat_rc=0 squat_pid="" rot_ready=1
+    local rot_base="" rot_log="" squat_pid="" rot_ready=1
     checks=$((checks + 3)) # ARM D, ARM E, ARM F — counted even when the fixture cannot be built
     _pg_SELFTEST_SQUAT_PIDS=""
     rot_log="$tmp/rotation-squat.log"
-    rot_base="$(_pg_selftest_free_run 4)" || rot_base=""
-    if [ -z "$rot_base" ]; then
-      echo "port-guard selftest: FAIL: ARM D/E/F: no run of 4 consecutive free ports is available for the rotation fixture" >&2
+    # One base drives all three arms (ARM D rotates from it, ARM F uses base+3
+    # as its free explicit port), so it is squatted under proven ownership with
+    # a bounded FRESH-base retry (INT-CI-024): a base lost in the pick->bind
+    # window costs a new base, never the three arms. The helper prints a named
+    # SETUP error — never a PREMISE BROKEN verdict — when every try is lost.
+    if _pg_selftest_rot_prepare "$rot_log"; then
+      rot_base="$_pg_SELFTEST_ROT_BASE"
+      squat_pid="$_pg_SELFTEST_ROT_PID"
+      if [ "${_pg_SELFTEST_ROT_LOST:-0}" -gt 0 ]; then
+        echo "port-guard selftest: rotation fixture rotated past $_pg_SELFTEST_ROT_LOST lost base(s) and squatted :$rot_base on a fresh one (bases tried:$_pg_SELFTEST_ROT_TRIES — a lost pick->bind base costs a fresh base, INT-CI-024)"
+      fi
+    else
       fails=$((fails + 3))
       rot_ready=0
-    fi
-    if [ "$rot_ready" -eq 1 ]; then
-      # Called DIRECTLY, not through a command substitution: the squatter must
-      # outlive the call so the rotation can be shown to leave it alone.
-      _pg_selftest_squat "$rot_base" "$rot_log"
-      squat_rc=$?
-      squat_pid="$_pg_SELFTEST_SQUAT_PID"
-      if [ "$squat_rc" -ne 0 ]; then
-        echo "port-guard selftest: FAIL: ARM D/E/F: could not squat :$rot_base with a listener this selftest owns (rc=$squat_rc — 2 means no python3/nc is available)" >&2
-        fails=$((fails + 3))
-        rot_ready=0
-      fi
     fi
 
     if [ "$rot_ready" -eq 1 ]; then
@@ -1476,7 +1535,8 @@ by a PATH shim for python3:
   ARM C — a foreign listener on the candidate port is never adopted as the decoy:
           the port must be held by the pid the selftest started.
 It then proves select_scratch_port's own contract (QA-CRIER-10) on a run of
-consecutive ports it picks as free and squatters it starts and owns:
+consecutive ports it picks as free and squatters it starts and owns (its base is
+re-picked on a lost pick->bind base, PG_SELFTEST_ROT_BASE_TRIES, default 3):
   ARM D — a FIRST-candidate collision is rotated past, naming the occupied
           candidate, its holder pid, and the port it selected instead;
   ARM E — every candidate occupied fails closed (exit 1), listing each attempted
