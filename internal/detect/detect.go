@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -66,6 +67,38 @@ const (
 	SeverityWarning  = "warning"
 	SeverityCritical = "critical"
 )
+
+// AlertKind is the (signal, severity) pair one alert is counted under
+// (MON-CRIER-004). Both fields are the bounded enums above — no agent id, no
+// message id, nothing caller-chosen — so the metric's label set is closed.
+type AlertKind struct {
+	Signal   string
+	Severity string
+}
+
+// alertKinds is the closed set of pairs the detector raises today: one per
+// signal, with the severity that signal is raised at. It exists so the alert
+// counter is seeded at 0 and the series is visible on a scrape BEFORE the first
+// alert — an idle detector must not look like an absent one.
+var alertKinds = []AlertKind{
+	{Signal: SignalCanaryTrip, Severity: SeverityCritical},
+	{Signal: SignalFanoutSpike, Severity: SeverityCritical},
+	{Signal: SignalNewPeerBurst, Severity: SeverityCritical},
+	{Signal: SignalOddHourVolume, Severity: SeverityWarning},
+}
+
+// alertsTotal counts raised alerts by kind (MON-CRIER-004, observability-spec
+// §3.3): the trend the grow-only Alerts() slice cannot give. It is a real
+// counter incremented at raise(), not a scrape-time reading of the slice, so it
+// keeps meaning "how many ever fired" and matches the audit log's entries.
+var alertsTotal = metrics.Default.NewCounterVec("crier_detect_alerts_total",
+	"Alerts raised by the detection layer, by signal and severity (both bounded enums).", "signal", "severity")
+
+func init() {
+	for _, k := range alertKinds {
+		alertsTotal.With(k.Signal, k.Severity)
+	}
+}
 
 // Config tunes the detector. The zero value is valid: every window and
 // threshold falls back to its documented default.
@@ -537,6 +570,11 @@ func (d *Detector) raise(a Alert, at time.Time) {
 	d.alerts = append(d.alerts, a)
 	d.mu.Unlock()
 
+	// The counter is incremented outside the lock: both fields are the
+	// detector's bounded enums, so this can never widen the label set
+	// (MON-CRIER-004).
+	alertsTotal.With(a.Signal, a.Severity).Inc()
+
 	d.record(Entry{
 		At:      a.At,
 		Kind:    KindAlert,
@@ -568,6 +606,23 @@ func (d *Detector) Alerts() []Alert {
 	return out
 }
 
+// AlertsByKind counts the alerts raised so far per (signal, severity) pair — the
+// bounded snapshot an exporter needs, without copying the grow-only slice
+// (MON-CRIER-004). Pairs that have not fired are absent, not zero; a nil
+// detector (detection disabled) yields an empty map.
+func (d *Detector) AlertsByKind() map[AlertKind]int {
+	out := map[AlertKind]int{}
+	if d == nil {
+		return out
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, a := range d.alerts {
+		out[AlertKind{Signal: a.Signal, Severity: a.Severity}]++
+	}
+	return out
+}
+
 // Quarantined reports whether the agent has been contained. It implements
 // registry.Detector: the delivery path asks this before anything else.
 func (d *Detector) Quarantined(agentID string) bool {
@@ -590,6 +645,18 @@ func (d *Detector) Quarantines() []Quarantine {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
 	return out
+}
+
+// QuarantinedCount returns how many agents are currently contained. It is the
+// bounded reading behind crier_detect_quarantined_current (MON-CRIER-004): a
+// count, not the roster, so a gauge scrape allocates nothing per agent.
+func (d *Detector) QuarantinedCount() int {
+	if d == nil {
+		return 0
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.quarantined)
 }
 
 // Stats is the detector's own tally, for the read API.

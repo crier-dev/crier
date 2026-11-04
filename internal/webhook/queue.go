@@ -79,6 +79,35 @@ func (q *MemoryQueue) Len() int {
 	return len(q.items)
 }
 
+// OldestCreatedAt reports the CreatedAt of the OLDEST pending item, and false
+// when nothing is queued (MON-CRIER-004).
+//
+// It scans every item rather than reading items[0]: a redelivery re-Push
+// appends the same item at the tail with its original CreatedAt, so FIFO
+// position is NOT creation order. The oldest CreatedAt is the honest answer to
+// "how long has the oldest un-delivered push been waiting".
+//
+// This is an optional capability of a Queue implementation (the driver reads it
+// through an interface assertion), not part of the Queue interface: a queue
+// that cannot report an age leaves the gauge at 0 instead of inventing one.
+func (q *MemoryQueue) OldestCreatedAt() (time.Time, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var oldest time.Time
+	for _, it := range q.items {
+		if it == nil || it.CreatedAt.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || it.CreatedAt.Before(oldest) {
+			oldest = it.CreatedAt
+		}
+	}
+	if oldest.IsZero() {
+		return time.Time{}, false
+	}
+	return oldest, true
+}
+
 // marshalJSON is a helper for tests/debug.
 func (q *QueueItem) marshalJSON() ([]byte, error) {
 	return json.Marshal(q)

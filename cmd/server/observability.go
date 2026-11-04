@@ -9,11 +9,13 @@ import (
 	"net/http/pprof"
 	"strconv"
 
+	"github.com/crier-dev/crier/internal/detect"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
+	"github.com/crier-dev/crier/internal/webhook"
 
 	"github.com/gorilla/mux"
 )
@@ -71,10 +73,21 @@ type observabilityDeps struct {
 	relaySvc *relay.Relay
 	meshSvc  *mesh.Mesh
 	fedHold  *federation.HoldManager
+	// webhookDriver is the live push driver (MON-CRIER-004): its retry/backoff
+	// queue is the G5 backlog the depth/age gauges read. Always non-nil on a
+	// booted server; nil renders 0.
+	webhookDriver *webhook.Driver
+	// detector is the live detection layer (MON-CRIER-004), nil when detection
+	// is disabled — the quarantine gauge then renders 0.
+	detector *detect.Detector
 	// queueDepth reads the store-wide inbox queue (CR-FEAT-035). Wired from
 	// the store that actually serves, so the gauges report the queue of the
 	// backend answering — memory or postgres — and never a copied number.
 	queueDepth queueDepthReader
+	// storeBackend names the backend behind queueDepth, from the same resolved
+	// value GET /status advertises (memory|sqlite|postgres). It is a metric
+	// LABEL, so it is bounded by that enum — never a DSN, path or URL.
+	storeBackend string
 }
 
 // registerObservabilityGauges registers the composition-layer gauges whose
@@ -104,7 +117,39 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			}
 			return float64(n)
 		})
-	registerQueueDepthGauges(deps.queueDepth)
+	registerQueueDepthGauges(deps.queueDepth, deps.storeBackend)
+	// MON-CRIER-004: the subsystem-state series (webhook backlog, federation
+	// hold age, detection containment).
+	registerStateGauges(deps)
+}
+
+// storeQueueDepthReadErrors counts scrapes where the serving store reported no
+// inbox queue depth — exactly the reads that render inbox_queue_* as NaN
+// (MON-CRIER-004, spec §3.3 / G8). NaN is honest, but an intermittently
+// unreadable store produces gaps a rate cannot explain; this counter makes the
+// gap countable. The backend label is bounded by depthBackendLabel.
+var storeQueueDepthReadErrors = metrics.Default.NewCounterVec("crier_store_queue_depth_read_errors_total",
+	"Scrapes where the serving store reported no inbox queue depth (the reads that render inbox_queue_* as NaN), by backend.", "backend")
+
+// depthBackendLabel bounds the `backend` label of the read-error counter. It is
+// one of the resolved store backends (memory|sqlite|postgres — the same value
+// GET /status advertises) or:
+//
+//   - "proxy" — there is no depth reader at all: the serving store does not
+//     implement registry.DepthReporter (the remote proxy). The NaN is then a
+//     capability gap, permanently present, and must not be read as a flapping
+//     store; the label is what tells the two apart.
+//   - "unknown" — a reader with no resolved backend name (a hand-wired caller).
+//     Still bounded, never a DSN, path or URL.
+func depthBackendLabel(read queueDepthReader, backend string) string {
+	if read == nil {
+		return "proxy"
+	}
+	switch backend {
+	case "memory", "sqlite", "postgres":
+		return backend
+	}
+	return "unknown"
 }
 
 // registerQueueDepthGauges exposes the store-wide inbox queue (CR-FEAT-035):
@@ -116,13 +161,37 @@ func registerObservabilityGauges(deps observabilityDeps) {
 // empty queue, which is the one reading an operator must never be handed by
 // accident. NaN is valid in the text exposition format, so a scrape stays
 // parseable either way.
-func registerQueueDepthGauges(read queueDepthReader) {
-	sample := func(pick func(registry.QueueDepth) float64) func() float64 {
-		return func() float64 {
-			if read == nil {
-				return math.NaN()
+//
+// storeBackend names the backend behind read (memory|sqlite|postgres) and is
+// only ever used as the bounded label of crier_store_queue_depth_read_errors_total
+// (MON-CRIER-004), which is incremented ONCE per scrape that produced no value.
+func registerQueueDepthGauges(read queueDepthReader, storeBackend string) {
+	backend := depthBackendLabel(read, storeBackend)
+	// Seed the child at 0 so the series exists on a healthy boot: a store that
+	// answers every read never increments it, and an absent sample would read
+	// as "this counter does not exist" (spec §3.3 asks for the gap to be
+	// countable AND visible).
+	storeQueueDepthReadErrors.With(backend)
+
+	// readOnce performs one depth read. countFailure is true for exactly ONE of
+	// the three gauges: the exposition evaluates each gauge separately, so
+	// counting in all three would report three errors for one failed scrape.
+	readOnce := func(countFailure bool) (registry.QueueDepth, bool) {
+		if read == nil {
+			if countFailure {
+				storeQueueDepthReadErrors.With(backend).Inc()
 			}
-			depth, ok := read()
+			return registry.QueueDepth{}, false
+		}
+		depth, ok := read()
+		if !ok && countFailure {
+			storeQueueDepthReadErrors.With(backend).Inc()
+		}
+		return depth, ok
+	}
+	sample := func(pick func(registry.QueueDepth) float64, countFailure bool) func() float64 {
+		return func() float64 {
+			depth, ok := readOnce(countFailure)
 			if !ok {
 				return math.NaN()
 			}
@@ -132,13 +201,13 @@ func registerQueueDepthGauges(read queueDepthReader) {
 
 	metrics.Default.RegisterGaugeFunc("inbox_queue_depth",
 		"Inbox messages queued and unacknowledged across all agents (leased messages included), read from the serving store. NaN when the store cannot report a depth.",
-		sample(func(d registry.QueueDepth) float64 { return float64(d.Pending) }))
+		sample(func(d registry.QueueDepth) float64 { return float64(d.Pending) }, true))
 	metrics.Default.RegisterGaugeFunc("inbox_queue_leased",
 		"How many of inbox_queue_depth are currently held under a live lease. NaN when the store cannot report a depth.",
-		sample(func(d registry.QueueDepth) float64 { return float64(d.Leased) }))
+		sample(func(d registry.QueueDepth) float64 { return float64(d.Leased) }, false))
 	metrics.Default.RegisterGaugeFunc("inbox_queue_oldest_age_seconds",
 		"Age of the oldest unacknowledged, unexpired inbox message, in seconds (0 when nothing is queued). NaN when the store cannot report a depth.",
-		sample(func(d registry.QueueDepth) float64 { return d.OldestAge.Seconds() }))
+		sample(func(d registry.QueueDepth) float64 { return d.OldestAge.Seconds() }, false))
 }
 
 // registerPProf mounts the net/http/pprof surface on the gorilla mux:

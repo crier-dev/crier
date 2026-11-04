@@ -395,7 +395,7 @@ func TestCRFEAT035_QueueDepthGaugeIsNaNWhenTheStoreCannotReport(t *testing.T) {
 		t.Fatalf("a nil reader must render as null, got %+v", got)
 	}
 
-	registerQueueDepthGauges(nil)
+	registerQueueDepthGauges(nil, "proxy")
 	body := renderMetrics(t)
 	for _, name := range []string{"inbox_queue_depth", "inbox_queue_leased", "inbox_queue_oldest_age_seconds"} {
 		if !strings.Contains(body, name+" NaN") {
