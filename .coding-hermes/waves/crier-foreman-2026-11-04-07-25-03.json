@@ -1,0 +1,38 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-07-25-03",
+  "block": "MON-CRIER",
+  "block_title": "Observability: metrics reachable + queued-state series (P0, 5 rows)",
+  "mode": "serial-fallback",
+  "wave_budget": 10,
+  "capacity": {
+    "nproc": 16,
+    "loadavg_1m_at_compose": 8.69,
+    "slots_formula": "max(1, min(6, 16 - ceil(8.69))) = 6",
+    "slots": 6,
+    "wave_size": 1,
+    "why_not_wave": "The block has exactly two ready rows and they are NOT independent: MON-CRIER-005 is the global crier_* rename with a dual-emit window and must land LAST by its own design (it renames every series, including the ones MON-CRIER-002 introduces). MON-CRIER-002 therefore runs alone this tick, and 005 follows on a later tick once 002 is on main. Box capacity was never the limiter."
+  },
+  "resume_evidence": "Predecessor tick crier-foreman-2026-11-04-06-11-13 drove this same block (audit event 2079) and landed MON-CRIER-001/003/004 at 465daafe; its manifest explicitly deferred MON-CRIER-002 ('histogram foundation; shares the guard-check seam with 003, serial after 003') and MON-CRIER-005 ('global crier_* rename; must land last'). 003 is now merged, so 002 is the block's next ready row. Resume-first rule: same block, no re-sampling.",
+  "rows": [
+    {
+      "id": "MON-CRIER-002",
+      "priority": "P1",
+      "title": "No latency distribution anywhere: add histograms for HTTP routes, deliveries, webhook push and guard checks",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-002",
+      "branch": "wt/MON-CRIER-002",
+      "base": "8affddc6",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-04-07-25-03/brief-MON-CRIER-002.txt",
+      "log": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-04-07-25-03/worker-MON-CRIER-002.log",
+      "gitreins_task": "MON-CRIER-002 (created + started in this worktree by the foreman at 2026-11-04T12:3xZ)",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman",
+      "disjoint_files": "internal/metrics/metrics.go (histogram type), cmd/server/observability.go + new cmd/server/metrics_latency.go, internal/webhook/driver.go, internal/guard/metrics.go, internal/registry/deliver_composed.go"
+    }
+  ],
+  "deferred_rows_same_block": [
+    "MON-CRIER-005 — global crier_* rename with dated dual-emit window; must land last, after MON-CRIER-002 is on main"
+  ],
+  "merge_protocol": "serial: rebase wt/MON-CRIER-002 on current origin/main, count deletions (expect 0), run go build/vet/test on the merged tree, merge --no-ff, push both remotes, verify parity",
+  "ownership_note": "Canonical checkout /home/kara/crier was 41 commits BEHIND origin/main with 0 tracked edits; fast-forwarded to 8affddc6 this tick after removing six untracked files that blocked the merge: 5 specs/COURIER-*.md copies byte-identical to origin/main blobs (git hash-object proven) and docs/observability-spec.md, an earlier draft whose published successor is a strict superset (preserved at <scratch>/observability-spec-draft-superseded.md, sha256 e1bf2bad...). .vfs/graph/coverage.json was untracked locally and is now TRACKED on origin/main; the local copy was removed in favour of the published blob. Remaining untracked: .vfs/graph/.symbols_cache.json (repository-local hilo hook cache, resolved-in-fact, untouched). Bare .git/REBASE_HEAD dated 2026-11-02 14:59 classifies stale: mtime matches the reflog rebase(start) at 14:59:21, a rebase(finish) followed at 15:00:28, no rebase dir exists, and 35 commits landed after it. A live crier service (pid 1659715) holds the checkout as cwd; all tick writes happen in worktrees.",
+  "created_at": "2026-11-04T12:32:00+00:00"
+}

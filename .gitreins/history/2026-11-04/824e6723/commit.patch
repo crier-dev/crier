@@ -1,0 +1,40 @@
+commit 53ae7d88aa842116316fa7034c8a03b4242beb17
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Nov 4 03:17:00 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Nov 4 03:17:24 2026 -0500
+
+    chore(gitreins): start the MON-CRIER-002 lifecycle in its worktree
+    
+    The row's GitReins task was created and started at dispatch time; the registry
+    write is tracked, so it lands as its own commit beneath the foreman's merge
+    rather than being smuggled into the implementation commit (511bda30).
+    
+    ch:trace row=MON-CRIER-002
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ .gitreins/tasks.yaml | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index 1a3989e5..80bafcb9 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -3202,3 +3202,16 @@ tasks:
+   status: complete
+   created_at: '2026-11-04T01:47:10.732490+00:00'
+   completed_at: '2026-11-04T01:47:23.461375+00:00'
++- id: MON-CRIER-002
++  title: Add latency histograms to internal/metrics and emit HTTP route, webhook delivery,
++    guard check and inbox deliver duration series
++  criteria:
++  - 'ACCEPTANCE: go build ./... && go vet ./... && go test ./... green on the worker
++    tree; internal/metrics gains a histogram type with fixed buckets 0.005..30s; /metrics
++    exposes crier_http_request_duration_seconds{route,method,code}, crier_webhook_delivery_duration_seconds{outcome},
++    crier_guard_check_duration_seconds{decision,errored}, crier_inbox_deliver_duration_seconds{transport};
++    a live server''s /metrics carries the _bucket/_count/_sum families; labels carry
++    no agent id, message id, path or URL; route label comes from the mux template
++    with a bounded set. Spec: docs/observability-spec.md 3.3.'
++  status: in_progress
++  created_at: '2026-11-04T07:28:07.761855+00:00'

@@ -1,0 +1,89 @@
+{
+  "task_id": "MON-CRIER-002",
+  "task_title": "Add latency histograms to internal/metrics and emit HTTP route, webhook delivery, guard check and inbox deliver duration series",
+  "task_criteria": [
+    "ACCEPTANCE: go build ./... && go vet ./... && go test ./... green on the worker tree; internal/metrics gains a histogram type with fixed buckets 0.005..30s; /metrics exposes crier_http_request_duration_seconds{route,method,code}, crier_webhook_delivery_duration_seconds{outcome}, crier_guard_check_duration_seconds{decision,errored}, crier_inbox_deliver_duration_seconds{transport}; a live server's /metrics carries the _bucket/_count/_sum families; labels carry no agent id, message id, path or URL; route label comes from the mux template with a bounded set. Spec: docs/observability-spec.md 3.3."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/worktrees/crier-MON-CRIER-002",
+  "branch": "wt/MON-CRIER-002",
+  "commit": "53ae7d88aa842116316fa7034c8a03b4242beb17",
+  "working_tree_content_fingerprint": "b4377bd0efc4150f7897d165b8648ebc31d48c6bb3420d82461435d7646e1f59",
+  "working_tree_dirty_path_count": 2,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-MON-CRIER-002: the guard ",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-MON-CRIER-002: the guard would be cut off mid-run and report a fail-open PASS. Raising this run's budget to 420s \u2014 set guards.hook_timeout above guards.test_timeout to fix it at the source.\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/worktrees/crier-MON-CRIER-002/.gitreins/logs/guard-20261104T081733.008679Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/worktrees/crier-MON-CRIER-002/.gitreins/logs/guard-20261104T081733.008679Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 11 column 66 (char 557)) All verification complete. Every element of the single acceptance criterion is confirmed with hard evidence.\n\n**Summary of verification:**\n\n| Requirement | Evidence |\n|---|---|\n| `go build ./...` green | `BUILD_EXIT=0` |\n| `go vet ./...` green | `VET_EXIT=0` |\n| `go test ./...` green | `go test -sho",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 11 column 66 (char 557)) All verification complete. Every element of the single acceptance criterion is confirmed with hard evidence.\n\n**Summary of verification:**\n\n| Requirement | Evidence |\n|---|---|\n| `go build ./...` green | `BUILD_EXIT=0` |\n| `go vet ./...` green | `VET_EXIT=0` |\n| `go test ./...` green | `go test -sho",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [],
+            "summary": "(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 11 column 66 (char 557)) All verification complete. Every element of the single acceptance criterion is confirmed with hard evidence.\n\n**Summary of verification:**\n\n| Requirement | Evidence |\n|---|---|\n| `go build ./...` green | `BUILD_EXIT=0` |\n| `go vet ./...` green | `VET_EXIT=0` |\n| `go test ./...` green | `go test -sho",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY"
+    }
+  },
+  "summary": "Judge Result: MON-CRIER-002\n\nStage tier1: PASS\n    \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-MON-CRIER-002: the guard \n\nStage tier2: PASS\n  COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 11 column 66 (char 557)) All verification complete. Every element of the single acceptance criterion is confirmed with hard evidence.\n\n**Summary of verification:**\n\n| Requirement | Evidence |\n|---|---|\n| `go build ./...` green | `BUILD_EXIT=0` |\n| `go vet ./...` green | `VET_EXIT=0` |\n| `go test ./...` green | `go test -sho\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-04T08:24:50.454971",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-04T08:24:50.480707+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 1953,
+        "truncated": false,
+        "source": "git show 53ae7d88aa84"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 550,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "MON-CRIER-002"
+  }
+}
