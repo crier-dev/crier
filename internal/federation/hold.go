@@ -348,6 +348,37 @@ func (m *HoldManager) MaxHold() time.Duration { return m.cfg.MaxHold }
 // Pending returns the number of held deliveries.
 func (m *HoldManager) Pending() int { return m.queue.Len() }
 
+// OldestHeldAge reports how long the OLDEST held delivery has been waiting, and
+// 0 when nothing is held (MON-CRIER-004). It is built from Queue().List() — the
+// same snapshot the retry worker reads — so it needs no new bookkeeping: the age
+// is now - min(EnqueuedAt) across the queue, which survives a restart on a file
+// queue because EnqueuedAt is persisted.
+//
+// A hold with an unset EnqueuedAt (a hand-built item, never one this manager
+// enqueued) cannot be aged and is skipped rather than counted as infinitely old.
+func (m *HoldManager) OldestHeldAge() time.Duration {
+	if m == nil || m.queue == nil {
+		return 0
+	}
+	var oldest time.Time
+	for _, it := range m.queue.List() {
+		if it == nil || it.EnqueuedAt.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || it.EnqueuedAt.Before(oldest) {
+			oldest = it.EnqueuedAt
+		}
+	}
+	if oldest.IsZero() {
+		return 0
+	}
+	age := time.Since(oldest)
+	if age < 0 {
+		return 0
+	}
+	return age
+}
+
 // Start launches the retry loop. Idempotent; a no-op after Stop.
 func (m *HoldManager) Start() {
 	m.mu.Lock()

@@ -1121,8 +1121,14 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// byte-identical to a build without this feature. When it IS on and the
 	// configured log cannot be verified (a rewritten or torn record), startup
 	// FAILS rather than appending to a history that no longer means anything.
+	// MON-CRIER-004: the detector is declared OUTSIDE the opt-in block so the
+	// composition layer can hand the live object to the metrics registration
+	// below. It stays nil when detection is disabled — the quarantine gauge
+	// then renders 0, exactly as the opt-in contract promises (no detector, no
+	// state to report).
+	var det *detect.Detector
 	if cfg.Detection.Enabled {
-		det, err := detect.New(detect.Config{
+		det, err = detect.New(detect.Config{
 			LogPath:           cfg.Detection.LogPath,
 			KeyPath:           cfg.Detection.KeyPath,
 			FanoutWindow:      cfg.Detection.FanoutWindow,
@@ -1183,6 +1189,11 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		relaySvc: relaySvc,
 		meshSvc:  meshSvc,
 		fedHold:  fedHold,
+		// MON-CRIER-004: the live subsystem objects behind the backlog, hold-age
+		// and containment series. whDriver is always non-nil; det is nil when
+		// detection is disabled.
+		webhookDriver: whDriver,
+		detector:      det,
 		// The inbox queue gauges read the store that actually serves
 		// (CR-FEAT-035). A store that cannot report a depth leaves them NaN.
 		queueDepth: newQueueDepthReader(regStore),
@@ -1190,6 +1201,9 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		// GET /status already measures — the selected backend name and the
 		// serving store's HealthReporter probe (nil when the backend has
 		// none, which the gauge then grades through the depth read above).
+		// MON-CRIER-004 reuses storeBackend as the bounded backend label on
+		// the depth read-error counter: the resolved value /status advertises,
+		// never a DSN.
 		storeBackend: regBackend,
 		storeHealth:  statusHealthProbe,
 	})

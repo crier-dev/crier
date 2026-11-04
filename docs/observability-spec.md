@@ -210,6 +210,33 @@ coarser than 30s.
 | `crier_detect_alerts_total` | counter | alerts | `signal`, `severity` — both bounded enums from `internal/detect/detect.go:118-125` | Is an alert storm happening? (`Detector.Alerts()`, `internal/detect/detect.go:563`, is grow-only) |
 | `crier_detect_quarantined_current` | gauge | agents | — | How many agents are currently contained (`internal/detect/detect.go:52` `Containment`)? |
 
+**Implemented state series (MON-CRIER-004).** The following rows of the two
+tables above are live: registration is in `cmd/server/metrics_state.go`
+(`registerStateGauges`, called once from `registerObservabilityGauges`), the
+counters live with the code that increments them, and every label domain is
+closed (no agent id, message id, path or URL). Proven by
+`cmd/server/metrics_state_test.go` (live boot, non-zero arms),
+`internal/webhook/backlog_test.go`, `internal/federation/hold_age_test.go` and
+`internal/detect/alerts_metric_test.go`.
+
+| Name | Type | Labels — bounded domain | State source | Nil object |
+|------|------|-------------------------|--------------|------------|
+| `crier_webhook_queue_depth` | gauge | — | `webhook.Driver.QueueDepth()` → `Queue.Len()` | 0 |
+| `crier_webhook_queue_oldest_age_seconds` | gauge | — | `webhook.Driver.OldestAge()` → the OLDEST `QueueItem.CreatedAt` (a scanned minimum, not the FIFO head: a redelivery re-pushes at the tail) | 0 |
+| `crier_webhook_attempts_total` | counter | `attempt` ∈ `1..CR_WEBHOOK_MAX_RETRIES+1` (default `1..6`; higher ordinals collapse into the ceiling bucket) | incremented at each queued drain POST (`Retries+1`) and each blocking attempt | seeded at 0 |
+| `crier_federation_held_age_seconds` | gauge | — | `federation.HoldManager.OldestHeldAge()` → min `HoldItem.EnqueuedAt` over `Queue().List()` | 0 |
+| `crier_store_queue_depth_read_errors_total` | counter | `backend` ∈ {`memory`, `sqlite`, `postgres`, `proxy`, `unknown`} | incremented ONCE per scrape whose depth read produced no value; `proxy` = the store has no depth capability at all (`DepthReporter` unimplemented, the remote-proxy shape) | seeded at 0 |
+| `crier_detect_alerts_total` | counter | `signal` ∈ {`fanout_spike`, `new_peer_burst`, `odd_hour_volume`, `canary_trip`}, `severity` ∈ {`warning`, `critical`} — the four pairs the detector raises are seeded | `detect.Detector.raise()` (`AlertsByKind()` is the matching snapshot) | seeded at 0 |
+| `crier_detect_quarantined_current` | gauge | — | `detect.Detector.QuarantinedCount()` | 0 |
+
+Zero-vs-NaN rule, stated once: these gauges render **0** when the object behind
+them is absent (no webhook driver, no federation links, detection disabled) —
+"the subsystem is not configured" *is* an empty backlog, and an operator must
+not have to tell it apart from a broken scrape. `inbox_queue_*` keeps the
+opposite rule (NaN for a store that cannot answer, unchanged by this row), and
+`crier_store_queue_depth_read_errors_total` is the counter that makes those NaN
+gaps countable.
+
 **Process runtime (R4, optional).** If `client_golang` is adopted, `go_*` and
 `process_*` come for free; if the hand-written registry stays, at minimum emit
 `crier_go_goroutines` and `crier_process_open_fds` from

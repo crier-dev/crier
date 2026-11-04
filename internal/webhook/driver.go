@@ -25,6 +25,49 @@ import (
 var webhookOutcomeTotal = metrics.Default.NewCounterVec("webhook_deliveries_total",
 	"Webhook push deliveries by terminal outcome (delivered/failed/deadlettered/dropped).", "outcome")
 
+// webhookAttemptsTotal counts outbound attempts by their 1-based ordinal for the
+// delivery they belong to (MON-CRIER-004, observability-spec §3.3): attempt=1 is
+// the first try (the first drain of a queued item, or the first blocking
+// attempt), attempt=n is the n-th. It is the rate complement of
+// webhook_deliveries_total{outcome}: the outcome counter says what happened, this
+// one says how much retrying it took.
+//
+// The `attempt` label is a BOUNDED bucket (see attemptLabel): the retry ceiling
+// plus one, with anything beyond the ceiling collapsed into the last bucket, so a
+// misconfigured CR_WEBHOOK_MAX_RETRIES can never grow the label set.
+var webhookAttemptsTotal = metrics.Default.NewCounterVec("crier_webhook_attempts_total",
+	"Outbound webhook delivery attempts by attempt ordinal (1 = first try; bounded by the retry ceiling + 1).", "attempt")
+
+// attemptSeed is the default retry ceiling (DriverConfig.MaxRetries, 5) + 1 — the
+// buckets seeded at init so the series exists at 0 from the first scrape.
+const attemptSeed = 6
+
+func init() {
+	// Seed the default buckets so `crier_webhook_attempts_total{attempt="1"}` …
+	// render 0 on a fresh process (an idle server is not an absent series).
+	for attempt := 1; attempt <= attemptSeed; attempt++ {
+		webhookAttemptsTotal.With(strconv.Itoa(attempt))
+	}
+}
+
+// attemptLabel renders the bounded `attempt` label value for one attempt.
+// attempt is clamped into 1..maxRetries+1: the driver never retries past its
+// ceiling, and a value beyond it (a raised ceiling, a hand-built item) lands in
+// the ceiling bucket rather than creating an unbounded label.
+func attemptLabel(attempt, maxRetries int) string {
+	ceiling := maxRetries + 1
+	if ceiling < 1 {
+		ceiling = 1
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > ceiling {
+		attempt = ceiling
+	}
+	return strconv.Itoa(attempt)
+}
+
 // CodeWebhookFailed is the machine-readable error code carried by the
 // durable sender notification emitted when an async delivery exhausts its
 // bounded retries (DF-CRIER-8, spec §4).
@@ -342,6 +385,10 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		}
 		d.logDispatch(agentID, cfg, env, attempt, rid)
 		attempts++
+		// Every blocking attempt is one attempt bucket, first try included:
+		// attempt=1 is the initial POST, attempt=n the n-th retry within the
+		// caller's budget (MON-CRIER-004).
+		webhookAttemptsTotal.With(attemptLabel(attempts, d.cfg.MaxRetries)).Inc()
 		// Bound the ATTEMPT ITSELF by the remaining budget (INT-CI-004).
 		// Without this the attempt is capped only by the driver-global
 		// client timeout, so a delivery carrying timeout_ms=100 could run
@@ -469,6 +516,45 @@ func (d *Driver) enqueue(agentID string, env *Envelope, retries int, rid string)
 	return d.queue.Push(item)
 }
 
+// QueueDepth reports how many deliveries are waiting for redelivery in the
+// driver's queue (MON-CRIER-004). It is the depth of the retry/backoff backlog
+// only: an in-flight POST and a buffered batch are not queued yet, and the
+// caller-visible delivery count lives in webhook_deliveries_total.
+func (d *Driver) QueueDepth() int {
+	if d == nil || d.queue == nil {
+		return 0
+	}
+	return d.queue.Len()
+}
+
+// OldestAge reports how long the oldest queued delivery has been waiting
+// (MON-CRIER-004): now - the oldest item's CreatedAt, 0 when the queue is empty.
+// A queue implementation that cannot report creation times leaves it at 0 —
+// an honest "not measurable", never a fabricated age.
+//
+// The read is an optional capability (OldestCreatedAt), read by assertion, so
+// adding it needs no change to the Queue interface.
+func (d *Driver) OldestAge() time.Duration {
+	if d == nil || d.queue == nil {
+		return 0
+	}
+	reporter, ok := d.queue.(interface {
+		OldestCreatedAt() (time.Time, bool)
+	})
+	if !ok {
+		return 0
+	}
+	oldest, ok := reporter.OldestCreatedAt()
+	if !ok {
+		return 0
+	}
+	age := time.Since(oldest)
+	if age < 0 {
+		return 0
+	}
+	return age
+}
+
 // redeliverLoop drains the queue on the redelivery interval (and on demand
 // via wake), skipping agents whose circuit is open.
 func (d *Driver) redeliverLoop() {
@@ -518,6 +604,11 @@ func (d *Driver) drainQueue() {
 		}
 
 		var res Result
+		// One queued POST is one attempt: item.Retries counts the attempts
+		// already made for this item, so this one's ordinal is Retries+1
+		// (MON-CRIER-004). Counted for both the single and the batch form,
+		// before the POST so a hung transport still counts its attempt.
+		webhookAttemptsTotal.With(attemptLabel(item.Retries+1, d.cfg.MaxRetries)).Inc()
 		if len(item.Batch) > 0 {
 			// CR-FEAT-005: queued batch items redeliver as ONE batch POST
 			// (the flush failed while the endpoint was down).
