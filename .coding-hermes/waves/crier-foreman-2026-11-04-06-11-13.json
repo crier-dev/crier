@@ -1,0 +1,67 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-06-11-13",
+  "block": "MON-CRIER",
+  "block_title": "Observability: metrics reachable + queued-state series (P0, 5 rows)",
+  "mode": "wave",
+  "wave_budget": 11,
+  "capacity": {
+    "nproc": 16,
+    "loadavg_1m_at_compose": 10.21,
+    "slots_formula": "max(1, min(6, 16 - ceil(10.21))) = 5",
+    "slots": 5,
+    "wave_size": 3,
+    "why_not_5": "MON-CRIER-002 (histogram foundation, adds a new metric TYPE in internal/metrics and a guard-check histogram that overlaps 003's guard seam) and MON-CRIER-005 (global crier_* rename) are excluded: 005 must land last by its own design, and 002 shares internal/guard + registration scope with 003. Three concurrent workers is the independent set."
+  },
+  "resume_evidence": "Predecessor tick crier-foreman-2026-11-04-05-19-44 (commit 6eaaeddf) ran block-setup for MON-CRIER, adopted docs/observability-spec.md, wrote its manifest with worktrees TBD, and died before dispatch. A follow-on session at 06:01Z created+started GitReins tasks MON-CRIER-001 and MON-CRIER-004 inside pre-created worktrees but committed nothing and left no live process. This tick resumes that block and reuses both worktrees and both in_progress lifecycle tasks instead of re-creating them.",
+  "rows": [
+    {
+      "id": "MON-CRIER-001",
+      "priority": "P0",
+      "title": "crier /metrics is off by default and unset in the shipped unit",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-001",
+      "branch": "wt/MON-CRIER-001",
+      "base": "6eaaeddf",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t1967-brief-MON-CRIER-001.txt",
+      "log": "/home/kara/.hermes/cache/scratch/crier-t1967-worker-MON-CRIER-001.log",
+      "gitreins_task": "MON-CRIER-001 (pre-existing, status in_progress — created 2026-11-04T06:01:51Z by the died session; do NOT re-create)",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman",
+      "disjoint_files": "config/config.go, deploy/*, cmd/server/metrics_identity.go (new), README observability row"
+    },
+    {
+      "id": "MON-CRIER-003",
+      "priority": "P1",
+      "title": "Guard fails open invisibly: no metric for circuit-open, saturation, all-providers-failed",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-003",
+      "branch": "wt/MON-CRIER-003",
+      "base": "6eaaeddf",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t1967-brief-MON-CRIER-003.txt",
+      "log": "/home/kara/.hermes/cache/scratch/crier-t1967-worker-MON-CRIER-003.log",
+      "gitreins_task": "MON-CRIER-003 (create + start in its own worktree before implementing)",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman",
+      "disjoint_files": "internal/guard/{router,circuit}.go accessors, cmd/server/metrics_guard.go (new)"
+    },
+    {
+      "id": "MON-CRIER-004",
+      "priority": "P1",
+      "title": "Webhook retry backlog, federation hold age, store read errors, detection alerts emit no series",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-004",
+      "branch": "wt/MON-CRIER-004",
+      "base": "6eaaeddf",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t1967-brief-MON-CRIER-004.txt",
+      "log": "/home/kara/.hermes/cache/scratch/crier-t1967-worker-MON-CRIER-004.log",
+      "gitreins_task": "MON-CRIER-004 (pre-existing, status in_progress — created 2026-11-04T06:01:56Z by the died session; do NOT re-create)",
+      "worker_model": "deepseek-v4-flash",
+      "worker_provider": "deepseek-foreman",
+      "disjoint_files": "internal/webhook/driver.go, internal/federation hold accessor, internal/detect/detect.go, cmd/server/metrics_state.go (new)"
+    }
+  ],
+  "deferred_rows_same_block": [
+    "MON-CRIER-002 — histogram foundation; shares the guard-check seam with 003, serial after 003",
+    "MON-CRIER-005 — global crier_* rename with dual-emit window; must land last by design"
+  ],
+  "merge_protocol": "serial: rebase each wt/* branch on current origin/main, resolve shared registration hunks by keeping BOTH additive blocks, count deletions (expect 0), run go build/vet/test on the merged tree, push both remotes, verify parity",
+  "ownership_note": "Canonical checkout /home/kara/crier is 33 commits BEHIND origin/main, 0 ahead, with 8 untracked paths (`.vfs/graph/*.json` = repository-local hilo hook caches; specs/COURIER-*.md x5 = byte-identical to origin/main blobs, proven sha256; docs/observability-spec.md = same-bytes published spec). Live service cwd inside the checkout (pid 1659715, started 2026-11-04 00:27). Bare .git/REBASE_HEAD dated 2026-11-02 14:59 classifies stale (four signals: mtime predates 40+ normal operations, no rebase dir, commit 2e1ed4d3 not an ancestor, only in-scope process started a day later). Main checkout left READ-ONLY; every write for this tick happens in control worktree /home/kara/crier-ctl-20261104 (branch foreman/t1965 at 6eaaeddf).",
+  "created_at": "2026-11-04T06:15:00+00:00"
+}
