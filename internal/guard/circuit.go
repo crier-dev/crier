@@ -56,6 +56,11 @@ func (c *Circuit) open(key string) bool {
 	return c.now().Sub(opened) < c.cooldown
 }
 
+// IsOpen reports whether the endpoint's circuit is currently tripped. It is
+// the read-only view the exposition needs (MON-CRIER-003); breaker semantics
+// are untouched — see open, which remains the routing decision.
+func (c *Circuit) IsOpen(key string) bool { return c.open(key) }
+
 // recordSuccess resets the failure streak and closes the circuit.
 func (c *Circuit) recordSuccess(key string) {
 	c.mu.Lock()

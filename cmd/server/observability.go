@@ -75,6 +75,10 @@ type observabilityDeps struct {
 	// the store that actually serves, so the gauges report the queue of the
 	// backend answering — memory or postgres — and never a copied number.
 	queueDepth queueDepthReader
+	// guardStats is the live LLM guard (MON-CRIER-003): nil when the guard
+	// is disabled, in which case its gauges render 0 rather than a
+	// fabricated circuit/inflight reading.
+	guardStats guardMetricsReader
 }
 
 // registerObservabilityGauges registers the composition-layer gauges whose
@@ -105,6 +109,7 @@ func registerObservabilityGauges(deps observabilityDeps) {
 			return float64(n)
 		})
 	registerQueueDepthGauges(deps.queueDepth)
+	registerGuardGauges(deps.guardStats)
 }
 
 // registerQueueDepthGauges exposes the store-wide inbox queue (CR-FEAT-035):

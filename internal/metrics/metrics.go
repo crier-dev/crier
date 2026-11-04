@@ -5,12 +5,13 @@
 // no go.mod change.
 //
 // Series ownership follows the code that increments them: registry, relay,
-// webhook and cmd/server each construct their own counters on Default at
-// package init, while gauges whose objects live in the composition layer
-// (federation hold depth, live WS subscribers) are registered from
-// cmd/server. Registration is idempotent: re-creating a counter name returns
-// the existing series and re-registering a gauge replaces it, so a process
-// that boots the server more than once (tests do) never renders duplicates.
+// webhook, guard and cmd/server each construct their own counters on Default
+// at package init, while gauges whose objects live in the composition layer
+// (federation hold depth, live WS subscribers, guard circuit/inflight) are
+// registered from cmd/server. Registration is idempotent: re-creating a
+// counter name returns the existing series and re-registering a gauge
+// replaces it, so a process that boots the server more than once (tests do)
+// never renders duplicates.
 package metrics
 
 import (
@@ -111,6 +112,18 @@ type gaugeFunc struct {
 	fn   func() float64
 }
 
+// gaugeFuncLabel renders a labelled gauge computed at scrape time: fn
+// returns label value -> sample value. The label domain is the caller's
+// contract and must be bounded (a per-request value would grow the
+// exposition without bound); MON-CRIER-003's only user labels by provider
+// preset.
+type gaugeFuncLabel struct {
+	name      string
+	help      string
+	labelName string
+	fn        func() map[string]float64
+}
+
 // ---------- registry ----------
 
 // series is one exposable entity: metadata plus zero or more samples.
@@ -175,6 +188,30 @@ func (s *gaugeSeries) writeSamples(b *strings.Builder) {
 	b.WriteByte('\n')
 }
 
+type gaugeFuncLabelSeries struct {
+	g gaugeFuncLabel
+}
+
+func (s *gaugeFuncLabelSeries) meta() (string, string, string) {
+	return s.g.name, s.g.help, "gauge"
+}
+
+func (s *gaugeFuncLabelSeries) writeSamples(b *strings.Builder) {
+	samples := s.g.fn()
+	values := make([]string, 0, len(samples))
+	for v := range samples {
+		values = append(values, v)
+	}
+	sort.Strings(values) // deterministic exposition across scrapes
+	for _, v := range values {
+		b.WriteString(s.g.name)
+		writeLabels(b, []string{s.g.labelName}, []string{v})
+		b.WriteByte(' ')
+		writeFloat(b, samples[v])
+		b.WriteByte('\n')
+	}
+}
+
 // Registry holds an ordered set of series and renders them in the Prometheus
 // text exposition format. Safe for concurrent use.
 type Registry struct {
@@ -227,6 +264,18 @@ func (r *Registry) RegisterGaugeFunc(name, help string, fn func() float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.add(&gaugeSeries{g: gaugeFunc{name: name, help: help, fn: fn}})
+}
+
+// RegisterGaugeFuncLabel registers a single-label gauge whose samples are
+// fn() evaluated at scrape time: the returned map is label value -> sample
+// value. Re-registering an existing name replaces the previous fn, exactly
+// like RegisterGaugeFunc, so repeated boots in one process never duplicate
+// the series. The help text must state what a zero means, because this
+// primitive can only render values, never "no data".
+func (r *Registry) RegisterGaugeFuncLabel(name, help, labelName string, fn func() map[string]float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.add(&gaugeFuncLabelSeries{g: gaugeFuncLabel{name: name, help: help, labelName: labelName, fn: fn}})
 }
 
 // add appends s, replacing any same-name series in place (locked caller).

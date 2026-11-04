@@ -188,10 +188,29 @@ coarser than 30s.
 
 | Name | Type | Unit | Labels | Question | State source |
 |------|------|------|--------|----------|--------------|
-| `crier_guard_provider_circuit_open` | gauge 0/1 | — | `provider` (`spec.Provider`, a bounded preset enum: deepseek/openai/… — `internal/guard/router.go:249`) | Is a provider's circuit breaker currently open? | `internal/guard/circuit.go` `openedAt` map, read via a new `Circuit.Open(key) bool` accessor |
+| `crier_guard_provider_circuit_open` | gauge 0/1 | — | `provider` (`spec.Provider`, a bounded preset enum: deepseek/openai/… — `internal/guard/router.go:249`) | Is a provider's circuit breaker currently open? | `internal/guard/circuit.go` `openedAt` map, read via the exported `Circuit.IsOpen(key) bool`; `Router.OpenProviders` maps its circuit keys back to the bounded provider label |
 | `crier_guard_inflight` | gauge | checks | — | Are we at the concurrency cap (default 8, `CR_GUARD_MAX_CONCURRENT`, `internal/guard/router.go:114-115`)? | `len(r.sem)` on the `sem chan struct{}` (`internal/guard/router.go:142`) |
 | `crier_guard_saturated_total` | counter | checks | — | How often did a check bounce with `ErrConcurrencySaturated` (`internal/guard/router.go:166`)? | increment at that return |
 | `crier_guard_all_providers_failed_total` | counter | checks | — | How often did the whole fallback chain fail (`ErrAllProvidersFailed`, `internal/guard/router.go:353`)? | increment at that return |
+
+Implementing these exposed one gap in `internal/metrics`: gauges were
+callback-only and unlabelled, so a `{provider}` gauge could not be expressed.
+`Registry.RegisterGaugeFuncLabel` (one label, callback evaluated at scrape) was
+added for exactly this row — no new dependency.
+
+Implemented (MON-CRIER-003): `internal/guard/metrics.go` owns the two counters
+(series ownership follows the incrementing code), `internal/guard/circuit.go`
+gains `IsOpen`, `Router` gains `Inflight`/`OpenProviders`, and
+`cmd/server/metrics_guard.go` registers the two gauges.
+
+- **Label domain** — `provider` is the built-in preset enum (`deepseek`,
+  `groq`, `nvidia`, `jev`) plus `custom`, the single policy-supplied endpoint
+  class. Sorted and always fully emitted; never a base URL, model, agent or
+  message id (the circuit key stays inside the process).
+- **Disabled guard** — every one of these series renders 0, never `NaN`, and
+  the HELP text says so: "guard off" is a reading, not a scrape gap.
+- **`crier_guard_inflight`** reads `len(r.sem)`, the same channel the 2s
+  acquire wait contends on — there is no parallel counter to drift from it.
 
 **Webhook queue (R4).** Closes G5.
 
