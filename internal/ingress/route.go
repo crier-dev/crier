@@ -54,7 +54,7 @@ type RouteStore interface {
 	RecordRoute(ctx context.Context, rec RouteRecord) error
 }
 
-// JSONLRouteStore appends route records to `<root>/ingress-routes.jsonl`, one
+// JSONLRouteStore appends route records to `<root>/ingress/routes.jsonl`, one
 // JSON object per line, fsync'd before the call returns: a route record that
 // survives only in a buffer would be a receipt for a delivery that may not have
 // happened.
@@ -68,10 +68,11 @@ func NewJSONLRouteStore(root string) (*JSONLRouteStore, error) {
 	if root == "" {
 		return nil, fmt.Errorf("ingress route log: root is empty")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, fmt.Errorf("ingress route log: create %q: %w", root, err)
+	dir := filepath.Join(root, "ingress")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("ingress route log: create %q: %w", dir, err)
 	}
-	return &JSONLRouteStore{path: filepath.Join(root, "ingress-routes.jsonl")}, nil
+	return &JSONLRouteStore{path: filepath.Join(dir, "routes.jsonl")}, nil
 }
 
 // Path names the file this store appends to (for an operator and for tests).
