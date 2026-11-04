@@ -17,6 +17,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +29,23 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/session"
 )
+
+// idempotencyLedger opens the durable ledger under the same ingress directory
+// the route log uses (COURIER-INGRESS §3). A ledger that cannot be opened is
+// a real operational problem, so it is logged loudly and the process falls back
+// to the process-scoped ledger rather than refusing to serve — a restart then
+// loses replay protection, which is worse than crashing but better than an
+// outage, and the log line says exactly that.
+func idempotencyLedger(root string) ingress.IdempotencyStore {
+	path := filepath.Join(root, "ingress", "idempotency.jsonl")
+	store, err := ingress.OpenJSONLIdempotencyStore(path)
+	if err != nil {
+		slog.Error("ingress idempotency: durable ledger unavailable, falling back to process memory",
+			"path", path, "err", err)
+		return ingress.NewMemoryIdempotencyStore()
+	}
+	return store
+}
 
 // registryInbox adapts the registry's delivery core to ingress.InboxWriter.
 //
@@ -120,7 +139,7 @@ func openIngress(cfg config.Config, repo session.Repository, dispatcher *registr
 		Repo:         repo,
 		Inbox:        registryInbox{handler: dispatcher},
 		Route:        routes,
-		Idem:         ingress.NewMemoryIdempotencyStore(),
+		Idem:         idempotencyLedger(root),
 		Namespaces:   namespaces,
 		Permissions:  perms,
 		AllowedModes: ingressModes(cfg.Ingress.AllowedModes),
