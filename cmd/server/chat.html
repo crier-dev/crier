@@ -154,6 +154,34 @@ main { min-width:0; display:flex; flex-direction:column; }
 .management form { margin-top:12px; }
 @media(max-width:900px) { .management-grid { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:480px) { .management { padding:16px 12px; } }
+/* CRIER-UI-1: the destination control, tag chips, read state and the harness
+   badge reuse the palette above. No new colours, no external asset, no build
+   step — the page must keep working offline from the one embedded document. */
+.dest-row { display:grid; gap:10px; margin-top:10px; }
+.dest-group { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0; padding:0; border:0; min-inline-size:0; }
+.dest-label { flex:1 1 100%; font-size:12px; color:var(--dim); }
+.dest-choice { display:inline-flex; align-items:center; gap:7px; min-height:34px; padding:5px 11px; border:1px solid var(--border); border-radius:20px; background:var(--input); color:var(--dim); font-size:12px; }
+.dest-choice input { appearance:auto; width:auto; min-width:0; height:auto; margin:0; padding:0; border:0; background:transparent; accent-color:var(--mint); }
+.dest-choice[data-active="true"] { border-color:rgba(76,195,138,.55); background:rgba(76,195,138,.13); color:var(--text); }
+.dest-fields { display:flex; flex-wrap:wrap; gap:10px; }
+.dest-fields label { flex:1 1 180px; }
+.dest-fields[hidden] { display:none; }
+.tags-row { display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin-top:10px; }
+.tags-row label { flex:1 1 200px; }
+.tag-chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.tag-chips:empty { display:none; }
+.tag-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border:1px solid rgba(167,139,250,.45); border-radius:20px; background:rgba(167,139,250,.10); color:var(--lav); font-size:11px; overflow-wrap:anywhere; }
+.tag-chip button { min-height:0; min-width:0; padding:0 2px; border:0; background:transparent; color:inherit; font-size:12px; font-weight:600; }
+.m-tags { margin-top:7px; }
+.tag-filter-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 20px; border-bottom:1px solid var(--border); }
+.tag-filter-btn { min-height:32px; padding:3px 10px; font-size:12px; font-weight:400; background:transparent; }
+.tag-filter-btn[aria-pressed="true"] { border-color:var(--mint); background:rgba(76,195,138,.13); color:var(--mint); }
+.seen-by { margin-top:7px; font-size:11px; color:var(--dim); }
+.pill.unread { color:var(--amber); background:rgba(245,176,74,.10); border-color:rgba(245,176,74,.45); }
+.pill.harness { color:var(--lav); background:rgba(167,139,250,.10); }
+#session-harness { margin-top:6px; }
+#session-harness .pill { margin-right:5px; }
+@media(max-width:480px) { .tag-filter-bar { padding-left:12px; padding-right:12px; } .dest-choice { flex:1 1 100%; } }
 </style>
 </head>
 <body data-openapi-client="CR-CHAT-009" data-ui-revision="CR-CHAT-038">
@@ -231,14 +259,44 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 </html>
 </template>
 <main id="main" tabindex="-1">
-  <header class="thread-header"><div class="thread-heading"><h2 id="conversation-title">Your agents. One conversation.</h2><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Close session</button><button id="reopen-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Reopen session</button><p id="session-lifecycle-reason" class="note" role="status" hidden></p><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
+  <header class="thread-header"><div class="thread-heading"><h2 id="conversation-title">Your agents. One conversation.</h2><p id="conversation-meta" class="note">Select a session to read its recorded transcript.</p><p id="session-harness" class="note" role="status" hidden></p></div><div class="stack"><span id="session-state" class="pill" role="status">No session</span><button id="close-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Close session</button><button id="reopen-session" type="button" aria-describedby="session-lifecycle-reason session-lifecycle-result" hidden disabled>Reopen session</button><p id="session-lifecycle-reason" class="note" role="status" hidden></p><p id="session-lifecycle-result" class="note" role="status"></p></div></header>
   <div class="toolbar"><label>Thread view<select id="thread-filter" disabled><option value="">All threads</option></select></label><button id="refresh" class="ghost">Refresh</button><label>Collapse branch depth<select id="collapse-depth"><option value="1">1</option><option value="2">2</option><option value="3" selected>3 (default)</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label></div>
+  <div id="tag-filter-bar" class="tag-filter-bar" aria-label="Tag filter">
+    <span id="tag-filter-state" class="note" role="status">No tag filter — this is the full session read.</span>
+    <div id="tag-filter-chips" class="tag-chips" role="group" aria-label="Filter the transcript by tag"></div>
+    <button id="tag-filter-clear" type="button" class="ghost" hidden>Clear filter</button>
+  </div>
   <p id="refresh-state" class="note" role="status">HTTP reads every 15 seconds while this page is visible. No session WebSocket feed is exposed.</p>
   <div id="transcript" aria-label="Conversation transcript"><div class="empty"><strong>Choose where the conversation happens.</strong>Open an existing channel or create one using an existing agent identity.</div></div>
   <div class="composer-wrap">
     <div id="replying" hidden></div>
     <form id="composer" class="composer">
       <label for="text">Message</label><textarea id="text" placeholder="Write to the conversation…" aria-describedby="composer-hint composer-why" disabled></textarea>
+      <div class="tags-row">
+        <label for="tag-input">Tags <span class="note">(optional)</span><input id="tag-input" placeholder="lowercase-tag" autocomplete="off" spellcheck="false" aria-describedby="tag-hint tag-result" disabled></label>
+        <button id="tag-add" type="button" class="ghost" disabled>Add tag</button>
+      </div>
+      <div id="tag-chips" class="tag-chips" role="list" aria-label="Tags this message will carry"></div>
+      <p id="tag-hint" class="note">Tag grammar (COURIER-TAGS §2.1): lowercase ASCII letters, digits, <code>_</code> and <code>-</code>, at most one <code>:</code>, 1–64 characters, at most 16 tags. Enter or “Add tag” appends a chip; anything else is refused here with the server's own reason and is never sent.</p>
+      <p id="tag-result" class="note" role="status"></p>
+      <div class="dest-row">
+        <div class="dest-group" role="radiogroup" aria-label="Destination" aria-describedby="destination-hint">
+          <span class="dest-label">Destination</span>
+          <label class="dest-choice" id="dest-choice-session" data-active="true"><input type="radio" name="destination" value="session" checked> This session</label>
+          <label class="dest-choice" id="dest-choice-new_session" data-active="false"><input type="radio" name="destination" value="new_session"> New session</label>
+          <label class="dest-choice" id="dest-choice-inbox" data-active="false"><input type="radio" name="destination" value="inbox"> Agent inbox</label>
+        </div>
+        <p id="destination-state" class="note" role="status">This session — the existing session send path (POST /sessions/{id}/messages).</p>
+        <div id="dest-new" class="dest-fields" hidden>
+          <label>New session title<input id="dest-title" maxlength="200" placeholder="Name the new conversation" autocomplete="off" disabled></label>
+          <label>Kind<select id="dest-kind" disabled><option value="channel">channel</option><option value="direct">direct</option></select></label>
+          <label>Members, comma-separated agent IDs<input id="dest-members" placeholder="alpha, bravo" autocomplete="off" disabled></label>
+        </div>
+        <div id="dest-inbox" class="dest-fields" hidden>
+          <label>Target agent inbox<input id="dest-agent" list="registered-agents" placeholder="Existing agent ID" autocomplete="off" disabled></label>
+        </div>
+        <p id="destination-hint" class="note">Destination chooses the POST /ingress/messages <code>mode</code>: “This session” keeps the existing session send path; “New session” creates a session from the title, kind and members given here and posts into it; “Agent inbox” queues the message for one registered agent. Recipient and Intent apply to “This session” only. An unknown mode, agent or session is the server's named refusal, never a fallback.</p>
+      </div>
       <div class="composer-controls">
         <label>Recipient<select id="recipient" disabled><option value="">Session audience</option></select></label>
         <label>Intent<select id="intent" disabled><option value="message">Message</option><option value="task">Explicit task</option></select></label>
@@ -328,7 +386,12 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-const state = { current:null, session:null, sessionRead:"not-selected", sessions:[], agents:[], messages:[], systemEvents:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, selectedGroup:null, groupBusy:false };
+// CRIER-UI-1 adds the composer's destination (one of the three COURIER-INGRESS modes),
+// the tags drafted for the next message, the active transcript tag filter, the tag
+// vocabulary seen in this session, the last read-state response and the per-session
+// unread counts derived from it. Kept on ONE line: the truth harnesses read this
+// declaration with /^const state = .*;$/m.
+const state = { current:null, session:null, sessionRead:"not-selected", sessions:[], agents:[], messages:[], systemEvents:[], findings:[], reply:null, branch:false, collapseDepth:null, expandedBranches:new Set(), locationMessage:null, thread:"", participants:[], noAgentConfirmation:null, generation:0, busy:false, sending:false, requireAgentSignature:null, permissionsArmed:null, managementSurface:null, classBusy:false, agent:"", namespace:"", groups:[], group:null, selectedGroup:null, groupBusy:false, destination:"session", tags:[], tagFilter:"", tagVocabulary:new Map(), reads:null, unread:new Map() };
 // This single tab-scoped slot contains only an explicitly opted-in attribution ID.
 const taskDrafts = new Map(), taskNotices = new Map();
 const taskKey = taskID => state.current + "/" + taskID;
@@ -625,20 +688,73 @@ $("trust-query-form").addEventListener("submit",async event => {
   finally { $("trust-query-submit").disabled = false; }
 });
 refreshManagement();
+// CRIER-UI-1 (COURIER-READS §3.1): the session list's unread pill. It is the
+// CALLER's own cursor count from GET /sessions/{id}/reads; 0 and "unknown"
+// both render nothing, because an absent count is not zero and a pill is a
+// fact about this agent's cursor, never a placeholder.
+function unreadPill(id) {
+  const count = state.unread instanceof Map ? state.unread.get(id) : undefined;
+  if (!Number.isInteger(count) || count <= 0) return "";
+  return '<span class="pill unread" data-unread="' + esc(count) + '" title="Unread for this acting agent (GET /sessions/' + esc(id) + '/reads) — read state is not delivery.">' + esc(count === 1 ? "1 unread" : count + " unread") + '</span>';
+}
 function renderSessions() {
   const q = $("session-search").value.trim().toLowerCase();
   const sessions = state.sessions.filter(s => [s.title,s.id,s.preview].join(" ").toLowerCase().includes(q));
-  $("sessions").innerHTML = sessions.map(s => '<button type="button" class="session' + (state.current === s.id ? ' active' : '') + '" data-session="' + esc(s.id) + '" aria-current="' + (state.current === s.id ? 'page' : 'false') + '"><span class="avatar" aria-hidden="true">' + avatar(s.title || s.id) + '</span><span class="s-body"><span class="s-name">' + esc(s.title || s.id) + '</span><span class="s-preview">' + esc(s.preview || "No message preview") + '</span><span class="s-meta">' + esc(s.kind) + ' · ' + esc(s.state) + ' · ' + esc(s.message_count) + ' messages<br>' + esc(stamp(s.last_message_at || s.created_at)) + '</span></span></button>').join("") || '<p class="note">' + (q ? "No matching loaded sessions." : "No sessions returned. Create a channel to begin.") + '</p>';
+  $("sessions").innerHTML = sessions.map(s => '<button type="button" class="session' + (state.current === s.id ? ' active' : '') + '" data-session="' + esc(s.id) + '" aria-current="' + (state.current === s.id ? 'page' : 'false') + '"><span class="avatar" aria-hidden="true">' + avatar(s.title || s.id) + '</span><span class="s-body"><span class="s-name">' + esc(s.title || s.id) + '</span><span class="s-preview">' + esc(s.preview || "No message preview") + '</span><span class="s-meta">' + esc(s.kind) + ' · ' + esc(s.state) + ' · ' + esc(s.message_count) + ' messages<br>' + esc(stamp(s.last_message_at || s.created_at)) + '</span>' + unreadPill(s.id) + '</span></button>').join("") || '<p class="note">' + (q ? "No matching loaded sessions." : "No sessions returned. Create a channel to begin.") + '</p>';
 }
+// CRIER-UI-1: the destination is composer STATE, not a second send path.
+// "session" keeps the existing POST /sessions/{id}/messages send exactly as it
+// was; the other two modes go through POST /ingress/messages with the chosen
+// mode named explicitly (COURIER-INGRESS §2.1). An unrecognised value never
+// reaches the wire, and it is never silently treated as a mode either: anything
+// other than the two new modes is the session path, which is the default the
+// control starts on.
+//
+// DF-CRIER-483: destinationMode() and updateDestinationControls() are declared
+// INSIDE the composerState..renderReply extraction region ON PURPOSE —
+// composerState() and updateComposer() call them, and the truth harnesses
+// execute only that slice, so a helper placed above composerState is absent
+// from the harness while the shipped page looks fine.
 function composerState() {
+  const mode = destinationMode();
   const reason = !state.agent ? "Set an acting agent ID (Connection & identity, left) to enable sending."
     : state.sending ? "Send or session operation in progress — draft kept. Wait for it to finish."
-    : !state.session ? "No channel open — pick or create one."
-    : state.session.state !== "open" ? "This conversation is " + state.session.state + "; sending is unavailable. Pick or create an open channel."
+    // Only the session destination needs an open channel; the ingress modes
+    // create or address their own target, so no session is a precondition.
+    : mode === "session" && !state.session ? "No channel open — pick or create one, or choose another destination."
+    : mode === "session" && state.session.state !== "open" ? "This conversation is " + state.session.state + "; sending is unavailable. Pick or create an open channel."
     : state.requireAgentSignature === true ? "Send authority: agent signatures REQUIRED. This browser cannot sign; sends are refused as SESSION_SENDER_SIGNATURE_REQUIRED and record nothing. Use an authorized signed client; browser authentication remains an open owner decision (DF-CRIER-333)."
     : state.requireAgentSignature !== false ? "Send authority: unknown — refresh runtime posture before sending. This browser cannot sign; an acting ID is attribution, not a login or verified identity."
     : "";
   return {usable:!reason, reason};
+}
+function destinationMode() {
+  return state.destination === "new_session" || state.destination === "inbox" ? state.destination : "session";
+}
+// The composer's target controls are rendered from ONE derivation of the mode,
+// so the radios, the revealed fields and the outcome sentence cannot disagree.
+// Everything here stays inside the composerState..renderReply extraction region
+// the truth harnesses execute (DF-CRIER-483): $ and element properties only.
+function updateDestinationControls(mode, enabled) {
+  for (const value of ["session","new_session","inbox"]) {
+    const choice = $("dest-choice-" + value);
+    if (choice) choice.dataset.active = String(value === mode);
+  }
+  $("destination-state").textContent = mode === "new_session"
+    ? "New session — POST /ingress/messages mode=new_session creates the session from the fields below, then posts this message."
+    : mode === "inbox"
+      ? "Agent inbox — POST /ingress/messages mode=inbox queues this message for the registered agent named below."
+      : "This session — the existing session send path (POST /sessions/{id}/messages).";
+  $("dest-new").hidden = mode !== "new_session";
+  $("dest-inbox").hidden = mode !== "inbox";
+  $("tag-filter-clear").hidden = !state.tagFilter;
+  // Recipient and Intent belong to the session send path alone. The reason is
+  // named on the control rather than left implicit (CR-CHAT-039's rule).
+  for (const id of ["recipient","intent"]) {
+    $(id).disabled = !enabled || mode !== "session";
+    $(id).title = mode !== "session" ? "Recipient and Intent apply to the “This session” destination only; the ingress modes carry their own target." : "";
+  }
+  for (const id of ["dest-title","dest-kind","dest-members","dest-agent","tag-input","tag-add"]) $(id).disabled = !enabled;
 }
 // Existing action guards share the same state derivation; no second predicate.
 function composerReason() { return composerState().reason; }
@@ -707,11 +823,14 @@ function updateComposer() {
   // predicate and no timer of its own.
   updateClassControls();
   updateLateJoinPrompt();
-  const composer = composerState(), enabled = composer.usable;
-  for (const id of ["text","recipient","intent","send-button"]) $(id).disabled = !enabled;
+  const composer = composerState(), enabled = composer.usable, mode = destinationMode();
+  for (const id of ["text","send-button"]) $(id).disabled = !enabled;
+  // CRIER-UI-1: one derivation drives the radios, the revealed target fields,
+  // the Recipient/Intent availability and the outcome sentence.
+  updateDestinationControls(mode, enabled);
   $("thread-filter").disabled = !state.session || state.sending;
   for (const id of ["new-session","apply-identity","create-button"]) $(id).disabled = state.sending;
-  $("send-button").textContent = state.sending ? "Recording…" : $("intent").value === "task" ? "Create task" : "Send message";
+  $("send-button").textContent = state.sending ? "Recording…" : mode === "new_session" ? "Create session & send" : mode === "inbox" ? "Send to inbox" : $("intent").value === "task" ? "Create task" : "Send message";
   // CR-CHAT-039: a disabled composer with no stated reason reads as a broken page.
   // The hint names the ONE unmet precondition instead of leaving the user guessing.
   const why = composer.reason;
@@ -818,6 +937,16 @@ function renderHeader() {
   $("session-state").textContent = sessionState;
   $("session-state").className = "pill" + (s?.state === "open" ? " mint" : "");
   $("breadcrumb").textContent = (state.namespace || "Default realm") + " / " + (s ? s.title || s.id : "Conversations");
+  // CRIER-UI-1 (COURIER-HARNESS §4.3): a session bound to a harness adapter
+  // shows BOTH the harness name and the harness session id; a session with
+  // neither renders nothing rather than an empty badge. Both values are the
+  // session's own recorded fields — this page cannot bind or unbind a harness,
+  // and a missing half is reported as not reported, never guessed.
+  const harness = s && typeof s.harness === "string" ? s.harness.trim() : "";
+  const harnessSession = s && typeof s.harness_session_id === "string" ? s.harness_session_id.trim() : "";
+  const harnessRow = $("session-harness");
+  harnessRow.hidden = !harness && !harnessSession;
+  harnessRow.innerHTML = harnessRow.hidden ? "" : '<span class="pill harness">harness: ' + esc(harness || "not reported") + '</span> <span class="pill">harness session: ' + esc(harnessSession || "not reported") + '</span>';
   updateComposer();
 }
 function renderReply() {
@@ -832,9 +961,55 @@ function renderThreadOptions() {
   if (!threads.has(state.thread)) state.thread = "";
   $("thread-filter").value = state.thread;
 }
-function renderMessages(findings = []) {
+function renderMessages(findings = state.findings || []) {
   const el = $("transcript");
   const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  // CRIER-UI-1: read state is rendered per message GROUP here, inside the
+  // shipped renderer, because every truth harness that executes this function
+  // slices exactly this region — a helper declared outside it would be absent
+  // from the harness while the page looked fine (DF-CRIER-483's rule).
+  //
+  // N = members whose cursor reached the group's LAST message seq, M = the
+  // session's participant count (COURIER-READS §2/§3.1). A permission-scoped
+  // read returns only the caller's own row: that is an ABSENT denominator, not
+  // 0/M, so nothing is rendered rather than a ratio the server never said.
+  const readsView = (() => {
+    const body = state.reads, total = state.session?.participant_count;
+    if (!body || !Array.isArray(body.members)) return null;
+    if (!Number.isInteger(total) || total <= 0) return null;
+    if (body.members.length < total) return null;
+    return { rows: body.members, total };
+  })();
+  const threadKey = m => collapsedThreadGroup(m) || m.thread_id || "";
+  const groupLast = new Map();
+  for (const m of state.messages) {
+    const key = threadKey(m), prev = groupLast.get(key);
+    if (prev === undefined || m.seq > prev) groupLast.set(key, m.seq);
+  }
+  const seenByLine = m => {
+    if (!readsView) return "";
+    const last = groupLast.get(threadKey(m));
+    if (last === undefined || m.seq !== last) return "";
+    let seen = 0;
+    for (const row of readsView.rows) if (Number(row.read_through_seq) >= last) seen++;
+    return '<p class="note seen-by" title="Read cursors from GET /sessions/{id}/reads — read state is not delivery.">Seen by ' + seen + "/" + readsView.total + "</p>";
+  };
+  const messageTagChips = m => Array.isArray(m.tags) && m.tags.length
+    ? '<div class="tag-chips m-tags" role="group" aria-label="Message tags">' + m.tags.map(tag => '<button type="button" class="tag-chip" data-tag-filter="' + esc(tag) + '" aria-pressed="' + (state.tagFilter === tag ? "true" : "false") + '" title="Filter the transcript by this tag">' + esc(tag) + '</button>').join("") + '</div>'
+    : "";
+  // The filter bar is part of this render: it lists the tags THIS session's
+  // reads have shown (a UNION, so filtering by one tag never hides the way back
+  // to another), marks the active filter and states it in words. Tags are the
+  // only chips offered — nothing here invents a category the server never sent.
+  const vocab = state.tagVocabulary instanceof Map ? state.tagVocabulary : new Map();
+  for (const m of state.messages) for (const tag of Array.isArray(m.tags) ? m.tags : []) vocab.set(tag, true);
+  state.tagVocabulary = vocab;
+  const vocabTags = [...vocab.keys()].sort();
+  $("tag-filter-chips").innerHTML = vocabTags.map(tag => '<button type="button" class="tag-filter-btn" data-tag-filter="' + esc(tag) + '" aria-pressed="' + (state.tagFilter === tag ? "true" : "false") + '">' + esc(tag) + '</button>').join("");
+  $("tag-filter-clear").hidden = !state.tagFilter;
+  $("tag-filter-state").textContent = state.tagFilter
+    ? 'Active filter: tag "' + state.tagFilter + '" — the transcript is a server-side ?tag=' + state.tagFilter + ' read. Clear restores the full transcript.'
+    : vocabTags.length ? "No tag filter — showing the full session read. Pick a tag to filter the transcript server-side." : "No tag filter — this is the full session read; no message in it carries a tag yet.";
   const msgs = [...state.messages.filter(m => !state.thread || m.thread_id === state.thread), ...(state.systemEvents || []).map(e => ({...e, systemEvent:true, sessionWide: !!state.thread}))].sort((a,b) => a.seq - b.seq);
   let html = findings.map(f => '<p class="warning">Transcript finding: ' + esc(f.kind) + ' — ' + esc(f.detail) + '</p>').join("");
   const groups = new Map();
@@ -855,7 +1030,7 @@ function renderMessages(findings = []) {
       const hidden = groups.get(group);
       return '<section class="branch-summary" data-collapsed-thread="' + esc(group) + '"><button type="button" data-expand-branch="' + esc(group) + '" aria-expanded="false">' + hidden.length + (hidden.length === 1 ? ' message hidden' : ' messages hidden') + ' — Expand branch</button><p class="note">Generated index · branch ' + esc(group) + ' · raw messages one click underneath</p></section>';
     }
-    return m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"' + (m.sessionWide ? ' data-session-wide="true"' : '') + '><strong>SYSTEM EVENT' + (m.sessionWide ? ' · SESSION-WIDE' : '') + '</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + (m.state ? ' · state ' + esc(m.state) : '') + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article id="' + esc(messageAnchorID(m.id)) + '" data-message-id="' + esc(m.id) + '" data-thread-depth="' + esc(m.thread_depth ?? 0) + '" tabindex="-1" class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div><div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + anchorLink(m.parent_id) : m.anchor_message_id ? ' · branch from ' + anchorLink(m.anchor_message_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button><button type="button" class="reply-button" data-branch="' + esc(m.id) + '">Branch from here</button></div></article>'; }).join("");
+    return m.systemEvent ? '<article class="card system-event" data-event-seq="' + esc(m.seq) + '"' + (m.sessionWide ? ' data-session-wide="true"' : '') + '><strong>SYSTEM EVENT' + (m.sessionWide ? ' · SESSION-WIDE' : '') + '</strong><p>' + esc(m.text) + '</p><p class="note">' + esc(author(m.actor)) + ' · ' + esc(m.sender_identity_basis || "identity basis not recorded") + (m.state ? ' · state ' + esc(m.state) : '') + ' · ' + esc(stamp(m.ts)) + ' · #' + esc(m.seq) + '</p></article>' : '<article id="' + esc(messageAnchorID(m.id)) + '" data-message-id="' + esc(m.id) + '" data-thread-depth="' + esc(m.thread_depth ?? 0) + '" tabindex="-1" class="msg ' + (m.message_kind === "task" ? "task" : m.message_kind === "addressed" ? "addressed" : "plain") + (m.parent_id ? " reply" : "") + '"><span class="avatar" aria-hidden="true">' + avatar(author(m.author)) + '</span><div class="m-content"><div class="m-head"><strong>' + esc(author(m.author)) + '</strong><span class="pill ' + (m.message_kind === "task" ? "warning" : "lavender") + '">' + esc(m.message_kind === "task" ? "Explicit task" : m.message_kind === "addressed" ? "Addressed · no execution" : m.message_kind) + '</span><time class="note">' + esc(stamp(m.created_at)) + '</time></div><div class="m-body">' + esc(messageText(m)) + '</div>' + messageTagChips(m) + '<div class="m-meta">#' + esc(m.seq) + ' · ' + esc(m.sender_identity_basis || 'sender identity basis not recorded') + ' · thread ' + esc(m.thread_id) + (m.parent_id ? ' · reply to ' + anchorLink(m.parent_id) : m.anchor_message_id ? ' · branch from ' + anchorLink(m.anchor_message_id) : ' · thread root') + (m.parent_resolvable === false ? ' · parent unavailable' : '') + (m.task ? ' · task state: ' + esc(m.task.state || "not exposed") + ' (recorded at send time, not live)' : '') + '</div>' + seenByLine(m) + (m.task ? '<p class="note task-navigation" data-message-task="' + esc(m.task.task_id) + '">' + taskMessageLink(m.task.task_id) + '</p>' : '') + '<div class="outcomes">' + (m.outcomes || []).map(o => '<span class="' + (o.outcome === "in_progress" ? "warning" : negativeOutcome(o) ? "error" : "note") + '">' + esc(outcomeLine(o)) + '</span>').join("") + '</div><button type="button" class="reply-button" data-reply="' + esc(m.id) + '">Reply in thread</button><button type="button" class="reply-button" data-branch="' + esc(m.id) + '">Branch from here</button></div></article>'; }).join("");
   if (!msgs.length) html += '<div class="empty"><strong>No messages in this view.</strong>Start the conversation below. An empty transcript is not a delivery confirmation.</div>';
   renderBranchRail();
   // Avoid replacing a focused reply control on every background read.
@@ -1216,6 +1391,132 @@ function setIdentitySuggestion(agent, unavailable = false) {
     ? "Registered agents could not be loaded. Enter an existing agent ID only; this page does not register IDs."
     : "No registered agent is available. Enter an existing agent ID; this page does not register IDs.";
 }
+// CRIER-UI-1 (COURIER-READS §3.1): the session list's unread pill. One read per
+// LISTED session (bounded below), and the value used is the CALLER's own row
+// only — another member's unread is not this agent's. A session whose read
+// fails, or whose own row is absent because this caller is not privileged,
+// renders NO pill: an unknown count is not zero.
+const UNREAD_PILL_LIMIT = 25;
+function callerUnread(body) {
+  const rows = body && Array.isArray(body.members) ? body.members : [];
+  const mine = rows.find(row => row && row.member_type === "agent" && row.member_id === state.agent);
+  return mine && Number.isInteger(mine.unread) && mine.unread >= 0 ? mine.unread : null;
+}
+async function loadSessionUnread(generation = state.generation) {
+  if (!state.agent || !state.sessions.length) { state.unread = new Map(); renderSessions(); return; }
+  const listed = state.sessions.slice(0, UNREAD_PILL_LIMIT).map(s => s.id);
+  const counts = await Promise.all(listed.map(async id => {
+    try { return [id, callerUnread(await call(sessionPath(id, "reads")))]; }
+    catch { return [id, null]; }
+  }));
+  // A later refresh owns the list and the counts; this one must not overwrite it.
+  if (generation !== state.generation) return;
+  state.unread = new Map(counts.filter(([, count]) => Number.isInteger(count)));
+  renderSessions();
+}
+// CRIER-UI-1 (COURIER-TAGS §2.1): the composer's tag chips. This mirrors
+// internal/tags EXACTLY — same order of checks, same sentences — so a tag
+// refused here is refused by POST /ingress/messages for the same stated reason
+// and a tag accepted here is one the server accepts. Nothing is lowercased:
+// two spellings of one category is the drift the grammar exists to prevent.
+const TAG_MAX = 64, TAG_MAX_COUNT = 16, TAG_RESERVED_PREFIX = "sys:";
+const tagQuote = value => JSON.stringify(String(value));
+const tagEdge = ch => (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9");
+const tagBytes = tag => typeof TextEncoder === "function" ? new TextEncoder().encode(tag).length : tag.length;
+function tagGrammarReason(tag) {
+  if (!tag) return "tag invalid: \"\" (empty tag)";
+  const bytes = tagBytes(tag);
+  if (bytes > TAG_MAX) return "tag invalid: " + tagQuote(tag) + " (" + bytes + " characters, max " + TAG_MAX + ")";
+  for (const ch of tag) {
+    if ((ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9") || ch === "_" || ch === "-" || ch === ":") continue;
+    return "tag invalid: " + tagQuote(tag) + " (character '" + ch + "' is not lowercase ascii, a digit, '_' or '-')";
+  }
+  const segments = tag.split(":");
+  if (segments.length > 2) return "tag invalid: " + tagQuote(tag) + " (at most one ':' is allowed)";
+  for (const segment of segments) {
+    if (!segment) return "tag invalid: " + tagQuote(tag) + " (empty ':' segment)";
+    if (!tagEdge(segment[0])) return "tag invalid: " + tagQuote(tag) + " (a segment must start with a lowercase letter or digit)";
+    if (!tagEdge(segment[segment.length - 1])) return "tag invalid: " + tagQuote(tag) + " (a segment must end with a lowercase letter or digit)";
+    const segmentBytes = tagBytes(segment);
+    if (segmentBytes > TAG_MAX) return "tag invalid: " + tagQuote(tag) + " (segment is " + segmentBytes + " characters, max " + TAG_MAX + ")";
+  }
+  if (tag.startsWith(TAG_RESERVED_PREFIX)) return "tag " + tagQuote(tag) + " uses the reserved " + tagQuote(TAG_RESERVED_PREFIX) + " prefix, which only an operator principal may write";
+  return "";
+}
+function renderTagChips() {
+  $("tag-chips").innerHTML = state.tags.map(tag => '<span class="tag-chip" role="listitem">' + esc(tag) + '<button type="button" data-tag-remove="' + esc(tag) + '" aria-label="Remove tag ' + esc(tag) + '">×</button></span>').join("");
+}
+function addTag(raw) {
+  const tag = String(raw || "").trim();
+  if (!tag) return false;
+  if (state.tags.includes(tag)) { notice("tag-result", "Tag " + tag + " is already on this message; the server would store it once."); return false; }
+  if (state.tags.length >= TAG_MAX_COUNT) { notice("tag-result", "tag too many: " + (state.tags.length + 1) + " tags supplied (max " + TAG_MAX_COUNT + ")", true); return false; }
+  const reason = tagGrammarReason(tag);
+  if (reason) { notice("tag-result", reason, true); return false; }
+  state.tags.push(tag);
+  renderTagChips();
+  notice("tag-result", "Tag " + tag + " added to this message (" + state.tags.length + "/" + TAG_MAX_COUNT + ").");
+  return true;
+}
+function removeTag(tag) {
+  state.tags = state.tags.filter(item => item !== tag);
+  renderTagChips();
+  notice("tag-result", "Tag " + tag + " removed.");
+}
+// CRIER-UI-1 (COURIER-INGRESS §2.1): the two new destinations. One request
+// shape, the mode named explicitly, and the server's own result — including the
+// created session id — rendered as it answered. A refusal is shown VERBATIM.
+async function sendIngress(mode) {
+  const draft = $("text").value.trim();
+  if ($("intent").value === "task") {
+    notice("send-result", "An explicit task is created on the session route only (POST /sessions/{id}/tasks); POST /ingress/messages refuses kind=task. Choose “This session”, or set Intent back to Message.", true);
+    return;
+  }
+  const body = { mode, author:{ agent:state.agent }, text:draft, tags:[...state.tags] };
+  body.kind = /(^|\s)[@#]\S+/.test(draft) ? "addressed" : "plain";
+  if (mode === "new_session") {
+    const title = $("dest-title").value.trim();
+    if (!title) { notice("send-result", "A new session needs a title: POST /ingress/messages refuses an empty target.template.title (INGRESS_TEMPLATE_INVALID).", true); $("dest-title").focus(); return; }
+    const members = [...new Set($("dest-members").value.split(/[\s,]+/).map(id => id.trim()).filter(Boolean))]
+      .filter(id => id !== state.agent)
+      .map(id => ({ member_type:"agent", member_id:id }));
+    body.target = { template:{ title, kind:$("dest-kind").value || "channel", members } };
+  } else {
+    const agent = $("dest-agent").value.trim();
+    if (!agent) { notice("send-result", "An inbox send needs a target agent: POST /ingress/messages refuses an empty target.agent_id (INGRESS_AGENT_REQUIRED).", true); $("dest-agent").focus(); return; }
+    body.target = { agent_id:agent };
+  }
+  state.sending = true; ++state.generation; updateComposer();
+  notice("send-result", mode === "new_session" ? "Creating the session and recording the message…" : "Recording the message in the agent inbox…");
+  try {
+    const result = await call("/ingress/messages", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }, true);
+    const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
+    const lines = [];
+    if (mode === "new_session") lines.push("New session " + (result.session_id || "not reported by the server") + (result.created_session === true ? " created." : " — the server reports created_session:false."));
+    lines.push((mode === "inbox" ? "Inbox entry " : "Message ") + (result.message_id || "not reported by the server") + (result.seq ? " at seq " + result.seq : ""));
+    if (result.delivery) lines.push("Delivery: " + (result.delivery.mode || "not reported") + (result.delivery.harness ? " via " + result.delivery.harness : "") + (result.delivery.state ? " — " + result.delivery.state : "") + (result.delivery.error ? " (" + result.delivery.error + ")" : ""));
+    lines.push(outcomes.length ? outcomes.map(outcomeLine).join("; ") : "No per-recipient outcomes returned; delivery is unconfirmed.");
+    notice("send-result", lines.join("\n"));
+    // The draft and its chips are cleared only after the server answered.
+    $("text").value = ""; state.tags = []; renderTagChips();
+    $("tag-result").textContent = ""; $("tag-result").className = "note";
+    if (mode === "new_session") { $("dest-title").value = ""; $("dest-members").value = ""; } else { $("dest-agent").value = ""; }
+  } catch (e) {
+    // VERBATIM: the server's refusal sentence, exactly as it answered — no
+    // prefix, no re-wording, no second interpretation by this page.
+    notice("send-result", e.message, true);
+  } finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
+}
+// CRIER-UI-1 (COURIER-TAGS §2.4): a filter chip is a NEW READ (?tag=), never a
+// client-side hide — so the transcript shows exactly what the server answered
+// and "clear" restores the full read the same way.
+function setTagFilter(tag) {
+  const next = tag && state.tagFilter !== tag ? tag : "";
+  if (next === state.tagFilter) return;
+  state.tagFilter = next;
+  notice("tag-filter-state", next ? 'Filtering by tag "' + next + '" — reading the transcript with ?tag=' + next + "…" : "Clearing the tag filter — reading the full transcript…");
+  refresh();
+}
 async function refresh() {
   if (state.sending) return;
   const generation = ++state.generation, id = state.current, realm = state.namespace;
@@ -1228,7 +1529,7 @@ async function refresh() {
   const read = async (path, render, fail) => { try { const b = await call(path); if (valid()) render(b); } catch(e) { if (valid()) fail(e); } };
   const registry = read("/agents", b => { state.agents = (b.agents || []).filter(a => canonicalRealm(a.namespace) === canonicalRealm(state.namespace)); setIdentitySuggestion(state.agents[0]); renderDirectory(); }, e => { state.agents = []; setIdentitySuggestion(null, true); renderDirectory(); unavailable("capabilities",e); unavailable("capability-matrix",e); });
   const reads = [registry,
-    read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); }, e => { state.sessions = []; unavailable("sessions",e); }),
+    read("/sessions", b => { state.sessions = b.sessions || []; renderSessions(); void loadSessionUnread(generation); }, e => { state.sessions = []; state.unread = new Map(); unavailable("sessions",e); }),
     read("/status", b => {
       state.requireAgentSignature = b.require_agent_signature;
       // "enabled-unarmed" refers to this viewer's MANAGEMENT gate, not an
@@ -1244,7 +1545,17 @@ async function refresh() {
     }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; state.managementSurface = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
     loadGroups(generation, realm)];
   if (id) {
-    reads.push(read(sessionPath(id,"messages"), b => { state.session = b.session; state.sessionRead = "read"; state.messages = b.messages || []; state.systemEvents = b.system_events || []; renderHeader(); renderThreadOptions(); renderMessages(b.findings); }, e => { state.session = null; state.sessionRead = e.status >= 400 && e.status < 500 ? "refused" : "failed"; state.messages = []; state.systemEvents = []; renderHeader(); unavailable("transcript",e); }));
+    // CRIER-UI-1 (COURIER-TAGS §2.4): an active tag filter is a SERVER-side
+    // query (?tag=), never a client-side hide, so the transcript is exactly the
+    // set the server returned and its count cannot drift from the read.
+    const transcriptPath = state.tagFilter ? sessionPath(id,"messages") + "?tag=" + encodeURIComponent(state.tagFilter) : sessionPath(id,"messages");
+    reads.push(read(transcriptPath, b => { state.session = b.session; state.sessionRead = "read"; state.messages = b.messages || []; state.systemEvents = b.system_events || []; state.findings = Array.isArray(b.findings) ? b.findings : []; renderHeader(); renderThreadOptions(); renderMessages(); }, e => { state.session = null; state.sessionRead = e.status >= 400 && e.status < 500 ? "refused" : "failed"; state.messages = []; state.systemEvents = []; state.findings = []; state.reads = null; renderHeader(); unavailable("transcript",e); }));
+    // COURIER-READS §3.1: the same read that feeds "seen by N/M". Its failure
+    // clears the data — the renderer shows nothing rather than a stale ratio.
+    // It re-renders ONLY when the transcript itself was read: a failed
+    // transcript read has already written its cause into #transcript, and a
+    // re-render here would replace that notice with an "empty view" claim.
+    reads.push(read(sessionPath(id,"reads"), b => { state.reads = b; if (state.sessionRead === "read") renderMessages(); }, () => { state.reads = null; if (state.sessionRead === "read") renderMessages(); }));
     reads.push(registry.then(() => read(sessionPath(id,"participants"), renderParticipants, e => unavailable("participants",e))));
     reads.push(read(sessionPath(id,"permissions"), renderPermissions, e => unavailable("permissions",e)));
     reads.push(read(sessionPath(id,"tasks"), renderTasks, e => { unavailable("tasks",e); updateMessageTaskLinks(); }));
@@ -1260,6 +1571,10 @@ function openSession(id) {
   state.current = id; state.session = null; state.sessionRead = "pending"; state.messages = []; state.systemEvents = []; state.reply = null; state.branch = false; state.thread = "";
   $("participant-context-share").value = "summary"; $("participant-context-boundary").value = "";
   $("text").value = ""; $("intent").value = "message"; $("recipient").value = "";
+  // CRIER-UI-1: a draft's tags, the active tag filter and the read-state answer
+  // belong to the conversation that was open — none of them carry over.
+  state.tags = []; state.tagFilter = ""; state.tagVocabulary = new Map(); state.reads = null;
+  renderTagChips(); notice("tag-result", "");
   state.selectedGroup = null; renderSelectedGroup();
   renderReply(); renderHeader(); renderSessions(); notice("send-result", "");
   // DF-CRIER-414: the in-flight panel belongs to the conversation that was open
@@ -1302,9 +1617,16 @@ function deliverySummary(outcomes) {
 async function send(event) {
   event.preventDefault();
   if (composerReason() || !$("text").value.trim()) return;
+  // CRIER-UI-1: the chosen destination decides the route. The two ingress modes
+  // go through POST /ingress/messages with their mode named explicitly; the
+  // session destination keeps the path below byte-for-byte.
+  if (destinationMode() !== "session") { await sendIngress(destinationMode()); return; }
   const id = state.current, draft = $("text").value.trim(), recipient = $("recipient").value, task = $("intent").value === "task";
   if (task && !recipient) { notice("send-result","Choose an explicit agent recipient before requesting work.",true); return; }
   const payload = { payload:{text:draft}, sender:state.agent };
+  // CRIER-UI-1 (COURIER-TAGS §4): the same chips ride the session route, so a
+  // tag added here classifies the message whichever destination sends it.
+  if (state.tags.length) payload.tags = [...state.tags];
   if (state.reply) payload.parent_id = state.reply;
   if (state.reply && state.branch) {
     if (task) { notice("send-result", "Choose a message to start a branch; explicit tasks keep their existing thread behavior."); return; }
@@ -1382,7 +1704,10 @@ async function send(event) {
     const details = outcomes.map(outcomeLine).join("\n");
     const action = result.replay_action === "redelivered" ? "; delivery attempted again on the same message" : result.replay_action === "replayed" ? "; replayed without another delivery" : "";
     notice("send-result", (task ? "Task recorded" : "Message recorded") + action + deliverySummary(outcomes) + (result.sender_identity_basis ? "\nSender identity: " + result.sender_identity_basis + "." : "") + (details ? "\n" + details : "\nNo per-recipient delivery outcomes returned; delivery is unconfirmed.") + (retryable ? "\nDraft kept. Send again unchanged to retry delivery on the same message; its outcomes will be replaced, not a second operator row added." : inProgress ? "\nDelivery is already in flight. Draft kept. Refresh the transcript for confirmation; do not send again while it is in progress." : keepDraft ? "\nDraft kept. Refresh the transcript before sending again; sending this retained draft records a new message, not a retry of this non-retryable result." : ""), negative);
-    if (!keepDraft && !inProgress) { $("text").value = ""; state.reply = null; state.branch = false; renderReply(); }
+    // CRIER-UI-1: a recorded message releases its tag chips. Written straight
+    // into the slot, not through notice(), so the send outcome stays the last
+    // notice this page emitted (the delivery diagnostics order depends on it).
+    if (!keepDraft && !inProgress) { $("text").value = ""; state.reply = null; state.branch = false; renderReply(); if (state.tags.length) { state.tags = []; renderTagChips(); $("tag-result").textContent = ""; $("tag-result").className = "note"; } }
   } catch(e) {
     // The 12s browser wait is NOT CR_SESSION_DELIVERY_TIMEOUT_MS: fan-out,
     // federation and persistence can outlast it. Do not label that uncertainty
@@ -1505,6 +1830,7 @@ $("identity-form").addEventListener("submit", event => {
   renderDirectory(); notice("capability-matrix","Loading registry…");
   notice("groups-count","Loading GET /groups…"); notice("groups","Loading named groups…"); notice("group-roster","Select a group to read its roster."); notice("group-result","");
   $("text").value = ""; $("recipient").innerHTML = '<option value="">Session audience</option>'; $("intent").value = "message";
+  state.tags = []; state.tagFilter = ""; state.tagVocabulary = new Map(); state.reads = null; state.unread = new Map(); renderTagChips();
   renderReply(); renderHeader(); renderSessions(); notice("send-result","");
   $("thread-filter").innerHTML = '<option value="">All threads</option>';
   for (const panel of ["transcript","participants","tasks","permissions"]) notice(panel,"Select a session in this realm.");
@@ -1527,6 +1853,9 @@ $("transcript").addEventListener("scroll", () => {
 });
 $("thread-filter").addEventListener("change", () => { state.thread = $("thread-filter").value; state.reply = null; state.branch = false; renderReply(); renderMessages(); });
 $("transcript").addEventListener("click", e => {
+  // CRIER-UI-1: a tag chip on a message filters the transcript server-side.
+  const tag = e.target.closest("[data-tag-filter]");
+  if (tag) { e.preventDefault(); setTagFilter(tag.dataset.tagFilter); return; }
   const anchor = e.target.closest("[data-anchor]");
   if (anchor) { e.preventDefault(); navigateToMessage(anchor.dataset.anchor); return; }
   const expand = e.target.closest("[data-expand-branch]");
@@ -1543,6 +1872,29 @@ $("tasks").addEventListener("click", e => { const action = e.target.closest("[da
 $("text").addEventListener("input",resetAudienceWarning);
 $("recipient").addEventListener("change",resetAudienceWarning);
 $("intent").addEventListener("change", () => { resetAudienceWarning(); updateComposer(); });
+// CRIER-UI-1: the destination radios, the tag chips and the tag filter. Each
+// control only records the operator's choice; the request shape is built once,
+// in send()/sendIngress(), from state.destination and state.tags.
+for (const radio of document.querySelectorAll('[name="destination"]')) {
+  radio.addEventListener("change", () => {
+    if (!radio.checked) return;
+    state.destination = radio.value;
+    // Intent is a session-route concept. Switching away resets it rather than
+    // leaving a task intent the ingress route refuses (kind=task).
+    if (destinationMode() !== "session") $("intent").value = "message";
+    updateComposer();
+  });
+}
+$("tag-add").addEventListener("click", () => { if (addTag($("tag-input").value)) $("tag-input").value = ""; });
+$("tag-input").addEventListener("keydown", event => {
+  // Enter here adds a tag. Without this the key would submit the whole message.
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (addTag($("tag-input").value)) $("tag-input").value = "";
+});
+$("tag-chips").addEventListener("click", event => { const remove = event.target.closest("[data-tag-remove]"); if (remove) removeTag(remove.dataset.tagRemove); });
+$("tag-filter-chips").addEventListener("click", event => { const chip = event.target.closest("[data-tag-filter]"); if (chip) setTagFilter(chip.dataset.tagFilter); });
+$("tag-filter-clear").addEventListener("click", () => setTagFilter(""));
 $("composer").addEventListener("submit",send);
 $("text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
 setInterval(() => { if (!document.hidden && !state.busy && !state.sending) refresh(); },15000);

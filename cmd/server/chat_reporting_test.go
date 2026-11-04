@@ -123,9 +123,9 @@ func TestChatClientOutcomeReporting(t *testing.T) {
 const assert = require('node:assert/strict');
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id,{value:'',textContent:'',className:'',innerHTML:'',scrollHeight:0,scrollTop:0,clientHeight:100}); return elements.get(id); };
-const state = {current:'room',agent:'operator',namespace:'',session:{state:'open'},reply:'parent',generation:0,messages:[],thread:''};
+const state = {current:'room',agent:'operator',namespace:'',session:{state:'open'},reply:'parent',generation:0,messages:[],thread:'',tags:[]};
 const esc = String, author = () => 'operator', stamp = String, avatar = () => 'OP', messageText = m => m.payload.text;
-const composerReason = () => '', updateComposer = () => {}, resetAudienceWarning = () => {}, renderReply = () => {}, refresh = async () => {};
+const composerReason = () => '', destinationMode = () => 'session', renderTagChips = () => {}, updateComposer = () => {}, resetAudienceWarning = () => {}, renderReply = () => {}, refresh = async () => {};
 const notice = (id,text,error=false) => { $(id).textContent=text; $(id).className=error?'note error':'note'; };
 const crypto = require('node:crypto').webcrypto;
 const sessionPath = (id,suffix) => '/sessions/'+id+'/'+suffix;

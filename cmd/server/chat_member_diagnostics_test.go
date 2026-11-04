@@ -27,9 +27,9 @@ const assert=require('node:assert/strict');
 const crypto=require('node:crypto').webcrypto;
 const elements=new Map();
 const $=id=>{if(!elements.has(id))elements.set(id,{value:'',hidden:true});return elements.get(id)};
-const state={current:'room',namespace:'',agent:'operator',reply:null,sending:false,generation:0};
+const state={current:'room',namespace:'',agent:'operator',reply:null,sending:false,generation:0,tags:[]};
 const notices=[];const notice=(...args)=>notices.push(args);
-const composerReason=()=>'';const updateComposer=()=>{};const resetAudienceWarning=()=>{};const renderReply=()=>{};const refresh=async()=>{};
+const composerReason=()=>'';const destinationMode=()=>'session';const renderTagChips=()=>{};const updateComposer=()=>{};const resetAudienceWarning=()=>{};const renderReply=()=>{};const refresh=async()=>{};
 const sessionPath=(id,kind)=>'/sessions/'+id+'/'+kind;
 let outcomes=[];async function call(){return {outcomes}}
 ` + source[start:end] + `

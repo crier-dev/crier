@@ -32,7 +32,10 @@ function client() {
     return els.get(id);
   };
   const state = {current:'room',session:{id:'room',state:'open'},messages:fixture(),systemEvents:[],thread:'',reply:null,
-    agent:'atlas',namespace:'',sending:false,generation:0,participants:[]};
+    agent:'atlas',namespace:'',sending:false,generation:0,participants:[],
+    // CRIER-UI-1: the shipped composer defaults the destination to the session
+    // route and drafts no tags; send() reads both.
+    destination:'session',tags:[],tagFilter:''};
   const document = {getElementById: id => {
     // Only a genuinely rendered article can be the navigation target.
     if (!new RegExp('<article[^>]*id="'+id+'"').test($('transcript').innerHTML)) return null;
@@ -40,6 +43,10 @@ function client() {
   },createElement: () => {let text=''; return {set textContent(v){text=String(v);},get innerHTML(){return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}};}};
   const context = vm.createContext({$,state,document,console,Map,Set,Response,AbortSignal,DOMException,setTimeout,clearTimeout,
     crypto:require('node:crypto').webcrypto,author:()=> 'atlas',avatar:()=> 'A',stamp:String,messageText:m=>m.payload.text,
+    // CRIER-UI-1: the shipped helpers send() now reads. destinationMode() is the
+    // shipped default (no radio has been switched in this harness), and the tag
+    // chips are empty, so renderTagChips() has nothing to write.
+    destinationMode:()=> 'session',renderTagChips(){},
     resetAudienceWarning(){},composerReason:()=>'',updateComposer(){},openTaskThread:()=>false,taskMessageLink:()=>'',
     renderParticipants(){},refresh:async()=>{},clearSendProgress(){},startSendProgressWatcher(){},stopSendProgressWatcher(){},
     sessionPath:(id,suffix)=>`/sessions/${id}/${suffix}`,
