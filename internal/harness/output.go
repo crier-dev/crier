@@ -66,6 +66,9 @@ var sessionUnknownMarkers = []string{
 	"no such session",
 	"session does not exist",
 	"no session found",
+	// codex: `codex exec resume <missing>` answers
+	// "thread/resume failed: no rollout found for thread id <id>".
+	"no rollout found for thread",
 }
 
 // ClassifyFailure maps a failed run onto the §5 vocabulary: an unknown session

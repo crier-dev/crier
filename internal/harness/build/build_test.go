@@ -9,35 +9,57 @@ import (
 	"github.com/crier-dev/crier/internal/harness/build"
 )
 
-// TestRegistryRegistersConfiguredAdaptersAndStandsInForLaterRows proves the
-// config contract: hermes and opencode are real adapters, pi and codex are
-// accepted blocks that report why they are unavailable, and a block removed
-// from the config (a disabled one) is simply absent.
-func TestRegistryRegistersConfiguredAdaptersAndStandsInForLaterRows(t *testing.T) {
+// TestRegistryRegistersEveryConfiguredAdapter proves the config contract: all
+// four adapters are real, so a bogus binary makes that adapter — and only that
+// adapter — report why it is unavailable, and a refused block is simply absent.
+func TestRegistryRegistersEveryConfiguredAdapter(t *testing.T) {
 	cfg := harness.DefaultConfig()
 	cfg.Enabled = true
 	cfg.Adapters["hermes"] = harness.AdapterConfig{Binary: "/nonexistent/hermes-binary"}
 	cfg.Adapters["opencode"] = harness.AdapterConfig{Binary: "/nonexistent/opencode-binary"}
+	cfg.Adapters["pi"] = harness.AdapterConfig{Binary: "/nonexistent/pi-binary"}
 	delete(cfg.Adapters, "codex")
 	cfg.Disabled["codex"] = "malformed adapter block: synthetic"
 
 	reg := build.Registry(cfg)
 	caps := reg.Capabilities(context.Background())
 
-	if caps["hermes"].Available || !strings.Contains(caps["hermes"].Reason, "/nonexistent/hermes-binary") {
-		t.Fatalf("hermes must be unavailable and name its binary: %+v", caps["hermes"])
-	}
-	if caps["opencode"].Available {
-		t.Fatalf("opencode must be unavailable for a bogus binary: %+v", caps["opencode"])
-	}
-	if caps["pi"].Available || !strings.Contains(caps["pi"].Reason, "CRIER-HARNESS-2") {
-		t.Fatalf("pi must report its later row: %+v", caps["pi"])
+	for name, binary := range map[string]string{
+		"hermes":   "/nonexistent/hermes-binary",
+		"opencode": "/nonexistent/opencode-binary",
+		"pi":       "/nonexistent/pi-binary",
+	} {
+		if caps[name].Available || !strings.Contains(caps[name].Reason, binary) {
+			t.Fatalf("%s must be a real adapter that is unavailable and names its binary: %+v", name, caps[name])
+		}
 	}
 	if _, ok := caps["codex"]; ok {
 		t.Fatal("a disabled adapter block must not be registered at all")
 	}
 	if !reg.Enabled() {
 		t.Fatal("registry must carry harness.enabled")
+	}
+}
+
+// TestRegistryPiAndCodexCarryTheirSurfaces: the two adapters this build adds
+// advertise the flags they actually use, and codex's sandbox default is the
+// one §4.1 documents.
+func TestRegistryPiAndCodexCarryTheirSurfaces(t *testing.T) {
+	cfg := harness.DefaultConfig()
+	cfg.Enabled = true
+	cfg.Adapters["pi"] = harness.AdapterConfig{Binary: "/nonexistent/pi-binary"}
+	cfg.Adapters["codex"] = harness.AdapterConfig{Binary: "/nonexistent/codex-binary"}
+
+	reg := build.Registry(cfg)
+	caps := reg.Capabilities(context.Background())
+
+	pi := caps["pi"]
+	if !pi.Features["print"] || !pi.Features["session_id"] || !pi.Features["create"] || !pi.Features["continue"] {
+		t.Fatalf("pi must advertise -p and --session-id for create+continue: %+v", pi)
+	}
+	codex := caps["codex"]
+	if !codex.Features["resume"] || !codex.Features["create"] || !codex.Features["sandbox"] {
+		t.Fatalf("codex must advertise exec, resume and an explicit sandbox: %+v", codex)
 	}
 }
 

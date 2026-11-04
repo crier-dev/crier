@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/harness"
+	"github.com/crier-dev/crier/internal/harness/codex"
 	"github.com/crier-dev/crier/internal/harness/hermes"
 	"github.com/crier-dev/crier/internal/harness/opencode"
+	"github.com/crier-dev/crier/internal/harness/pi"
 )
 
 // ---------------------------------------------------------------------------
@@ -46,10 +48,30 @@ fi
 rec="$(mktemp "$dir/argv.XXXXXX")"
 printf '%s\0' "$@" > "$rec"
 printf '%s\n' "$PWD" >> "$dir/pwd"
+# A piped prompt is recorded next to the argv so a test can prove the message
+# travelled on stdin byte-identically (§6, >64 KiB).
+body="$(cat)"
+if [ -n "$body" ]; then
+  printf '%s' "$body" > "$dir/stdin.$(basename "$rec")"
+fi
 
 case "$mode" in
   unknown)
     printf '%s\n' "error: session not found" >&2
+    exit 1
+    ;;
+  rollout)
+    # codex's real words for a resume of an id it never recorded.
+    printf '%s\n' "Error: thread/resume: thread/resume failed: no rollout found for thread id 00000000-0000-4000-8000-000000000000 (code -32600)" >&2
+    exit 1
+    ;;
+  silent)
+    ;;
+  partial)
+    # codex mints the thread before the turn: a run that dies mid-turn still
+    # prints the handshake, and the receipt must keep that id.
+    printf '%s\n' '{"type":"thread.started","thread_id":"01a1a432-601b-7240-a7b3-a756326a65c0"}'
+    printf '%s\n' "Reconnecting... waiting for network" >&2
     exit 1
     ;;
   fail)
@@ -169,11 +191,19 @@ type contractCase struct {
 	// createState is the receipt state a successful create reports.
 	createState string
 	// createAbsentToken must NOT appear in the create argv (the token that
-	// would mean "continue this session").
+	// would mean "continue this session"). Empty means the adapter has no such
+	// token: pi's create path is the same --session-id call as its continue
+	// path, so only the id value differs.
 	createAbsentToken string
+	// createRequiredToken must appear in the create argv ("" = not asserted).
+	createRequiredToken string
 	// continueFlag is the argv token immediately followed by the session id on
-	// the continue path.
+	// the continue path ("" = assert the id appears in argv instead: codex takes
+	// the id as a bare positional after its flags).
 	continueFlag string
+	// continueIDIsPositional turns off the flag+id adjacency check: the id is
+	// still required to be in argv, just not next to a flag.
+	continueIDIsPositional bool
 }
 
 func contractCases() []contractCase {
@@ -197,10 +227,37 @@ func contractCases() []contractCase {
 			build: func(t *testing.T, binary string, f *fakeHarness, timeout time.Duration) harness.Adapter {
 				return opencode.New(opencode.Config{Binary: binary, Timeout: timeout})
 			},
-			createRunsProcess: true,
-			createState:       harness.StateDispatched,
-			createAbsentToken: "-s",
-			continueFlag:      "-s",
+			createRunsProcess:   true,
+			createState:         harness.StateDispatched,
+			createAbsentToken:   "-s",
+			createRequiredToken: "--title",
+			continueFlag:        "-s",
+		},
+		{
+			// pi create-or-continues: `pi -p --session-id <id>` creates <id>
+			// when it is absent (`pi --help`), so the create argv carries the
+			// same flags as a continue and only the id is fresh.
+			name: "pi",
+			build: func(t *testing.T, binary string, f *fakeHarness, timeout time.Duration) harness.Adapter {
+				return pi.New(pi.Config{Binary: binary, Timeout: timeout})
+			},
+			createRunsProcess:   true,
+			createState:         harness.StateDispatched,
+			createAbsentToken:   "--resume",
+			createRequiredToken: "--session-id",
+			continueFlag:        "--session-id",
+		},
+		{
+			name: "codex",
+			build: func(t *testing.T, binary string, f *fakeHarness, timeout time.Duration) harness.Adapter {
+				return codex.New(codex.Config{Binary: binary, Timeout: timeout})
+			},
+			createRunsProcess:      true,
+			createState:            harness.StateDispatched,
+			createAbsentToken:      "resume",
+			createRequiredToken:    "-s",
+			continueFlag:           "resume",
+			continueIDIsPositional: true,
 		},
 	}
 }
@@ -262,13 +319,18 @@ func TestAdapterContract(t *testing.T) {
 					if len(args) != 1 {
 						t.Fatalf("want 1 invocation, got %d: %v", len(args), args)
 					}
-					for _, arg := range args[0] {
-						if arg == tc.createAbsentToken {
-							t.Fatalf("create argv must not carry %q: %v", tc.createAbsentToken, args[0])
+					// TestProbeReportsBinaryAndVersion's sibling: a create must
+					// not carry the continue token, and must carry the token
+					// that makes it a create for that harness.
+					if tc.createAbsentToken != "" {
+						for _, arg := range args[0] {
+							if arg == tc.createAbsentToken {
+								t.Fatalf("create argv must not carry %q: %v", tc.createAbsentToken, args[0])
+							}
 						}
 					}
-					if !containsElement(args[0], "--title") {
-						t.Fatalf("create argv must carry --title: %v", args[0])
+					if tc.createRequiredToken != "" && !containsElement(args[0], tc.createRequiredToken) {
+						t.Fatalf("create argv must carry %q: %v", tc.createRequiredToken, args[0])
 					}
 					if rc.SessionID != "ses_fake_created" {
 						t.Fatalf("session id: want ses_fake_created, got %q", rc.SessionID)
@@ -311,7 +373,16 @@ func TestAdapterContract(t *testing.T) {
 					t.Fatalf("want 1 invocation, got %d: %v", len(args), args)
 				}
 				idx := indexOf(args[0], tc.continueFlag)
-				if idx < 0 || idx+1 >= len(args[0]) || args[0][idx+1] != sid {
+				if idx < 0 {
+					t.Fatalf("continue argv must carry %q: %v", tc.continueFlag, args[0])
+				}
+				if tc.continueIDIsPositional {
+					if indexOf(args[0], sid) < 0 {
+						t.Fatalf("continue argv must carry the session id %q: %v", sid, args[0])
+					}
+					return
+				}
+				if idx+1 >= len(args[0]) || args[0][idx+1] != sid {
 					t.Fatalf("continue argv must carry %q %q: %v", tc.continueFlag, sid, args[0])
 				}
 			})
@@ -403,8 +474,16 @@ func TestAdapterContract(t *testing.T) {
 					t.Fatalf("message text must arrive byte-identical as ONE argv element:\nwant %q\ngot  %q", text, last)
 				}
 				for _, arg := range args[0] {
-					if arg == "sh" || arg == "bash" || arg == "-c" {
+					if arg == "sh" || arg == "bash" {
 						t.Fatalf("argv must contain no shell: %v", args[0])
+					}
+				}
+				// No "sh -c"/"bash -c": a `-c` on its own is a documented
+				// config flag for some CLIs (codex `-c key=value`), so only the
+				// shell-invocation pair is evidence of interpolation.
+				for i := 0; i+1 < len(args[0]); i++ {
+					if (args[0][i] == "sh" || args[0][i] == "bash") && args[0][i+1] == "-c" {
+						t.Fatalf("argv must not invoke a shell: %v", args[0])
 					}
 				}
 			})
@@ -536,6 +615,262 @@ func TestAdapterContract(t *testing.T) {
 			})
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Adapter-specific contract edges (pi and codex)
+// ---------------------------------------------------------------------------
+
+// TestPiFreshSessionIDIsCreate pins pi's documented create-or-continue
+// semantic: `--session-id <id>` creates <id> when pi does not have it, so a
+// delivery with no session id must come back Created=true — never
+// HARNESS_SESSION_UNKNOWN — and must record the id it actually passed. The fake
+// prints nothing on stdout here, so the only possible source of the receipt's
+// session id is the adapter's own generated id.
+func TestPiFreshSessionIDIsCreate(t *testing.T) {
+	f := newFakeHarness(t)
+	f.mode("silent")
+	a := pi.New(pi.Config{Binary: f.bin})
+
+	rc, err := a.Deliver(context.Background(), harness.SessionRef{},
+		harness.Message{ID: "m_pi_1", SessionID: "s_pi", Author: "ci", Text: "first turn"})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if rc.State != harness.StateDispatched {
+		t.Fatalf("state: want dispatched, got %q (error %q tail %q)", rc.State, rc.Error, rc.Tail)
+	}
+	if !rc.Created {
+		t.Fatalf("a fresh --session-id is a create: receipt must report Created=true: %+v", rc)
+	}
+	if rc.Error == harness.CodeSessionUnknown {
+		t.Fatalf("a fresh id must never be HARNESS_SESSION_UNKNOWN: %+v", rc)
+	}
+	args := f.invocations()
+	if len(args) != 1 {
+		t.Fatalf("want 1 invocation, got %d: %v", len(args), args)
+	}
+	idx := indexOf(args[0], "--session-id")
+	if idx < 0 || idx+1 >= len(args[0]) {
+		t.Fatalf("create argv must carry --session-id <fresh id>: %v", args[0])
+	}
+	passed := args[0][idx+1]
+	if passed == "" {
+		t.Fatalf("the generated session id must not be empty: %v", args[0])
+	}
+	if rc.SessionID != passed {
+		t.Fatalf("receipt must record the id it used: argv %q, receipt %q", passed, rc.SessionID)
+	}
+	if !strings.HasPrefix(rc.SessionID, "crier-") || !strings.Contains(rc.SessionID, "s_pi") {
+		t.Fatalf("the generated id must be traceable to the courier session: %q", rc.SessionID)
+	}
+	for _, banned := range []string{"--resume", "-r", "--continue", "-c", "--fork"} {
+		if containsElement(args[0], banned) {
+			t.Fatalf("the create path must use only -p/--session-id, saw %q: %v", banned, args[0])
+		}
+	}
+}
+
+// TestPiCreatedOnAbsentIDIsReported proves the receipt tells the truth when the
+// caller named an id pi did not have: pi announces it in its own words on
+// stderr, and the receipt must say Created=true rather than pretend it
+// continued a session that did not exist.
+func TestPiCreatedOnAbsentIDIsReported(t *testing.T) {
+	f := newFakeHarness(t)
+	f.mode("silent")
+	a := pi.New(pi.Config{Binary: f.bin})
+
+	msg := harness.Message{ID: "m_pi_2", SessionID: "s_pi", Text: "turn"}
+	// The fake harness's stderr is empty, so nothing claims a create.
+	rc, err := a.Deliver(context.Background(), harness.SessionRef{ID: "ses_named"}, msg)
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if rc.Created {
+		t.Fatalf("no create marker from the harness: Created must stay false: %+v", rc)
+	}
+	if rc.SessionID != "ses_named" {
+		t.Fatalf("receipt must carry the id it continued: %q", rc.SessionID)
+	}
+}
+
+// TestCodexResumeUnknownNeverCreates uses codex's real unknown-session text
+// ("no rollout found for thread id …"): the delivery fails with
+// HARNESS_SESSION_UNKNOWN, and exactly one process ran — no silent create.
+func TestCodexResumeUnknownNeverCreates(t *testing.T) {
+	f := newFakeHarness(t)
+	f.mode("rollout")
+	a := codex.New(codex.Config{Binary: f.bin})
+
+	const sid = "01a1a422-dad4-78e3-99b0-6c6b3bfd2c1d"
+	rc, err := a.Deliver(context.Background(), harness.SessionRef{ID: sid},
+		harness.Message{ID: "m_codex_1", SessionID: "s_codex", Text: "ghost turn"})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if rc.State != harness.StateFailed || rc.Error != harness.CodeSessionUnknown {
+		t.Fatalf("want failed/%s, got %+v", harness.CodeSessionUnknown, rc)
+	}
+	if !strings.Contains(rc.Tail, "no rollout found") {
+		t.Fatalf("the tail must carry codex's own words: %q", rc.Tail)
+	}
+	args := f.invocations()
+	if len(args) != 1 {
+		t.Fatalf("an unknown session must not trigger a second (create) invocation: %v", args)
+	}
+	if len(args[0]) < 2 || args[0][0] != "exec" || args[0][1] != "resume" {
+		t.Fatalf("the only invocation must be `exec resume <id>`: %v", args[0])
+	}
+	if containsElement(args[0], "-s") {
+		t.Fatalf("-s is a create-path flag; a resume must not look like one: %v", args[0])
+	}
+}
+
+// TestCodexThreadIDSurvivesAFailedTurn: codex prints the thread handshake
+// before the turn runs, so a delivery that dies mid-turn still has an id the
+// courier can resume. The receipt must carry it, and the failure must stay a
+// failure with codex's own tail.
+func TestCodexThreadIDSurvivesAFailedTurn(t *testing.T) {
+	f := newFakeHarness(t)
+	f.mode("partial")
+	a := codex.New(codex.Config{Binary: f.bin})
+
+	const thread = "01a1a432-601b-7240-a7b3-a756326a65c0"
+	rc, err := a.Deliver(context.Background(), harness.SessionRef{},
+		harness.Message{ID: "m_c3", SessionID: "s_c", Text: "create"})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if rc.State != harness.StateFailed || rc.Error != harness.CodeExitNonZero {
+		t.Fatalf("want failed/%s, got %+v", harness.CodeExitNonZero, rc)
+	}
+	if rc.SessionID != thread {
+		t.Fatalf("receipt must keep the thread codex minted: want %q, got %q", thread, rc.SessionID)
+	}
+	if !rc.Created {
+		t.Fatalf("the create path must still report Created=true: %+v", rc)
+	}
+	if !strings.Contains(rc.Tail, "Reconnecting") {
+		t.Fatalf("the tail must carry codex's stderr: %q", rc.Tail)
+	}
+}
+
+// TestCodexSandboxAlwaysExplicit: the sandbox mode comes from config and is
+// passed on BOTH paths — `-s` on create, `-c sandbox_mode="…"` on resume (which
+// has no -s). Nothing is left to ~/.codex/config.toml.
+func TestCodexSandboxAlwaysExplicit(t *testing.T) {
+	f := newFakeHarness(t)
+	const mode = "read-only"
+	a := codex.New(codex.Config{Binary: f.bin, Sandbox: mode})
+
+	if _, err := a.Deliver(context.Background(), harness.SessionRef{},
+		harness.Message{ID: "m_c1", SessionID: "s_c", Text: "create"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := a.Deliver(context.Background(), harness.SessionRef{ID: "ses_c"},
+		harness.Message{ID: "m_c2", SessionID: "s_c", Text: "continue"}); err != nil {
+		t.Fatalf("continue: %v", err)
+	}
+	args := f.invocations()
+	if len(args) != 2 {
+		t.Fatalf("want 2 invocations, got %d: %v", len(args), args)
+	}
+	// Glob order is filename order, not call order: identify each invocation by
+	// its shape instead of its position.
+	var create, resume []string
+	for _, argv := range args {
+		if len(argv) > 1 && argv[1] == "resume" {
+			resume = argv
+			continue
+		}
+		create = argv
+	}
+	if create == nil || resume == nil {
+		t.Fatalf("want one create and one resume invocation: %v", args)
+	}
+	if idx := indexOf(create, "-s"); idx < 0 || idx+1 >= len(create) || create[idx+1] != mode {
+		t.Fatalf("create must pass -s %q: %v", mode, create)
+	}
+	if containsElement(resume, "-s") {
+		t.Fatalf("resume has no -s; it must use -c: %v", resume)
+	}
+	idx := indexOf(resume, "-c")
+	if idx < 0 || idx+1 >= len(resume) || resume[idx+1] != `sandbox_mode="`+mode+`"` {
+		t.Fatalf("resume must pin the configured sandbox: %v", resume)
+	}
+}
+
+// TestLongMessageTravelsOnStdin covers §6: above 64 KiB the text stops being an
+// argv element and becomes the child's stdin, byte-identically, with `-` as the
+// documented prompt placeholder where the CLI has one.
+func TestLongMessageTravelsOnStdin(t *testing.T) {
+	text := strings.Repeat("a", 70<<10) + "; rm -rf / $(id)"
+
+	for _, tc := range []struct {
+		name      string
+		adapter   func(binary string) harness.Adapter
+		wantsDash bool
+	}{
+		{name: "pi", adapter: func(binary string) harness.Adapter {
+			return pi.New(pi.Config{Binary: binary})
+		}},
+		{name: "codex", adapter: func(binary string) harness.Adapter {
+			return codex.New(codex.Config{Binary: binary})
+		}, wantsDash: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHarness(t)
+			a := tc.adapter(f.bin)
+			rc, err := a.Deliver(context.Background(),
+				harness.SessionRef{ID: "ses_long"},
+				harness.Message{ID: "m_long", SessionID: "s_long", Text: text})
+			if err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			if rc.State != harness.StateDispatched {
+				t.Fatalf("state: %q (%q)", rc.State, rc.Error)
+			}
+			args := f.invocations()
+			if len(args) != 1 {
+				t.Fatalf("want 1 invocation, got %d", len(args))
+			}
+			for _, arg := range args[0] {
+				if len(arg) > 64<<10 {
+					t.Fatalf("a 70 KiB message must not travel in argv (ARG_MAX); saw %d bytes", len(arg))
+				}
+			}
+			if tc.wantsDash && !containsElement(args[0], "-") {
+				t.Fatalf("the stdin prompt placeholder must be argv's last element: %v", args[0])
+			}
+			captured := readStdinCaptures(t, f.dir)
+			if len(captured) != 1 {
+				t.Fatalf("want 1 stdin body, got %d", len(captured))
+			}
+			if captured[0] != text {
+				t.Fatalf("stdin body must be byte-identical: want %d bytes, got %d", len(text), len(captured[0]))
+			}
+		})
+	}
+}
+
+// readStdinCaptures returns every stdin body the fake harness recorded, in
+// filename order.
+func readStdinCaptures(t *testing.T, dir string) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "stdin.*"))
+	if err != nil {
+		t.Fatalf("glob stdin: %v", err)
+	}
+	sort.Strings(paths)
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		out = append(out, string(raw))
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

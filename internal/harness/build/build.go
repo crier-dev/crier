@@ -10,21 +10,18 @@ import (
 	"strings"
 
 	"github.com/crier-dev/crier/internal/harness"
+	"github.com/crier-dev/crier/internal/harness/codex"
 	"github.com/crier-dev/crier/internal/harness/hermes"
 	"github.com/crier-dev/crier/internal/harness/opencode"
-)
-
-// UnimplementedReason is what pi and codex report until their rows land: their
-// config blocks are accepted, and the capability table says why they are not
-// available instead of pretending they do not exist.
-const (
-	PiReason    = "adapter not implemented in this build (CRIER-HARNESS-2)"
-	CodexReason = "adapter not implemented in this build (CRIER-HARNESS-3)"
+	"github.com/crier-dev/crier/internal/harness/pi"
 )
 
 // Registry builds the adapter registry from the harness config. A disabled
 // adapter block is skipped; every other adapter is unaffected, and a warning is
 // logged for each (§4.1).
+//
+// All four adapters are real: a block that is present is registered, a block
+// that was refused (malformed) is absent and only that adapter is missing.
 func Registry(cfg harness.Config) *harness.Registry {
 	for _, warning := range cfg.Warnings {
 		if strings.Contains(warning, "adapter disabled") {
@@ -33,19 +30,11 @@ func Registry(cfg harness.Config) *harness.Registry {
 		}
 		slog.Warn("harness config", "reason", warning)
 	}
-	known := map[string]string{}
-	if _, disabled := cfg.Disabled[harness.AdapterPi]; !disabled {
-		known[harness.AdapterPi] = PiReason
-	}
-	if _, disabled := cfg.Disabled[harness.AdapterCodex]; !disabled {
-		known[harness.AdapterCodex] = CodexReason
-	}
 	r := harness.NewRegistry(harness.RegistryOptions{
-		Enabled:          cfg.Enabled,
-		Default:          cfg.Default,
-		Timeout:          cfg.Timeout,
-		MaxConcurrent:    cfg.MaxConcurrent,
-		KnownUnavailable: known,
+		Enabled:       cfg.Enabled,
+		Default:       cfg.Default,
+		Timeout:       cfg.Timeout,
+		MaxConcurrent: cfg.MaxConcurrent,
 	})
 	if ac, ok := cfg.Adapters[harness.AdapterHermes]; ok {
 		r.Register(hermes.New(hermes.Config{
@@ -65,6 +54,24 @@ func Registry(cfg harness.Config) *harness.Registry {
 			Username:     ac.Username,
 			PasswordFile: ac.PasswordFile,
 			Timeout:      cfg.Timeout,
+		}))
+	}
+	if ac, ok := cfg.Adapters[harness.AdapterPi]; ok {
+		r.Register(pi.New(pi.Config{
+			Binary:     ac.Binary,
+			Workdir:    ac.Workdir,
+			Model:      ac.Model,
+			SessionDir: ac.SessionDir,
+			Timeout:    cfg.Timeout,
+		}))
+	}
+	if ac, ok := cfg.Adapters[harness.AdapterCodex]; ok {
+		r.Register(codex.New(codex.Config{
+			Binary:  ac.Binary,
+			Workdir: ac.Workdir,
+			Model:   ac.Model,
+			Sandbox: ac.Sandbox,
+			Timeout: cfg.Timeout,
 		}))
 	}
 	return r

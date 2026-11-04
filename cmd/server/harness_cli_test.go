@@ -30,6 +30,8 @@ func harnessEnv(fakePath string) func(string) string {
 	env := map[string]string{
 		"CR_HARNESS_HERMES_BINARY":   fakePath,
 		"CR_HARNESS_OPENCODE_BINARY": "/nonexistent/opencode-binary",
+		"CR_HARNESS_PI_BINARY":       fakePath,
+		"CR_HARNESS_CODEX_BINARY":    fakePath,
 	}
 	return func(key string) string { return env[key] }
 }
@@ -41,9 +43,16 @@ func TestHarnessListReportsEveryAdapter(t *testing.T) {
 		t.Fatalf("list exit: want 0, got %d (%s)", code, errOut.String())
 	}
 	got := out.String()
-	for _, want := range []string{"NAME", "hermes", "opencode", "pi", "codex", "true", "false", "4.5.6", "CRIER-HARNESS-2", "CRIER-HARNESS-3"} {
+	// All four adapters are real in this build: every one of them is probed and
+	// reports the fake binary's version, and none reports a later row.
+	for _, want := range []string{"NAME", "hermes", "opencode", "pi", "codex", "true", "false", "4.5.6"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("list output missing %q:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"CRIER-HARNESS-2", "CRIER-HARNESS-3"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("pi and codex are implemented; %q must not appear:\n%s", gone, got)
 		}
 	}
 	if !strings.Contains(got, "binary not found: /nonexistent/opencode-binary") {
