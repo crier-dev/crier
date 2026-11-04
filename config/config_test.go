@@ -763,8 +763,10 @@ func TestLoad_GuardKanbanURL(t *testing.T) {
 
 // ---------- Observability (DF-CRIER-142) ----------
 
-// TestLoad_ObservabilityDefaults pins the OFF-by-default contract: with
-// neither flag set, both live-inspection surfaces stay disabled.
+// TestLoad_ObservabilityDefaults pins the default posture: pprof stays OFF
+// unless asked for, and metrics is ON by default (MON-CRIER-001) — a bare boot
+// must serve /metrics, because a deployed crier answering 404 is
+// indistinguishable from a broken one.
 func TestLoad_ObservabilityDefaults(t *testing.T) {
 	unsetAll(t)
 	t.Setenv("CR_ENABLE_PPROF", "")
@@ -773,7 +775,7 @@ func TestLoad_ObservabilityDefaults(t *testing.T) {
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.False(t, cfg.Observability.EnablePProf, "default: pprof surface OFF")
-	assert.False(t, cfg.Observability.EnableMetrics, "default: metrics surface OFF")
+	assert.True(t, cfg.Observability.EnableMetrics, "default: metrics surface ON (MON-CRIER-001)")
 }
 
 // TestLoad_ObservabilityTolerantBools is the table for the tolerant bool
@@ -821,7 +823,9 @@ func TestLoad_ObservabilityTolerantBools(t *testing.T) {
 }
 
 // TestLoad_ObservabilityIndependent pins that each flag gates its own
-// surface — enabling one never drags the other on.
+// surface — enabling one never drags the other on, and disabling one never
+// drags the other off. The metrics default is ON, so the pprof-only arm pins
+// metrics OFF explicitly rather than falling through to the default.
 func TestLoad_ObservabilityIndependent(t *testing.T) {
 	unsetAll(t)
 	t.Setenv("CR_ENABLE_METRICS", "true")
@@ -832,6 +836,7 @@ func TestLoad_ObservabilityIndependent(t *testing.T) {
 
 	unsetAll(t)
 	t.Setenv("CR_ENABLE_PPROF", "1")
+	t.Setenv("CR_ENABLE_METRICS", "false")
 	cfg, err = config.Load()
 	require.NoError(t, err)
 	assert.True(t, cfg.Observability.EnablePProf)

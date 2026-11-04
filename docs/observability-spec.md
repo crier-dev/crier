@@ -256,6 +256,9 @@ Two decisions to make explicitly, both recorded as rows:
    unconfigured in its own unit is the G1 failure. **Recommendation:** default
    the flag to true (metrics endpoints disclose no secret — the series list is
    static and documented in README.md:2490) and let an operator turn it off.
+   _Landed in MON-CRIER-001: the default is now true (`config/config.go`
+   `LoadFrom`), both units carry `Environment=CR_ENABLE_METRICS=true`, and
+   `CR_ENABLE_METRICS=false` remains the operator override._
 2. **Auth.** Keep `/metrics` non-exempt (auth-off servers stay open; auth-on
    servers require the bearer). Then the scrape job MUST carry the token. If
    that is unacceptable operationally, the alternative is to add `/metrics` to
@@ -287,6 +290,16 @@ remote_write, and anything scrape-only needs a scrape job in
         product: crier
         service: crier-bus
 ```
+
+**Shipped example.** `deploy/prometheus-scrape.example.yml` is the job above as
+a paste-in, including the `authorization.credentials_file` line the
+non-exempt route requires (the file holds the `CR_AUTH_TOKEN` value; the token
+never appears in the Prometheus config). With MON-CRIER-001 landed this is the
+whole collection path — the server registers `/metrics` on a bare boot
+(`CR_ENABLE_METRICS` defaults to true), both shipped units set it explicitly,
+and the identity/health series of §3.2 (`crier_up`, `crier_build_info`,
+`crier_store_healthy`, `crier_start_time_seconds`) are registered at boot, so
+the only silence left is a `401`/`up=0` an operator can alert on.
 
 Caveats an implementer must respect (they are why this section is not just a
 paste-in):

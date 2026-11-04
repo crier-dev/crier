@@ -1169,12 +1169,13 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		r.HandleFunc("/agents/{id}/kill-switch", dh.HandleKillSwitch).Methods("POST")
 	}
 
-	// Opt-in live-inspection surfaces (DF-CRIER-142): GET /metrics and
-	// GET /debug/pprof/* exist ONLY when CR_ENABLE_METRICS /
-	// CR_ENABLE_PPROF is set; unset flags leave both 404. Neither is
-	// auth-exempt. This must run after relay/mesh/federation exist (the
-	// gauges read them) and returns the handler the server serves (the
-	// metrics flag wraps the mux with the request counter).
+	// Live-inspection surfaces (DF-CRIER-142): GET /metrics is registered by
+	// default (MON-CRIER-001; CR_ENABLE_METRICS=false turns it off) and
+	// GET /debug/pprof/* only when CR_ENABLE_PPROF is set; with both off the
+	// paths are 404. Neither is auth-exempt. This must run after
+	// relay/mesh/federation exist (the gauges read them) and returns the
+	// handler the server serves (the metrics flag wraps the mux with the
+	// request counter).
 	srvHandler := registerObservability(r, observabilityFlags{
 		EnableMetrics: cfg.Observability.EnableMetrics,
 		EnablePProf:   cfg.Observability.EnablePProf,
@@ -1185,6 +1186,12 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		// The inbox queue gauges read the store that actually serves
 		// (CR-FEAT-035). A store that cannot report a depth leaves them NaN.
 		queueDepth: newQueueDepthReader(regStore),
+		// MON-CRIER-001: crier_store_healthy reuses the SAME two things
+		// GET /status already measures — the selected backend name and the
+		// serving store's HealthReporter probe (nil when the backend has
+		// none, which the gauge then grades through the depth read above).
+		storeBackend: regBackend,
+		storeHealth:  statusHealthProbe,
 	})
 
 	// INT-CI-014: a CRIER_PORT of 0 binds an ephemeral port (" :0") — the

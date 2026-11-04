@@ -32,6 +32,11 @@ WorkingDirectory=/var/lib/crier
 RuntimeDirectory=crier
 RuntimeDirectoryMode=0750
 EnvironmentFile=-/etc/crier/crier.env
+# Belt-and-braces over the built-in default (MON-CRIER-001): the deployed unit
+# says the Prometheus surface is ON rather than depending on a default that
+# could flip silently. A CR_ENABLE_METRICS=false in /etc/crier/crier.env still
+# wins — systemd applies EnvironmentFile= over Environment=.
+Environment=CR_ENABLE_METRICS=true
 # NOTE: no -port here on purpose — CRIER_PORT from the environment file (or the
 # server's own default, 8767) is the same knob, and systemd's ${VAR} expansion
 # of an UNSET variable yields an empty argv word, which would turn `-port` into

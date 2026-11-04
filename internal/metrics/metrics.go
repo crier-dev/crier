@@ -7,10 +7,16 @@
 // Series ownership follows the code that increments them: registry, relay,
 // webhook and cmd/server each construct their own counters on Default at
 // package init, while gauges whose objects live in the composition layer
-// (federation hold depth, live WS subscribers) are registered from
-// cmd/server. Registration is idempotent: re-creating a counter name returns
-// the existing series and re-registering a gauge replaces it, so a process
-// that boots the server more than once (tests do) never renders duplicates.
+// (federation hold depth, live WS subscribers, build identity, store health)
+// are registered from cmd/server. Registration is idempotent: re-creating a
+// counter name returns the existing series and re-registering a gauge replaces
+// it, so a process that boots the server more than once (tests do) never
+// renders duplicates.
+//
+// Gauges come in two shapes: RegisterGaugeFunc for a single unlabelled sample,
+// and RegisterGaugeFuncVec for a sample whose label VALUES are fixed for the
+// process lifetime (a build identity, the serving backend) — both evaluate
+// their callback at scrape time.
 package metrics
 
 import (
@@ -111,6 +117,19 @@ type gaugeFunc struct {
 	fn   func() float64
 }
 
+// gaugeVecFunc renders a value computed at scrape time under a fixed set of
+// label values. The label VALUES are captured at registration, not passed by
+// the callback: a gauge whose identity is fixed for the process lifetime
+// (build identity, serving backend) has nothing per-scrape to vary, and
+// keeping the render path single-sample keeps the exposition deterministic.
+type gaugeVecFunc struct {
+	name        string
+	help        string
+	labelNames  []string
+	labelValues []string
+	fn          func() float64
+}
+
 // ---------- registry ----------
 
 // series is one exposable entity: metadata plus zero or more samples.
@@ -175,6 +194,19 @@ func (s *gaugeSeries) writeSamples(b *strings.Builder) {
 	b.WriteByte('\n')
 }
 
+type gaugeVecSeries struct {
+	g gaugeVecFunc
+}
+
+func (s *gaugeVecSeries) meta() (string, string, string) { return s.g.name, s.g.help, "gauge" }
+func (s *gaugeVecSeries) writeSamples(b *strings.Builder) {
+	b.WriteString(s.g.name)
+	writeLabels(b, s.g.labelNames, s.g.labelValues)
+	b.WriteByte(' ')
+	writeFloat(b, s.g.fn())
+	b.WriteByte('\n')
+}
+
 // Registry holds an ordered set of series and renders them in the Prometheus
 // text exposition format. Safe for concurrent use.
 type Registry struct {
@@ -227,6 +259,31 @@ func (r *Registry) RegisterGaugeFunc(name, help string, fn func() float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.add(&gaugeSeries{g: gaugeFunc{name: name, help: help, fn: fn}})
+}
+
+// RegisterGaugeFuncVec registers a gauge whose value is fn() evaluated at
+// scrape time, rendered under the given label names/values — one sample per
+// registration, for a gauge whose label values are fixed for the process
+// lifetime (build identity, serving backend). Like RegisterGaugeFunc,
+// re-registering the same name replaces the gauge, so a second boot in one
+// process rebinds rather than duplicating.
+//
+// A mismatched name/value arity (all in-tree call sites pass literals) is
+// registered UNLABELLED rather than panicking: a metric must never take the
+// process down, and an unlabelled gauge still answers its question.
+func (r *Registry) RegisterGaugeFuncVec(name, help string, labelNames, labelValues []string, fn func() float64) {
+	if len(labelNames) != len(labelValues) {
+		labelNames, labelValues = nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.add(&gaugeVecSeries{g: gaugeVecFunc{
+		name:        name,
+		help:        help,
+		labelNames:  append([]string(nil), labelNames...),
+		labelValues: append([]string(nil), labelValues...),
+		fn:          fn,
+	}})
 }
 
 // add appends s, replacing any same-name series in place (locked caller).

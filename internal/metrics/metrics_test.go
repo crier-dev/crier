@@ -161,10 +161,58 @@ func TestGaugeReRegisterReplaces(t *testing.T) {
 	}
 }
 
+// TestGaugeFuncVec renders one sample under fixed labels, honours the
+// registration order of the label names, evaluates fn per scrape and replaces
+// the previous registration (the rebind a second in-process boot needs).
+func TestGaugeFuncVec(t *testing.T) {
+	reg := NewRegistry()
+	n := 0
+	reg.RegisterGaugeFuncVec("crier_build_info", "build identity",
+		[]string{"version", "commit", "dirty"}, []string{"1.2.3", "abc12345", "false"},
+		func() float64 { n++; return float64(n) })
+
+	body, _ := scrapeBody(t, reg)
+	if !strings.Contains(body, "# TYPE crier_build_info gauge") {
+		t.Fatalf("missing gauge TYPE line:\n%s", body)
+	}
+	if !strings.Contains(body, `crier_build_info{version="1.2.3",commit="abc12345",dirty="false"} 1`) {
+		t.Fatalf("labelled sample not rendered in registration order:\n%s", body)
+	}
+	if body, _ := scrapeBody(t, reg); !strings.Contains(body, `crier_build_info{version="1.2.3",commit="abc12345",dirty="false"} 2`) {
+		t.Fatalf("fn must be re-evaluated at scrape:\n%s", body)
+	}
+
+	reg.RegisterGaugeFuncVec("crier_build_info", "build identity",
+		[]string{"version", "commit", "dirty"}, []string{"9.9.9", "def67890", "true"},
+		func() float64 { return 1 })
+	body, _ = scrapeBody(t, reg)
+	if strings.Count(body, "# TYPE crier_build_info gauge") != 1 {
+		t.Fatalf("re-register duplicated the series:\n%s", body)
+	}
+	if !strings.Contains(body, `crier_build_info{version="9.9.9",commit="def67890",dirty="true"} 1`) {
+		t.Fatalf("re-register did not replace the labels:\n%s", body)
+	}
+	if strings.Contains(body, `version="1.2.3"`) {
+		t.Fatalf("stale label set survived re-registration:\n%s", body)
+	}
+}
+
+// TestGaugeFuncVecLabelEscaping pins that a label value carrying a quote or a
+// backslash is escaped, exactly like CounterVec's.
+func TestGaugeFuncVecLabelEscaping(t *testing.T) {
+	reg := NewRegistry()
+	reg.RegisterGaugeFuncVec("g", "help", []string{"commit"}, []string{`a"b\c`}, func() float64 { return 0 })
+	body, _ := scrapeBody(t, reg)
+	if !strings.Contains(body, `g{commit="a\"b\\c"} 0`) {
+		t.Fatalf("label value not escaped:\n%s", body)
+	}
+}
+
+// TestArityMismatchDiscarded covers the counter vec's deliberate discard on a
+// wrong-arity With call: no panic, nothing in the exposition.
 func TestArityMismatchDiscarded(t *testing.T) {
 	reg := NewRegistry()
 	v := reg.NewCounterVec("z_total", "help", "a", "b")
-	// Wrong arity must not panic and must not register anything.
 	v.With("only-one").Inc()
 	if body, _ := scrapeBody(t, reg); strings.Contains(body, "z_total{") {
 		t.Fatalf("arity-mismatched child leaked into the exposition:\n%s", body)

@@ -19,6 +19,11 @@ Type=exec
 # the installer. EnvironmentFile is OPTIONAL (-): the server has defaults, and a
 # missing config must not stop it from booting on 8767.
 EnvironmentFile=-%h/.config/crier/crier.env
+# Belt-and-braces over the built-in default (MON-CRIER-001): the deployed unit
+# says the Prometheus surface is ON rather than depending on a default that
+# could flip silently. A CR_ENABLE_METRICS=false in ~/.config/crier/crier.env
+# still wins — systemd applies EnvironmentFile= over Environment=.
+Environment=CR_ENABLE_METRICS=true
 ExecStart=%h/.local/bin/crier -pidfile %t/crier/crier.pid
 # %t is $XDG_RUNTIME_DIR: created and cleaned up by the manager, and distinct
 # per user, so two users on one box never share a pidfile. The pidfile lives
