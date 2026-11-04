@@ -248,6 +248,12 @@ type sessionView struct {
 	ThreadCount      int        `json:"thread_count"`
 	LastMessageAt    *time.Time `json:"last_message_at,omitempty"`
 	Preview          string     `json:"preview,omitempty"`
+	// Harness / HarnessSessionID expose the binding COURIER-HARNESS §4.3
+	// records, so a client can show WHICH agent session this courier session is
+	// delivering into. Omitted when the session is store-only — an absent
+	// binding is not an empty string, it is the absence of a claim.
+	Harness          string `json:"harness,omitempty"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
 }
 
 // sessionsResponse is the GET /sessions body.
@@ -1531,6 +1537,11 @@ func (h *Handler) viewOf(st *State) sessionView {
 		Visibility:   sess.Visibility,
 		MessageCount: len(st.Messages),
 		ThreadCount:  len(st.Threads),
+		// The binding is part of the session object (COURIER-HARNESS §4.3): a
+		// caller must be able to see which agent session a push will reach
+		// without guessing or reading the log.
+		Harness:          sess.Harness,
+		HarnessSessionID: sess.HarnessSessionID,
 	}
 	now := h.now()
 	for _, m := range st.Members {
