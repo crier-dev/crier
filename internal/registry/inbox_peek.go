@@ -138,7 +138,7 @@ WHERE agent_id = $1 AND id = $2;`,
 	// the dispatch's selection hints and the correlation it answers — because a
 	// consumer that looks before it claims must see what it is looking at.
 	applySelectionJSONB(&entry, selection)
-	// COURIER-TAGS §2.4: a peek shows the tags the lease would hand back, so a
+	// CRIER-TAGS §2.4: a peek shows the tags the lease would hand back, so a
 	// consumer that looks before it claims sees the same classification.
 	applyTagsJSONB(&entry, tags)
 	entry.LeasedAt = leasedAt

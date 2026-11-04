@@ -488,7 +488,7 @@ func TestAdapterContract(t *testing.T) {
 				}
 			})
 
-			// TestPerSessionSerialization: two deliveries to one courier
+			// TestPerSessionSerialization: two deliveries to one Crier
 			// session never overlap.
 			t.Run("PerSessionSerialization", func(t *testing.T) {
 				f := newFakeHarness(t)
@@ -662,7 +662,7 @@ func TestPiFreshSessionIDIsCreate(t *testing.T) {
 		t.Fatalf("receipt must record the id it used: argv %q, receipt %q", passed, rc.SessionID)
 	}
 	if !strings.HasPrefix(rc.SessionID, "crier-") || !strings.Contains(rc.SessionID, "s_pi") {
-		t.Fatalf("the generated id must be traceable to the courier session: %q", rc.SessionID)
+		t.Fatalf("the generated id must be traceable to the Crier session: %q", rc.SessionID)
 	}
 	for _, banned := range []string{"--resume", "-r", "--continue", "-c", "--fork"} {
 		if containsElement(args[0], banned) {
@@ -728,7 +728,7 @@ func TestCodexResumeUnknownNeverCreates(t *testing.T) {
 
 // TestCodexThreadIDSurvivesAFailedTurn: codex prints the thread handshake
 // before the turn runs, so a delivery that dies mid-turn still has an id the
-// courier can resume. The receipt must carry it, and the failure must stay a
+// Crier can resume. The receipt must carry it, and the failure must stay a
 // failure with codex's own tail.
 func TestCodexThreadIDSurvivesAFailedTurn(t *testing.T) {
 	f := newFakeHarness(t)

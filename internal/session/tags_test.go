@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// COURIER-TAGS (CRIER-TAGS-1) §7: tags on the session API surface.
+// CRIER-TAGS (CRIER-TAGS-1) §7: tags on the session API surface.
 //
 // Every case here runs against BOTH local backends (JSONL and SQLite), because
 // §2.5 makes the filter a Go-level predicate over the fetched set: if the two

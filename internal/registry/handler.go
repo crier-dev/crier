@@ -1658,7 +1658,7 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// COURIER-TAGS §2.4 (CRIER-TAGS-1): ?tag= (AND) and ?tags_any= (OR) narrow
+	// CRIER-TAGS §2.4 (CRIER-TAGS-1): ?tag= (AND) and ?tags_any= (OR) narrow
 	// the batch. Refusing the combination of both happens BEFORE anything is
 	// claimed, so a malformed filter can never consume a lease.
 	filter, terr := inboxTagFilter(r)
@@ -1721,7 +1721,7 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	if messages == nil {
 		messages = []*InboxEntry{}
 	}
-	// COURIER-TAGS §2.4: the filter is applied HERE, in Go, over the batch the
+	// CRIER-TAGS §2.4: the filter is applied HERE, in Go, over the batch the
 	// store just claimed — the one place every backend (memory, SQLite,
 	// PostgreSQL, the remote proxy) answers it identically, without a second
 	// query path in this row (§2.5).

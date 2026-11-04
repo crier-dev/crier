@@ -59,12 +59,12 @@ type MCPServer struct {
 	// refuse with the CRIER_HTTP_URL gate.
 	dagger daggerctl.Control
 
-	// courier is the read side of the nudge (CRIER-MCP-NUDGE). Nil means this
+	// crier is the read side of the nudge (CRIER-MCP-NUDGE). Nil means this
 	// process has no session store wired: the summary then reports the
 	// agent-inbox count alone rather than inventing session rows.
-	courier CourierSource
+	crier CrierSource
 	// harness is the adapter registry the read-only harness_list /
-	// harness_probe tools report on (COURIER-HARNESS §4.4). Nil = no
+	// harness_probe tools report on (CRIER-HARNESS §4.4). Nil = no
 	// adapters configured in this process.
 	harness *harness.Registry
 	// operatorScope permits reading ANOTHER agent's unread summary
@@ -110,13 +110,13 @@ type Options struct {
 	// DaggerToken is the bearer token the auto-built dagger REST client
 	// presents to the Crier server. It is ignored when Dagger is set.
 	DaggerToken string
-	// Courier answers the unread nudge (CRIER-MCP-NUDGE). Nil means this
+	// Crier answers the unread nudge (CRIER-MCP-NUDGE). Nil means this
 	// process cannot see session state and the summary reports the
-	// agent-inbox count alone. Build it with a *Courier over the registry
+	// agent-inbox count alone. Build it with a *Crier over the registry
 	// store, session repository and read-cursor service.
-	Courier CourierSource
+	Crier CrierSource
 	// Harness is the adapter registry behind harness_list / harness_probe
-	// (COURIER-HARNESS §4.4). Nil = both tools report an empty list.
+	// (CRIER-HARNESS §4.4). Nil = both tools report an empty list.
 	Harness *harness.Registry
 	// OperatorScope permits reading another agent's unread summary. Default
 	// false: a bridge answers only for its own identity (NUDGE_SCOPE_DENIED).
@@ -142,7 +142,7 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 		allowKeylessAgent: opts.AllowKeylessAgents,
 		agentID:           opts.AgentID,
 		httpURL:           strings.TrimSuffix(opts.HTTPURL, "/"),
-		courier:           opts.Courier,
+		crier:             opts.Crier,
 		harness:           opts.Harness,
 		operatorScope:     opts.OperatorScope,
 		nudgeDisabled:     opts.NudgeDisabled,
@@ -208,10 +208,10 @@ func (s *MCPServer) registerTools() {
 	// CRIER-MCP-NUDGE (§2.1): the nudge informs. The summary carries counts
 	// only; the list is the explicit, bounded read the nudge names.
 	if !s.nudgeDisabled {
-		s.tools["courier_unread_summary"] = s.handleCourierUnreadSummary
-		s.tools["courier_unread_list"] = s.handleCourierUnreadList
+		s.tools["courier_unread_summary"] = s.handleCrierUnreadSummary
+		s.tools["courier_unread_list"] = s.handleCrierUnreadList
 	}
-	// COURIER-HARNESS §4.4, carried into this row: read-only adapter
+	// CRIER-HARNESS §4.4, carried into this row: read-only adapter
 	// introspection. There is deliberately NO delivery tool.
 	s.tools["harness_list"] = s.handleHarnessList
 	s.tools["harness_probe"] = s.handleHarnessProbe
@@ -475,15 +475,15 @@ func (s *MCPServer) toolDefinitions() []toolDefinition {
 		// ask for one.
 		{
 			Name:        "courier_unread_summary",
-			Description: "How much courier mail is waiting for this agent: total unread, counts by tag category, the oldest unread timestamp and per-session counts. COUNTS ONLY — it never returns message text. Answers for the bridge's own identity (require CRIER_AGENT_ID) unless agent_id is supplied — another agent's counts need an operator scope, otherwise NUDGE_SCOPE_DENIED. An unregistered agent answers total:0, not an error. Read-only: it never marks anything read. Session counts need the session backend this process can read (CR_SESSION_BACKEND / CR_SESSION_LOG_ROOT).",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent to report on (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the count to one courier session"}},"required":[]}`),
+			Description: "How much Crier mail is waiting for this agent: total unread, counts by tag category, the oldest unread timestamp and per-session counts. COUNTS ONLY — it never returns message text. Answers for the bridge's own identity (require CRIER_AGENT_ID) unless agent_id is supplied — another agent's counts need an operator scope, otherwise NUDGE_SCOPE_DENIED. An unregistered agent answers total:0, not an error. Read-only: it never marks anything read. Session counts need the session backend this process can read (CR_SESSION_BACKEND / CR_SESSION_LOG_ROOT).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent to report on (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the count to one Crier session"}},"required":[]}`),
 		},
 		{
 			Name:        "courier_unread_list",
-			Description: "Read the unread courier messages (message_id, session_id, author, tags, text, seq) — the \"read them\" the nudge names. Bounded: default 20, maximum 100 (an over-max limit is clamped). Defaults to the bridge's own identity (requires CRIER_AGENT_ID) unless agent_id is supplied. Read-only: it does not mark read, lease or ack anything.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent whose unread messages to read (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the list to one courier session"},"limit":{"type":"integer","description":"Maximum messages to return (default 20, max 100; over-max is clamped)","default":20,"minimum":1,"maximum":100}},"required":[]}`),
+			Description: "Read the unread Crier messages (message_id, session_id, author, tags, text, seq) — the \"read them\" the nudge names. Bounded: default 20, maximum 100 (an over-max limit is clamped). Defaults to the bridge's own identity (requires CRIER_AGENT_ID) unless agent_id is supplied. Read-only: it does not mark read, lease or ack anything.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent whose unread messages to read (default: the bridge's own identity, CRIER_AGENT_ID)"},"session_id":{"type":"string","description":"Narrow the list to one Crier session"},"limit":{"type":"integer","description":"Maximum messages to return (default 20, max 100; over-max is clamped)","default":20,"minimum":1,"maximum":100}},"required":[]}`),
 		},
-		// COURIER-HARNESS §4.4: read-only adapter introspection, no delivery.
+		// CRIER-HARNESS §4.4: read-only adapter introspection, no delivery.
 		{
 			Name:        "harness_list",
 			Description: "List the harness adapters this process knows, with the capability each Probe measured (available, version, binary, features, reason). Read-only: there is no delivery tool — a message is delivered by ingress, not by an MCP client.",

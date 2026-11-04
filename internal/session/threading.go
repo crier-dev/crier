@@ -685,7 +685,7 @@ func (h *Handler) HandleSessionSearch(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "QUERY_REQUIRED", "q is required")
 		return
 	}
-	// COURIER-TAGS §2.4: the same ?tag= / ?tags_any= filter the transcript
+	// CRIER-TAGS §2.4: the same ?tag= / ?tags_any= filter the transcript
 	// applies, over the same fetched set, so a search is a search WITHIN a
 	// category rather than a second indexing model (§2.5).
 	filter, ok := readTagFilter(w, r)

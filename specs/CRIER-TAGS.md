@@ -1,7 +1,7 @@
-# COURIER-TAGS.md — message tags, the category vocabulary, and filtered reads
+# CRIER-TAGS.md — message tags, the category vocabulary, and filtered reads
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-TAGS-1**
-Series: `specs/COURIER-INGRESS.md` (writes tags), `specs/COURIER-READS.md` (filters read state),
+Series: `specs/CRIER-INGRESS.md` (writes tags), `specs/CRIER-READS.md` (filters read state),
 `specs/CHAT-SESSIONS.md` §4 (message kinds — a tag is NOT a kind).
 
 ## 1. Purpose
@@ -36,7 +36,7 @@ lowercased, because two spellings of one category is the drift this feature exis
 
 ```go
 // internal/session/session.go, on Message
-// Tags classifies the message (COURIER-TAGS §2.1). Empty on historical records;
+// Tags classifies the message (CRIER-TAGS §2.1). Empty on historical records;
 // a reader must treat absent and empty identically.
 Tags []string `json:"tags,omitempty"`
 ```
@@ -60,7 +60,7 @@ Appended to existing read routes, never replacing their parameters:
 |---|---|---|
 | `GET /sessions/{id}/messages` | `?tag=build&tag=urgent` | AND across repeated `tag`; unknown tag → empty set, not an error |
 | `GET /sessions/{id}/search` | `?tag=` | same |
-| `GET /agents/{id}/inbox` | `?tag=` | same; tags ride the route record (COURIER-INGRESS §3) |
+| `GET /agents/{id}/inbox` | `?tag=` | same; tags ride the route record (CRIER-INGRESS §3) |
 | `GET /sessions/{id}/messages` | `?tags_any=build,urgent` | OR form; mutually exclusive with `tag` (400 if both) |
 
 ### 2.5 Go
@@ -100,7 +100,7 @@ uses the existing route records.
 
 - `cmd/server/main.go`: `r.HandleFunc("/tags", tagsHandler.HandleList).Methods("GET")` in the
   authenticated subrouter.
-- `ingressHandler` (COURIER-INGRESS) calls `tags.Normalize` before storing; a validation error
+- `ingressHandler` (CRIER-INGRESS) calls `tags.Normalize` before storing; a validation error
   becomes `400 INGRESS_TAGS_INVALID`.
 - `HandlePostMessage` accepts the same `tags` field, so both write paths agree.
 - `docs/openapi.yaml`: `tags` on `Message`, on the ingress request, and the `/tags` path.
@@ -150,6 +150,6 @@ uses the existing route records.
 ## 8. Hilo Impact
 
 Depends on: `internal/session` (Message + stores), `internal/permissions` (visibility scoping for
-`/tags` counts). Depended on by: `COURIER-INGRESS.md` (validates and carries tags),
-`COURIER-READS.md` (unread counts filterable by tag), `chat.html` chip UI.
+`/tags` counts). Depended on by: `CRIER-INGRESS.md` (validates and carries tags),
+`CRIER-READS.md` (unread counts filterable by tag), `chat.html` chip UI.
 No existing query changes shape; filters are additive query parameters.

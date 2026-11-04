@@ -282,17 +282,17 @@ type Config struct {
 	// registered at all, so a deployment that does not control DAGs serves
 	// exactly the surface it served before this feature existed.
 	Dagger DaggerConfig
-	// Harness holds the harness-delivery block (COURIER-HARNESS §4.1). Delivery
+	// Harness holds the harness-delivery block (CRIER-HARNESS §4.1). Delivery
 	// is OFF by default, and nothing in this block can fail startup: a
 	// malformed adapter block disables that adapter and records the reason in
 	// Harness.Warnings.
 	Harness harness.Config
 	// Ingress tunes the push-ingress surface (CRIER-INGRESS-1,
-	// specs/COURIER-INGRESS.md §4). Nothing here is required: the defaults are
+	// specs/CRIER-INGRESS.md §4). Nothing here is required: the defaults are
 	// the spec's — a 1 MiB body and all three modes.
 	Ingress IngressConfig
 	// MCP holds the crier-mcp bridge's nudge posture (CRIER-MCP-NUDGE,
-	// specs/COURIER-MCP-NUDGE.md §4). The nudge informs, it never reads:
+	// specs/CRIER-MCP-NUDGE.md §4). The nudge informs, it never reads:
 	// these settings only decide whether the surface is offered at all and
 	// whether a session-start line is prepended to delivered text.
 	MCP MCPConfig
@@ -330,7 +330,7 @@ type NudgeConfig struct {
 	SessionStart bool
 }
 
-// IngressConfig is the push-ingress posture (COURIER-INGRESS §4).
+// IngressConfig is the push-ingress posture (CRIER-INGRESS §4).
 //
 // The surface itself is always on (it is registered in the authenticated
 // subrouter beside /sessions), so this config can only bound a request or
@@ -866,7 +866,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 	if cfg.Session.GroupRoot == "" {
 		cfg.Session.GroupRoot = DefaultGroupRoot
 	}
-	// Push ingress (CRIER-INGRESS-1, COURIER-INGRESS §4). Both settings are
+	// Push ingress (CRIER-INGRESS-1, CRIER-INGRESS §4). Both settings are
 	// optional and additive: unset means the spec's defaults, so no existing
 	// deployment changes behaviour. A value that cannot be honoured is a
 	// startup error — an operator must never be told a cap or a mode

@@ -1,4 +1,4 @@
-// Package ingress implements the push-ingress surface of specs/COURIER-INGRESS.md
+// Package ingress implements the push-ingress surface of specs/CRIER-INGRESS.md
 // (CRIER-INGRESS-1): POST /ingress/messages, one call that pushes a message to
 // exactly one of three destinations — an existing session, a NEW session created
 // from a template, or an agent inbox.
@@ -27,7 +27,7 @@ import (
 	"net/http"
 )
 
-// The error codes of COURIER-INGRESS §5, plus the two conditions the spec names
+// The error codes of CRIER-INGRESS §5, plus the two conditions the spec names
 // outside that table (§6's empty message and §2.1's payload bound). Every code
 // the handler can answer with is declared here, so the catalog has one address
 // and a test can enumerate it.
@@ -79,7 +79,7 @@ const (
 	// spec bounds the field without naming a code; this one says what happened
 	// instead of folding a caller's oversized object into INGRESS_INVALID_JSON.
 	CodePayloadTooLarge = "INGRESS_PAYLOAD_TOO_LARGE"
-	// CodeTagsInvalid: see COURIER-TAGS §5 (grammar, count, length, sys:).
+	// CodeTagsInvalid: see CRIER-TAGS §5 (grammar, count, length, sys:).
 	CodeTagsInvalid = "INGRESS_TAGS_INVALID"
 	// CodeEmptyMessage: neither text nor payload carried anything (§6).
 	CodeEmptyMessage = "INGRESS_EMPTY_MESSAGE"

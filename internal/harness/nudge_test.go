@@ -33,7 +33,7 @@ func TestSessionStartHintPrepended(t *testing.T) {
 	if rc.State != harness.StateDispatched {
 		t.Fatalf("delivery must still succeed: %+v", rc)
 	}
-	prefix := "[courier] 3 unread (build, urgent) — call courier_unread_list to read."
+	prefix := "[Crier] 3 unread (build, urgent) — call courier_unread_list to read."
 	if !strings.HasPrefix(stub.lastMsg.Text, prefix) {
 		t.Fatalf("delivered text must start with the prefix, got %q", stub.lastMsg.Text)
 	}

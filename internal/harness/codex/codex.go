@@ -1,4 +1,4 @@
-// Package codex adapts the OpenAI codex CLI (COURIER-HARNESS §2).
+// Package codex adapts the OpenAI codex CLI (CRIER-HARNESS §2).
 //
 // Two verified surfaces, nothing else:
 //   - create:   `codex exec "<prompt>"` (a new session)
@@ -136,7 +136,7 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 		// codex mints the thread id itself, and it is on stdout as soon as the
 		// thread exists — before the turn completes. Take it even from a failed
 		// run: a thread that was created and then timed out is resumable, and
-		// the receipt is the only place the courier can learn its id.
+		// the receipt is the only place the Crier can learn its id.
 		if tid := ThreadID(res.Stdout); tid != "" {
 			rc.SessionID = tid
 		}
@@ -159,7 +159,7 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 	}
 
 	if rc.Created && rc.SessionID == "" {
-		// Delivered but unbound: the courier session needs the id codex minted,
+		// Delivered but unbound: the Crier session needs the id codex minted,
 		// so the receipt downgrades to OUTPUT_INVALID exactly as §5 requires.
 		rc.Error = harness.CodeOutputInvalid
 		rc.Tail = firstLine(string(res.Stdout))

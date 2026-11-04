@@ -248,8 +248,8 @@ type sessionView struct {
 	ThreadCount      int        `json:"thread_count"`
 	LastMessageAt    *time.Time `json:"last_message_at,omitempty"`
 	Preview          string     `json:"preview,omitempty"`
-	// Harness / HarnessSessionID expose the binding COURIER-HARNESS §4.3
-	// records, so a client can show WHICH agent session this courier session is
+	// Harness / HarnessSessionID expose the binding CRIER-HARNESS §4.3
+	// records, so a client can show WHICH agent session this Crier session is
 	// delivering into. Omitted when the session is store-only — an absent
 	// binding is not an empty string, it is the absence of a claim.
 	Harness          string `json:"harness,omitempty"`
@@ -283,7 +283,7 @@ type transcriptMessage struct {
 	Outcomes            []outcomeView   `json:"outcomes,omitempty"`
 	IdempotencyKey      string          `json:"idempotency_key,omitempty"`
 	SenderIdentityBasis string          `json:"sender_identity_basis,omitempty"`
-	// Tags classifies the message (COURIER-TAGS §2.1). Absent on an untagged
+	// Tags classifies the message (CRIER-TAGS §2.1). Absent on an untagged
 	// message and on every historical record, which a reader treats as the
 	// same thing as an empty list (§6).
 	Tags []string `json:"tags,omitempty"`
@@ -481,7 +481,7 @@ type postMessageRequest struct {
 	Targets        []AudienceTarget `json:"targets,omitempty"`
 	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 	RequestID      string           `json:"request_id,omitempty"`
-	// Tags classifies the message (COURIER-TAGS §2.1). They are validated by
+	// Tags classifies the message (CRIER-TAGS §2.1). They are validated by
 	// the same grammar the ingress write path uses, so both write paths agree —
 	// a tag this route accepts is a tag the other accepts.
 	Tags []string `json:"tags,omitempty"`
@@ -732,7 +732,7 @@ func (h *Handler) HandleTranscript(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "VISIBILITY_FORBIDDEN", err.Error())
 		return
 	}
-	// COURIER-TAGS §2.4: ?tag= (AND) and ?tags_any= (OR) narrow the transcript.
+	// CRIER-TAGS §2.4: ?tag= (AND) and ?tags_any= (OR) narrow the transcript.
 	// The filter is applied HERE, in Go over the already-fetched set, so the
 	// JSONL, SQLite and Postgres backends answer identically and no engine
 	// grows a second query path (§2.5). An unknown tag yields an empty set,
@@ -894,7 +894,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_PAYLOAD", err.Error())
 		return
 	}
-	// COURIER-TAGS §2.1: the grammar gate runs BEFORE a message id, thread or
+	// CRIER-TAGS §2.1: the grammar gate runs BEFORE a message id, thread or
 	// transcript row exists, so a refused tag writes nothing at all.
 	tagList, ok := h.normalizeMessageTags(w, req.Tags)
 	if !ok {
@@ -1537,7 +1537,7 @@ func (h *Handler) viewOf(st *State) sessionView {
 		Visibility:   sess.Visibility,
 		MessageCount: len(st.Messages),
 		ThreadCount:  len(st.Threads),
-		// The binding is part of the session object (COURIER-HARNESS §4.3): a
+		// The binding is part of the session object (CRIER-HARNESS §4.3): a
 		// caller must be able to see which agent session a push will reach
 		// without guessing or reading the log.
 		Harness:          sess.Harness,
@@ -2089,7 +2089,7 @@ func (h *Handler) realm(r *http.Request, bodyNamespace string) (string, error) {
 // checked against the declared policies and the realm's auth posture.
 //
 // It is exported because a surface that composes with this store from another
-// package (internal/ingress, COURIER-INGRESS §4) must answer the SAME question
+// package (internal/ingress, CRIER-INGRESS §4) must answer the SAME question
 // with the SAME rule — a second spelling of "which realm is this" is exactly
 // the drift the namespace wall exists to prevent. The rule is unchanged from
 // the handler method it was extracted from: an undeclared name is

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// CRIER-UI-1: the courier UI regression — the composer's destination control
+// CRIER-UI-1: the Crier UI regression — the composer's destination control
 // and the two POST /ingress/messages modes it names, tag chips and their
 // client-side grammar, the ?tag= transcript filter, "seen by N/M" from the
 // read-cursor route, and the harness badge — driven in real Chromium against a
@@ -19,10 +19,10 @@ import (
 // A missing browser prerequisite is the script's exit 77, which this test
 // reports as a SKIP naming the cause: a green here means the assertions ran,
 // never that they were skipped.
-func TestChatCourierUIBrowser(t *testing.T) {
+func TestChatCrierUIBrowser(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("node is required for the courier UI browser regression")
+		t.Skip("node is required for the Crier UI browser regression")
 	}
 	// Unsigned attribution is the posture this page is designed for: the script
 	// seeds its transcript through the public API, and the page's own sends are
@@ -50,9 +50,9 @@ func TestChatCourierUIBrowser(t *testing.T) {
 	}
 	t.Logf("%s", out)
 	if err != nil {
-		t.Fatalf("courier UI browser regression: %v\n%s", err, out)
+		t.Fatalf("Crier UI browser regression: %v\n%s", err, out)
 	}
 	if !strings.Contains(string(out), "PASS: CRIER-UI-1") {
-		t.Fatal("courier UI browser regression did not complete its assertions")
+		t.Fatal("Crier UI browser regression did not complete its assertions")
 	}
 }

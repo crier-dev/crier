@@ -32,7 +32,7 @@ tags:
   - name: dagger
     description: "OPT-IN control surface over a Hermes-dagger pipeline (CR-CHAT-033): create, observe, cancel, resume, rewind and run a registered skill. crier embeds NO executor (decision D18) — every operation is a CLIENT call to the dagger HTTP/JSON endpoint named by CR_DAGGER_URL, and crier holds only the run's record. The six routes exist only while CR_DAGGER_URL is set."
   - name: ingress
-    description: "Push ingress (CRIER-INGRESS-1, specs/COURIER-INGRESS.md): ONE call that pushes a message to exactly one of three destinations — an existing session, a NEW session created from a template, or an agent inbox. A session message is appended through the same session store the /sessions routes write, and an inbox push goes through the same delivery path POST /agents/{id}/inbox uses (capability form included) — there is no second append and no second delivery path."
+    description: "Push ingress (CRIER-INGRESS-1, specs/CRIER-INGRESS.md): ONE call that pushes a message to exactly one of three destinations — an existing session, a NEW session created from a template, or an agent inbox. A session message is appended through the same session store the /sessions routes write, and an inbox push goes through the same delivery path POST /agents/{id}/inbox uses (capability form included) — there is no second append and no second delivery path."
   - name: detection
     description: |
       OPT-IN detection and containment (CR-FEAT-030, specs/DETECTION.md): the
@@ -611,7 +611,7 @@ paths:
       tags: [tags]
       summary: The tag vocabulary this caller can see
       description: |
-        COURIER-TAGS (specs/COURIER-TAGS.md §2.3): every tag in the caller's
+        CRIER-TAGS (specs/CRIER-TAGS.md §2.3): every tag in the caller's
         realm with how many messages carry it and when it was last used, most
         used first and ties broken by name so two identical requests answer
         identically.
@@ -654,7 +654,7 @@ paths:
                         tag:
                           type: string
                           pattern: "^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?(:[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?)?$"
-                          description: A tag in the COURIER-TAGS §2.1 grammar.
+                          description: A tag in the CRIER-TAGS §2.1 grammar.
                         count:
                           type: integer
                           description: Messages in the caller's scope carrying this tag.
@@ -672,7 +672,7 @@ paths:
       tags: [ingress]
       summary: Push a message to a session, a new session, or an agent inbox
       description: |
-        COURIER-INGRESS (specs/COURIER-INGRESS.md §2): one endpoint, three
+        CRIER-INGRESS (specs/CRIER-INGRESS.md §2): one endpoint, three
         destinations, selected by `mode` — never defaulted:
 
           * `session`      append to an existing session. The append is the
@@ -691,7 +691,7 @@ paths:
                            lease/ack semantics, same guard.
 
         `delivery` reports where the message went beyond the durable store.
-        With no harness adapter configured (COURIER-HARNESS §4) it is
+        With no harness adapter configured (CRIER-HARNESS §4) it is
         `{"mode":"store","state":"stored"}` — the message is in the session (or
         the inbox) and every reader gets it from there.
 
@@ -705,7 +705,7 @@ paths:
           in: header
           required: false
           description: |
-            Caller-chosen key (COURIER-INGRESS §2.1; `body.idempotency_key` is
+            Caller-chosen key (CRIER-INGRESS §2.1; `body.idempotency_key` is
             accepted too — two DIFFERENT keys on one request are refused). A
             replay with the same key and an identical request returns the
             ORIGINAL body with its original status and creates nothing; the same
@@ -3487,7 +3487,7 @@ paths:
         member (X-Agent-ID) or to hold a read permission on it (CR-CHAT-003);
         otherwise 403 VISIBILITY_FORBIDDEN.
 
-        COURIER-TAGS (specs/COURIER-TAGS.md §2.4): `?tag=` narrows the
+        CRIER-TAGS (specs/CRIER-TAGS.md §2.4): `?tag=` narrows the
         transcript to messages carrying EVERY named tag, `?tags_any=` to
         messages carrying ANY of a comma-separated list. Filtering is a
         predicate over the fetched set, so every storage backend answers
@@ -3503,7 +3503,7 @@ paths:
           explode: true
           description: |-
             Narrow the result to messages carrying EVERY named tag (AND across
-            repeated `tag` parameters — specs/COURIER-TAGS.md §2.4). A tag is
+            repeated `tag` parameters — specs/CRIER-TAGS.md §2.4). A tag is
             lowercase ASCII letters, digits, `_` and `-`, with at most ONE `:`
             namespace separator, 1-64 characters; `sys:` is reserved for
             operators. Case and whitespace are REFUSED, never normalized, so
@@ -3520,7 +3520,7 @@ paths:
           required: false
           description: |-
             The OR form: a comma-separated list returns messages carrying ANY
-            of the named tags (specs/COURIER-TAGS.md §2.4). Supplying this AND
+            of the named tags (specs/CRIER-TAGS.md §2.4). Supplying this AND
             `tag` in one request is a 400 TAGS_FILTER_CONFLICT — the server
             does not guess which was meant.
           schema:
@@ -4345,7 +4345,7 @@ paths:
       tags: [sessions]
       summary: Who has read what in a session
       description: |
-        CRIER-READS-1 (specs/COURIER-READS.md §3.1): one row per participant
+        CRIER-READS-1 (specs/CRIER-READS.md §3.1): one row per participant
         with its stored cursor, its unread count and when it last read.
 
         A cursor is the member's own claim about its own progress. It is NOT a
@@ -5714,7 +5714,7 @@ components:
     IngressRequest:
       type: object
       description: |
-        The POST /ingress/messages body (COURIER-INGRESS §2.1). One struct,
+        The POST /ingress/messages body (CRIER-INGRESS §2.1). One struct,
         `mode` selects the destination; the three target spellings are
         mutually exclusive. Decoding is STRICT: an unknown field is
         INGRESS_INVALID_JSON.
@@ -5762,7 +5762,7 @@ components:
           description: The message prose. Folded into the payload as `payload.text` unless the payload already carries one. Empty is allowed only when `payload` is present.
         tags:
           type: array
-          description: COURIER-TAGS §2.1 tags. Validated here with the same grammar the session send route uses; an invalid tag is INGRESS_TAGS_INVALID and nothing is written.
+          description: CRIER-TAGS §2.1 tags. Validated here with the same grammar the session send route uses; an invalid tag is INGRESS_TAGS_INVALID and nothing is written.
           maxItems: 16
           items:
             type: string
@@ -5782,7 +5782,7 @@ components:
           description: The same key the Idempotency-Key header carries. Two DIFFERENT keys on one request are refused.
     IngressResult:
       type: object
-      description: The COURIER-INGRESS §2.1 response body.
+      description: The CRIER-INGRESS §2.1 response body.
       required: [mode, message_id, created_session, delivery]
       additionalProperties: false
       properties:
@@ -5833,7 +5833,7 @@ components:
           description: True exactly when THIS call created the session (mode=new_session). A keyed replay of that call answers with the original body, so it stays true.
         delivery:
           type: object
-          description: Where the message went beyond the durable store. With no harness adapter configured (COURIER-HARNESS §4) it is {"mode":"store","state":"stored"}.
+          description: Where the message went beyond the durable store. With no harness adapter configured (CRIER-HARNESS §4) it is {"mode":"store","state":"stored"}.
           required: [mode, state]
           properties:
             mode:
@@ -5849,7 +5849,7 @@ components:
               description: Present when state=failed. Storage is the contract; dispatch is best-effort and reported honestly (a failed dispatch does not fail the call and does not roll back the write).
     SessionTemplate:
       type: object
-      description: The minimum a new session needs (COURIER-INGRESS §2.2). Memory is NOT a step — a member joins with whatever context the runtime grants it.
+      description: The minimum a new session needs (CRIER-INGRESS §2.2). Memory is NOT a step — a member joins with whatever context the runtime grants it.
       required: [title]
       additionalProperties: false
       properties:
@@ -7137,7 +7137,7 @@ components:
           type: array
           maxItems: 16
           description: |-
-            The tags this message was classified with (specs/COURIER-TAGS.md
+            The tags this message was classified with (specs/CRIER-TAGS.md
             §2.1), in the order they were supplied. ABSENT on an untagged
             message and on every record written before tags existed — absent
             and empty mean the same thing to a reader, and neither is an
@@ -7911,7 +7911,7 @@ components:
           type: array
           maxItems: 16
           description: |-
-            Classify the message (specs/COURIER-TAGS.md §2.1). A tag is
+            Classify the message (specs/CRIER-TAGS.md §2.1). A tag is
             lowercase ASCII letters, digits, `_` and `-`, at most one `:`
             namespace separator, 1-64 characters; order is preserved and exact
             repeats collapse to one. A grammar violation is 400 TAGS_INVALID

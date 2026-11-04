@@ -1,5 +1,5 @@
 // harness_tools.go — the read-only harness tools carried over from
-// COURIER-HARNESS §4.4 (folded into CRIER-MCP-NUDGE because the harness row
+// CRIER-HARNESS §4.4 (folded into CRIER-MCP-NUDGE because the harness row
 // declared the deviation).
 //
 // They wrap harness.Registry.Capabilities and Probe and nothing else: there is

@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The harness block of the relay config (COURIER-HARNESS §4.1). It is read
+// The harness block of the relay config (CRIER-HARNESS §4.1). It is read
 // from the YAML file named by CR_HARNESS_CONFIG when set, and every value can
 // be overridden by an environment variable.
 //

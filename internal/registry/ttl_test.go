@@ -370,7 +370,7 @@ func TestPostgresStoreUnit_Deliver_NeverExpiresWritesInfinity(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, nil, nil,
 			0, nil, nil, pgxmock.AnyArg(), infinityArg{}, nil, nil, nil, nil, nil,
-			// COURIER-TAGS §3: no tags on this entry, so the column is NULL.
+			// CRIER-TAGS §3: no tags on this entry, so the column is NULL.
 			nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
@@ -388,7 +388,7 @@ func TestPostgresStoreUnit_Deliver_TTLSeconds_HourIsWritten(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, nil, nil,
 			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil,
-			// COURIER-TAGS §3: no tags on this entry, so the column is NULL.
+			// CRIER-TAGS §3: no tags on this entry, so the column is NULL.
 			nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 

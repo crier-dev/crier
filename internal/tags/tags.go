@@ -1,5 +1,5 @@
 // Package tags implements the message-tag grammar and the tag filters of
-// specs/COURIER-TAGS.md (CRIER-TAGS-1).
+// specs/CRIER-TAGS.md (CRIER-TAGS-1).
 //
 // A tag CLASSIFIES a message; it never routes and never grants (§1). The
 // grammar is deliberately narrow so that two spellings of one category cannot

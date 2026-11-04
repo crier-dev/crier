@@ -1,6 +1,6 @@
 package ingress
 
-// idempotency.go — the ingress key ledger (COURIER-INGRESS §3).
+// idempotency.go — the ingress key ledger (CRIER-INGRESS §3).
 //
 // One row per (namespace, key): the hash of the request that first used the key
 // and the EXACT result body (and status) that request received. A replay with

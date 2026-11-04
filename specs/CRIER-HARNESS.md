@@ -1,13 +1,13 @@
-# COURIER-HARNESS.md — harness adapters: a message can start or continue a session in a real agent
+# CRIER-HARNESS.md — harness adapters: a message can start or continue a session in a real agent
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-HARNESS-1** (interface + Hermes +
 opencode), **CRIER-HARNESS-2** (pi-agent), **CRIER-HARNESS-3** (codex)
-Series: `specs/COURIER-INGRESS.md` (the call that triggers delivery), `specs/COURIER-READS.md`
+Series: `specs/CRIER-INGRESS.md` (the call that triggers delivery), `specs/CRIER-READS.md`
 (harness sessions read through cursors too).
 
 ## 1. Purpose
 
-Courier currently stores messages; an agent has to poll. This adds an adapter layer so a message
+Crier currently stores messages; an agent has to poll. This adds an adapter layer so a message
 can be **delivered into a live harness session** — continuing an existing one or creating a new
 one — with a receipt that says what actually happened. The inbox stays; this is the push half.
 
@@ -64,11 +64,11 @@ type SessionRef struct {
 }
 
 type Message struct {
-    ID       string   `json:"id"`        // courier message id, for correlation
+    ID       string   `json:"id"`        // Crier message id, for correlation
     Text     string   `json:"text"`
     Tags     []string `json:"tags,omitempty"`
     Author   string   `json:"author"`
-    SessionID string  `json:"session_id"` // courier session
+    SessionID string  `json:"session_id"` // Crier session
 }
 
 // Receipt is evidence, not a promise. It is persisted with the message.
@@ -136,7 +136,7 @@ with the reason; the daemon still starts.
 if h.Dispatch != nil {
     report := h.Dispatch.Deliver(ctx, DispatchRequest{
         Harness:   req.Harness,        // from target.harness, else config default
-        SessionRef: refFromSession(sess), // harness id stored on the courier session
+        SessionRef: refFromSession(sess), // harness id stored on the Crier session
         Message:   msg,
     })
     result.Delivery = report
@@ -149,7 +149,7 @@ stored message.
 
 ### 4.3 Where the harness session id lives
 
-On the courier session record, in a new field:
+On the Crier session record, in a new field:
 
 ```go
 // internal/session/session.go
@@ -159,7 +159,7 @@ Harness          string `json:"harness,omitempty"`
 HarnessSessionID string `json:"harness_session_id,omitempty"`
 ```
 
-A `new_session` ingress with `target.harness:"pi"` creates the courier session **and** records
+A `new_session` ingress with `target.harness:"pi"` creates the Crier session **and** records
 the harness id on first successful delivery. Subsequent messages to that session continue it.
 If the harness reports the session unknown (`opencode run -s <missing>` exits non-zero with a
 "session not found" class message, `codex exec resume <missing>` likewise), the adapter returns
@@ -201,7 +201,7 @@ A `failed` receipt never changes the HTTP status of the ingress call: storage su
 - **Workdir:** must exist and be a directory at delivery time; otherwise `failed`
   (`HARNESS_WORKDIR_MISSING`). Never auto-created — a wrong cwd silently changes what the agent
   does.
-- **Concurrency:** the same courier session must not get two concurrent deliveries (interleaved
+- **Concurrency:** the same Crier session must not get two concurrent deliveries (interleaved
   turns corrupt a harness transcript). Serialize per session with a keyed mutex; the second waits.
 - **Restart with in-flight deliveries:** receipts are written on completion; an interrupted
   delivery is recorded as `failed` with `Error:"HARNESS_INTERRUPTED"` by the next start.
@@ -237,6 +237,6 @@ logged-in CLI and is recorded separately.
 
 Depends on: `internal/session` (Harness fields), `internal/delivery` (concurrency + timeout
 plumbing), `internal/config`.
-Depended on by: `COURIER-INGRESS.md` (§4 hook), the courier UI (per-session harness badge), and
+Depended on by: `CRIER-INGRESS.md` (§4 hook), the Crier UI (per-session harness badge), and
 the future control plane that attaches harnesses to sessions.
 Nothing existing changes: with `harness.enabled: false` every code path behaves exactly as today.

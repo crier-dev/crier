@@ -1,4 +1,4 @@
-// Package pi adapts the pi coding agent (COURIER-HARNESS §2).
+// Package pi adapts the pi coding agent (CRIER-HARNESS §2).
 //
 // One verified surface, nothing else:
 //   - continue: `pi -p --session-id <id> "<text>"`
@@ -16,7 +16,7 @@
 //   - text over 64 KiB goes on stdin (pi reads its prompt from stdin when no
 //     message positional is given), because ARG_MAX would otherwise cap it;
 //   - text starting with "@" goes on stdin too, because pi expands @-prefixed
-//     arguments as file references and a courier message must arrive as text.
+//     arguments as file references and a Crier message must arrive as text.
 package pi
 
 import (
@@ -153,7 +153,7 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 	// The id we handed to --session-id is the id pi used. On the create path
 	// the harness may echo the id it minted — prefer that — but a continue must
 	// report the id it was told to continue: an echoed different id belongs to
-	// some other session and must not overwrite the binding the courier holds.
+	// some other session and must not overwrite the binding the Crier holds.
 	if created {
 		if echoed := harness.ExtractSessionID(res.Stdout); echoed != "" {
 			rc.SessionID = echoed
@@ -200,9 +200,9 @@ func needsStdin(text string) bool {
 	return len(text) > maxArgBytes || strings.HasPrefix(text, "@")
 }
 
-// newSessionID builds the create-path id. It is derived from the courier
+// newSessionID builds the create-path id. It is derived from the Crier
 // session (else message) id so an operator can correlate pi's session listing
-// with courier, and falls back to random bytes when nothing usable remains.
+// with Crier, and falls back to random bytes when nothing usable remains.
 // The alphabet is pi's file-safe subset: pi names the session file
 // "<timestamp>_<id>.jsonl".
 func newSessionID(msg harness.Message) string {
@@ -227,7 +227,7 @@ func newSessionID(msg harness.Message) string {
 }
 
 // sanitizeID keeps [A-Za-z0-9._-] and turns everything else into a single "-",
-// so a courier id can never escape the session directory or split an argv.
+// so a Crier id can never escape the session directory or split an argv.
 func sanitizeID(s string) string {
 	var b strings.Builder
 	dash := false

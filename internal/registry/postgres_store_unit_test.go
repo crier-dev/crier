@@ -976,7 +976,7 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil,
-								// COURIER-TAGS §3: tags column, NULL when the entry carries none.
+								// CRIER-TAGS §3: tags column, NULL when the entry carries none.
 								nil).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
@@ -992,7 +992,7 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil,
-			// COURIER-TAGS §3: tags column, NULL when the entry carries none.
+			// CRIER-TAGS §3: tags column, NULL when the entry carries none.
 			nil).
 		WillReturnError(errors.New("disk full"))
 

@@ -4,7 +4,7 @@
 //	resource  courier://inbox/{agent_id}/unread  — the same counts-only JSON
 //	prompt    courier_nudge                      — the one-line template
 //
-// Both are read-only views over CourierSource.Summary. Neither carries a
+// Both are read-only views over CrierSource.Summary. Neither carries a
 // message body, and neither advances a cursor: a client that attaches the
 // resource to a system prompt learns the count, not the mail.
 package mcp
@@ -26,13 +26,13 @@ const NudgeResourceURITemplate = "courier://inbox/{agent_id}/unread"
 const NudgePromptName = "courier_nudge"
 
 // nudgePromptZero is the prompt body when there is nothing to read.
-const nudgePromptZero = "You have no unread messages in courier."
+const nudgePromptZero = "You have no unread messages in Crier."
 
 // resourceDescription / promptDescription are the metadata a client sees before
 // it reads anything; they say "counts only" in words so nobody expects bodies.
 const (
-	resourceDescription = "Unread courier counts for one agent: total, by_category, oldest_at and per-session counts. Counts only — no message text."
-	promptDescription   = "One-line courier nudge: how many unread messages are waiting and the tool to read them."
+	resourceDescription = "Unread Crier counts for one agent: total, by_category, oldest_at and per-session counts. Counts only — no message text."
+	promptDescription   = "One-line Crier nudge: how many unread messages are waiting and the tool to read them."
 )
 
 // resourceTemplate is one resources/templates/list entry.
@@ -79,7 +79,7 @@ func (s *MCPServer) handleResourcesList() any {
 	if s.nudgeEnabled() && s.agentID != "" {
 		out = append(out, resourceEntry{
 			URI:         NudgeResourceURI(s.agentID),
-			Name:        "courier unread",
+			Name:        "Crier unread",
 			Description: resourceDescription,
 			MimeType:    "application/json",
 		})
@@ -93,7 +93,7 @@ func (s *MCPServer) handleResourceTemplatesList() any {
 	if s.nudgeEnabled() {
 		out = append(out, resourceTemplate{
 			URITemplate: NudgeResourceURITemplate,
-			Name:        "courier unread",
+			Name:        "Crier unread",
 			Description: resourceDescription,
 			MimeType:    "application/json",
 		})
@@ -115,7 +115,7 @@ func (s *MCPServer) handleResourcesRead(params json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("unknown resource: %s", in.URI)
 	}
 	if !s.nudgeEnabled() {
-		return nil, fmt.Errorf("the courier nudge surface is disabled (mcp.nudge.enabled=false)")
+		return nil, fmt.Errorf("the Crier nudge surface is disabled (mcp.nudge.enabled=false)")
 	}
 	scopeAgent, _, err := s.nudgeScope(agentID, "")
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *MCPServer) handlePromptsList() any {
 			Description: promptDescription,
 			Arguments: []promptArgument{
 				{Name: "agent_id", Description: "Agent whose unread mail to report (default: the bridge's own identity)"},
-				{Name: "session_id", Description: "Narrow the count to one courier session"},
+				{Name: "session_id", Description: "Narrow the count to one Crier session"},
 			},
 		})
 	}
@@ -167,7 +167,7 @@ func (s *MCPServer) handlePromptsGet(params json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("unknown prompt: %s", in.Name)
 	}
 	if !s.nudgeEnabled() {
-		return nil, fmt.Errorf("the courier nudge surface is disabled (mcp.nudge.enabled=false)")
+		return nil, fmt.Errorf("the Crier nudge surface is disabled (mcp.nudge.enabled=false)")
 	}
 	agentID, sessionID, err := s.nudgeScope(in.Arguments["agent_id"], in.Arguments["session_id"])
 	if err != nil {
@@ -195,9 +195,9 @@ func NudgePromptTemplate(total int, byCategory map[string]int) string {
 	}
 	categories := CategoryList(byCategory)
 	if len(categories) == 0 {
-		return fmt.Sprintf("You have %d unread messages in courier. Call courier_unread_list to read them.", total)
+		return fmt.Sprintf("You have %d unread messages in Crier. Call courier_unread_list to read them.", total)
 	}
-	return fmt.Sprintf("You have %d unread messages in courier (%s). Call courier_unread_list to read them.",
+	return fmt.Sprintf("You have %d unread messages in Crier (%s). Call courier_unread_list to read them.",
 		total, strings.Join(categories, ", "))
 }
 
@@ -217,15 +217,15 @@ func CategoryList(byCategory map[string]int) []string {
 	return out
 }
 
-// SessionStartCounts adapts a CourierSource to the harness delivery hook: the
+// SessionStartCounts adapts a CrierSource to the harness delivery hook: the
 // one-line session-start hint needs (total, categories) for the message's
-// courier session, and that is exactly what the summary already computes.
+// Crier session, and that is exactly what the summary already computes.
 //
 // It is the ONE place the two halves are joined, so the number a harness is
 // told and the number courier_unread_summary answers cannot drift. The
 // categories are ordered busiest-first (CategoryList) so the prefix is stable
 // across calls.
-func SessionStartCounts(c CourierSource, agentID string) func(ctx context.Context, msg harness.Message) (int, []string) {
+func SessionStartCounts(c CrierSource, agentID string) func(ctx context.Context, msg harness.Message) (int, []string) {
 	if c == nil {
 		return nil
 	}
@@ -266,8 +266,8 @@ func (s *MCPServer) nudgeEnabled() bool { return !s.nudgeDisabled }
 // unreadSummary is the ONE summary path shared by the tool, the resource and
 // the prompt, so all three can never disagree.
 func (s *MCPServer) unreadSummary(ctx context.Context, agentID, sessionID string) (UnreadSummary, error) {
-	if s.courier == nil {
+	if s.crier == nil {
 		return s.inboxOnlySummary(agentID), nil
 	}
-	return s.courier.Summary(ctx, UnreadQuery{AgentID: agentID, SessionID: sessionID})
+	return s.crier.Summary(ctx, UnreadQuery{AgentID: agentID, SessionID: sessionID})
 }

@@ -260,7 +260,7 @@ type Session struct {
 	// surgery.
 	Group      string `json:"group,omitempty"`
 	Visibility string `json:"visibility,omitempty"`
-	// Harness names the adapter bound to this session (COURIER-HARNESS §4.3)
+	// Harness names the adapter bound to this session (CRIER-HARNESS §4.3)
 	// and HarnessSessionID is the id in THAT harness. Empty means store-only,
 	// which is the default: a session that never asked for push delivery
 	// behaves exactly as it did before this field existed.
@@ -403,7 +403,7 @@ type Message struct {
 	// SenderIdentityBasis is server-stamped ingress assurance, never payload
 	// metadata. Empty means historical/internal provenance was not recorded.
 	SenderIdentityBasis string `json:"sender_identity_basis,omitempty"`
-	// Tags classifies the message (COURIER-TAGS §2.1). Empty on historical
+	// Tags classifies the message (CRIER-TAGS §2.1). Empty on historical
 	// records; a reader must treat absent and empty identically (§6).
 	Tags []string `json:"tags,omitempty"`
 	// Seq is the ordering authority within the session; ts is display and
@@ -586,7 +586,7 @@ func (st *State) apply(rec *Record) error {
 		st.Session.ClosedAt = nil
 		st.Lifecycle = append(st.Lifecycle, rec)
 	case RecordHarnessBind:
-		// COURIER-HARNESS §4.3: the FIRST successful delivery binds the id it
+		// CRIER-HARNESS §4.3: the FIRST successful delivery binds the id it
 		// minted. A later record may rebind (an operator moving the session to
 		// a new harness id); the fold takes the last one, like every other
 		// keep-LAST fact in the stream.

@@ -30,37 +30,37 @@ func TestNudgePrefixFormatting(t *testing.T) {
 			name:       "one category",
 			total:      3,
 			categories: []string{"build"},
-			want:       "[courier] 3 unread (build)" + suffix,
+			want:       "[Crier] 3 unread (build)" + suffix,
 		},
 		{
 			name:       "two categories",
 			total:      3,
 			categories: []string{"build", "urgent"},
-			want:       "[courier] 3 unread (build, urgent)" + suffix,
+			want:       "[Crier] 3 unread (build, urgent)" + suffix,
 		},
 		{
 			name:       "three categories collapse to two plus a count",
 			total:      7,
 			categories: []string{"build", "urgent", "ops"},
-			want:       "[courier] 7 unread (build, urgent +1)" + suffix,
+			want:       "[Crier] 7 unread (build, urgent +1)" + suffix,
 		},
 		{
 			name:       "five categories",
 			total:      9,
 			categories: []string{"build", "urgent", "ops", "qa", "docs"},
-			want:       "[courier] 9 unread (build, urgent +3)" + suffix,
+			want:       "[Crier] 9 unread (build, urgent +3)" + suffix,
 		},
 		{
 			name:       "no categories",
 			total:      2,
 			categories: nil,
-			want:       "[courier] 2 unread" + suffix,
+			want:       "[Crier] 2 unread" + suffix,
 		},
 		{
 			name:       "blank categories are ignored",
 			total:      2,
 			categories: []string{"", "  "},
-			want:       "[courier] 2 unread" + suffix,
+			want:       "[Crier] 2 unread" + suffix,
 		},
 	}
 	for _, tc := range cases {
@@ -76,13 +76,13 @@ func TestNudgePrefixFormatting(t *testing.T) {
 // as "<max>+", never as a bigger number.
 func TestNudgePrefixCapsCount(t *testing.T) {
 	got := nudgePrefixCapped(1500, []string{"build"}, 999)
-	want := "[courier] 999+ unread (build) — call courier_unread_list to read."
+	want := "[Crier] 999+ unread (build) — call courier_unread_list to read."
 	if got != want {
 		t.Fatalf("capped prefix = %q, want %q", got, want)
 	}
 	// At the cap exactly, no "+" is added.
 	got = nudgePrefixCapped(999, []string{"build"}, 999)
-	want = "[courier] 999 unread (build) — call courier_unread_list to read."
+	want = "[Crier] 999 unread (build) — call courier_unread_list to read."
 	if got != want {
 		t.Fatalf("at-cap prefix = %q, want %q", got, want)
 	}
@@ -103,7 +103,7 @@ func TestNudgePrefixBoundedTo160Chars(t *testing.T) {
 	if n := utf8.RuneCountInString(got); n > 160 {
 		t.Fatalf("prefix is %d characters, want <= 160: %q", n, got)
 	}
-	if !strings.HasPrefix(got, "[courier] 5 unread") {
+	if !strings.HasPrefix(got, "[Crier] 5 unread") {
 		t.Fatalf("the count must survive the bound: %q", got)
 	}
 	if strings.Contains(got, "(") {

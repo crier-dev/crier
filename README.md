@@ -20,7 +20,7 @@ bus-to-bus federation — self-hosted, in one Go binary.
 ![The crier fleet — agents on their own platforms, passing glowing messages along luminous paths](docs/img/agents-wide.png)
 
 <p align="center"><i>The fleet: every agent gets a mailbox, a voice, and a place in the mesh.
-Meet the mascots → <a href="https://crier-dev.github.io/crier/#uses">builder · home · business · courier</a></i></p>
+Meet the mascots → <a href="https://crier-dev.github.io/crier/#uses">builder · home · business · crier</a></i></p>
 
 Crier provides four primitives for agent communication:
 
@@ -1031,7 +1031,7 @@ request, and a server running with signature enforcement on
 | `mesh_request` | `CRIER_MESH_URL`, `CRIER_AGENT_ID` | the bridge opens its own WebSocket connection only when both are set |
 | `create_run`, `run_status`, `cancel_run`, `resume_run`, `rewind_run`, `run_skill` | `CRIER_HTTP_URL` | the dagger control tools (CR-CHAT-033): they drive the run records the **server** holds through its dagger control routes, so the server must also run with `CR_DAGGER_URL` set — `crier` never executes a DAG itself |
 | `courier_unread_summary`, `courier_unread_list` | `CRIER_AGENT_ID` | the unread nudge (CRIER-MCP-NUDGE): they answer for the bridge's own identity unless `agent_id` is supplied, and another agent's counts need `CRIER_OPERATOR_SCOPE=true` (otherwise `NUDGE_SCOPE_DENIED`). Session counts also need the session backend the bridge can read (`CR_SESSION_BACKEND`, `CR_SESSION_LOG_ROOT`, `CR_SESSION_SQLITE_PATH`); without it the counts cover the agent inbox only |
-| `harness_list`, `harness_probe` | _nothing_ | COURIER-HARNESS §4.4 read-only adapter introspection. There is deliberately **no** delivery tool — delivery is an ingress action, not an agent action |
+| `harness_list`, `harness_probe` | _nothing_ | CRIER-HARNESS §4.4 read-only adapter introspection. There is deliberately **no** delivery tool — delivery is an ingress action, not an agent action |
 
 With no environment at all — the default in-process stdio mode — twelve tools
 cannot work, and startup says exactly which:
@@ -1382,7 +1382,7 @@ candidate list is a named failure that starts nothing (QA-CRIER-10).
 - **Transcript view** — `GET /sessions/{id}/messages`, with threaded replies rendered via each message's `parent_id`/`parent_resolvable` (a broken thread is flagged, never hidden) and any `findings` shown
 - **Message send** — `POST /sessions/{id}/messages` (`{"payload":{"text":…},"sender":…,"parent_id":…}`), including reply-to-threading
 - **Destination control (CRIER-UI-1)** — the composer selects one of the three `POST /ingress/messages` modes. **This session** keeps the existing session send path unchanged; **New session** collects title, kind and members and posts `mode=new_session`, showing the created `session_id` in the outcome line; **Agent inbox** collects an agent id and posts `mode=inbox`
-- **Tag chips and tag filter (CRIER-UI-1)** — tags are added as chips before send and validated client-side against the COURIER-TAGS §2.1 grammar (same sentences, same order as `internal/tags`); the same `tags` array rides both write paths. A chip in the filter bar or on a message re-reads the transcript with `?tag=<tag>` (a server-side read, never a client-side hide), and Clear restores the full read
+- **Tag chips and tag filter (CRIER-UI-1)** — tags are added as chips before send and validated client-side against the CRIER-TAGS §2.1 grammar (same sentences, same order as `internal/tags`); the same `tags` array rides both write paths. A chip in the filter bar or on a message re-reads the transcript with `?tag=<tag>` (a server-side read, never a client-side hide), and Clear restores the full read
 - **Read state (CRIER-UI-1)** — `GET /sessions/{id}/reads` renders `seen by N/M` per message group (N = cursors at or past the group's last seq, M = the session's participant count). A response that omits participants — a caller without `session.read_state.all` sees only its own row — renders **nothing**, because an absent denominator is not `0/M`
 - **Permission/grant badges** — `GET /sessions/{id}/permissions` renders each participant's role, allowed actions and `source: grant` cells as badges
 

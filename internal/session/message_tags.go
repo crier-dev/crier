@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// The SQL view stores a message's tags (COURIER-TAGS §2.1) as one JSON array in
+// The SQL view stores a message's tags (CRIER-TAGS §2.1) as one JSON array in
 // a TEXT column on BOTH engines: SQLite as TEXT, PostgreSQL as TEXT rather than
 // TEXT[]. That is deliberate, and it is what keeps ONE scan path serving both
 // engines exactly as the rest of this store does — an array column would fork

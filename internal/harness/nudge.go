@@ -1,6 +1,6 @@
 package harness
 
-// nudge.go — the session-start hint (CRIER-MCP-NUDGE, specs/COURIER-MCP-NUDGE.md
+// nudge.go — the session-start hint (CRIER-MCP-NUDGE, specs/CRIER-MCP-NUDGE.md
 // §2.2 / §2.3).
 //
 // The hint INFORMS; it never reads. It is a single prefix line prepended to the
@@ -42,10 +42,10 @@ func nudgePrefix(total int, categories []string) string {
 //
 // Rules (§2.3), exactly:
 //   - total == 0                → "" (no prefix, no noise)
-//   - no categories             → "[courier] 3 unread — call …" (no empty "()")
-//   - 1 category                → "[courier] 3 unread (build) — call …"
-//   - 2 categories              → "[courier] 3 unread (build, urgent) — call …"
-//   - 3 or more                 → "[courier] 3 unread (build, urgent +2) — call …"
+//   - no categories             → "[Crier] 3 unread — call …" (no empty "()")
+//   - 1 category                → "[Crier] 3 unread (build) — call …"
+//   - 2 categories              → "[Crier] 3 unread (build, urgent) — call …"
+//   - 3 or more                 → "[Crier] 3 unread (build, urgent +2) — call …"
 //   - total above maxCount      → the count is reported as "<max>+" ("999+")
 func nudgePrefixCapped(total int, categories []string, maxCount int) string {
 	if total <= 0 {
@@ -65,11 +65,11 @@ func nudgePrefixCapped(total int, categories []string, maxCount int) string {
 		number += "+"
 	}
 
-	line := "[courier] " + number + " unread" + categoryClause(categories) + nudgeSuffix
+	line := "[Crier] " + number + " unread" + categoryClause(categories) + nudgeSuffix
 	if utf8.RuneCountInString(line) > nudgeMaxLen {
 		// The category clause is the only elastic part; dropping it keeps the
 		// line's meaning (a count and the call to action) inside the budget.
-		line = "[courier] " + number + " unread" + nudgeSuffix
+		line = "[Crier] " + number + " unread" + nudgeSuffix
 	}
 	if utf8.RuneCountInString(line) > nudgeMaxLen {
 		line = truncateRunes(line, nudgeMaxLen)

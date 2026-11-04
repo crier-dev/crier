@@ -1,7 +1,7 @@
-// Package harness delivers one courier message into one live agent harness
-// session (specs/COURIER-HARNESS.md).
+// Package harness delivers one Crier message into one live agent harness
+// session (specs/CRIER-HARNESS.md).
 //
-// The package is the push half of Courier: the inbox stays first-class, and an
+// The package is the push half of Crier: the inbox stays first-class, and an
 // adapter is the only thing that knows how to hand a message to a specific
 // harness binary. Everything an adapter may execute is listed in the spec's
 // verified-surfaces table (§2) — no adapter opens a TUI, drives a pty or
@@ -84,7 +84,7 @@ type SessionRef struct {
 	Args    []string `json:"args,omitempty"`
 }
 
-// Message is the courier message as the adapter sees it. Text is untrusted
+// Message is the Crier message as the adapter sees it. Text is untrusted
 // input and is always passed as ONE argv element (or one HTTP field), never
 // through a shell.
 type Message struct {

@@ -14,7 +14,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// COURIER-TAGS (CRIER-TAGS-1): the write-path grammar gate, the read filters
+// CRIER-TAGS (CRIER-TAGS-1): the write-path grammar gate, the read filters
 // and the vocabulary endpoint.
 //
 // A tag CLASSIFIES a message; it never routes and never grants (§1). Everything

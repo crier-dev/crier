@@ -1,4 +1,4 @@
-// Package opencode adapts the opencode CLI (COURIER-HARNESS §2).
+// Package opencode adapts the opencode CLI (CRIER-HARNESS §2).
 //
 // Two verified surfaces, nothing else:
 //   - continue: `opencode run -s <id> --format json <text>`
@@ -183,16 +183,16 @@ func (a *Adapter) password() (string, error) {
 	return pass, nil
 }
 
-// title is the create-path session title: the courier session id, so an
-// operator can correlate the harness listing with a courier session.
+// title is the create-path session title: the Crier session id, so an
+// operator can correlate the harness listing with a Crier session.
 func title(sess harness.SessionRef, msg harness.Message) string {
 	if msg.SessionID != "" {
-		return "courier " + msg.SessionID
+		return "Crier " + msg.SessionID
 	}
 	if msg.ID != "" {
-		return "courier " + msg.ID
+		return "Crier " + msg.ID
 	}
-	return "courier message"
+	return "Crier message"
 }
 
 func firstLine(s string) string {

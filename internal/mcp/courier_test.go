@@ -25,7 +25,7 @@ const (
 	nudgeInbox  = "TOP-SECRET-INBOX-BODY"
 )
 
-// nudgeFixture is one courier world: a registry with alpha's inbox holding two
+// nudgeFixture is one Crier world: a registry with alpha's inbox holding two
 // messages, and a session where alpha is a member and bravo has posted messages
 // carrying tags and text.
 type nudgeFixture struct {
@@ -121,7 +121,7 @@ func newNudgeFixture(t *testing.T, msgCount int) *nudgeFixture {
 
 	server := NewWithOptions(store, Options{
 		AgentID: nudgeAgent,
-		Courier: &Courier{Inbox: store, Sessions: repo, Reads: svc},
+		Crier:   &Crier{Inbox: store, Sessions: repo, Reads: svc},
 	})
 	return &nudgeFixture{server: server, store: store, sessionID: sid, sessionUnread: msgCount}
 }
@@ -129,7 +129,7 @@ func newNudgeFixture(t *testing.T, msgCount int) *nudgeFixture {
 // summary calls the tool handler and decodes its body.
 func (f *nudgeFixture) summary(t *testing.T, args string) (UnreadSummary, error) {
 	t.Helper()
-	raw, err := f.server.handleCourierUnreadSummary(json.RawMessage(args))
+	raw, err := f.server.handleCrierUnreadSummary(json.RawMessage(args))
 	if err != nil {
 		return UnreadSummary{}, err
 	}
@@ -257,7 +257,7 @@ func TestUnreadListBounded(t *testing.T) {
 	}
 
 	f := newNudgeFixture(t, 30)
-	body, err := f.server.handleCourierUnreadList(json.RawMessage(`{}`))
+	body, err := f.server.handleCrierUnreadList(json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestUnreadListBounded(t *testing.T) {
 
 	// Over the maximum clamps to 100 rather than erroring; 30 available means
 	// 30 rows on the wire.
-	body, err = f.server.handleCourierUnreadList(json.RawMessage(`{"limit":5000}`))
+	body, err = f.server.handleCrierUnreadList(json.RawMessage(`{"limit":5000}`))
 	if err != nil {
 		t.Fatalf("over-max limit must clamp, not error: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestUnreadListBounded(t *testing.T) {
 	}
 
 	// An explicit small limit is honoured exactly.
-	body, err = f.server.handleCourierUnreadList(json.RawMessage(`{"limit":5}`))
+	body, err = f.server.handleCrierUnreadList(json.RawMessage(`{"limit":5}`))
 	if err != nil {
 		t.Fatalf("limit 5: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestUnreadListBounded(t *testing.T) {
 // tags come back, and the cursor is untouched after both tools ran.
 func TestUnreadListIncludesTags(t *testing.T) {
 	f := newNudgeFixture(t, 3)
-	body, err := f.server.handleCourierUnreadList(json.RawMessage(`{"limit":100}`))
+	body, err := f.server.handleCrierUnreadList(json.RawMessage(`{"limit":100}`))
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestUnreadListIncludesTags(t *testing.T) {
 	}
 
 	// Reading again must return the same rows: nothing was advanced.
-	again, err := f.server.handleCourierUnreadList(json.RawMessage(`{"limit":100}`))
+	again, err := f.server.handleCrierUnreadList(json.RawMessage(`{"limit":100}`))
 	if err != nil {
 		t.Fatalf("second list: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestNudgeResourceAndPrompt(t *testing.T) {
 		t.Fatalf("prompts/get: %v", err)
 	}
 	rendered := fmt.Sprintf("%v", prompt)
-	if !strings.Contains(rendered, "You have 5 unread messages in courier") {
+	if !strings.Contains(rendered, "You have 5 unread messages in Crier") {
 		t.Fatalf("prompt must render the live count: %v", prompt)
 	}
 	if !strings.Contains(rendered, "Call courier_unread_list to read them.") {
@@ -400,9 +400,9 @@ func TestNudgeDisabledRemovesSurface(t *testing.T) {
 // answers, so a harness is never told a different number than an agent reads.
 func TestSessionStartCountsMatchSummary(t *testing.T) {
 	f := newNudgeFixture(t, 3)
-	counts := SessionStartCounts(f.server.courier, nudgeAgent)
+	counts := SessionStartCounts(f.server.crier, nudgeAgent)
 	if counts == nil {
-		t.Fatal("a wired courier must produce a counts hook")
+		t.Fatal("a wired Crier must produce a counts hook")
 	}
 	total, categories := counts(context.Background(), harnessMessage(f.sessionID))
 	if total != 5 {
@@ -414,7 +414,7 @@ func TestSessionStartCountsMatchSummary(t *testing.T) {
 		t.Fatalf("hook categories = %v, want %v", categories, want)
 	}
 	if SessionStartCounts(nil, nudgeAgent) != nil {
-		t.Fatal("no courier source must mean no hook")
+		t.Fatal("no Crier source must mean no hook")
 	}
 }
 
@@ -423,7 +423,7 @@ func harnessMessage(sessionID string) harness.Message {
 	return harness.Message{ID: "m", SessionID: sessionID, Text: "body"}
 }
 
-// TestHarnessTools pins the two carried-over tools (COURIER-HARNESS §4.4):
+// TestHarnessTools pins the two carried-over tools (CRIER-HARNESS §4.4):
 // harness_list reports an empty surface when none is wired, and harness_probe
 // names the unknown adapter without inventing one.
 func TestHarnessTools(t *testing.T) {

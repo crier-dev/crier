@@ -1,6 +1,6 @@
 package reads
 
-// service_test.go — the acceptance criteria of specs/COURIER-READS.md §8, one
+// service_test.go — the acceptance criteria of specs/CRIER-READS.md §8, one
 // test per numbered item, driven through the REAL cursor stores and the REAL
 // session repository (no doubles): a cursor that only works against a fake is
 // not a cursor.

@@ -24,7 +24,7 @@ import (
 )
 
 // openReadCursors opens the read-cursor store that belongs to the SELECTED
-// session backend (CRIER-READS-1, specs/COURIER-READS.md §4).
+// session backend (CRIER-READS-1, specs/CRIER-READS.md §4).
 //
 // The cursor is session state, so it follows the session backend rather than
 // introducing a fourth storage choice: a JSONL deployment keeps its cursors at

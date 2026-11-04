@@ -1,6 +1,6 @@
 package ingress
 
-// handler_test.go — the unit battery of COURIER-INGRESS §7 (1-9) plus the
+// handler_test.go — the unit battery of CRIER-INGRESS §7 (1-9) plus the
 // refusals the catalog names. The store is the REAL JSONL session store in a
 // temp directory, not a double: the row's whole claim is that an ingress push
 // writes the same records the session routes write, and a fake store would let
@@ -312,7 +312,7 @@ func TestIngressNewSessionCreatesAndPosts(t *testing.T) {
 		t.Fatalf("transcript message %+v does not match the result %+v", msg, res)
 	}
 	if strings.Join(msg.Tags, ",") != "build,urgent" {
-		t.Fatalf("stored tags = %v, want [build urgent] (COURIER-TAGS order preserved)", msg.Tags)
+		t.Fatalf("stored tags = %v, want [build urgent] (CRIER-TAGS order preserved)", msg.Tags)
 	}
 	var payload struct {
 		Text string `json:"text"`

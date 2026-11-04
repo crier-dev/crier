@@ -1,4 +1,4 @@
-// Package hermes adapts the Hermes agent harness (COURIER-HARNESS §2).
+// Package hermes adapts the Hermes agent harness (CRIER-HARNESS §2).
 //
 // Two verified surfaces, nothing else:
 //   - continue: `hermes chat -Q --resume <id> -q <text>`
@@ -196,7 +196,7 @@ func (a *Adapter) create(ctx context.Context, sess harness.SessionRef, msg harne
 	}
 	rc.SessionID = harness.ExtractSessionID(raw)
 	if rc.SessionID == "" {
-		// Delivered, but the id the courier session needs is missing: the
+		// Delivered, but the id the Crier session needs is missing: the
 		// receipt says so instead of implying a binding it does not have.
 		rc.Error = harness.CodeOutputInvalid
 	}

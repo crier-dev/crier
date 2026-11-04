@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TestSessionViewCarriesTheHarnessBinding pins COURIER-HARNESS §4.3 at the HTTP
+// TestSessionViewCarriesTheHarnessBinding pins CRIER-HARNESS §4.3 at the HTTP
 // boundary: the session object a client reads must SAY which agent session a
 // push will reach. Without this the UI cannot show a harness badge, because the
 // field would never arrive — an absent binding is the absence of a claim, and a

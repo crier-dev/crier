@@ -277,7 +277,7 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
         <button id="tag-add" type="button" class="ghost" disabled>Add tag</button>
       </div>
       <div id="tag-chips" class="tag-chips" role="list" aria-label="Tags this message will carry"></div>
-      <p id="tag-hint" class="note">Tag grammar (COURIER-TAGS §2.1): lowercase ASCII letters, digits, <code>_</code> and <code>-</code>, at most one <code>:</code>, 1–64 characters, at most 16 tags. Enter or “Add tag” appends a chip; anything else is refused here with the server's own reason and is never sent.</p>
+      <p id="tag-hint" class="note">Tag grammar (CRIER-TAGS §2.1): lowercase ASCII letters, digits, <code>_</code> and <code>-</code>, at most one <code>:</code>, 1–64 characters, at most 16 tags. Enter or “Add tag” appends a chip; anything else is refused here with the server's own reason and is never sent.</p>
       <p id="tag-result" class="note" role="status"></p>
       <div class="dest-row">
         <div class="dest-group" role="radiogroup" aria-label="Destination" aria-describedby="destination-hint">
@@ -386,7 +386,7 @@ const $ = id => document.getElementById(id);
 const sessionPath = (id, suffix) => "/sessions/" + encodeURIComponent(id) + "/" + suffix;
 // Match internal/namespace.Canonical's documented default-realm alias.
 const canonicalRealm = name => name === "default" ? "" : name || "";
-// CRIER-UI-1 adds the composer's destination (one of the three COURIER-INGRESS modes),
+// CRIER-UI-1 adds the composer's destination (one of the three CRIER-INGRESS modes),
 // the tags drafted for the next message, the active transcript tag filter, the tag
 // vocabulary seen in this session, the last read-state response and the per-session
 // unread counts derived from it. Kept on ONE line: the truth harnesses read this
@@ -688,7 +688,7 @@ $("trust-query-form").addEventListener("submit",async event => {
   finally { $("trust-query-submit").disabled = false; }
 });
 refreshManagement();
-// CRIER-UI-1 (COURIER-READS §3.1): the session list's unread pill. It is the
+// CRIER-UI-1 (CRIER-READS §3.1): the session list's unread pill. It is the
 // CALLER's own cursor count from GET /sessions/{id}/reads; 0 and "unknown"
 // both render nothing, because an absent count is not zero and a pill is a
 // fact about this agent's cursor, never a placeholder.
@@ -705,7 +705,7 @@ function renderSessions() {
 // CRIER-UI-1: the destination is composer STATE, not a second send path.
 // "session" keeps the existing POST /sessions/{id}/messages send exactly as it
 // was; the other two modes go through POST /ingress/messages with the chosen
-// mode named explicitly (COURIER-INGRESS §2.1). An unrecognised value never
+// mode named explicitly (CRIER-INGRESS §2.1). An unrecognised value never
 // reaches the wire, and it is never silently treated as a mode either: anything
 // other than the two new modes is the session path, which is the default the
 // control starts on.
@@ -937,7 +937,7 @@ function renderHeader() {
   $("session-state").textContent = sessionState;
   $("session-state").className = "pill" + (s?.state === "open" ? " mint" : "");
   $("breadcrumb").textContent = (state.namespace || "Default realm") + " / " + (s ? s.title || s.id : "Conversations");
-  // CRIER-UI-1 (COURIER-HARNESS §4.3): a session bound to a harness adapter
+  // CRIER-UI-1 (CRIER-HARNESS §4.3): a session bound to a harness adapter
   // shows BOTH the harness name and the harness session id; a session with
   // neither renders nothing rather than an empty badge. Both values are the
   // session's own recorded fields — this page cannot bind or unbind a harness,
@@ -970,7 +970,7 @@ function renderMessages(findings = state.findings || []) {
   // from the harness while the page looked fine (DF-CRIER-483's rule).
   //
   // N = members whose cursor reached the group's LAST message seq, M = the
-  // session's participant count (COURIER-READS §2/§3.1). A permission-scoped
+  // session's participant count (CRIER-READS §2/§3.1). A permission-scoped
   // read returns only the caller's own row: that is an ABSENT denominator, not
   // 0/M, so nothing is rendered rather than a ratio the server never said.
   const readsView = (() => {
@@ -1391,7 +1391,7 @@ function setIdentitySuggestion(agent, unavailable = false) {
     ? "Registered agents could not be loaded. Enter an existing agent ID only; this page does not register IDs."
     : "No registered agent is available. Enter an existing agent ID; this page does not register IDs.";
 }
-// CRIER-UI-1 (COURIER-READS §3.1): the session list's unread pill. One read per
+// CRIER-UI-1 (CRIER-READS §3.1): the session list's unread pill. One read per
 // LISTED session (bounded below), and the value used is the CALLER's own row
 // only — another member's unread is not this agent's. A session whose read
 // fails, or whose own row is absent because this caller is not privileged,
@@ -1414,7 +1414,7 @@ async function loadSessionUnread(generation = state.generation) {
   state.unread = new Map(counts.filter(([, count]) => Number.isInteger(count)));
   renderSessions();
 }
-// CRIER-UI-1 (COURIER-TAGS §2.1): the composer's tag chips. This mirrors
+// CRIER-UI-1 (CRIER-TAGS §2.1): the composer's tag chips. This mirrors
 // internal/tags EXACTLY — same order of checks, same sentences — so a tag
 // refused here is refused by POST /ingress/messages for the same stated reason
 // and a tag accepted here is one the server accepts. Nothing is lowercased:
@@ -1463,7 +1463,7 @@ function removeTag(tag) {
   renderTagChips();
   notice("tag-result", "Tag " + tag + " removed.");
 }
-// CRIER-UI-1 (COURIER-INGRESS §2.1): the two new destinations. One request
+// CRIER-UI-1 (CRIER-INGRESS §2.1): the two new destinations. One request
 // shape, the mode named explicitly, and the server's own result — including the
 // created session id — rendered as it answered. A refusal is shown VERBATIM.
 async function sendIngress(mode) {
@@ -1507,7 +1507,7 @@ async function sendIngress(mode) {
     notice("send-result", e.message, true);
   } finally { state.sending = false; state.busy = false; updateComposer(); await refresh(); }
 }
-// CRIER-UI-1 (COURIER-TAGS §2.4): a filter chip is a NEW READ (?tag=), never a
+// CRIER-UI-1 (CRIER-TAGS §2.4): a filter chip is a NEW READ (?tag=), never a
 // client-side hide — so the transcript shows exactly what the server answered
 // and "clear" restores the full read the same way.
 function setTagFilter(tag) {
@@ -1545,12 +1545,12 @@ async function refresh() {
     }, e => { state.permissionsArmed = null; state.requireAgentSignature = null; state.managementSurface = null; updateComposer(); unavailable("health",e); notice("sender-authority","Send authority: unknown — runtime posture could not be read. This browser cannot sign; acting ID is attribution, not login.",true); notice("posture", "Runtime posture: unknown — " + e.message, true); }),
     loadGroups(generation, realm)];
   if (id) {
-    // CRIER-UI-1 (COURIER-TAGS §2.4): an active tag filter is a SERVER-side
+    // CRIER-UI-1 (CRIER-TAGS §2.4): an active tag filter is a SERVER-side
     // query (?tag=), never a client-side hide, so the transcript is exactly the
     // set the server returned and its count cannot drift from the read.
     const transcriptPath = state.tagFilter ? sessionPath(id,"messages") + "?tag=" + encodeURIComponent(state.tagFilter) : sessionPath(id,"messages");
     reads.push(read(transcriptPath, b => { state.session = b.session; state.sessionRead = "read"; state.messages = b.messages || []; state.systemEvents = b.system_events || []; state.findings = Array.isArray(b.findings) ? b.findings : []; renderHeader(); renderThreadOptions(); renderMessages(); }, e => { state.session = null; state.sessionRead = e.status >= 400 && e.status < 500 ? "refused" : "failed"; state.messages = []; state.systemEvents = []; state.findings = []; state.reads = null; renderHeader(); unavailable("transcript",e); }));
-    // COURIER-READS §3.1: the same read that feeds "seen by N/M". Its failure
+    // CRIER-READS §3.1: the same read that feeds "seen by N/M". Its failure
     // clears the data — the renderer shows nothing rather than a stale ratio.
     // It re-renders ONLY when the transcript itself was read: a failed
     // transcript read has already written its cause into #transcript, and a
@@ -1624,7 +1624,7 @@ async function send(event) {
   const id = state.current, draft = $("text").value.trim(), recipient = $("recipient").value, task = $("intent").value === "task";
   if (task && !recipient) { notice("send-result","Choose an explicit agent recipient before requesting work.",true); return; }
   const payload = { payload:{text:draft}, sender:state.agent };
-  // CRIER-UI-1 (COURIER-TAGS §4): the same chips ride the session route, so a
+  // CRIER-UI-1 (CRIER-TAGS §4): the same chips ride the session route, so a
   // tag added here classifies the message whichever destination sends it.
   if (state.tags.length) payload.tags = [...state.tags];
   if (state.reply) payload.parent_id = state.reply;

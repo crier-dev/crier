@@ -40,16 +40,16 @@ func sessionConfigured(cfg config.Config) bool {
 		strings.TrimSpace(cfg.Session.SQLitePath) != ""
 }
 
-// openCourier wires the nudge's read side from config. It never fails startup:
+// openCrier wires the nudge's read side from config. It never fails startup:
 // a store that cannot open is logged and the nudge falls back to the
 // agent-inbox count, because a nudge must never be the reason an agent's bridge
 // will not start. The returned cleanup closes what was opened.
-func openCourier(cfg config.Config, store registry.Store, logger *slog.Logger) (mcp.CourierSource, func()) {
+func openCrier(cfg config.Config, store registry.Store, logger *slog.Logger) (mcp.CrierSource, func()) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if !sessionConfigured(cfg) {
-		logger.Info("courier nudge: no session backend configured in this process — unread counts cover the agent inbox only",
+		logger.Info("Crier nudge: no session backend configured in this process — unread counts cover the agent inbox only",
 			"hint", "set CR_SESSION_BACKEND (and CR_SESSION_LOG_ROOT / CR_SESSION_SQLITE_PATH) to the server's session store")
 		return nil, func() {}
 	}
@@ -62,19 +62,19 @@ func openCourier(cfg config.Config, store registry.Store, logger *slog.Logger) (
 		DatabaseURL: cfg.Database.URL,
 	})
 	if err != nil {
-		logger.Warn("courier nudge: session store could not be opened — unread counts cover the agent inbox only",
+		logger.Warn("Crier nudge: session store could not be opened — unread counts cover the agent inbox only",
 			"backend", backend, "error", err)
 		return nil, func() {}
 	}
 	cursors, closeCursors, err := openReadCursors(cfg, backend)
 	if err != nil {
 		closeStore(repo)
-		logger.Warn("courier nudge: read cursors could not be opened — unread counts cover the agent inbox only",
+		logger.Warn("Crier nudge: read cursors could not be opened — unread counts cover the agent inbox only",
 			"backend", backend, "error", err)
 		return nil, func() {}
 	}
-	logger.Info("courier nudge: session unread wired", "backend", backend)
-	return &mcp.Courier{Inbox: store, Sessions: repo, Reads: &reads.Service{Repo: repo, Cursors: cursors}},
+	logger.Info("Crier nudge: session unread wired", "backend", backend)
+	return &mcp.Crier{Inbox: store, Sessions: repo, Reads: &reads.Service{Repo: repo, Cursors: cursors}},
 		func() {
 			closeCursors()
 			closeStore(repo)

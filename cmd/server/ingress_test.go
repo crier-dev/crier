@@ -1,6 +1,6 @@
 package main
 
-// ingress_test.go — the HTTP integration rows of COURIER-INGRESS §7 (10-11)
+// ingress_test.go — the HTTP integration rows of CRIER-INGRESS §7 (10-11)
 // plus the parity check that matters most for the old surface: an inbox push
 // made through /ingress/messages is the SAME kind of durable entry, with the
 // same ack semantics, as one made through /agents/{id}/inbox (test 7, proven

@@ -1,5 +1,5 @@
 // ingressroutes.go — wiring for the push-ingress surface (CRIER-INGRESS-1,
-// specs/COURIER-INGRESS.md).
+// specs/CRIER-INGRESS.md).
 //
 // The handler itself lives in internal/ingress. This file supplies the three
 // things it needs from the process, and nothing else:
@@ -31,7 +31,7 @@ import (
 )
 
 // idempotencyLedger opens the durable ledger under the same ingress directory
-// the route log uses (COURIER-INGRESS §3). A ledger that cannot be opened is
+// the route log uses (CRIER-INGRESS §3). A ledger that cannot be opened is
 // a real operational problem, so it is logged loudly and the process falls back
 // to the process-scoped ledger rather than refusing to serve — a restart then
 // loses replay protection, which is worse than crashing but better than an
@@ -55,7 +55,7 @@ func idempotencyLedger(root string) ingress.IdempotencyStore {
 // selection. The entry it composes is the entry those routes compose — payload,
 // sender, tags, idempotency key, created-at — so an inbox entry written by
 // ingress is indistinguishable from one written over HTTP, which is exactly
-// what COURIER-INGRESS §4.2 and test 7 require.
+// what CRIER-INGRESS §4.2 and test 7 require.
 type registryInbox struct {
 	handler *registry.Handler
 }
@@ -145,10 +145,10 @@ func openIngress(cfg config.Config, repo session.Repository, dispatcher *registr
 		AllowedModes: ingressModes(cfg.Ingress.AllowedModes),
 		MaxBodyBytes: cfg.Ingress.MaxBodyBytes,
 	}
-	// The dispatch hook is wired to the harness registry (COURIER-HARNESS §4,
+	// The dispatch hook is wired to the harness registry (CRIER-HARNESS §4,
 	// via harnesswiring.go). A session with no harness binding still answers
 	// `{"mode":"store","state":"stored"}`, which is the honest report and not a
-	// weaker success: the courier record IS the delivery for a store-only
+	// weaker success: the Crier record IS the delivery for a store-only
 	// session.
 	if reg := buildHarnessRegistry(cfg); reg != nil {
 		h.Dispatch = &harnessDispatch{reg: reg, repo: repo}

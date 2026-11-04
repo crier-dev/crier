@@ -1,17 +1,17 @@
-# COURIER-MCP-NUDGE.md — the agent is told it has mail, and decides whether to read it
+# CRIER-MCP-NUDGE.md — the agent is told it has mail, and decides whether to read it
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-MCP-NUDGE** (stretch)
-Series: `specs/COURIER-READS.md` (unread numbers the nudge reports), `specs/COURIER-INGRESS.md`
+Series: `specs/CRIER-READS.md` (unread numbers the nudge reports), `specs/CRIER-INGRESS.md`
 (the traffic that produces mail).
 
 ## 1. Purpose
 
 An agent that never polls still needs to know mail is waiting. Give MCP clients a **nudge
-surface**: a zero-cost way to learn "you have N unread in courier, categories X/Y" at the start of
+surface**: a zero-cost way to learn "you have N unread in Crier, categories X/Y" at the start of
 a turn, plus the existing tools to fetch only if it chooses.
 
 Design constraint from the owner, made normative here: **the nudge informs, it never auto-reads
-and never injects message bodies.** Bodies arrive only when the agent calls a Courier tool.
+and never injects message bodies.** Bodies arrive only when the agent calls a Crier tool.
 
 ## 2. Interface
 
@@ -35,8 +35,8 @@ bounded by `limit` (default 20, max 100). This is the "read them" the nudge name
 | Mechanism | When it applies | Contract |
 |---|---|---|
 | MCP prompt/resource | Any MCP client | Client decides when to surface it. No push. |
-| Session-start hint | `COURIER-HARNESS` adapters | A **prefix line** prepended to the delivered message text: `[courier] 3 unread (build, urgent) — call courier_unread_list to read.` Never a separate hidden message. |
-| SSE/websocket notification | Clients connected to `/relay/subscribe/{topic}` | `{"type":"courier.unread","agent_id":"alpha","count":3}` — count only, no bodies. |
+| Session-start hint | `CRIER-HARNESS` adapters | A **prefix line** prepended to the delivered message text: `[courier] 3 unread (build, urgent) — call courier_unread_list to read.` Never a separate hidden message. |
+| SSE/websocket notification | Clients connected to `/relay/subscribe/{topic}` | `{"type":"Crier.unread","agent_id":"alpha","count":3}` — count only, no bodies. |
 
 The session-start hint is the practical version of "tell the agent at the beginning". It is
 embedded in the message the harness receives, so no harness cooperation is required beyond
@@ -72,12 +72,12 @@ func nudgePrefix(total int, categories []string) string
 
 ## 3. Data Model
 
-None new. Counts are computed from existing inbox state plus `COURIER-READS` cursors when the
+None new. Counts are computed from existing inbox state plus `CRIER-READS` cursors when the
 message belongs to a session rather than an agent inbox:
 
 - agent-inbox unread = existing inbox stats (`unread` already exists there)
-- session unread = `COURIER-READS.Service.Unread`
-- `by_category` = tags (COURIER-TAGS), with untagged counted as `uncategorized`
+- session unread = `CRIER-READS.Service.Unread`
+- `by_category` = tags (CRIER-TAGS), with untagged counted as `uncategorized`
 
 ## 4. Wiring
 
@@ -89,7 +89,7 @@ message belongs to a session rather than an agent inbox:
 - Config: `mcp.nudge.enabled` (default true), `mcp.nudge.max_count` (999),
   `mcp.nudge.session_start` (default false — opt-in per deployment, because a prefix changes the
   agent's prompt and that is a product decision, not a default).
-- `COURIER-HARNESS` adapters read `mcp.nudge.session_start` and prepend via `nudgePrefix`.
+- `CRIER-HARNESS` adapters read `mcp.nudge.session_start` and prepend via `nudgePrefix`.
 
 ## 5. Error Catalog
 
@@ -131,8 +131,8 @@ to "do I have mail" for an agent that is not registered yet.
 
 ## 8. Hilo Impact
 
-Depends on: `internal/mcp`, `internal/session` inbox stats, `COURIER-READS` cursors,
-`COURIER-TAGS` categories, `COURIER-HARNESS` adapters (for the prefix).
+Depends on: `internal/mcp`, `internal/session` inbox stats, `CRIER-READS` cursors,
+`CRIER-TAGS` categories, `CRIER-HARNESS` adapters (for the prefix).
 Depended on by: nothing — this is the outermost convenience layer. Disabled by config, the system
 is unchanged. This row is explicitly a **stretch**: 1–3 and the harness adapters are useful
 without it.

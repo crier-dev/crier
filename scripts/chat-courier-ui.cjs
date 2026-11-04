@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// CRIER-UI-1: the courier UI regression, driven in REAL Chromium against the
+// CRIER-UI-1: the Crier UI regression, driven in REAL Chromium against the
 // stock server and temporary storage. It exercises the shipped page only:
 //   - the composer's destination control (session | new_session | inbox) and the
 //     two POST /ingress/messages modes it names;
-//   - tag chips validated client-side against COURIER-TAGS §2.1, with the
+//   - tag chips validated client-side against CRIER-TAGS §2.1, with the
 //     server's own refusal sentence shown verbatim when the server refuses;
 //   - the transcript tag filter (?tag=), which is a server-side read;
 //   - "seen by N/M" from GET /sessions/{id}/reads, and its absence when the
@@ -112,7 +112,7 @@ async function run() {
     await must(base, "POST", "/agents", {id, public_key: publicKey.export({type: "spki", format: "der"}).subarray(-32).toString("hex")});
   }
   const session = await must(base, "POST", "/sessions", {
-    title: "Courier UI session", kind: "channel", created_by: {agent: operator},
+    title: "Crier UI session", kind: "channel", created_by: {agent: operator},
     members: [{member_type: "agent", member_id: operator}, {member_type: "agent", member_id: recipient}],
   });
   const first = await must(base, "POST", "/sessions/" + session.id + "/messages", {sender: operator, payload: {text: "build pipeline is green"}, message_kind: "plain", tags: ["build"]});
@@ -121,7 +121,7 @@ async function run() {
   // recipient), so the session list's unread pill has a real value to show and
   // the fully-read session has none.
   const unreadSession = await must(base, "POST", "/sessions", {
-    title: "Courier UI unread session", kind: "channel", created_by: {agent: recipient},
+    title: "Crier UI unread session", kind: "channel", created_by: {agent: recipient},
     members: [{member_type: "agent", member_id: operator}, {member_type: "agent", member_id: recipient}],
   });
   await must(base, "POST", "/sessions/" + unreadSession.id + "/messages", {sender: recipient, payload: {text: "waiting on your review"}, message_kind: "plain", tags: ["review"]});
@@ -168,7 +168,7 @@ async function run() {
   await waitIdle(page);
   assert.equal(await page.locator(".msg").count(), 2, "both recorded messages render");
 
-  // COURIER-READS §2, §3.1: this reader presents NO member identity, so the
+  // CRIER-READS §2, §3.1: this reader presents NO member identity, so the
   // read-state response carries every participant and the ratio has a real
   // denominator: both cursors reached the group's last seq.
   assert.equal(await page.locator("#session-harness").isVisible(), false, "an unbound session renders no harness badge");
@@ -181,7 +181,7 @@ async function run() {
   verified("seen-by: 2/2 per message group, computed from GET /sessions/{id}/reads");
 
   // Tag chips: the filter bar lists the tags the transcript carries, and each
-  // message shows its own (COURIER-TAGS §2.4).
+  // message shows its own (CRIER-TAGS §2.4).
   const filterChips = await page.locator("#tag-filter-chips [data-tag-filter]").allInnerTexts();
   assert.deepEqual(filterChips.map(tag => tag.trim()), ["build", "urgent"], "the filter bar lists the tags this transcript carries, sorted");
   assert.equal(await page.locator("#transcript [data-tag-filter]").count(), 3, "message tag chips: build, urgent + build");
@@ -268,7 +268,7 @@ async function run() {
   assert.equal(await page.locator("#dest-inbox").isVisible(), false);
   assert.equal(await page.locator("#recipient").isDisabled(), true, "Recipient belongs to the session route and is disabled here");
   assert.match(await page.locator("#destination-state").innerText(), /mode=new_session/);
-  await page.locator("#dest-title").fill("Courier UI created session");
+  await page.locator("#dest-title").fill("Crier UI created session");
   await page.locator("#dest-kind").selectOption("channel");
   await page.locator("#dest-members").fill(recipient + ", " + recipient + " ,");
   await page.locator("#text").fill("created through the ingress composer");
@@ -281,7 +281,7 @@ async function run() {
   const createdID = createdLine.match(/New session (\S+) created\./)?.[1];
   assert.ok(createdID, "the outcome line names the created session id: " + createdLine);
   const createdRead = await must(base, "GET", "/sessions/" + createdID + "/messages");
-  assert.equal(createdRead.session.title, "Courier UI created session");
+  assert.equal(createdRead.session.title, "Crier UI created session");
   assert.equal(createdRead.messages.length, 1);
   assert.deepEqual(createdRead.messages[0].tags, ["build", "ci:nightly"], "the chips ride the ingress request");
   assert.equal(createdRead.session.participant_count, 2, "the author auto-joins and the named member joins once");
@@ -322,7 +322,7 @@ async function run() {
   // ---------------------------------------------------------------------
   // Harness badge (criterion 6)
   //
-  // MEASURED SERVER GAP, reported not worked around: COURIER-HARNESS §4.3 puts
+  // MEASURED SERVER GAP, reported not worked around: CRIER-HARNESS §4.3 puts
   // harness / harness_session_id on the session RECORD, but the server's
   // sessionView (internal/session/http.go) does not carry either field on GET
   // /sessions or on the transcript's session object. No live response can
@@ -436,7 +436,7 @@ async function run() {
     const file = path.join(evidence, name);
     console.log("  " + file + (fs.existsSync(file) ? " (" + fs.statSync(file).size + " bytes)" : " MISSING"));
   }
-  console.log("PASS: CRIER-UI-1 courier UI (destination, tags, filter, seen-by, harness badge, responsive, zero console errors)");
+  console.log("PASS: CRIER-UI-1 Crier UI (destination, tags, filter, seen-by, harness badge, responsive, zero console errors)");
 }
 run().catch(error => {
   console.error(error && error.stack || error);

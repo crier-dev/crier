@@ -18,7 +18,7 @@ const DefaultMaxConcurrent = 4
 // SessionStart is true and Counts is set, Deliver prepends nudgePrefix to the
 // message text it hands the adapter.
 //
-// It is a hook rather than a store dependency because the courier stores the
+// It is a hook rather than a store dependency because the Crier stores the
 // numbers live in (inboxes + read cursors) are not the harness package's to
 // know. The default — the zero value — is OFF: no hook, no prefix, and the
 // delivered text is byte-identical to a build without this feature.
@@ -60,7 +60,7 @@ type RegistryOptions struct {
 }
 
 // Registry resolves a harness name to an adapter, serialises deliveries per
-// courier session and bounds how many run at once (§6).
+// Crier session and bounds how many run at once (§6).
 type Registry struct {
 	mu       sync.RWMutex
 	adapters map[string]Adapter
@@ -76,11 +76,11 @@ type Registry struct {
 	delivered uint64
 }
 
-// DispatchRequest is the ingress hook's call shape (COURIER-INGRESS §4.2).
+// DispatchRequest is the ingress hook's call shape (CRIER-INGRESS §4.2).
 type DispatchRequest struct {
 	// Harness names the adapter; empty means the configured default.
 	Harness string
-	// SessionRef carries the harness binding recorded on the courier session.
+	// SessionRef carries the harness binding recorded on the Crier session.
 	SessionRef SessionRef
 	// Message is the stored message; its SessionID serialises delivery.
 	Message Message
@@ -196,7 +196,7 @@ func (r *Registry) Probe(ctx context.Context, name string) (Capability, error) {
 	return a.Probe(ctx)
 }
 
-// Deliver is the exported hook COURIER-INGRESS §4.2 calls after the message is
+// Deliver is the exported hook CRIER-INGRESS §4.2 calls after the message is
 // durably appended. It never returns an error: a delivery problem is a
 // Receipt with State=failed, because storage already succeeded and the HTTP
 // status must not change.
@@ -273,7 +273,7 @@ func (r *Registry) DeliveredCount() uint64 {
 	return r.delivered
 }
 
-// sessionKey serialises deliveries per courier session — a message without a
+// sessionKey serialises deliveries per Crier session — a message without a
 // session still gets its own key from its message id so two retries of the
 // same message cannot overlap either.
 func sessionKey(harnessName string, msg Message) string {

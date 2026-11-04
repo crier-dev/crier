@@ -167,8 +167,8 @@ func run(args []string) int {
 	}
 	// CRIER-MCP-NUDGE: the nudge's read side. It never fails startup — a
 	// session store that cannot open leaves the agent-inbox counts working.
-	courier, closeCourier := openCourier(cfg, store, slog.Default())
-	defer closeCourier()
+	crier, closeCrier := openCrier(cfg, store, slog.Default())
+	defer closeCrier()
 
 	server := mcp.NewWithOptions(store, mcp.Options{
 		DeliveryHandler: deliveryHandler,
@@ -187,15 +187,15 @@ func run(args []string) int {
 		// the server (and in the thread) immediately.
 		DaggerToken: identity.Token,
 		// CRIER-MCP-NUDGE: the counts-only unread surface, plus the read-only
-		// harness introspection carried over from COURIER-HARNESS §4.4.
-		Courier: courier,
+		// harness introspection carried over from CRIER-HARNESS §4.4.
+		Crier: crier,
 		// The session-start hint is armed from the SAME config block the
 		// server reads: the prefix is off by default, and the counts come
 		// from the nudge source above so both halves agree.
 		Harness: build.RegistryWithNudge(cfg.Harness, harness.NudgeHint{
 			SessionStart: cfg.MCP.Nudge.SessionStart,
 			MaxCount:     cfg.MCP.Nudge.MaxCount,
-			Counts:       mcp.SessionStartCounts(courier, os.Getenv(mcp.EnvAgentID)),
+			Counts:       mcp.SessionStartCounts(crier, os.Getenv(mcp.EnvAgentID)),
 		}),
 		OperatorScope: envBool(slog.Default(), mcp.EnvOperatorScope),
 		NudgeDisabled: !cfg.MCP.Nudge.Enabled,
@@ -452,7 +452,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "                              CR_REQUIRE_AGENT_SIG=true (the secure default). Key material")
 	fmt.Fprintln(out, "                              is never logged.")
 	_, _ = fmt.Fprintln(out)
-	_, _ = fmt.Fprintln(out, "Courier unread nudge (CRIER-MCP-NUDGE):")
+	_, _ = fmt.Fprintln(out, "Crier unread nudge (CRIER-MCP-NUDGE):")
 	_, _ = fmt.Fprintln(out, "  courier_unread_summary / courier_unread_list, the resource")
 	_, _ = fmt.Fprintln(out, "  courier://inbox/{agent_id}/unread and the courier_nudge prompt report")
 	_, _ = fmt.Fprintln(out, "  UNREAD COUNTS. The summary never returns message text; the list is the")
@@ -466,7 +466,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(out, "                                and read cursors; unset, the counts cover the")
 	_, _ = fmt.Fprintln(out, "                                agent inbox only.")
 	_, _ = fmt.Fprintln(out)
-	_, _ = fmt.Fprintln(out, "Harness introspection (COURIER-HARNESS 4.4): harness_list and harness_probe")
+	_, _ = fmt.Fprintln(out, "Harness introspection (CRIER-HARNESS 4.4): harness_list and harness_probe")
 	_, _ = fmt.Fprintln(out, "  report what each configured harness adapter can do. Read-only: there is no")
 	_, _ = fmt.Fprintln(out, "  delivery tool — delivery is an ingress action, not an agent action.")
 	_, _ = fmt.Fprintln(out)

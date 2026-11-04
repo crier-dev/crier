@@ -8,7 +8,7 @@ import (
 	"github.com/crier-dev/crier/internal/tags"
 )
 
-// Inbox tags (COURIER-TAGS §2.4, §3): a tag rides the ROUTE RECORD, so the
+// Inbox tags (CRIER-TAGS §2.4, §3): a tag rides the ROUTE RECORD, so the
 // inbox entry a message fans out to carries the same classification the
 // transcript does. That is what lets `GET /agents/{id}/inbox?tag=build` answer
 // for a QUEUED message without reading the session, which may be in another

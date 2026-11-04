@@ -1,8 +1,8 @@
-# COURIER-INGRESS.md — push ingress: one call, three destinations
+# CRIER-INGRESS.md — push ingress: one call, three destinations
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-INGRESS-1**
-Series: `specs/CHAT-SESSIONS.md` (session model), `specs/COURIER-HARNESS.md` (harness delivery),
-`specs/COURIER-TAGS.md` (tags on the same message), `specs/COURIER-READS.md` (read cursors).
+Series: `specs/CHAT-SESSIONS.md` (session model), `specs/CRIER-HARNESS.md` (harness delivery),
+`specs/CRIER-TAGS.md` (tags on the same message), `specs/CRIER-READS.md` (read cursors).
 
 ## 1. Purpose
 
@@ -48,7 +48,7 @@ Request body — one struct, `mode` selects the destination:
   "author": { "agent": "ci-bot" },              // required; same AuthorRef shape as /sessions/{id}/messages
   "kind": "plain" | "addressed",                // never "task" — task creation stays on its own route
   "text": "build 4412 failed on main",
-  "tags": ["build", "urgent"],                  // COURIER-TAGS; validated here
+  "tags": ["build", "urgent"],                  // CRIER-TAGS; validated here
   "payload": { },                               // optional opaque JSON, ≤ 256 KiB
   "reply_to_thread": "m_root123"                // optional; only valid with mode=session
 }
@@ -68,7 +68,7 @@ Response `200` (existing session) / `201` (new session created):
 }
 ```
 
-`delivery` is present only when a harness adapter claimed the message (COURIER-HARNESS §4).
+`delivery` is present only when a harness adapter claimed the message (CRIER-HARNESS §4).
 When no adapter is configured the object is `{"mode":"store","state":"stored"}` — the message is
 in the session and every participant reads it from the transcript, exactly as today.
 
@@ -118,7 +118,7 @@ type SessionTemplate struct {
 type Handler struct {
     Repo     session.Repository
     Inbox    InboxWriter      // narrow: Deliver(ctx, agentID, capability string, msg InboxMessage) ([]session.DeliveryOutcome, error)
-    Dispatch DeliveryDispatch // nil-able; see COURIER-HARNESS §4
+    Dispatch DeliveryDispatch // nil-able; see CRIER-HARNESS §4
     Idem     IdempotencyStore // records (namespace, key) -> prior Result
     Now      func() time.Time
 }
@@ -217,7 +217,7 @@ if a caller needs it.
 | `INGRESS_SESSION_NOT_FOUND` | 404 | `mode=session` and no such session. |
 | `INGRESS_KEY_REUSED` | 409 | Same idempotency key, different request hash. |
 | `INGRESS_BODY_TOO_LARGE` | 413 | Body exceeds `ingress.max_body_bytes`. |
-| `INGRESS_TAGS_INVALID` | 400 | See COURIER-TAGS §5 (bad grammar, too many, too long). |
+| `INGRESS_TAGS_INVALID` | 400 | See CRIER-TAGS §5 (bad grammar, too many, too long). |
 | `INGRESS_STORE_ERROR` | 500 | Backend append failed; nothing is claimed delivered. |
 
 Every error body is the project's existing `{"error":"CODE","message":"..."}` shape.
@@ -235,7 +235,7 @@ Every error body is the project's existing `{"error":"CODE","message":"..."}` sh
 - **`reply_to_thread` on `new_session`:** `400 INGRESS_REPLY_TOO_DEEP`; a fresh session has no
   thread to reply into.
 - **Inbox + tags:** tags are stored on the route record and passed to the inbox entry so inbox
-  filters (COURIER-TAGS) work for queued messages too.
+  filters (CRIER-TAGS) work for queued messages too.
 - **Harness dispatch fails:** the message is stored and its `outcomes` are real; `delivery`
   reports `{"mode":"harness","harness":"opencode","state":"failed","error":"..."}`. The call
   returns 201 — storage is the contract, dispatch is best-effort and reported honestly.
@@ -273,7 +273,7 @@ Manual/live (documented in the row's evidence):
 
 Depends on: `internal/session` (`Repository`, `Message`, `Audience`, `DeliveryOutcome`),
 `internal/session` inbox handler (unchanged, reused), `internal/config`, `internal/httperr`.
-Depended on by: `COURIER-HARNESS.md` (dispatch hook), `COURIER-TAGS.md` (tags carried here),
-`COURIER-READS.md` (unread is computed over the messages this route creates).
+Depended on by: `CRIER-HARNESS.md` (dispatch hook), `CRIER-TAGS.md` (tags carried here),
+`CRIER-READS.md` (unread is computed over the messages this route creates).
 Nothing existing changes behaviour: the route is additive and the inbox path is called, not
 reimplemented.

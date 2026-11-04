@@ -1,7 +1,7 @@
-# COURIER-READS.md — read cursors: who has read what, and what is unread
+# CRIER-READS.md — read cursors: who has read what, and what is unread
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-READS-1**
-Series: `specs/CHAT-SESSIONS.md` §4 (transcript, seq authority), `specs/COURIER-TAGS.md`
+Series: `specs/CHAT-SESSIONS.md` §4 (transcript, seq authority), `specs/CRIER-TAGS.md`
 (tag-scoped unread), `specs/CHAT-PERMISSIONS.md` (who may mark for whom).
 
 ## 1. Purpose
@@ -157,7 +157,7 @@ replay. Compaction of that file is out of scope; the replay folds to the highest
 3. `TestAdvanceClampsToLastSeq` — 999999 → 49, `clamped:true`.
 4. `TestMessageIDsResolveToMaxSeq`.
 5. `TestUnreadExcludesOwnMessages`.
-6. `TestUnreadTagFilter` — with tags from COURIER-TAGS.
+6. `TestUnreadTagFilter` — with tags from CRIER-TAGS.
 7. `TestReadsStatePermissionScoped` — a non-privileged caller sees one row only.
 8. `TestConcurrentAdvanceHighestWins` — 20 goroutines, final seq is the max, no error.
 9. `TestMemberRemovedKeepsCursorButHidden`.

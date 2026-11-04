@@ -1,6 +1,6 @@
 package ingress
 
-// request.go — the POST /ingress/messages body (COURIER-INGRESS §2.1).
+// request.go — the POST /ingress/messages body (CRIER-INGRESS §2.1).
 //
 // One struct selects the destination with `mode`; the three targets are
 // mutually exclusive spellings in the same `target` object so a caller cannot
@@ -211,7 +211,7 @@ func (h *Handler) parseRequest(r *http.Request, raw rawRequest) (*Request, error
 	}
 	req.Payload = payload
 
-	// COURIER-TAGS §2.1: the grammar gate runs BEFORE anything is stored, so a
+	// CRIER-TAGS §2.1: the grammar gate runs BEFORE anything is stored, so a
 	// refused tag writes nothing at all.
 	normalized, err := tags.Normalize(raw.Tags)
 	if err != nil {

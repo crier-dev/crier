@@ -748,7 +748,7 @@ func inboxInsertArgs(agentID string, entry *InboxEntry) []any {
 		// JSONB body (NULL when the delivery named neither), and the Crier
 		// correlation the message answers is NULL when it answers nothing.
 		selectionJSONB(entry), nullText(entry.ReplyTo),
-		// COURIER-TAGS §3: the route record's tags, NULL when the message
+		// CRIER-TAGS §3: the route record's tags, NULL when the message
 		// carried none.
 		tagsJSONB(entry),
 	}

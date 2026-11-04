@@ -145,7 +145,7 @@ func registerSessionRoutes(r *mux.Router, h *Handler) {
 	// CR-CHAT-031: the session-level dual output read (trace | summary).
 	r.HandleFunc("/sessions/{id}/output", h.HandleSessionOutput).Methods(http.MethodGet)
 	r.HandleFunc("/sessions/{id}/search", h.HandleSessionSearch).Methods(http.MethodGet)
-	// COURIER-TAGS §2.3: the tag vocabulary read.
+	// CRIER-TAGS §2.3: the tag vocabulary read.
 	r.HandleFunc("/tags", h.HandleListTags).Methods(http.MethodGet)
 	// CR-CHAT-021: the audit trail, permission matrix and role badges.
 	RegisterAuditRoutes(r, h)

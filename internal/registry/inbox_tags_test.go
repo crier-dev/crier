@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// inbox_tags_test.go — COURIER-TAGS §2.4 (CRIER-TAGS-1) at the inbox edge: the
+// inbox_tags_test.go — CRIER-TAGS §2.4 (CRIER-TAGS-1) at the inbox edge: the
 // tags a message was CLASSIFIED with ride its route record, so a reader can ask
 // "the build lane's messages" and get only those — and the two filter
 // spellings cannot both be supplied.

@@ -380,7 +380,7 @@ func sqliteDeliver(ctx context.Context, q *sqliteQueries, agentID string, e *Inb
 	}
 	selection := selectionJSONB(e)
 	// tagsJSONB returns nil for an untagged entry, so the column stays SQL NULL
-	// ("never tagged" has one representation — COURIER-TAGS §6).
+	// ("never tagged" has one representation — CRIER-TAGS §6).
 	tagList, _ := tagsJSONB(e).(string)
 	payload := e.Payload
 	if payload == nil {

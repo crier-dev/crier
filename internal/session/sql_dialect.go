@@ -85,7 +85,7 @@ var sqliteSchemaStatements = []string{
 		payload      TEXT NULL,
 		guard        TEXT NULL,
 		audience     TEXT NULL,
-		-- COURIER-TAGS §3: the message's tags as ONE JSON array (see
+		-- CRIER-TAGS §3: the message's tags as ONE JSON array (see
 		-- message_tags.go for why both engines store them as TEXT). NULL means
 		-- untagged, which is also what every pre-existing row reads as.
 		tags         TEXT NULL,
@@ -243,7 +243,7 @@ var postgresSchemaStatements = []string{
 		payload      TEXT NULL,
 		guard        TEXT NULL,
 		audience     TEXT NULL,
-		-- COURIER-TAGS §3: the message's tags as ONE JSON array (see
+		-- CRIER-TAGS §3: the message's tags as ONE JSON array (see
 		-- message_tags.go for why both engines store them as TEXT). NULL means
 		-- untagged, which is also what every pre-existing row reads as.
 		tags         TEXT NULL,

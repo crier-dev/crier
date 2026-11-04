@@ -50,7 +50,7 @@ const (
 	RecordClose         RecordType = "session.close"
 	RecordReopen        RecordType = "session.reopen"
 	// RecordHarnessBind records the harness session id a delivery minted for a
-	// session that named a harness but had none yet (COURIER-HARNESS §4.3).
+	// session that named a harness but had none yet (CRIER-HARNESS §4.3).
 	// It is an EVENT, not a field mutation: the log is append-only, so the
 	// binding is answerable by replay like every other lifecycle fact.
 	RecordHarnessBind RecordType = "session.harness.bind"
@@ -81,7 +81,7 @@ type Record struct {
 	Group            string     `json:"group,omitempty"`
 	Visibility       string     `json:"visibility,omitempty"`
 	// Harness and HarnessSessionID bind the session to a harness adapter
-	// (COURIER-HARNESS §4.3). Absent on a store-only session.
+	// (CRIER-HARNESS §4.3). Absent on a store-only session.
 	Harness          string `json:"harness,omitempty"`
 	HarnessSessionID string `json:"harness_session_id,omitempty"`
 
@@ -108,7 +108,7 @@ type Record struct {
 	IdempotencyKey      string             `json:"idempotency_key,omitempty"`
 	DispatchEvidence    []DispatchEvidence `json:"dispatch_evidence,omitempty"`
 	SenderIdentityBasis string             `json:"sender_identity_basis,omitempty"`
-	// Tags classifies the message (COURIER-TAGS §2.1). They live on the
+	// Tags classifies the message (CRIER-TAGS §2.1). They live on the
 	// message record itself, so the JSONL log carries them with no migration
 	// and an exported bundle keeps them (§3).
 	Tags []string `json:"tags,omitempty"`
@@ -228,7 +228,7 @@ func (r *Record) validate(requireThreadID bool) error {
 		// actor is optional in the shape (§5.1 shows it, but a system close
 		// with no named actor is still a valid record).
 	case RecordHarnessBind:
-		// COURIER-HARNESS §4.3: a bind must name the harness and the id it
+		// CRIER-HARNESS §4.3: a bind must name the harness and the id it
 		// minted — a bind carrying neither would be a no-op record.
 		if r.Harness == "" || r.HarnessSessionID == "" {
 			return fmt.Errorf("%w: session.harness.bind without harness/harness_session_id", ErrInvalidRecord)
@@ -490,7 +490,7 @@ func (m *Message) Record() *Record {
 		IdempotencyKey:      m.IdempotencyKey,
 		DispatchEvidence:    m.DispatchEvidence,
 		SenderIdentityBasis: m.SenderIdentityBasis,
-		// Tags ride the message record itself (COURIER-TAGS §3), so the log,
+		// Tags ride the message record itself (CRIER-TAGS §3), so the log,
 		// the projection and an exported bundle all carry them. A record
 		// rebuilt from this Message — including the fan-out's write-back of
 		// outcomes onto the same seq — keeps them; without this line the
@@ -548,7 +548,7 @@ func ReopenRecord(sessionID string, seq int64, ts time.Time, actor AuthorRef) *R
 	}
 }
 
-// HarnessBindRecord renders the session.harness.bind line (COURIER-HARNESS
+// HarnessBindRecord renders the session.harness.bind line (CRIER-HARNESS
 // §4.3): the first successful delivery to a session that names a harness
 // records the id it minted, so every later message continues THAT session
 // rather than creating a second one.

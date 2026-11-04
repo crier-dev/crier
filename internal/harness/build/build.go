@@ -2,7 +2,7 @@
 //
 // It exists because the adapters import package harness: a builder inside
 // harness would close an import cycle. Everything that needs a served
-// registry (the CLI, and COURIER-INGRESS later) calls Registry.
+// registry (the CLI, and CRIER-INGRESS later) calls Registry.
 package build
 
 import (
@@ -33,7 +33,7 @@ func Registry(cfg harness.Config) *harness.Registry {
 
 // RegistryWithNudge is Registry plus the session-start unread hint
 // (CRIER-MCP-NUDGE §2.2). A deployment that arms it passes SessionStart from
-// mcp.nudge.session_start and a Counts hook that reads the live courier stores;
+// mcp.nudge.session_start and a Counts hook that reads the live Crier stores;
 // a nil Counts (or SessionStart false) delivers messages untouched.
 func RegistryWithNudge(cfg harness.Config, nudge NudgeOptions) *harness.Registry {
 	for _, warning := range cfg.Warnings {

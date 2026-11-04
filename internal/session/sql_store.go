@@ -124,7 +124,7 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 			return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
 		}
 	}
-	// COURIER-TAGS §3: `tags` reaches an EXISTING database additively. The
+	// CRIER-TAGS §3: `tags` reaches an EXISTING database additively. The
 	// CREATE TABLE above only gives the column to a database created fresh, so
 	// an upgraded deployment gets the ALTER here, inside the same transaction
 	// as the rest of the schema — one durability point, no half-migrated view.
@@ -148,7 +148,7 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 }
 
 // ensureTranscriptTagsColumn adds chat_transcript.tags to a database created
-// before the column existed (COURIER-TAGS §3). It is idempotent: the column is
+// before the column existed (CRIER-TAGS §3). It is idempotent: the column is
 // looked up first and the ALTER only runs when it is absent, so a fresh
 // database (where the CREATE TABLE already declared it) is untouched and a
 // restart is a no-op. The lookup is the one genuinely engine-specific bit, and

@@ -181,7 +181,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		return runKeygen(args[1:], os.Stdout)
 	}
 	// `crier harness list|probe` is a read-only reporting surface
-	// (COURIER-HARNESS §4.4): it probes binaries and never starts the server.
+	// (CRIER-HARNESS §4.4): it probes binaries and never starts the server.
 	if len(args) > 0 && args[0] == "harness" {
 		return runHarness(args[1:], os.Stdout, os.Stderr, getenv)
 	}
@@ -933,21 +933,21 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// and the generated summary (an index, never the record).
 	r.HandleFunc("/sessions/{id}/output", sessHandler.HandleSessionOutput).Methods("GET")
 	r.HandleFunc("/sessions/{id}/search", sessHandler.HandleSessionSearch).Methods("GET")
-	// COURIER-TAGS (CRIER-TAGS-1) §2.3: the message-tag VOCABULARY — the tags
+	// CRIER-TAGS (CRIER-TAGS-1) §2.3: the message-tag VOCABULARY — the tags
 	// this caller may actually read, with a count and a last-used timestamp per
 	// tag. A read surface, additive to the transcript: it reuses the sessions
 	// handler's own realm and visibility gates, so it cannot become a side door
 	// into a private room. The tag FILTERS (?tag= / ?tags_any=) ride the
 	// existing read routes above rather than adding a second transcript route.
 	r.HandleFunc("/tags", sessHandler.HandleListTags).Methods("GET")
-	// Push ingress (CRIER-INGRESS-1, specs/COURIER-INGRESS.md §4): ONE call
+	// Push ingress (CRIER-INGRESS-1, specs/CRIER-INGRESS.md §4): ONE call
 	// that pushes a message to an existing session, a session created from a
 	// template, or an agent inbox. Registered here, inside the authenticated
 	// subrouter, so it inherits the same bearer check as /sessions and is NOT
 	// part of the public path list. Its writes go through the same session
 	// repository and the same inbox delivery path the routes above use.
 	r.HandleFunc("/ingress/messages", ingressHandler.ServeHTTP).Methods("POST")
-	// Read cursors (CRIER-READS-1, specs/COURIER-READS.md §3.1): who has read
+	// Read cursors (CRIER-READS-1, specs/CRIER-READS.md §3.1): who has read
 	// what, and what is unread for a member. A cursor is per (session, member)
 	// and monotonic; `reads` is a read receipt, never a delivery guarantee and
 	// never a claim about another agent. The handlers live in internal/reads

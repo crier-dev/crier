@@ -1,6 +1,6 @@
 package ingress
 
-// handler.go — POST /ingress/messages (COURIER-INGRESS §2, §3, §6).
+// handler.go — POST /ingress/messages (CRIER-INGRESS §2, §3, §6).
 //
 // The handler routes ONE call to exactly one of three destinations:
 //
@@ -65,7 +65,7 @@ type InboxWriter interface {
 	Deliver(ctx context.Context, agentID, capability string, msg InboxMessage) ([]session.DeliveryOutcome, error)
 }
 
-// DispatchRequest is what a harness adapter (COURIER-HARNESS §4) is offered.
+// DispatchRequest is what a harness adapter (CRIER-HARNESS §4) is offered.
 type DispatchRequest struct {
 	Mode       Mode
 	SessionID  string
@@ -147,7 +147,7 @@ type Handler struct {
 	// Route records the ingress.route entry mode=inbox writes. Nil skips the
 	// record (a test double or an embedding with no route log).
 	Route RouteStore
-	// Dispatch is the nil-able COURIER-HARNESS hook. Nil = no adapter.
+	// Dispatch is the nil-able CRIER-HARNESS hook. Nil = no adapter.
 	Dispatch DeliveryDispatch
 	// Idem is the idempotency ledger. Nil disables key replay; the request's
 	// key still rides the message record, so the session store's own dedupe

@@ -1,6 +1,6 @@
 package ingress
 
-// route.go — the ONE new record kind this row writes (COURIER-INGRESS §3).
+// route.go — the ONE new record kind this row writes (CRIER-INGRESS §3).
 //
 // `ingress.route` answers "where did this push actually land": the inbox entry
 // id it produced, the agent (or the capability that selected it), the author,
@@ -42,7 +42,7 @@ type RouteRecord struct {
 	// ack later names, so the route record and the ack cannot disagree.
 	MessageID string            `json:"message_id"`
 	Author    session.AuthorRef `json:"author"`
-	// Tags are the normalized tags the entry was stored with (COURIER-TAGS
+	// Tags are the normalized tags the entry was stored with (CRIER-TAGS
 	// §2.4), so an inbox filter can answer for a queued message without
 	// reading the session it came from.
 	Tags      []string  `json:"tags,omitempty"`

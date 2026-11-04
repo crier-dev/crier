@@ -1,6 +1,6 @@
 package session
 
-// COURIER-HARNESS §4.3: the harness binding lives on the courier session
+// CRIER-HARNESS §4.3: the harness binding lives on the Crier session
 // record, so it must survive BOTH persistence shapes — the JSONL append log and
 // the SQL view (SQLite here; PostgreSQL shares the projection code).
 

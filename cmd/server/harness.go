@@ -19,7 +19,7 @@ import (
 // adapter's own version probe has a shorter budget.
 const harnessProbeTimeout = 30 * time.Second
 
-// runHarness dispatches `crier harness <subcommand>` (COURIER-HARNESS §4.4).
+// runHarness dispatches `crier harness <subcommand>` (CRIER-HARNESS §4.4).
 // It never starts the server, and it reads and probes only: there is no
 // delivery verb, because delivery is an ingress action, not an agent action.
 func runHarness(args []string, out, errOut io.Writer, getenv config.Getenv) int {

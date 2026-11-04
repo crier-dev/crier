@@ -86,7 +86,7 @@ var SchemaStatements = []string{
 		payload      JSONB NULL,
 		guard        JSONB NULL,
 		audience     JSONB NULL,
-		-- COURIER-TAGS §3: the message's tags as ONE JSON array in TEXT (the
+		-- CRIER-TAGS §3: the message's tags as ONE JSON array in TEXT (the
 		-- shared SQLStore's own spelling, so both stores of an engine agree).
 		tags         TEXT NULL,
 		created_at   TIMESTAMPTZ NOT NULL,
@@ -132,7 +132,7 @@ var SchemaStatements = []string{
 		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		last_seq   BIGINT NOT NULL DEFAULT 0
 	)`,
-	// COURIER-TAGS §3: `tags` on an EXISTING database. The column is declared
+	// CRIER-TAGS §3: `tags` on an EXISTING database. The column is declared
 	// in chat_transcript above for a fresh one; this additive statement is what
 	// reaches a deployment that already has the table, and it is a no-op there
 	// after the first run. PostgreSQL's IF NOT EXISTS makes it idempotent, and

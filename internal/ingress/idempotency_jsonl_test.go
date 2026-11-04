@@ -11,7 +11,7 @@ import (
 // TestJSONLIdempotencySurvivesRestart is the point of the durable ledger: a
 // sender that retries with the same Idempotency-Key after the server restarts
 // must get the ORIGINAL answer, not a second message. The in-memory ledger could
-// not do this, and COURIER-INGRESS §3 asks for a stored one.
+// not do this, and CRIER-INGRESS §3 asks for a stored one.
 func TestJSONLIdempotencySurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "ingress", "idempotency.jsonl")

@@ -4,10 +4,10 @@
 // The two rows were landed separately by design: ingress left
 // Handler.Dispatch nil so its `delivery` object honestly reported
 // {"mode":"store","state":"stored"}, and the harness layer exported
-// Registry.Deliver as "the hook COURIER-INGRESS §4.2 calls". This file closes
+// Registry.Deliver as "the hook CRIER-INGRESS §4.2 calls". This file closes
 // the loop and nothing more:
 //
-//   - it reads the harness binding recorded on the courier session
+//   - it reads the harness binding recorded on the Crier session
 //     (Session.Harness / Session.HarnessSessionID),
 //   - refuses to dispatch a session with no binding (store-only, which is the
 //     honest report, never a fake `dispatched`),
@@ -20,7 +20,7 @@
 // LIFECYCLE NOTE, stated rather than hidden: the first delivery to a session
 // that names a harness but has no HarnessSessionID yet CREATES the harness
 // session, and the adapter's receipt carries the id it minted. Recording that
-// id back onto the courier session is a store write this file does not do
+// id back onto the Crier session is a store write this file does not do
 // (it would need the session store's append path and a new record kind), so a
 // session created this way re-uses the id only for the lifetime of the
 // process: the registry's receipt is returned to the caller, and persisting
@@ -60,7 +60,7 @@ var _ ingress.DeliveryDispatch = (*harnessDispatch)(nil)
 func (d *harnessDispatch) Dispatch(ctx context.Context, req ingress.DispatchRequest) (ingress.DeliveryReport, error) {
 	stored := ingress.DeliveryReport{Mode: "store", State: "stored"}
 
-	// An inbox push has no courier session to bind to, and a message with no
+	// An inbox push has no Crier session to bind to, and a message with no
 	// session id cannot be serialised per session; both stay store-only.
 	if d == nil || d.reg == nil || !d.reg.Enabled() || strings.TrimSpace(req.SessionID) == "" {
 		return stored, nil
@@ -95,7 +95,7 @@ func (d *harnessDispatch) Dispatch(ctx context.Context, req ingress.DispatchRequ
 		},
 	})
 
-	// COURIER-HARNESS §4.3: the FIRST successful delivery to a session that
+	// CRIER-HARNESS §4.3: the FIRST successful delivery to a session that
 	// named a harness but had no id records the id the adapter minted, so every
 	// later message continues THAT session instead of creating a second one.
 	// Until this lands, a binding lived only for the process lifetime.

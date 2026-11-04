@@ -1,5 +1,5 @@
 // courier.go — the unread nudge surface (CRIER-MCP-NUDGE,
-// specs/COURIER-MCP-NUDGE.md §2.1, §3, §5).
+// specs/CRIER-MCP-NUDGE.md §2.1, §3, §5).
 //
 // The nudge INFORMS: it reports how much mail is waiting, never what the mail
 // says. UnreadSummary and its resource body therefore carry counts only, and
@@ -57,7 +57,7 @@ type UnreadSummary struct {
 	Sessions   []SessionUnread `json:"sessions"`
 }
 
-// SessionUnread is one courier session's unread count for the queried agent.
+// SessionUnread is one Crier session's unread count for the queried agent.
 type SessionUnread struct {
 	SessionID string `json:"session_id"`
 	Unread    int    `json:"unread"`
@@ -83,27 +83,27 @@ type UnreadList struct {
 
 // UnreadQuery scopes one nudge read. AgentID is always resolved (the bridge
 // identity fills it in when the caller names none); SessionID is optional and
-// narrows the query to one courier session.
+// narrows the query to one Crier session.
 type UnreadQuery struct {
 	AgentID   string
 	SessionID string
 }
 
-// CourierSource answers the nudge from the live courier stores. It is an
+// CrierSource answers the nudge from the live Crier stores. It is an
 // interface so the MCP server can be built against a test source and so a
 // future HTTP-backed source (a bridge on another host) can be substituted
 // without touching the tool handlers.
-type CourierSource interface {
+type CrierSource interface {
 	Summary(ctx context.Context, q UnreadQuery) (UnreadSummary, error)
 	Unread(ctx context.Context, q UnreadQuery, limit int) (UnreadList, error)
 }
 
-// Courier reads unread state from the shipped courier stores: the registry's
+// Crier reads unread state from the shipped Crier stores: the registry's
 // agent inboxes (counts) and the session transcript plus read cursors
 // (per-session counts, bodies). Every field is optional; a nil Sessions/Reads
 // means this process cannot see session state and the summary reports the
 // agent-inbox numbers alone.
-type Courier struct {
+type Crier struct {
 	// Inbox is the registry store the agent-inbox unread comes from (the
 	// existing inboxStats number).
 	Inbox registry.Store
@@ -115,7 +115,7 @@ type Courier struct {
 	Now func() time.Time
 }
 
-// Summary implements CourierSource (§2.1). It never returns message bodies:
+// Summary implements CrierSource (§2.1). It never returns message bodies:
 // the totals are inbox queue depth plus each member session's unread count, and
 // by_category aggregates the TAGS of the unread session messages only (an
 // agent-inbox entry carries no tags today, so its messages land in
@@ -124,7 +124,7 @@ type Courier struct {
 // An agent the registry does not know is answered with an empty summary, not an
 // error (§5): silence is the correct answer to "do I have mail" for an agent
 // that is not registered yet.
-func (c *Courier) Summary(ctx context.Context, q UnreadQuery) (UnreadSummary, error) {
+func (c *Crier) Summary(ctx context.Context, q UnreadQuery) (UnreadSummary, error) {
 	out := UnreadSummary{ByCategory: map[string]int{}, Sessions: []SessionUnread{}}
 	if c == nil {
 		return out, nil
@@ -171,9 +171,9 @@ func (c *Courier) Summary(ctx context.Context, q UnreadQuery) (UnreadSummary, er
 	return out, nil
 }
 
-// Unread implements CourierSource: the bounded "read them" the nudge names
+// Unread implements CrierSource: the bounded "read them" the nudge names
 // (§2.1). Ordering is session then seq, so the answer is stable.
-func (c *Courier) Unread(ctx context.Context, q UnreadQuery, limit int) (UnreadList, error) {
+func (c *Crier) Unread(ctx context.Context, q UnreadQuery, limit int) (UnreadList, error) {
 	limit = ClampUnreadLimit(limit)
 	out := UnreadList{Messages: []UnreadMessage{}}
 	if c == nil {
@@ -231,7 +231,7 @@ type sessionUnread struct {
 // unreadBySession walks the sessions the agent participates in and asks the
 // read-cursor service for its unread rows. Sessions without unread are still
 // returned (empty) so the caller decides what to report.
-func (c *Courier) unreadBySession(ctx context.Context, agentID, sessionID string) ([]sessionUnread, error) {
+func (c *Crier) unreadBySession(ctx context.Context, agentID, sessionID string) ([]sessionUnread, error) {
 	if c.Reads == nil || c.Sessions == nil || agentID == "" {
 		return nil, nil
 	}
@@ -246,7 +246,7 @@ func (c *Courier) unreadBySession(ctx context.Context, agentID, sessionID string
 			if errors.Is(err, session.ErrSessionNotFound) {
 				continue
 			}
-			return nil, fmt.Errorf("courier unread: load session %q: %w", id, err)
+			return nil, fmt.Errorf("Crier unread: load session %q: %w", id, err)
 		}
 		if !isActiveAgentMember(st, agentID, c.now()) {
 			// §6: an agent's summary is scoped to its own member id. A
@@ -255,7 +255,7 @@ func (c *Courier) unreadBySession(ctx context.Context, agentID, sessionID string
 		}
 		msgs, err := c.Reads.Unread(ctx, id, agentID, nil)
 		if err != nil {
-			return nil, fmt.Errorf("courier unread: session %q: %w", id, err)
+			return nil, fmt.Errorf("Crier unread: session %q: %w", id, err)
 		}
 		row := sessionUnread{sessionID: id, messages: msgs}
 		for _, m := range msgs {
@@ -272,19 +272,19 @@ func (c *Courier) unreadBySession(ctx context.Context, agentID, sessionID string
 // sessionIDs returns the sessions to consult: exactly one when the query names
 // it, otherwise every session the repository holds (the membership check
 // narrows that to the agent's own rooms).
-func (c *Courier) sessionIDs(ctx context.Context, sessionID string) ([]string, error) {
+func (c *Crier) sessionIDs(ctx context.Context, sessionID string) ([]string, error) {
 	if sessionID != "" {
 		return []string{sessionID}, nil
 	}
 	ids, err := c.Sessions.Sessions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("courier unread: list sessions: %w", err)
+		return nil, fmt.Errorf("Crier unread: list sessions: %w", err)
 	}
 	sort.Strings(ids)
 	return ids, nil
 }
 
-func (c *Courier) now() time.Time {
+func (c *Crier) now() time.Time {
 	if c.Now != nil {
 		return c.Now().UTC()
 	}
@@ -292,7 +292,7 @@ func (c *Courier) now() time.Time {
 }
 
 // isActiveAgentMember reports whether agentID is an ACTIVE agent participant of
-// st. A removed member has no read-state row and no mail (§7 of COURIER-READS).
+// st. A removed member has no read-state row and no mail (§7 of CRIER-READS).
 func isActiveAgentMember(st *session.State, agentID string, now time.Time) bool {
 	if st == nil {
 		return false
@@ -357,9 +357,9 @@ func (s *MCPServer) nudgeScope(agentID, sessionID string) (string, string, error
 	return agentID, sessionID, nil
 }
 
-// handleCourierUnreadSummary — courier_unread_summary (§2.1). Counts only.
-func (s *MCPServer) handleCourierUnreadSummary(args json.RawMessage) (any, error) {
-	var in CourierUnreadSummaryInput
+// handleCrierUnreadSummary — courier_unread_summary (§2.1). Counts only.
+func (s *MCPServer) handleCrierUnreadSummary(args json.RawMessage) (any, error) {
+	var in CrierUnreadSummaryInput
 	if err := decodeArgs(args, &in); err != nil {
 		return nil, err
 	}
@@ -367,19 +367,19 @@ func (s *MCPServer) handleCourierUnreadSummary(args json.RawMessage) (any, error
 	if err != nil {
 		return nil, err
 	}
-	if s.courier == nil {
+	if s.crier == nil {
 		return s.inboxOnlySummary(agentID), nil
 	}
-	// Tool handlers have no context parameter on this bridge; the courier
+	// Tool handlers have no context parameter on this bridge; the Crier
 	// reads are local store reads, so a background context is the honest
 	// equivalent (there is no caller deadline to honour).
-	return s.courier.Summary(context.Background(), UnreadQuery{AgentID: agentID, SessionID: sessionID})
+	return s.crier.Summary(context.Background(), UnreadQuery{AgentID: agentID, SessionID: sessionID})
 }
 
-// handleCourierUnreadList — courier_unread_list (§2.1). The explicit, bounded
+// handleCrierUnreadList — courier_unread_list (§2.1). The explicit, bounded
 // read the nudge names; it advances nothing.
-func (s *MCPServer) handleCourierUnreadList(args json.RawMessage) (any, error) {
-	var in CourierUnreadListInput
+func (s *MCPServer) handleCrierUnreadList(args json.RawMessage) (any, error) {
+	var in CrierUnreadListInput
 	if err := decodeArgs(args, &in); err != nil {
 		return nil, err
 	}
@@ -387,10 +387,10 @@ func (s *MCPServer) handleCourierUnreadList(args json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.courier == nil {
+	if s.crier == nil {
 		return UnreadList{Count: 0, Messages: []UnreadMessage{}}, nil
 	}
-	return s.courier.Unread(context.Background(), UnreadQuery{AgentID: agentID, SessionID: sessionID}, in.Limit)
+	return s.crier.Unread(context.Background(), UnreadQuery{AgentID: agentID, SessionID: sessionID}, in.Limit)
 }
 
 // inboxOnlySummary is the answer when this process has no session source wired:

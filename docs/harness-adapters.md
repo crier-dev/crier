@@ -1,10 +1,10 @@
 # Harness adapters
 
-Push delivery: hand a stored courier message to a live agent harness session —
+Push delivery: hand a stored Crier message to a live agent harness session —
 continuing an existing one or creating a new one — and record a receipt that
 says what actually happened. The inbox stays; this is the push half.
 
-Binding contract: `specs/COURIER-HARNESS.md`. Row: CRIER-HARNESS-1 (interface,
+Binding contract: `specs/CRIER-HARNESS.md`. Row: CRIER-HARNESS-1 (interface,
 registry, Hermes and opencode adapters; pi and codex are CRIER-HARNESS-2/3).
 
 Delivery is **off by default** (`harness.enabled: false`), so with the block
@@ -97,7 +97,7 @@ Error codes: `HARNESS_UNKNOWN`, `HARNESS_UNAVAILABLE`,
 tail), `HARNESS_OUTPUT_INVALID` (delivered; only the receipt is downgraded),
 `HARNESS_DISABLED`, `HARNESS_CONCURRENCY_FULL`, `HARNESS_WORKDIR_MISSING`.
 
-Deliveries are serialised per courier session (two concurrent turns would
+Deliveries are serialised per Crier session (two concurrent turns would
 interleave one transcript) and bounded by `max_concurrent`.
 
 ## Where the harness session id lives

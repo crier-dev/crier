@@ -103,7 +103,7 @@ func TestHarnessDispatchInboxModeIsStoreOnly(t *testing.T) {
 
 // TestHarnessDispatchDeliversIntoARealPiSession is the live half of the joint.
 // It skips unless CRIER_TEST_LIVE_HARNESS=1 and pi is installed, then proves the
-// whole path against the REAL harness: a courier session bound to pi gets the
+// whole path against the REAL harness: a Crier session bound to pi gets the
 // message written into pi's own session file.
 func TestHarnessDispatchDeliversIntoARealPiSession(t *testing.T) {
 	if os.Getenv("CRIER_TEST_LIVE_HARNESS") == "" {
@@ -188,7 +188,7 @@ func (f *fakeAdapter) Deliver(_ context.Context, sess harness.SessionRef, _ harn
 	return harness.Receipt{Harness: f.name, SessionID: f.minted, Created: true, State: harness.StateDispatched}, nil
 }
 
-// TestHarnessDispatchPersistsTheMintedSessionID is COURIER-HARNESS §4.3: the
+// TestHarnessDispatchPersistsTheMintedSessionID is CRIER-HARNESS §4.3: the
 // first successful delivery records the id it minted, and the NEXT delivery
 // continues that id instead of creating a second harness session.
 func TestHarnessDispatchPersistsTheMintedSessionID(t *testing.T) {

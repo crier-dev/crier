@@ -1,5 +1,5 @@
 // Package reads implements per-member read cursors — "who has read what, and
-// what is unread" — per specs/COURIER-READS.md (CRIER-READS-1).
+// what is unread" — per specs/CRIER-READS.md (CRIER-READS-1).
 //
 // A read receipt is a CLAIM BY A MEMBER ABOUT ITS OWN PROGRESS. It is never a
 // delivery guarantee and never an authority statement about another agent:
@@ -117,7 +117,7 @@ type MemberState struct {
 
 // messageTags returns the tags a message carries.
 //
-// COURIER-TAGS.md (CRIER-TAGS-1) has NOT landed in this tree: session.Message
+// CRIER-TAGS.md (CRIER-TAGS-1) has NOT landed in this tree: session.Message
 // carries no Tags field, so there is no tag data to read and this returns nil.
 // It exists so the tag filter has exactly ONE place to become real: when the
 // field lands, this function is the only change needed and messageMatchesTags

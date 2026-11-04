@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// JSONLIdempotencyStore is the durable form of the ledger COURIER-INGRESS §3
+// JSONLIdempotencyStore is the durable form of the ledger CRIER-INGRESS §3
 // describes: an append-only file of `(namespace, key) -> hash + first result`,
 // replayed into memory at open so a restart keeps answering a repeated
 // Idempotency-Key with the ORIGINAL response instead of creating a second
