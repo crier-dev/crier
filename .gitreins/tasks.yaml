@@ -3286,3 +3286,12 @@ tasks:
   status: complete
   created_at: '2026-11-04T18:48:58.517784+00:00'
   completed_at: '2026-11-04T19:35:15.842768+00:00'
+- id: INT-CI-025
+  title: internal/harness TestAdapterContract pid-file race under load
+  criteria:
+  - go test -short -count=5 -timeout 900s ./internal/harness exits 0 under host load
+    >= 20; three consecutive go test -short -count=1 ./... runs show no TestAdapterContract
+    failure; the process-group-kill assertion is preserved (both recorded pids are
+    dead)
+  status: in_progress
+  created_at: '2026-11-04T23:35:21.475171+00:00'
