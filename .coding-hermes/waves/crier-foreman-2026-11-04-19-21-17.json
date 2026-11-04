@@ -1,0 +1,26 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-19-21-17",
+  "block": "INT-CI-025",
+  "block_title": "CI health: port-guard selftest + harness adapter contract flakes",
+  "mode": "serial",
+  "wave_size": 1,
+  "slots": 1,
+  "slots_reason": "nproc=16, loadavg 1m=21.22 -> max(1,min(6,16-ceil(21.22)))=1; WAVE_BUDGET=9 is not the binding constraint, the box is. Loaded box = 1 worker, never idle.",
+  "block_selection_reason": "Top-ranked block QA-CRIER-54 has exactly one pending row (RELEASE-009), a readiness-sweep record whose remaining blocker is owner-gated (INT-CI-019 self-hosted runner decision) and whose changelog premise is already satisfied (CHANGELOG.md carries [0.3.0] - 2026-11-03). Driving it would land nothing. main is RED right now (CI run 41889075219, job 'Demo-harness port-guard selftest'), which blocks RELEASE-009 transitively and blocks every merge, so this tick drives the ready P1 row that clears that red: INT-CI-024 in block INT-CI-025.",
+  "resume": "Prior tick crier-foreman-2026-11-04-18-25-47 closed block CRIER-OBS-1 (CRIER-OBS-1 complete, no ready rows remain). Not a resume. Row-level resume instead: worktree /home/kara/worktrees/crier-INT-CI-024 already carried unmerged commit 883bc30b fixing the ARM D/E/F squat retry (judged tier1 PASS, tier2 INCOMPLETE on a 402 provider error), so this tick extends that tree rather than starting fresh.",
+  "base": "19ad6f12",
+  "worker_lane": "deepseek-v4-flash / deepseek-foreman (project-documented crier worker lane; glm-5.3-flash workers stalled with zero writes on 2026-11-04 13:00 tick)",
+  "rows": [
+    {
+      "id": "INT-CI-024",
+      "title": "CI port-guard selftest intermittently FAILs: ARM C premise-broken and ARM D/E/F squat failures must become named SETUP errors with same-window assertions",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-024",
+      "branch": "wt/INT-CI-024",
+      "base": "19ad6f12",
+      "existing_commits": ["883bc30b"],
+      "files_seam": "scripts/lib/port-guard.sh",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-04-19-21-17/brief-INT-CI-024.txt"
+    }
+  ],
+  "merge_order": ["INT-CI-024"]
+}
