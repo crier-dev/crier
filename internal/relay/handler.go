@@ -23,14 +23,8 @@ import (
 
 // relayEventsTotal counts accepted relay publishes (DF-CRIER-142): one Inc
 // per publish the handler accepts (202), rejections are not deliveries.
-var relayEventsTotal = metrics.Default.NewCounter("relay_events_total",
+var relayEventsTotal = metrics.Default.NewCounter("crier_relay_events_total",
 	"Relay events accepted and fanned out to subscribers (POST /relay/publish accepts).")
-
-// MON-CRIER-005 dual-emit: the namespaced twin of relay_events_total
-// (observability-spec §3.1) — same samples, second name, no increment change.
-func init() {
-	metrics.Default.Alias("relay_events_total", "crier_relay_events_total")
-}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,

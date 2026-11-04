@@ -93,24 +93,17 @@ const ErrNoCapableAgent = "NO_CAPABLE_AGENT"
 
 // capabilityRoutedTotal counts capability-routed deliveries that RESOLVED to a
 // holder and were dispatched down the existing deliver path (the accept itself
-// is counted by deliveries_total, exactly as a by-id delivery is). Refusals are
+// is counted by crier_delivery_accepted_total, exactly as a by-id delivery is). Refusals are
 // counted separately, so an operator can see a pool that has gone empty without
 // subtracting two numbers.
-var capabilityRoutedTotal = metrics.Default.NewCounter("capability_routed_total",
+var capabilityRoutedTotal = metrics.Default.NewCounter("crier_capability_routed_total",
 	"Capability-routed deliveries that resolved to a holder (POST /capabilities/{capability}/inbox).")
 
 // capabilityUnheldTotal counts capability-routed deliveries refused with
 // NO_CAPABLE_AGENT: the dial failed because nobody on this relay advertises the
 // capability.
-var capabilityUnheldTotal = metrics.Default.NewCounter("capability_unheld_total",
+var capabilityUnheldTotal = metrics.Default.NewCounter("crier_capability_unheld_total",
 	"Capability-routed deliveries refused with NO_CAPABLE_AGENT (no agent on this relay holds the capability).")
-
-// MON-CRIER-005 dual-emit: the namespaced twins of the two capability series
-// (observability-spec §3.1) — same samples, second name, no increment change.
-func init() {
-	metrics.Default.Alias("capability_routed_total", "crier_capability_routed_total")
-	metrics.Default.Alias("capability_unheld_total", "crier_capability_unheld_total")
-}
 
 // routedTarget returns the holder id an accept should report, and "" for a
 // by-id delivery — whose body must stay byte-identical to what it always was

@@ -50,7 +50,7 @@ func TestCounterAddInc(t *testing.T) {
 
 func TestCounterVecChildrenAndDeterministicOrder(t *testing.T) {
 	reg := NewRegistry()
-	v := reg.NewCounterVec("http_requests_total", "HTTP requests by status code.", "code")
+	v := reg.NewCounterVec("example_requests_total", "Example requests by status code.", "code")
 	v.With("404").Inc()
 	v.With("200").Add(2)
 	v.With("200").Inc() // same child accumulates
@@ -60,10 +60,10 @@ func TestCounterVecChildrenAndDeterministicOrder(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want the v0.0.4 text format type", ctype)
 	}
 	for _, want := range []string{
-		"# HELP http_requests_total HTTP requests by status code.",
-		"# TYPE http_requests_total counter",
-		`http_requests_total{code="200"} 3`,
-		`http_requests_total{code="404"} 1`,
+		"# HELP example_requests_total Example requests by status code.",
+		"# TYPE example_requests_total counter",
+		`example_requests_total{code="200"} 3`,
+		`example_requests_total{code="404"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q; body:\n%s", want, body)
@@ -77,23 +77,23 @@ func TestCounterVecChildrenAndDeterministicOrder(t *testing.T) {
 
 func TestCounterWithZeroSamplesStillExposesMetadata(t *testing.T) {
 	reg := NewRegistry()
-	reg.NewCounter("deliveries_total", "Accepted deliveries.")
-	reg.NewCounterVec("webhook_deliveries_total", "Webhook push deliveries by outcome.", "outcome")
+	reg.NewCounter("example_widgets_total", "Example widgets accepted.")
+	reg.NewCounterVec("example_push_total", "Example pushes by outcome.", "outcome")
 
 	// A plain counter always carries its single sample (0 until first
 	// increment); a childless vec carries metadata only — both match the
 	// reference client's exposition.
 	body, _ := scrapeBody(t, reg)
 	for _, want := range []string{
-		"# TYPE deliveries_total counter",
-		"deliveries_total 0",
-		"# TYPE webhook_deliveries_total counter",
+		"# TYPE example_widgets_total counter",
+		"example_widgets_total 0",
+		"# TYPE example_push_total counter",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q; body:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "webhook_deliveries_total{") {
+	if strings.Contains(body, "example_push_total{") {
 		t.Errorf("childless vec emitted a sample anyway:\n%s", body)
 	}
 }
@@ -508,177 +508,75 @@ func TestGaugeFuncLabelSamples(t *testing.T) {
 	}
 }
 
-// ---------- MON-CRIER-005: dual-emit aliases ----------
+// ---------- MON-CRIER-007: the dual-emit window is closed ----------
 //
-// The namespacing migration is a dual-emit window: every legacy series keeps
-// its name and samples while a namespaced twin is served from the SAME series
-// (observability-spec §3.1). These tests pin the four properties the exposition
-// depends on: identical samples, one evaluation per scrape, no duplicate
-// family, and an alias that follows the live series.
+// MON-CRIER-005 renamed the exposition to crier_* by SERVING A SECOND NAME for
+// every family (Registry.Alias). That window is closed: the alias surface is
+// deleted, so a family renders under exactly one name — the name it was
+// registered with. The test below is the primitive-level arm of that rule; the
+// arm that renders the REAL default registry lives in cmd/server
+// (TestMetricsLegacyFamiliesRetired), because only the server binary links every
+// production registration site.
 
-// TestAliasRendersSameSamplesUnderBothNames: a counter and a labelled counter
-// vec each expose their samples twice — under the legacy name and under the
-// namespaced alias — with identical values and the same label set.
-func TestAliasRendersSameSamplesUnderBothNames(t *testing.T) {
-	reg := NewRegistry()
-	deliveries := reg.NewCounter("deliveries_total", "Accepted deliveries.")
-	deliveries.Add(7)
-	guard := reg.NewCounterVec("guard_decisions_total", "Guard verdicts.", "decision")
-	guard.With("block").Add(2)
-	guard.With("allow").Add(5)
-
-	reg.Alias("deliveries_total", "crier_delivery_accepted_total")
-	reg.Alias("guard_decisions_total", "crier_guard_decisions_total")
-
-	body, _ := scrapeBody(t, reg)
-	for _, want := range []string{
-		"deliveries_total 7",
-		"crier_delivery_accepted_total 7",
-		`guard_decisions_total{decision="allow"} 5`,
-		`crier_guard_decisions_total{decision="allow"} 5`,
-		`crier_guard_decisions_total{decision="block"} 2`,
-		"# HELP crier_delivery_accepted_total Accepted deliveries.",
-		"# TYPE crier_delivery_accepted_total counter",
-		"# TYPE crier_guard_decisions_total counter",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("exposition missing %q:\n%s", want, body)
-		}
-	}
-	// The alias is a NAME, not a copy: the family appears exactly once under
-	// each name, and the underlying counter was never incremented twice.
-	if got := strings.Count(body, "# TYPE crier_delivery_accepted_total counter"); got != 1 {
-		t.Errorf("# TYPE crier_delivery_accepted_total appears %d times, want 1:\n%s", got, body)
-	}
-	if got := deliveries.value(); got != 7 {
-		t.Errorf("aliasing changed the counter value: %v, want 7", got)
-	}
-}
-
-// TestAliasGaugeEvaluatedOncePerScrape: a gauge callback runs ONCE per scrape
-// even when the family is exported under two names. Several of this process's
-// gauges have side effects (the inbox queue gauges read the serving store and
-// count a failed read once per scrape), so an alias that re-evaluated the
-// callback would double both the read and the error count.
-func TestAliasGaugeEvaluatedOncePerScrape(t *testing.T) {
-	reg := NewRegistry()
-	calls := 0
-	reg.RegisterGaugeFunc("inbox_queue_depth", "Queue depth.", func() float64 {
-		calls++
-		return 3
-	})
-	reg.Alias("inbox_queue_depth", "crier_inbox_queue_depth")
-
-	body, _ := scrapeBody(t, reg)
-	if calls != 1 {
-		t.Fatalf("gauge callback ran %d times for one scrape, want 1", calls)
-	}
-	for _, want := range []string{"inbox_queue_depth 3", "crier_inbox_queue_depth 3"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("exposition missing %q:\n%s", want, body)
-		}
-	}
-}
-
-// TestAliasFollowsLiveSeries: the alias is resolved at render time, so a gauge
-// the composition layer re-registers on a second in-process boot keeps aliasing
-// the LIVE callback instead of the object that existed when Alias was called.
-func TestAliasFollowsLiveSeries(t *testing.T) {
-	reg := NewRegistry()
-	reg.RegisterGaugeFunc("ws_subscribers", "Subscribers.", func() float64 { return 1 })
-	reg.Alias("ws_subscribers", "crier_ws_subscribers")
-
-	reg.RegisterGaugeFunc("ws_subscribers", "Subscribers.", func() float64 { return 42 })
-
-	body, _ := scrapeBody(t, reg)
-	for _, want := range []string{"ws_subscribers 42", "crier_ws_subscribers 42"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("alias did not follow the re-registered gauge (missing %q):\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "ws_subscribers 1\n") {
-		t.Fatalf("stale gauge value rendered after re-registration:\n%s", body)
-	}
-}
-
-// TestAliasHistogramRenamesEveryDerivedSuffix: an aliased histogram renames all
-// of its derived series (_bucket with le, _sum, _count) and keeps the label
-// order, so Prometheus reads a real histogram under the new name.
-func TestAliasHistogramRenamesEveryDerivedSuffix(t *testing.T) {
-	reg := NewRegistry()
-	h := reg.NewHistogram("legacy_duration_seconds", "Latency.", []float64{0.1, 1})
-	h.Observe(0.05)
-	h.Observe(2)
-	reg.Alias("legacy_duration_seconds", "crier_legacy_duration_seconds")
-
-	body, _ := scrapeBody(t, reg)
-	for _, want := range []string{
-		"# TYPE crier_legacy_duration_seconds histogram",
-		`crier_legacy_duration_seconds_bucket{le="0.1"} 1`,
-		`crier_legacy_duration_seconds_bucket{le="+Inf"} 2`,
-		"crier_legacy_duration_seconds_count 2",
-		"crier_legacy_duration_seconds_sum 2.05",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("exposition missing %q:\n%s", want, body)
-		}
-	}
-}
-
-// TestAliasIdempotentAndSingleName: aliasing the same pair twice (a second boot
-// in one process) adds nothing, and a pair whose names are equal renders ONE
-// family — the brief's rule that a series whose legacy name already matches its
-// namespaced name is never emitted twice.
-func TestAliasIdempotentAndSingleName(t *testing.T) {
-	reg := NewRegistry()
-	reg.NewCounter("transfers_total", "help")
-	reg.Alias("transfers_total", "crier_inbox_transfers_total")
-	reg.Alias("transfers_total", "crier_inbox_transfers_total")
-
-	body, _ := scrapeBody(t, reg)
-	if got := strings.Count(body, "# TYPE crier_inbox_transfers_total counter"); got != 1 {
-		t.Fatalf("# TYPE crier_inbox_transfers_total appears %d times, want 1 (idempotent alias):\n%s", got, body)
-	}
-
-	same := NewRegistry()
-	same.NewCounter("crier_up", "help")
-	same.Alias("crier_up", "crier_up") // equal names: no twin
-	body, _ = scrapeBody(t, same)
-	if got := strings.Count(body, "# TYPE crier_up gauge"); got != 0 {
-		t.Errorf("unexpected family for a counter named crier_up:\n%s", body)
-	}
-	// Exactly one SAMPLE line (metadata lines also contain "crier_up ").
-	if got := sampleLines(body, "crier_up "); got != 1 {
-		t.Fatalf("equal-name alias duplicated the sample (%d lines):\n%s", got, body)
-	}
-}
-
-// sampleLines counts the sample lines (not HELP/TYPE metadata) that begin with
-// prefix — the exposition's own shape, not a substring guess.
-func sampleLines(body, prefix string) int {
-	n := 0
+// familyNames returns the set of family names an exposition carries: the name
+// on every sample line and on every HELP/TYPE metadata line. That is exactly
+// the served surface, so a second name invented anywhere in the render path is
+// visible here.
+func familyNames(body string) map[string]bool {
+	out := map[string]bool{}
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			n++
+		switch {
+		case strings.HasPrefix(line, "# HELP "):
+			line = strings.TrimPrefix(line, "# HELP ")
+		case strings.HasPrefix(line, "# TYPE "):
+			line = strings.TrimPrefix(line, "# TYPE ")
+		case strings.HasPrefix(line, "#"), line == "":
+			continue
 		}
+		end := strings.IndexAny(line, "{ ")
+		if end < 0 {
+			continue
+		}
+		out[line[:end]] = true
 	}
-	return n
+	return out
 }
 
-// TestAliasYieldsToARealSeries: an alias is a name reservation, not ownership.
-// When the namespaced name is later registered as a real series, that series
-// wins and the alias is dropped — the exposition never serves one family twice.
-func TestAliasYieldsToARealSeries(t *testing.T) {
+// TestFamiliesRenderOnlyUnderTheirRegisteredName: registering N names renders
+// exactly those N families — no bare second name, no legacy twin. A revived
+// alias mechanism (one series served under two names) fails this immediately.
+func TestFamiliesRenderOnlyUnderTheirRegisteredName(t *testing.T) {
 	reg := NewRegistry()
-	reg.NewCounter("deliveries_total", "legacy")
-	reg.Alias("deliveries_total", "crier_delivery_accepted_total")
-	reg.NewCounter("crier_delivery_accepted_total", "real")
+	reg.NewCounter("crier_delivery_accepted_total", "Accepted deliveries.").Add(7)
+	reg.NewCounterVec("crier_guard_decisions_total", "Guard verdicts.", "decision").With("allow").Add(5)
+	reg.RegisterGaugeFunc("crier_inbox_queue_depth", "Queue depth.", func() float64 { return 3 })
 
 	body, _ := scrapeBody(t, reg)
-	if got := strings.Count(body, "# TYPE crier_delivery_accepted_total counter"); got != 1 {
-		t.Fatalf("# TYPE crier_delivery_accepted_total appears %d times, want 1:\n%s", got, body)
+	got := familyNames(body)
+	want := []string{
+		"crier_delivery_accepted_total",
+		"crier_guard_decisions_total",
+		"crier_inbox_queue_depth",
 	}
-	if !strings.Contains(body, "# HELP crier_delivery_accepted_total real") {
-		t.Fatalf("the real series did not win over the alias:\n%s", body)
+	if len(got) != len(want) {
+		t.Fatalf("exposition carries %d families, want %d (exactly one per registered name): %v\n%s",
+			len(got), len(want), got, body)
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Errorf("registered family %q missing from the exposition", name)
+		}
+	}
+
+	// The retired bare names must not be invented for a namespaced series: the
+	// whole point of closing the window is that a scrape no longer carries both.
+	for _, retired := range []string{
+		"deliveries_total",
+		"guard_decisions_total",
+		"inbox_queue_depth",
+	} {
+		if got[retired] {
+			t.Errorf("retired legacy family %q is still served — the dual-emit window reopened:\n%s", retired, body)
+		}
 	}
 }

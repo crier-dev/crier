@@ -417,7 +417,7 @@ func (r *Relay) Topics() []TopicInfo {
 }
 
 // SubscriberCount returns the number of live topic subscribers across all
-// topics and patterns (DF-CRIER-142). It backs the ws_subscribers gauge in
+// topics and patterns (DF-CRIER-142). It backs the crier_ws_subscribers gauge in
 // cmd/server; a topic's channel is counted once per subscription
 // registration, matching how Topics() reports per-topic counts.
 func (r *Relay) SubscriberCount() int {

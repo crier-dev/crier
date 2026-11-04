@@ -33,8 +33,32 @@ procedure, the gate requirements and the publish step are in
   real traffic. **Dual-emit window opened 2026-11-04**; it closes only when
   `v0.4.0` has shipped, no dashboard/alert has referenced a legacy name for 30
   consecutive days, and a release scrapes zero legacy families — or on the
-  operator's decision by 2027-05-04. Deleting the legacy names is a separate
-  change with its own row.
+  operator's decision by 2027-05-04. The window was in fact closed the same day
+  by MON-CRIER-007, which deleted the legacy names and the alias mechanism (see
+  **Removed** below) before any deployed dashboard depended on the old names.
+
+### Removed
+
+- **The 18 pre-rename Prometheus families, and the alias mechanism that served
+  them** (MON-CRIER-007, `docs/observability-spec.md` §3.1) — **2026-11-04**.
+  The MON-CRIER-005 dual-emit window is closed: `GET /metrics` serves the
+  `crier_*` names only, and `internal/metrics` no longer has a second-name
+  surface at all (the `Alias` method, its registry field and the render-time
+  family rename are deleted), so a family can only be served under the name it
+  was registered with. The retired names are `deliveries_total`,
+  `guard_decisions_total`, `webhook_deliveries_total`,
+  `capability_routed_total`, `capability_unheld_total`,
+  `expired_messages_total`, `dead_lettered_messages_total`,
+  `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`,
+  `relay_events_total`, `http_requests_total`, `federation_held_current`,
+  `ws_subscribers`, `inbox_queue_depth`, `inbox_queue_leased`,
+  `inbox_queue_oldest_age_seconds` and `inbox_shed_total`; each one's
+  replacement is named in the 18-pair table in README §Observability.
+  **This is a breaking change for any dashboard, alert rule or query still
+  keying on a legacy name** — repoint it at the `crier_*` name. The regression
+  test `cmd/server/observability_namespace_test.go` renders the real default
+  registry and fails if any of the 18 families comes back, so the window cannot
+  silently reopen.
 
 ## [0.3.0] - 2026-11-03
 

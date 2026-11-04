@@ -122,12 +122,16 @@ column; §3.2 is the new surface. Low-cardinality only: no agent id, message id,
 request id, path, prompt, URL or timestamp in any label. Bounded label domains
 are stated per metric.
 
-### 3.1 Existing series (18) — today's names, proposed rename
+### 3.1 Series renamed by MON-CRIER-005 (18) — legacy names retired 2026-11-04
 
-All of these are registered today; names/paths verified by live scrape and by
-the registration sites cited.
+The 18 pre-rename names in the first column were served beside their `crier_*`
+twins for a dual-emit window that MON-CRIER-007 **closed on 2026-11-04**: a live
+scrape now carries the last column only, and `internal/metrics` has no alias
+surface left to serve a family under a second name. Every registration site
+below now registers the SERVED name (the line citations are the audit snapshot
+this table was derived from, not live line numbers).
 
-| Today | Type | Site | Proposed name |
+| Retired legacy name | Type | Site | Served name |
 |-------|------|------|---------------|
 | `deliveries_total` | counter | `internal/registry/handler.go:37`, inc at `internal/registry/dispatch.go:419,465,566` | `crier_delivery_accepted_total` |
 | `guard_decisions_total{decision}` | counter | `internal/registry/handler.go:43`, inc `internal/registry/dispatch.go:312,321,328` | `crier_guard_decisions_total{decision}` |
@@ -382,6 +386,8 @@ Rows are in `.coding-hermes/board/tasks.jsonl`, lane `monitoring`:
   detect alert counters.
 - **R5** — rename existing series to the `crier_*` convention with a dated
   dual-emit window, and fix `http_requests_total{code}` → `{code,route}`.
+  **Shipped:** MON-CRIER-005 opened the window and MON-CRIER-007 closed it on
+  2026-11-04 — the 18 legacy names are deleted from the exposition (§3.1).
 
 ---
 
@@ -415,9 +421,12 @@ crier**, not against a local build.
    curl -s <host>:8767/metrics | grep -E '^crier_delivery_accepted_total|^crier_http_requests_total\{route="/agents/\{id\}/inbox"'
    # Expected: both advance by 1.
    ```
-   (Verified working on the pre-rename names today: `deliveries_total 3` after
-   three 201 deliveries, `inbox_queue_depth 3`, `inbox_queue_oldest_age_seconds
-   0.022` — probe run 2026-11-03.)
+   (Probe run 2026-11-03 verified this on the pre-rename names:
+   `deliveries_total 3` after three 201 deliveries, `inbox_queue_depth 3`,
+   `inbox_queue_oldest_age_seconds 0.022`. Those names were retired on
+   2026-11-04 — the same numbers now appear as
+   `crier_delivery_accepted_total`, `crier_inbox_queue_depth` and
+   `crier_inbox_queue_oldest_age_seconds`.)
 5. **Latency is a distribution.**
    ```promql
    histogram_quantile(0.99, sum by (le, route) (rate(crier_http_request_duration_seconds_bucket[5m]))) > 1
@@ -456,5 +465,5 @@ crier**, not against a local build.
   measurement against a large store.
 - **The `countRequests` `Hijack` path under load.** It forwards `Hijack` for
   WebSocket upgrades (`cmd/server/observability.go:187-192`) and this was not
-  load-tested; a WS upgrade increments `http_requests_total` with whatever
+  load-tested; a WS upgrade increments `crier_http_requests_total` with whatever
   status the recorder holds (`200`), which may mis-attribute long-lived sockets.

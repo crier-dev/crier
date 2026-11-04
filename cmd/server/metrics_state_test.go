@@ -162,10 +162,11 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		}
 	}
 
-	// The legacy unprefixed federation depth series must be untouched by this
-	// row (MON-CRIER-005 owns the rename).
-	if !strings.Contains(body, "# TYPE federation_held_current gauge") {
-		t.Error("federation_held_current must stay registered exactly as before")
+	// The federation depth series is namespaced (MON-CRIER-007 closed the
+	// dual-emit window) and must stay as registered — this row adds series
+	// beside it, it renames nothing.
+	if !strings.Contains(body, "# TYPE crier_federation_held_current gauge") {
+		t.Error("crier_federation_held_current must stay registered exactly as before")
 	}
 }
 
@@ -327,8 +328,8 @@ func TestMetricsState_StoreDepthReadErrorsCountedOncePerScrape(t *testing.T) {
 		before, _ := sampleValue(renderMetrics(t), `crier_store_queue_depth_read_errors_total{backend="sqlite"}`)
 		body := renderMetrics(t)
 
-		if !strings.Contains(body, "inbox_queue_depth NaN") {
-			t.Errorf("inbox_queue_depth must stay NaN on a failed read\nbody:\n%s", body)
+		if !strings.Contains(body, "crier_inbox_queue_depth NaN") {
+			t.Errorf("crier_inbox_queue_depth must stay NaN on a failed read\nbody:\n%s", body)
 		}
 		after, ok := sampleValue(body, `crier_store_queue_depth_read_errors_total{backend="sqlite"}`)
 		if !ok {
@@ -354,7 +355,7 @@ func TestMetricsState_StoreDepthReadErrorsCountedOncePerScrape(t *testing.T) {
 		if after-before != 1 {
 			t.Errorf("proxy read-error counter advanced by %v over one scrape, want 1", after-before)
 		}
-		if !strings.Contains(body, "inbox_queue_depth NaN") {
+		if !strings.Contains(body, "crier_inbox_queue_depth NaN") {
 			t.Error("the documented NaN reading must be unchanged for a store with no depth route")
 		}
 	})
@@ -370,8 +371,8 @@ func TestMetricsState_StoreDepthReadErrorsCountedOncePerScrape(t *testing.T) {
 	if after != before {
 		t.Errorf("a healthy depth read moved the read-error counter from %v to %v, want no movement", before, after)
 	}
-	if v, ok := sampleValue(body, "inbox_queue_depth"); !ok || v != 3 {
-		t.Errorf("inbox_queue_depth = %v (present=%v), want the healthy reading 3", v, ok)
+	if v, ok := sampleValue(body, "crier_inbox_queue_depth"); !ok || v != 3 {
+		t.Errorf("crier_inbox_queue_depth = %v (present=%v), want the healthy reading 3", v, ok)
 	}
 }
 

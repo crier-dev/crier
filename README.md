@@ -1794,14 +1794,14 @@ it, and `GET /metrics` exposes the same three numbers as gauges:
 ```
 
 ```
-# TYPE inbox_queue_depth gauge
-inbox_queue_depth 41
-# TYPE inbox_queue_leased gauge
-inbox_queue_leased 3
-# TYPE inbox_queue_oldest_age_seconds gauge
-inbox_queue_oldest_age_seconds 12
-# TYPE inbox_shed_total counter
-inbox_shed_total{scope="global"} 7
+# TYPE crier_inbox_queue_depth gauge
+crier_inbox_queue_depth 41
+# TYPE crier_inbox_queue_leased gauge
+crier_inbox_queue_leased 3
+# TYPE crier_inbox_queue_oldest_age_seconds gauge
+crier_inbox_queue_oldest_age_seconds 12
+# TYPE crier_inbox_shed_total counter
+crier_inbox_shed_total{scope="global"} 7
 ```
 
 - `pending` counts un-acknowledged, un-expired messages across **all** inboxes
@@ -1810,7 +1810,7 @@ inbox_shed_total{scope="global"} 7
 - A store that cannot report a depth renders `"queue_depth": null` in `/status`
   and `NaN` on the gauges — "empty" and "unavailable" are never the same
   reading.
-- `inbox_shed_total` counts what the budget refused, by scope.
+- `crier_inbox_shed_total` counts what the budget refused, by scope.
 
 All of the above is executed as a test against the real server —
 `TestCRFEAT035_*` in `cmd/server/crfeat035_test.go` (priority beats arrival
@@ -1962,7 +1962,7 @@ All configuration is via environment variables (defaults shown):
 | `CR_WEBHOOK_BATCH_FLUSH_S` | `5` | Batch flush interval, seconds. |
 | `DEEPSEEK_API_KEY` | _(unset)_ | API key for the deepseek provider preset (referenced as `env:DEEPSEEK_API_KEY`). Without it, guard LLM calls fail and the guard fails open. |
 | `CR_ENABLE_PPROF` | `false` | Opt-in: register `GET /debug/pprof/` (plus `cmdline`, `profile`, `symbol`, `trace`, `heap`, `goroutine`, `block`, `mutex`, `threadcreate`) for live Go profiling. Default off — unset means the path is not registered and answers `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
-| `CR_ENABLE_METRICS` | `true` | Register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests, the identity/health series (`crier_up`, `crier_build_info{version,commit,dirty}`, `crier_store_healthy{backend}`, `crier_start_time_seconds`), and the live inbox queue (`inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds`, `inbox_shed_total`; CR-FEAT-035). **On by default** — an unset value registers the surface; set it to `false` (or `0`/`no`) to leave the path unregistered and answering `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
+| `CR_ENABLE_METRICS` | `true` | Register `GET /metrics` serving the Prometheus text exposition format (v0.0.4) — deliveries, webhook outcomes, guard decisions, federation hold depth, relay events, WS subscribers, HTTP requests, the identity/health series (`crier_up`, `crier_build_info{version,commit,dirty}`, `crier_store_healthy{backend}`, `crier_start_time_seconds`), and the live inbox queue (`crier_inbox_queue_depth`, `crier_inbox_queue_leased`, `crier_inbox_queue_oldest_age_seconds`, `crier_inbox_shed_total`; CR-FEAT-035). **On by default** — an unset value registers the surface; set it to `false` (or `0`/`no`) to leave the path unregistered and answering `404`. Not auth-exempt: with `CR_AUTH_TOKEN` set it requires the Bearer header like any other authenticated route. See [Observability](#observability-metrics--profiling). |
 | `CR_A2A_ENABLED` | `false` | Opt-in: A2A (agent-to-agent protocol) interoperability — INT-A2A-001/002/003/004/005 SHIPPED, INT-A2A-006 (the extended card) the one surface still unbuilt — [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md). **Default off, and A2A is an extra rather than first-class support**: with the flag unset nothing A2A-related is registered, and every existing route, response body, auth requirement and storage path behaves exactly as it did before the option existed. The flag is also only HALF the gate — an agent takes part in A2A only if it opted in as well, via the optional `a2a` object on `POST /agents` / `PATCH /agents/{id}` (`{"a2a":{"enabled":true}}`, strictly decoded, absent by default). With the flag set crier publishes exactly TWO A2A surfaces, and nothing else: (1) `GET /.well-known/agent-card.json?agent_id=<id>` serves the [A2A](https://a2a-protocol.org) Agent Card projected from that agent's registry row (INT-A2A-002) — `404` for an id that is not an opted-in row, `400` when the request names no agent, `Cache-Control: private` + `ETag` for conditional GETs; (2) `POST /a2a` is the A2A JSON-RPC 2.0 binding (INT-A2A-003 for its sends, INT-A2A-004 for the task lifecycle, INT-A2A-005 for the push-notification configuration operations) serving `SendMessage` (a `Task` or a direct `Message`), `SendStreamingMessage` (`text/event-stream`, carrying the task's own inbox lifecycle plus everything published on the task's relay topic) and the task lifecycle — `GetTask` (the current state of one task), `ListTasks` (one agent's tasks, filtered and cursor-paginated), `CancelTask` (releases the message's lease and closes it) and `SubscribeToTask` (`text/event-stream` for a task that is still open) — plus the four push-notification configuration methods, `CreateTaskPushNotificationConfig`, `GetTaskPushNotificationConfig`, `ListTaskPushNotificationConfigs` and `DeleteTaskPushNotificationConfig`, which are a VIEW over the agent's existing webhook config (no second store, no second delivery path: a write goes through `PATCH /agents/{id}`'s own handler, and the notification is an ordinary webhook delivery whose payload is the [A2A](https://a2a-protocol.org) `StreamResponse` envelope). Every one of them is reachable only for an agent whose row opted in, and every one translates into crier's EXISTING machinery (the delivery path's own handler for a send; the inbox entry's own state for the lifecycle — there is no second task store; the agent's own webhook config for a push configuration) rather than a second engine, and all of them are unregistered (answering the router's own `404`) when the flag is unset. Those four push methods answer `PushNotificationNotSupportedError` (`-32003`) for an agent with no webhook — its Agent Card already says `capabilities.pushNotifications: false`. **The task lifecycle's state mapping is documented in [`specs/A2A-OPTION.md` §5.5.2](specs/A2A-OPTION.md) and every task a read returns names the crier record its state came from (`metadata.crier.state_basis`)**: an unclaimed message is `TASK_STATE_SUBMITTED`, a leased one `TASK_STATE_WORKING`, one past its TTL (or one the expiry sweep recorded) `TASK_STATE_FAILED`, a `CancelTask` answers `TASK_STATE_CANCELED`, and an acknowledged message — which crier REMOVES, keeping no tombstone — is `TaskNotFoundError` (`-32001`), never an invented `TASK_STATE_COMPLETED`. A message sent to a task in a terminal state is refused (`-32004`), a cancel of a terminal task is refused (`-32002`), and neither is a `200`. The extended card (INT-A2A-006) is the ONLY surface still unbuilt: it answers `-32601 MethodNotFoundError` today. |
 | `CR_DETECT_ENABLED` | `false` | Opt-in: the detection layer (CR-FEAT-030) — signed delivery log, behaviour alerts, canary tokens and the kill-switch, plus the five detection routes. Default off: unset means no route is registered (all five answer `404`), no log file is written and the delivery path is unchanged. Not auth-exempt — the kill-switch requires the Bearer header like every other authenticated route. See [Detection & containment](#detection--containment-cr-feat-030). |
 | `CR_DETECT_LOG` | _(unset — no log written)_ | Path of the append-only signed delivery log. Every delivery outcome is appended and fsynced; alerts and containment are recorded in it too. Unset, alerts and containment still work in memory — nothing is persisted. |
@@ -2521,24 +2521,26 @@ curl -s -H "Authorization: Bearer $CR_AUTH_TOKEN" localhost:8767/status | python
 
 Two live-inspection surfaces (`DF-CRIER-142`). `GET /metrics` is **on by default** (an unset `CR_ENABLE_METRICS` registers it; set `CR_ENABLE_METRICS=false` to leave the path answering `404`); `GET /debug/pprof/` stays **opt-in** (`CR_ENABLE_PPROF=true`):
 
-- `GET /metrics` — the Prometheus text exposition format (v0.0.4): `deliveries_total`, `webhook_deliveries_total{outcome}`, `guard_decisions_total{decision}`, `capability_routed_total` (capability-routed deliveries that resolved to a holder), `capability_unheld_total` (refused with `NO_CAPABLE_AGENT`), `federation_held_current`, `relay_events_total`, `ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `expired_messages_total`, `dead_lettered_messages_total`, `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`, `crier_up` (constant 1 while the process serves), `crier_build_info{version,commit,dirty}` (the same build identity `GET /version` serves), `crier_store_healthy{backend}` (1 when the serving store answers its health probe, 0 when it answers unhealthy, `NaN` when the backend exposes no probe this layer can consult), `crier_start_time_seconds` (unix seconds of process start — uptime is `time()` minus it), `inbox_queue_depth`, `inbox_queue_leased`, `inbox_queue_oldest_age_seconds` (gauges, `NaN` when the serving store cannot report a depth), `inbox_shed_total{scope}` (what the global ingest budget refused), and `http_requests_total{code,route}`. Scrape job: [`deploy/prometheus-scrape.example.yml`](deploy/prometheus-scrape.example.yml).
+- `GET /metrics` — the Prometheus text exposition format (v0.0.4): `crier_delivery_accepted_total`, `crier_webhook_deliveries_total{outcome}`, `crier_guard_decisions_total{decision}`, `crier_capability_routed_total` (capability-routed deliveries that resolved to a holder), `crier_capability_unheld_total` (refused with `NO_CAPABLE_AGENT`), `crier_federation_held_current`, `crier_relay_events_total`, `crier_ws_subscribers` (relay topic subscribers + connected mesh peers, summed), `crier_inbox_expired_total`, `crier_inbox_deadlettered_total`, `crier_inbox_expiry_receipts_total`, `crier_delivery_idempotent_replay_total`, `crier_inbox_transfers_total`, `crier_up` (constant 1 while the process serves), `crier_build_info{version,commit,dirty}` (the same build identity `GET /version` serves), `crier_store_healthy{backend}` (1 when the serving store answers its health probe, 0 when it answers unhealthy, `NaN` when the backend exposes no probe this layer can consult), `crier_start_time_seconds` (unix seconds of process start — uptime is `time()` minus it), `crier_inbox_queue_depth`, `crier_inbox_queue_leased`, `crier_inbox_queue_oldest_age_seconds` (gauges, `NaN` when the serving store cannot report a depth), `crier_inbox_shed_total{scope}` (what the global ingest budget refused), and `crier_http_requests_total{code,route}`. Scrape job: [`deploy/prometheus-scrape.example.yml`](deploy/prometheus-scrape.example.yml).
 - `GET /debug/pprof/` (`CR_ENABLE_PPROF=true`) — the standard Go profiling index plus the named profiles (`heap`, `goroutine`, `block`, `mutex`, `threadcreate`, `profile`, `symbol`, `trace`, `cmdline`).
 
 **Neither path is auth-exempt**: they are served like any other authenticated route — with `CR_AUTH_TOKEN` set they require `Authorization: Bearer <token>`; with auth disabled they are open. The exempt-path list in `internal/middleware/auth.go` is unchanged. Exposure note: the pprof surface reveals runtime internals (stacks, heap) — enable it only on trusted networks.
 
-### Namespaced metric names and the dual-emit window (MON-CRIER-005)
+### Namespaced metric names (MON-CRIER-005 rename; dual-emit window closed by MON-CRIER-007)
 
-Every series now identifies its product. The convention is
+Every series identifies its product. The convention is
 `crier_<subsystem>_<thing>_<unit>` (`docs/observability-spec.md` §3), and it
 matters in a shared Prometheus: an unprefixed `http_requests_total` collides with
 conventional client instrumentation and no series says which product emitted it.
 
-The rename is **dual-emit, not a break** — dashboards and alerts that key on the
-legacy names keep working. Both names are rendered from the SAME series (an alias
-in `internal/metrics`, not a second counter), so their samples can never drift
-apart, and no increment site changed:
+**The dual-emit window is CLOSED as of 2026-11-04 (MON-CRIER-007).** A scrape
+serves the right-hand column only. The 18 pre-rename names below are retired:
+they are not registered, not rendered, and `internal/metrics` no longer has an
+alias mechanism that could serve one family under a second name. A dashboard,
+alert rule or query still keying on a left-hand name must be repointed at its
+right-hand name — `curl -s <host>:8767/metrics | grep -cE '^(deliveries_total|http_requests_total|ws_subscribers|inbox_queue_'` is `0` on a closed surface.
 
-| Legacy (still served) | Namespaced twin |
+| Retired (no longer served) | Served name |
 |---|---|
 | `deliveries_total` | `crier_delivery_accepted_total` |
 | `guard_decisions_total{decision}` | `crier_guard_decisions_total{decision}` |
@@ -2559,7 +2561,7 @@ apart, and no increment site changed:
 | `inbox_queue_oldest_age_seconds` | `crier_inbox_queue_oldest_age_seconds` |
 | `inbox_shed_total{scope}` | `crier_inbox_shed_total{scope}` |
 
-`http_requests_total` also gained the bounded `route` label — the gorilla/mux
+`crier_http_requests_total` carries the bounded `route` label — the gorilla/mux
 **path template** (`/agents/{id}/inbox`), never the raw path, URL or query, so
 the label domain is the route table (~66 templates). A request the router never
 matched (its 404/405 fallbacks, a path-clean redirect) carries the single literal
@@ -2570,15 +2572,19 @@ scrapes from real traffic:
 sum by (route) (rate(crier_http_requests_total{code=~"5.."}[5m]))
 ```
 
-**Window.** Started 2026-11-04 (this change). Both names are served for the whole
-window; the legacy names are deleted only when the window closes, and closing is
-a separate change with its own row. Proposed close trigger, all three required:
-(a) `v0.4.0` has shipped, and (b) no fleet dashboard, alert rule or scrape-derived
-query has referenced a legacy name for 30 consecutive days (checked against the
-Prometheus/Grafana configs and the fleet's alert files), and (c) a release is cut
-in which `curl -s <host>:8767/metrics | grep -cE '^(deliveries_total|http_requests_total|ws_subscribers|inbox_queue_' ` is 0 on every deployed relay. If those are not met by **2027-05-04** (six months), the window closes anyway on the operator's decision recorded in the release notes — an unclosed rename is worse than a noisy one.
+**History — how the window ran.** The rename opened on 2026-11-04 (MON-CRIER-005)
+as a dual-emit rather than a break: for the life of the window both names were
+rendered from the SAME series (a name alias in `internal/metrics`, not a second
+counter), so the two could never drift apart and no increment site changed. Its
+close trigger was all three of (a) `v0.4.0` shipped, (b) no fleet dashboard,
+alert rule or scrape-derived query referencing a legacy name for 30 consecutive
+days, and (c) a release scraping zero legacy families on every deployed relay —
+with **2027-05-04** as the backstop. MON-CRIER-007 closed it early, the same day,
+before any deployed dashboard depended on the legacy names; the backstop was
+never needed, because an unclosed rename is worse than a noisy one.
 
 ch:trace row=MON-CRIER-005 spec=docs/observability-spec.md#3.1 wave=.coding-hermes/waves/crier-foreman-2026-11-04-13-00-50.json test=internal/metrics/metrics_test.go::TestAliasRendersSameSamplesUnderBothNames doc=README.md#observability prompt=none:worker-brief evidence="curl -s http://127.0.0.1:18767/metrics | grep -cE '^crier_'" witness=none:not-pushed verdict=none:pending-tier2 commit=none:worker memory=none:worker
+ch:trace row=MON-CRIER-007 spec=docs/observability-spec.md#3.1 test=cmd/server/observability_namespace_test.go::TestMetricsLegacyFamiliesRetired doc=README.md#observability-metrics--profiling evidence="curl -s http://127.0.0.1:21251/metrics | grep -cE '^crier_'" prompt=none:worker-brief witness=none:not-pushed verdict=none:pending-tier2 commit=none:worker memory=none:worker
 
 ## Documentation
 
