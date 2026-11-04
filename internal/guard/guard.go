@@ -229,7 +229,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		res.MessageID = in.MessageID
 		res.DurationMs = time.Since(start).Milliseconds()
 		g.record(res)
-		g.audit(ctx, agentID, in, res, len(in.Payload))
+		g.audit(ctx, agentID, in, res, len(in.Payload), start)
 		g.maybeEnqueueCard(agentID, in, policy, res)
 		return res, nil
 	}
@@ -310,7 +310,7 @@ func (g *Guard) Check(ctx context.Context, agentID string, cfg *AgentGuardConfig
 		}
 	}
 	g.record(res)
-	g.audit(ctx, agentID, in, res, len(in.Payload))
+	g.audit(ctx, agentID, in, res, len(in.Payload), start)
 	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res, nil
 }
@@ -356,7 +356,7 @@ func (g *Guard) errorResult(ctx context.Context, agentID string, in Input, polic
 		res.Decision = DecisionAllow
 	}
 	g.record(res)
-	g.audit(ctx, agentID, in, res, payloadBytes)
+	g.audit(ctx, agentID, in, res, payloadBytes, start)
 	g.maybeEnqueueCard(agentID, in, policy, res)
 	return res
 }
@@ -420,7 +420,15 @@ func mergePatterns(llm, prematch []string) []string {
 // delivery came over HTTP (DF-CRIER-141) — the guard's decision line is the
 // choke-point record the relay/inbox/webhook lines are joined to, so it is
 // annotated rather than duplicated.
-func (g *Guard) audit(ctx context.Context, agentID string, in Input, r Result, payloadBytes int) {
+//
+// MON-CRIER-002: it also records crier_guard_check_duration_seconds for this
+// verdict. audit is the ONE place every completed check passes through (the
+// oversize path, the LLM path and every errorResult arm), so the histogram and
+// the decision line it mirrors cannot drift apart. start is the Check call's
+// own start, giving sub-millisecond precision the line's whole-millisecond
+// "ms" attribute cannot express.
+func (g *Guard) audit(ctx context.Context, agentID string, in Input, r Result, payloadBytes int, start time.Time) {
+	observeCheckDuration(r.Decision, r.Errored, time.Since(start))
 	args := []any{
 		"msg", in.MessageID,
 		"target", agentID,

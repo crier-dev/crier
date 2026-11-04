@@ -256,6 +256,10 @@ func (d *Driver) Deliver(agentID string, cfg *Config, env *Envelope) (bool, erro
 // (DF-CRIER-141). Deliver keeps the old behavior for callers with no
 // request context.
 func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config, env *Envelope) (bool, error) {
+	// MON-CRIER-002: the accept stamp. It rides into the queue item (and the
+	// batch buffer) so a delivery that ends minutes later — after retries and
+	// backoff — is measured from here, end to end.
+	accepted := time.Now()
 	if cfg == nil {
 		return false, fmt.Errorf("webhook: nil config for %s", agentID)
 	}
@@ -267,10 +271,10 @@ func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config
 
 	switch effectiveDeliveryMode(cfg, env) {
 	case "batch":
-		d.bufferEnqueue(agentID, cfg, env, rid)
+		d.bufferEnqueue(agentID, cfg, env, rid, accepted)
 		return false, nil
 	case "async":
-		return d.enqueueAsync(agentID, env, rid)
+		return d.enqueueAsync(agentID, env, rid, accepted)
 	default:
 		// Legacy immediate-attempt path (blocking callers via Deliver).
 	}
@@ -280,7 +284,7 @@ func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config
 	d.mu.Unlock()
 	if deg {
 		// Circuit open: queue without hammering a poisoned endpoint.
-		return false, d.enqueue(agentID, env, 0, rid)
+		return false, d.enqueue(agentID, env, 0, rid, accepted)
 	}
 
 	d.logDispatch(agentID, cfg, env, 0, rid)
@@ -289,11 +293,12 @@ func (d *Driver) DeliverContext(ctx context.Context, agentID string, cfg *Config
 	if res.Err == nil && !res.Retryable && res.StatusCode >= 200 && res.StatusCode < 300 {
 		d.recordSuccess(agentID)
 		webhookOutcomeTotal.With("delivered").Inc()
+		observeDeliveryDuration("delivered", accepted)
 		return true, nil
 	}
 	d.recordFailure(agentID, res)
 	// Transient failure / unreachable: queue for redelivery (bounded by retries).
-	return false, d.enqueue(agentID, env, 0, rid)
+	return false, d.enqueue(agentID, env, 0, rid, accepted)
 }
 
 // effectiveDeliveryMode resolves the per-message mode: the envelope's own
@@ -310,8 +315,8 @@ func effectiveDeliveryMode(cfg *Config, env *Envelope) string {
 
 // enqueueAsync implements fire-and-forget: the item goes straight to the
 // durable queue and the drain loop is woken to POST it in the background.
-func (d *Driver) enqueueAsync(agentID string, env *Envelope, rid string) (bool, error) {
-	if err := d.enqueue(agentID, env, 0, rid); err != nil {
+func (d *Driver) enqueueAsync(agentID string, env *Envelope, rid string, accepted time.Time) (bool, error) {
+	if err := d.enqueue(agentID, env, 0, rid, accepted); err != nil {
 		return false, err
 	}
 	d.wake(d.drainWakeCh)
@@ -350,6 +355,20 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 	targetStatus := 0
 	cut := false
 	deadline := time.Now().Add(budget)
+	// MON-CRIER-002: one observation per blocking CALL, at its terminal state
+	// (a blocking delivery retries inside this call, so the histogram records
+	// the whole accept-to-answer latency, not one sample per attempt — the
+	// per-attempt view is crier_webhook_attempts_total). The path that
+	// dead-letters says so; every other failure ends as "failed".
+	accepted := time.Now()
+	terminalOutcome := "failed"
+	defer func() {
+		if deliveryErr == nil {
+			observeDeliveryDuration("delivered", accepted)
+			return
+		}
+		observeDeliveryDuration(terminalOutcome, accepted)
+	}()
 	defer func() {
 		if deliveryErr != nil {
 			deliveryErr = &BlockingDeliveryError{Attempts: attempts, Budget: budget,
@@ -442,6 +461,7 @@ func (d *Driver) DeliverBlocking(ctx context.Context, agentID string, cfg *Confi
 		if !res.Retryable {
 			d.recordFailure(agentID, res)
 			webhookOutcomeTotal.With("deadlettered").Inc()
+			terminalOutcome = "deadlettered"
 			return nil, fmt.Errorf("%w: %w", ErrPermanent, lastErr)
 		}
 		d.recordFailure(agentID, res)
@@ -501,12 +521,20 @@ func (g *sessionGate) acquireContext(ctx context.Context, sessionID string) (fun
 // (spec §2.1: redelivery never re-runs the guard), and rid — the accepting
 // request's correlation id, "" for non-HTTP callers — rides along so the
 // background dispatch lines carry it (DF-CRIER-141).
-func (d *Driver) enqueue(agentID string, env *Envelope, retries int, rid string) error {
+//
+// accepted is the moment the delivery was handed to the driver (MON-CRIER-002):
+// it becomes the item's CreatedAt, so the retry/backoff backlog's oldest-age
+// gauge AND crier_webhook_delivery_duration_seconds both measure from the
+// accept, not from the first failed POST.
+func (d *Driver) enqueue(agentID string, env *Envelope, retries int, rid string, accepted time.Time) error {
+	if accepted.IsZero() {
+		accepted = time.Now()
+	}
 	item := &QueueItem{
 		AgentID:   agentID,
 		Envelope:  env,
 		Retries:   retries,
-		CreatedAt: time.Now(),
+		CreatedAt: accepted,
 		RequestID: rid,
 	}
 	if env != nil && env.Crier.Guard != nil {
@@ -587,12 +615,14 @@ func (d *Driver) drainQueue() {
 			logf("webhook: queued delivery dropped (agent paused by kill-switch)",
 				"agent", item.AgentID, "message_id", envelopeID(item.Envelope))
 			webhookOutcomeTotal.With("dropped").Inc()
+			observeDeliveryDuration("dropped", item.CreatedAt)
 			continue
 		}
 		cfg := d.agentConfig(item.AgentID)
 		if cfg == nil {
 			logf("webhook: queue item dropped (agent gone)", "agent", item.AgentID)
 			webhookOutcomeTotal.With("dropped").Inc()
+			observeDeliveryDuration("dropped", item.CreatedAt)
 			continue
 		}
 		d.mu.Lock()
@@ -628,6 +658,7 @@ func (d *Driver) drainQueue() {
 		if res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
 			d.recordSuccess(item.AgentID)
 			webhookOutcomeTotal.With("delivered").Inc()
+			observeDeliveryDuration("delivered", item.CreatedAt)
 			continue
 		}
 		if !res.Retryable {
@@ -636,6 +667,7 @@ func (d *Driver) drainQueue() {
 				"agent", item.AgentID, "status", res.StatusCode)
 			d.recordSuccess(item.AgentID) // reset failure streak
 			webhookOutcomeTotal.With("deadlettered").Inc()
+			observeDeliveryDuration("deadlettered", item.CreatedAt)
 			continue
 		}
 		d.recordFailure(item.AgentID, res)
@@ -653,6 +685,7 @@ func (d *Driver) drainQueue() {
 				"budget", budget, "agent_retries", cfg.Retries,
 				"max_retries", d.cfg.MaxRetries)
 			webhookOutcomeTotal.With("dropped").Inc()
+			observeDeliveryDuration("dropped", item.CreatedAt)
 			d.notifyExhausted(item, res)
 		}
 	}
@@ -917,18 +950,23 @@ type batchBuffer struct {
 // add appends an envelope and refreshes the buffer config. The guard
 // verdict rides on the inner envelope (and in the item, spec §2.1), and rid
 // — the accepting request's correlation id — rides on the item so the flush
-// line can carry it (DF-CRIER-141).
-func (b *batchBuffer) add(cfg *Config, env *Envelope, rid string) {
+// line can carry it (DF-CRIER-141). accepted is the delivery's accept stamp
+// (MON-CRIER-002): the batch may wait a whole flush interval before it is
+// POSTed, and crier_webhook_delivery_duration_seconds measures from here.
+func (b *batchBuffer) add(cfg *Config, env *Envelope, rid string, accepted time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.cfg = cfg
 	if len(b.items) == 0 {
 		b.firstAt = time.Now()
 	}
+	if accepted.IsZero() {
+		accepted = time.Now()
+	}
 	item := &QueueItem{
 		AgentID:   b.agentID,
 		Envelope:  env,
-		CreatedAt: time.Now(),
+		CreatedAt: accepted,
 		RequestID: rid,
 	}
 	if env != nil && env.Crier.Guard != nil {
@@ -963,7 +1001,7 @@ func (b *batchBuffer) pending() (n int, age time.Duration, cfg *Config) {
 
 // bufferEnqueue routes a batch-mode envelope into the per-agent buffer and
 // wakes the flush loop. Never blocks on the endpoint.
-func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope, rid string) {
+func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope, rid string, accepted time.Time) {
 	d.mu.Lock()
 	buf := d.batches[agentID]
 	if buf == nil {
@@ -971,7 +1009,7 @@ func (d *Driver) bufferEnqueue(agentID string, cfg *Config, env *Envelope, rid s
 		d.batches[agentID] = buf
 	}
 	d.mu.Unlock()
-	buf.add(cfg, env, rid)
+	buf.add(cfg, env, rid, accepted)
 	d.wake(d.flushWakeCh)
 }
 
@@ -1051,6 +1089,11 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		logf("webhook: buffered batch dropped (agent paused by kill-switch)",
 			"agent", agentID, "messages", len(items))
 		webhookOutcomeTotal.With("dropped").Add(float64(len(items)))
+		// One observation per MESSAGE: the counter above counts messages too,
+		// so the distribution keeps the same unit (MON-CRIER-002).
+		for _, it := range items {
+			observeDeliveryDuration("dropped", it.CreatedAt)
+		}
 		return
 	}
 	envs := make([]*Envelope, 0, len(items))
@@ -1077,6 +1120,9 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 		d.recordSuccess(agentID)
 		logf("webhook: batch delivered", "agent", agentID, "messages", len(envs), "status", res.StatusCode)
 		webhookOutcomeTotal.With("delivered").Inc()
+		for _, it := range items {
+			observeDeliveryDuration("delivered", it.CreatedAt)
+		}
 		return
 	}
 	if !res.Retryable {
@@ -1085,6 +1131,9 @@ func (d *Driver) flushBatch(buf *batchBuffer) {
 			"agent", agentID, "status", res.StatusCode, "messages", len(envs))
 		d.recordSuccess(agentID)
 		webhookOutcomeTotal.With("deadlettered").Inc()
+		for _, it := range items {
+			observeDeliveryDuration("deadlettered", it.CreatedAt)
+		}
 		return
 	}
 	d.logBatchOutcome(agentID, cfg, len(envs), 0, res, batchRequestID(items))
@@ -1111,16 +1160,25 @@ func setBatchTarget(agentID string, envs []*Envelope) {
 // requeueBatch pushes a failed batch into the durable queue as ONE batch
 // item, preserving the coalescing across retries. The request correlation id
 // of the flush is carried on (DF-CRIER-141).
+//
+// CreatedAt is the OLDEST inner item's accept stamp (MON-CRIER-002), not the
+// requeue instant: the item is the same work, so its age — and the
+// accept-to-terminal latency the delivery histogram will record — must keep
+// counting from when crier accepted it, across every requeue.
 func (d *Driver) requeueBatch(agentID string, items []*QueueItem) {
 	envs := make([]*Envelope, 0, len(items))
-	for _, it := range items {
+	accepted := time.Now()
+	for i, it := range items {
 		envs = append(envs, it.Envelope)
+		if !it.CreatedAt.IsZero() && (i == 0 || it.CreatedAt.Before(accepted)) {
+			accepted = it.CreatedAt
+		}
 	}
 	_ = d.queue.Push(&QueueItem{
 		AgentID:   agentID,
 		Batch:     envs,
 		Retries:   0,
-		CreatedAt: time.Now(),
+		CreatedAt: accepted,
 		RequestID: batchRequestID(items),
 	})
 }

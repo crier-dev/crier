@@ -33,11 +33,16 @@ func Logging(next http.Handler) http.Handler {
 				// that Recovery writes on the way out.
 				status = http.StatusInternalServerError
 			}
+			duration := time.Since(start)
+			// MON-CRIER-002: the distribution beside the log attribute — the
+			// same measurement, exposed so a p99 exists at all. The route
+			// label is the mux template (see metrics.go), never the path.
+			recordRequestDuration(r, status, duration.Seconds())
 			slog.Info("request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", status,
-				"duration", time.Since(start),
+				"duration", duration,
 				"request_id", RequestIDFromContext(r.Context()),
 			)
 			if panicked != nil {
