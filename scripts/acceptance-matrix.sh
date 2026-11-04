@@ -591,6 +591,32 @@ else
 fi
 
 # ============================================================================
+# 6-orphaned-servers — MON-CRIER-006
+# ============================================================================
+# Every server THIS runner started has just been killed by cleanup(); what no
+# cell above can see is a server started by something ELSE whose parent then
+# went away — the 2026-11-04 shape (361 crier servers reparented to
+# `systemd --user`, LISTEN on :19001..:19273, 7.84 GB RSS, invisible to every
+# green gate until a foreman census found it 20+ minutes later). The guard
+# counts crier-server-shaped processes with a gone parent and FAILS this runner
+# at the threshold. It is REPORT-ONLY — it signals nothing — so a live server
+# this runner did not start is named, never killed.
+if [ -f "$REPO_ROOT/scripts/lib/orphan-server-guard.sh" ]; then
+  # shellcheck source=scripts/lib/orphan-server-guard.sh
+  . "$REPO_ROOT/scripts/lib/orphan-server-guard.sh"
+  ORPHAN_RC=0
+  ORPHAN_REPORT="$( ( assert_no_orphan_servers "${ORPHAN_SERVER_THRESHOLD:-10}" ) 2>&1 )" || ORPHAN_RC=$?
+  if [ "$ORPHAN_RC" -eq 0 ]; then
+    record PASS "6-orphaned-servers" "no orphaned crier server set ($(orphan_server_count) with a gone parent, threshold ${ORPHAN_SERVER_THRESHOLD:-10})"
+  else
+    record FAIL "6-orphaned-servers" "crier server process(es) with a gone parent are still running"
+    printf '%s\n' "$ORPHAN_REPORT"
+  fi
+else
+  record SKIP "6-orphaned-servers" "scripts/lib/orphan-server-guard.sh is missing"
+fi
+
+# ============================================================================
 # Summary
 # ============================================================================
 echo
