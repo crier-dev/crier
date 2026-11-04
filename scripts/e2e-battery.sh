@@ -1483,6 +1483,29 @@ for chaos_port in "$FEDPROXY_PORT" "$FEDA_PORT" "$FEDB_PORT" "$GUARD_PORT" "$A2A
   fi
 done
 
+# MON-CRIER-006: the ORPHANED-SERVER regression check. Every server THIS battery
+# started has just been killed; what no cell above could see is a server started
+# by something ELSE whose parent then went away — the 2026-11-04 shape (361 crier
+# servers reparented to `systemd --user`, :19001..:19273, 7.84 GB RSS, found by a
+# foreman census 20+ minutes later while every gate was green). The guard counts
+# crier-server-shaped processes with a gone parent and FAILS the battery at the
+# threshold instead of reporting green. It is REPORT-ONLY — it signals nothing —
+# so a live server this battery did not start is named, never killed; a
+# DELIBERATELY detached relay (pidfile-managed, setsid) reparents exactly like a
+# leak and is counted, which is why the verdict is a threshold
+# (ORPHAN_SERVER_THRESHOLD, default 10) rather than zero.
+# shellcheck source=scripts/lib/orphan-server-guard.sh
+. "$REPO_ROOT/scripts/lib/orphan-server-guard.sh"
+ORPHAN_RC=0
+ORPHAN_REPORT="$( ( assert_no_orphan_servers "${ORPHAN_SERVER_THRESHOLD:-10}" ) 2>&1 )" || ORPHAN_RC=$?
+if [ "$ORPHAN_RC" -eq 0 ]; then
+  PASS=$((PASS+1)); echo "PASS  no orphaned crier server set ($(orphan_server_count) with a gone parent, threshold ${ORPHAN_SERVER_THRESHOLD:-10})"
+else
+  FAIL=$((FAIL+1))
+  echo "FAIL  orphaned crier server set — crier server process(es) with a gone parent are still running"
+  printf '%s\n' "$ORPHAN_REPORT"
+fi
+
 echo ""
 echo "BATTERY RESULT: $PASS pass / $FAIL fail (port $PORT, agent $AGENT)"
 echo "{\"battery\":\"e2e-001\",\"ts\":\"$(date -u +%FT%TZ)\",\"port\":$PORT,\"pass\":$PASS,\"fail\":$FAIL}" >> "$EVID"
