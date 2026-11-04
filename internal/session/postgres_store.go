@@ -298,6 +298,11 @@ func (s *PostgresStore) project(ctx context.Context, rec *Record) error {
 			`UPDATE chat_sessions SET state = 'open', closed_at = NULL WHERE id = $1`,
 			rec.SessionID)
 		return err
+	case RecordHarnessBind:
+		_, err := s.requestExecutor().Exec(ctx,
+			`UPDATE chat_sessions SET harness = $1, harness_session_id = $2 WHERE id = $3`,
+			rec.Harness, rec.HarnessSessionID, rec.SessionID)
+		return err
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}

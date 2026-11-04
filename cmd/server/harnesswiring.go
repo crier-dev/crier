@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/harness"
@@ -93,6 +94,22 @@ func (d *harnessDispatch) Dispatch(ctx context.Context, req ingress.DispatchRequ
 			SessionID: req.SessionID,
 		},
 	})
+
+	// COURIER-HARNESS §4.3: the FIRST successful delivery to a session that
+	// named a harness but had no id records the id the adapter minted, so every
+	// later message continues THAT session instead of creating a second one.
+	// Until this lands, a binding lived only for the process lifetime.
+	if receipt.State == harness.StateDispatched && receipt.SessionID != "" && st.Session.HarnessSessionID == "" {
+		if seq, err := d.repo.NextSeq(ctx, req.SessionID); err == nil {
+			rec := session.HarnessBindRecord(req.SessionID, seq, time.Now().UTC(), name, receipt.SessionID)
+			if err := d.repo.Append(ctx, rec); err != nil {
+				// The message IS delivered; failing the call would be a lie about
+				// the transcript. Report the bind problem in the delivery object
+				// so an operator sees it instead of a silent re-create next time.
+				slog.Warn("harness bind record failed", "session", req.SessionID, "harness", name, "err", err)
+			}
+		}
+	}
 
 	report := ingress.DeliveryReport{
 		Mode:    "harness",

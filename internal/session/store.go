@@ -49,6 +49,11 @@ const (
 	RecordThreadBranch  RecordType = "session.thread.branch"
 	RecordClose         RecordType = "session.close"
 	RecordReopen        RecordType = "session.reopen"
+	// RecordHarnessBind records the harness session id a delivery minted for a
+	// session that named a harness but had none yet (COURIER-HARNESS §4.3).
+	// It is an EVENT, not a field mutation: the log is append-only, so the
+	// binding is answerable by replay like every other lifecycle fact.
+	RecordHarnessBind RecordType = "session.harness.bind"
 )
 
 // Record is ONE line of the JSONL ordered append log (§5.1) — the transport
@@ -222,6 +227,12 @@ func (r *Record) validate(requireThreadID bool) error {
 	case RecordClose, RecordReopen:
 		// actor is optional in the shape (§5.1 shows it, but a system close
 		// with no named actor is still a valid record).
+	case RecordHarnessBind:
+		// COURIER-HARNESS §4.3: a bind must name the harness and the id it
+		// minted — a bind carrying neither would be a no-op record.
+		if r.Harness == "" || r.HarnessSessionID == "" {
+			return fmt.Errorf("%w: session.harness.bind without harness/harness_session_id", ErrInvalidRecord)
+		}
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, r.Type)
 	}
@@ -534,6 +545,22 @@ func ReopenRecord(sessionID string, seq int64, ts time.Time, actor AuthorRef) *R
 		Seq:       seq,
 		TS:        ts.UTC(),
 		Actor:     &actor,
+	}
+}
+
+// HarnessBindRecord renders the session.harness.bind line (COURIER-HARNESS
+// §4.3): the first successful delivery to a session that names a harness
+// records the id it minted, so every later message continues THAT session
+// rather than creating a second one.
+func HarnessBindRecord(sessionID string, seq int64, ts time.Time, harness, harnessSessionID string) *Record {
+	return &Record{
+		V:                RecordFormatVersion,
+		Type:             RecordHarnessBind,
+		SessionID:        sessionID,
+		Seq:              seq,
+		TS:               ts.UTC(),
+		Harness:          harness,
+		HarnessSessionID: harnessSessionID,
 	}
 }
 

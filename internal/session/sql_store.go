@@ -276,6 +276,11 @@ func (s *SQLStore) project(ctx context.Context, rec *Record) error {
 			`UPDATE chat_sessions SET state = 'open', closed_at = NULL WHERE id = ?`,
 			rec.SessionID)
 		return err
+	case RecordHarnessBind:
+		_, err := s.exec(ctx,
+			`UPDATE chat_sessions SET harness = ?, harness_session_id = ? WHERE id = ?`,
+			rec.Harness, rec.HarnessSessionID, rec.SessionID)
+		return err
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}

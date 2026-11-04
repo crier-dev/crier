@@ -161,3 +161,118 @@ func TestHarnessDispatchDeliversIntoARealPiSession(t *testing.T) {
 	}
 	t.Logf("live joint proven: session %s, report %+v, transcript %s", sessID, report, matches[0])
 }
+
+// fakeAdapter records what it was asked to deliver to, so a test can prove the
+// SECOND delivery continued the id the first one minted.
+type fakeAdapter struct {
+	name     string
+	minted   string
+	seen     []harness.SessionRef
+	failNext bool
+}
+
+func (f *fakeAdapter) Name() string { return f.name }
+
+func (f *fakeAdapter) Probe(_ context.Context) (harness.Capability, error) {
+	return harness.Capability{Available: true, Version: "test"}, nil
+}
+
+func (f *fakeAdapter) Deliver(_ context.Context, sess harness.SessionRef, _ harness.Message) (harness.Receipt, error) {
+	f.seen = append(f.seen, sess)
+	if f.failNext {
+		return harness.FailedReceipt(f.name, "HARNESS_FAILED", "boom"), nil
+	}
+	if sess.ID != "" {
+		return harness.Receipt{Harness: f.name, SessionID: sess.ID, State: harness.StateDispatched}, nil
+	}
+	return harness.Receipt{Harness: f.name, SessionID: f.minted, Created: true, State: harness.StateDispatched}, nil
+}
+
+// TestHarnessDispatchPersistsTheMintedSessionID is COURIER-HARNESS §4.3: the
+// first successful delivery records the id it minted, and the NEXT delivery
+// continues that id instead of creating a second harness session.
+func TestHarnessDispatchPersistsTheMintedSessionID(t *testing.T) {
+	ctx := context.Background()
+	repo := newJointRepo(t)
+	// The session names the harness but has no id yet: exactly the state the
+	// first delivery arrives in.
+	newJointSession(t, repo, "s_bind", "fake", "")
+
+	adapter := &fakeAdapter{name: "fake", minted: "hs-minted-1"}
+	reg := harness.NewRegistry(harness.RegistryOptions{Enabled: true, Default: "fake", Timeout: 30 * time.Second, MaxConcurrent: 1})
+	reg.Register(adapter)
+	d := &harnessDispatch{reg: reg, repo: repo}
+
+	first, err := d.Dispatch(ctx, ingress.DispatchRequest{SessionID: "s_bind", MessageID: "m1", Text: "one"})
+	if err != nil {
+		t.Fatalf("first dispatch: %v", err)
+	}
+	if first.State != harness.StateDispatched {
+		t.Fatalf("first dispatch state = %q, want %q", first.State, harness.StateDispatched)
+	}
+
+	st, err := repo.Load(ctx, "s_bind")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if st.Session.HarnessSessionID != "hs-minted-1" {
+		t.Fatalf("the minted id was not persisted: harness_session_id = %q, want hs-minted-1", st.Session.HarnessSessionID)
+	}
+	if st.Session.Harness != "fake" {
+		t.Fatalf("harness = %q, want fake", st.Session.Harness)
+	}
+
+	// The bind is a LIFECYCLE event, so it is replayable like the rest.
+	found := false
+	for _, rec := range st.Lifecycle {
+		if rec.Type == session.RecordHarnessBind && rec.HarnessSessionID == "hs-minted-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no session.harness.bind record in the lifecycle: %+v", st.Lifecycle)
+	}
+
+	// Second delivery must CONTINUE hs-minted-1, not mint another.
+	if _, err := d.Dispatch(ctx, ingress.DispatchRequest{SessionID: "s_bind", MessageID: "m2", Text: "two"}); err != nil {
+		t.Fatalf("second dispatch: %v", err)
+	}
+	if len(adapter.seen) != 2 {
+		t.Fatalf("adapter saw %d deliveries, want 2", len(adapter.seen))
+	}
+	if adapter.seen[0].ID != "" {
+		t.Fatalf("the first delivery should arrive with no id, got %q", adapter.seen[0].ID)
+	}
+	if adapter.seen[1].ID != "hs-minted-1" {
+		t.Fatalf("the second delivery continued %q, want hs-minted-1 (a silent re-create would split the transcript)", adapter.seen[1].ID)
+	}
+}
+
+// TestHarnessDispatchDoesNotBindOnFailure keeps the bind honest: a failed
+// delivery records no id, so the next attempt still creates rather than
+// continuing a session that was never created.
+func TestHarnessDispatchDoesNotBindOnFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newJointRepo(t)
+	newJointSession(t, repo, "s_fail", "fake", "")
+
+	adapter := &fakeAdapter{name: "fake", minted: "hs-never", failNext: true}
+	reg := harness.NewRegistry(harness.RegistryOptions{Enabled: true, Default: "fake", Timeout: 30 * time.Second, MaxConcurrent: 1})
+	reg.Register(adapter)
+	d := &harnessDispatch{reg: reg, repo: repo}
+
+	report, err := d.Dispatch(ctx, ingress.DispatchRequest{SessionID: "s_fail", MessageID: "m1", Text: "x"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if report.State != harness.StateFailed {
+		t.Fatalf("state = %q, want failed", report.State)
+	}
+	st, err := repo.Load(ctx, "s_fail")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if st.Session.HarnessSessionID != "" {
+		t.Fatalf("a failed delivery bound %q; it must record nothing", st.Session.HarnessSessionID)
+	}
+}

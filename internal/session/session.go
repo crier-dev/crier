@@ -585,6 +585,20 @@ func (st *State) apply(rec *Record) error {
 		st.Session.State = SessionOpen
 		st.Session.ClosedAt = nil
 		st.Lifecycle = append(st.Lifecycle, rec)
+	case RecordHarnessBind:
+		// COURIER-HARNESS §4.3: the FIRST successful delivery binds the id it
+		// minted. A later record may rebind (an operator moving the session to
+		// a new harness id); the fold takes the last one, like every other
+		// keep-LAST fact in the stream.
+		if st.Session == nil {
+			return fmt.Errorf("%w: session.harness.bind before session.create", ErrInvalidRecord)
+		}
+		if rec.HarnessSessionID == "" {
+			return fmt.Errorf("%w: session.harness.bind carries no harness_session_id", ErrInvalidRecord)
+		}
+		st.Session.Harness = rec.Harness
+		st.Session.HarnessSessionID = rec.HarnessSessionID
+		st.Lifecycle = append(st.Lifecycle, rec)
 	default:
 		return fmt.Errorf("%w: unknown record type %q", ErrInvalidRecord, rec.Type)
 	}
