@@ -73,7 +73,9 @@ func New(cfg Config) *Adapter {
 	return &Adapter{cfg: cfg, now: time.Now}
 }
 
-// Name is the harness id used in config, receipts and metrics.
+// Name is the harness id used in config and receipts, and the harness label
+// value on crier_harness_dispatches_total, crier_harness_dispatch_errors_total
+// and crier_harness_dispatch_duration_seconds (CRIER-OBS-1).
 func (a *Adapter) Name() string { return Name }
 
 // Features reports the surfaces this adapter uses: `exec` (create), `exec

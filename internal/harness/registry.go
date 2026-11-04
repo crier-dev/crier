@@ -200,8 +200,16 @@ func (r *Registry) Probe(ctx context.Context, name string) (Capability, error) {
 // durably appended. It never returns an error: a delivery problem is a
 // Receipt with State=failed, because storage already succeeded and the HTTP
 // status must not change.
-func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) Receipt {
+//
+// Every completed call is counted exactly once (CRIER-OBS-1): the deferred
+// observation runs on ALL return paths — the refusals this body can take and
+// the adapter's receipt alike — so a failed dispatch is a counter with its
+// error class, not only a log line. The series live in metrics.go; the
+// returned Receipt is untouched either way, and the observation reads the
+// registry's own clock so an injected clock stays deterministic.
+func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) (receipt Receipt) {
 	start := r.now()
+	defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()
 	if !r.enabled {
 		return FailedReceipt(req.Harness, CodeDisabled, "harness.enabled is false").withTime(r.now())
 	}
