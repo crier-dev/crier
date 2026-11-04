@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -53,6 +53,7 @@ help:
 	@echo "  readme-api-check  FAIL when README's API inventory sentence ('documented as N paths / M operations in docs/openapi.yaml') disagrees with a fresh parse of docs/openapi.yaml — an independent arm (PyYAML) beside the Go gate (DF-CRIER-492)"
 	@echo "  readme-api-selftest  Prove that check still rejects a drifted README (over-counted operations, wrong path count, missing and duplicated sentences) and refuses an empty/unparseable/missing spec or an interpreter without PyYAML, incl. a NEUTER proof (DF-CRIER-492)"
 	@echo "  port-guard-selftest  Exercise the demo-harness port guards on a self-picked free port (QA-CRIER-9)"
+	@echo "  orphan-guard-selftest  Prove the orphaned-crier-server guard: a seeded orphan set (setsid-detached decoys that reparent to systemd --user like the 2026-11-04 leak) fails the assert at the threshold, cleanup is exact, and an unreadable process table fails closed (MON-CRIER-006)"
 	@echo "  scratch-port-rotation-selftest  Prove every example runner CHOOSES its scratch port (rotation, exhaustion, explicit override) — no provider (QA-CRIER-10); its live cases SKIP, exit 0, when 'ss'/iproute2 is missing (QA-CRIER-40)"
 	@echo "  client-roundtrip-check  CR-FEAT-027: `crier keygen` + the Python and TypeScript clients through a full signed round-trip on a scratch port (no openssl, no xxd, no packages)"
 	@echo "  transport-retry-selftest  Exercise the deploy-leg transport retry/classifier on PATH shims — no host, no docker (INT-CI-001)"
@@ -297,6 +298,27 @@ readme-api-selftest:
 # The selftest picks its own free port, so a busy runner cannot make it flake.
 port-guard-selftest:
 	bash scripts/lib/port-guard.sh --selftest
+
+# MON-CRIER-006 — the ORPHANED-SERVER regression guard. On 2026-11-04 a
+# server-spawning run under a transient hermes worker scope leaked 361 crier
+# servers (one per port, LISTEN on :19001..:19273, ~24 MB RSS each = 7.84 GB
+# resident) which reparented to the user systemd manager (`systemd --user`, ppid
+# 7126), so no live spawner could be named from the process table — and every
+# gate that ran during the window was green. The spawner itself is OUTSIDE this
+# repository (an ad-hoc agent-side harness around a /tmp/crier-mon built from
+# cmd/server; `grep -rn crier-mon` finds nothing in this tree), so the fix for it
+# cannot live here. What lives here is the guard that makes the CLASS visible:
+# scripts/lib/orphan-server-guard.sh counts crier-server-shaped processes whose
+# parent is gone and fails at a threshold (default 10, ORPHAN_SERVER_THRESHOLD).
+# This target proves that guard: PASS on a host at its baseline, FAIL over the
+# threshold on a seeded orphan set (decoys this selftest detaches with
+# `setsid --fork`, so they reparent to systemd --user exactly like the
+# incident's 361), exact-pid cleanup that leaves the host where it found it, and
+# a fail-closed exit 2 on a process table it cannot read. The E2E battery runs
+# the same assert at its teardown, so a leaked set fails the battery instead of
+# being reported green.
+orphan-guard-selftest:
+	@bash scripts/lib/orphan-server-guard.sh --selftest
 
 # QA-CRIER-10: every example runner that starts a scratch service must CHOOSE its
 # port (bounded candidate rotation, holder evidence for every candidate skipped, a

@@ -1374,6 +1374,32 @@ pid, its command line and the audit command. An explicit `CRIER_PORT` is still
 honored literally and fails closed when that port is occupied, and an exhausted
 candidate list is a named failure that starts nothing (QA-CRIER-10).
 
+### A leaked server set is visible from inside the repo
+
+The port guards above decide whether a harness measures the server it started.
+They cannot see a server nobody in this process started — and on 2026-11-04 that
+gap cost the host a real incident: a server-spawning run under a transient
+worker scope leaked 361 crier servers (one per port, `LISTEN` on `:19001..:19273`,
+`~24 MB` RSS each — 7.84 GB resident) which reparented to the user systemd
+manager, so no live spawner could be named from the process table. Every gate
+that ran during the window was green; a foreman census found it 20+ minutes
+later and reaped it by exact pid. The spawner was an ad-hoc harness outside this
+repository, so it cannot be fixed here — what lives here is the check that makes
+the class visible on the next run: `scripts/lib/orphan-server-guard.sh` counts
+crier-server-shaped processes (`crier`, `crier-mon`, `crier-server`, or a
+`cmd/server` binary under one of those names) whose parent is gone — pid 1, a
+`systemd --user` manager, or a pid that no longer exists — and fails at a
+threshold (default 10, `ORPHAN_SERVER_THRESHOLD`) naming the count, every pid,
+its age and RSS, and the `--list` / `ss -tlnp` / `ps` audit commands. It never
+signals a process: reaping stays an exact-pid operator action (`kill <pid>`),
+never `pkill -f`, which also matches the shell that runs it. `make
+orphan-guard-selftest` proves it — PASS at a host's baseline, FAIL over the
+threshold on a seeded orphan set the selftest detaches with `setsid --fork` so it
+reparents to `systemd --user` exactly like the incident's 361, exact-pid cleanup,
+and a fail-closed exit 2 on a process table it cannot read. The E2E battery runs
+the same assert at its teardown, so a leaked set fails the battery instead of
+being reported green.
+
 ## Web chat client (CR-CHAT-009)
 
 `GET /chat` serves the web client MVP: a self-contained (embedded, asset-free, no build step) HTML page that is a **client of the public API** — every UI action is a documented public REST call, the same way `/docs` is served. It provides:
