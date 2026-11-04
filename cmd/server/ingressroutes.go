@@ -126,10 +126,14 @@ func openIngress(cfg config.Config, repo session.Repository, dispatcher *registr
 		AllowedModes: ingressModes(cfg.Ingress.AllowedModes),
 		MaxBodyBytes: cfg.Ingress.MaxBodyBytes,
 	}
-	// COURIER-HARNESS §4 owns the dispatch adapter; this row leaves the hook
-	// nil on purpose, so `delivery` honestly reports {"mode":"store",
-	// "state":"stored"} until that adapter is wired.
-	h.Dispatch = nil
+	// The dispatch hook is wired to the harness registry (COURIER-HARNESS §4,
+	// via harnesswiring.go). A session with no harness binding still answers
+	// `{"mode":"store","state":"stored"}`, which is the honest report and not a
+	// weaker success: the courier record IS the delivery for a store-only
+	// session.
+	if reg := buildHarnessRegistry(cfg); reg != nil {
+		h.Dispatch = &harnessDispatch{reg: reg, repo: repo}
+	}
 	return h, nil
 }
 
