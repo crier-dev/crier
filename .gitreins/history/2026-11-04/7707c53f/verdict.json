@@ -1,0 +1,88 @@
+{
+  "task_id": "CRIER-OBS-1",
+  "task_title": "Instrument harness delivery: ingress -> agent dispatch metrics",
+  "task_criteria": [
+    "1) The ingress->harness dispatch path emits a counter of deliveries by harness and by state (dispatched/failed) plus a duration histogram labelled by harness. 2) A failed dispatch is countable with its error class, not only visible in a log line. 3) The series appear on GET /metrics of a booted server and are covered by a test that asserts the family names and at least one labelled sample after a real dispatch through a fake adapter. 4) The four adapter comments claiming names are used in metrics become true or are corrected."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/worktrees/crier-CRIER-OBS-1",
+  "branch": "wt/CRIER-OBS-1",
+  "commit": "c90de971cc5db5e70ffe5a94d337072d162cf21e",
+  "working_tree_content_fingerprint": "0a1a69744155324fb1d56c5132a5c29cda68d28135e671941748737273394f3a",
+  "working_tree_dirty_path_count": 1,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-CRIER-OBS-1: the guard wo",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-CRIER-OBS-1: the guard would be cut off mid-run and report a fail-open PASS. Raising this run's budget to 420s \u2014 set guards.hook_timeout above guards.test_timeout to fix it at the source.\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/worktrees/crier-CRIER-OBS-1/.gitreins/logs/guard-20261104T182834.547442Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/worktrees/crier-CRIER-OBS-1/.gitreins/logs/guard-20261104T182834.547442Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 1) The ingress->harness dispatch path emits a counter of deliveries by harness and by state (dispatched/failed) plus a duration histogram labelled by harness. 2) A failed dispatch is countable with its error class, not only visible in a log line. 3) The series appear on GET /metrics of a booted server and are covered by a test that asserts the family names and at least one labelled sample after a real dispatch through a fake adapter. 4) The four adapter comments claiming names are used in metrics become true or are corrected.: All four parts verified in /home/kara/worktrees/crier-CRIER-OBS-1 @ c90de971 (feature commit 4fc39f23). (1) internal/harness/metrics.go:57-63 defines crier_harness_dispatches_total{harness,state} with closed state domain dispatched/failed (metrics.go:44-47), and metrics.go:84-87 defines crier_harness_dispatch_duration_seconds{harness} over metrics.DefaultBuckets; both are emitted from observeDispatchMetrics (metrics.go:96-111), which is wired into the single choke point Registry.Deliver via `defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()` at internal/harness/registry.go:211-212, so every return path (HARNESS_DISABLED/UNKNOWN/CONCURRENCY_FULL/UNAVAILABLE refusals and the adapter receipt) records exactly one sample. (2) metrics.go:71-77 defines crier_harness_dispatch_errors_total{harness,class} incremented only for failed receipts with class = rc.Error (the \u00a75 code, e.g. HARNESS_FAILED/HARNESS_UNKNOWN), falling back to \"none\" \u2014 countable by error class, not just a log line. (3) Live arm cmd/server/harness_metrics_test.go boots the real server with CR_ENABLE_METRICS=true, CR_HARNESS_ENABLED=true and a fake pi binary (writeCLIFakeHarness), pushes two messages through POST /ingress/messages (one dispatched via pi, one refused with HARNESS_UNKNOWN), and asserts HELP/TYPE for all three families on a fresh boot plus exact labelled samples on GET /metrics. Ran `go test -count=1 ./cmd/server/ -run TestHarnessDispatchMetricsOnBootedServer -v` -> `--- PASS: TestHarnessDispatchMetricsOnBootedServer (0.07s)` / `ok github.com/crier-dev/crier/cmd/server 0.109s`. Unit arm `go test -count=1 ./internal/harness/ -run TestHarnessDispatchMetrics -v` -> `--- PASS: TestHarnessDispatchMetrics (0.00s)` / `ok ... 0.004s`; full `go test -count=1 ./internal/harness/ ./internal/metrics/` -> `ok ... 11.917s` / `ok ... 0.014s`; `go build ./...` exit 0; `go vet ./internal/harness/ ./cmd/server/` exit 0. (4) The four adapter Name() doc comments now name the real series: internal/harness/codex/codex.go:76-79, internal/harness/hermes/hermes.go:62-65, internal/harness/opencode/opencode.go:53-56, internal/harness/pi/pi.go:74-77 ('the harness label value on crier_harness_dispatches_total, crier_harness_dispatch_errors_total and crier_harness_dispatch_duration_seconds (CRIER-OBS-1)'), and the interface comment internal/harness/adapter.go:49 is now true; internal/metrics/metrics.go:17 series-ownership paragraph also lists harness.\nAll four parts of CRIER-OBS-1 are implemented and proven: three harness dispatch metric families wired into Registry.Deliver's deferred close, error-class counting, both unit and booted-server /metrics tests passing, and the four adapter comments corrected to name the real series.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 1) The ingress->harness dispatch path emits a counter of deliveries by harness and by state (dispatched/failed) plus a duration histogram labelled by harness. 2) A failed dispatch is countable with its error class, not only visible in a log line. 3) The series appear on GET /metrics of a booted server and are covered by a test that asserts the family names and at least one labelled sample after a real dispatch through a fake adapter. 4) The four adapter comments claiming names are used in metrics become true or are corrected.: All four parts verified in /home/kara/worktrees/crier-CRIER-OBS-1 @ c90de971 (feature commit 4fc39f23). (1) internal/harness/metrics.go:57-63 defines crier_harness_dispatches_total{harness,state} with closed state domain dispatched/failed (metrics.go:44-47), and metrics.go:84-87 defines crier_harness_dispatch_duration_seconds{harness} over metrics.DefaultBuckets; both are emitted from observeDispatchMetrics (metrics.go:96-111), which is wired into the single choke point Registry.Deliver via `defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()` at internal/harness/registry.go:211-212, so every return path (HARNESS_DISABLED/UNKNOWN/CONCURRENCY_FULL/UNAVAILABLE refusals and the adapter receipt) records exactly one sample. (2) metrics.go:71-77 defines crier_harness_dispatch_errors_total{harness,class} incremented only for failed receipts with class = rc.Error (the \u00a75 code, e.g. HARNESS_FAILED/HARNESS_UNKNOWN), falling back to \"none\" \u2014 countable by error class, not just a log line. (3) Live arm cmd/server/harness_metrics_test.go boots the real server with CR_ENABLE_METRICS=true, CR_HARNESS_ENABLED=true and a fake pi binary (writeCLIFakeHarness), pushes two messages through POST /ingress/messages (one dispatched via pi, one refused with HARNESS_UNKNOWN), and asserts HELP/TYPE for all three families on a fresh boot plus exact labelled samples on GET /metrics. Ran `go test -count=1 ./cmd/server/ -run TestHarnessDispatchMetricsOnBootedServer -v` -> `--- PASS: TestHarnessDispatchMetricsOnBootedServer (0.07s)` / `ok github.com/crier-dev/crier/cmd/server 0.109s`. Unit arm `go test -count=1 ./internal/harness/ -run TestHarnessDispatchMetrics -v` -> `--- PASS: TestHarnessDispatchMetrics (0.00s)` / `ok ... 0.004s`; full `go test -count=1 ./internal/harness/ ./internal/metrics/` -> `ok ... 11.917s` / `ok ... 0.014s`; `go build ./...` exit 0; `go vet ./internal/harness/ ./cmd/server/` exit 0. (4) The four adapter Name() doc comments now name the real series: internal/harness/codex/codex.go:76-79, internal/harness/hermes/hermes.go:62-65, internal/harness/opencode/opencode.go:53-56, internal/harness/pi/pi.go:74-77 ('the harness label value on crier_harness_dispatches_total, crier_harness_dispatch_errors_total and crier_harness_dispatch_duration_seconds (CRIER-OBS-1)'), and the interface comment internal/harness/adapter.go:49 is now true; internal/metrics/metrics.go:17 series-ownership paragraph also lists harness.\nAll four parts of CRIER-OBS-1 are implemented and proven: three harness dispatch metric families wired into Registry.Deliver's deferred close, error-class counting, both unit and booted-server /metrics tests passing, and the four adapter comments corrected to name the real series.",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "1) The ingress->harness dispatch path emits a counter of deliveries by harness and by state (dispatched/failed) plus a duration histogram labelled by harness. 2) A failed dispatch is countable with its error class, not only visible in a log line. 3) The series appear on GET /metrics of a booted server and are covered by a test that asserts the family names and at least one labelled sample after a real dispatch through a fake adapter. 4) The four adapter comments claiming names are used in metrics become true or are corrected.",
+                "status": "PASS",
+                "detail": "All four parts verified in /home/kara/worktrees/crier-CRIER-OBS-1 @ c90de971 (feature commit 4fc39f23). (1) internal/harness/metrics.go:57-63 defines crier_harness_dispatches_total{harness,state} with closed state domain dispatched/failed (metrics.go:44-47), and metrics.go:84-87 defines crier_harness_dispatch_duration_seconds{harness} over metrics.DefaultBuckets; both are emitted from observeDispatchMetrics (metrics.go:96-111), which is wired into the single choke point Registry.Deliver via `defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()` at internal/harness/registry.go:211-212, so every return path (HARNESS_DISABLED/UNKNOWN/CONCURRENCY_FULL/UNAVAILABLE refusals and the adapter receipt) records exactly one sample. (2) metrics.go:71-77 defines crier_harness_dispatch_errors_total{harness,class} incremented only for failed receipts with class = rc.Error (the \u00a75 code, e.g. HARNESS_FAILED/HARNESS_UNKNOWN), falling back to \"none\" \u2014 countable by error class, not just a log line. (3) Live arm cmd/server/harness_metrics_test.go boots the real server with CR_ENABLE_METRICS=true, CR_HARNESS_ENABLED=true and a fake pi binary (writeCLIFakeHarness), pushes two messages through POST /ingress/messages (one dispatched via pi, one refused with HARNESS_UNKNOWN), and asserts HELP/TYPE for all three families on a fresh boot plus exact labelled samples on GET /metrics. Ran `go test -count=1 ./cmd/server/ -run TestHarnessDispatchMetricsOnBootedServer -v` -> `--- PASS: TestHarnessDispatchMetricsOnBootedServer (0.07s)` / `ok github.com/crier-dev/crier/cmd/server 0.109s`. Unit arm `go test -count=1 ./internal/harness/ -run TestHarnessDispatchMetrics -v` -> `--- PASS: TestHarnessDispatchMetrics (0.00s)` / `ok ... 0.004s`; full `go test -count=1 ./internal/harness/ ./internal/metrics/` -> `ok ... 11.917s` / `ok ... 0.014s`; `go build ./...` exit 0; `go vet ./internal/harness/ ./cmd/server/` exit 0. (4) The four adapter Name() doc comments now name the real series: internal/harness/codex/codex.go:76-79, internal/harness/hermes/hermes.go:62-65, internal/harness/opencode/opencode.go:53-56, internal/harness/pi/pi.go:74-77 ('the harness label value on crier_harness_dispatches_total, crier_harness_dispatch_errors_total and crier_harness_dispatch_duration_seconds (CRIER-OBS-1)'), and the interface comment internal/harness/adapter.go:49 is now true; internal/metrics/metrics.go:17 series-ownership paragraph also lists harness.",
+                "resolution_probability": 0.03
+              }
+            ],
+            "summary": "All four parts of CRIER-OBS-1 are implemented and proven: three harness dispatch metric families wired into Registry.Deliver's deferred close, error-class counting, both unit and booted-server /metrics tests passing, and the four adapter comments corrected to name the real series.",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY"
+    }
+  },
+  "summary": "Judge Result: CRIER-OBS-1\n\nStage tier1: PASS\n    \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/worktrees/crier-CRIER-OBS-1: the guard wo\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 1) The ingress->harness dispatch path emits a counter of deliveries by harness and by state (dispatched/failed) plus a duration histogram labelled by harness. 2) A failed dispatch is countable with its error class, not only visible in a log line. 3) The series appear on GET /metrics of a booted server and are covered by a test that asserts the family names and at least one labelled sample after a real dispatch through a fake adapter. 4) The four adapter comments claiming names are used in metrics become true or are corrected.: All four parts verified in /home/kara/worktrees/crier-CRIER-OBS-1 @ c90de971 (feature commit 4fc39f23). (1) internal/harness/metrics.go:57-63 defines crier_harness_dispatches_total{harness,state} with closed state domain dispatched/failed (metrics.go:44-47), and metrics.go:84-87 defines crier_harness_dispatch_duration_seconds{harness} over metrics.DefaultBuckets; both are emitted from observeDispatchMetrics (metrics.go:96-111), which is wired into the single choke point Registry.Deliver via `defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()` at internal/harness/registry.go:211-212, so every return path (HARNESS_DISABLED/UNKNOWN/CONCURRENCY_FULL/UNAVAILABLE refusals and the adapter receipt) records exactly one sample. (2) metrics.go:71-77 defines crier_harness_dispatch_errors_total{harness,class} incremented only for failed receipts with class = rc.Error (the \u00a75 code, e.g. HARNESS_FAILED/HARNESS_UNKNOWN), falling back to \"none\" \u2014 countable by error class, not just a log line. (3) Live arm cmd/server/harness_metrics_test.go boots the real server with CR_ENABLE_METRICS=true, CR_HARNESS_ENABLED=true and a fake pi binary (writeCLIFakeHarness), pushes two messages through POST /ingress/messages (one dispatched via pi, one refused with HARNESS_UNKNOWN), and asserts HELP/TYPE for all three families on a fresh boot plus exact labelled samples on GET /metrics. Ran `go test -count=1 ./cmd/server/ -run TestHarnessDispatchMetricsOnBootedServer -v` -> `--- PASS: TestHarnessDispatchMetricsOnBootedServer (0.07s)` / `ok github.com/crier-dev/crier/cmd/server 0.109s`. Unit arm `go test -count=1 ./internal/harness/ -run TestHarnessDispatchMetrics -v` -> `--- PASS: TestHarnessDispatchMetrics (0.00s)` / `ok ... 0.004s`; full `go test -count=1 ./internal/harness/ ./internal/metrics/` -> `ok ... 11.917s` / `ok ... 0.014s`; `go build ./...` exit 0; `go vet ./internal/harness/ ./cmd/server/` exit 0. (4) The four adapter Name() doc comments now name the real series: internal/harness/codex/codex.go:76-79, internal/harness/hermes/hermes.go:62-65, internal/harness/opencode/opencode.go:53-56, internal/harness/pi/pi.go:74-77 ('the harness label value on crier_harness_dispatches_total, crier_harness_dispatch_errors_total and crier_harness_dispatch_duration_seconds (CRIER-OBS-1)'), and the interface comment internal/harness/adapter.go:49 is now true; internal/metrics/metrics.go:17 series-ownership paragraph also lists harness.\nAll four parts of CRIER-OBS-1 are implemented and proven: three harness dispatch metric families wired into Registry.Deliver's deferred close, error-class counting, both unit and booted-server /metrics tests passing, and the four adapter comments corrected to name the real series.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-04T18:30:18.078855",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-04T18:30:18.102046+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 1487,
+        "truncated": false,
+        "source": "git show c90de971cc5d"
+      }
+    ],
+    "task_id": "CRIER-OBS-1"
+  }
+}
