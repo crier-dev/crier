@@ -1,0 +1,30 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-09-13-51",
+  "project": "crier",
+  "block": "MON-CRIER-006",
+  "block_title": "Observability: metrics reachable + queued-state series (P0, 5 rows)",
+  "mode": "wave",
+  "wave_budget": 12,
+  "slots": 4,
+  "slots_reason": "nproc=16, loadavg 1m=11.18 at selection; max(1,min(6,16-ceil(11.18)))=4; WAVE_BUDGET=12 ceiling",
+  "selected": [
+    {
+      "task_id": "MON-CRIER-005",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-005",
+      "branch": "wt/MON-CRIER-005",
+      "base": "f88f161f12106e84141ab18cda4bf954e03bc4e8",
+      "brief": "MON-CRIER-005-brief.txt",
+      "reason": "same block, pending, no dependency edge; namespaced metric rename is independent of orphan-harness files"
+    },
+    {
+      "task_id": "MON-CRIER-006",
+      "worktree": "/home/kara/worktrees/crier-MON-CRIER-006",
+      "branch": "wt/MON-CRIER-006",
+      "base": "f88f161f12106e84141ab18cda4bf954e03bc4e8",
+      "brief": "MON-CRIER-006-brief.txt",
+      "reason": "same block, pending, no dependency edge; orphan sweep attribution/guard is separate from metric source files"
+    }
+  ],
+  "control_worktree": "/home/kara/crier-control-20261104-091351",
+  "status": "manifest-written-before-dispatch"
+}
