@@ -3202,3 +3202,16 @@ tasks:
   status: complete
   created_at: '2026-11-04T01:47:10.732490+00:00'
   completed_at: '2026-11-04T01:47:23.461375+00:00'
+- id: MON-CRIER-002
+  title: Add latency histograms to internal/metrics and emit HTTP route, webhook delivery,
+    guard check and inbox deliver duration series
+  criteria:
+  - 'ACCEPTANCE: go build ./... && go vet ./... && go test ./... green on the worker
+    tree; internal/metrics gains a histogram type with fixed buckets 0.005..30s; /metrics
+    exposes crier_http_request_duration_seconds{route,method,code}, crier_webhook_delivery_duration_seconds{outcome},
+    crier_guard_check_duration_seconds{decision,errored}, crier_inbox_deliver_duration_seconds{transport};
+    a live server''s /metrics carries the _bucket/_count/_sum families; labels carry
+    no agent id, message id, path or URL; route label comes from the mux template
+    with a bounded set. Spec: docs/observability-spec.md 3.3.'
+  status: in_progress
+  created_at: '2026-11-04T07:28:07.761855+00:00'

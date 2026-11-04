@@ -2,8 +2,10 @@ package metrics
 
 import (
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -251,6 +253,213 @@ func TestConcurrentScrapeAndIncrement(t *testing.T) {
 	}
 	if got := v.With("hot").value(); got != 1600 {
 		t.Fatalf("vec child after concurrent increments = %v, want 1600", got)
+	}
+}
+
+// TestHistogramRendersPrometheusShape pins the histogram exposition: bucket
+// lines with an le label in ascending order, CUMULATIVE counts, a +Inf bucket,
+// and the _sum/_count families a Prometheus server needs to build a p99
+// (MON-CRIER-002).
+func TestHistogramRendersPrometheusShape(t *testing.T) {
+	reg := NewRegistry()
+	h := reg.NewHistogram("crier_test_duration_seconds", "Test latency.", []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30})
+	for _, v := range []float64{0.003, 0.02, 0.2, 40} {
+		h.Observe(v)
+	}
+
+	body, _ := scrapeBody(t, reg)
+	for _, want := range []string{
+		"# TYPE crier_test_duration_seconds histogram",
+		// 0.003 and 0.02 both land at or below 0.025; 0.2 is above 0.1 and
+		// below 0.25; 40 exceeds the last bound and lives only in +Inf.
+		`crier_test_duration_seconds_bucket{le="0.005"} 1`,
+		`crier_test_duration_seconds_bucket{le="0.01"} 1`,
+		`crier_test_duration_seconds_bucket{le="0.025"} 2`,
+		`crier_test_duration_seconds_bucket{le="0.05"} 2`,
+		`crier_test_duration_seconds_bucket{le="0.1"} 2`,
+		`crier_test_duration_seconds_bucket{le="0.25"} 3`,
+		`crier_test_duration_seconds_bucket{le="30"} 3`,
+		`crier_test_duration_seconds_bucket{le="+Inf"} 4`,
+		`crier_test_duration_seconds_count 4`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q; body:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "crier_test_duration_seconds_sum 40.223") {
+		t.Errorf("sum sample missing or wrong (want 40.223); body:\n%s", body)
+	}
+
+	// Bucket lines must be strictly ascending by le and end at +Inf: a
+	// Prometheus parser rejects a histogram whose buckets are out of order.
+	prev := -1.0
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "crier_test_duration_seconds_bucket{") {
+			continue
+		}
+		le := line[strings.Index(line, `le="`)+4 : strings.Index(line, `"} `)]
+		if le == "+Inf" {
+			prev = math.Inf(1)
+			continue
+		}
+		v, err := strconv.ParseFloat(le, 64)
+		if err != nil {
+			t.Fatalf("bucket le %q is not a float: %v", le, err)
+		}
+		if v <= prev {
+			t.Errorf("bucket le=%v is not > the previous bound %v:\n%s", v, prev, body)
+		}
+		prev = v
+	}
+	if prev != math.Inf(1) {
+		t.Errorf("histogram has no +Inf bucket as its last line:\n%s", body)
+	}
+}
+
+// TestHistogramVecLabelsAndOrder pins the labelled form: the vec's labels in
+// registration order, "le" last, one sample per child, sorted for a
+// deterministic exposition.
+func TestHistogramVecLabelsAndOrder(t *testing.T) {
+	reg := NewRegistry()
+	v := reg.NewHistogramVec("crier_test_labelled_seconds", "help.",
+		[]float64{0.1, 1}, "route", "method", "code")
+	v.Observe(0.5, "/a", "GET", "200")
+	v.Observe(0.05, "/b", "POST", "201")
+	v.Observe(0.05, "/b", "POST", "201")
+
+	body, _ := scrapeBody(t, reg)
+	for _, want := range []string{
+		"# TYPE crier_test_labelled_seconds histogram",
+		`crier_test_labelled_seconds_bucket{route="/a",method="GET",code="200",le="0.1"} 0`,
+		`crier_test_labelled_seconds_bucket{route="/a",method="GET",code="200",le="1"} 1`,
+		`crier_test_labelled_seconds_bucket{route="/a",method="GET",code="200",le="+Inf"} 1`,
+		`crier_test_labelled_seconds_sum{route="/a",method="GET",code="200"} 0.5`,
+		`crier_test_labelled_seconds_count{route="/a",method="GET",code="200"} 1`,
+		`crier_test_labelled_seconds_bucket{route="/b",method="POST",code="201",le="0.1"} 2`,
+		`crier_test_labelled_seconds_count{route="/b",method="POST",code="201"} 2`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q; body:\n%s", want, body)
+		}
+	}
+	// le is the LAST label on a bucket line: a client library and every
+	// Prometheus parser expects that position.
+	if strings.Index(body, `route="/a"`) > strings.Index(body, `route="/b"`) {
+		t.Errorf("children are not in sorted label order:\n%s", body)
+	}
+}
+
+// TestHistogramBucketNormalisation: an unsorted bucket set with duplicates,
+// zeros and negatives is normalised once at construction, so the exposition is
+// always monotonic (and two calls with the same garbage still agree).
+func TestHistogramBucketNormalisation(t *testing.T) {
+	reg := NewRegistry()
+	h := reg.NewHistogram("norm_seconds", "help", []float64{1, 0.1, 0.1, 0, -2, math.NaN(), 2.5})
+	h.Observe(0.05)
+	h.Observe(1.5)
+
+	body, _ := scrapeBody(t, reg)
+	if strings.Contains(body, `le="0"`) || strings.Contains(body, `le="-2"`) {
+		t.Fatalf("non-positive bounds leaked into the exposition:\n%s", body)
+	}
+	if strings.Contains(body, `le="NaN"`) {
+		t.Fatalf("a NaN bound rendered:\n%s", body)
+	}
+	for _, want := range []string{
+		`norm_seconds_bucket{le="0.1"} 1`,
+		`norm_seconds_bucket{le="1"} 1`,
+		`norm_seconds_bucket{le="2.5"} 2`,
+		`norm_seconds_bucket{le="+Inf"} 2`,
+		"norm_seconds_count 2",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q; body:\n%s", want, body)
+		}
+	}
+	if strings.Count(body, `le="0.1"`) != 1 {
+		t.Errorf("duplicate bound rendered twice:\n%s", body)
+	}
+}
+
+// TestHistogramReRegisterKeepsSeries: a second construction of the same name
+// (a second boot in one process) must return the LIVE series, not duplicate
+// the family or reset its buckets.
+func TestHistogramReRegisterKeepsSeries(t *testing.T) {
+	reg := NewRegistry()
+	h1 := reg.NewHistogram("dup_seconds", "help", []float64{1})
+	h1.Observe(0.5)
+	h2 := reg.NewHistogram("dup_seconds", "help", []float64{5})
+	h2.Observe(0.5)
+	if got := h1.countValue(); got != 2 {
+		t.Fatalf("re-registered histogram count = %d, want 2 (same series)", got)
+	}
+	v1 := reg.NewHistogramVec("dup_vec_seconds", "help", []float64{1}, "k")
+	v1.Observe(0.5, "a")
+	v2 := reg.NewHistogramVec("dup_vec_seconds", "help", []float64{9}, "k")
+	v2.Observe(0.5, "a")
+
+	body, _ := scrapeBody(t, reg)
+	if n := strings.Count(body, "# TYPE dup_seconds histogram"); n != 1 {
+		t.Errorf("# TYPE dup_seconds appears %d times, want 1:\n%s", n, body)
+	}
+	if n := strings.Count(body, "# TYPE dup_vec_seconds histogram"); n != 1 {
+		t.Errorf("# TYPE dup_vec_seconds appears %d times, want 1:\n%s", n, body)
+	}
+	if !strings.Contains(body, `dup_vec_seconds_bucket{k="a",le="1"} 2`) {
+		t.Errorf("re-registered vec did not keep accumulating:\n%s", body)
+	}
+}
+
+// TestHistogramArityMismatchDiscarded: a wrong-arity With never panics and
+// never leaks a half-labelled sample.
+func TestHistogramArityMismatchDiscarded(t *testing.T) {
+	reg := NewRegistry()
+	v := reg.NewHistogramVec("arity_seconds", "help", []float64{1}, "a", "b")
+	v.With("only-one").Observe(0.5)
+	body, _ := scrapeBody(t, reg)
+	if strings.Contains(body, "arity_seconds_bucket{") {
+		t.Fatalf("arity-mismatched child leaked into the exposition:\n%s", body)
+	}
+	v.Observe(0.5, "one", "two")
+	body, _ = scrapeBody(t, reg)
+	if !strings.Contains(body, `arity_seconds_bucket{a="one",b="two",le="+Inf"} 1`) {
+		t.Fatalf("correct-arity child missing:\n%s", body)
+	}
+}
+
+// TestHistogramConcurrentObserveAndScrape: writers and the renderer run
+// concurrently without a race (run under -race) and every observation is
+// counted exactly once.
+func TestHistogramConcurrentObserveAndScrape(t *testing.T) {
+	reg := NewRegistry()
+	v := reg.NewHistogramVec("busy_seconds", "help", DefaultBuckets, "k")
+	v.Observe(0.5, "seed") // pre-create the child so the writers share it
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				v.Observe(0.01*float64(i+1), "hot")
+			}
+		}(i)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < 50; j++ {
+			_ = reg.render()
+		}
+	}()
+	wg.Wait()
+
+	if got := v.With("hot").countValue(); got != 1600 {
+		t.Fatalf("child count after concurrent observes = %d, want 1600", got)
+	}
+	body, _ := scrapeBody(t, reg)
+	if !strings.Contains(body, `busy_seconds_bucket{k="hot",le="+Inf"} 1600`) {
+		t.Fatalf("+Inf bucket did not accumulate every observation:\n%s", body)
 	}
 }
 

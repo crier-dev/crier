@@ -111,8 +111,6 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 	}{
 		{"crier_webhook_queue_depth", 0, "an idle server has no queued redeliveries"},
 		{"crier_webhook_queue_oldest_age_seconds", 0, "an empty queue has no oldest item"},
-		{`crier_webhook_attempts_total{attempt="1"}`, 0, "the first-attempt bucket is seeded"},
-		{`crier_webhook_attempts_total{attempt="6"}`, 0, "the default ceiling (5+1) is seeded"},
 		{"crier_federation_held_age_seconds", 0, "no federation links, so nothing is held"},
 		{`crier_store_queue_depth_read_errors_total{backend="memory"}`, 0, "the memory store answers every depth read"},
 		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, 0, "detection is disabled and the bounded pairs are seeded"},
@@ -131,6 +129,20 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		}
 		if got != w.value {
 			t.Errorf("%s = %v, want %v — %s", w.prefix, got, w.value, w.why)
+		}
+	}
+
+	// The webhook ATTEMPT buckets are seeded, not necessarily 0: metrics.Default
+	// is process-wide, so a sibling test in this binary that drives a real
+	// webhook delivery (MON-CRIER-002's live latency test) legitimately
+	// increments the first-attempt ordinal. Presence of every bounded ordinal is
+	// this row's contract; "0" only ever held on a pristine process.
+	for _, prefix := range []string{
+		`crier_webhook_attempts_total{attempt="1"}`,
+		`crier_webhook_attempts_total{attempt="6"}`,
+	} {
+		if got, ok := sampleValue(body, prefix); !ok || math.IsNaN(got) {
+			t.Errorf("%s is absent or NaN — every bounded attempt ordinal must be seeded\nbody:\n%s", prefix, body)
 		}
 	}
 

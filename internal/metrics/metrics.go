@@ -1,8 +1,17 @@
 // Package metrics implements the tiny Prometheus text-exposition registry
 // behind the opt-in GET /metrics surface (DF-CRIER-142). It is deliberately
-// dependency-free: counters are sync/atomic float64s, gauges are callbacks,
-// and Handler renders the v0.0.4 text format — no prometheus/client_golang,
-// no go.mod change.
+// dependency-free: counters and histograms are sync/atomic float64s, gauges
+// are callbacks, and Handler renders the v0.0.4 text format — no
+// prometheus/client_golang, no go.mod change.
+//
+// Histograms (MON-CRIER-002, observability-spec §3.3) carry a FIXED,
+// cumulative bucket set decided at construction and shared by every sample of
+// a vec: a bucket boundary is never allocated per request, so Observe is a
+// scan over the (twelve-entry) bounds plus three atomic adds. A histogram
+// renders the full Prometheus histogram shape — one "<name>_bucket" line per
+// bucket with an "le" label, a "+Inf" bucket, plus "<name>_sum" and
+// "<name>_count" — so promtool and every Prometheus server read it as a
+// real histogram rather than a pile of unknown series.
 //
 // Series ownership follows the code that increments them: registry, relay,
 // webhook, guard and cmd/server each construct their own counters on Default
@@ -55,13 +64,7 @@ func (c *Counter) Add(v float64) {
 	if v <= 0 {
 		return
 	}
-	for {
-		old := c.val.Load()
-		next := math.Float64frombits(old) + v
-		if c.val.CompareAndSwap(old, math.Float64bits(next)) {
-			return
-		}
-	}
+	addFloat(&c.val, v)
 }
 
 // Inc increments the counter by one.
@@ -108,6 +111,228 @@ func (v *CounterVec) With(labelValues ...string) *Counter {
 	v.children[key] = c
 	v.keys[key] = append([]string(nil), labelValues...)
 	return c
+}
+
+// ---------- histogram ----------
+
+// DefaultBuckets is the fixed latency bucket set of observability-spec §3.3:
+// a hand-rolled exporter has no use for finer than 5ms or coarser than 30s.
+// It is a plain slice so a caller can pass it straight to NewHistogram or
+// NewHistogramVec; both COPY and normalise it, so a live series never shares
+// storage with this (mutable) package variable.
+var DefaultBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
+
+// Histogram is a cumulative-bucket distribution of one measured quantity
+// (seconds, for every series this repo emits). Buckets are fixed at
+// construction and never reallocated: Observe is a scan over the shared
+// bounds plus three atomic adds, safe for concurrent writers and for a
+// concurrent scrape.
+//
+// Bucket counters are stored PER BUCKET (not cumulatively) and summed at
+// render time, which is what Prometheus means by "cumulative buckets": the
+// sample for le=0.1 counts every observation <= 0.1. An observation above the
+// last bound lands in no bucket and is counted only by _count — exactly the
+// "+Inf" bucket.
+type Histogram struct {
+	name   string
+	help   string
+	bounds []float64 // sorted, strictly increasing, fixed for the series' life
+
+	counts []atomic.Uint64 // per-bucket (NOT cumulative) counts, index-parallel to bounds
+	sum    atomic.Uint64   // Float64bits of the running sum
+	count  atomic.Uint64   // every observation, including those above the last bound
+}
+
+// newHistogram builds a histogram over a normalised COPY of bounds.
+func newHistogram(name, help string, bounds []float64) *Histogram {
+	b := normalizeBuckets(bounds)
+	return &Histogram{name: name, help: help, bounds: b, counts: make([]atomic.Uint64, len(b))}
+}
+
+// Observe records one observation of v (v is seconds for latency series).
+// Negative values are clamped to 0 and NaN is dropped: a clock anomaly must
+// never render a distribution that cannot exist, and NaN would poison _sum
+// for the lifetime of the process.
+func (h *Histogram) Observe(v float64) {
+	if math.IsNaN(v) {
+		return
+	}
+	if v < 0 {
+		v = 0
+	}
+	for i, ub := range h.bounds {
+		if v <= ub {
+			h.counts[i].Add(1)
+			break
+		}
+	}
+	addFloat(&h.sum, v)
+	h.count.Add(1)
+}
+
+// count returns the number of observations.
+func (h *Histogram) countValue() uint64 { return h.count.Load() }
+
+// sumValue returns the running sum of observations.
+func (h *Histogram) sumValue() float64 { return math.Float64frombits(h.sum.Load()) }
+
+// writeSamples renders the Prometheus histogram shape: one _bucket line per
+// bound (cumulative), the +Inf bucket, then _sum and _count. labelNames and
+// labelValues are the vec's own labels, in registration order; "le" is always
+// appended last, as the reference client does.
+func (h *Histogram) writeSamples(b *strings.Builder, labelNames, labelValues []string) {
+	var cumulative uint64
+	for i, ub := range h.bounds {
+		cumulative += h.counts[i].Load()
+		h.writeBucket(b, labelNames, labelValues, formatBucket(ub), cumulative)
+	}
+	// +Inf: every observation, including those above the last bound.
+	h.writeBucket(b, labelNames, labelValues, "+Inf", h.count.Load())
+
+	h.writeScalar(b, labelNames, labelValues, "_sum", strconv.FormatFloat(h.sumValue(), 'g', -1, 64))
+	h.writeScalar(b, labelNames, labelValues, "_count", strconv.FormatUint(h.count.Load(), 10))
+}
+
+func (h *Histogram) writeBucket(b *strings.Builder, labelNames, labelValues []string, le string, v uint64) {
+	b.WriteString(h.name)
+	b.WriteString("_bucket")
+	writeLabels(b, appendLabel(labelNames, "le"), appendLabel(labelValues, le))
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatUint(v, 10))
+	b.WriteByte('\n')
+}
+
+func (h *Histogram) writeScalar(b *strings.Builder, labelNames, labelValues []string, suffix, value string) {
+	b.WriteString(h.name)
+	b.WriteString(suffix)
+	if len(labelNames) > 0 {
+		writeLabels(b, labelNames, labelValues)
+	}
+	b.WriteByte(' ')
+	b.WriteString(value)
+	b.WriteByte('\n')
+}
+
+// HistogramVec is a histogram partitioned by label values (e.g.
+// crier_http_request_duration_seconds{route,method,code}). Children are
+// created on first use and every child shares the ONE bucket set fixed when
+// the vec was constructed — the reason a hot path never allocates buckets.
+type HistogramVec struct {
+	name       string
+	help       string
+	bounds     []float64
+	labelNames []string
+
+	mu       sync.RWMutex // read-mostly: With takes the read lock on the hot path
+	children map[string]*Histogram
+	keys     map[string][]string // joined label values -> the values themselves
+}
+
+// With returns the child histogram for the given label values, creating it on
+// first use. labelValues must match the label names' arity, in order; a
+// mismatched call returns a discarded histogram (never panics on a hot path,
+// never leaks an unlabelled sample into the exposition).
+func (v *HistogramVec) With(labelValues ...string) *Histogram {
+	if len(labelValues) != len(v.labelNames) {
+		return discardedHistogram
+	}
+	key := strings.Join(labelValues, "\xff")
+	v.mu.RLock()
+	h, ok := v.children[key]
+	v.mu.RUnlock()
+	if ok {
+		return h
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if h, ok := v.children[key]; ok { // lost the race: reuse the winner
+		return h
+	}
+	if v.children == nil {
+		v.children = make(map[string]*Histogram)
+		v.keys = make(map[string][]string)
+	}
+	h = newHistogram(v.name, v.help, v.bounds)
+	v.children[key] = h
+	v.keys[key] = append([]string(nil), labelValues...)
+	return h
+}
+
+// Observe records one observation under the given label values: the one-call
+// form of With(values...).Observe(x) used on the delivery hot paths.
+func (v *HistogramVec) Observe(x float64, labelValues ...string) {
+	v.With(labelValues...).Observe(x)
+}
+
+// snapshot copies the child map and label values so rendering never holds the
+// lock while writing samples (a slow scrape must not block a delivery path).
+func (v *HistogramVec) snapshot() (map[string]*Histogram, map[string][]string, []string) {
+	v.mu.RLock()
+	children := make(map[string]*Histogram, len(v.children))
+	values := make(map[string][]string, len(v.keys))
+	keys := make([]string, 0, len(v.children))
+	for k, h := range v.children {
+		children[k] = h
+		values[k] = v.keys[k]
+		keys = append(keys, k)
+	}
+	v.mu.RUnlock()
+	sort.Strings(keys) // deterministic exposition across scrapes
+	return children, values, keys
+}
+
+// discardedHistogram is the sink for arity-mismatched With calls: a hot path
+// must never panic over a metric. It has no bounds, so it only ever records
+// into its +Inf bucket — and it is never registered, so nothing is exposed.
+var discardedHistogram = newHistogram("", "", nil)
+
+// normalizeBuckets returns a sorted, strictly increasing COPY of bounds with
+// non-positive, NaN, infinite and duplicate entries dropped: a bucket set that
+// cannot render monotonic cumulative counts would produce an exposition
+// Prometheus rejects.
+func normalizeBuckets(bounds []float64) []float64 {
+	sorted := make([]float64, 0, len(bounds))
+	for _, b := range bounds {
+		if math.IsNaN(b) || math.IsInf(b, 0) || b <= 0 {
+			continue
+		}
+		sorted = append(sorted, b)
+	}
+	sort.Float64s(sorted)
+	out := sorted[:0]
+	for i, b := range sorted {
+		if i > 0 && b == sorted[i-1] {
+			continue // duplicate bound: one bucket, not two
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// formatBucket renders a bucket bound the way the reference client does: the
+// shortest float that round-trips (0.005, 0.01, … 30).
+func formatBucket(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+
+// appendLabel returns names with one more value appended, WITHOUT mutating the
+// caller's slice (a child's label slice is shared by every scrape).
+func appendLabel(values []string, extra string) []string {
+	out := make([]string, len(values)+1)
+	copy(out, values)
+	out[len(values)] = extra
+	return out
+}
+
+// addFloat atomically adds v to the float64 whose bits live at addr. Used by
+// Counter.Add and Histogram.Observe: integer atomics are not enough for a
+// float running total.
+func addFloat(addr *atomic.Uint64, v float64) {
+	for {
+		old := addr.Load()
+		next := math.Float64frombits(old) + v
+		if addr.CompareAndSwap(old, math.Float64bits(next)) {
+			return
+		}
+	}
 }
 
 // ---------- gauge ----------
@@ -193,6 +418,32 @@ func (s *counterVecSeries) writeSamples(b *strings.Builder) {
 		b.WriteByte(' ')
 		writeFloat(b, s.v.children[k].value())
 		b.WriteByte('\n')
+	}
+}
+
+// ---------- histogram series ----------
+
+type histogramSeries struct {
+	h *Histogram
+}
+
+func (s *histogramSeries) meta() (string, string, string) { return s.h.name, s.h.help, "histogram" }
+func (s *histogramSeries) writeSamples(b *strings.Builder) {
+	s.h.writeSamples(b, nil, nil)
+}
+
+type histogramVecSeries struct {
+	v *HistogramVec
+}
+
+func (s *histogramVecSeries) meta() (string, string, string) {
+	return s.v.name, s.v.help, "histogram"
+}
+
+func (s *histogramVecSeries) writeSamples(b *strings.Builder) {
+	children, values, keys := s.v.snapshot()
+	for _, k := range keys {
+		children[k].writeSamples(b, s.v.labelNames, values[k])
 	}
 }
 
@@ -287,6 +538,45 @@ func (r *Registry) NewCounterVec(name, help string, labelNames ...string) *Count
 	}
 	v := &CounterVec{name: name, help: help, labelNames: append([]string(nil), labelNames...)}
 	r.add(&counterVecSeries{v: v})
+	return v
+}
+
+// NewHistogram registers (or returns the already-registered) unlabelled
+// histogram under name, over a normalised copy of buckets. Re-registering the
+// same name returns the existing series (a second boot in one process keeps
+// accumulating — the Prometheus contract) with ITS original buckets: the
+// bucket set is fixed by the first construction.
+func (r *Registry) NewHistogram(name, help string, buckets []float64) *Histogram {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.byName[name]; ok {
+		if hs, ok := s.(*histogramSeries); ok {
+			return hs.h
+		}
+	}
+	h := newHistogram(name, help, buckets)
+	r.add(&histogramSeries{h: h})
+	return h
+}
+
+// NewHistogramVec registers (or returns the already-registered) labelled
+// histogram under name. labelNames are rendered in order on every sample, with
+// "le" appended last per bucket line; all children share one bucket set.
+func (r *Registry) NewHistogramVec(name, help string, buckets []float64, labelNames ...string) *HistogramVec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.byName[name]; ok {
+		if hs, ok := s.(*histogramVecSeries); ok {
+			return hs.v
+		}
+	}
+	v := &HistogramVec{
+		name:       name,
+		help:       help,
+		bounds:     normalizeBuckets(buckets),
+		labelNames: append([]string(nil), labelNames...),
+	}
+	r.add(&histogramVecSeries{v: v})
 	return v
 }
 

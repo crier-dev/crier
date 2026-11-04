@@ -149,6 +149,12 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 	if st := delivery.httpState; st != nil {
 		req, attempt, capability, serviceAuthority, deliverStart = st.request, st.attempt, st.capability, st.authority, st.started
 	}
+	// MON-CRIER-002: the transport-cost distribution, recorded on the way out
+	// of every path that actually reached a transport (see
+	// metrics_deliver.go). A refusal that never chose one records nothing.
+	defer func() {
+		observeDeliverDuration(result.Transport, time.Since(deliverStart))
+	}()
 	id := entry.AgentID
 	if target != nil {
 		id = target.ID
