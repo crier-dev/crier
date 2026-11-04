@@ -1,0 +1,38 @@
+commit bd9b63b5cab90e4d3ce6cedd64dde6314b428b10
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Nov 4 10:06:13 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Nov 4 10:06:13 2026 -0500
+
+    chore(gitreins): carry the MON-CRIER-007 lifecycle record into the judged worktree
+---
+ .gitreins/tasks.yaml | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index fc16fc1c..28f9b267 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -3241,3 +3241,22 @@ tasks:
+   status: in_progress
+   created_at: '2026-11-04T13:19:48.521968+00:00'
+   completed_at: '2026-11-04T13:51:09.640764+00:00'
++- id: MON-CRIER-007
++  title: 'Close the crier_* dual-emit window: delete the 18 legacy metric names'
++  criteria:
++  - A built cmd/server started with CR_ENABLE_METRICS=true and scraped on /metrics
++    exposes ZERO legacy-name families (http_requests_total, deliveries_total, guard_decisions_total,
++    inbox_queue_depth, inbox_queue_leased, inbox_queue_oldest_age_seconds, ws_subscribers,
++    federation_held_current, webhook_deliveries_total, inbox_shed_total, capability_routed_total,
++    capability_unheld_total, expired_messages_total, dead_lettered_messages_total,
++    expiry_receipts_total, idempotent_replays_total, transfers_total, relay_events_total)
++    while every crier_* twin from the dual-emit count is still present; no production
++    code path calls Registry.Alias (tests may keep a synthetic alias plumbing test);
++    internal/metrics/metrics.go alias plumbing is deleted or proven unused by a test;
++    README Observability states the window is closed with date and CHANGELOG records
++    the removal; repo-wide grep for each legacy name finds no remaining dashboard/query/doc
++    consumer; go build ./... , go vet ./... and go test ./internal/metrics/... ./cmd/server/...
++    -count=1 all pass.
++  status: complete
++  created_at: '2026-11-04T14:27:33.822257+00:00'
++  completed_at: '2026-11-04T14:56:03.245838+00:00'
