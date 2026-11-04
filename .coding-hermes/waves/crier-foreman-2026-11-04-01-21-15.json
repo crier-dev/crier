@@ -1,0 +1,37 @@
+{
+  "tick": "crier-foreman-2026-11-04-01-21-15",
+  "mode": "serial",
+  "wave_id": "none:serial-loaded-box",
+  "block": "CRIER-HARNESS family (Courier push-into-session capability)",
+  "block_evidence": "block_drive.py: block CRIER-HARNESS-3 pending=2 ready=2 done=1/3 (33%); predecessor landings 35fcc2d9 specs, a40e49a6 CRIER-TAGS-1, 08307304 CRIER-READS-1, e85a68e0 CRIER-HARNESS-1, 7e4446ca CRIER-INGRESS-1",
+  "why_serial": "capacity: nproc=16, loadavg=31.67 -> slots=max(1, 16-ceil(31.67))=1; WAVE_BUDGET=4 is a ceiling, not an obligation. Box loaded => one worker, not idle.",
+  "capacity": {
+    "nproc": 16,
+    "loadavg_1m": 31.67,
+    "slots_formula": "max(1, min(6, nproc - ceil(loadavg)))",
+    "slots": 1,
+    "wave_budget": 4
+  },
+  "rows": [
+    {
+      "id": "CRIER-HARNESS-2",
+      "title": "pi-agent adapter: pi -p --session-id (creates when absent, continues when present)",
+      "status_at_dispatch": "pending",
+      "worktree": "/home/kara/crier-wt-harness2",
+      "branch": "wt/CRIER-HARNESS-2-pi",
+      "base": "82b5f083",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-t1965-harness2-brief.txt",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "zai-glm-default",
+      "lane_probe": "LANE_OK, agent.log API call #1 model=glm-5.3-flash provider=custom (no Fallback activated)",
+      "dispatch_handle": "proc_c923aa80241c",
+      "dispatch_pid": 4037423,
+      "gitreins_task": "CRIER-HARNESS-2 (created + started in worktree)"
+    }
+  ],
+  "deferred_rows_same_block": [
+    "CRIER-HARNESS-3 (codex adapter) - same seam (adapter registry + contract table), serial after 2"
+  ],
+  "ownership_note": "canonical checkout /home/kara/crier is BEHIND origin/main (10 commits) with 8 untracked paths and a live service cwd (bin/crier, pid 971715); main left read-only, all writes from control worktree /home/kara/crier-control-20261104-0124 at origin/main. Residue: .vfs/graph/{.symbols_cache.json,coverage.json} = repository-local hilo hook output; specs/COURIER-*.md (5) = byte-identical to origin/main blobs (proven sha256) => published-bytes duplicates; docs/observability-spec.md = untracked sibling spec draft (mtime 16:27, references stale HEAD 104a2096) left untouched, no live writer.",
+  "notes": "Sibling Courier lane landed 5 rows + 5 specs 18:52-20:21 local and left worktree /home/kara/crier-wt-adapters (branch wt/CRIER-HARNESS-2-3 at e85a68e0) prepared; this tick used its own worktree/branch to avoid colliding with that prepared branch."
+}
