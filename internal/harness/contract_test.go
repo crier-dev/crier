@@ -888,24 +888,75 @@ func indexOf(args []string, want string) int {
 	return -1
 }
 
+// The fake harness records its own pid and its child's in two separate appends,
+// and the adapter's deliver timeout SIGKILLs the process group the moment it
+// expires (400ms in DeliverTimeoutKillsProcessGroup). Under host load the shell
+// can start late enough that the kill lands between those two appends — or
+// before the first one — so a single-shot read races the writer. The assertion
+// the test exists for is the process-group kill, not the write ordering, so the
+// read waits for the file to settle instead of assuming it is already complete.
+const (
+	pidsWanted       = 2
+	pidsWaitBound    = 5 * time.Second
+	pidsPollInterval = 10 * time.Millisecond
+)
+
+// readPIDs waits up to pidsWaitBound for path to hold at least pidsWanted
+// parseable pids, then returns them. A pid write that never appears (or never
+// completes) is still a red: the failure names the wait bound and carries the
+// last thing that was actually on disk.
 func readPIDs(t *testing.T, path string) []int {
 	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read pids: %v", err)
+	deadline := time.Now().Add(pidsWaitBound)
+	var lastRaw string
+	var lastErr error
+	for {
+		if raw, err := os.ReadFile(path); err != nil {
+			lastErr = err
+		} else {
+			lastRaw = string(raw)
+			pids, perr := parsePIDs(raw)
+			if len(pids) >= pidsWanted {
+				return pids
+			}
+			lastErr = perr
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(pidsPollInterval)
 	}
-	var pids []int
+	if lastErr != nil {
+		t.Fatalf("read pids: %v (waited %s for %s to hold %d pids)", lastErr, pidsWaitBound, path, pidsWanted)
+	}
+	t.Fatalf("fake harness wrote fewer than %d pids to %s within %s: %q", pidsWanted, path, pidsWaitBound, lastRaw)
+	return nil
+}
+
+// parsePIDs returns every non-empty line that parses as a pid, in file order,
+// along with the first line that did not. A caller that needs pidsWanted of
+// them tolerates a partially written file while it waits; the error is only
+// surfaced when the wait gives up.
+func parsePIDs(raw []byte) ([]int, error) {
+	var (
+		pids     []int
+		firstErr error
+	)
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		pid, err := strconv.Atoi(line)
 		if err != nil {
-			t.Fatalf("bad pid %q: %v", line, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("bad pid %q: %w", line, err)
+			}
+			continue
 		}
 		pids = append(pids, pid)
 	}
-	return pids
+	return pids, firstErr
 }
 
 // waitDead fails if pid is still signalable after budget.
