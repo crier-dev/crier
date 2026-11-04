@@ -4258,6 +4258,186 @@ paths:
   # search that returns a LOCATION (specs/CHAT-INTERFACE.md §3.8.2). The
   # collapse is a READ shape over the thread tree — records are never
   # truncated (D11 consequence 5).
+  /sessions/{id}/reads:
+    get:
+      operationId: readState
+      tags: [sessions]
+      summary: Who has read what in a session
+      description: |
+        CRIER-READS-1 (specs/COURIER-READS.md §3.1): one row per participant
+        with its stored cursor, its unread count and when it last read.
+
+        A cursor is the member's own claim about its own progress. It is NOT a
+        delivery guarantee and not a statement about another agent, and the two
+        numbers stay separate on the wire: `unread` counts messages, delivery
+        outcomes count recipients.
+
+        A caller without `session.read_state.all` sees only its own row — the
+        other rows are OMITTED rather than zeroed, so nothing implies a
+        participant has read a session it has not opened.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      responses:
+        "200":
+          description: Every participant's read state and the session's last seq.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members, last_seq]
+                properties:
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      required: [member_type, member_id, read_through_seq, unread]
+                      properties:
+                        member_type: {type: string}
+                        member_id: {type: string}
+                        read_through_seq:
+                          type: integer
+                          description: Highest seq this member has marked as read; 0 means nothing read.
+                        unread:
+                          type: integer
+                          description: Messages with seq above the cursor that this member did not author.
+                        last_read_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: Null for a member that has never marked anything — never 0 and never the session's creation time.
+                  last_seq:
+                    type: integer
+                    description: The session's last seq, the upper bound a cursor can report.
+        "403":
+          description: VISIBILITY_FORBIDDEN — the caller may not read this session.
+        "404":
+          description: The session does not exist in the caller's realm (a realm mismatch answers 404, never 403).
+    post:
+      operationId: markRead
+      tags: [sessions]
+      summary: Advance a member's read cursor
+      description: |
+        Monotonic: a `read_through_seq` below the stored cursor is refused
+        (409 READS_REWIND_REFUSED) and the stored value is unchanged. A value
+        above the session's last seq is CLAMPED and the response reports
+        `clamped: true` — the server never stores a number it cannot justify.
+
+        `read_through_seq` and `message_ids` are alternatives: ids resolve to
+        their max seq, an absent pair means "read through the latest", and
+        supplying both is 400 READS_SEQ_INVALID. A message id from another
+        session is 404 READS_MESSAGE_NOT_IN_SESSION.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [member_type, member_id]
+              properties:
+                member_type: {type: string}
+                member_id: {type: string}
+                read_through_seq:
+                  type: integer
+                  minimum: 0
+                message_ids:
+                  type: array
+                  items: {type: string}
+            example:
+              member_type: agent
+              member_id: alpha
+              read_through_seq: 42
+      responses:
+        "200":
+          description: The STORED cursor and the member's unread count after the advance.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [member_type, member_id, read_through_seq, clamped, unread]
+                properties:
+                  member_type: {type: string}
+                  member_id: {type: string}
+                  read_through_seq: {type: integer}
+                  clamped:
+                    type: boolean
+                    description: True when the requested seq exceeded the session's last seq and was clamped.
+                  unread: {type: integer}
+                  updated_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+        "400":
+          description: READS_MEMBER_REQUIRED or READS_SEQ_INVALID.
+        "403":
+          description: READS_MEMBER_NOT_PARTICIPANT or READS_FOR_OTHER_MEMBER_DENIED — marking for another member needs session.read_state.write_all.
+        "404":
+          description: READS_MESSAGE_NOT_IN_SESSION.
+        "409":
+          description: READS_REWIND_REFUSED — a cursor never moves backwards through this route.
+  /sessions/{id}/reads/unread:
+    get:
+      operationId: unreadMessages
+      tags: [sessions]
+      summary: The messages one member has not read
+      description: |
+        CRIER-READS-1 (§3.1): the transcript entries above the member's cursor
+        that the member did not author, optionally narrowed by tag. `tags` is
+        present on every entry (possibly empty) because the contract names it.
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: member_id
+          in: query
+          required: true
+          description: Whose unread list to answer.
+          schema: {type: string}
+        - name: member_type
+          in: query
+          required: false
+          description: Defaults to `agent`.
+          schema: {type: string}
+        - name: tag
+          in: query
+          required: false
+          description: Restrict to messages carrying EVERY named tag (repeatable).
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: {type: string}
+      responses:
+        "200":
+          description: The unread entries and their count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unread, count]
+                properties:
+                  unread:
+                    type: array
+                    items:
+                      type: object
+                      required: [message_id, seq, author]
+                      properties:
+                        message_id: {type: string}
+                        seq: {type: integer}
+                        tags:
+                          type: array
+                          items: {type: string}
+                        author:
+                          type: object
+                  count: {type: integer}
+        "400":
+          description: READS_MEMBER_REQUIRED — no member_id supplied.
+        "403":
+          description: The caller may not read this session or may not see this member's state.
+        "404":
+          description: The session does not exist in the caller's realm.
   /sessions/{id}/threads/{thread_id}:
     get:
       operationId: readThreadWithDepth

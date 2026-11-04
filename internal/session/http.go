@@ -2004,6 +2004,28 @@ func (h *Handler) addParticipantView(ctx context.Context, sessionID string, mt M
 // Scoping, identity and validation.
 // ---------------------------------------------------------------------------
 
+// ReadStateAccess resolves a read-state request's target session and applies
+// the session's OWN read-visibility rule — the same two decisions
+// HandleTranscript makes (realm wall → 404, never 403; a private session needs
+// membership or a granted read), so the read-state routes (CRIER-READS-1) add
+// no second way to reach a room. It writes its own refusal and answers false
+// having done so.
+//
+// It is exported for internal/reads, whose handlers the server registers
+// beside the session routes: the reads package depends on this one (it returns
+// session.State), so the session package cannot import it back.
+func (h *Handler) ReadStateAccess(w http.ResponseWriter, r *http.Request) (*State, *Session, bool) {
+	st, sess, ok := h.loadScoped(w, r)
+	if !ok {
+		return nil, nil, false
+	}
+	if err := h.authorizeRead(r.Context(), r, sess, st); err != nil {
+		writeAPIError(w, http.StatusForbidden, "VISIBILITY_FORBIDDEN", err.Error())
+		return nil, nil, false
+	}
+	return st, sess, true
+}
+
 // loadScoped resolves the realm, loads the session and refuses a session that
 // belongs to another realm as 404 — never a 403, which would confirm that a
 // session the caller cannot see exists.
@@ -2101,6 +2123,12 @@ func callerIdentity(r *http.Request) AuthorRef {
 		AsAgent:   strings.TrimSpace(r.URL.Query().Get("as_agent")),
 	}
 }
+
+// CallerIdentity is callerIdentity for a surface that lives outside this
+// package (CRIER-READS-1's read-state routes in internal/reads). It is the SAME
+// function, exported so one identity convention serves every session read
+// instead of a second spelling growing beside it.
+func CallerIdentity(r *http.Request) AuthorRef { return callerIdentity(r) }
 
 // authorizeReadAs is authorizeRead's rule with the caller named explicitly, so
 // a POST (which names its caller in the BODY) can be held to the same rule a

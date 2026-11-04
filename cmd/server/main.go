@@ -844,7 +844,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// guarded registry dispatcher the inbox routes use — no second delivery path.
 	// Every surface is realm-scoped on arrival (row 38). A store that cannot
 	// open fails the boot rather than serving a deployment with no sessions.
-	sessStore, sessHandler, err := openSessionAPI(cfg, regStore, registryHandler, nsReg, permsChecker, permsGrantEvents)
+	sessStore, sessHandler, readsHandler, err := openSessionAPI(cfg, regStore, registryHandler, nsReg, permsChecker, permsGrantEvents)
 	if err != nil {
 		slog.Error("initialize session api", "error", err)
 		return 1
@@ -921,6 +921,15 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// into a private room. The tag FILTERS (?tag= / ?tags_any=) ride the
 	// existing read routes above rather than adding a second transcript route.
 	r.HandleFunc("/tags", sessHandler.HandleListTags).Methods("GET")
+	// Read cursors (CRIER-READS-1, specs/COURIER-READS.md §3.1): who has read
+	// what, and what is unread for a member. A cursor is per (session, member)
+	// and monotonic; `reads` is a read receipt, never a delivery guarantee and
+	// never a claim about another agent. The handlers live in internal/reads
+	// and hold this same session handler as their SessionAccess, so the realm
+	// wall and the private-session rule are decided in exactly one place.
+	r.HandleFunc("/sessions/{id}/reads", readsHandler.HandleMarkRead).Methods("POST")
+	r.HandleFunc("/sessions/{id}/reads", readsHandler.HandleReadState).Methods("GET")
+	r.HandleFunc("/sessions/{id}/reads/unread", readsHandler.HandleUnread).Methods("GET")
 	// Named groups (CR-CHAT-013, D8): a curated roster addressed as @team:x
 	// that ONE message fans out to — every current member, through the same
 	// shipped fan-out path (no second delivery path). Distinct from a

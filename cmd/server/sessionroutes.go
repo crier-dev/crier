@@ -13,13 +13,44 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
+	"github.com/crier-dev/crier/internal/reads"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/session"
 )
+
+// openReadCursors opens the read-cursor store that belongs to the SELECTED
+// session backend (CRIER-READS-1, specs/COURIER-READS.md §4).
+//
+// The cursor is session state, so it follows the session backend rather than
+// introducing a fourth storage choice: a JSONL deployment keeps its cursors at
+// `<CR_SESSION_LOG_ROOT>/reads/<session_id>.jsonl` beside the transcripts they
+// describe, and a SQLite/PostgreSQL deployment keeps them in the
+// chat_read_cursors table. A store that cannot open is a boot error, the same
+// rule the session store itself follows — an operator must never get a server
+// that silently answers "nobody has read anything".
+func openReadCursors(ctx context.Context, cfg config.Config) (reads.Store, error) {
+	switch cfg.ResolvedSessionBackend() {
+	case config.SessionBackendSQLite:
+		path := strings.TrimSpace(cfg.Session.SQLitePath)
+		if path == "" {
+			path = config.DefaultSQLitePath
+		}
+		return reads.NewSQLiteStore(ctx, path)
+	case config.SessionBackendPostgres:
+		return reads.NewPostgresStore(ctx, cfg.Database.URL)
+	default:
+		root := strings.TrimSpace(cfg.Session.LogRoot)
+		if root == "" {
+			root = config.DefaultSessionLogRoot
+		}
+		return reads.NewJSONLStore(root)
+	}
+}
 
 // openSessionAPI opens the chat-session store named by CR_SESSION_BACKEND and
 // builds the session API handler. It returns the opened store so the caller can
@@ -57,14 +88,14 @@ func openSessionAPI(
 	namespaces *namespace.Registry,
 	perms *permissions.Checker,
 	grantEvents func(context.Context, string) ([]session.PermissionsGrantView, error),
-) (session.Store, *session.Handler, error) {
+) (session.Store, *session.Handler, *reads.HTTPHandler, error) {
 	sessStore, err := session.OpenStore(context.Background(), cfg.ResolvedSessionBackend(), session.StoreOptions{
 		SQLitePath:  cfg.Session.SQLitePath,
 		LogRoot:     cfg.Session.LogRoot,
 		DatabaseURL: cfg.Database.URL,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("session api: %w", err)
+		return nil, nil, nil, fmt.Errorf("session api: %w", err)
 	}
 
 	// Named groups (CR-CHAT-022): the roster persists in the SELECTED session
@@ -76,7 +107,7 @@ func openSessionAPI(
 	// applies to the session store.
 	groupStore, err := groupStoreForSessionStore(sessStore, cfg.Session.GroupRoot)
 	if err != nil {
-		return nil, nil, fmt.Errorf("group api: %w", err)
+		return nil, nil, nil, fmt.Errorf("group api: %w", err)
 	}
 
 	// Keep this selection tied to the session store's concrete backend. In
@@ -98,5 +129,19 @@ func openSessionAPI(
 		// reading the peers listing see the same identity.
 		InstanceName: federationName(cfg),
 	})
-	return sessStore, h, nil
+
+	// CRIER-READS-1: the read-state surface is built here, beside the session
+	// handler it shares its visibility rule with, and its three routes are
+	// registered in main.go with the other always-on session routes. The
+	// handler holds session.Handler as its SessionAccess, so the realm wall and
+	// the private-session rule are decided in exactly one place.
+	cursorStore, err := openReadCursors(context.Background(), cfg)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("read cursors: %w", err)
+	}
+	readHandler := reads.NewHTTPHandler(
+		&reads.Service{Repo: sessStore, Cursors: cursorStore},
+		h, &reads.Authorizer{Permissions: perms},
+	)
+	return sessStore, h, readHandler, nil
 }

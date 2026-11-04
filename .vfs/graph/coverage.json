@@ -1,0 +1,10 @@
+{
+  "contributes": 698,
+  "discovered_files": 701,
+  "no_imports": 3,
+  "package_facades": 0,
+  "schema": 1,
+  "unique_edge_sources": 698,
+  "unreadable": 0,
+  "unsupported_extension": 0
+}
