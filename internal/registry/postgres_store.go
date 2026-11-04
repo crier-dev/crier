@@ -733,8 +733,8 @@ func prepareInboxDelivery(agentID string, entry *InboxEntry) error {
 const inboxInsertSQL = `
 INSERT INTO inbox_entries (
     id, agent_id, payload, sender, idempotency_key, priority, thread_id, principal_id, created_at, expires_at,
-    leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms, selection, reply_to
-) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13, $14::jsonb, $15);`
+    leased_at, lease_id, lease_expires_at, acked, namespace, location, delivery_ms, selection, reply_to, tags
+) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, FALSE, $11, $12::jsonb, $13, $14::jsonb, $15, $16::jsonb);`
 
 func inboxInsertArgs(agentID string, entry *InboxEntry) []any {
 	return []any{
@@ -748,6 +748,9 @@ func inboxInsertArgs(agentID string, entry *InboxEntry) []any {
 		// JSONB body (NULL when the delivery named neither), and the Crier
 		// correlation the message answers is NULL when it answers nothing.
 		selectionJSONB(entry), nullText(entry.ReplyTo),
+		// COURIER-TAGS §3: the route record's tags, NULL when the message
+		// carried none.
+		tagsJSONB(entry),
 	}
 }
 
@@ -885,7 +888,7 @@ FOR KEY SHARE;`, agentID).Scan(&agentCheck)
 	rows, err := tx.Query(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''), priority,
        COALESCE(thread_id, ''), COALESCE(principal_id, ''), created_at, expires_at, COALESCE(namespace, ''), location,
-       COALESCE(delivery_ms, 0), selection, COALESCE(reply_to, '')
+       COALESCE(delivery_ms, 0), selection, COALESCE(reply_to, ''), tags
 FROM inbox_entries
 WHERE agent_id = $1
   AND acked = FALSE
@@ -910,9 +913,10 @@ LIMIT $3;`,
 		var location []byte
 		var selection []byte
 		var deliveryMs pgtype.Int8
+		var storedTags []byte
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender,
 			&entry.IdempotencyKey, &entry.Priority, &entry.ThreadID, &entry.PrincipalID, &entry.CreatedAt, &expiresAt, &entry.Namespace, &location,
-			&deliveryMs, &selection, &entry.ReplyTo); err != nil {
+			&deliveryMs, &selection, &entry.ReplyTo, &storedTags); err != nil {
 			rows.Close()
 			return nil, "", fmt.Errorf("retrieve scan: %w", err)
 		}
@@ -922,6 +926,7 @@ LIMIT $3;`,
 		// the lease it takes — and a hint-less message reads back exactly as
 		// it was delivered (no member, no invented default).
 		applySelectionJSONB(&entry, selection)
+		applyTagsJSONB(&entry, storedTags)
 		entry.ExpiresAt = expiryFromTimestamptz(expiresAt)
 		// CR-CHAT-020: the stored per-message delivery latency, read
 		// through pgtype.Int8 so a NULL (an untimed entry) scans cleanly

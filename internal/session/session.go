@@ -397,6 +397,9 @@ type Message struct {
 	// SenderIdentityBasis is server-stamped ingress assurance, never payload
 	// metadata. Empty means historical/internal provenance was not recorded.
 	SenderIdentityBasis string `json:"sender_identity_basis,omitempty"`
+	// Tags classifies the message (COURIER-TAGS §2.1). Empty on historical
+	// records; a reader must treat absent and empty identically (§6).
+	Tags []string `json:"tags,omitempty"`
 	// Seq is the ordering authority within the session; ts is display and
 	// correlation (§3.1). A client must never order by created_at alone.
 	Seq       int64     `json:"seq"`
@@ -692,6 +695,7 @@ func (st *State) upsertMessage(rec *Record) {
 		IdempotencyKey:      rec.IdempotencyKey,
 		DispatchEvidence:    rec.DispatchEvidence,
 		SenderIdentityBasis: rec.SenderIdentityBasis,
+		Tags:                rec.Tags,
 		Seq:                 rec.Seq,
 		CreatedAt:           rec.TS,
 	}

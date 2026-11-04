@@ -277,6 +277,10 @@ type transcriptMessage struct {
 	Outcomes            []outcomeView   `json:"outcomes,omitempty"`
 	IdempotencyKey      string          `json:"idempotency_key,omitempty"`
 	SenderIdentityBasis string          `json:"sender_identity_basis,omitempty"`
+	// Tags classifies the message (COURIER-TAGS §2.1). Absent on an untagged
+	// message and on every historical record, which a reader treats as the
+	// same thing as an empty list (§6).
+	Tags []string `json:"tags,omitempty"`
 	// ReplayAction distinguishes a pure replay from a new delivery attempt of
 	// the same durable message. Omitted on an original send/transcript GET.
 	ReplayAction       string             `json:"replay_action,omitempty"`
@@ -471,6 +475,10 @@ type postMessageRequest struct {
 	Targets        []AudienceTarget `json:"targets,omitempty"`
 	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 	RequestID      string           `json:"request_id,omitempty"`
+	// Tags classifies the message (COURIER-TAGS §2.1). They are validated by
+	// the same grammar the ingress write path uses, so both write paths agree —
+	// a tag this route accepts is a tag the other accepts.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -718,6 +726,15 @@ func (h *Handler) HandleTranscript(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "VISIBILITY_FORBIDDEN", err.Error())
 		return
 	}
+	// COURIER-TAGS §2.4: ?tag= (AND) and ?tags_any= (OR) narrow the transcript.
+	// The filter is applied HERE, in Go over the already-fetched set, so the
+	// JSONL, SQLite and Postgres backends answer identically and no engine
+	// grows a second query path (§2.5). An unknown tag yields an empty set,
+	// never an error (§6).
+	filter, ok := readTagFilter(w, r)
+	if !ok {
+		return
+	}
 
 	out := transcriptResponse{
 		Session:      h.viewOf(st),
@@ -726,6 +743,9 @@ func (h *Handler) HandleTranscript(w http.ResponseWriter, r *http.Request) {
 		Findings:     st.Findings,
 	}
 	for _, m := range st.Messages {
+		if !filter.Matches(m.Tags) {
+			continue
+		}
 		out.Messages = append(out.Messages, h.messageViewOf(st, m))
 	}
 	out.Count = len(out.Messages)
@@ -868,6 +888,12 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_PAYLOAD", err.Error())
 		return
 	}
+	// COURIER-TAGS §2.1: the grammar gate runs BEFORE a message id, thread or
+	// transcript row exists, so a refused tag writes nothing at all.
+	tagList, ok := h.normalizeMessageTags(w, req.Tags)
+	if !ok {
+		return
+	}
 
 	author, ok := resolveAuthor(nil, req.Sender, req.PrincipalID, req.AsAgent)
 	if !ok {
@@ -945,6 +971,7 @@ func (h *Handler) HandlePostMessage(w http.ResponseWriter, r *http.Request) {
 		Payload:             req.Payload,
 		CreatedAt:           now,
 		IdempotencyKey:      req.IdempotencyKey,
+		Tags:                tagList,
 	}
 
 	// Thread resolution: a root's thread is its own id; a reply stays in its
@@ -1537,6 +1564,7 @@ func (h *Handler) messageViewOf(st *State, m *Message) transcriptMessage {
 		Audience:            m.Audience,
 		Outcomes:            outcomeViews(m.Outcomes),
 		IdempotencyKey:      m.IdempotencyKey,
+		Tags:                m.Tags,
 		DispatchEvidence:    m.DispatchEvidence,
 		OutcomesIncomplete:  messageOutcomesIncomplete(m),
 		SenderIdentityBasis: m.SenderIdentityBasis,

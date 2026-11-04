@@ -603,6 +603,67 @@ paths:
           description: Missing or invalid bearer token — /status is not auth-exempt (CR_AUTH_TOKEN is set and no valid Authorization Bearer header was sent)
 
   # ── Relay: Pub/Sub ──
+  /tags:
+    get:
+      operationId: tagVocabulary
+      tags: [tags]
+      summary: The tag vocabulary this caller can see
+      description: |
+        COURIER-TAGS (specs/COURIER-TAGS.md §2.3): every tag in the caller's
+        realm with how many messages carry it and when it was last used, most
+        used first and ties broken by name so two identical requests answer
+        identically.
+
+        The counts are PERMISSION-SCOPED: a session the caller may not read is
+        skipped entirely, so a private room's tag neither appears nor is
+        counted — counting it would leak the existence of both the tag and the
+        room it lives in. `sys:` tags appear only for an operator principal.
+      parameters:
+        - $ref: "#/components/parameters/XCrierNamespace"
+        - name: since
+          in: query
+          required: false
+          description: Only count messages created at or after this RFC 3339 timestamp. A malformed value is INVALID_REQUEST.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          description: Truncate the list after sorting. Omitted means every tag in scope; a non-positive value is INVALID_REQUEST and a value above the maximum is TAGS_QUERY_TOO_BROAD.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: The tag vocabulary, most used first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tags]
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: object
+                      required: [tag, count, last_used]
+                      properties:
+                        tag:
+                          type: string
+                          pattern: "^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?(:[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?)?$"
+                          description: A tag in the COURIER-TAGS §2.1 grammar.
+                        count:
+                          type: integer
+                          description: Messages in the caller's scope carrying this tag.
+                        last_used:
+                          type: string
+                          format: date-time
+                          description: Creation time of the newest message carrying it.
+        "400":
+          description: INVALID_REQUEST (bad `since`/`limit`) or TAGS_QUERY_TOO_BROAD (limit above the maximum).
+        "401":
+          description: The relay requires a bearer token and none (or a wrong one) was presented.
   /relay/publish:
     post:
       operationId: relayPublish
@@ -3344,9 +3405,45 @@ paths:
         A session whose `visibility` is `private` requires the caller to be a
         member (X-Agent-ID) or to hold a read permission on it (CR-CHAT-003);
         otherwise 403 VISIBILITY_FORBIDDEN.
+
+        COURIER-TAGS (specs/COURIER-TAGS.md §2.4): `?tag=` narrows the
+        transcript to messages carrying EVERY named tag, `?tags_any=` to
+        messages carrying ANY of a comma-separated list. Filtering is a
+        predicate over the fetched set, so every storage backend answers
+        identically, and a `tag` the session has never used is an EMPTY
+        transcript, not an error. Untagged messages carry no `tags` key.
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - $ref: "#/components/parameters/XCrierNamespace"
+        - name: tag
+          in: query
+          required: false
+          style: form
+          explode: true
+          description: |-
+            Narrow the result to messages carrying EVERY named tag (AND across
+            repeated `tag` parameters — specs/COURIER-TAGS.md §2.4). A tag is
+            lowercase ASCII letters, digits, `_` and `-`, with at most ONE `:`
+            namespace separator, 1-64 characters; `sys:` is reserved for
+            operators. Case and whitespace are REFUSED, never normalized, so
+            `Build` is a 400 TAGS_INVALID. An unknown tag returns an EMPTY set
+            (200), never a 404 — polling a category that has not appeared yet
+            must not be an error. Mutually exclusive with `tags_any`.
+          schema:
+            type: array
+            items:
+              type: string
+              pattern: "^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?(:[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?)?$"
+        - name: tags_any
+          in: query
+          required: false
+          description: |-
+            The OR form: a comma-separated list returns messages carrying ANY
+            of the named tags (specs/COURIER-TAGS.md §2.4). Supplying this AND
+            `tag` in one request is a 400 TAGS_FILTER_CONFLICT — the server
+            does not guess which was meant.
+          schema:
+            type: string
       responses:
         "200":
           description: The session object and its ordered transcript.
@@ -6607,6 +6704,17 @@ components:
           description: Send-only counts keyed by every exact per-target outcome name, without roll-ups.
         idempotency_key:
           type: string
+        tags:
+          type: array
+          maxItems: 16
+          description: |-
+            The tags this message was classified with (specs/COURIER-TAGS.md
+            §2.1), in the order they were supplied. ABSENT on an untagged
+            message and on every record written before tags existed — absent
+            and empty mean the same thing to a reader, and neither is an
+            error.
+          items:
+            type: string
         replay_action:
           type: string
           enum: [replayed, redelivered, replayed_outcome_missing, replayed_outcome_unknown]
@@ -7370,6 +7478,20 @@ components:
           type: string
         request_id:
           type: string
+        tags:
+          type: array
+          maxItems: 16
+          description: |-
+            Classify the message (specs/COURIER-TAGS.md §2.1). A tag is
+            lowercase ASCII letters, digits, `_` and `-`, at most one `:`
+            namespace separator, 1-64 characters; order is preserved and exact
+            repeats collapse to one. A grammar violation is 400 TAGS_INVALID
+            naming the offending tag, more than 16 is 400 TAGS_TOO_MANY, and
+            the reserved `sys:` prefix is 403 TAGS_RESERVED_PREFIX. Tags are
+            never silently lowercased or trimmed: the client trims.
+          items:
+            type: string
+            pattern: "^[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?(:[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?)?$"
     PostSessionTaskRequest:
       type: object
       required: [payload, targets]

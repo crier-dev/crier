@@ -685,6 +685,13 @@ func (h *Handler) HandleSessionSearch(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "QUERY_REQUIRED", "q is required")
 		return
 	}
+	// COURIER-TAGS §2.4: the same ?tag= / ?tags_any= filter the transcript
+	// applies, over the same fetched set, so a search is a search WITHIN a
+	// category rather than a second indexing model (§2.5).
+	filter, ok := readTagFilter(w, r)
+	if !ok {
+		return
+	}
 	lower := strings.ToLower
 	q = lower(q)
 	channel := sess.Title
@@ -693,6 +700,9 @@ func (h *Handler) HandleSessionSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	hits := make([]searchHit, 0)
 	for _, m := range st.Messages {
+		if !filter.Matches(m.Tags) {
+			continue
+		}
 		text := lower(payloadText(m.Payload))
 		if !strings.Contains(text, q) && !strings.Contains(lower(m.ThreadID), q) && !strings.Contains(lower(m.ID), q) {
 			continue

@@ -295,15 +295,15 @@ func (s *SQLiteStore) Touch(id string, at time.Time) error {
 // The row codec is shared by claim, peek, close, purge and transfer. Lease
 // duration is reconstructed from persisted timestamps, not lost at JSON's
 // LeaseDuration json:"-" field. Payload is BLOB, so arbitrary bytes survive.
-const sqliteEntryColumns = `id,agent_id,payload,created_at,expires_at,leased_at,lease_id,lease_expires_at,acked,COALESCE(sender,''),COALESCE(idempotency_key,''),priority,COALESCE(namespace,''),COALESCE(thread_id,''),location,COALESCE(delivery_ms,0),COALESCE(principal_id,''),selection,COALESCE(reply_to,''),entry_guard`
+const sqliteEntryColumns = `id,agent_id,payload,created_at,expires_at,leased_at,lease_id,lease_expires_at,acked,COALESCE(sender,''),COALESCE(idempotency_key,''),priority,COALESCE(namespace,''),COALESCE(thread_id,''),location,COALESCE(delivery_ms,0),COALESCE(principal_id,''),selection,COALESCE(reply_to,''),entry_guard,tags`
 
 func scanSQLiteEntry(row sqliteScanner) (*InboxEntry, error) {
 	e := &InboxEntry{}
 	var created int64
 	var expiry, leased, until sql.NullInt64
 	var lease sql.NullString
-	var loc, selection, guard []byte
-	err := row.Scan(&e.ID, &e.AgentID, &e.Payload, &created, &expiry, &leased, &lease, &until, &e.ACKed, &e.Sender, &e.IdempotencyKey, &e.Priority, &e.Namespace, &e.ThreadID, &loc, &e.DeliveryMs, &e.PrincipalID, &selection, &e.ReplyTo, &guard)
+	var loc, selection, guard, tags []byte
+	err := row.Scan(&e.ID, &e.AgentID, &e.Payload, &created, &expiry, &leased, &lease, &until, &e.ACKed, &e.Sender, &e.IdempotencyKey, &e.Priority, &e.Namespace, &e.ThreadID, &loc, &e.DeliveryMs, &e.PrincipalID, &selection, &e.ReplyTo, &guard, &tags)
 	if err != nil {
 		return nil, err
 	}
@@ -326,6 +326,7 @@ func scanSQLiteEntry(row sqliteScanner) (*InboxEntry, error) {
 		}
 	}
 	applySelectionJSONB(e, selection)
+	applyTagsJSONB(e, tags)
 	return e, nil
 }
 func sqliteEntries(ctx context.Context, q *sqliteQueries, agentID string) ([]*InboxEntry, error) {
@@ -378,11 +379,14 @@ func sqliteDeliver(ctx context.Context, q *sqliteQueries, agentID string, e *Inb
 		return err
 	}
 	selection := selectionJSONB(e)
+	// tagsJSONB returns nil for an untagged entry, so the column stays SQL NULL
+	// ("never tagged" has one representation — COURIER-TAGS §6).
+	tagList, _ := tagsJSONB(e).(string)
 	payload := e.Payload
 	if payload == nil {
 		payload = []byte{}
 	}
-	_, err = q.ExecContext(ctx, `INSERT INTO inbox_entries(id,agent_id,payload,created_at,expires_at,sender,idempotency_key,priority,namespace,thread_id,location,delivery_ms,principal_id,selection,reply_to,entry_guard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, agentID, payload, sqliteTime(e.CreatedAt), sqliteTime(e.ExpiresAt), nullableSQLiteString(e.Sender), nullableSQLiteString(e.IdempotencyKey), e.Priority, nullableSQLiteString(e.Namespace), nullableSQLiteString(e.ThreadID), loc, e.DeliveryMs, nullableSQLiteString(e.PrincipalID), selection, nullableSQLiteString(e.ReplyTo), guard)
+	_, err = q.ExecContext(ctx, `INSERT INTO inbox_entries(id,agent_id,payload,created_at,expires_at,sender,idempotency_key,priority,namespace,thread_id,location,delivery_ms,principal_id,selection,reply_to,entry_guard,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, agentID, payload, sqliteTime(e.CreatedAt), sqliteTime(e.ExpiresAt), nullableSQLiteString(e.Sender), nullableSQLiteString(e.IdempotencyKey), e.Priority, nullableSQLiteString(e.Namespace), nullableSQLiteString(e.ThreadID), loc, e.DeliveryMs, nullableSQLiteString(e.PrincipalID), selection, nullableSQLiteString(e.ReplyTo), guard, nullableSQLiteString(tagList))
 	return err
 }
 func (s *SQLiteStore) Deliver(agentID string, e *InboxEntry) error {

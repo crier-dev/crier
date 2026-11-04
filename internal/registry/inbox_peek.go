@@ -75,6 +75,9 @@ func (s *MemoryStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 func cloneInboxEntry(e *InboxEntry) *InboxEntry {
 	clone := *e
 	clone.Payload = append([]byte(nil), e.Payload...)
+	if len(e.Tags) > 0 {
+		clone.Tags = append([]string(nil), e.Tags...)
+	}
 	if e.Model != nil {
 		hint := *e.Model
 		clone.Model = &hint
@@ -107,19 +110,20 @@ func (s *PostgresStore) Peek(agentID, messageID string) (*InboxEntry, error) {
 		leaseID   *string
 		acked     bool
 		selection []byte
+		tags      []byte
 	)
 	err := s.pool.QueryRow(ctx, `
 SELECT id, agent_id, payload, COALESCE(sender, ''), COALESCE(idempotency_key, ''),
        COALESCE(principal_id, ''),
        created_at, expires_at, leased_at, lease_id, acked,
-       selection, COALESCE(reply_to, '')
+       selection, COALESCE(reply_to, ''), tags
 FROM inbox_entries
 WHERE agent_id = $1 AND id = $2;`,
 		agentID, messageID,
 	).Scan(&entry.ID, &entry.AgentID, &entry.Payload, &entry.Sender, &entry.IdempotencyKey,
 		&entry.PrincipalID,
 		&entry.CreatedAt, &expiresAt, &leasedAt, &leaseID, &acked,
-		&selection, &entry.ReplyTo)
+		&selection, &entry.ReplyTo, &tags)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("%w: %q is not in agent %q's inbox", ErrMessageNotFound, messageID, agentID)
@@ -134,6 +138,9 @@ WHERE agent_id = $1 AND id = $2;`,
 	// the dispatch's selection hints and the correlation it answers — because a
 	// consumer that looks before it claims must see what it is looking at.
 	applySelectionJSONB(&entry, selection)
+	// COURIER-TAGS §2.4: a peek shows the tags the lease would hand back, so a
+	// consumer that looks before it claims sees the same classification.
+	applyTagsJSONB(&entry, tags)
 	entry.LeasedAt = leasedAt
 	if leaseID != nil {
 		entry.LeaseID = *leaseID

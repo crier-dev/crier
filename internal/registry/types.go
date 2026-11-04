@@ -129,6 +129,12 @@ type InboxEntry struct {
 	// sub-millisecond delivery is a real measurement and must not share a
 	// representation with "no delivery produced this entry".
 	DeliveryMs int64 `json:"delivery_ms,omitempty"`
+	// Tags classifies the message (COURIER-TAGS §2.1), carried on the route
+	// record so an inbox filter can answer for a QUEUED message: the session
+	// it came from may be in another realm, or already gone. Empty on every
+	// entry written before the field existed, and an empty list is rendered
+	// absent (omitempty) — a reader treats the two identically (§6).
+	Tags []string `json:"tags,omitempty"`
 	// Priority is the sender-supplied retrieval priority (CR-FEAT-035),
 	// bounded by MinMessagePriority..MaxMessagePriority (0..9). Retrieve hands
 	// back the HIGHEST priority messages first; messages of equal priority keep

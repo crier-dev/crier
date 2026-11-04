@@ -99,6 +99,10 @@ type Record struct {
 	IdempotencyKey      string             `json:"idempotency_key,omitempty"`
 	DispatchEvidence    []DispatchEvidence `json:"dispatch_evidence,omitempty"`
 	SenderIdentityBasis string             `json:"sender_identity_basis,omitempty"`
+	// Tags classifies the message (COURIER-TAGS §2.1). They live on the
+	// message record itself, so the JSONL log carries them with no migration
+	// and an exported bundle keeps them (§3).
+	Tags []string `json:"tags,omitempty"`
 
 	// --- session.thread.branch ---
 	ParentThreadID  string `json:"parent_thread_id,omitempty"`
@@ -469,6 +473,13 @@ func (m *Message) Record() *Record {
 		IdempotencyKey:      m.IdempotencyKey,
 		DispatchEvidence:    m.DispatchEvidence,
 		SenderIdentityBasis: m.SenderIdentityBasis,
+		// Tags ride the message record itself (COURIER-TAGS §3), so the log,
+		// the projection and an exported bundle all carry them. A record
+		// rebuilt from this Message — including the fan-out's write-back of
+		// outcomes onto the same seq — keeps them; without this line the
+		// keep-LAST re-projection would silently strip a tag a later read
+		// still expects.
+		Tags: m.Tags,
 	}
 }
 

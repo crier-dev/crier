@@ -914,6 +914,13 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// and the generated summary (an index, never the record).
 	r.HandleFunc("/sessions/{id}/output", sessHandler.HandleSessionOutput).Methods("GET")
 	r.HandleFunc("/sessions/{id}/search", sessHandler.HandleSessionSearch).Methods("GET")
+	// COURIER-TAGS (CRIER-TAGS-1) §2.3: the message-tag VOCABULARY — the tags
+	// this caller may actually read, with a count and a last-used timestamp per
+	// tag. A read surface, additive to the transcript: it reuses the sessions
+	// handler's own realm and visibility gates, so it cannot become a side door
+	// into a private room. The tag FILTERS (?tag= / ?tags_any=) ride the
+	// existing read routes above rather than adding a second transcript route.
+	r.HandleFunc("/tags", sessHandler.HandleListTags).Methods("GET")
 	// Named groups (CR-CHAT-013, D8): a curated roster addressed as @team:x
 	// that ONE message fans out to — every current member, through the same
 	// shipped fan-out path (no second delivery path). Distinct from a

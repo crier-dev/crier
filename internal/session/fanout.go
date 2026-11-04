@@ -254,6 +254,10 @@ func fanoutAttemptWithReplies(ctx context.Context, deliverer InboxDeliverer, msg
 				// per-agent durable inbox is part of that storage.
 				ThreadID:  msg.ThreadID,
 				CreatedAt: time.Now().UTC(),
+				// COURIER-TAGS §2.4: the tags ride the ROUTE RECORD, so the
+				// inbox can filter a queued message without reading the session
+				// it came from (which may be another realm, or gone).
+				Tags: msg.Tags,
 				// The machine-readable location (CR-CHAT-029): the agent can SAY
 				// where it is — instance, realm, session (channel), thread and,
 				// when this send spawned a deliberately branched child thread

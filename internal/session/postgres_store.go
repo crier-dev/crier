@@ -84,6 +84,9 @@ var SchemaStatements = []string{
 		payload      JSONB NULL,
 		guard        JSONB NULL,
 		audience     JSONB NULL,
+		-- COURIER-TAGS §3: the message's tags as ONE JSON array in TEXT (the
+		-- shared SQLStore's own spelling, so both stores of an engine agree).
+		tags         TEXT NULL,
 		created_at   TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (session_id, seq)
 	)`,
@@ -127,6 +130,12 @@ var SchemaStatements = []string{
 		session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
 		last_seq   BIGINT NOT NULL DEFAULT 0
 	)`,
+	// COURIER-TAGS §3: `tags` on an EXISTING database. The column is declared
+	// in chat_transcript above for a fresh one; this additive statement is what
+	// reaches a deployment that already has the table, and it is a no-op there
+	// after the first run. PostgreSQL's IF NOT EXISTS makes it idempotent, and
+	// every pre-existing row keeps NULL — "untagged", never invented (§6).
+	`ALTER TABLE chat_transcript ADD COLUMN IF NOT EXISTS tags TEXT NULL`,
 	// The task lifecycle projection (CR-CHAT-030, §3.7): the same keep-LAST
 	// per (session_id, message_id) the §5.2 view fixes, in this engine's own
 	// types. CREATE TABLE IF NOT EXISTS needs no migration step.
@@ -451,8 +460,8 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 	_, err := s.requestExecutor().Exec(ctx, `
 		INSERT INTO chat_transcript
 			(session_id, seq, message_id, thread_id, parent_id, message_kind,
-			 author_type, author_id, principal_id, payload, guard, audience, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NULL,$11::jsonb,$12)
+			 author_type, author_id, principal_id, payload, guard, audience, tags, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NULL,$11::jsonb,$12,$13)
 		ON CONFLICT (session_id, seq) DO UPDATE SET
 			message_id   = EXCLUDED.message_id,
 			thread_id    = EXCLUDED.thread_id,
@@ -463,9 +472,10 @@ func (s *PostgresStore) projectMessage(ctx context.Context, rec *Record) error {
 			principal_id = EXCLUDED.principal_id,
 			payload      = EXCLUDED.payload,
 			audience     = EXCLUDED.audience,
+			tags         = EXCLUDED.tags,
 			created_at   = EXCLUDED.created_at`,
 		rec.SessionID, rec.Seq, rec.MessageID, rec.ThreadID, rec.ParentID, string(rec.MessageKind),
-		authorType, authorID, principalID, payload, audience, rec.TS.UTC())
+		authorType, authorID, principalID, payload, audience, encTags(rec.Tags), rec.TS.UTC())
 	if err != nil {
 		return fmt.Errorf("project message: %w", err)
 	}
@@ -704,7 +714,7 @@ func (s *PostgresStore) loadMessages(ctx context.Context, sessionID string) ([]*
 	rows, err := s.pool.Query(ctx, `
 		SELECT seq, message_id, thread_id, parent_id, message_kind,
 		       author_type, author_id, principal_id, COALESCE(payload, 'null'::jsonb),
-		       COALESCE(audience, 'null'::jsonb), created_at
+		       COALESCE(audience, 'null'::jsonb), tags, created_at
 		FROM chat_transcript WHERE session_id = $1 ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load messages: %w", err)
@@ -716,9 +726,13 @@ func (s *PostgresStore) loadMessages(ctx context.Context, sessionID string) ([]*
 		m := &Message{SessionID: sessionID}
 		var kind, authorType, authorID, principalID string
 		var payload, audience []byte
+		var storedTags *string
 		if err := rows.Scan(&m.Seq, &m.ID, &m.ThreadID, &m.ParentID, &kind,
-			&authorType, &authorID, &principalID, &payload, &audience, &m.CreatedAt); err != nil {
+			&authorType, &authorID, &principalID, &payload, &audience, &storedTags, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		if m.Tags, err = decTagsPtr(storedTags); err != nil {
+			return nil, err
 		}
 		m.Kind = MessageKind(kind)
 		m.Author = joinAuthor(authorType, authorID, principalID)

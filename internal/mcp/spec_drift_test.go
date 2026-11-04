@@ -116,6 +116,7 @@ var excludedOperations = map[string]string{
 	"createBinding":             "POST /bindings — \"Record a binding\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
 	"createGrant":               "POST /grants — \"Create a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
 	"revokeGrant":               "POST /grants/{grantid}/revoke — \"Tombstone a grant\" (CR-CHAT-007): admin-token-gated; same rationale as mintPrincipal.",
+	"tagVocabulary":             "GET /tags — the reader-facing tag vocabulary (COURIER-TAGS §2.3). Its counts are PERMISSION-SCOPED to the sessions the calling identity may read, and the MCP bridge holds one shared message token, so a tool would answer a different question than the route does. The agent-facing category summary is CRIER-MCP-NUDGE's `courier_unread_summary`, which reclassifies this entry when it lands.",
 	"healthCheck":               "GET /health — server liveness probe (spec tag \"health\": \"Server liveness, build identity and effective runtime posture\"); an operator/load-balancer surface, not an agent-messaging verb.",
 	"buildVersion":              "GET /version — \"Build identity of the running server\" (same identity `crier -version` prints and the startup log carries); an operator/CLI concern, not an agent-messaging verb.",
 	"runtimeStatus":             "GET /status — \"Effective runtime posture (auth, guard, registry backend, build identity)\"; operator-only and deliberately NOT auth-exempt, so it is not something a bridge identity should fetch on a tool call.",

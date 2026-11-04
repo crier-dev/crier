@@ -69,7 +69,7 @@ func TestRunMigrations_SchemaMigrationsCreated(t *testing.T) {
 		SELECT version, dirty FROM schema_migrations
 	`).Scan(&version, &dirty)
 	require.NoError(t, err, "schema_migrations table should exist after migration")
-	assert.Equal(t, 18, version, "should reflect migration 018 for durable A2A replay receipts")
+	assert.Equal(t, 19, version, "should reflect migration 019 for the message tags on the route record")
 	assert.False(t, dirty, "migrations should not be marked dirty")
 }
 

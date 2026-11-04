@@ -926,7 +926,7 @@ func TestPostgresStoreUnit_Deliver_Success(t *testing.T) {
 	// answers nothing, so the last two args are SQL NULL.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", entry.Payload, "foreman", "k-1",
-			0, "thr-1", "prin_01", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil, nil, nil).
+			0, "thr-1", "prin_01", pgxmock.AnyArg(), pgxmock.AnyArg(), nil, `{"channel":"sess-1","thread":"thr-1"}`, nil, nil, nil, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", entry)
@@ -947,7 +947,7 @@ func TestPostgresStoreUnit_Deliver_AbsentProvenanceIsSQLNull(t *testing.T) {
 	// both optional columns are SQL NULL.
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), nil, nil,
-			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
+			0, nil, nil, pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil, nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -961,7 +961,7 @@ func TestPostgresStoreUnit_Deliver_AgentNotFound(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "missing", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
+								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil, nil).
 		WillReturnError(&pgconn.PgError{Code: "23503"}) // FK violation
 
 	err := s.Deliver("missing", &InboxEntry{Payload: []byte(`{}`)})
@@ -975,7 +975,9 @@ func TestPostgresStoreUnit_Deliver_DuplicateID(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-								pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil,
+								// COURIER-TAGS §3: tags column, NULL when the entry carries none.
+								nil).
 		WillReturnError(&pgconn.PgError{Code: "23505"}) // duplicate PK
 
 	err := s.Deliver("agent", &InboxEntry{ID: "dup", Payload: []byte(`{}`)})
@@ -989,7 +991,9 @@ func TestPostgresStoreUnit_Deliver_SQLError(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO inbox_entries`).
 		WithArgs(pgxmock.AnyArg(), "agent", pgxmock.AnyArg(), pgxmock.AnyArg(),
-			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil).
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), nil, nil, nil, nil, nil,
+			// COURIER-TAGS §3: tags column, NULL when the entry carries none.
+			nil).
 		WillReturnError(errors.New("disk full"))
 
 	err := s.Deliver("agent", &InboxEntry{Payload: []byte(`{}`)})
@@ -1069,8 +1073,8 @@ func TestPostgresStoreUnit_Retrieve_Success(t *testing.T) {
 	// since CR-FEAT-036 its selection hints (one JSONB body, NULL when the
 	// delivery named neither) plus the Crier correlation it answers
 	// (COALESCE'd like the other optional text columns).
-	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "principal_id", "created_at", "expires_at", "namespace", "location", "delivery_ms", "selection", "reply_to"}).
-		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", "prin_01", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil, []byte(`{"model":"gpt-5.3","provider":"zai-glm-default"}`), "dispatch-7")
+	rows := pgxmock.NewRows([]string{"id", "agent_id", "payload", "sender", "idempotency_key", "priority", "thread_id", "principal_id", "created_at", "expires_at", "namespace", "location", "delivery_ms", "selection", "reply_to", "tags"}).
+		AddRow("msg-1", "agent", []byte(`{}`), "foreman", "", 0, "thr-1", "prin_01", now, now.Add(time.Hour), "", []byte(`{"channel":"sess-1","thread":"thr-1"}`), nil, []byte(`{"model":"gpt-5.3","provider":"zai-glm-default"}`), "dispatch-7", nil)
 	mock.ExpectQuery(`FOR UPDATE SKIP LOCKED`).
 		WithArgs("agent", pgxmock.AnyArg(), 10).
 		WillReturnRows(rows)

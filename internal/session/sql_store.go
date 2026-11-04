@@ -124,10 +124,63 @@ func (s *SQLStore) ApplySchema(ctx context.Context) error {
 			return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
 		}
 	}
+	// COURIER-TAGS §3: `tags` reaches an EXISTING database additively. The
+	// CREATE TABLE above only gives the column to a database created fresh, so
+	// an upgraded deployment gets the ALTER here, inside the same transaction
+	// as the rest of the schema — one durability point, no half-migrated view.
+	if err := s.ensureTranscriptTagsColumn(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("session %s store: apply schema: %w", s.dialect.Name(), err)
+	}
 	// The commit is the ONE durability point for the whole view, so a
 	// half-created schema cannot survive a crash mid-boot either.
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("session %s store: apply schema: commit: %w", s.dialect.Name(), err)
+	}
+	return nil
+}
+
+// ensureTranscriptTagsColumn adds chat_transcript.tags to a database created
+// before the column existed (COURIER-TAGS §3). It is idempotent: the column is
+// looked up first and the ALTER only runs when it is absent, so a fresh
+// database (where the CREATE TABLE already declared it) is untouched and a
+// restart is a no-op. The lookup is the one genuinely engine-specific bit, and
+// it stays here rather than in the Dialect interface because the DDL it guards
+// is shared.
+func (s *SQLStore) ensureTranscriptTagsColumn(ctx context.Context, tx *sql.Tx) error {
+	var exists bool
+	var err error
+	if s.dialect.Name() == BackendPostgres {
+		err = tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'chat_transcript' AND column_name = 'tags'
+			)`).Scan(&exists)
+	} else {
+		// SQLite has no information_schema; its PRAGMA is a table-valued
+		// function on every supported version, so one query answers it.
+		var name string
+		err = tx.QueryRowContext(ctx,
+			`SELECT name FROM pragma_table_info('chat_transcript') WHERE name = 'tags'`).Scan(&name)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			exists, err = false, nil
+		case err != nil:
+		default:
+			exists = true
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("inspect chat_transcript tags column: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	// Additive: existing rows keep every value they had, and `tags` is NULL on
+	// all of them — a historical message reads as untagged (§6).
+	if _, err := tx.ExecContext(ctx,
+		`ALTER TABLE chat_transcript ADD COLUMN tags TEXT NULL`); err != nil {
+		return fmt.Errorf("add chat_transcript tags column: %w", err)
 	}
 	return nil
 }
@@ -388,8 +441,8 @@ func (s *SQLStore) projectMessage(ctx context.Context, rec *Record) error {
 	_, err := s.exec(ctx, `
 		INSERT INTO chat_transcript
 			(session_id, seq, message_id, thread_id, parent_id, message_kind,
-			 author_type, author_id, principal_id, payload, guard, audience, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?)
+			 author_type, author_id, principal_id, payload, guard, audience, tags, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)
 		ON CONFLICT (session_id, seq) DO UPDATE SET
 			message_id   = excluded.message_id,
 			thread_id    = excluded.thread_id,
@@ -400,9 +453,10 @@ func (s *SQLStore) projectMessage(ctx context.Context, rec *Record) error {
 			principal_id = excluded.principal_id,
 			payload      = excluded.payload,
 			audience     = excluded.audience,
+			tags         = excluded.tags,
 			created_at   = excluded.created_at`,
 		rec.SessionID, rec.Seq, rec.MessageID, rec.ThreadID, rec.ParentID, string(rec.MessageKind),
-		authorType, authorID, principalID, encJSON(rec.Payload), audience, encTime(rec.TS))
+		authorType, authorID, principalID, encJSON(rec.Payload), audience, encTags(rec.Tags), encTime(rec.TS))
 	if err != nil {
 		return fmt.Errorf("project message: %w", err)
 	}
@@ -655,7 +709,7 @@ func (s *SQLStore) loadMembers(ctx context.Context, sessionID string) ([]*Member
 func (s *SQLStore) loadMessages(ctx context.Context, sessionID string) ([]*Message, error) {
 	rows, err := s.query(ctx, `
 		SELECT seq, message_id, thread_id, parent_id, message_kind,
-		       author_type, author_id, principal_id, payload, audience, created_at
+		       author_type, author_id, principal_id, payload, audience, tags, created_at
 		FROM chat_transcript WHERE session_id = ? ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load messages: %w", err)
@@ -665,10 +719,13 @@ func (s *SQLStore) loadMessages(ctx context.Context, sessionID string) ([]*Messa
 	for rows.Next() {
 		m := &Message{SessionID: sessionID}
 		var kind, authorType, authorID, principalID, createdAt string
-		var payload, audience sql.NullString
+		var payload, audience, storedTags sql.NullString
 		if err := rows.Scan(&m.Seq, &m.ID, &m.ThreadID, &m.ParentID, &kind,
-			&authorType, &authorID, &principalID, &payload, &audience, &createdAt); err != nil {
+			&authorType, &authorID, &principalID, &payload, &audience, &storedTags, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		if m.Tags, err = decTags(storedTags); err != nil {
+			return nil, err
 		}
 		m.Kind = MessageKind(kind)
 		m.Author = joinAuthor(authorType, authorID, principalID)

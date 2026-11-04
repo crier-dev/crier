@@ -1658,6 +1658,15 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// COURIER-TAGS §2.4 (CRIER-TAGS-1): ?tag= (AND) and ?tags_any= (OR) narrow
+	// the batch. Refusing the combination of both happens BEFORE anything is
+	// claimed, so a malformed filter can never consume a lease.
+	filter, terr := inboxTagFilter(r)
+	if terr != nil {
+		writeTagFilterError(w, terr)
+		return
+	}
+
 	// Query spellings: the spec'd `limit`/`lease_seconds`
 	// (docs/openapi.yaml) alias the historical `max`/`lease`. All four
 	// work. Precedence when both spellings appear in one request: the
@@ -1711,6 +1720,27 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	}
 	if messages == nil {
 		messages = []*InboxEntry{}
+	}
+	// COURIER-TAGS §2.4: the filter is applied HERE, in Go, over the batch the
+	// store just claimed — the one place every backend (memory, SQLite,
+	// PostgreSQL, the remote proxy) answers it identically, without a second
+	// query path in this row (§2.5).
+	//
+	// KNOWN LIMIT, stated rather than hidden: Retrieve LEASES what it returns,
+	// so a batch that is narrowed here has already been claimed. Entries this
+	// filter drops stay leased until their lease expires — they are not lost,
+	// they are briefly unavailable to another reader, and the next poll skips
+	// past them. A store-level predicate (or a peek-then-claim read) is the
+	// follow-up that removes that cost; it is deliberately NOT invented here,
+	// because §2.5 fixes filtering in one place for this row.
+	if !filter.Empty() {
+		kept := make([]*InboxEntry, 0, len(messages))
+		for _, entry := range messages {
+			if filter.Matches(entry.Tags) {
+				kept = append(kept, entry)
+			}
+		}
+		messages = kept
 	}
 
 	// Post-retrieve counters (DF-CRIER-177): the same Stats call the
