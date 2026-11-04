@@ -1,0 +1,30 @@
+{
+  "tick_id": "crier-foreman-2026-11-04-05-19-44",
+  "block": "MON-CRIER",
+  "block_title": "Observability: metrics reachable + queued-state series (P0, 5 rows)",
+  "mode": "wave",
+  "wave_budget": 2,
+  "slots_computed": "min(6, 16 - ceil(loadavg 10.38)) = 5 -> capped at WAVE_BUDGET 2",
+  "selection": "Rows MON-CRIER-001 and MON-CRIER-004: mutually independent file footprints (001: config/config.go, deploy/*.service, cmd/server/observability.go mount block; 004: internal/webhook, internal/federation, internal/detect, observability.go registration hunks). 002/003/005 share the internal/metrics + registration seam and are deferred to a later serial pass; 005 (global rename) must land last by design.",
+  "spec": "docs/observability-spec.md (audit lane deliverable, adopted this tick via block-setup commit)",
+  "residue_disposition": {
+    ".vfs/graph/": "resolved-in-fact: repository-local post-commit hilo graph warm hook cache; untouched",
+    "docs/observability-spec.md": "attributed to observability-audit-2026-11-03 lane (filed MON-CRIER rows citing it); adopted as block design authority, committed via control worktree",
+    "specs/COURIER-*.md": "no provenance (zero board/event references); foreign residue, preserved untouched, not staged"
+  },
+  "workers": [
+    {
+      "task_id": "MON-CRIER-001",
+      "worktree": "TBD-at-dispatch",
+      "branch": "TBD-at-dispatch",
+      "brief": "TBD-at-dispatch"
+    },
+    {
+      "task_id": "MON-CRIER-004",
+      "worktree": "TBD-at-dispatch",
+      "branch": "TBD-at-dispatch",
+      "brief": "TBD-at-dispatch"
+    }
+  ],
+  "created_at": "2026-11-04T05:19:44+00:00"
+}
