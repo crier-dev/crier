@@ -104,6 +104,19 @@
 #   ARM C — a FOREIGN listener on the candidate port is never adopted as the
 #           decoy: the port must be held by the pid this selftest started, not
 #           merely by SOMETHING — the phantom-green QA-CRIER-9 exists for.
+#           SAME-WINDOW RULE (INT-CI-024): the fixture's foreign listener pid,
+#           the port it squatted, that port's holder pid and the holder's
+#           command line are read in ONE observation taken immediately after the
+#           child run and BEFORE any cleanup can kill the fixture listener (the
+#           EXIT trap can only kill a pid assigned after that observation, and
+#           the per-arm kills come after it too) — no re-pick, no sleep, no
+#           re-scan that could race. A fixture listener that is GONE in that
+#           window is reported as a named ARM C SETUP failure (pid, port, what
+#           the port is held by now), NEVER as a PREMISE BROKEN verdict about
+#           the product: the rotation contract was never exercised, so that
+#           fixture proves nothing. Only the adopted-foreign-listener defect
+#           stays a product FAIL. PG_SELFTEST_FORCE_ARM_C_DEAD=1 proves this
+#           classification fires (see the budgets below).
 #
 # It also proves the candidate ROTATION itself (QA-CRIER-10), on a run of
 # consecutive ports it picks as free itself, with squatter listeners it starts
@@ -149,6 +162,11 @@
 # reding the three arms (INT-CI-024); when every try is lost the fixture reports
 # a named SETUP failure on stderr — never a PREMISE BROKEN result — and the
 # three rotation checks still count as failures.
+# PG_SELFTEST_FORCE_ARM_C_DEAD=1 makes the ARM C fixture kill its OWN foreign
+# listener between the child run and the assertion, so the named ARM C SETUP
+# classification is proven to fire instead of being taken on trust: the run
+# exits nonzero and prints `FAIL: ARM C SETUP — …`, never PREMISE BROKEN. Unset,
+# behaviour is unchanged.
 #
 # shellcheck shell=bash disable=SC2155,SC2317
 
@@ -730,6 +748,33 @@ _pg_selftest_listener_start() {
   return 0
 }
 
+# _pg_selftest_arm_c_force_dead <pid> — FORCED-FAILURE PROOF for ARM C
+# (PG_SELFTEST_FORCE_ARM_C_DEAD=1): kill the fixture's OWN foreign listener and
+# wait (bounded ~2s, no network, no re-pick) for it to be gone, so the
+# observation that follows sees a DEAD fixture exactly as a lost listener would.
+# The kill is announced on stderr: a forced run must never be mistaken for a
+# real fixture failure. It is the fixture's own listener — the very one the arm
+# is about to prove is still holding — so killing it here is legitimate.
+_pg_selftest_arm_c_force_dead() {
+  local pid="${1:-}" i=0
+  [ -n "$pid" ] || return 1
+  echo "port-guard selftest: FORCED FAILURE (PG_SELFTEST_FORCE_ARM_C_DEAD=1) — killing the ARM C fixture's foreign listener pid $pid between the child run and the assertion, to prove the SETUP classification fires" >&2
+  kill "$pid" 2>/dev/null || true
+  while [ "$i" -lt 20 ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 20 ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
 # _pg_selftest_decoy_ready <port> <pid> <log> — bounded wait (~<tries> x 0.1s) for
 # the pid WE started to be the one holding <port>, and returns 0 only on PROVEN
 # OWNERSHIP. Presence is not ownership: a candidate port held by any other pid (a
@@ -1269,10 +1314,21 @@ SHIM
       fi
 
       # ── ARM C: a FOREIGN listener on the candidate is never adopted ──────────
+      # SAME-WINDOW RULE (INT-CI-024): the fixture's foreign listener pid, the
+      # port it squatted, that port's holder pid and the holder's command line
+      # are read in ONE observation taken immediately after the child run and
+      # BEFORE any cleanup can kill the fixture listener — no re-pick, no sleep,
+      # no re-scan. A second scan later (or after the arm's own kills) can only
+      # report a different world, and a fixture that is gone by then is a SETUP
+      # failure of THIS selftest, never a PREMISE BROKEN verdict about the
+      # product: the rotation contract was never exercised, so the arm proves
+      # nothing. Only the defect this arm exists for — the FOREIGN listener
+      # adopted as the decoy — stays a product FAIL.
       local arm_c="$tmp/arm-c"
       mkdir -p "$arm_c"
       local c_count="$arm_c/bind-count" c_pids="$arm_c/foreign-pids" c_flog="$arm_c/foreign.log"
-      local c_out="" c_rc=0 c_foreign="" c_holder="" c_child_pid=""
+      local c_out="" c_rc=0 c_foreign="" c_foreign_alive=0 c_holder="" c_holder_line=""
+      local c_holder_cmd="" c_holder_note="" c_child_pid=""
       local c_abandoned="" c_rotated="" c_guards=0 c_extra=""
       printf '0\n' >"$c_count"
       : >"$c_pids"
@@ -1283,12 +1339,35 @@ SHIM
       c_abandoned="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: abandoned candidate :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       c_rotated="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: decoy port :\([0-9][0-9]*\) .*/\1/p' | head -n 1)"
       c_child_pid="$(printf '%s\n' "$c_out" | sed -n 's/^port-guard selftest: decoy listener pid \([0-9][0-9]*\) .*/\1/p' | head -n 1)"
-      # The foreign holder must STILL hold the abandoned candidate after the run:
-      # it is not ours to kill, so a run that killed it would be a second defect.
-      if [ -n "$c_abandoned" ]; then
-        c_holder="$(port_holder_pid "$c_abandoned")"
+      # FORCED-FAILURE PROOF (PG_SELFTEST_FORCE_ARM_C_DEAD=1): kill the fixture's
+      # own foreign listener BETWEEN the child run and the observation, so the
+      # SETUP classification below is exercised on demand — never trusted from a
+      # plan. It exits nonzero with the named SETUP line and never PREMISE BROKEN.
+      if [ "${PG_SELFTEST_FORCE_ARM_C_DEAD:-0}" = "1" ] && [ -n "$c_foreign" ]; then
+        _pg_selftest_arm_c_force_dead "$c_foreign"
       fi
-      # the fixture's own listener must not outlive this arm
+      # ── THE ONE OBSERVATION — the same window the assertions are made in ─────
+      # `ss` is read ONCE for the abandoned port; the holder pid comes from that
+      # single LISTEN line and the cmdline from that pid. Nothing below re-scans.
+      if [ -n "$c_abandoned" ]; then
+        c_holder_line="$(_pg_listen_line "$c_abandoned")"
+      fi
+      c_holder="$(_pg_pid_from_line "$c_holder_line")"
+      if [ -n "$c_holder" ]; then
+        c_holder_cmd="$(_pg_cmdline "$c_holder")"
+      fi
+      if [ -n "$c_foreign" ] && kill -0 "$c_foreign" 2>/dev/null; then
+        c_foreign_alive=1
+      fi
+      c_holder_note="${c_holder:-none}"
+      if [ -n "$c_holder_cmd" ]; then
+        c_holder_note="$c_holder_note — $c_holder_cmd"
+      fi
+      # ORDERING (part of the same-window rule): the fixture listeners are this
+      # selftest's OWN, so they must not outlive the arm — but only the kills
+      # BELOW may end them. The EXIT trap can only kill a pid assigned to
+      # _pg_SELFTEST_FOREIGN_PID, and that assignment happens here, after the
+      # observation; nothing above this point can reap the fixture listener.
       _pg_SELFTEST_FOREIGN_PID="$c_foreign"
       while IFS= read -r c_extra; do
         if [ -n "$c_extra" ] && [ "$c_extra" != "$c_foreign" ]; then
@@ -1303,10 +1382,23 @@ SHIM
         echo "  output: $c_out" >&2
         fails=$((fails + 1))
       elif [ -z "$c_foreign" ]; then
-        echo "port-guard selftest: FAIL: ARM C: PREMISE BROKEN — the shim left no foreign listener, so this arm proves nothing" >&2
+        echo "port-guard selftest: FAIL: ARM C SETUP — the fixture's shim squatted no foreign listener on :${c_abandoned:-unknown} (no listener pid was recorded), so this arm proves nothing" >&2
+        echo "  this is a SETUP failure of the selftest's OWN fixture, never a verdict about the product: no rotation was ever exercised, so the ARM C check counts as a failure" >&2
+        fails=$((fails + 1))
+      elif [ -n "$c_child_pid" ] && [ "$c_child_pid" = "$c_foreign" ]; then
+        # A PRODUCT defect, and it must outrank every fixture check above it: if
+        # the foreign listener was adopted as the decoy there is no abandoned
+        # candidate to examine, so a holder test here would launder the
+        # phantom-green into a SETUP error.
+        echo "port-guard selftest: FAIL: ARM C: the FOREIGN listener (pid $c_foreign) was adopted as the decoy — the phantom-green this arm exists for" >&2
+        fails=$((fails + 1))
+      elif [ "$c_foreign_alive" -ne 1 ]; then
+        echo "port-guard selftest: FAIL: ARM C SETUP — the fixture's foreign listener pid $c_foreign on :${c_abandoned:-unknown} exited before the assertion (holder now: '$c_holder_note'); the rotation contract was never exercised, so this arm proves nothing" >&2
+        echo "  this is a SETUP failure of the selftest's OWN fixture, never a verdict about the product: the child run did rotate off a foreign-held candidate, but that fixture listener was gone in the same window the assertion observes (re-run; PG_SELFTEST_FORCE_ARM_C_DEAD=1 reproduces this classification on demand)" >&2
         fails=$((fails + 1))
       elif [ "$c_holder" != "$c_foreign" ]; then
-        echo "port-guard selftest: FAIL: ARM C: PREMISE BROKEN — port :${c_abandoned:-?} was held by '${c_holder:-nothing}', not the foreign pid $c_foreign" >&2
+        echo "port-guard selftest: FAIL: ARM C SETUP — port :${c_abandoned:-unknown} is no longer held by the fixture's foreign listener pid $c_foreign (holder now: '$c_holder_note'); the rotation contract was never exercised, so this arm proves nothing" >&2
+        echo "  this is a SETUP failure of the selftest's OWN fixture, never a verdict about the product: the port left the fixture's hands between the child run and the assertion" >&2
         fails=$((fails + 1))
       elif [ -z "$c_abandoned" ] || [ -z "$c_rotated" ] || [ "$c_abandoned" = "$c_rotated" ]; then
         echo "port-guard selftest: FAIL: ARM C: no rotation off the foreign-held candidate (abandoned='${c_abandoned:-none}', rotated-to='${c_rotated:-none}')" >&2
@@ -1315,9 +1407,6 @@ SHIM
       elif [ -z "$c_child_pid" ]; then
         echo "port-guard selftest: FAIL: ARM C: the rotated run did not name its own decoy pid" >&2
         echo "  output: $c_out" >&2
-        fails=$((fails + 1))
-      elif [ "$c_child_pid" = "$c_foreign" ]; then
-        echo "port-guard selftest: FAIL: ARM C: the FOREIGN listener (pid $c_foreign) was adopted as the decoy — the phantom-green this arm exists for" >&2
         fails=$((fails + 1))
       elif ! printf '%s\n' "$c_out" | grep -q "held by pid $c_foreign"; then
         echo "port-guard selftest: FAIL: ARM C: the refusal did not name the foreign holder pid $c_foreign" >&2
@@ -1328,7 +1417,7 @@ SHIM
         echo "  output: $c_out" >&2
         fails=$((fails + 1))
       else
-        echo "PASS: ARM C: a foreign listener on :$c_abandoned (pid $c_foreign, still holding) is refused and rotated past — the decoy is pid $c_child_pid on :$c_rotated, proven ours, not merely something listening"
+        echo "PASS: ARM C: a foreign listener on :$c_abandoned (pid $c_foreign, still holding in the same window as this assertion: holder '$c_holder_note') is refused and rotated past — the decoy is pid $c_child_pid on :$c_rotated, proven ours, not merely something listening"
       fi
     fi
   fi
@@ -1533,7 +1622,10 @@ by a PATH shim for python3:
   ARM B — an exhausted rotation budget fails closed (exit 1), naming the budget
           and every attempted port, with no PASS for a decoy that never bound;
   ARM C — a foreign listener on the candidate port is never adopted as the decoy:
-          the port must be held by the pid the selftest started.
+          the port must be held by the pid the selftest started, proven in the
+          SAME observation window as the assertion; a fixture listener that is
+          gone by then is a named ARM C SETUP failure, never a PREMISE BROKEN
+          verdict about the product (PG_SELFTEST_FORCE_ARM_C_DEAD=1 proves it).
 It then proves select_scratch_port's own contract (QA-CRIER-10) on a run of
 consecutive ports it picks as free and squatters it starts and owns (its base is
 re-picked on a lost pick->bind base, PG_SELFTEST_ROT_BASE_TRIES, default 3):
