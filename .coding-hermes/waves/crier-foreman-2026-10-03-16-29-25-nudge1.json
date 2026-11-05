@@ -1,0 +1,29 @@
+{
+  "tick_id": "crier-foreman-2026-10-03-16-29-25-nudge1",
+  "block": "INT-CI-025",
+  "block_title": "CI health: port-guard selftest + harness adapter contract flakes",
+  "mode": "serial",
+  "wave_size": 1,
+  "slots": 1,
+  "slots_reason": "nproc=16, loadavg 1m=14.24 -> max(1,min(6,16-ceil(14.24)))=1; WAVE_BUDGET=6 is not the binding constraint. Loaded box = one worker, never idle.",
+  "block_selection_reason": "RESUME-FIRST: the previous tick's board event 2108 names block INT-CI-025 and it still holds ready rows (INT-CI-020, INT-CI-025). Of the block's three pending rows, INT-CI-019 is owner-gated (self-hosted runner restore-vs-retire decision) and INT-CI-020 lives in the bunker CLI/host, not in this repository, so the one in-repo actionable row is INT-CI-025: the load-sensitive internal/harness TestAdapterContract pid-file race that reds the pre-commit Tier-1 gate and the merged-tree full suite.",
+  "resume": "Continuation of an interrupted session (gateway drain_timeout). Verified no work of this tick exists: event log has no event containing this tick id; HEAD 77ba773f == origin/main, worktree clean after restoring one generated vfs cache file; no /home/kara/worktrees/crier-INT-CI-025 existed before this tick.",
+  "base": "77ba773f",
+  "worker_lane": "deepseek-v4-flash / deepseek-foreman (project-documented crier worker lane)",
+  "rows": [
+    {
+      "id": "INT-CI-025",
+      "title": "internal/harness TestAdapterContract flakes under full-suite load: a different adapter subtest reds each run with 'read pids: no such file'",
+      "worktree": "/home/kara/worktrees/crier-INT-CI-025",
+      "branch": "wt/INT-CI-025",
+      "base": "77ba773f",
+      "files_seam": "internal/harness/contract_test.go",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-20261003.3LFibU/brief-INT-CI-025.txt"
+    }
+  ],
+  "rows_left_open": [
+    {"id": "INT-CI-019", "reason": "owner-gated: self-hosted runner kara-main restore-vs-retire decision"},
+    {"id": "INT-CI-020", "reason": "infrastructure-blocked for this repo: bunker CLI --network-mode enforcement on bunker-las-03, not crier source"}
+  ],
+  "merge_order": ["INT-CI-025"]
+}
