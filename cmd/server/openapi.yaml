@@ -1289,6 +1289,9 @@ paths:
                 webhook:
                   $ref: "#/components/schemas/WebhookConfig"
                   description: "Optional webhook endpoint registered at creation time (same object as the PATCH `webhook` property) — when present the endpoint is registered immediately; absent or null leaves the agent with no webhook. Validated on registration (400 on violation), with the same rules as PATCH."
+                hermes_session:
+                  $ref: "#/components/schemas/HermesSessionConfig"
+                  description: "Optional Hermes-session delivery target — when present the agent's deliveries become turns inside a Hermes gateway session (specs/HERMES-SESSION-DELIVERY.md), bypassing the inbox; validated on registration (400 on violation), with the credential resolved per delivery"
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010, spec LLM-MESSAGE-GUARD.md §4.1/§9.2) — validated at registration (400 on violation); API keys are never part of it, only env: refs"
@@ -1378,6 +1381,9 @@ paths:
                 webhook:
                   $ref: "#/components/schemas/WebhookConfig"
                   description: "Optional webhook endpoint registered at creation time (same object and rules as POST /agents); validated on registration (400 on violation)"
+                hermes_session:
+                  $ref: "#/components/schemas/HermesSessionConfig"
+                  description: "Optional Hermes-session delivery target — when present the agent's deliveries become turns inside a Hermes gateway session (specs/HERMES-SESSION-DELIVERY.md), bypassing the inbox; validated on registration (400 on violation), with the credential resolved per delivery"
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   description: "Optional LLM message-guard policy config (CR-FEAT-010); validated at registration (400 on violation)"
@@ -1506,6 +1512,10 @@ paths:
                   $ref: "#/components/schemas/WebhookConfig"
                   nullable: true
                   description: Webhook endpoint config — registers/updates when an object; null or absent removes the webhook
+                hermes_session:
+                  $ref: "#/components/schemas/HermesSessionConfig"
+                  nullable: true
+                  description: Hermes-session delivery target — registers/updates when an object; null or absent removes it (the same contract as webhook)
                 guard:
                   $ref: "#/components/schemas/GuardAgentConfig"
                   nullable: true
@@ -1548,6 +1558,16 @@ paths:
         Delivers a message to the target agent. When the agent has a webhook
         endpoint registered, the message is POSTed there instead of the inbox
         (CR-FEAT-001; delivery_mode blocking|async|batch per WEBHOOK-DELIVERY.md).
+
+        When the agent has a `hermes_session` target registered instead, the
+        message becomes ONE turn inside a Hermes gateway session (policy new /
+        existing / per-agent) and the inbox is bypassed the same way: a 200
+        carries transport=hermes-session, hermes_session_id and the turn's
+        reply, `"replayed":true` when that message id was already delivered,
+        and the refusals are named — HERMES_GATEWAY_UNREACHABLE (502),
+        HERMES_GATEWAY_UNAUTHORIZED (502, with the gateway's own status in
+        gateway_status), HERMES_SESSION_NOT_FOUND (404) and
+        HERMES_SESSION_CLOSED (409).
 
         When the target agent has a guard policy (CR-FEAT-010), the message is
         classified by the LLM message guard before ANY delivery: allow →
@@ -6365,6 +6385,46 @@ components:
         agents:
           type: integer
           description: "Live census: agents registered into this namespace, derived from the same rows the delivery path routes on."
+    HermesSessionConfig:
+      type: object
+      description: |-
+        Optional Hermes-session delivery target
+        (specs/HERMES-SESSION-DELIVERY.md). When present, a delivery to this
+        agent becomes ONE agent turn inside a Hermes gateway session — created
+        or reused per `policy` — instead of an inbox write or a webhook POST.
+        The durable inbox is bypassed exactly as it is on the webhook path.
+        `token_file` is a PATH: the bearer token is read from that file at
+        delivery time (a regular file with no group/other permission bits) and
+        never appears in config, in a request body, or in a log line.
+        Registration validates the SHAPE only (400 on violation); the
+        credential itself is resolved per delivery, so a rotation needs no
+        re-registration and a missing file surfaces as the named refusal
+        HERMES_CREDENTIAL_UNAVAILABLE rather than as a registration nobody can
+        act on today. When both `webhook` and `hermes_session` are registered,
+        the session target wins.
+      required: [base_url, token_file]
+      properties:
+        base_url:
+          type: string
+          description: Gateway origin (http(s)://host:port); the gateway's session routes are appended.
+        token_file:
+          type: string
+          description: Filesystem path of the gateway bearer token (0600 or stricter; group/world-readable files are refused).
+        policy:
+          type: string
+          enum: [new, existing, per-agent]
+          default: new
+          description: "new = one session per message; existing = append to session_id; per-agent = one session per agent, created on first delivery and recorded in the relay process."
+        session_id:
+          type: string
+          description: The session an `existing` policy appends to. Required for that policy, and refused when set for `per-agent` (the relay records that one itself).
+        title:
+          type: string
+          description: Optional title for a session this transport CREATES (blank lets the gateway mint one).
+        timeout_ms:
+          type: integer
+          default: 30000
+          description: Per-call bound for each gateway request; absent or <=0 means the documented default.
     GuardAgentConfig:
       type: object
       required: [policies]
