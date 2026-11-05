@@ -185,6 +185,14 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	if len(args) > 0 && args[0] == "harness" {
 		return runHarness(args[1:], os.Stdout, os.Stderr, getenv)
 	}
+	// `crier a2a-client card|send|get|cancel` is crier's OUTBOUND A2A client
+	// (INT-A2A-007, specs/A2A-OPTION.md §1). Like keygen it owns its own flag
+	// set and never starts the server, so no pre-existing argument shape
+	// reaches it. It needs no local A2A switch: CR_A2A_ENABLED gates this
+	// server's A2A ROUTES, not its ability to address a foreign agent.
+	if len(args) > 0 && args[0] == "a2a-client" {
+		return runA2AClient(args[1:], os.Stdout, os.Stderr, getenv)
+	}
 
 	help, showVersion, stop, port, dbURL, pidfilePath, err := parseArgs(args, os.Stdout)
 	if err != nil {
@@ -1638,6 +1646,7 @@ func printUsage(out io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(out, "  crier [flags]")
 	fmt.Fprintln(out, "  crier keygen [flags]        generate an ed25519 keypair + the agent config (no openssl, no xxd)")
 	_, _ = fmt.Fprintln(out, "  crier harness list|probe    probe the configured harness adapters (read-only; no delivery)")
+	_, _ = fmt.Fprintln(out, "  crier a2a-client <verb>     card|send|get|cancel against a foreign A2A agent (outbound; no local switch needed)")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Flags:")
 	fs.PrintDefaults()

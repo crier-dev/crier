@@ -15,6 +15,25 @@ procedure, the gate requirements and the publish step are in
 
 ### Added
 
+- **Outbound A2A client: crier can now ADDRESS a foreign A2A agent**
+  (INT-A2A-007, `specs/A2A-OPTION.md` §5.7). New package `internal/a2a/client`
+  plus the `crier a2a-client card|send|get|cancel` subcommand. It discovers the
+  peer through `/.well-known/agent-card.json` and parses the card into the SAME
+  `AgentCard` type the publisher projects, sends `message/send` / `tasks/get` /
+  `tasks/cancel` with the server's own param structs (and its own PascalCase
+  method names, with the pre-1.0 slash dialect selectable), and reports the
+  peer's task id together with the SHA-256 digest of the card it addressed
+  (`-record PATH` writes it). Idempotency is the wire's own: one `messageId` per
+  send, reused across a retry, so a retry cannot create a second task on the
+  peer. Credentials come from a file (mode-checked) or an environment variable
+  only, are redacted under every `fmt` verb and JSON, and a card that requires a
+  scheme the client cannot present is refused before anything is sent. Four
+  failure paths answer four distinct named errors and exit codes — unreachable
+  (1), no agent card / 404 (3), invalid JSON-RPC response (4), unauthenticated /
+  401 (5) — and a 401 is exactly one request. **No route, flag or default
+  changed:** `CR_A2A_ENABLED` keeps its meaning as the gate on crier's own A2A
+  routes, and the client needs no switch at all.
+
 - **Namespaced Prometheus series, served beside the legacy names for a dated
   dual-emit window** (MON-CRIER-005, `docs/observability-spec.md` §3.1).
   Every series now also emits under `crier_<subsystem>_<thing>_<unit>`

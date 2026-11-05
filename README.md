@@ -566,6 +566,35 @@ It refuses to overwrite an existing key unless you pass `-force`, because a
 keypair is not regenerable: an agent registered with the old public key could
 never sign again.
 
+### Address a foreign A2A agent — `crier a2a-client`
+
+The same binary is crier's **outbound** A2A client: it discovers a foreign agent,
+sends it a message, and reads or cancels the task it created. It needs **no local
+A2A switch** — `CR_A2A_ENABLED` gates crier's own A2A *routes*, and this only
+talks outward — so it works on a bus whose A2A surface is dark.
+
+```bash
+./bin/crier a2a-client card   -url https://peer.example -agent-id agent-b
+./bin/crier a2a-client send   -url https://peer.example -agent-id agent-b \
+                              -text "deploy the canary" -message-id deploy-42 \
+                              -credential-file peer.token -record peer-task.json
+./bin/crier a2a-client get    -url https://peer.example -agent-id agent-b -task <id>
+./bin/crier a2a-client cancel -url https://peer.example -agent-id agent-b -task <id>
+```
+
+`-message-id` **is** the idempotency key: a retry with the same value returns the
+peer's first task instead of creating a second one, and the record says which id
+was used. `-record PATH` writes the peer's task id plus the SHA-256 digest of the
+agent card that was addressed (the same hash the card's `ETag` is derived from),
+so a later run can prove which card it talked to.
+
+Credentials come from `-credential-file` (mode 0600) or `-credential-env`, never
+from a command-line value, and never appear in output or errors. A card that
+requires a scheme you hold no credential for is refused **before** anything is
+sent. Each failure has its own exit code (1 unreachable, 3 no card, 4 invalid
+JSON-RPC response, 5 unauthenticated, 7 credential required, …) — `crier
+a2a-client -h` lists them all.
+
 ### Run
 
 **The documented path is the durable one.** Crier's inbox is durable by design,
@@ -2599,7 +2628,7 @@ ch:trace row=MON-CRIER-007 spec=docs/observability-spec.md#3.1 test=cmd/server/o
 | [`docs/federated-peer-auth.md`](docs/federated-peer-auth.md) | Federated peer auth (CR-CHAT-024) — the signed-forward recipe: keys, `CR_FED_AUTH_FILE`/`CR_FED_SELF_KEY_FILE`/`CR_FED_PEERS_FILE` on both relays, the exact `<METHOD>\n<path>\n<unix-seconds>` transcript with a copy-paste `printf`/`openssl` sign command, the verbatim refusal bodies, and an offline verify one-liner. Companion: [`docs/federated-rooms.md`](docs/federated-rooms.md) (remote participants + per-peer policy) |
 | [`docs/AGENT-ECOSYSTEM.md`](docs/AGENT-ECOSYSTEM.md) | Agent-ecosystem reference stack — setup, per-harness walkthroughs, battery guide, bunker deployment, CI ops, troubleshooting (CR-FEAT-022) |
 | [`specs/LLM-MESSAGE-GUARD.md`](specs/LLM-MESSAGE-GUARD.md) | Message guard spec (CR-SPEC-002) — verdict contract, policies, providers, kanban output |
-| [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md) | A2A interoperability as an opt-in extra (INT-A2A-001/002/003) — binding decision (JSON-RPC 2.0 + SSE), A2A ⇄ crier object mapping, the two-half gate, the route surface, the JSON-RPC binding and its part/error/streaming contracts, the non-regression contract |
+| [`specs/A2A-OPTION.md`](specs/A2A-OPTION.md) | A2A interoperability as an opt-in extra (INT-A2A-001..005 for the server surfaces, INT-A2A-007 for the OUTBOUND client) — binding decision (JSON-RPC 2.0 + SSE), A2A ⇄ crier object mapping, the two-half gate, the route surface, the JSON-RPC binding and its part/error/streaming contracts, the task lifecycle and push-configuration views, the outbound client (discovery, credentials, idempotency, named failures), the non-regression contract |
 | [`examples/demo.sh`](examples/demo.sh) | Runnable end-to-end demo (register → deliver → signed retrieve → ack) |
 
 ## Contributor hook health

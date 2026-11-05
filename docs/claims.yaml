@@ -1662,6 +1662,23 @@ claims:
     quote: "PushNotificationNotSupportedError"
     xfail: null
 
+  # --- INT-A2A-007 (appended): the OUTBOUND client — crier as an A2A client. --
+  # The row adds no route and no flag, so what is pinned is the SHIPPED surface
+  # and the spec section a client implementation is held to. The behaviour (the
+  # four named failures, the idempotent retry, the credential gate) is executed
+  # in internal/a2a/client/client_test.go and cmd/server/a2aclient_test.go, not
+  # re-told here.
+  - id: ANCHOR-A2A-OUTBOUND-CLIENT
+    kind: anchor
+    doc: README.md
+    quote: "Address a foreign A2A agent — `crier a2a-client`"
+    xfail: null
+  - id: ANCHOR-A2A-OUTBOUND-SPEC
+    kind: anchor
+    doc: specs/A2A-OPTION.md
+    quote: "### 5.7 The outbound client — crier as an A2A client (INT-A2A-007, SHIPPED)"
+    xfail: null
+
   # --- INT-A2A-004 (appended): the A2A task lifecycle. ------------------------
   # The row ships no route of its own — the four methods extend the SAME
   # `POST /a2a` binding INT-A2A-003 registered — so the claim that matters here

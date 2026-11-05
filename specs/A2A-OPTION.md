@@ -5,7 +5,8 @@ INT-A2A-002 (**SHIPPED** — the Agent Card discovery route, §5.3), INT-A2A-003
 JSON-RPC binding: SendMessage + SendStreamingMessage, §5.4), INT-A2A-004 (**SHIPPED** — the task
 lifecycle: GetTask / ListTasks / CancelTask / SubscribeToTask mapped onto the inbox entry, §5.5),
 INT-A2A-005 (**SHIPPED** — the push-notification configuration operations, §5.6), INT-A2A-006 (the
-extended card — the remaining A2A surface, NOT shipped)
+extended card — the remaining A2A surface, NOT shipped), INT-A2A-007 (**SHIPPED** — the OUTBOUND
+client: crier as an A2A client, §5.7)
 Source: **A2A v1.0.0** (`github.com/a2aproject/A2A`) — section numbers below are that specification's.
 Precedent: `specs/WEBHOOK-DELIVERY.md` (same rigor + format).
 
@@ -15,6 +16,11 @@ Crier is an agent-to-agent message bus: relay pub/sub, a WebSocket mesh, an agen
 durable inboxes. A2A is the interoperable wire protocol other agent frameworks speak. This document
 lets a crier agent be reachable by an A2A client — and, later, lets a crier agent be an A2A client —
 **without crier becoming an A2A-first system**.
+
+Both halves now exist. The second one — crier addressing a FOREIGN agent — shipped as INT-A2A-007
+(§5.7) and is the only A2A surface that is **not** behind `CR_A2A_ENABLED`: that switch gates this
+server's A2A routes, while being an A2A client is outbound-only and changes nothing this relay
+registers, answers or stores.
 
 **The standing constraint (Bane, 2026-09-25), restated into every row of this series:**
 
@@ -1013,6 +1019,107 @@ What that means, precisely:
 - **It does not make A2A first-class.** Every bit of it is behind `CR_A2A_ENABLED` and the per-agent
   opt-in, and with the switch off the route does not exist (§5.1).
 
+### 5.7 The outbound client — crier as an A2A client (INT-A2A-007, SHIPPED)
+
+§1's second half. Every section above describes crier being ADDRESSED by an A2A client; this one
+describes crier ADDRESSING a foreign A2A agent. It adds **no route, no flag, no field and no store**
+on the server: the surface is a CLI subcommand, and the code lives in `internal/a2a/client`, which
+reuses this package's `AgentCard`, `Message`, `Part`, `Task`, the param structs and the method names
+rather than restating the wire (§3's mapping table applies verbatim in this direction).
+
+| | |
+|---|---|
+| Surface | `crier a2a-client card\|send\|get\|cancel` (`cmd/server/a2aclient.go`), dispatched beside `crier keygen` before the server's own flags are parsed |
+| Gate | **none locally.** `CR_A2A_ENABLED` gates THIS server's A2A ROUTES (§4.1); being a client is outbound and registers nothing, so the subcommand works on a relay whose own A2A surface is dark — which is the live fleet bus's posture (§7's non-goals are unaffected) |
+| Binding | JSON-RPC 2.0 (§2), `POST` to the `supportedInterfaces[]` URL the peer's card advertises |
+| Default posture after the row | unchanged: with `CR_A2A_ENABLED` unset both server paths still answer `404`, and the new subcommand does not consult the switch |
+
+#### 5.7.1 Discovery
+
+`GET` the peer's `/.well-known/agent-card.json` — with `&agent_id=<id>` only when the client was given
+a selector, because a single-agent peer serves the bare path (§5.3's "why a selector"). The body is
+parsed into `a2a.AgentCard`, the SAME type §5.3 projects, and the client then acts on that card's own
+statements:
+
+| Card fact | What the client does with it |
+|---|---|
+| `supportedInterfaces[]` | picks the entry whose `protocolBinding` is `JSONRPC` (an absent binding means JSONRPC: it is the only one this client speaks), requires an absolute http(s) `url`, and sends every request there |
+| `AgentInterface.tenant` | sent as `params.tenant` — crier's routing field for a multi-agent origin (§5.3). Falls back to the discovery selector, then the card's `name` |
+| `securitySchemes` / `securityRequirements` | decides WHICH header the credential is written into, and whether the client may send at all (§5.7.2) |
+| the served bytes | hashed (`sha256:`) into the record the CLI writes (§5.7.4). It is the same hash the card's `ETag` is derived from (§5.3.2), so a recorded digest is comparable with the peer's own validator |
+
+A card that is absent, non-200, or unusable is refused with a NAMED error, never defaulted into a
+request: `AGENT_CARD_NOT_FOUND` for `404`, `AGENT_CARD_MALFORMED` for a body that is not a JSON object,
+omits `name`, declares no interfaces, or advertises no usable JSON-RPC interface.
+
+#### 5.7.2 Credentials, and the posture gate
+
+A credential is read from a **file** (mode-checked: a group- or world-readable file is refused) or an
+**environment variable**, never from a flag value or any other argument that could reach a log. The
+type has no accessor for the secret, redacts every `fmt` verb and its JSON form, and no error message
+this client produces carries the value.
+
+Before sending, the client checks the card's `securityRequirements` against what it holds. A
+requirement is a set of ALTERNATIVES (the schemes inside one entry are all required together), so the
+first fully satisfiable alternative is used; if NONE is satisfiable the client refuses with
+`CREDENTIAL_REQUIRED`, naming the peer's own scheme names, and **sends nothing**. A requirement naming
+a scheme the card does not declare is unsatisfiable by construction and is refused the same way.
+
+`401`/`403` is ONE named failure (`UNAUTHENTICATED`) and is never retried: a peer that refused the
+credential refuses it again, and a retry loop is a storm rather than resilience. This applies to the
+discovery route as well, which §5.3.1 states is authenticated like every other route.
+
+#### 5.7.3 Idempotency, and the two method dialects
+
+`message.messageId` IS the idempotency key (§5.4.2). The client mints one when the caller did not pin
+it, reports it on the result, and reuses it across its own transport retry — so a retry cannot mint a
+second task on the peer. A caller that retries in its own loop passes the same `-message-id` and
+receives the peer's FIRST task, which the record labels `replayed` when the peer's own
+`metadata.crier` says so. A changed id is a different task, and the result always states the id it
+used.
+
+The transport retries **only** a transport failure (`PEER_UNREACHABLE`), at most once. A peer's
+JSON-RPC refusal, an invalid response, a 401 and an HTTP error are answered at once.
+
+A2A v1.0.0 §9.1 fixes the binding's method names to the operation's PascalCase form
+(`SendMessage`, `GetTask`, `CancelTask`), which is what this server serves and what the client sends
+by default. The slash form (`message/send`, `tasks/get`, `tasks/cancel`) that pre-1.0 peers still
+emit is a selectable dialect (`-wire legacy`) sending the SAME params — nothing else in a request
+differs.
+
+#### 5.7.4 The record, and the named failures
+
+Every successful verb writes a record naming **the peer task id** (or the message id when the peer
+answered with a direct Message, §5.4.4's `<200` row) and **the digest of the card it addressed**,
+plus the endpoint, tenant, method dialect and replay flag. `-record PATH` makes it a JSON file (mode
+0600) readable afterwards; `-json` prints it.
+
+Each failure has its own name and its own exit code, so a script branches on the class:
+
+| name | exit | when |
+|---|---|---|
+| `PEER_UNREACHABLE` | 1 | the peer could not be reached (connection refused, DNS, TLS, timeout) |
+| `AGENT_CARD_NOT_FOUND` | 3 | discovery answered `404` |
+| `INVALID_JSONRPC_RESPONSE` | 4 | the body is not a JSON-RPC 2.0 response, or does not echo the request id, or carries neither/both of result and error |
+| `UNAUTHENTICATED` | 5 | `401`/`403` — one request, no retry |
+| `AGENT_CARD_MALFORMED` | 6 | a card that cannot be used |
+| `CREDENTIAL_REQUIRED` | 7 | the card requires a scheme this client holds no credential for — refused BEFORE sending |
+| `PEER_REFUSED` | 8 | a well-formed JSON-RPC error from the peer (its code and message are carried verbatim) |
+| `PEER_HTTP_ERROR` | 9 | an HTTP error that is not an auth answer |
+| `CREDENTIAL_INVALID` | 10 | a credential that cannot be read |
+
+#### 5.7.5 What this row deliberately does not do
+
+- **No streaming client.** `SendStreamingMessage` and `SubscribeToTask` are server surfaces; this row
+  sends, reads and cancels. A stream consumer is a separate row, and inventing one here would ship an
+  SSE parser no acceptance criterion covers.
+- **No push-notification configuration client.** The four §5.6 operations are not addressed outbound.
+- **No local A2A switch, and no change to one.** `CR_A2A_ENABLED` keeps its meaning and its default
+  (§4.1); the subcommand reads none of it.
+- **No new route, no new store, no new payload model.** The client holds no state between runs; the
+  record it writes is a report, not a task store.
+- **No retry of a refusal.** See §5.7.3.
+
 ## 6. Non-regression contract
 
 "Behaves exactly as today" is asserted over the following, with the switch **off** and with it **on**
@@ -1192,3 +1299,18 @@ still `-32601`.
 
 Still absent under both switch positions: the extended card, and any change to the relay's WebSocket
 path.
+
+### 8.6 INT-A2A-007 — the outbound client (§5.7)
+
+| Deliverable | Where |
+|---|---|
+| The client: discovery, credentials, the three operations, the named failures | `internal/a2a/client` — `New`/`Options`, `Discover` (the `/.well-known/agent-card.json` fetch, `a2a.AgentCard` parsing, `DigestOf`), `Credential` + `CredentialFromFile` / `CredentialFromEnv` (redacted, mode-checked), `Send` / `GetTask` / `CancelTask`, the `WireV1` / `WireLegacy` method dialects, and the `Err*` sentinels behind the stable names |
+| Reused, not restated | `internal/a2a` — `AgentCard` and its nested objects, `Message` / `Part`, `Task`, `SendMessageParams` / `GetTaskParams` / `CancelTaskParams`, `RPCRequest` / `RPCError`, `CardMediaType`, `AgentCardPath`, `JSONRPCBindingPath`, `ProtocolVersion`, the method-name constants |
+| The shipped surface | `cmd/server/a2aclient.go` — `runA2AClient` (`card` / `send` / `get` / `cancel`), the exit-code contract, the record writer; dispatched from `cmd/server/main.go` beside `crier keygen` |
+| The unit gate | `internal/a2a/client/client_test.go` — the card parsed from the PUBLISHER's projection, every request decoded with the SERVER's own strict decoders, the retry reusing one messageId, the pinned-id replay, the legacy dialect, the four failure paths (each with its own name and, for 401, exactly one request), the credential gate before sending, the apiKey scheme read from the card, the malformed-card table, and the redaction of a credential under every `fmt` verb and JSON |
+| The surface's gate | `cmd/server/a2aclient_test.go` — the subcommand booted against an httptest peer: the record's peer task id and card digest (re-read from disk), the replay through the shipped CLI, the four failure paths with four DISTINCT exit codes and names, the credential gate refusing before any request, the file/env credential sources, and the refused argument shapes |
+| Non-regression | `cmd/server/a2a_optin_test.go` and every other A2A gate: **unchanged**. This row adds no route and no flag; with `CR_A2A_ENABLED` unset both server paths still answer `404`, and the subcommand is exercised on a bus in exactly that posture |
+| Docs | §5.7 of this file, §1's second half, `README.md` (`crier a2a-client` in the keypair/CLI section and the spec index), `CHANGELOG.md` |
+
+Not shipped by that row: a streaming client, a push-configuration client, any server route, any flag,
+and any change to `CR_A2A_ENABLED` or to a running deployment's posture.
