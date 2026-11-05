@@ -40,6 +40,18 @@ set -u
 dir="${HARNESS_FAKE_DIR:?HARNESS_FAKE_DIR is unset}"
 mode="${HARNESS_FAKE_MODE:-ok}"
 
+# The timeout test kills this process group when the deliver timeout expires, so
+# the pids it asserts on must already be on disk. Record them FIRST — before the
+# --version check, before mktemp/argv/pwd, before stdin is drained — and emit
+# both in a single write so a reader never observes a half-written pair. The
+# adapter may SIGKILL the group at any point after exec, and a writer that runs
+# late has nothing to poll for.
+if [ "$mode" = "timeout" ]; then
+  sleep 30 &
+  child=$!
+  printf '%s\n%s\n' "$$" "$child" > "$dir/pids"
+fi
+
 if [ "${1:-}" = "--version" ]; then
   printf '%s\n' "fakeharness 1.2.3"
   exit 0
@@ -79,9 +91,9 @@ case "$mode" in
     exit 3
     ;;
   timeout)
-    printf '%s\n' "$$" >> "$dir/pids"
-    sleep 30 &
-    printf '%s\n' "$!" >> "$dir/pids"
+    # The pids were recorded up front (single write, before stdin). Here the
+    # helper must only be reaped: appending the pids a second time would make
+    # the file carry four lines and hide a regression in the early write.
     wait
     ;;
   slow)
@@ -888,13 +900,13 @@ func indexOf(args []string, want string) int {
 	return -1
 }
 
-// The fake harness records its own pid and its child's in two separate appends,
-// and the adapter's deliver timeout SIGKILLs the process group the moment it
-// expires (400ms in DeliverTimeoutKillsProcessGroup). Under host load the shell
-// can start late enough that the kill lands between those two appends — or
-// before the first one — so a single-shot read races the writer. The assertion
-// the test exists for is the process-group kill, not the write ordering, so the
-// read waits for the file to settle instead of assuming it is already complete.
+// The fake harness records its own pid and its child's in one write, as the
+// first thing it does — before any other side effect and before stdin is
+// drained — because the adapter's deliver timeout SIGKILLs the process group
+// the moment it expires (400ms in DeliverTimeoutKillsProcessGroup) and under
+// host load the shell can be killed anywhere after exec. A writer-side record
+// is the only thing that survives an early kill; the read below stays bounded
+// so a genuinely missing record is still a red rather than a hang.
 const (
 	pidsWanted       = 2
 	pidsWaitBound    = 5 * time.Second
