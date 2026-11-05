@@ -43,18 +43,52 @@ func probeBinary(ctx context.Context, binary string, features map[string]bool) (
 	return cap, nil
 }
 
-// versionFrom reads a version out of a `--version` line: the last token, which
-// is the version in every shape these CLIs print ("opencode 1.18.29",
-// "hermes 0.9.1", "1.2.3").
+// versionFrom reads a version out of a `--version` line. The shapes these CLIs
+// print are "opencode 1.18.29", "hermes 0.9.1", "1.2.3" — where the version is
+// the LAST token — and "2.1.318 (Claude Code)", where the last token is the
+// program's own parenthesised name. So the first token that LOOKS like a
+// version number wins, and only a line with no such token falls back to the
+// last field. Without that preference an adapter reports "Code)" as its
+// version, which is worse than reporting none: it looks measured.
 func versionFrom(stdout string) string {
 	for _, line := range strings.Split(stdout, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) == 0 {
 			continue
 		}
+		for _, f := range fields {
+			candidate := strings.TrimPrefix(f, "v")
+			if looksLikeVersion(candidate) {
+				return candidate
+			}
+		}
 		return strings.TrimPrefix(fields[len(fields)-1], "v")
 	}
 	return ""
+}
+
+// looksLikeVersion reports whether s starts with digits and dots — the shape
+// shared by every version string these binaries print. It is deliberately
+// loose: a pre-release suffix ("1.2.3-beta.1") still passes on its numeric
+// prefix, and a word like "Code)" cannot.
+func looksLikeVersion(s string) bool {
+	digits, dots := 0, 0
+	for i, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r == '.':
+			dots++
+		case r == '-' || r == '+':
+			return digits > 0 && dots > 0
+		default:
+			return false
+		}
+		if i == 0 && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return digits > 0 && dots > 0
 }
 
 // sessionUnknownMarkers are the harness-side classes that mean "no such

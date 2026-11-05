@@ -21,6 +21,7 @@ message is always one argv element (or one HTTP field).
 | hermes | `hermes chat -Q --resume <id> -q <text>` | gateway `POST /v1/responses` |
 | opencode | `opencode run -s <id> --format json <text>` | `opencode run --title <t> --format json <text>` |
 | opencode (server) | same + `--attach <url>` | same |
+| claude-code | `claude -p --resume <id> --output-format json <text>` | `claude -p --output-format json <text>` |
 
 The Hermes CLI cannot create a session through a verified surface, so when
 `gateway_url` is empty the adapter reports `create:false` / `gateway:false` in

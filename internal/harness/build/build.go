@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/crier-dev/crier/internal/harness"
+	"github.com/crier-dev/crier/internal/harness/claudecode"
 	"github.com/crier-dev/crier/internal/harness/codex"
 	"github.com/crier-dev/crier/internal/harness/hermes"
 	"github.com/crier-dev/crier/internal/harness/opencode"
@@ -25,7 +26,7 @@ type NudgeOptions = harness.NudgeHint
 // adapter block is skipped; every other adapter is unaffected, and a warning is
 // logged for each (§4.1).
 //
-// All four adapters are real: a block that is present is registered, a block
+// All five adapters are real: a block that is present is registered, a block
 // that was refused (malformed) is absent and only that adapter is missing.
 func Registry(cfg harness.Config) *harness.Registry {
 	return RegistryWithNudge(cfg, NudgeOptions{})
@@ -86,6 +87,15 @@ func RegistryWithNudge(cfg harness.Config, nudge NudgeOptions) *harness.Registry
 			Model:   ac.Model,
 			Sandbox: ac.Sandbox,
 			Timeout: cfg.Timeout,
+		}))
+	}
+	if ac, ok := cfg.Adapters[harness.AdapterClaudeCode]; ok {
+		r.Register(claudecode.New(claudecode.Config{
+			Binary:         ac.Binary,
+			Workdir:        ac.Workdir,
+			Model:          ac.Model,
+			PermissionMode: ac.PermissionMode,
+			Timeout:        cfg.Timeout,
 		}))
 	}
 	return r

@@ -206,9 +206,28 @@ A `failed` receipt never changes the HTTP status of the ingress call: storage su
 - **Restart with in-flight deliveries:** receipts are written on completion; an interrupted
   delivery is recorded as `failed` with `Error:"HARNESS_INTERRUPTED"` by the next start.
 
+### 6.6 claude-code — BUILT (CRIER-HARNESS-11)
+
+Decision: **build**, not refuse. The row asked for the choice in writing; the adapter exists at
+`internal/harness/claudecode` and is registered as `claude-code` (config binary default `claude`).
+
+- **Verified surfaces** (read back from the installed 2.1.318 binary, not assumed):
+  create `claude -p --output-format json <text>`; continue `claude -p --resume <id> --output-format json <text>`.
+  There is no create-with-a-chosen-id flag, so like codex the adapter always takes the id the CLI
+  minted, and the first delivery binds it to the Crier session (§4.3).
+- **Honest failure, not invention**: an unknown `--resume` id is `HARNESS_SESSION_UNKNOWN`; exit 0 with
+  `is_error:true` in the JSON result is a FAILED receipt, because "the process ran" is not "the agent
+  answered"; a create that mints no id downgrades to `OUTPUT_INVALID`.
+- **Permission posture is not widened silently**: `--permission-mode` is passed only when configured.
+- **Known host block (not an adapter defect)**: on a host whose `~/.claude/settings.json` routes the CLI
+  at a dead local router (the same Claude Code Router shape that blocks codex), a turn hangs and the
+  adapter reports `HARNESS_TIMEOUT` with no transcript. The gated leg
+  `TestLiveTurnAgainstTheInstalledBinary` records exactly that, so the block is visible in evidence
+  instead of being mistaken for a broken adapter.
+
 ## 7. Testing
 
-Per adapter (four adapters × the same contract):
+Per adapter (five adapters × the same contract):
 
 1. `TestProbeReportsBinaryAndVersion` — with a fake script on `PATH` printing `--version`.
 2. `TestProbeMissingBinary` — `binary: /nonexistent` → `available:false` with a reason naming it.

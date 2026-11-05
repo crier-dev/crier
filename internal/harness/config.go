@@ -25,14 +25,15 @@ const (
 
 	// Adapter names. The four config blocks are accepted from day one; pi and
 	// codex report unavailable until their rows land.
-	AdapterHermes   = "hermes"
-	AdapterOpencode = "opencode"
-	AdapterPi       = "pi"
-	AdapterCodex    = "codex"
+	AdapterHermes     = "hermes"
+	AdapterOpencode   = "opencode"
+	AdapterPi         = "pi"
+	AdapterCodex      = "codex"
+	AdapterClaudeCode = "claude-code"
 )
 
 // KnownAdapters is the closed set of adapter names a config block may use.
-var KnownAdapters = []string{AdapterHermes, AdapterOpencode, AdapterPi, AdapterCodex}
+var KnownAdapters = []string{AdapterHermes, AdapterOpencode, AdapterPi, AdapterCodex, AdapterClaudeCode}
 
 // AdapterConfig is one adapters.<name> block. The union is deliberate: the
 // fields a harness does not use stay empty, and an unknown key inside a block
@@ -59,6 +60,10 @@ type AdapterConfig struct {
 
 	// codex sandbox mode (accepted for CRIER-HARNESS-3).
 	Sandbox string `yaml:"sandbox"`
+
+	// claude-code --permission-mode (accepted for CRIER-HARNESS-11). Empty
+	// leaves the operator's posture untouched.
+	PermissionMode string `yaml:"permission_mode"`
 }
 
 // Config is the harness block.
@@ -86,10 +91,11 @@ func DefaultConfig() Config {
 		Timeout:       DefaultTimeout,
 		MaxConcurrent: DefaultMaxConcurrent,
 		Adapters: map[string]AdapterConfig{
-			AdapterHermes:   {Binary: AdapterHermes},
-			AdapterOpencode: {Binary: AdapterOpencode, Username: "opencode"},
-			AdapterPi:       {Binary: AdapterPi},
-			AdapterCodex:    {Binary: AdapterCodex, Sandbox: "workspace-write"},
+			AdapterHermes:     {Binary: AdapterHermes},
+			AdapterOpencode:   {Binary: AdapterOpencode, Username: "opencode"},
+			AdapterPi:         {Binary: AdapterPi},
+			AdapterCodex:      {Binary: AdapterCodex, Sandbox: "workspace-write"},
+			AdapterClaudeCode: {Binary: "claude"},
 		},
 		Disabled: map[string]string{},
 	}
