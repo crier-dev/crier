@@ -3304,3 +3304,15 @@ tasks:
   status: complete
   created_at: '2026-11-05T19:59:58.610825+00:00'
   completed_at: '2026-11-05T20:10:01.718119+00:00'
+- id: PERF-001
+  title: SQLite WAL journal mode for session store
+  criteria:
+  - 'PRAGMA journal_mode=WAL QueryRow at open for file-backed stores with logged rollback
+    fallback for :memory: and sidecar-less filesystems; test asserts pragma answers
+    wal over a temp file and the fallback arm serves a create; go build/vet/test ./internal/session/...
+    pass; BenchmarkSessionCreate p50 <= 5ms at -benchtime=20x; docs/performance.md
+    records before/after and marks Remediation item 1 applied; JSONL and PostgreSQL
+    backends unchanged'
+  status: complete
+  created_at: '2026-11-05T22:12:48.846614+00:00'
+  completed_at: '2026-11-05T22:50:18.513904+00:00'
