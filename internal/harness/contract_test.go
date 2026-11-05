@@ -40,6 +40,18 @@ set -u
 dir="${HARNESS_FAKE_DIR:?HARNESS_FAKE_DIR is unset}"
 mode="${HARNESS_FAKE_MODE:-ok}"
 
+# The timeout test kills this process group when the deliver timeout expires, so
+# the pids it asserts on must already be on disk. Record them FIRST — before the
+# --version check, before mktemp/argv/pwd, before stdin is drained — and emit
+# both in a single write so a reader never observes a half-written pair. The
+# adapter may SIGKILL the group at any point after exec, and a writer that runs
+# late has nothing to poll for.
+if [ "$mode" = "timeout" ]; then
+  sleep 30 &
+  child=$!
+  printf '%s\n%s\n' "$$" "$child" > "$dir/pids"
+fi
+
 if [ "${1:-}" = "--version" ]; then
   printf '%s\n' "fakeharness 1.2.3"
   exit 0
@@ -79,9 +91,9 @@ case "$mode" in
     exit 3
     ;;
   timeout)
-    printf '%s\n' "$$" >> "$dir/pids"
-    sleep 30 &
-    printf '%s\n' "$!" >> "$dir/pids"
+    # The pids were recorded up front (single write, before stdin). Here the
+    # helper must only be reaped: appending the pids a second time would make
+    # the file carry four lines and hide a regression in the early write.
     wait
     ;;
   slow)
@@ -888,24 +900,75 @@ func indexOf(args []string, want string) int {
 	return -1
 }
 
+// The fake harness records its own pid and its child's in one write, as the
+// first thing it does — before any other side effect and before stdin is
+// drained — because the adapter's deliver timeout SIGKILLs the process group
+// the moment it expires (400ms in DeliverTimeoutKillsProcessGroup) and under
+// host load the shell can be killed anywhere after exec. A writer-side record
+// is the only thing that survives an early kill; the read below stays bounded
+// so a genuinely missing record is still a red rather than a hang.
+const (
+	pidsWanted       = 2
+	pidsWaitBound    = 5 * time.Second
+	pidsPollInterval = 10 * time.Millisecond
+)
+
+// readPIDs waits up to pidsWaitBound for path to hold at least pidsWanted
+// parseable pids, then returns them. A pid write that never appears (or never
+// completes) is still a red: the failure names the wait bound and carries the
+// last thing that was actually on disk.
 func readPIDs(t *testing.T, path string) []int {
 	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read pids: %v", err)
+	deadline := time.Now().Add(pidsWaitBound)
+	var lastRaw string
+	var lastErr error
+	for {
+		if raw, err := os.ReadFile(path); err != nil {
+			lastErr = err
+		} else {
+			lastRaw = string(raw)
+			pids, perr := parsePIDs(raw)
+			if len(pids) >= pidsWanted {
+				return pids
+			}
+			lastErr = perr
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(pidsPollInterval)
 	}
-	var pids []int
+	if lastErr != nil {
+		t.Fatalf("read pids: %v (waited %s for %s to hold %d pids)", lastErr, pidsWaitBound, path, pidsWanted)
+	}
+	t.Fatalf("fake harness wrote fewer than %d pids to %s within %s: %q", pidsWanted, path, pidsWaitBound, lastRaw)
+	return nil
+}
+
+// parsePIDs returns every non-empty line that parses as a pid, in file order,
+// along with the first line that did not. A caller that needs pidsWanted of
+// them tolerates a partially written file while it waits; the error is only
+// surfaced when the wait gives up.
+func parsePIDs(raw []byte) ([]int, error) {
+	var (
+		pids     []int
+		firstErr error
+	)
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		pid, err := strconv.Atoi(line)
 		if err != nil {
-			t.Fatalf("bad pid %q: %v", line, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("bad pid %q: %w", line, err)
+			}
+			continue
 		}
 		pids = append(pids, pid)
 	}
-	return pids
+	return pids, firstErr
 }
 
 // waitDead fails if pid is still signalable after budget.

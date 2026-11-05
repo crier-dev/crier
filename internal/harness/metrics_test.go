@@ -11,6 +11,7 @@ package harness_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -59,10 +60,14 @@ func scrape(t *testing.T) string {
 
 // TestHarnessDispatchMetrics dispatches one success and one coded failure
 // through the registry, then asserts the three family names and the exact
-// labelled samples. The harness name "fake" is used by no other test in this
-// package, so the exact sample values are deterministic regardless of test
-// order: exactly the two dispatches below have ever been counted under it.
+// labelled samples. The harness id carries a per-invocation suffix because the
+// counters live in the process-wide registry: `go test -count=N` reruns every
+// test inside ONE process, so a fixed id would accumulate (2, 3, … dispatches)
+// and the exact-sample assertions would fail on every rerun after the first.
+// A fresh id keeps "exactly the two dispatches below" true however many times
+// the test runs, and it is used by no other test either way.
 func TestHarnessDispatchMetrics(t *testing.T) {
+	name := fmt.Sprintf("fake_%d", time.Now().UnixNano())
 	// A FIXED injected clock keeps the histogram deterministic: the elapsed
 	// between Deliver's start stamp and its deferred observation is exactly
 	// zero no matter how many clock reads the body makes, so every
@@ -70,10 +75,10 @@ func TestHarnessDispatchMetrics(t *testing.T) {
 	// wiring, not about timing.
 	reg := harness.NewRegistry(harness.RegistryOptions{
 		Enabled: true,
-		Default: "fake",
+		Default: name,
 		Now:     func() time.Time { return time.Unix(1700000000, 0) },
 	})
-	reg.Register(&stubAdapter{name: "fake"})
+	reg.Register(&stubAdapter{name: name})
 
 	rc := reg.Deliver(context.Background(), harness.DispatchRequest{
 		SessionRef: harness.SessionRef{ID: "ses_metrics"},
@@ -85,9 +90,9 @@ func TestHarnessDispatchMetrics(t *testing.T) {
 
 	// A failed receipt carrying its code. Registering under the SAME harness
 	// id is deliberate (registration replaces, which is a documented
-	// registry property): both samples land under harness="fake", so the
+	// registry property): both samples land under harness=name, so the
 	// two state children of one adapter are asserted side by side.
-	reg.Register(&failingStub{name: "fake"})
+	reg.Register(&failingStub{name: name})
 	rc = reg.Deliver(context.Background(), harness.DispatchRequest{
 		SessionRef: harness.SessionRef{ID: "ses_metrics"},
 		Message:    harness.Message{ID: "m_fail", SessionID: "s_metrics", Text: "x"},
@@ -110,13 +115,13 @@ func TestHarnessDispatchMetrics(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`crier_harness_dispatches_total{harness="fake",state="dispatched"} 1`,
-		`crier_harness_dispatches_total{harness="fake",state="failed"} 1`,
-		`crier_harness_dispatch_errors_total{harness="fake",class="HARNESS_FAILED"} 1`,
-		`crier_harness_dispatch_duration_seconds_bucket{harness="fake",le="0.005"} 2`,
-		`crier_harness_dispatch_duration_seconds_bucket{harness="fake",le="+Inf"} 2`,
-		`crier_harness_dispatch_duration_seconds_count{harness="fake"} 2`,
-		`crier_harness_dispatch_duration_seconds_sum{harness="fake"} 0`,
+		fmt.Sprintf(`crier_harness_dispatches_total{harness=%q,state="dispatched"} 1`, name),
+		fmt.Sprintf(`crier_harness_dispatches_total{harness=%q,state="failed"} 1`, name),
+		fmt.Sprintf(`crier_harness_dispatch_errors_total{harness=%q,class="HARNESS_FAILED"} 1`, name),
+		fmt.Sprintf(`crier_harness_dispatch_duration_seconds_bucket{harness=%q,le="0.005"} 2`, name),
+		fmt.Sprintf(`crier_harness_dispatch_duration_seconds_bucket{harness=%q,le="+Inf"} 2`, name),
+		fmt.Sprintf(`crier_harness_dispatch_duration_seconds_count{harness=%q} 2`, name),
+		fmt.Sprintf(`crier_harness_dispatch_duration_seconds_sum{harness=%q} 0`, name),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("exposition missing sample %q:\n%s", want, body)
