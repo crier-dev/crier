@@ -27,6 +27,13 @@ func runHarness(args []string, out, errOut io.Writer, getenv config.Getenv) int 
 		getenv = func(string) string { return "" }
 	}
 	cfg := harness.LoadConfig(getenv)
+	// A name no adapter serves is a load-time refusal, not a warning that only
+	// surfaces at the first message (CRIER-HARNESS-9): the operator is looking
+	// at this output, and the accepted set is right here.
+	if err := cfg.Validate(); err != nil {
+		_, _ = fmt.Fprintf(errOut, "crier harness: %v\n", err)
+		return 2
+	}
 	reg := build.Registry(cfg)
 
 	if len(args) == 0 {

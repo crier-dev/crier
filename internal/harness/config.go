@@ -2,8 +2,10 @@ package harness
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +79,10 @@ type Config struct {
 	// Disabled maps an adapter name to the reason its block was refused. The
 	// adapter is not registered; every other adapter is unaffected.
 	Disabled map[string]string
+	// Unknown holds adapter names a config named that no adapter serves. They
+	// are a load-time refusal (Validate), not a warning: a block that loads and
+	// only fails at the first message reads as if it worked.
+	Unknown []string
 	// Warnings records non-fatal configuration problems worth one log line
 	// each at startup.
 	Warnings []string
@@ -178,19 +184,44 @@ func applyYAMLFile(cfg *Config, path string) error {
 			cfg.MaxConcurrent = *parsed.MaxConcurrent
 		}
 	}
+	// A block may be written under an alias (pi-agent) of an adapter that
+	// already has a shipped default block. The operator's values win over the
+	// default — that is what "configured" means — but the block is stored under
+	// the canonical id so one adapter can never be configured twice.
 	for name, node := range parsed.Adapters {
 		ac, err := decodeAdapterBlock(node)
 		if err != nil {
 			cfg.Disabled[name] = "malformed adapter block: " + err.Error()
 			continue
 		}
-		if !isKnownAdapter(name) {
+		resolved, aliased := name, false
+		if canonical, ok := CanonicalName(name); ok {
+			if canonical != name {
+				resolved, aliased = canonical, true
+			}
+		} else {
+			// Nothing serves this name. Refusing it here, at load, is the
+			// point (CRIER-HARNESS-9/12): it is recorded as Unknown so
+			// Validate can fail with the accepted set, instead of a warning
+			// that only becomes a delivery failure later.
+			cfg.Unknown = append(cfg.Unknown, name)
 			cfg.Disabled[name] = "unknown adapter"
 			continue
 		}
-		cfg.Adapters[name] = ac
-		delete(cfg.Disabled, name)
+		if aliased {
+			if _, bothSpelled := parsed.Adapters[resolved]; bothSpelled {
+				cfg.Warnings = append(cfg.Warnings,
+					fmt.Sprintf("harness adapter %q is an alias of %q and both spellings configure it; the %q block wins", name, resolved, resolved))
+				continue
+			}
+			cfg.Warnings = append(cfg.Warnings,
+				fmt.Sprintf("harness adapter %q is an alias of %q; configuring %q", name, resolved, resolved))
+		}
+		cfg.Adapters[resolved] = ac
+		delete(cfg.Disabled, resolved)
 	}
+	sort.Strings(cfg.Unknown)
+	cfg.Unknown = dedupeStrings(cfg.Unknown)
 	return nil
 }
 
@@ -273,21 +304,77 @@ func applyAdapterEnv(cfg *Config, getenv func(string) string) {
 // block was structurally fine. Values the adapter cannot act on are warnings;
 // a name outside the known set is a disabled block.
 func validate(cfg *Config) {
+	if cfg.Default != "" {
+		if canonical, ok := CanonicalName(cfg.Default); ok && canonical != cfg.Default {
+			cfg.Warnings = append(cfg.Warnings,
+				fmt.Sprintf("harness.default %q is an alias of %q; using %q", cfg.Default, canonical, canonical))
+			cfg.Default = canonical
+		}
+	}
 	if cfg.Default != "" && !isKnownAdapter(cfg.Default) {
 		cfg.Warnings = append(cfg.Warnings,
 			fmt.Sprintf("harness.default %q is not a known adapter; requests naming no harness will fail HARNESS_UNKNOWN", cfg.Default))
 	}
 	for name := range cfg.Adapters {
-		if !isKnownAdapter(name) {
-			cfg.Disabled[name] = "unknown adapter"
-			delete(cfg.Adapters, name)
+		if isKnownAdapter(name) {
+			continue
 		}
+		// An alias is the same adapter under a second spelling (pi-agent ->
+		// pi). Resolve it onto the canonical block: one block per adapter, so a
+		// config that names both spellings cannot configure the same adapter
+		// twice with different values.
+		if canonical, ok := CanonicalName(name); ok {
+			if _, exists := cfg.Adapters[canonical]; !exists {
+				cfg.Adapters[canonical] = cfg.Adapters[name]
+			}
+			delete(cfg.Adapters, name)
+			continue
+		}
+		cfg.Unknown = append(cfg.Unknown, name)
+		cfg.Disabled[name] = "unknown adapter"
+		delete(cfg.Adapters, name)
 	}
+	sort.Strings(cfg.Unknown)
+	cfg.Unknown = dedupeStrings(cfg.Unknown)
 	for name, reason := range cfg.Disabled {
 		delete(cfg.Adapters, name)
 		cfg.Warnings = append(cfg.Warnings,
 			fmt.Sprintf("harness adapter disabled: %s: %s", name, reason))
 	}
+}
+
+// Validate refuses a harness configuration that names something no adapter
+// serves. LoadConfig itself keeps returning a Config (server startup must not
+// depend on a config being perfect), so both the CLI and the server call this
+// and exit non-zero — the failure belongs at load, where an operator is still
+// looking, not at the first message.
+//
+// The accepted set is derived from KnownAdapters + the alias table, so it can
+// never drift from what the builders register.
+func (c Config) Validate() error {
+	if len(c.Unknown) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("unknown harness adapter")
+	if len(c.Unknown) > 1 {
+		b.WriteString("s")
+	}
+	b.WriteString(": ")
+	for i, name := range c.Unknown {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.Quote(name))
+		if s := Suggest(name); s != "" {
+			b.WriteString(" (did you mean ")
+			b.WriteString(strconv.Quote(s))
+			b.WriteString("?)")
+		}
+	}
+	b.WriteString("; accepted: ")
+	b.WriteString(AcceptedNamesHelp())
+	return errors.New(b.String())
 }
 
 func isKnownAdapter(name string) bool {
@@ -297,4 +384,18 @@ func isKnownAdapter(name string) bool {
 		}
 	}
 	return false
+}
+
+// dedupeStrings removes repeats from a sorted slice.
+func dedupeStrings(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	out := in[:1]
+	for _, s := range in[1:] {
+		if s != out[len(out)-1] {
+			out = append(out, s)
+		}
+	}
+	return out
 }

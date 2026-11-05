@@ -253,6 +253,15 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// Re-install the logger now that we know the user's level/format.
 	initLogger(cfg)
 
+	// A harness name no adapter serves is refused HERE, before any route is
+	// mounted: a config that loads and only fails at the first message looks
+	// like a working deployment (CRIER-HARNESS-9/12). The accepted set travels
+	// in the error so the fix does not need a doc lookup.
+	if err := cfg.Harness.Validate(); err != nil {
+		slog.Error("harness configuration refused", "error", err)
+		return 1
+	}
+
 	// Which registry backend serves is decided ONCE, from the configuration,
 	// by cfg.ResolvedRegistryBackend: store selection below and GET /status
 	// body (DF-CRIER-113) both key off this value, so the backend it advertises

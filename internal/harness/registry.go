@@ -130,6 +130,12 @@ func (r *Registry) Register(a Adapter) {
 
 // Get resolves a harness name to an adapter.
 func (r *Registry) Get(name string) (Adapter, bool) {
+	// An alias is a spelling, not a second adapter: resolve it here so a
+	// session bound `harness: pi-agent` reaches the pi adapter, and a probe of
+	// either name answers for the same binary (CRIER-HARNESS-9).
+	if canonical, ok := CanonicalName(name); ok {
+		name = canonical
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	a, ok := r.adapters[name]
