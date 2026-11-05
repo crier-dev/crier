@@ -17,9 +17,11 @@ func (sqliteDialect) Rebind(query string) string { return query }
 
 // InitStatements arms the single-connection pragmas. A SQLite deployment runs
 // one writer (NewSQLiteStore pools a single connection), so the per-connection
-// settings hold for every statement. `journal_mode` is deliberately NOT set
-// here: it returns a row, and the default rollback journal is the most
-// portable choice.
+// settings hold for every statement. `journal_mode` is deliberately NOT here:
+// the pragma returns a row, which InitStatements (row-less statements only)
+// cannot carry, so it is armed by NewSQLiteStore as a QueryRow at open — see
+// selectSQLiteJournalMode — with a logged fallback to the rollback journal
+// where WAL cannot be armed.
 func (sqliteDialect) InitStatements() []string {
 	return []string{
 		`PRAGMA busy_timeout = 5000`,

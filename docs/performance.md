@@ -1,6 +1,7 @@
 # Session API performance — SQLite baseline
 
-**Status:** measured (DF-CRIER-308) · **Scope:** the `CR_SESSION_BACKEND=sqlite`
+**Status:** measured (DF-CRIER-308); remediation item 1 applied (PERF-001) ·
+**Scope:** the `CR_SESSION_BACKEND=sqlite`
 session API surface · **Recorded artefact:** `docs/session-bench-baseline.txt`
 
 The session API (CR-CHAT-019) is an always-on surface, and the SQLite adapter is
@@ -136,10 +137,10 @@ create, seq, p50                  = 77.3 ms       (measured)
 cell service time under WAL       ≈ 2-5 ms        (5-6 × 0.04 ms + the reads below)
 ```
 
-`sqliteDialect.InitStatements` deliberately does not set `journal_mode` — it
-returns a row, so it cannot ride a list of row-less pragmas, and the comment
-records "the default rollback journal is the most portable choice". The
-measurement says what that choice costs.
+`sqliteDialect.InitStatements` does not set `journal_mode` — it returns a row, so
+it cannot ride a list of row-less pragmas — and the store used to ship the default
+rollback journal as "the most portable choice". The measurement above is what that
+choice cost; *Applied fix* below records what changing it bought.
 
 ### 2. One pooled connection makes p99 a queue, not a latency
 
@@ -161,14 +162,94 @@ the cost grows linearly with the number of sessions held, so a deployment with
 
 ---
 
+## Applied fix — `journal_mode=WAL` (PERF-001)
+
+Remediation item 1 shipped: `NewSQLiteStore` arms `PRAGMA journal_mode=WAL` on a
+file-backed database with a `QueryRow` at open (`selectSQLiteJournalMode` in
+`internal/session/sqlite.go`), before the schema is applied. It cannot ride
+`sqliteDialect.InitStatements()`: that pragma returns a row, and `InitStatements`
+carries row-less statements only.
+
+The fallback is exercised, not assumed. WAL is skipped, the rollback journal kept,
+and the reason logged (structured `slog` at WARN — never a silent no-op) when:
+
+| condition | why WAL cannot be used | journal mode kept |
+| --- | --- | --- |
+| `:memory:`, or a `file:` DSN with `mode=memory` | no file, so nowhere for `-wal`/`-shm` | `memory` |
+| the database directory cannot create a file — a probe creates and removes one file beside the database | SQLite could not create the sidecars | `delete` |
+| `PRAGMA journal_mode=WAL` errors, or answers anything other than `wal` | the driver/filesystem refused it | whatever SQLite reports |
+
+Each arm has a test: `TestSQLite_WALArmedOnFileDatabase` asserts a fresh file
+answers `delete` before the store opens and `wal` after it does (journal mode is
+persisted in the header, so that "before" is what makes the "after"
+attributable); `TestSQLite_MemoryStoreKeepsRollbackJournal`,
+`TestSQLite_SidecarRefusalKeepsRollbackJournal` and
+`TestSQLite_PragmaErrorIsAFallbackNotAnOpenFailure` assert the fallback opens, logs
+its reason, and still serves a create.
+
+### Re-recorded numbers
+
+Same instrument, same command as the baseline (`internal/session/bench_test.go`
+driving the real route set, the real handler and the real adapter over
+`httptest`), on the tick host, `go1.26.10 linux/amd64`, fixture
+`benchSeedSessions`=20 × `benchSeedMessages`=20:
+
+```bash
+go test -run "^$" -bench "BenchmarkSessionCreate$" -benchtime=20x ./internal/session/
+```
+
+```
+  create seq         n    p50_ms    p95_ms    p99_ms    max_ms    loadavg(1m)
+  ------------------ ---- --------- --------- --------- --------- ------------
+  before (rollback)  20   35.899    43.691    47.933    47.933    33.02
+  after  (WAL)       20    0.850     1.155    46.728    46.728    16.56
+  after  (WAL) r2    20    0.732     1.213    48.125    48.125    16.20
+  after  (WAL)      100    0.761     1.340    38.871    47.510    15.46
+```
+
+`p50` **35.9 ms → 0.73–0.85 ms (42–49x)**, `p95` **43.7 ms → 1.2–1.3 ms
+(33–38x)**.
+
+The p99 is **not** trimmed: it stays ~39–48 ms and that is a real cost, not an
+artefact of the change. Under WAL the durable cost moved from *every* write
+(18–30 ms each) to a much rarer stall — exactly one of the twenty creates in each
+20-sample round took ~46–48 ms, and at n=100 the p99 (38.9 ms) and max (47.5 ms)
+show the same stall recurred rather than washing out. So the cost was batched,
+not eliminated. Its mechanism is not attributed here: it is either WAL's own
+writeback/checkpoint or plain host contention (these runs sat at loadavg 15–26 on
+a shared 16-core box). Either way it is a real p99 cost and it stays in the
+record.
+
+The store floor, both arms in ONE process so they see identical host state
+(`-bench "BenchmarkSessionStoreCommitCost" -benchtime=50x`), is the
+load-independent evidence for the mechanism:
+
+```
+  commit-rollback  n=50  p50 30.308 ms  p95 242.590 ms  p99 2969.769 ms
+  commit-wal       n=50  p50  0.038 ms  p95   0.079 ms  p99    0.130 ms
+```
+
+That is **798x per durable write at p50**, and one `POST /sessions` performs 5–6
+of them. The before arm above ran at a higher 1-minute loadavg than the after
+arms; load on a shared host does not produce a 42x p50 delta, and the paired
+commit-cost arms carry the mechanism regardless.
+
+What this change does **not** fix: the single pooled connection still serialises
+every request (*Analysis* §2) and `GET /sessions` is still O(N) loads (*Analysis*
+§3), so the 100-way-concurrent p99 target is not reachable on this change alone.
+No schema, dialect or backend change rides along — JSONL and PostgreSQL are
+untouched, and a database that refuses WAL behaves exactly as it did before.
+
+---
+
 ## Remediation (ranked by measured impact)
 
-1. **`journal_mode=WAL` on the SQLite adapter** — the store's single biggest
-   lever: one record write 18.5 ms → 0.040 ms (p50), and `POST /sessions` from
-   ~77 ms to low single-digit milliseconds. It must be applied where it can
-   return a row (a `QueryRow` at open, not `InitStatements`), and it needs a
-   fallback for a database that cannot do WAL (`:memory:`, a network filesystem),
-   since the portable-rollback-journal comment is a real constraint.
+1. **`journal_mode=WAL` on the SQLite adapter** — **APPLIED (PERF-001)**: one
+   record write 18.5 ms → 0.038 ms (p50) at the store floor, and `POST /sessions`
+   from 35.9 ms → 0.73–0.85 ms (p50) on the re-recorded before/after — see
+   *Applied fix* above, including the untrimmed p99 outlier and the fallback for
+   a database that cannot do WAL (`:memory:`, a filesystem that cannot host the
+   sidecars), which the portable-rollback-journal comment was right to demand.
 2. **Do one transaction per request, not one per record.** `POST /sessions`
    currently issues 5–6 separate commits (`SQLStore.Append` = projection +
    `chat_seq` upsert, called once per record). Batching the create's records into
@@ -181,11 +262,11 @@ the cost grows linearly with the number of sessions held, so a deployment with
    keeping one connection is only required today because the per-connection
    pragmas must not be reset by a fresh pooled connection.
 
-Items 1–4 are production changes to the store and the handler and are **not**
+Items 2–4 are production changes to the store and the handler and are **not**
 made by this task: DF-CRIER-308 is a benchmarking/documentation row, and the
-baseline's job is to name the cost and size the fix, not to ship it. Item 1 alone
-is a one-line change with a measured ~400x effect on the write path and should be
-the first thing a follow-up row takes.
+baseline's job is to name the cost and size the fix, not to ship it. Item 1 was
+taken by PERF-001 (see *Applied fix*), which is why the numbers above are the only
+ones in this file that were re-recorded against a shipped change.
 
 ---
 
