@@ -305,8 +305,18 @@ COUNTERS = os.environ["FAKE_COUNTERS"]
 counts = {"status": 0, "agents": 0, "inbox": 0, "patch": 0, "other": 0}
 
 def flush():
-    with open(COUNTERS, "w") as f:
+    # ATOMIC by construction: a reader must never observe the truncate window.
+    # open(COUNTERS, "w") empties the document BEFORE json.dump fills it, so a
+    # concurrent read can parse an empty body, raise JSONDecodeError and leave
+    # the caller with no number. That is exactly how LOCAL-ROUTES-PROBES read
+    # "status= agents= inbox=" under CI load and reported the fake crier as
+    # never probed while the probes HAD hit it (INT-CI-026). Writing a sibling
+    # temp file and renaming it makes every observable state a complete
+    # document.
+    tmp = COUNTERS + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(counts, f)
+    os.replace(tmp, COUNTERS)
 
 class H(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
@@ -359,7 +369,9 @@ with open(os.environ["FAKE_PORT_FILE"], "w") as f:
     f.write(str(srv.server_address[1]))
 srv.serve_forever()
 PY
-  : > "$TMP/counters.json"
+  cat > "$TMP/counters.json" <<'JSON'
+{"status": 0, "agents": 0, "inbox": 0, "patch": 0, "other": 0}
+JSON
   FAKE_COUNTERS="$TMP/counters.json" FAKE_PORT_FILE="$TMP/fake.port" \
     python3 "$TMP/fake_crier.py" &
   FAKE_PID=$!
@@ -373,7 +385,35 @@ PY
     return 0
   fi
   FAKE_PORT="$(cat "$TMP/fake.port")"
-  counters() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], 0))' "$TMP/counters.json" "$1"; }
+  # Bounded readiness wait, NOT an immediate json.load. The counters document is
+  # rewritten on every fake-crier hit, and a read that landed before the first
+  # write (or inside a non-atomic rewrite window) returned an empty string; bash
+  # then compared `"" -ge 1`, the arm fell to its FAIL branch and reported the
+  # fake crier as never probed while the probes HAD hit it (INT-CI-026). Retry
+  # until the document parses, and report 0 only after the deadline so a genuine
+  # routing failure still fails the arm with a number instead of a traceback.
+  counters() {
+    local key="$1"
+    local val=""
+    local deadline=$((SECONDS + 5))
+    while :; do
+      if val="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], 0))
+except (OSError, ValueError):
+    raise SystemExit(1)
+' "$TMP/counters.json" "$key" 2>/dev/null)"; then
+        break
+      fi
+      if (( SECONDS >= deadline )); then
+        val=0
+        break
+      fi
+      sleep 0.05
+    done
+    printf '%s\n' "${val:-0}"
+  }
 
   # ── 7+8+9: --local never deploys, routes to the supplied host/port, skips
   #      honestly and exits 0 because zero probes failed ──────────────────────
