@@ -1,0 +1,96 @@
+{
+  "task_id": "INT-A2A-007",
+  "task_title": "outbound A2A client",
+  "task_criteria": [
+    "go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1"
+  ],
+  "passed": true,
+  "worktree": "/home/kara/crier",
+  "branch": "main",
+  "commit": "f2b051a2bff90c5bee28530fe7b2b63fa204f65c",
+  "working_tree_content_fingerprint": "b8cd5e0e5e526780858d81618ba75d5072c207f859d3ee94eaac5f7d22c14bff",
+  "working_tree_dirty_path_count": 487,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/crier: the guard would be cut off mid-run",
+      "steps": [
+        {
+          "id": "guard",
+          "type": "script",
+          "passed": true,
+          "output": "WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/crier: the guard would be cut off mid-run and report a fail-open PASS. Raising this run's budget to 420s \u2014 set guards.hook_timeout above guards.test_timeout to fix it at the source.\nTier 1: DEGRADED PASS (skips: go_build=No Go files staged, go_lint=No Go files staged, go_tests=No Go files staged)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  ~ go_build \u2014 skipped (No Go files staged)\n  ~ go_lint \u2014 skipped (No Go files staged)\n  ~ go_tests \u2014 skipped (No Go files staged)\n  guard log: /home/kara/crier/.gitreins/logs/guard-20261105T201002.090073Z.log\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/crier/.gitreins/logs/guard-20261105T201002.090073Z.log"
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1: Ran the exact chained command fresh: `go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1` -> CHAIN_EXIT=0. Output: `ok github.com/crier-dev/crier/internal/a2a 0.013s`, `ok github.com/crier-dev/crier/internal/a2a/client 0.024s`, `ok github.com/crier-dev/crier/cmd/server 0.077s`. Individually verified too: go build exit 0, go vet exit 0 (no diagnostics), a2a tests exit 0. Verbose run of the client tests shows all passing: TestA2AClientSendRecordsPeerTaskAndCardDigest, TestA2AClientCardAndTaskVerbs, TestA2AClientFourFailuresHaveDistinctExitCodes (unreachable/card404/invalidJSONRPC/unauthenticated), TestA2AClientCredentialRequiredRefusesBeforeSending, TestA2AClientCredentialFromFileAndEnv, TestA2AClientUsageRefusals (9 subtests) \u2014 all PASS. Outbound client implementation present in cmd/server/a2aclient.go with tests in cmd/server/a2aclient_test.go and internal/a2a/client/.\nAll four commands in the criterion (build, vet, internal/a2a tests, cmd/server TestA2AClient) pass with exit code 0 in a fresh chained run.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1: Ran the exact chained command fresh: `go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1` -> CHAIN_EXIT=0. Output: `ok github.com/crier-dev/crier/internal/a2a 0.013s`, `ok github.com/crier-dev/crier/internal/a2a/client 0.024s`, `ok github.com/crier-dev/crier/cmd/server 0.077s`. Individually verified too: go build exit 0, go vet exit 0 (no diagnostics), a2a tests exit 0. Verbose run of the client tests shows all passing: TestA2AClientSendRecordsPeerTaskAndCardDigest, TestA2AClientCardAndTaskVerbs, TestA2AClientFourFailuresHaveDistinctExitCodes (unreachable/card404/invalidJSONRPC/unauthenticated), TestA2AClientCredentialRequiredRefusesBeforeSending, TestA2AClientCredentialFromFileAndEnv, TestA2AClientUsageRefusals (9 subtests) \u2014 all PASS. Outbound client implementation present in cmd/server/a2aclient.go with tests in cmd/server/a2aclient_test.go and internal/a2a/client/.\nAll four commands in the criterion (build, vet, internal/a2a tests, cmd/server TestA2AClient) pass with exit code 0 in a fresh chained run.",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1",
+                "status": "PASS",
+                "detail": "Ran the exact chained command fresh: `go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1` -> CHAIN_EXIT=0. Output: `ok github.com/crier-dev/crier/internal/a2a 0.013s`, `ok github.com/crier-dev/crier/internal/a2a/client 0.024s`, `ok github.com/crier-dev/crier/cmd/server 0.077s`. Individually verified too: go build exit 0, go vet exit 0 (no diagnostics), a2a tests exit 0. Verbose run of the client tests shows all passing: TestA2AClientSendRecordsPeerTaskAndCardDigest, TestA2AClientCardAndTaskVerbs, TestA2AClientFourFailuresHaveDistinctExitCodes (unreachable/card404/invalidJSONRPC/unauthenticated), TestA2AClientCredentialRequiredRefusesBeforeSending, TestA2AClientCredentialFromFileAndEnv, TestA2AClientUsageRefusals (9 subtests) \u2014 all PASS. Outbound client implementation present in cmd/server/a2aclient.go with tests in cmd/server/a2aclient_test.go and internal/a2a/client/.",
+                "resolution_probability": 0.63
+              }
+            ],
+            "summary": "All four commands in the criterion (build, vet, internal/a2a tests, cmd/server TestA2AClient) pass with exit code 0 in a fresh chained run.",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY"
+    }
+  },
+  "summary": "Judge Result: INT-A2A-007\n\nStage tier1: PASS\n    \u2713 guard: WARN: hook_timeout=300s <= test_timeout=300s in /home/kara/crier: the guard would be cut off mid-run\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1: Ran the exact chained command fresh: `go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test ./cmd/server -run TestA2AClient -count=1` -> CHAIN_EXIT=0. Output: `ok github.com/crier-dev/crier/internal/a2a 0.013s`, `ok github.com/crier-dev/crier/internal/a2a/client 0.024s`, `ok github.com/crier-dev/crier/cmd/server 0.077s`. Individually verified too: go build exit 0, go vet exit 0 (no diagnostics), a2a tests exit 0. Verbose run of the client tests shows all passing: TestA2AClientSendRecordsPeerTaskAndCardDigest, TestA2AClientCardAndTaskVerbs, TestA2AClientFourFailuresHaveDistinctExitCodes (unreachable/card404/invalidJSONRPC/unauthenticated), TestA2AClientCredentialRequiredRefusesBeforeSending, TestA2AClientCredentialFromFileAndEnv, TestA2AClientUsageRefusals (9 subtests) \u2014 all PASS. Outbound client implementation present in cmd/server/a2aclient.go with tests in cmd/server/a2aclient_test.go and internal/a2a/client/.\nAll four commands in the criterion (build, vet, internal/a2a tests, cmd/server TestA2AClient) pass with exit code 0 in a fresh chained run.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-05T20:10:30.459954",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-05T20:10:30.552026+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 49250,
+        "truncated": false,
+        "source": "git show f2b051a2bff9"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 1297,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "INT-A2A-007"
+  }
+}

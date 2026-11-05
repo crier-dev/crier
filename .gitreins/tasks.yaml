@@ -3293,5 +3293,14 @@ tasks:
     >= 20; three consecutive go test -short -count=1 ./... runs show no TestAdapterContract
     failure; the process-group-kill assertion is preserved (both recorded pids are
     dead)
-  status: in_progress
+  status: complete
   created_at: '2026-11-04T23:35:21.475171+00:00'
+  completed_at: '2026-11-05T00:50:04.147959+00:00'
+- id: INT-A2A-007
+  title: outbound A2A client
+  criteria:
+  - go build ./... && go vet ./... && go test ./internal/a2a/... -count=1 && go test
+    ./cmd/server -run TestA2AClient -count=1
+  status: complete
+  created_at: '2026-11-05T19:59:58.610825+00:00'
+  completed_at: '2026-11-05T20:10:01.718119+00:00'
