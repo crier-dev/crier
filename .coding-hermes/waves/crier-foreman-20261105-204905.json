@@ -2,15 +2,16 @@
   "tick_id": "crier-foreman-2026-11-05-20-49-05",
   "block": "PERF-001",
   "wave_size": 1,
-  "reason": "singleton block — only one ready row in the block, so wave = serial in a worktree",
+  "reason": "singleton block — one ready row, so the wave is a single worker in a worktree",
+  "attempt": 2,
+  "attempt_1_failure_mode": "no-dispatch-wrong-workdir: worker launched with /home/kara/crier-wt-PERF-001 (nonexistent); real path is /home/kara/worktrees/crier-PERF-001. Zero commits; branch reaped.",
   "rows": [
     {
       "id": "PERF-001",
-      "worktree": "/home/kara/crier-wt-PERF-001",
+      "worktree": "/home/kara/worktrees/crier-PERF-001",
       "branch": "wt/PERF-001",
       "base": "d5630b8b",
-      "brief": "/home/kara/.hermes/cache/scratch/crier-20261105-2049/PERF-001-brief.txt",
-      "attempt": 1,
+      "brief": "/home/kara/.hermes/cache/scratch/crier-20261105-2049/PERF-001-brief-v2.txt",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman"
     }
