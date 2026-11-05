@@ -24,6 +24,7 @@ import (
 	"github.com/crier-dev/crier/internal/addressing"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/namespace"
@@ -45,11 +46,15 @@ var guardDecisionsTotal = metrics.Default.NewCounterVec("crier_guard_decisions_t
 
 // registerRequest is the JSON body for POST /agents.
 type registerRequest struct {
-	ID           string                  `json:"id"`
-	PublicKey    string                  `json:"public_key"`
-	Capabilities []string                `json:"capabilities"`
-	Webhook      *webhook.Config         `json:"webhook,omitempty"`
-	Guard        *guard.AgentGuardConfig `json:"guard,omitempty"`
+	ID           string          `json:"id"`
+	PublicKey    string          `json:"public_key"`
+	Capabilities []string        `json:"capabilities"`
+	Webhook      *webhook.Config `json:"webhook,omitempty"`
+	// Hermes is the optional Hermes-session delivery target
+	// (specs/HERMES-SESSION-DELIVERY.md). Absent keeps a registration
+	// byte-identical to one that predates the transport.
+	Hermes *hermesession.Config    `json:"hermes_session,omitempty"`
+	Guard  *guard.AgentGuardConfig `json:"guard,omitempty"`
 	// A2A is the optional per-agent half of the A2A gate (INT-A2A-001).
 	// Absent is the default and keeps every existing registration byte-
 	// identical; present is strictly decoded by strictA2AMember.
@@ -323,7 +328,10 @@ func validateDeliverPayload(req *deliverRequest) error {
 type patchRequest struct {
 	Capabilities []string        `json:"capabilities,omitempty"`
 	Webhook      *webhook.Config `json:"webhook,omitempty"`
-	Guard        json.RawMessage `json:"guard,omitempty"`
+	// Hermes mirrors the registration field: present replaces the block,
+	// absent or explicit null removes it — the same contract webhook uses.
+	Hermes *hermesession.Config `json:"hermes_session,omitempty"`
+	Guard  json.RawMessage      `json:"guard,omitempty"`
 	// A2A mirrors the registration field (INT-A2A-001): present replaces the
 	// block, explicit null clears it, absent leaves it unchanged — the same
 	// three-state contract the webhook object uses, so an agent that opted in
@@ -346,6 +354,16 @@ type blockingDeliverResponse struct {
 	// (CR-FEAT-025): the endpoint was called ONCE, and `reply` is the reply
 	// that call produced.
 	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
+	// HermesSessionID names the Hermes gateway session the turn ran in, on a
+	// transport=hermes-session accept (specs/HERMES-SESSION-DELIVERY.md). It is
+	// what a later reply is matched against, and it is absent on every webhook
+	// accept, so a webhook body is byte-identical to before.
+	HermesSessionID string `json:"hermes_session_id,omitempty"`
+	// Replayed marks an accept answered from the session transport's own
+	// replay window for the same message id: nothing new was sent to the
+	// gateway. Distinct from IdempotentReplay, which is keyed on the sender's
+	// idempotency_key.
+	Replayed bool `json:"replayed,omitempty"`
 	// Capability and Target are present on a capability-ROUTED blocking
 	// delivery (CR-FEAT-026): the capability dialed and the holder that
 	// answered. Same two fields, same meaning as on deliverResponse.
@@ -691,6 +709,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 		PublicKey:    HexKey(rawKey),
 		Capabilities: req.Capabilities,
 		Webhook:      req.Webhook,
+		Hermes:       req.Hermes,
 		Guard:        req.Guard,
 		A2A:          req.A2A,
 		Namespace:    namespaceName,
@@ -707,6 +726,16 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 	if agent.Guard != nil {
 		// LLM message-guard config validation (spec §4.1/§9.2, CR-FEAT-010).
 		if err := agent.Guard.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if agent.Hermes != nil {
+		// Shape only: the token file is read at DELIVERY time, so a relay
+		// that registers an agent need not be able to read the credential
+		// yet, and a missing file surfaces as HERMES_CREDENTIAL_UNAVAILABLE
+		// rather than as a registration nobody can act on today.
+		if err := agent.Hermes.Validate(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -879,6 +908,17 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	if req.Capabilities != nil {
 		agent.Capabilities = req.Capabilities
+	}
+	if req.Hermes == nil {
+		// Same contract as webhook: absent or null removes the block, present
+		// replaces it whole.
+		agent.Hermes = nil
+	} else {
+		if err := req.Hermes.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		agent.Hermes = req.Hermes
 	}
 	if req.Webhook == nil {
 		// Spec §7: webhook absent or null removes the webhook.
@@ -1305,6 +1345,7 @@ func (h *Handler) deliverAuthenticated(w http.ResponseWriter, r *http.Request, i
 						Transport:        rec.Transport,
 						Reply:            rec.Reply,
 						SessionID:        req.SessionID,
+						HermesSessionID:  rec.HermesSessionID,
 						RequestID:        req.RequestID,
 						Capability:       rec.Capability,
 						Target:           rec.Target,

@@ -13,7 +13,9 @@ import (
 //   - transport="inbox"   — the durable store write (and the wake-up ping that
 //     follows it) on this relay;
 //   - transport="webhook" — accepting the push: a blocking POST that waits for
-//     the endpoint's answer, or a queue accept for the async/batch modes.
+//     the endpoint's answer, or a queue accept for the async/batch modes;
+//   - transport="hermes-session" — one agent turn inside a Hermes gateway
+//     session (create-if-needed + POST .../chat), measured across both calls.
 //
 // The measurement lives in Dispatch — the one choke point both delivery
 // callers share (POST /agents/{id}/inbox through the HTTP handler, and
@@ -36,9 +38,9 @@ var inboxDeliverDuration = metrics.Default.NewHistogramVec(
 	metrics.DefaultBuckets, "transport")
 
 // deliverTransports is the closed transport domain of that histogram.
-var deliverTransports = []string{"inbox", "webhook"}
+var deliverTransports = []string{"inbox", "webhook", "hermes-session"}
 
-// init seeds both transports at 0.
+// init seeds every transport at 0.
 func init() {
 	for _, transport := range deliverTransports {
 		inboxDeliverDuration.With(transport)

@@ -78,9 +78,13 @@ type idempotentReceipt struct {
 	// Blocking marks a request/response accept: its Reply is part of the
 	// recorded outcome, because answering a replayed blocking delivery with an
 	// empty reply would be worse than not deduplicating it at all.
-	Blocking   bool
-	Reply      json.RawMessage
-	RecordedAt time.Time
+	Blocking bool
+	Reply    json.RawMessage
+	// HermesSessionID is recorded for a session-transport accept, so a replay
+	// under the same idempotency_key names the session that already holds the
+	// work instead of leaving the sender to start another one.
+	HermesSessionID string
+	RecordedAt      time.Time
 	// Capability and Target record the routing provenance of a
 	// capability-routed delivery (CR-FEAT-026): the capability the sender
 	// dialed and the holder chosen for it. They ride on the receipt so a

@@ -18,6 +18,7 @@ import (
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/harness"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/webhook"
 )
@@ -159,6 +160,7 @@ func NewWithOptions(store registry.Store, opts Options) *MCPServer {
 			// Blocking-only delivery needs no background queue lifecycle.
 			h = registry.NewHandler(store)
 			h.SetWebhookDriver(webhook.NewDriver(webhook.NewClient(30*time.Second, nil), webhook.NewMemoryQueue(), webhook.DriverConfig{}))
+			h.SetHermesSessionClient(hermesession.NewClient(hermesession.DefaultTimeoutMs * time.Millisecond))
 		}
 		s.deliver = h.Deliver
 	}

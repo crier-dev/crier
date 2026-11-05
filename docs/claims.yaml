@@ -153,6 +153,19 @@ ignore_paths:
   - /transfer
   - /dead-letters
 
+  # The Hermes-session delivery target (specs/HERMES-SESSION-DELIVERY.md, README §6)
+  # makes NO crier route claim: it adds no HTTP surface, only a per-agent config
+  # block on the EXISTING registration and delivery routes. The path-looking
+  # tokens its prose names are the REMOTE end of the transport — the Hermes
+  # gateway's own session routes (the same class as /v1/chat/completions and
+  # /v1/configure above) — plus one filesystem credential path an operator
+  # writes. Crier registers no /api/sessions handler (grep cmd/ internal/ finds
+  # none), so these are ignored, not claimed; the delivery routes the section
+  # describes ARE live and already covered by their own claims.
+  - /api/sessions
+  - /api/sessions/{id}/chat
+  - /run/secrets/hermes-gateway.token
+
 claims:
   # --- routes (kind: route) — README/TESTERS claim these paths exist; probe live. ---
   - id: ROUTE-README-RELAY-PUBLISH

@@ -201,7 +201,56 @@ redeliveries pause instead of POSTing and resume when a probe
 (`CR_WEBHOOK_PROBE_S`) succeeds, so a poisoned endpoint can take much longer
 than the default cadence to reach exhaustion.
 
-### 6. Named groups (`@team:<name>`)
+### 6. Hermes-session delivery (also bypasses the inbox)
+
+An agent can instead register a `hermes_session` target — `PATCH /agents/{id}`
+with `{"hermes_session":{…}}` — and its messages become **agent turns inside a
+Hermes gateway session**: crier creates the session (`POST /api/sessions`) or
+appends to one it already knows, then posts the message to
+`/api/sessions/{id}/chat`. Full contract:
+[`specs/HERMES-SESSION-DELIVERY.md`](specs/HERMES-SESSION-DELIVERY.md).
+
+```json
+{"hermes_session": {
+  "base_url": "http://127.0.0.1:8642",
+  "token_file": "/run/secrets/hermes-gateway.token",
+  "policy": "per-agent"
+}}
+```
+
+| key | required | meaning |
+|-----|----------|---------|
+| `base_url` | yes | gateway origin (`http(s)://host:port`) |
+| `token_file` | yes | **path** of the bearer token file — read at delivery time, `0600` or stricter, never carried in config and never logged |
+| `policy` | no (`new`) | `new` = a session per message · `existing` = append to `session_id` · `per-agent` = one session per agent, created on first delivery and recorded in the relay process |
+| `session_id` | for `existing` | the session to append to |
+| `title` | no | title for a session this transport creates |
+| `timeout_ms` | no (`30000`) | per-call bound on each gateway request |
+
+The inbox is **not** written — a retrieve after a session delivery is empty,
+exactly as on the webhook path — and a `hermes_session` block outranks a
+`webhook` block on the same agent. The accept is `200`, names the transport,
+and carries the session and the turn's answer:
+
+```json
+{"id":"3f2c…","transport":"hermes-session","hermes_session_id":"api_1730…","reply":"…","replayed":true}
+```
+
+`replayed` appears when the SAME message id is delivered twice: nothing is
+created or posted the second time, and the second answer names the same session.
+A delivery carrying `idempotency_key` deduplicates the same way (`idempotent_replay`),
+because the HTTP ingress mints a fresh message id per request.
+
+Failures are **named** and keep the gateway's own status verbatim in
+`gateway_status`: `HERMES_GATEWAY_UNREACHABLE` (`502`, nothing delivered),
+`HERMES_GATEWAY_UNAUTHORIZED` (`502`; the gateway answered `401`/`403` to the
+credential crier was configured with), `HERMES_SESSION_NOT_FOUND` (`404`), and
+`HERMES_SESSION_CLOSED` (`409`; the session exists but has ended — the gateway
+would still run the turn, this transport refuses). `HERMES_CREDENTIAL_UNAVAILABLE`
+(`502`) covers a missing or loose-permission token file, and
+`HERMES_GATEWAY_REJECTED` (`502`) every other gateway answer.
+
+### 7. Named groups (`@team:<name>`)
 
 A named group is a curated, editable roster of agents addressed as
 `@team:<name>` (CR-CHAT-013/022). `POST /groups` creates one — `created_by`, or

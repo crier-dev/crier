@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/webhook"
@@ -60,5 +62,8 @@ func localDeliveryHandler(cfg config.Config, store registry.Store) (*registry.Ha
 	h.SetWebhookDriver(webhook.NewDriver(webhook.NewClient(cfg.Webhook.Timeout, []byte(cfg.Webhook.Secret)), webhook.NewMemoryQueue(), webhook.DriverConfig{
 		MaxRetries: cfg.Webhook.MaxRetries, CircuitThreshold: cfg.Webhook.CircuitThreshold,
 	}))
+	// Hermes-session delivery: the credential is per agent and read from its
+	// own file at delivery time, so the client needs no configuration here.
+	h.SetHermesSessionClient(hermesession.NewClient(hermesession.DefaultTimeoutMs * time.Millisecond))
 	return h, cleanup, nil
 }

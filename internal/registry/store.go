@@ -12,6 +12,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/permissions"
 	"github.com/crier-dev/crier/internal/ratelimit"
@@ -195,6 +196,12 @@ type Handler struct {
 	// webhooks pushes deliveries to agent webhook endpoints when configured
 	// (CR-FEAT-001). Nil disables webhook delivery.
 	webhooks *webhook.Driver
+	// hermes delivers to a Hermes gateway SESSION when the target agent
+	// registers a hermes_session config (specs/HERMES-SESSION-DELIVERY.md).
+	// Nil disables the transport: a session-configured agent is then refused
+	// with HERMES_SESSION_TRANSPORT_UNAVAILABLE instead of being delivered to
+	// the inbox or a webhook it did not configure.
+	hermes *hermesession.Client
 	// fed forwards deliveries for agents unknown on this relay to linked
 	// relays (CR-FEAT-006). Nil disables federation.
 	fed *federation.Client

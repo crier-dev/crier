@@ -10,6 +10,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/webhook"
 )
 
@@ -69,6 +70,13 @@ type Agent struct {
 	LastSeen     time.Time   `json:"last_seen"`
 	// Webhook is the optional push-delivery endpoint (CR-FEAT-001).
 	Webhook *webhook.Config `json:"webhook,omitempty"`
+	// Hermes is the optional Hermes-session delivery target
+	// (specs/HERMES-SESSION-DELIVERY.md): the delivery becomes one agent turn
+	// inside a Hermes gateway session, created or reused per the configured
+	// policy. Absent (omitempty) keeps the serialized row byte-identical to a
+	// registration that predates the transport, and the inbox (or the webhook,
+	// if one is also configured) is used exactly as before.
+	Hermes *hermesession.Config `json:"hermes_session,omitempty"`
 	// Guard is the optional LLM message-guard policy config (CR-FEAT-010).
 	// API keys are never part of it — only env: refs (spec §4.1/§9.2).
 	Guard *guard.AgentGuardConfig `json:"guard,omitempty"`

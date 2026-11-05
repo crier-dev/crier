@@ -24,6 +24,7 @@ import (
 	"github.com/crier-dev/crier/internal/dispatchlive"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/pidfile"
@@ -771,6 +772,12 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	if cfg.Webhook.Secret != "" {
 		secret = []byte(cfg.Webhook.Secret)
 	}
+	// Hermes-session delivery (specs/HERMES-SESSION-DELIVERY.md): active only
+	// for agents that register a hermes_session config. The client holds no
+	// credential of its own — each agent's token is read from its own file at
+	// delivery time — so wiring it unconditionally costs nothing.
+	hermesClient := hermesession.NewClient(hermesession.DefaultTimeoutMs * time.Millisecond)
+
 	whClient := webhook.NewClient(cfg.Webhook.Timeout, secret)
 	whDriver := webhook.NewDriver(whClient, webhook.NewMemoryQueue(), webhook.DriverConfig{
 		MaxRetries:       cfg.Webhook.MaxRetries,
@@ -800,6 +807,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	whDriver.Start()
 	defer whDriver.Stop()
 	registryHandler.SetWebhookDriver(whDriver)
+	registryHandler.SetHermesSessionClient(hermesClient)
 	slog.Info("webhook delivery", "enabled", true, "timeout", cfg.Webhook.Timeout,
 		"retries", cfg.Webhook.MaxRetries, "signing", secret != nil)
 	registerRegistryRoutes(r, registryHandler)

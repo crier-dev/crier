@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/webhook"
@@ -53,9 +54,15 @@ type DeliveryResult struct {
 	Transport    string
 	DeliveryMode string
 	Reply        json.RawMessage
-	StatusCode   int
-	response     any
-	receipt      *ServiceDeliveryReceipt
+	// Replayed is true when a session delivery was answered from the replay
+	// window of an earlier delivery of the SAME message id
+	// (specs/HERMES-SESSION-DELIVERY.md): nothing new was sent. It is the
+	// transport's own dedup, distinct from the sender-keyed
+	// IdempotentReplay of CR-FEAT-025.
+	Replayed   bool
+	StatusCode int
+	response   any
+	receipt    *ServiceDeliveryReceipt
 }
 
 // DispatchError is a refusal or transport/store failure. Its status and body are
@@ -238,7 +245,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 				entry.ID = rec.ID
 				result.Guard = rec.Guard
 				if rec.Blocking {
-					respond(rec.Status, blockingDeliverResponse{ID: rec.ID, Transport: rec.Transport, Reply: rec.Reply, SessionID: req.SessionID, RequestID: req.RequestID, IdempotentReplay: true})
+					respond(rec.Status, blockingDeliverResponse{ID: rec.ID, Transport: rec.Transport, Reply: rec.Reply, SessionID: req.SessionID, HermesSessionID: rec.HermesSessionID, RequestID: req.RequestID, IdempotentReplay: true})
 				} else {
 					respond(rec.Status, rec.replayResponse())
 				}
@@ -336,6 +343,95 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 				guardMeta = &m
 			}
 		}
+	}
+
+	if target != nil && target.Hermes != nil {
+		// The transport must be wired, or this delivery would silently land
+		// in an inbox the agent's own configuration does not name.
+		if h.hermes == nil {
+			respond(http.StatusBadGateway, hermesDeliveryFailure{Error: hermesTransportUnavailable,
+				Detail: "this relay has no Hermes-session transport wired; the target agent is configured to receive session deliveries"})
+			dispatchErr.(*DispatchError).Code = hermesTransportUnavailable
+			return
+		}
+		// A session delivery is replayed by message id, so it needs one. Every
+		// caller mints an id before dispatching; this is the same minter, for
+		// a direct caller that did not.
+		if entry.ID == "" {
+			messageID, idErr := newLeaseID()
+			if idErr != nil {
+				respond(http.StatusInternalServerError, map[string]string{"error": "generate message id"})
+				return
+			}
+			entry.ID = messageID
+		}
+		result.Transport, result.DeliveryMode = hermesession.Transport, "session"
+		res, herr := h.hermes.Deliver(ctx, target.Hermes, hermesession.Request{
+			AgentID:        id,
+			MessageID:      entry.ID,
+			Sender:         req.Sender,
+			CrierSessionID: req.SessionID,
+			Kind:           kind,
+			// The guard's (possibly quarantined) payload is what leaves.
+			Body: payload,
+		})
+		if herr != nil {
+			var failure *hermesession.Failure
+			if errors.As(herr, &failure) {
+				respond(failure.Status, hermesDeliveryFailure{
+					Error:         failure.Code,
+					Detail:        failure.Detail,
+					GatewayStatus: failure.GatewayStatus,
+				})
+				dispatchErr.(*DispatchError).Code = failure.Code
+				return
+			}
+			respond(http.StatusBadGateway, map[string]string{"error": herr.Error()})
+			return
+		}
+		// The reply is a JSON string, not a structured body: a Hermes turn
+		// answers with text, and quoting it keeps `reply` valid JSON for every
+		// consumer of the blocking shape.
+		reply, marshalErr := json.Marshal(res.Reply)
+		if marshalErr != nil {
+			respond(http.StatusInternalServerError, map[string]string{"error": "encode session reply"})
+			return
+		}
+		// The turn ran: record the accept under the sender's key (CR-FEAT-025)
+		// so a retried idempotency_key answers with the session that already
+		// holds the work instead of starting a second one.
+		accept(idempotentReceipt{
+			Status:          http.StatusOK,
+			ID:              entry.ID,
+			Transport:       hermesession.Transport,
+			Blocking:        true,
+			Reply:           reply,
+			HermesSessionID: res.SessionID,
+		})
+		slog.Info("inbox deliver accepted",
+			"target", id,
+			"sender", req.Sender,
+			"message_id", entry.ID,
+			"transport", hermesession.Transport,
+			"hermes_session_id", res.SessionID,
+			"session_policy", string(res.Policy),
+			"replayed", res.Replayed,
+			"request_id", middleware.RequestIDFromContext(ctx),
+		)
+		result.Replayed = res.Replayed
+		respond(http.StatusOK, blockingDeliverResponse{
+			ID:              entry.ID,
+			Transport:       hermesession.Transport,
+			Reply:           reply,
+			SessionID:       req.SessionID,
+			HermesSessionID: res.SessionID,
+			Replayed:        res.Replayed,
+			RequestID:       req.RequestID,
+			Capability:      capability,
+			Target:          routedTarget(capability, id),
+		})
+		deliveriesTotal.Inc()
+		return
 	}
 
 	if h.webhooks != nil && target != nil && target.Webhook != nil {
