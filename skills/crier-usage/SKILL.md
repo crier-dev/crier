@@ -570,3 +570,26 @@ Reader rules this gate assumes, and you should keep:
   second `member.added`. A re-add does NOT change the role (§2.3: a role change
   is a remove+add pair); the response reports the recorded role. A re-add of a
   REMOVED member is still a new member.add (201, `action:"added"`).
+
+## Harness adapters (live-verified 2026-11-06 @ 5dc81b05)
+
+- `crier harness list` and `crier harness probe <name>` are the only user-facing
+  harness surfaces. `list` prints name / available / version / features / reason
+  for every registered adapter (1.30 s wall for five); `probe` prints one JSON
+  capability object and exits 1 for an unknown name, listing the known ones.
+  `probe pi-agent` resolves to `pi` (alias); `available:false` with a reason
+  naming the missing binary is the correct answer on a host without that CLI —
+  it is not an adapter defect.
+- Registered ids on this build: `claude-code`, `codex`, `hermes`, `opencode`,
+  `pi`.
+- Push delivery is DARK. Nothing in the product binds a session to a harness:
+  `POST /ingress/messages` refuses `target.harness` with 400
+  `INGRESS_INVALID_JSON` (accepted target keys: `session_id`, `template`,
+  `agent_id`, `capability`), `POST /sessions` has no harness field, and `POST
+  /agents` has none either. With `CR_HARNESS_ENABLED=true` an unbound session
+  answers `delivery: {"mode":"store","state":"stored"}` — that is the honest
+  report, not a failure. Tracked by DF-CRIER-500; do not chase it as a config
+  error.
+- Do not try to fake the binding by appending a record: `session.harness.bind`
+  is written only after a delivery to a session that ALREADY names a harness
+  (`cmd/server/harnesswiring.go`), so it needs the value it would produce.
