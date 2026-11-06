@@ -146,9 +146,27 @@ func decodePollBody(t *testing.T, body string) decodedPollBody {
 // structural identity.
 var volatileRetrieveValues = regexp.MustCompile(`"(id|lease_id|created_at|expires_at|leased_at)":"[^"]*"`)
 
+// deliveryMsStrip removes the delivery_ms member entirely (presence AND
+// value) before the structural comparison. The field is stamped by the
+// DELIVER request that stored a message — the whole-millisecond latency of
+// that POST (CR-CHAT-020: deliverStart at handler.go:1108 covers decode →
+// guard → durable write), omitted below 1ms because a sub-millisecond
+// delivery is a real measurement, never a zero (memory_store.go records the
+// value only when > 0). The two bodies compared here claim two DIFFERENT
+// deliveries, so whether the key exists at all depends on how long each
+// POST happened to run — ≥1ms under coverage instrumentation (observed as
+// delivery_ms:5 in CI run 42136938993, the flake this normalization fixes),
+// sub-millisecond locally — and never on which retrieve spelling answered:
+// openapi.yaml spells it outright, "The latency of YOUR retrieve is not this
+// field; it is the delivery's." The field's own contract is pinned
+// separately by TestDeliveryMsRidesDeliverAndRetrieve (delivery_ms_test.go);
+// stripping it here keeps the comparison judged on the poll-only path's own
+// shape — key set, field order, counters, payload encoding.
+var deliveryMsStrip = regexp.MustCompile(`,?"delivery_ms":\d+`)
+
 func maskVolatile(t *testing.T, body string) string {
 	t.Helper()
-	return volatileRetrieveValues.ReplaceAllString(body, `"$1":"<masked>"`)
+	return volatileRetrieveValues.ReplaceAllString(deliveryMsStrip.ReplaceAllString(body, ""), `"$1":"<masked>"`)
 }
 
 // ----- AC 1: the long-poll returns EARLY on delivery -----
@@ -265,8 +283,11 @@ func TestInboxPollOnlyPathIsUnchanged(t *testing.T) {
 
 	// (b) The SAME agent, read poll-only and then with wait_seconds=0 after an
 	// ack, so the only differences left are the ids/timestamps each response
-	// generates. Everything else — key set, field order, counters, payload
-	// encoding — must match.
+	// generates — and delivery_ms, whose presence is a property of the DELIVER
+	// that stored each message (its whole-millisecond POST latency, omitted
+	// below 1ms), not of the retrieve spelling; maskVolatile normalizes it
+	// away for exactly that reason. Everything else — key set, field order,
+	// counters, payload encoding — must match.
 	mustDeliver(t, srv.URL, "poll-b", "sender-1")
 	_, populatedNoParam, _ := getInboxRaw(t, srv.URL, "poll-b", "")
 	first := decodePollBody(t, populatedNoParam)
