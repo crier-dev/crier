@@ -10,8 +10,11 @@
 //
 // Three kinds of proof, in this order:
 //
-//   - a live boot (metrics on, in-memory store) renders every series — at 0 when
-//     idle, never absent, never NaN;
+//   - a live boot (metrics on, in-memory store) renders every series — the
+//     boot-scoped state gauges at 0 when idle, the process-wide alert counters
+//     at their presence + no-new-alert contract (they carry whatever a sibling
+//     test in this binary already raised, so an absolute 0 is not a fact this
+//     boot can report), never absent, never NaN;
 //   - an unreachable webhook endpoint makes the backlog depth and the oldest age
 //     ADVANCE on a live boot (the G5 gap: today only a log line said so);
 //   - the store depth read-error counter advances once per failed scrape, with
@@ -19,6 +22,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -99,7 +103,8 @@ func sampleValue(body, prefix string) (float64, bool) {
 }
 
 // TestMetricsState_SeriesRenderOnIdleBoot is the presence half: every series of
-// this row renders, at its idle value, on a plain metrics-on boot.
+// this row renders on a plain metrics-on boot — the boot-scoped state gauges at
+// their idle value, the process-wide counters at their presence contract.
 func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 	baseURL := bootStateMetricsServer(t)
 	body := scrapeMetrics(t, baseURL)
@@ -113,8 +118,6 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		{"crier_webhook_queue_oldest_age_seconds", 0, "an empty queue has no oldest item"},
 		{"crier_federation_held_age_seconds", 0, "no federation links, so nothing is held"},
 		{`crier_store_queue_depth_read_errors_total{backend="memory"}`, 0, "the memory store answers every depth read"},
-		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, 0, "detection is disabled and the bounded pairs are seeded"},
-		{`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`, 0, "every bounded (signal,severity) pair exists before the first alert"},
 		{"crier_detect_quarantined_current", 0, "no agent is contained"},
 	}
 	for _, w := range want {
@@ -129,6 +132,66 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		}
 		if got != w.value {
 			t.Errorf("%s = %v, want %v — %s", w.prefix, got, w.value, w.why)
+		}
+	}
+
+	// crier_detect_alerts_total is a PROCESS-WIDE counter, exactly like the
+	// attempt buckets below and unlike every state gauge in the table above:
+	// internal/detect keeps one package-level vec on metrics.Default
+	// (detect.go:94), seeds its bounded children in init(), and increments them
+	// in raise() (detect.go:565). It therefore carries whatever any earlier test
+	// in this binary raised BEFORE this boot existed — this boot cannot reset it,
+	// and an absolute 0 was never its fact to report (QA-CRIER-56).
+	//
+	// Two siblings in this package raise into it:
+	//
+	//   - TestMetricsState_DetectionBootRendersAlertSeries (this file) delivers a
+	//     planted canary and trips canary_trip/critical. It is the DETERMINISTIC
+	//     contaminator: the -count=10 iteration after it reds at the absolute 0
+	//     with 1,2,3,…9 (reproduced pre-fix on d3b78329).
+	//   - TestDetectionCatchesAndContainsACompromisedAgent (crfeat030_test.go)
+	//     delivers five messages from one sender, and internal/detect raises
+	//     odd_hour_volume/warning at DefaultQuietMinMessages INSIDE its default
+	//     01:00-05:00 UTC window (detect.go:496-516, inQuietHours reads the wall
+	//     clock), so that one contaminates only when the suite runs in that
+	//     window — the shape the hosted Coverage job reded in.
+	//
+	// The claim this row owns: each pair RENDERS, is a real non-negative number,
+	// and an idle boot (its own detection is off, nothing is delivered to it)
+	// raises NOTHING NEW — so the value may start wherever a sibling left it and
+	// must not advance across two scrapes of this same boot.
+	for _, w := range []struct {
+		prefix string
+		why    string
+	}{
+		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, "detection is disabled in this boot, but the bounded pair must still be seeded by internal/detect"},
+		{`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`, "every bounded (signal,severity) pair must render before the first alert"},
+	} {
+		first, ok := sampleValue(body, w.prefix)
+		if !ok {
+			t.Errorf("%s is absent from /metrics — %s\nbody:\n%s", w.prefix, w.why, body)
+			continue
+		}
+		if math.IsNaN(first) {
+			t.Errorf("%s = NaN — a bounded alert counter always renders a number\nbody:\n%s", w.prefix, body)
+			continue
+		}
+		if first < 0 {
+			t.Errorf("%s = %v — an alert counter cannot be negative", w.prefix, first)
+			continue
+		}
+		after, ok := sampleValue(scrapeMetrics(t, baseURL), w.prefix)
+		if !ok {
+			t.Errorf("%s disappeared between two scrapes of the same boot", w.prefix)
+			continue
+		}
+		if math.IsNaN(after) {
+			t.Errorf("%s went from %v to NaN between two scrapes", w.prefix, first)
+			continue
+		}
+		if after != first {
+			t.Errorf("%s advanced from %v to %v across two scrapes of an IDLE boot — its detection is off and nothing was delivered to it, so an alert came from something other than this boot",
+				w.prefix, first, after)
 		}
 	}
 
@@ -433,5 +496,110 @@ func TestMetricsState_PrometheusTextStaysParseable(t *testing.T) {
 		if _, err := strconv.ParseFloat(fields[1], 64); err != nil {
 			t.Errorf("exposition line %q carries a non-numeric value: %v", line, err)
 		}
+	}
+}
+
+// preFixAlertsTotalClaim is the EXACT claim QA-CRIER-56 removed, transcribed
+// from the pre-fix table (an absolute "want 0" on a process-wide alert
+// counter). It survives here only as the negative control for
+// TestMetricsState_IdleBootAlertCounterSurvivesSiblingRaise: if the fixture ever
+// stops contaminating the shared vec, this function starts accepting the body
+// and that test fails instead of passing vacuously.
+func preFixAlertsTotalClaim(body, prefix string) error {
+	got, ok := sampleValue(body, prefix)
+	if !ok {
+		return fmt.Errorf("%s is absent from /metrics", prefix)
+	}
+	if math.IsNaN(got) {
+		return fmt.Errorf("%s = NaN", prefix)
+	}
+	if got != 0 {
+		return fmt.Errorf("%s = %v, want 0", prefix, got)
+	}
+	return nil
+}
+
+// TestMetricsState_IdleBootAlertCounterSurvivesSiblingRaise is the QA-CRIER-56
+// regression: the idle-boot contract must hold when the process-wide alert
+// counter is ALREADY non-zero before this boot exists.
+//
+// The contamination is deterministic and clock-independent — a planted canary
+// trips canary_trip on the delivery path (the same raise() -> shared
+// metrics.Default vec path the wall-clock-sensitive odd_hour_volume sibling
+// takes), so this arm reds on the pre-fix claim at 03:00Z and 13:00Z alike.
+func TestMetricsState_IdleBootAlertCounterSurvivesSiblingRaise(t *testing.T) {
+	const (
+		prefix = `crier_detect_alerts_total{signal="canary_trip",severity="critical"}`
+		token  = "qa-crier-56-canary"
+	)
+
+	// --- phase 1: raise canary_trip in this binary -----------------------------
+	dir := t.TempDir()
+	t.Setenv("CR_ENABLE_METRICS", "true")
+	t.Setenv("CR_ENABLE_PPROF", "")
+	t.Setenv("CR_REQUIRE_AGENT_SIG", "false")
+	t.Setenv("CR_GUARD_ENABLED", "false")
+	t.Setenv("CR_DETECT_ENABLED", "true")
+	t.Setenv("CR_DETECT_LOG", dir+"/delivery.jsonl")
+	t.Setenv("CR_DETECT_KEY", dir+"/delivery.key")
+	t.Setenv("CR_CANARY_TOKENS", token)
+
+	raiser := bootObservabilityServer(t)
+	before, ok := sampleValue(scrapeMetrics(t, raiser), prefix)
+	if !ok {
+		t.Fatalf("%s is absent from a detection-enabled boot\n", prefix)
+	}
+	status, _, raw := bpCall(t, raiser, http.MethodPost, "/agents", `{"id":"qa56-canary-target"}`, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("register canary target: status %d, body %s", status, raw)
+	}
+	status, _, raw = bpCall(t, raiser, http.MethodPost, "/agents/qa56-canary-target/inbox",
+		`{"sender":"qa56-canary-sender","payload":{"note":"`+token+`"}}`, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("deliver the canary payload: status %d, body %s", status, raw)
+	}
+	raised, ok := sampleValue(scrapeMetrics(t, raiser), prefix)
+	if !ok {
+		t.Fatalf("%s disappeared after the trip\n", prefix)
+	}
+	if raised <= before {
+		t.Fatalf("fixture did not raise: %s = %v after a canary delivery, was %v — this regression arm would prove nothing", prefix, raised, before)
+	}
+
+	// --- phase 2: the idle boot may only REPORT it -----------------------------
+	// Detection OFF and no traffic: nothing in this boot can raise, so a change
+	// here can only come from somewhere else.
+	t.Setenv("CR_DETECT_ENABLED", "")
+	idle := bootStateMetricsServer(t)
+	body := scrapeMetrics(t, idle)
+
+	got, ok := sampleValue(body, prefix)
+	if !ok {
+		t.Fatalf("%s is absent from an idle boot that follows a sibling raise — the pair must render whatever its value\nbody:\n%s", prefix, body)
+	}
+	if math.IsNaN(got) || got < 0 {
+		t.Fatalf("%s = %v — a bounded alert counter renders a real, non-negative number", prefix, got)
+	}
+	if got < raised {
+		t.Fatalf("%s = %v on the idle boot but %v was raised before it — the process-wide counter lost the sibling's raise", prefix, got, raised)
+	}
+
+	// NEGATIVE CONTROL, both directions: the removed claim must REJECT this body
+	// (the fixture really contaminates) and ACCEPT a pristine one (the claim is
+	// not degenerate).
+	if err := preFixAlertsTotalClaim(body, prefix); err == nil {
+		t.Fatalf("negative control did not red: the pre-fix claim (absolute 0) ACCEPTED a body whose %s is %v", prefix, got)
+	}
+	if err := preFixAlertsTotalClaim(prefix+" 0\n", prefix); err != nil {
+		t.Fatalf("negative control is degenerate: the pre-fix claim rejected a pristine 0 sample (%v)", err)
+	}
+
+	// The contract this row owns: an idle boot raises nothing NEW.
+	after, ok := sampleValue(scrapeMetrics(t, idle), prefix)
+	if !ok {
+		t.Fatalf("%s disappeared between two scrapes of the same boot", prefix)
+	}
+	if after != got {
+		t.Errorf("%s advanced from %v to %v across two scrapes of an IDLE boot — its detection is off and nothing was delivered to it", prefix, got, after)
 	}
 }
