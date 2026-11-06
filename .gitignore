@@ -104,3 +104,9 @@ __pycache__/
 .worktrees/
 .coding-hermes/board/*.jsonl.new
 .coding-hermes/board/*.jsonl.lock
+
+# Wave-composition scratch written by foreman ticks (tick-id stubs). These are
+# not evidence and cannot be read back by any consumer; leaving them untracked
+# dirties the tree after every wave and blocks the next tick's ownership gate.
+.coding-hermes/waves/*.id
+.coding-hermes/waves/*.tmp
