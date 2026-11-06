@@ -3433,3 +3433,9 @@ tasks:
   status: complete
   created_at: '2026-11-06T09:18:49.705275+00:00'
   completed_at: '2026-11-06T09:40:47.421204+00:00'
+- id: QA-CRIER-56
+  title: Fix flaky TestMetricsState_SeriesRenderOnIdleBoot
+  criteria:
+  - Test passes 10x with -count=10, no races, <2s runtime, isolated metrics registry
+  status: in_progress
+  created_at: '2026-11-06T13:37:10.676063+00:00'

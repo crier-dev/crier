@@ -1,0 +1,10 @@
+{
+  "tick_id": "crier-foreman-2026-11-06-13-24-54",
+  "block_id": "QA-CRIER-56",
+  "slots": 3,
+  "rows": [
+    {"id": "RELEASE-009", "task": "releng readiness sweep", "worktree": "wt/RELEASE-009", "branch": "fix/release-009-t2"},
+    {"id": "RELEASE-011", "task": "stale deploy cleanup", "worktree": "wt/RELEASE-011", "branch": "fix/release-011-t2"},
+    {"id": "QA-CRIER-56", "task": "flaky test fix", "worktree": "wt/QA-CRIER-56", "branch": "fix/qa-crier-56-t2"}
+  ]
+}
