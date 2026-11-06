@@ -1,0 +1,42 @@
+[Unit]
+# crier — daily trigger for the backup drill (deploy/crier-backup.service).
+#
+# This is the half that was missing: the dump script and its verification exist,
+# but without a timer the cadence in docs/operations.md §4 lives in an operator's
+# head. A timer that fires is evidence; a "we take dumps daily" sentence is not.
+Description=crier daily backup drill (dump + restore verification)
+Documentation=https://github.com/crier-dev/crier/blob/main/docs/operations.md
+
+[Timer]
+# Pulled in BY NAME so enablement cannot half-work: `systemctl enable
+# crier-backup.timer` plus this Unit= is enough, with no separate enable of the
+# service. Enabling a timer whose service is not resolvable fires into nothing,
+# which is the modern spelling of the silent missed backup.
+# (This key belongs to [Timer], not [Unit] — systemd warns and IGNORES it in
+# [Unit], and the implicit same-name lookup would mask the mistake on this pair
+# while breaking any future rename of the service.)
+Unit=crier-backup.service
+# Daily, at a fixed wall-clock time rather than OnBootSec=/OnUnitActiveSec=:
+# a fixed time is predictable across reboots, and Persistent= (below) covers the
+# boot it missed. The calendar is evaluated in the SYSTEM timezone — 03:20 is
+# quiet hours on a box whose bus serves agents all day, and it leaves the
+# morning for a human to read a failure before the workday. Change the time to
+# move the window; changing the repo to move it does not.
+OnCalendar=*-*-* 03:20:00
+# A MISSED RUN MUST NOT VANISH. With Persistent=true systemd stores the last
+# time this timer fired; if the box was off (or the timer was masked) across
+# 03:20, the run happens at the next boot instead of being silently skipped. This
+# is the property that makes the cadence true on a host that reboots — and it is
+# also a diagnostic: a run that lands minutes after boot means a fire was missed.
+Persistent=true
+# Spread the fire across a fleet. Everybody's 03:20 is the same 03:20, and the
+# drill CREATEs and DROPs a throwaway PostgreSQL database; jitter turns that
+# thundering herd into a staggered set of single drills. It delays a run, never
+# drops one — Persistent= still decides whether it fires at all.
+RandomizedDelaySec=30min
+
+[Install]
+# timers.target, not multi-user.target: the TIMER is the unit that gets enabled,
+# and the service is reached through Unit= above. Anything else here would run
+# the dump once at boot and then never again.
+WantedBy=timers.target

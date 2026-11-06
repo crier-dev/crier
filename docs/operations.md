@@ -244,12 +244,97 @@ anything else in `/status`.
 
 ---
 
-## 6. What is still not automated
+## 6. The scheduled drill, and what is still not automated
 
 The scripts exist and are the supported path — `scripts/backup-db.sh` dumps and
 verifies every configured store, `scripts/restore-db.sh` restores with the
-guards above. What is **not** automated is the cadence: nothing in this
-repository schedules them or alarms when a daily dump did not happen, so §4
-remains an operator obligation. A scheduled job that runs `backup-db.sh --drill`
-and fails loudly when the dump or its drill does not verify is the remaining
-work, tracked on the board as `CRIER-OPS-001`.
+guards above. The **cadence** used to be an operator obligation with nothing
+behind it: a day with no dump was silent, because a job nobody scheduled cannot
+fail. Two unit files ship in [`deploy/`](deploy/) now, and they are the whole
+difference between "we dump daily" and a dump that exists:
+
+| unit | what it is |
+| --- | --- |
+| `deploy/crier-backup.service` | `Type=oneshot`. Runs the backed-up **drill** arm: `backup-db.sh /var/backups/crier --drill` — dump every configured store, verify each artifact, then restore the PostgreSQL dump into a throwaway database and compare public-table counts with live. Same `User=crier` and the same `EnvironmentFile=-/etc/crier/crier.env` as `deploy/crier.service`, so it reads the stores the server actually opened. |
+| `deploy/crier-backup.timer` | Fires the service **daily at 03:20** system-local, `Persistent=true` (a run missed while the box was off happens at the next boot instead of being skipped), `RandomizedDelaySec=30min` (a fleet does not all drill at once), `WantedBy=timers.target`. |
+
+**Dump destination:** `/var/backups/crier`, owned `crier:crier`, mode `0750`,
+artifacts named `crier-postgres-<stamp>.dump`, `crier-session-<stamp>.db`,
+`crier-registry-<stamp>.db`. The unit names that path in `ReadWritePaths=`
+because `ProtectSystem=strict` makes `/var/backups` read-only to the job; it
+cannot create the directory itself, so the operator creates it once (step 1
+below), and a missing directory fails the unit instead of dumping somewhere
+else. A per-user install that takes dumps by hand (§4, `~/crier-backups`) is
+unaffected — this unit is for the system-service flavour.
+
+### 6.1 Enable it
+
+```sh
+# 1. the dump directory — must exist BEFORE the first run (ReadWritePaths=)
+sudo install -d -m 0750 -o crier -g crier /var/backups/crier
+
+# 2. the script the unit executes. ExecStart points at an INSTALLED COPY, not at
+#    the checkout: a timer must not depend on where the repo lives, and a
+#    `git pull` that moves or deletes the tree must not disarm the backup.
+sudo install -d -m 0755 /usr/local/lib/crier/scripts
+sudo install -m 0755 scripts/backup-db.sh /usr/local/lib/crier/scripts/backup-db.sh
+#    RE-RUN THIS after any change to scripts/backup-db.sh — the timer runs the
+#    copy, so an edited checkout is not what fires at 03:20.
+
+# 3. the units
+sudo install -m 0644 deploy/crier-backup.service /etc/systemd/system/crier-backup.service
+sudo install -m 0644 deploy/crier-backup.timer   /etc/systemd/system/crier-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now crier-backup.timer
+systemctl list-timers crier-backup.timer --no-pager   # proves the next fire
+
+# 4. prove it now, by hand, instead of waiting for the clock
+sudo systemctl start crier-backup.service
+systemctl status crier-backup.service --no-pager
+journalctl -u crier-backup.service -n 40 --no-pager
+```
+
+Step 4 is not ceremony: it is the only way to know the account can reach the
+stores **before** the first unattended fire.
+
+### 6.2 What failure looks like
+
+There is no `|| true`, no `SuccessExitStatus=` and no wrapper that swallows the
+exit code. `backup-db.sh` exits non-zero when a store could not be dumped, when
+an artifact does not parse, or when the drill's restored table count disagrees
+with live, and it names the failing store on stderr. That leaves
+`crier-backup.service` **failed**, so the miss has two surfaces:
+
+```sh
+systemctl --failed | grep crier-backup
+journalctl -u crier-backup.service -n 50 --no-pager
+```
+
+The unit ships **no `OnFailure=`** on purpose: a target named there would be
+untested boilerplate, and an alarm unit that itself fails is a second silent
+hole. The failed state plus the journal line is the alarm — read it after a
+reboot that follows a `Persistent=true` catch-up run, too.
+
+Two expected non-failures that still deserve a look in that journal:
+
+- `SKIP postgres drill: cannot CREATE DATABASE as crier` — the dump was made and
+  verified (`pg_restore --list`), but the restore comparison did not run because
+  the service account cannot create databases. Exit stays 0. Grant `CREATEDB` to
+  the account if the drill is to be real.
+- `skip postgres: CR_DATABASE_URL unset …` — no PostgreSQL store configured on
+  this host. With no store at all the script exits 1 (`no store configured`) and
+  the unit fails, which is correct: a backup job that backs up nothing is a
+  failure, not a green.
+
+### 6.3 Retention is still yours
+
+The timer **never deletes**. §4's retention rule stands unchanged and stays an
+operator task: keep enough dumps to cover the restore window, retain one weekly
+dump for a month, and keep copies **off-host** — a drill that proves a dump is
+restorable says nothing about a disk that also held the only copy. Nothing in
+this repository prunes: a pruner that deletes the wrong backup is a worse
+failure than a full `/var/backups`, so it was deliberately not shipped here.
+
+**What is still not automated:** pruning, off-host replication, and any alerting
+beyond the failed unit and its journal line. That residual — and the retention
+automation that would close it — is tracked on the board as `CRIER-OPS-002`.
