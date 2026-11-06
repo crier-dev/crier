@@ -69,7 +69,13 @@ func TestSessionSQLiteAliasChild(t *testing.T) {
 	var posture map[string]any
 	code, raw := sessionDo(t, client, "GET", base+"/status", nil, &posture)
 	require.Equal(t, http.StatusOK, code, raw)
-	require.Equal(t, path, posture["session_store_path"])
+	// CR-GAP-077: /status reports the RESOLVED file the backend opened, so the
+	// expected spelling must be resolved too. Under the agent harness GOTMPDIR is
+	// a symlink (/var/tmp/hermes-go-tmp -> hermes-go-tmp-real) and t.TempDir()
+	// keeps the unresolved spelling, which reds this equality on a clean tree.
+	resolvedPath, resolveErr := filepath.EvalSymlinks(path)
+	require.NoError(t, resolveErr)
+	require.Equal(t, resolvedPath, posture["session_store_path"])
 	t.Logf("/status session store: %s (%v)", posture["session_store_path"], posture["session_store_mount"])
 	code, raw = sessionDo(t, client, "GET", base+"/sessions", nil, nil)
 	require.Equal(t, http.StatusOK, code, raw)
