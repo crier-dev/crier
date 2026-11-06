@@ -3365,5 +3365,6 @@ tasks:
     \ with the --drill arm; systemd-analyze verify exits 0 on both units; docs/operations.md\
     \ \xA76 names the units, the enable commands and that the residual is tracked\
     \ on CRIER-OPS-002, no longer citing the closed CRIER-OPS-001"
-  status: in_progress
+  status: complete
   created_at: '2026-11-06T00:36:18.085931+00:00'
+  completed_at: '2026-11-06T00:43:36.773132+00:00'
