@@ -3316,3 +3316,17 @@ tasks:
   status: complete
   created_at: '2026-11-05T22:12:48.846614+00:00'
   completed_at: '2026-11-05T22:50:18.513904+00:00'
+- id: INT-CI-026
+  title: 'bunker-matrix-selftest LOCAL-ROUTES-PROBES: remove the torn-read race on
+    the fake crier''s counters file'
+  criteria:
+  - 'The counters reader in scripts/bunker-matrix-selftest.sh never observes a truncated
+    or not-yet-written counters document: the fake crier writes it atomically (open+os.replace)
+    and counters() retries a bounded number of times before reporting a value, so
+    LOCAL-ROUTES-PROBES reports the real hit counts instead of an empty body. Proven
+    by a RED/GREEN harness: the old non-atomic writer + plain json.load yields decode
+    errors under concurrent reads, the shipped form yields zero, and bash scripts/bunker-matrix-selftest.sh
+    still reports 18/18 checks behaved.'
+  status: complete
+  created_at: '2026-11-05T23:58:01.580197+00:00'
+  completed_at: '2026-11-05T23:59:29.078734+00:00'
