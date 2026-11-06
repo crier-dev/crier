@@ -1,0 +1,55 @@
+{
+  "wave_id": "crier-foreman-2026-11-06-14-41-12",
+  "tick": "crier-foreman-2026-11-06-14-41-12",
+  "project": "crier",
+  "block": "CRIER-HARNESS-15 (block_drive label; resume of block CRIER-HARNESS-11 named by the 2026-11-06T09:45 wave)",
+  "resume": true,
+  "base_ref": "origin/main",
+  "base_sha": "a9162f49",
+  "created_at": "2026-11-06T14:52:00Z",
+  "slots": 3,
+  "slot_derivation": "nproc=16, loadavg1=12.64 -> ceil=13 -> 16-13=3 -> min(6,3)=3; WAVE_BUDGET=10 so box-derived 3 is the ceiling",
+  "model": "deepseek-v4-flash",
+  "provider": "deepseek-foreman",
+  "rows": [
+    {
+      "id": "CRIER-HARNESS-15",
+      "priority": "P3",
+      "title": "AdapterConfig.PermissionMode has no CR_HARNESS_* env override, and the derived key would be mangled by the claude-code hyphen",
+      "worktree": "/home/kara/worktrees/crier-CRIER-HARNESS-15",
+      "branch": "wt/CRIER-HARNESS-15",
+      "base_sha": "a9162f49",
+      "files": "internal/harness/config.go, internal/harness/config_test.go (+ a new focused test file if cleaner)",
+      "seam": "harness env-config loader",
+      "independence": "no depends_on edge in the wave; touches internal/harness/config.go only; does not touch specs/ or internal/ingress/"
+    },
+    {
+      "id": "CRIER-HARNESS-14",
+      "priority": "P3",
+      "title": "Document the codex provider knob and HARNESS_PROVIDER_UNREACHABLE in specs + docs",
+      "worktree": "/home/kara/worktrees/crier-CRIER-HARNESS-14",
+      "branch": "wt/CRIER-HARNESS-14",
+      "base_sha": "a9162f49",
+      "files": "specs/CRIER-HARNESS.md (section 5 Error Catalog), docs/harness-adapters.md",
+      "seam": "documentation only",
+      "independence": "docs-only; no Go file touched; no overlap with the config or ingress rows"
+    },
+    {
+      "id": "CRIER-INGRESS-4",
+      "priority": "P2",
+      "title": "Project ingress.route into the sqlite and postgres chat_messages stores",
+      "worktree": "/home/kara/worktrees/crier-CRIER-INGRESS-4",
+      "branch": "wt/CRIER-INGRESS-4",
+      "base_sha": "a9162f49",
+      "files": "internal/ingress/route.go (+handler wiring), internal/registry sqlite/postgres store projections, tests",
+      "seam": "ingress route store -> SQL backends",
+      "independence": "no depends_on edge in the wave (CRIER-INGRESS-1 is complete); touches internal/ingress + internal/registry, disjoint from harness config and docs"
+    }
+  ],
+  "held_back": {
+    "CRIER-HARNESS-6": "P1 live-delivery proof into a real Hermes session: needs a live gateway/token and a real transcript on disk - foreman-direct live evidence, not a worker edit",
+    "CRIER-HARNESS-7": "P1 live-delivery proof into a real opencode session: same environment-bound evidence class",
+    "CRIER-HARNESS-10": "P2 opencode-v2 id policy: touches internal/harness names/config AND specs/CRIER-HARNESS.md, i.e. both a code seam of CRIER-HARNESS-15 and the docs seam of CRIER-HARNESS-14 - deferred one tick to keep the wave conflict-free"
+  },
+  "merge_order": ["CRIER-HARNESS-14", "CRIER-HARNESS-15", "CRIER-INGRESS-4"]
+}

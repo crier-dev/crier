@@ -3439,3 +3439,34 @@ tasks:
   - Test passes 10x with -count=10, no races, <2s runtime, isolated metrics registry
   status: in_progress
   created_at: '2026-11-06T13:37:10.676063+00:00'
+- id: CRIER-HARNESS-15
+  title: AdapterConfig.PermissionMode gets a documented CR_HARNESS_ env override that
+    survives the claude-code hyphen
+  criteria:
+  - CR_HARNESS_CLAUDE_CODE_PERMISSION_MODE is read by LoadConfig and visible on the
+    loaded AdapterConfig.PermissionMode for the claude-code adapter, proven by a config
+    test; existing CR_HARNESS_ keys keep resolving; go test ./internal/harness/ -count=1
+    exits 0
+  status: complete
+  created_at: '2026-11-06T14:44:07.478794+00:00'
+  completed_at: '2026-11-06T14:51:40.680653+00:00'
+- id: CRIER-HARNESS-14
+  title: Document the codex provider knob and HARNESS_PROVIDER_UNREACHABLE in specs
+    and docs
+  criteria:
+  - specs/CRIER-HARNESS.md section 5 and docs/harness-adapters.md both name CR_CODEX_BASE_URL
+    and HARNESS_PROVIDER_UNREACHABLE with the meaning that matches internal/harness/codex/codex.go,
+    and a grep of both names in both files returns at least one hit each
+  status: complete
+  created_at: '2026-11-06T14:44:07.954943+00:00'
+  completed_at: '2026-11-06T14:52:51.457379+00:00'
+- id: CRIER-INGRESS-4
+  title: Project ingress.route into the sqlite and postgres chat_messages stores
+  criteria:
+  - an inbox-mode push writes an ingress.route row (kind=ingress.route) on sqlite
+    and on postgres, JSONL behavior unchanged, a test asserts the row on each backend,
+    and a failed route write is reported in the response; go build ./... and the named
+    package tests exit 0
+  status: in_progress
+  created_at: '2026-11-06T14:44:08.480834+00:00'
+  completed_at: '2026-11-06T15:09:13.654136+00:00'
