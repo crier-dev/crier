@@ -3330,3 +3330,28 @@ tasks:
   status: complete
   created_at: '2026-11-05T23:58:01.580197+00:00'
   completed_at: '2026-11-05T23:59:29.078734+00:00'
+- id: CRIER-OPS-001
+  title: 'CRIER-OPS-001: document and script the durable-store backup and restore
+    path'
+  criteria:
+  - docs/operations.md is tracked and documents pg_dump/pg_restore for the compose
+    postgres service and sqlite3 .backup/VACUUM INTO for the SQLite stores, with a
+    measured restore drill and the /status fields that prove a restore (registry_backend,
+    registry_durable, agents_total). scripts/backup-db.sh dumps and verifies every
+    configured store and exits 0 while a --drill arm restores 22 of 22 public tables
+    of the live fleet database into a throwaway database. scripts/restore-db.sh refuses
+    without CR_RESTORE_CONFIRM=yes, refuses while a crier process runs, and refuses
+    a dump that does not parse. The crier ops census reports zero findings and docs-check
+    stays green.
+  status: complete
+  created_at: '2026-11-06T00:22:01.624860+00:00'
+  completed_at: '2026-11-06T00:22:52.319596+00:00'
+- id: CR-GAP-075
+  title: 'TestSQLiteMetadataLeaseAndOwnership: replace the bare 1s Eventually with
+    a load-derived budget that names elapsed time and budget on failure'
+  criteria:
+  - A full-package run of ./internal/registry at host load >= 16 passes TestSQLiteMetadataLeaseAndOwnership,
+    the Eventually budget is a documented constant derived from a measured worst case
+    (not 1 second), and the failure message names elapsed time and the budget
+  status: in_progress
+  created_at: '2026-11-06T00:23:41.830558+00:00'
