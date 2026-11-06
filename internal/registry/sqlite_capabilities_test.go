@@ -9,6 +9,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/webhook"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,6 +80,13 @@ func TestSQLiteEvidenceAtomicAndDurable(t *testing.T) {
 	require.ErrorIs(t, s.RecordTaskOutput("a", TaskOutput{}), ErrInvalidStoreInput)
 }
 
+// leaseReclaimBudget bounds the reclaim wait in TestSQLiteMetadataLeaseAndOwnership.
+// MEASURED: reclaim completed in 3.757321ms; a full-package run took 22.861s at
+// load 29.03 on this 16-core host. The single 1s Eventually on a shared host
+// produced the false red tracked by CR-GAP-075; 30s leaves headroom beyond that measured
+// package runtime while still failing on a real reclaim regression.
+const leaseReclaimBudget = 30 * time.Second
+
 func TestSQLiteMetadataLeaseAndOwnership(t *testing.T) {
 	t.Parallel()
 	s := newTestSQLiteStore(t)
@@ -120,10 +128,17 @@ func TestSQLiteMetadataLeaseAndOwnership(t *testing.T) {
 	require.Equal(t, entry.Payload, peek.Payload)
 	_, _, err = s.Retrieve("b", time.Nanosecond, 1)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
+	reclaimStarted := time.Now()
+	var reclaimElapsed time.Duration
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		rows, newLease, err := s.Retrieve("b", time.Hour, 1)
-		return err == nil && len(rows) == 1 && newLease != ""
-	}, time.Second, time.Millisecond)
+		if err != nil || len(rows) != 1 || newLease == "" {
+			c.Errorf("lease reclaim not ready: elapsed=%s budget=%s (err=%v rows=%d lease=%q)", time.Since(reclaimStarted), leaseReclaimBudget, err, len(rows), newLease)
+			return
+		}
+		reclaimElapsed = time.Since(reclaimStarted)
+	}, leaseReclaimBudget, time.Millisecond)
+	t.Logf("lease reclaim latency=%s budget=%s", reclaimElapsed, leaseReclaimBudget)
 	count, err := s.RevokeLeases("b")
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
