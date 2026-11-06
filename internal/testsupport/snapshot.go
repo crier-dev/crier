@@ -208,8 +208,28 @@ func SnapshotBuildDir(t *testing.T, pkgDir string) string {
 // above the package — a copy with no .git, a tarball — the nearest directory
 // holding a go.mod is the root instead, which is the same directory for every
 // module in this repository.
+//
+// CR-GAP-077: the package path is canonicalized before it is related to the
+// root. `git rev-parse --show-toplevel` reports the work tree's REAL,
+// symlink-resolved path, while a caller's path keeps whatever symlinks its
+// ancestors carry — under the agent harness GOTMPDIR points at a symlink
+// (/var/tmp/hermes-go-tmp -> /var/tmp/hermes-go-tmp-real), so a t.TempDir
+// fixture compared lexically against git's real toplevel yielded a rel of
+// "../../../hermes-go-tmp/Test.../001/cmd/hello". Joining that onto the
+// snapshot root collapsed back onto the LIVE package directory, so
+// SnapshotBuildDir returned the working tree instead of a clone of HEAD and
+// the isolation silently became a no-op (the guard's go_tests lane then reds a
+// clean tree). Resolving both sides first is a no-op wherever no symlink is
+// involved.
 func treeContext(absPkgDir string) (root, rel string, err error) {
+	if resolved, rerr := filepath.EvalSymlinks(absPkgDir); rerr == nil {
+		absPkgDir = resolved
+	}
+
 	if top, err := git(absPkgDir, "rev-parse", "--show-toplevel"); err == nil {
+		if resolved, rerr := filepath.EvalSymlinks(top); rerr == nil {
+			top = resolved
+		}
 		rel, relErr := filepath.Rel(top, absPkgDir)
 		if relErr != nil {
 			return "", "", fmt.Errorf("cannot make %q relative to the work tree root %q: %v", absPkgDir, top, relErr)
