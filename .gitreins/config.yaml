@@ -15,6 +15,21 @@ guards:
     lint: true
     tests: true
   test_timeout: 300
+  # hook_timeout (CR-GAP-073): the OVERALL guard budget must EXCEED the tests
+  # arm's budget, never equal it. With only test_timeout set, guards.hook_timeout
+  # fell back to its 300s default — hook_timeout == test_timeout — so the tests
+  # arm was allowed to consume the entire overall budget and the guard died in
+  # the hook-timeout path first, which reports fail-open and never runs the arms
+  # that came after it. gitreins (0.17.1, engine/guard_manager.py) DERIVES
+  # test_timeout + 120 = 420s for this pair at runtime and warns on every run:
+  #   WARN: hook_timeout=300s <= test_timeout=300s ... Raising this run's budget
+  #   to 420s — set guards.hook_timeout above guards.test_timeout to fix it at
+  #   the source.
+  # Setting it here fixes it at the source: the warning stops and the budget is
+  # this repo's declared value rather than a number derived per run.
+  # 420 = test_timeout 300 + 120s of slack for go_build + go_lint, which run
+  # BEFORE the tests arm and are charged to the same overall budget.
+  hook_timeout: 420
 pipeline:
   stages:
   - id: tier1
