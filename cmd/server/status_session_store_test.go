@@ -35,6 +35,13 @@ func TestSessionStoreLocation(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.db")
 	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	// CR-GAP-077: sessionStoreLocation resolves the file it opens, so the
+	// expected path must be resolved too. Under the agent harness GOTMPDIR is a
+	// symlink (/var/tmp/hermes-go-tmp -> hermes-go-tmp-real), so t.TempDir() and
+	// the resolved path differ and the equality below would be a false red on a
+	// clean tree. A tree with no symlink in play is unchanged.
+	resolved, resolveErr := filepath.EvalSymlinks(path)
+	require.NoError(t, resolveErr)
 	link := filepath.Join(root, "alias.db")
 	require.NoError(t, os.Symlink(path, link))
 	cwd, err := os.Getwd()
@@ -45,7 +52,7 @@ func TestSessionStoreLocation(t *testing.T) {
 		cfg := config.Config{Session: config.SessionConfig{Backend: "sqlite", SQLitePath: input}}
 		got, _ := sessionStoreLocation(cfg)
 		require.NotNil(t, got)
-		require.Equal(t, path, *got, "resolve actual file, not URI options or symlink spelling")
+		require.Equal(t, resolved, *got, "resolve actual file, not URI options or symlink spelling")
 	}
 	for _, input := range []string{":memory:", "file::memory:?cache=shared", "file:volatile?mode=memory&cache=shared"} {
 		got, kind := sessionStoreLocation(config.Config{Session: config.SessionConfig{Backend: "sqlite", SQLitePath: input}})
@@ -60,9 +67,15 @@ func TestSessionStoreLocation(t *testing.T) {
 	got, kind := sessionStoreLocation(config.Config{Session: config.SessionConfig{Backend: "postgres"}, Database: config.DatabaseConfig{URL: "postgres://user:secret@host/db"}})
 	require.Nil(t, got, "never expose a credential-bearing database URL")
 	require.Equal(t, "external", kind)
+	// CR-GAP-077: the store resolves the directory it reports, so the expected
+	// spelling is the resolved one (GOTMPDIR is a symlink under the agent
+	// harness). A tree with no symlink in play is unchanged.
+	resolvedRoot, resolveErr := filepath.EvalSymlinks(root)
+	require.NoError(t, resolveErr)
 	got, _ = sessionStoreLocation(config.Config{Session: config.SessionConfig{Backend: "jsonl", LogRoot: root}})
-	require.Equal(t, root, *got)
+	require.Equal(t, resolvedRoot, *got)
 	got, kind = sessionStoreLocation(config.Config{Session: config.SessionConfig{Backend: "sqlite", SQLitePath: filepath.Join(root, "missing.db")}})
+	// A missing file cannot be resolved, so the store reports the path as spelled.
 	require.Equal(t, filepath.Join(root, "missing.db"), *got)
 	require.Equal(t, "unknown", kind, "a missing file cannot supply mount evidence")
 }

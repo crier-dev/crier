@@ -35,6 +35,15 @@ func matchingStorePostureConfig(t *testing.T, root string) (config.Config, strin
 	registryPath := filepath.Join(root, "registry.db")
 	require.NoError(t, os.WriteFile(sessionPath, nil, 0o600))
 	require.NoError(t, os.WriteFile(registryPath, nil, 0o600))
+	// CR-GAP-077: /status reports the RESOLVED file the backend opened, so the
+	// expected values must be resolved too. Under the agent harness GOTMPDIR is
+	// a symlink (/var/tmp/hermes-go-tmp -> hermes-go-tmp-real), so t.TempDir()
+	// and the store's resolved path differ and these equalities would be a
+	// false red on a clean tree. A tree with no symlink in play is unchanged.
+	sessionPath, err := filepath.EvalSymlinks(sessionPath)
+	require.NoError(t, err)
+	registryPath, err = filepath.EvalSymlinks(registryPath)
+	require.NoError(t, err)
 	return config.Config{
 		Session: config.SessionConfig{
 			Backend:          config.SessionBackendSQLite,
