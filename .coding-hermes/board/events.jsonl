@@ -2148,3 +2148,6 @@
 {"id":2138,"timestamp":"2026-11-06 00:10:33.812534","event_type":"task_updated","task_id":"QA-CRIER-REVIEW-5","actor":"foreman","detail":"{\"title\":\"docker_build FAILs on a fresh agent because the build cell runs before the rootless docker socket exists (legacy builder + closed-pipe tar), not because buildx is missing\"}","tick_number":null}
 {"id":2139,"timestamp":"2026-11-06 00:26:21.658731","event_type":"task_completed","task_id":"CRIER-OPS-001","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":2140,"timestamp":"2026-11-06 00:35:53.683083","event_type":"task_created","task_id":"CRIER-OPS-002","actor":"foreman","detail":"{\"id\":\"CRIER-OPS-002\",\"status\":\"pending\"}","tick_number":null}
+{"id":2141,"timestamp":"2026-11-06 00:39:09.573128","event_type":"task_created","task_id":"CR-GAP-077","actor":"foreman","detail":"{\"id\":\"CR-GAP-077\",\"status\":\"pending\"}","tick_number":null}
+{"id":2142,"timestamp":"2026-11-06 00:39:10.061746","event_type":"task_created","task_id":"CR-GAP-078","actor":"foreman","detail":"{\"id\":\"CR-GAP-078\",\"status\":\"pending\"}","tick_number":null}
+{"id":2143,"timestamp":"2026-11-06 00:39:16.194854","event_type":"task_completed","task_id":"CR-GAP-075","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
