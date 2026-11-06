@@ -147,12 +147,27 @@ adapters:
 		if !slices.Contains(cfg.Unknown, name) {
 			t.Fatalf("%q must be recorded in Unknown so the load is a hard failure: %v", name, cfg.Unknown)
 		}
-		if cfg.Disabled[name] != "unknown adapter" {
-			t.Fatalf("%q disabled reason = %q, want %q", name, cfg.Disabled[name], "unknown adapter")
-		}
 		if _, ok := cfg.Adapters[name]; ok {
 			t.Fatalf("%q must not survive as an adapter block", name)
 		}
+	}
+	// deepseek is a plain unknown adapter and keeps the generic reason.
+	// opencode-v2 is a KNOWN-MISSING id (CRIER-HARNESS-10): its refusal names
+	// the finding — no v2 artifact exists — instead of the class, because
+	// "unknown adapter" is true but useless when the reason nothing serves the
+	// name is that the thing it names does not exist to be served.
+	if cfg.Disabled["deepseek"] != "unknown adapter" {
+		t.Fatalf("deepseek disabled reason = %q, want %q", cfg.Disabled["deepseek"], "unknown adapter")
+	}
+	finding, missing := harness.KnownMissingReason("opencode-v2")
+	if !missing {
+		t.Fatal("opencode-v2 must sit in the known-missing table or this fixture's premise is gone")
+	}
+	if cfg.Disabled["opencode-v2"] != finding {
+		t.Fatalf("opencode-v2 disabled reason = %q, want the named finding %q", cfg.Disabled["opencode-v2"], finding)
+	}
+	if !strings.Contains(msg, "no opencode v2 artifact exists") {
+		t.Fatalf("the v2 refusal must name the finding, not just the unknown-adapter class: %s", msg)
 	}
 	// The accepted set is printed from KnownAdapters + the alias table, so every
 	// served name must appear — including the ones this row turned from silent
@@ -463,5 +478,91 @@ func TestClaudeCodeIsAWorkingAdapter(t *testing.T) {
 	}
 	if containsElement(argv, "--resume") {
 		t.Fatalf("the create path must not carry --resume: %v", argv)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CRIER-HARNESS-10: the opencode-v2 refusal names the finding.
+//
+// ch:trace row=CRIER-HARNESS-10 spec=specs/CRIER-HARNESS.md#opencode-id-policy
+// wave=.coding-hermes/waves/crier-foreman-2026-11-06-16-31-19.json#CRIER-HARNESS-10
+// test=internal/harness/names_routing_test.go::TestOpencodeV2RefusalNamesTheFinding
+// doc=specs/CRIER-HARNESS.md evidence=go test -short ./internal/harness/... (local run log in
+// the closeout report) witness=none:local-worktree-no-published-endpoint
+// verdict=none:foreman-completes-after-merge commit=wt/CRIER-HARNESS-10 head reported at closeout
+// memory=none:foreman-closeout
+// ---------------------------------------------------------------------------
+
+// TestOpencodeV2RefusalNamesTheFinding pins the row's behaviour end to end:
+// `opencode-v2` names no artifact (there is no v2 install to measure), so every
+// refusal surface — the load-time Validate error, the disabled-block reason, a
+// delivery receipt and a probe — carries that finding instead of the generic
+// unknown-adapter message. The ROUTING is unchanged: the name still resolves to
+// no adapter and the served set is exactly the five known adapters.
+func TestOpencodeV2RefusalNamesTheFinding(t *testing.T) {
+	const finding = "no opencode v2 artifact exists"
+
+	// Routing is unchanged: the name resolves to nothing under any casing, and
+	// no adapter answers it.
+	for _, spelling := range []string{"opencode-v2", "OpenCode-V2"} {
+		if canonical, ok := harness.CanonicalName(spelling); ok {
+			t.Fatalf("%q must not resolve to an adapter (got %q): no v2 artifact exists", spelling, canonical)
+		}
+	}
+	tabled, missing := harness.KnownMissingReason("opencode-v2")
+	if !missing || !strings.Contains(tabled, finding) {
+		t.Fatalf("opencode-v2 must sit in the known-missing table with its finding: %q/%t", tabled, missing)
+	}
+
+	cfg := harness.LoadConfig(writeHarnessConfig(t, `
+enabled: true
+adapters:
+  opencode-v2:
+    binary: opencode
+`))
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("opencode-v2 has no artifact and must be refused at load")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, finding) {
+		t.Fatalf("the load refusal must name the finding, not the generic class: %s", msg)
+	}
+	if cfg.Disabled["opencode-v2"] == "unknown adapter" {
+		t.Fatal("the v2 refusal must not fall back to the generic unknown-adapter reason")
+	}
+
+	// The refusal removes nothing that is served: the registry still holds
+	// exactly the five known adapters.
+	reg := build.Registry(cfg)
+	registered := append([]string(nil), reg.Names()...)
+	sort.Strings(registered)
+	known := slices.Clone(harness.KnownAdapters)
+	sort.Strings(known)
+	if !slices.Equal(registered, known) {
+		t.Fatalf("the v2 refusal must not change the served set: registered %v, known %v", registered, known)
+	}
+
+	// A delivery naming opencode-v2 fails HARNESS_UNKNOWN with the finding in
+	// the receipt tail, before any binary is executed.
+	rc := reg.Deliver(context.Background(), harness.DispatchRequest{
+		Harness:    "opencode-v2",
+		SessionRef: harness.SessionRef{Harness: "opencode-v2", ID: "hs_v2"},
+		Message:    harness.Message{ID: "m_v2", SessionID: "s_v2", Text: "hello"},
+	})
+	if rc.State != harness.StateFailed || rc.Error != harness.CodeUnknown {
+		t.Fatalf("a delivery naming opencode-v2 must fail %s: %+v", harness.CodeUnknown, rc)
+	}
+	if !strings.Contains(rc.Tail, finding) {
+		t.Fatalf("the receipt tail must carry the finding, not a generic unknown: %q", rc.Tail)
+	}
+
+	// A probe of the missing id answers with the finding too.
+	cap, perr := reg.Probe(context.Background(), "opencode-v2")
+	if perr == nil {
+		t.Fatal("probing opencode-v2 must fail")
+	}
+	if !strings.Contains(cap.Reason, finding) {
+		t.Fatalf("the probe capability must carry the finding: %q", cap.Reason)
 	}
 }

@@ -104,3 +104,34 @@ func TestHarnessUsageAndUnknownSubcommand(t *testing.T) {
 		t.Fatalf("unknown subcommand: want 2, got %d", code)
 	}
 }
+
+// TestHarnessProbeNamesTheMissingV2Finding pins CRIER-HARNESS-10: `probe
+// opencode-v2` exits 1 with the FINDING — no v2 artifact exists — instead of
+// the generic registered-adapter line, while a plainly unrelated name keeps
+// that generic line. The distinction is the point: one names a release that
+// does not exist, the other names a misspelling.
+func TestHarnessProbeNamesTheMissingV2Finding(t *testing.T) {
+	fake := writeCLIFakeHarness(t)
+	var out, errOut bytes.Buffer
+	if code := runHarness([]string{"probe", "opencode-v2"}, &out, &errOut, harnessEnv(fake)); code != 1 {
+		t.Fatalf("opencode-v2 probe exit: want 1, got %d (%s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "no opencode v2 artifact exists") {
+		t.Fatalf("the v2 refusal must name the finding: %s", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "not a registered adapter") {
+		t.Fatalf("the v2 refusal must not use the generic registered-adapter line: %s", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runHarness([]string{"probe", "nope"}, &out, &errOut, harnessEnv(fake)); code != 1 {
+		t.Fatalf("unknown probe exit: want 1, got %d", code)
+	}
+	if !strings.Contains(errOut.String(), "not a registered adapter") {
+		t.Fatalf("a plainly unrelated name must keep the generic message: %s", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "no opencode v2 artifact exists") {
+		t.Fatalf("the finding belongs to the v2 id only: %s", errOut.String())
+	}
+}

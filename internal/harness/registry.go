@@ -193,11 +193,17 @@ func (r *Registry) Capabilities(ctx context.Context) map[string]Capability {
 	return out
 }
 
-// Probe measures one adapter by name. An unregistered name is HARNESS_UNKNOWN.
+// Probe measures one adapter by name. An unregistered name is HARNESS_UNKNOWN;
+// a known-missing id (CRIER-HARNESS-10) carries its finding, not a bare
+// "unknown harness".
 func (r *Registry) Probe(ctx context.Context, name string) (Capability, error) {
 	a, ok := r.Get(name)
 	if !ok {
-		return Capability{Reason: "unknown harness " + name}, fmt.Errorf("%s: %q", CodeUnknown, name)
+		reason := "unknown harness " + name
+		if finding, missing := KnownMissingReason(name); missing {
+			reason = finding
+		}
+		return Capability{Reason: reason}, fmt.Errorf("%s: %q", CodeUnknown, name)
 	}
 	return a.Probe(ctx)
 }
@@ -228,7 +234,13 @@ func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) (receipt Re
 	}
 	adapter, ok := r.Get(name)
 	if !ok {
-		return FailedReceipt(name, CodeUnknown, "no adapter registered for "+name).withTime(r.now())
+		detail := "no adapter registered for " + name
+		if finding, missing := KnownMissingReason(name); missing {
+			// A requested id with no artifact behind it says so by name
+			// (CRIER-HARNESS-10): "unknown" is not the finding.
+			detail = finding
+		}
+		return FailedReceipt(name, CodeUnknown, detail).withTime(r.now())
 	}
 
 	// One goroutine per delivery, each with its own deadline (§4.2). The

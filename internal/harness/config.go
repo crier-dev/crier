@@ -205,7 +205,7 @@ func applyYAMLFile(cfg *Config, path string) error {
 			// Validate can fail with the accepted set, instead of a warning
 			// that only becomes a delivery failure later.
 			cfg.Unknown = append(cfg.Unknown, name)
-			cfg.Disabled[name] = "unknown adapter"
+			cfg.Disabled[name] = refusalReason(name)
 			continue
 		}
 		if aliased {
@@ -353,7 +353,7 @@ func validate(cfg *Config) {
 			continue
 		}
 		cfg.Unknown = append(cfg.Unknown, name)
-		cfg.Disabled[name] = "unknown adapter"
+		cfg.Disabled[name] = refusalReason(name)
 		delete(cfg.Adapters, name)
 	}
 	sort.Strings(cfg.Unknown)
@@ -388,6 +388,15 @@ func (c Config) Validate() error {
 			b.WriteString(", ")
 		}
 		b.WriteString(strconv.Quote(name))
+		// A known-missing id (CRIER-HARNESS-10) carries its finding instead
+		// of a guess: the operator did not misspell a served adapter, they
+		// named something that does not exist to be served.
+		if finding, missing := KnownMissingReason(name); missing {
+			b.WriteString(" (")
+			b.WriteString(finding)
+			b.WriteString(")")
+			continue
+		}
 		if s := Suggest(name); s != "" {
 			b.WriteString(" (did you mean ")
 			b.WriteString(strconv.Quote(s))
@@ -397,6 +406,17 @@ func (c Config) Validate() error {
 	b.WriteString("; accepted: ")
 	b.WriteString(AcceptedNamesHelp())
 	return errors.New(b.String())
+}
+
+// refusalReason is the user-facing reason a requested adapter name is refused.
+// A name in the known-missing table carries its own finding (CRIER-HARNESS-10);
+// everything else stays the generic "unknown adapter", which is the honest
+// word for a name nothing serves.
+func refusalReason(name string) string {
+	if finding, missing := KnownMissingReason(name); missing {
+		return finding
+	}
+	return "unknown adapter"
 }
 
 func isKnownAdapter(name string) bool {

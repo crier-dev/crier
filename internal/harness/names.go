@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,31 @@ import (
 // already the metric label and the persisted session binding.
 var adapterAliases = map[string]string{
 	"pi-agent": AdapterPi,
+}
+
+// knownMissingAdapters holds harness ids an operator may plausibly write that
+// have NO artifact behind them — a requested release, not a misspelling. The
+// value is the finding the refusal must carry (CRIER-HARNESS-10): "unknown
+// adapter" is true but useless when the reason nothing serves the name is that
+// the thing it names does not exist to be served. The id policy itself is
+// specs/CRIER-HARNESS.md §6.7: an adapter id names an implementation, a
+// measured version names a release, so `opencode-v2` is refused until a v2
+// artifact exists and its probe measures one.
+var knownMissingAdapters = map[string]string{
+	AdapterOpencode + "-v2": "no opencode v2 artifact exists: opencode is served by the single id " + strconv.Quote(AdapterOpencode) + ", whose adapter reports the installed CLI's measured version (specs/CRIER-HARNESS.md §6.7)",
+}
+
+// KnownMissingReason returns the finding that explains why nothing serves a
+// requested id. ok is false for a name that is merely unknown, so generic
+// handling (the accepted set, a near-miss suggestion) stays generic and only
+// the known-missing ids get their named refusal. Case is ignored, matching how
+// an alias is resolved: "OpenCode-V2" is the same non-existent request.
+func KnownMissingReason(name string) (string, bool) {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if finding, ok := knownMissingAdapters[n]; ok {
+		return finding, true
+	}
+	return "", false
 }
 
 // CanonicalName resolves a configured or requested harness name to the adapter

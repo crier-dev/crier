@@ -87,6 +87,13 @@ func harnessProbe(reg *harness.Registry, name string, out, errOut io.Writer) int
 	defer cancel()
 	cap, err := reg.Probe(ctx, name)
 	if err != nil {
+		// A known-missing id (CRIER-HARNESS-10) gets its finding, not the
+		// generic registered-adapter line: the operator asked for a release
+		// that does not exist, and the message says exactly that.
+		if finding, missing := harness.KnownMissingReason(name); missing {
+			_, _ = fmt.Fprintf(errOut, "crier harness probe: %s: %s\n", name, finding)
+			return 1
+		}
 		_, _ = fmt.Fprintf(errOut, "crier harness probe: %s is not a registered adapter (known: %s)\n",
 			name, strings.Join(reg.Names(), ", "))
 		return 1

@@ -2,7 +2,8 @@
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-HARNESS-1** (interface + Hermes +
 opencode), **CRIER-HARNESS-2** (pi-agent), **CRIER-HARNESS-3** (codex), **CRIER-HARNESS-14**
-(docs: the codex provider override `CR_CODEX_BASE_URL` and `HARNESS_PROVIDER_UNREACHABLE`)
+(docs: the codex provider override `CR_CODEX_BASE_URL` and `HARNESS_PROVIDER_UNREACHABLE`),
+**CRIER-HARNESS-10** (the opencode id policy, §6.7)
 Series: `specs/CRIER-INGRESS.md` (the call that triggers delivery), `specs/CRIER-READS.md`
 (harness sessions read through cursors too).
 
@@ -286,6 +287,42 @@ Decision: **build**, not refuse. The row asked for the choice in writing; the ad
   adapter reports `HARNESS_TIMEOUT` with no transcript. The gated leg
   `TestLiveTurnAgainstTheInstalledBinary` records exactly that, so the block is visible in evidence
   instead of being mistaken for a broken adapter.
+
+### 6.7 opencode id policy — one id, the measured version carries the major (CRIER-HARNESS-10)
+
+**Finding (2026-11-06, control host):** there is no "opencode v2" artifact to install or measure.
+The probe that produced the §2 table measured `opencode --version` → `1.18.29` on 2026-11-03, and
+re-running that same probe on 2026-11-06 measures `1.18.29` again; no v2 artifact exists to install
+anywhere Crier deploys. The id `opencode-v2` therefore names nothing. Crier serves opencode through
+exactly one adapter id, `opencode` (`KnownAdapters`, `internal/harness/opencode`) — one id, and the
+version says which release is actually installed.
+
+**Policy:** an adapter id names an implementation, never a release train; a measured version names a
+release. A new major version of an already-served harness does **not** get a new config id — it is
+admitted by the version its `Probe` measures (`Capability.Version`, the VERSION column of
+`crier harness list`).
+
+- **Requesting `opencode-v2` today** — as a config block (§4.1), a delivery request, or
+  `crier harness probe opencode-v2` — fails with the finding, not the generic unknown-adapter
+  message: `no opencode v2 artifact exists: opencode is served by the single id "opencode", whose
+  adapter reports the installed CLI's measured version (specs/CRIER-HARNESS.md §6.7)`. The refusal
+  comes from a fixed table (`knownMissingAdapters` in `internal/harness/names.go`), so it is
+  deterministic; the load stays a hard failure exactly as for any other unknown name
+  (CRIER-HARNESS-9/12), and the served set is unchanged.
+- **What would admit a future v2** — evidence, not a name:
+  1. an installable opencode 2.x artifact, measured on this control host the way §2 measured
+     `1.18.29` (`--version` through the adapter's Probe), with the measurement recorded here;
+  2. its injection surface re-verified against the §2 table, or the 1.x surfaces proven unchanged
+     by the same probes;
+  3. then the existing `opencode` adapter is extended in place if the surface holds — or, only if
+     the CLI/wire surface is incompatible with it, a NEW adapter id is added by extending
+     `KnownAdapters` + `build.Registry` with its own verified-surfaces entry. Aliasing
+     `opencode-v2` onto the 1.x adapter is forbidden: an alias is a second spelling of a SERVED
+     adapter, and `opencode-v2` is not served by anything.
+- **How a future v2 is detected:** by version, not by id. `crier harness list` prints the measured
+  version of the installed binary (today `1.18.29`); a 2.x number in that column, together with the
+  §2 evidence above, is the admission signal. Until that measurement exists, the v2 id is refused
+  by name and no speculative id is created for it.
 
 ## 7. Testing
 
