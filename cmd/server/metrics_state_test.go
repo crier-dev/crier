@@ -10,8 +10,9 @@
 //
 // Three kinds of proof, in this order:
 //
-//   - a live boot (metrics on, in-memory store) renders every series — at 0 when
-//     idle, never absent, never NaN;
+//   - a live boot (metrics on, in-memory store) renders every series — each
+//     boot-scoped gauge at 0 when idle, the two process-wide alert counters at
+//     their presence + monotonic contract, never absent, never NaN;
 //   - an unreachable webhook endpoint makes the backlog depth and the oldest age
 //     ADVANCE on a live boot (the G5 gap: today only a log line said so);
 //   - the store depth read-error counter advances once per failed scrape, with
@@ -99,7 +100,8 @@ func sampleValue(body, prefix string) (float64, bool) {
 }
 
 // TestMetricsState_SeriesRenderOnIdleBoot is the presence half: every series of
-// this row renders, at its idle value, on a plain metrics-on boot.
+// this row renders on a plain metrics-on boot — the boot-scoped state gauges at
+// their idle value, the process-wide counters at their presence contract.
 func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 	baseURL := bootStateMetricsServer(t)
 	body := scrapeMetrics(t, baseURL)
@@ -113,8 +115,6 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		{"crier_webhook_queue_oldest_age_seconds", 0, "an empty queue has no oldest item"},
 		{"crier_federation_held_age_seconds", 0, "no federation links, so nothing is held"},
 		{`crier_store_queue_depth_read_errors_total{backend="memory"}`, 0, "the memory store answers every depth read"},
-		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, 0, "detection is disabled and the bounded pairs are seeded"},
-		{`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`, 0, "every bounded (signal,severity) pair exists before the first alert"},
 		{"crier_detect_quarantined_current", 0, "no agent is contained"},
 	}
 	for _, w := range want {
@@ -143,6 +143,52 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 	} {
 		if got, ok := sampleValue(body, prefix); !ok || math.IsNaN(got) {
 			t.Errorf("%s is absent or NaN — every bounded attempt ordinal must be seeded\nbody:\n%s", prefix, body)
+		}
+	}
+
+	// crier_detect_alerts_total is a PROCESS-WIDE counter, exactly like the
+	// attempt buckets above and unlike the state gauges: internal/detect
+	// increments one package-level counter vec in raise(), so a sibling test in
+	// this binary that trips an alert leaves the child non-zero before this boot
+	// exists. TestDetectionCatchesAndContainsACompromisedAgent (crfeat030_test.go)
+	// does precisely that: it delivers five messages from ONE sender, which trips
+	// odd_hour_volume/warning whenever the suite runs inside the detector's
+	// default quiet window (01:00-05:00 UTC), and the Coverage job that reded at
+	// metrics_state_test.go:131 was this test reading that sibling's increment —
+	// not the boot under test (repro: the two tests selected alone, in this
+	// order, red; this test alone green; same pair green outside the window).
+	//
+	// So the alert pairs are asserted at their PRESENCE + monotonic contract: the
+	// bounded children must exist and a second scrape of the same boot must not
+	// read lower. An absolute 0 here would only ever hold on a pristine process,
+	// which a package run never is; the presence claim is what this row owns.
+	for _, w := range []struct {
+		prefix string
+		why    string
+	}{
+		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, "detection is disabled here, but the bounded pair must still be seeded by internal/detect"},
+		{`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`, "every bounded (signal,severity) pair must render before the first alert"},
+	} {
+		first, ok := sampleValue(body, w.prefix)
+		if !ok {
+			t.Errorf("%s is absent from /metrics — %s\nbody:\n%s", w.prefix, w.why, body)
+			continue
+		}
+		if math.IsNaN(first) {
+			t.Errorf("%s = NaN — a bounded alert counter always renders a number\nbody:\n%s", w.prefix, body)
+			continue
+		}
+		if first < 0 {
+			t.Errorf("%s = %v — an alert counter cannot be negative", w.prefix, first)
+			continue
+		}
+		after, ok := sampleValue(scrapeMetrics(t, baseURL), w.prefix)
+		if !ok {
+			t.Errorf("%s disappeared between two scrapes of the same boot", w.prefix)
+			continue
+		}
+		if after < first {
+			t.Errorf("%s went backwards across two scrapes (%v then %v) — the counter must be monotonic", w.prefix, first, after)
 		}
 	}
 
