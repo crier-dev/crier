@@ -270,7 +270,20 @@ func applyEnv(cfg *Config, getenv func(string) string) {
 	}
 }
 
-// adapterEnvFields names the env override for every configurable adapter field.
+// adapterEnvFields names the env override for every field an adapter block can
+// set, so the whole of AdapterConfig is configurable from either surface. The
+// table is exhaustive on purpose: a field added to AdapterConfig without an
+// entry here would be settable from YAML only, and silent about it.
+// TestAdapterEnvOverridesEveryAdapterConfigField derives the expected key set
+// from the struct's own yaml tags, so that gap is a red test rather than a
+// documentation claim. There is no field this table deliberately leaves out.
+//
+// The key is CR_HARNESS_<ADAPTER>_<FIELD> with the adapter id upper-cased and
+// every hyphen mapped to an underscore (see adapterEnvName): an adapter id may
+// contain a hyphen — claude-code does — but an environment variable name may
+// not. The claude-code permission mode is therefore
+// CR_HARNESS_CLAUDE_CODE_PERMISSION_MODE; the hyphenated spelling
+// CR_HARNESS_CLAUDE-CODE_PERMISSION_MODE is never consulted.
 var adapterEnvFields = []struct {
 	suffix string
 	set    func(*AdapterConfig, string)
@@ -285,13 +298,22 @@ var adapterEnvFields = []struct {
 	{"PASSWORD_FILE", func(a *AdapterConfig, v string) { a.PasswordFile = v }},
 	{"SESSION_DIR", func(a *AdapterConfig, v string) { a.SessionDir = v }},
 	{"SANDBOX", func(a *AdapterConfig, v string) { a.Sandbox = v }},
+	{"PERMISSION_MODE", func(a *AdapterConfig, v string) { a.PermissionMode = v }},
+}
+
+// adapterEnvName renders an adapter id as the segment it occupies in a
+// CR_HARNESS_* key. Hyphens cannot appear in an environment variable name, so
+// claude-code occupies CR_HARNESS_CLAUDE_CODE_*. Adapter ids without a hyphen
+// (hermes, opencode, pi, codex) keep the key they have always had.
+func adapterEnvName(name string) string {
+	return strings.ReplaceAll(strings.ToUpper(name), "-", "_")
 }
 
 func applyAdapterEnv(cfg *Config, getenv func(string) string) {
 	for _, name := range KnownAdapters {
 		ac := cfg.Adapters[name]
 		for _, f := range adapterEnvFields {
-			key := "CR_HARNESS_" + strings.ToUpper(name) + "_" + f.suffix
+			key := "CR_HARNESS_" + adapterEnvName(name) + "_" + f.suffix
 			if v := strings.TrimSpace(getenv(key)); v != "" {
 				f.set(&ac, v)
 			}
