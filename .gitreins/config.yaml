@@ -12,6 +12,32 @@ guards:
   test_command: go test -short -count=1 ./...
   go:
     build: true
+    # lint stays TRUE (CR-GAP-076, measured 2026-11-06 at eab766b5): this lane
+    # is ALREADY diff-only and there is nothing to configure. gitreins 0.17.1
+    # hard-wires the per-staged-package invocation as
+    #   golangci-lint run --new-from-rev=HEAD~1 <pkg>
+    # (pipx engine/guards.py check_go_lint, 60s per-package bound) and reads NO
+    # lint_command knob for Go — guards.test_command reaches the TESTS lane
+    # only — so a lint_command key set here would be a silently-ignored dead
+    # key (the DF-GITREINS-POC-45 anti-pattern), not a configuration.
+    # Measured on this tree: `golangci-lint run --new-from-rev=HEAD~1` reports
+    # 0 issues — the ~69 pre-existing findings (50 errcheck, 10 staticcheck,
+    # 8 unused, 1 ineffassign; CR-GAP-076's "~70") never surface under the
+    # diff filter, and a NEW finding on a staged line fails the lane
+    # (red-proven 2026-11-06 with a staged probe, CR-GAP-076 AC 4).
+    # Do not re-derive the row's premise from a bare `golangci-lint run ./...`:
+    # without the rev filter it reports those 69 findings under SIBLING
+    # WORKTREE paths (../crier-CR-GAP-073/... etc.) because every crier
+    # worktree shares the module path and the golangci-lint analysis cache
+    # keeps the first-linting checkout's absolute paths. The diff filter drops
+    # those unattributable paths (fail-closed). The Nov-5 guard FAILs recorded
+    # in ~/proj-wt-crier-hermes/.gitreins/logs/guard-20261105T03*.log were NOT
+    # findings: both show go_lint killed by the 60s bound (empty
+    # `[cmd/crier-mcp]` output) and go_tests by the 300s bound on the loaded
+    # host. If go_lint dies that way again, warm the caches first (one
+    # `golangci-lint run cmd/crier-mcp` + one `go test -short ./...`) instead
+    # of reaching for --no-verify. A configurable lint command/budget is an
+    # upstream gitreins change, not a repo config change.
     lint: true
     tests: true
   test_timeout: 300
