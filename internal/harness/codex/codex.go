@@ -15,12 +15,36 @@
 // makes a delivery reproducible on a host whose user config differs.
 //
 // Text over 64 KiB goes on stdin via the documented `-` prompt (§6).
+//
+// # The provider knob (CRIER-HARNESS-13)
+//
+// codex resolves its provider from ~/.codex/config.toml, so the endpoint the
+// adapter talks to depended on the host: a router that was down surfaced as
+// "the CLI retries until the harness timeout", i.e. a bare HARNESS_TIMEOUT with
+// no URL and no dial error. Config.BaseURL (env CR_CODEX_BASE_URL) is the
+// adapter's own knob for that endpoint. It is passed to the CLI as a COMPLETE
+// custom model provider, which is the only shape codex accepts: 0.166.0 refuses
+// `-c model_providers.openai.base_url=…` outright ("model_providers contains
+// reserved built-in provider IDs: `openai`"), so the override DEFINES the
+// "crier" provider instead of editing the built-in one. The endpoint must speak
+// the OpenAI Responses API (wire_api "responses"), which is codex's own
+// protocol.
+//
+// On failure the adapter names what the CLI cannot: codex's retry line
+// ("Reconnecting... waiting for network (Connection failed: error sending
+// request)") carries neither the target nor the operating-system error, so
+// when the endpoint refuses a TCP connection the receipt reports
+// HARNESS_PROVIDER_UNREACHABLE and quotes the dial error AND the target URL.
+// The diagnostic connection is made only on a failed delivery, is bounded by
+// providerDialTimeout, and never runs on the success path.
 package codex
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"net"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +57,33 @@ const Name = "codex"
 // DefaultSandbox is the mode §4.1 ships. It is applied when config leaves the
 // field empty so the mode is never inherited from the user's config file.
 const DefaultSandbox = "workspace-write"
+
+// EnvBaseURL names the provider endpoint override Config.BaseURL also takes.
+const EnvBaseURL = "CR_CODEX_BASE_URL"
+
+// CodeProviderUnreachable is the receipt code for a delivery that failed
+// because the provider endpoint the CLI is pointed at refused the connection.
+// It is an adapter-level code in the §5 shape, like HARNESS_WORKDIR_MISSING and
+// HARNESS_INTERRUPTED (§6): the catalog's HARNESS_EXIT_NONZERO cannot say WHY
+// the turn died, and the retry loop codex enters against a dead endpoint
+// otherwise reaches the caller as a context-free HARNESS_TIMEOUT.
+const CodeProviderUnreachable = "HARNESS_PROVIDER_UNREACHABLE"
+
+// The custom provider block. "openai" is a reserved built-in id (codex 0.166.0
+// rejects an override of it), so the override ships its own id; env_key keeps
+// reading the credential the host already exports rather than inventing one.
+const (
+	providerID      = "crier"
+	providerName    = "Crier"
+	providerWireAPI = "responses"
+	providerEnvKey  = "OPENAI_API_KEY"
+)
+
+// providerDialTimeout bounds the diagnostic TCP connect a failed delivery makes
+// to the endpoint. It is a connect, not a round trip: a reachable host answers
+// it in milliseconds, a dead one is refused immediately, and an unroutable one
+// costs this and no more.
+const providerDialTimeout = 2 * time.Second
 
 // maxArgBytes is where the message stops travelling in the argument vector.
 const maxArgBytes = 64 << 10
@@ -51,7 +102,21 @@ type Config struct {
 	Sandbox string
 	// Timeout bounds one delivery; zero takes the harness default.
 	Timeout time.Duration
+	// BaseURL is the OpenAI-compatible (Responses API) endpoint the CLI is
+	// pointed at, e.g. http://127.0.0.1:8080/v1. Empty leaves the CLI on
+	// whatever ~/.codex/config.toml names. New() falls back to EnvBaseURL.
+	BaseURL string
+	// Exec runs one codex invocation; nil uses harness.RunCommand, which is
+	// the production path. The seam lets an embedding run the CLI through a
+	// sandbox or a wrapper — or stand a stub in for the binary — while the
+	// adapter keeps building the same argv and parsing the same JSONL. It is
+	// not a bypass: whatever runs still receives the argv the adapter built
+	// and its output is still parsed as codex's.
+	Exec ExecFunc
 }
+
+// ExecFunc runs one codex invocation under a per-delivery deadline.
+type ExecFunc func(ctx context.Context, spec harness.ExecSpec, timeout time.Duration) harness.ExecResult
 
 // Adapter delivers messages into codex sessions.
 type Adapter struct {
@@ -59,7 +124,8 @@ type Adapter struct {
 	now func() time.Time
 }
 
-// New builds the adapter. An empty binary means "codex" on PATH.
+// New builds the adapter. An empty binary means "codex" on PATH; an empty
+// BaseURL means EnvBaseURL, so a host can be routed without a config field.
 func New(cfg Config) *Adapter {
 	if strings.TrimSpace(cfg.Binary) == "" {
 		cfg.Binary = Name
@@ -70,6 +136,12 @@ func New(cfg Config) *Adapter {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = harness.DefaultTimeout
 	}
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		cfg.BaseURL = strings.TrimSpace(os.Getenv(EnvBaseURL))
+	}
+	if cfg.Exec == nil {
+		cfg.Exec = harness.RunCommand
+	}
 	return &Adapter{cfg: cfg, now: time.Now}
 }
 
@@ -79,8 +151,8 @@ func New(cfg Config) *Adapter {
 func (a *Adapter) Name() string { return Name }
 
 // Features reports the surfaces this adapter uses: `exec` (create), `exec
-// resume` (continue), `--json` (the thread id comes from its first event) and
-// the explicit sandbox mode.
+// resume` (continue), `--json` (the thread id comes from its first event), the
+// explicit sandbox mode, and the provider override when one is configured.
 func (a *Adapter) Features() map[string]bool {
 	return map[string]bool{
 		"continue": true,
@@ -90,6 +162,7 @@ func (a *Adapter) Features() map[string]bool {
 		"sandbox":  strings.TrimSpace(a.cfg.Sandbox) != "",
 		"model":    strings.TrimSpace(a.cfg.Model) != "",
 		"stdin":    true,
+		"base_url": strings.TrimSpace(a.cfg.BaseURL) != "",
 	}
 }
 
@@ -117,7 +190,7 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 
 	id := strings.TrimSpace(sess.ID)
 	args, stdin := a.argv(sess, msg, id)
-	res := harness.RunCommand(ctx, harness.ExecSpec{
+	res := a.cfg.Exec(ctx, harness.ExecSpec{
 		Path:  path,
 		Args:  args,
 		Dir:   workdir,
@@ -143,21 +216,40 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 			rc.SessionID = tid
 		}
 	}
+	// finish stamps the duration on the way out, so a failure that needed the
+	// diagnostic connect reports the whole attempt and not the part before it.
+	finish := func(r harness.Receipt) (harness.Receipt, error) {
+		r.DurationMS = time.Since(start).Milliseconds()
+		return r, nil
+	}
 	switch {
 	case res.StartError != "":
 		return harness.FailedReceipt(Name, harness.CodeUnavailable, res.StartError), nil
 	case res.TimedOut:
 		rc.State = harness.StateFailed
 		rc.Error = harness.CodeTimeout
-		rc.Tail = fmt.Sprintf("delivery exceeded %s", a.cfg.Timeout)
-		return rc, nil
+		rc.Tail = "delivery exceeded " + a.cfg.Timeout.String()
+		// A deadline against an endpoint that refuses TCP is not a slow turn:
+		// codex retries "waiting for network" until it is killed. Name the
+		// cause instead of handing back a context-free timeout.
+		if named, ok := a.providerDown(res, true); ok {
+			rc.Error = CodeProviderUnreachable
+			rc.Tail = named
+		} else if target := a.targetURL(res); target != "" {
+			rc.Tail += " at provider " + target
+		}
+		return finish(rc)
 	case res.ExitCode != 0:
 		// The harness's own stderr tail is the evidence: a 401, a missing
 		// rollout and a sandbox refusal all surface here, unedited.
 		rc.State = harness.StateFailed
 		rc.Error = harness.ClassifyFailure(string(res.Stdout), string(res.Stderr))
 		rc.Tail = res.Tail
-		return rc, nil
+		if named, ok := a.providerDown(res, false); ok {
+			rc.Error = CodeProviderUnreachable
+			rc.Tail = named
+		}
+		return finish(rc)
 	}
 
 	if rc.Created && rc.SessionID == "" {
@@ -166,7 +258,7 @@ func (a *Adapter) Deliver(ctx context.Context, sess harness.SessionRef, msg harn
 		rc.Error = harness.CodeOutputInvalid
 		rc.Tail = firstLine(string(res.Stdout))
 	}
-	return rc, nil
+	return finish(rc)
 }
 
 // argv builds the argument vector and the optional stdin body. Message text is
@@ -188,6 +280,17 @@ func (a *Adapter) argv(sess harness.SessionRef, msg harness.Message, id string) 
 	if model := a.model(sess); model != "" {
 		args = append(args, "-m", model)
 	}
+	if base := strings.TrimSpace(a.cfg.BaseURL); base != "" {
+		// One complete provider definition: codex refuses a base_url override
+		// of a built-in provider, so the adapter ships its own id.
+		args = append(args,
+			"-c", "model_provider="+quoteTOML(providerID),
+			"-c", "model_providers."+providerID+".name="+quoteTOML(providerName),
+			"-c", "model_providers."+providerID+".base_url="+quoteTOML(base),
+			"-c", "model_providers."+providerID+".wire_api="+quoteTOML(providerWireAPI),
+			"-c", "model_providers."+providerID+".env_key="+quoteTOML(providerEnvKey),
+		)
+	}
 	args = append(args, sess.Args...)
 	if !create {
 		args = append(args, id)
@@ -208,9 +311,9 @@ func (a *Adapter) model(sess harness.SessionRef) string {
 	return strings.TrimSpace(a.cfg.Model)
 }
 
-// quoteTOML renders a sandbox mode as the TOML string `-c key="value"` expects.
-// Modes are a closed set (read-only, workspace-write, danger-full-access), so
-// this only encodes a value config already validated by codex itself.
+// quoteTOML renders a value as the TOML string `-c key="value"` expects. Every
+// value that reaches it — sandbox modes, provider ids, model names, base URLs —
+// is a value config already validated, so this only encodes it.
 func quoteTOML(v string) string {
 	if !strings.ContainsAny(v, "\"\\") {
 		return `"` + v + `"`
@@ -220,6 +323,144 @@ func quoteTOML(v string) string {
 		return `"` + strings.ReplaceAll(v, `"`, "") + `"`
 	}
 	return string(encoded)
+}
+
+// connectionFailureMarkers are the classes a harness prints when it could not
+// reach its provider. They are matched against stdout AND stderr because codex
+// reports the retry loop as JSON on stdout while other CLIs use stderr.
+var connectionFailureMarkers = []string{
+	"connection failed",
+	"waiting for network",
+	"error sending request",
+	"connection refused",
+	"connect: connection refused",
+	"no such host",
+	"network is unreachable",
+	"connection reset",
+	"tls handshake",
+	"unexpected eof",
+	"i/o timeout",
+}
+
+// providerDown names a delivery that failed because the provider endpoint is
+// unreachable, or reports false when the evidence does not say that.
+//
+// onTimeout relaxes the trigger: a delivery that hit its deadline against an
+// endpoint that refuses TCP is unreachable even when the CLI printed nothing
+// before it was killed (codex retries in silence for whole minutes). An
+// exit-non-zero delivery must show a connection class first, so an auth or
+// sandbox failure never gets relabelled by a probe.
+//
+// The returned tail carries the target URL and the operating system's own dial
+// error — the two facts the CLI's retry line omits.
+func (a *Adapter) providerDown(res harness.ExecResult, onTimeout bool) (string, bool) {
+	evidence := string(res.Stdout) + "\n" + string(res.Stderr)
+	target := a.targetURL(res)
+	if target == "" {
+		return "", false
+	}
+	if !onTimeout && !connectionFailure(evidence) {
+		return "", false
+	}
+	refused, err := endpointRefused(target)
+	if !refused {
+		return "", false
+	}
+	named := "codex provider unreachable at " + target + ": " + err.Error()
+	if line := connectionLine(evidence); line != "" {
+		named += " (codex: " + line + ")"
+	}
+	return named, true
+}
+
+// targetURL is the provider endpoint: the configured knob, else whichever URL
+// the CLI itself named in its failure output.
+func (a *Adapter) targetURL(res harness.ExecResult) string {
+	if base := strings.TrimSpace(a.cfg.BaseURL); base != "" {
+		return base
+	}
+	return firstURL(string(res.Stdout) + "\n" + string(res.Stderr))
+}
+
+// endpointRefused reports whether a TCP connect to the endpoint is refused. A
+// target that is not a URL with a host says nothing, so it is not a failure.
+func endpointRefused(target string) (bool, error) {
+	u, err := url.Parse(strings.TrimSpace(target))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return false, nil
+	}
+	addr := u.Host
+	if u.Port() == "" {
+		port := "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+		addr = net.JoinHostPort(u.Hostname(), port)
+	}
+	conn, err := net.DialTimeout("tcp", addr, providerDialTimeout)
+	if err != nil {
+		return true, err
+	}
+	_ = conn.Close()
+	return false, nil
+}
+
+// connectionFailure reports whether the captured output carries a
+// connection-class error.
+func connectionFailure(evidence string) bool {
+	return connectionLine(evidence) != ""
+}
+
+// connectionLine is the first line that names a connection-class failure,
+// trimmed for a receipt tail. codex's own words are the useful half; the URL
+// and the errno are supplied by the adapter.
+func connectionLine(evidence string) string {
+	for _, line := range strings.Split(evidence, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		low := strings.ToLower(line)
+		for _, marker := range connectionFailureMarkers {
+			if strings.Contains(low, marker) {
+				return clip(line, 300)
+			}
+		}
+	}
+	return ""
+}
+
+// firstURL pulls the first http(s) URL out of the captured output. JSONL wraps
+// it in quotes and prose wraps it in parentheses, so the scan stops at the
+// delimiters those shapes use.
+func firstURL(evidence string) string {
+	for _, scheme := range []string{"http://", "https://"} {
+		for i := 0; ; i++ {
+			j := strings.Index(evidence[i:], scheme)
+			if j < 0 {
+				break
+			}
+			start := i + j
+			end := start
+			for end < len(evidence) && !strings.ContainsRune(" 	\r\n\"'),;]}", rune(evidence[end])) {
+				end++
+			}
+			candidate := strings.TrimRight(evidence[start:end], ".")
+			if parsed, err := url.Parse(candidate); err == nil && parsed.Host != "" {
+				return candidate
+			}
+			i = start
+		}
+	}
+	return ""
+}
+
+// clip bounds a quoted line so one runaway child cannot bloat a receipt.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // ThreadID pulls the codex thread id out of `--json` output. The first event of
