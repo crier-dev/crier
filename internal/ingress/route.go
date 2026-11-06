@@ -10,11 +10,13 @@ package ingress
 // exactly the kind of parallel bookkeeping that drifts.
 //
 // Storage: §3 allows a JSONL store ("one line") and the SQL spelling ("a row in
-// chat_messages with kind=ingress.route"). This row implements the JSONL form,
-// written beside the session log root it describes. The SQL form needs a new
-// message kind in three backends' projections; that is a storage change this
-// row deliberately does not make, and RouteStore is the seam it would land
-// behind — the handler depends on the interface, not on the file.
+// chat_messages with kind=ingress.route"). BOTH are implemented: this file is
+// the JSONL form, written beside the session log root it describes, and
+// route_sql.go is the SQL form, projected into the session store's own view
+// (see internal/session/ingress_route.go for the naming delta — this repo has
+// no chat_messages table, and the transcript cannot carry a session-less,
+// non-message row). RouteStore is the seam both land behind, and cmd/server
+// selects one at boot from the session backend that is actually active.
 
 import (
 	"context"

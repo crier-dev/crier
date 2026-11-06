@@ -43,7 +43,13 @@ var _ Store = (*PostgresStore)(nil)
 // SchemaStatements is the DDL for the §5.2 view, applied verbatim and
 // idempotently. It is exported so a deployment can audit the exact SQL rather
 // than infer it, and so a test can assert the shape exists.
-var SchemaStatements = []string{
+//
+// The trailing append is the ingress.route receipt (CRIER-INGRESS §3): a new
+// table, so CREATE TABLE IF NOT EXISTS reaches an existing database without an
+// ALTER. This store keeps the engine's native timestamps, hence the TIMESTAMPTZ
+// spelling — see ingress_route.go for the row's shape and for why it is not a
+// chat_transcript row.
+var SchemaStatements = append([]string{
 	`CREATE TABLE IF NOT EXISTS chat_sessions (
 		id                TEXT PRIMARY KEY,
 		namespace         TEXT NOT NULL DEFAULT '',
@@ -170,7 +176,7 @@ var SchemaStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS chat_group_members_name_idx
 		ON chat_group_members (group_name, position)`,
-}
+}, ingressRouteStatements("TIMESTAMPTZ")...)
 
 // NewPostgresStore opens a pool against connString, applies the §5.2 schema
 // and returns a ready store. The caller owns the returned store and must

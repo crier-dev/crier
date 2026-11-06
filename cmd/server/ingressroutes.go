@@ -131,7 +131,7 @@ func openIngress(cfg config.Config, repo session.Repository, dispatcher *registr
 	if root == "" {
 		root = config.DefaultSessionLogRoot
 	}
-	routes, err := ingress.NewJSONLRouteStore(root)
+	routes, err := ingressRouteStore(repo, root)
 	if err != nil {
 		return nil, fmt.Errorf("ingress route log: %w", err)
 	}
@@ -154,6 +154,24 @@ func openIngress(cfg config.Config, repo session.Repository, dispatcher *registr
 		h.Dispatch = &harnessDispatch{reg: reg, repo: repo}
 	}
 	return h, nil
+}
+
+// ingressRouteStore picks where mode=inbox records its route (§3).
+//
+// A SQL session store (sqlite or postgres — BOTH implement
+// session.IngressRouteWriter) projects one `ingress.route` row into the same
+// database the session view lives in, so the receipt is queryable beside the
+// messages it describes. Every other backend — JSONL today — keeps the JSONL
+// log, whose bytes this selection does not change.
+//
+// The test is a CAPABILITY assertion, not a backend-name comparison: which
+// engine is active is a config value, and widening this to a second SQL engine
+// must not mean editing a switch here.
+func ingressRouteStore(repo session.Repository, root string) (ingress.RouteStore, error) {
+	if writer, ok := repo.(session.IngressRouteWriter); ok {
+		return ingress.NewSQLRouteStore(writer)
+	}
+	return ingress.NewJSONLRouteStore(root)
 }
 
 // ingressModes converts the configured mode strings into the handler's typed

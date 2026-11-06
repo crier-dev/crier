@@ -31,11 +31,15 @@ func (sqliteDialect) InitStatements() []string {
 }
 
 func (sqliteDialect) SchemaStatements() []string {
-	stmts := make([]string, 0, len(sqliteSchemaStatements)+len(sqlGroupSchemaStatements))
+	stmts := make([]string, 0, len(sqliteSchemaStatements)+len(sqlGroupSchemaStatements)+3)
 	stmts = append(stmts, sqliteSchemaStatements...)
 	// Named groups (CR-CHAT-022): the same dialect-pair as the session view,
 	// so an existing SQLite database reaches the tables with no migration.
 	stmts = append(stmts, sqlGroupSchemaStatements...)
+	// The ingress.route receipt (CRIER-INGRESS §3): a new table, so
+	// CREATE TABLE IF NOT EXISTS reaches an existing database without an
+	// ALTER — see ingress_route.go for why it is not a chat_transcript row.
+	stmts = append(stmts, ingressRouteStatements("TEXT")...)
 	return stmts
 }
 
@@ -190,11 +194,15 @@ func (postgresDialect) Rebind(query string) string {
 func (postgresDialect) InitStatements() []string { return nil }
 
 func (postgresDialect) SchemaStatements() []string {
-	stmts := make([]string, 0, len(postgresSchemaStatements)+len(sqlGroupSchemaStatements))
+	stmts := make([]string, 0, len(postgresSchemaStatements)+len(sqlGroupSchemaStatements)+3)
 	stmts = append(stmts, postgresSchemaStatements...)
 	// Named groups (CR-CHAT-022): the same dialect-pair as the session view,
 	// so an existing PostgreSQL database reaches the tables with no migration.
 	stmts = append(stmts, sqlGroupSchemaStatements...)
+	// The ingress.route receipt (CRIER-INGRESS §3). This dialect stores
+	// timestamps as canonical RFC 3339 TEXT like every other column of the
+	// shared store, so it takes the TEXT spelling — see ingress_route.go.
+	stmts = append(stmts, ingressRouteStatements("TEXT")...)
 	return stmts
 }
 
