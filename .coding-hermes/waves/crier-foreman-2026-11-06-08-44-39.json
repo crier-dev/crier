@@ -1,0 +1,38 @@
+{
+  "tick": "crier-foreman-2026-11-06-08-44-39",
+  "block": "CRIER-HARNESS-11",
+  "slots": 2,
+  "slots_reason": "nproc=16, loadavg 13.39 -> 16 - ceil(13.39) = 2",
+  "rows": ["CRIER-HARNESS-12", "CRIER-HARNESS-13"],
+  "independence": "CRIER-HARNESS-12 edits internal/harness/config.go + config_test.go + names/names_test.go (load-time validation, adapter fixtures); CRIER-HARNESS-13 edits internal/harness/codex/ only (live-delivery test + named dial failure). Different packages, no shared symbol, no depends_on edge between the rows.",
+  "worktrees": [
+    {
+      "row": "CRIER-HARNESS-12",
+      "path": "/home/kara/worktrees/crier-CRIER-HARNESS-12",
+      "branch": "wt/CRIER-HARNESS-12",
+      "base_sha": "4c6350f1"
+    },
+    {
+      "row": "CRIER-HARNESS-13",
+      "path": "/home/kara/worktrees/crier-CRIER-HARNESS-13",
+      "branch": "wt/CRIER-HARNESS-13",
+      "base_sha": "4c6350f1"
+    }
+  ],
+  "briefs": [
+    "/tmp/brief-CRIER-HARNESS-12",
+    "/tmp/brief-CRIER-HARNESS-13"
+  ],
+  "gitreins_tasks": ["CRIER-HARNESS-12", "CRIER-HARNESS-13"],
+  "worker_model": "deepseek-v4-flash",
+  "worker_provider": "deepseek-foreman",
+  "blocked_rows_noted": {
+    "DF-CRIER-498": "cross-repo: fleet QA harness (coding-hermes-tools/.hermes/scripts/bunker-qa.sh)",
+    "DF-CRIER-499": "cross-repo: same harness; prior tick already proved zero-diff here",
+    "QA-CRIER-REVIEW-6": "cross-repo: same harness (act cells)",
+    "QA-CRIER-REVIEW-7": "cross-repo: same harness (port extractor); fix already staged at coding-hermes-tools-DF-CRIER-498 worktree line 2689"
+  },
+  "held_back": {
+    "RELEASE-011": "live-host operation: rebuild + restart the serving :8767 process that the fleet dispatcher is connected to. Held back from this tick as a prod-touching action; needs a dedicated releng window."
+  }
+}
