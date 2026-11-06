@@ -3383,5 +3383,22 @@ tasks:
   - TestSnapshotBuildDirExcludesUncommittedSiblingEdit passes under a symlinked GOTMPDIR
     on a clean tree; SnapshotBuildDir returns a clone of HEAD, not the live package
     dir; no commit bypass needed.
-  status: in_progress
+  status: complete
   created_at: '2026-11-06T05:11:48.189299+00:00'
+  completed_at: '2026-11-06T05:39:27.758843+00:00'
+- id: CR-GAP-078
+  title: TestInboxPollOnlyPathIsUnchanged stabilized under coverage
+  criteria:
+  - The test masks delivery_ms (a delivery-side timing artifact) and passes 10/10
+    under -cover; no production code changed.
+  status: complete
+  created_at: '2026-11-06T06:01:41.107665+00:00'
+  completed_at: '2026-11-06T06:01:42.525060+00:00'
+- id: CR-GAP-076
+  title: 'Go lint lane is already diff-only: document it instead of a dead key'
+  criteria:
+  - Config-only documentation commit; go_lint is diff-only in gitreins 0.17.1 (--new-from-rev=HEAD~1);
+    a new finding still fails the lane while the ~69 pre-existing findings never surface.
+  status: complete
+  created_at: '2026-11-06T06:02:37.584531+00:00'
+  completed_at: '2026-11-06T06:02:38.780744+00:00'
