@@ -1,0 +1,123 @@
+[Unit]
+# crier — the SCHEDULED backup drill (docs/operations.md §6).
+#
+# scripts/backup-db.sh has existed and been proven (it dumps every configured
+# store AND verifies each artifact) but nothing ran it on a clock, so a day with
+# no dump was silent: an operator obligation with no surface that fails when it
+# is not met. This unit is that surface. Pair it with deploy/crier-backup.timer;
+# running this unit by hand is also the supported way to take an off-cadence
+# dump before an upgrade (docs/operations.md §4).
+Description=crier backup dump + restore drill
+Documentation=https://github.com/crier-dev/crier/blob/main/docs/operations.md
+# Only for the PostgreSQL dump/drill: pg_dump, pg_restore, psql and createdb
+# talk to the local server over its unix socket (or a TCP URL from
+# CR_DATABASE_URL), and a boot that starts this unit before the network/PG is up
+# would only manufacture a failure. Wants= (not Requires=) keeps the timer's
+# daily fire alive on a box where network-online takes a different path.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# ONESHOT, on purpose: this is a job, not a daemon. There is no state to keep
+# between runs and nothing to restart; the timer is what makes it recur.
+Type=oneshot
+# Same account and same environment surface as the service it backs up
+# (deploy/crier.service): the dump must be taken as the user that can read the
+# stores, and it must read the SAME CR_* variables the server reads, or it backs
+# up a path the server never opened. `-` keeps a missing /etc/crier/crier.env
+# from being a start failure here — the script itself then fails loudly with
+# "no store configured", which is the error worth reading.
+User=crier
+Group=crier
+EnvironmentFile=-/etc/crier/crier.env
+# Relative SQLite paths in crier.env (e.g. CR_SQLITE_PATH=crier.db) resolve
+# against the working directory — measured for the server, and the backup script
+# tests `-f "$path"` on exactly those values, so it must stand in the same
+# directory the server does or it reports "does not exist" for a store that is
+# right there. StateDirectory= also guarantees the directory exists and is owned
+# by User= on a fresh install (mode matches deploy/crier.service).
+StateDirectory=crier
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/crier
+
+# THE DRILL ARM IS THE POINT. Without --drill the script proves only that each
+# artifact parses; with it, the PostgreSQL dump is restored into a throwaway
+# database and its public-table count is compared with live. §4's own rule —
+# "a dump that has never been restored does not count as a backup" — is what
+# this argv encodes. The output directory is absolute so the run does not depend
+# on $HOME of the service account.
+#
+# NOTE: this path is an INSTALLED COPY of the tracked script, not the checkout.
+# A timer must not depend on where the repo lives, and /usr/local/lib/crier/ is
+# the install root for it (docs/operations.md §6 has the install step). Re-copy
+# after any change to scripts/backup-db.sh.
+ExecStart=/usr/local/lib/crier/scripts/backup-db.sh /var/backups/crier --drill
+
+# The dump directory is named EXPLICITLY because ProtectSystem=strict makes the
+# whole tree read-only, /var/backups included. It is not created here: systemd
+# builds the read-write bind from a path that already exists, and ProtectSystem
+# only auto-creates the directory it owns through StateDirectory=/CacheDirectory=.
+# So the operator creates it once at enable time — docs/operations.md §6, step 1:
+#   sudo install -d -m 0750 -o crier -g crier /var/backups/crier
+# A missing directory therefore fails this unit (mkdir in the script exits 1)
+# rather than quietly dumping somewhere else.
+ReadWritePaths=/var/backups/crier
+# The dumps carry the agent registry and undelivered inbox payloads — message
+# bodies and delivery metadata, not just counts. 0077 keeps a root-owned
+# /var/backups from making them world-readable; the script writes its own
+# artifacts and its .pg_dump.err/.pg_restore.err scratch files with this umask.
+UMask=0077
+
+# NO `|| true`, NO SuccessExitStatus=, and no swallow-the-failure wrapper:
+# backup-db.sh exits non-zero when a store could not be dumped, when an artifact
+# does not parse, or when the drill's restored count disagrees with live, and it
+# names the failing store on stderr. That must leave the unit FAILED so
+# `systemctl --failed` lists it and the journal keeps the reason. A green unit
+# with a broken dump is exactly the silent miss this unit exists to end.
+#
+# No OnFailure= either: a unit named there would be untested boilerplate, and an
+# OnFailure target that itself fails is a second silent hole. The failed state
+# plus the journal line is the alarm surface docs/operations.md §6 documents.
+#
+# The journal IS the log here, unlike deploy/crier.service. That unit appends to
+# a file because a USER journal was measured to capture nothing; this is a
+# SYSTEM unit, whose journal is the durable one, and the failure evidence has to
+# land where `journalctl -u crier-backup.service` reads it.
+SyslogIdentifier=crier-backup
+# No Restart=: a oneshot that failed has already said why, and a retry loop
+# would hammer a broken store all night. The timer's next fire (and Persistent=
+# after a reboot) is the retry.
+Restart=no
+# The default DefaultTimeoutStartSec is 90s. A real drill — pg_dump of the
+# registry plus a full pg_restore into a throwaway database — can exceed it on a
+# busy instance, and being killed at 90s would read as "the backup broke". 30
+# minutes is a ceiling, not an expectation.
+TimeoutStartSec=30min
+# Take the dump below the relay's priority: this is a daily batch job running on
+# the same box that serves the mesh.
+Nice=10
+
+# ── Hardening ───────────────────────────────────────────────────────────────
+# Same shape as deploy/crier.service, plus the one writable path above. The
+# script only READS the stores and forks pg_dump/pg_restore/psql/createdb/
+# sqlite3 from /usr/bin, so the rest of the filesystem can stay read-only.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# AF_UNIX for the PostgreSQL unix socket (and a unix-socket CR_DATABASE_URL);
+# AF_INET/AF_INET6 for a TCP CR_DATABASE_URL and any network PG host.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+# Shipped in case an operator wants to trigger it at boot, but the supported
+# enablement is the TIMER (deploy/crier-backup.timer), which pulls this unit in
+# by name. Enabling this alone would run the dump once per boot, not daily.
+WantedBy=multi-user.target
