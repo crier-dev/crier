@@ -1,0 +1,29 @@
+{
+  "tick_id": "crier-foreman-2026-11-06-02-19-29",
+  "block": "DF-CRIER-499",
+  "block_title": "Fresh-agent Go bootstrap gates on presence, not version",
+  "wave_size": 2,
+  "slots": 5,
+  "box_load": 10.97,
+  "rows": [
+    {
+      "id": "DF-CRIER-498",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-498",
+      "branch": "wt/DF-CRIER-498",
+      "base_sha": "04baf98b",
+      "brief": "/tmp/brief-DF-CRIER-498.md",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default"
+    },
+    {
+      "id": "DF-CRIER-499",
+      "worktree": "/home/kara/worktrees/crier-DF-CRIER-499",
+      "branch": "wt/DF-CRIER-499",
+      "base_sha": "04baf98b",
+      "brief": "/tmp/brief-DF-CRIER-499.md",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default"
+    }
+  ],
+  "created_at": "2026-11-06T02:19:29Z"
+}

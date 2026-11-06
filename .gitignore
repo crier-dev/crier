@@ -49,10 +49,23 @@ crier-sessions.sqlite-shm
 # Hilo — generated code-graph index, untracked (DF-CRIER-211). The graph is rebuilt
 # locally by the hilo CLI and is never shipped; .vfs/manifest.yaml stays tracked
 # (it is the hilo project manifest — config, not generated output).
+#
+# coverage.json and .symbols_cache.json are WRITTEN BY THE TOOL on every
+# hook-running commit (`hilo graph warm --changed` in .git/hooks/post-commit).
+# coverage.json used to be tracked, which made the working tree dirty again
+# immediately after every commit — a self-renewing ownership residue that blocked
+# foreman lanes repeatedly. No tracked consumer reads it (git grep = 0; CR-GAP-076
+# preflight P5), so it is untracked here and both files are ignored below.
 .vfs/.dirty
 .vfs/graph/edges.jsonl
 .vfs/graph/.last_reconcile
 .vfs/graph/.parse_cache.json
+.vfs/graph/coverage.json
+.vfs/graph/.symbols_cache.json
+
+# GitReins local rescue bundles (salvaged history/verdict copies). Same class as
+# .gitreins/history/ below: machine-local evidence, never shipped.
+.gitreins/rescued-*/
 
 # GitReins history
 .gitreins/history/

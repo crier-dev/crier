@@ -1,0 +1,10 @@
+{
+  "tick_id": "crier-foreman-2026-11-06-04-03-39",
+  "block": "CR-GAP-078",
+  "wave_size": 3,
+  "rows": [
+    {"id": "CR-GAP-076", "worktree": "/home/kara/worktrees/crier-CR-GAP-076", "branch": "wt/CR-GAP-076", "brief": "/tmp/brief-CR-GAP-076.txt"},
+    {"id": "CR-GAP-077", "worktree": "/home/kara/worktrees/crier-CR-GAP-077", "branch": "wt/CR-GAP-077", "brief": "/tmp/brief-CR-GAP-077.txt"},
+    {"id": "CR-GAP-078", "worktree": "/home/kara/worktrees/crier-CR-GAP-078", "branch": "wt/CR-GAP-078", "brief": "/tmp/brief-CR-GAP-078.txt"}
+  ]
+}

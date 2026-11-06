@@ -3377,3 +3377,11 @@ tasks:
     resolved host port so it grades OK/INFO with a probed HTTP status instead of UNVERIFIED
   status: in_progress
   created_at: '2026-11-06T02:21:39.761660+00:00'
+- id: CR-GAP-077
+  title: Canonicalize package path before tree-relative snapshot resolution
+  criteria:
+  - TestSnapshotBuildDirExcludesUncommittedSiblingEdit passes under a symlinked GOTMPDIR
+    on a clean tree; SnapshotBuildDir returns a clone of HEAD, not the live package
+    dir; no commit bypass needed.
+  status: in_progress
+  created_at: '2026-11-06T05:11:48.189299+00:00'
