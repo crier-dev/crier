@@ -1,7 +1,8 @@
 # CRIER-HARNESS.md — harness adapters: a message can start or continue a session in a real agent
 
 Status: **DRAFT v1 · 2026-11-03** · Owner: Bane · Row: **CRIER-HARNESS-1** (interface + Hermes +
-opencode), **CRIER-HARNESS-2** (pi-agent), **CRIER-HARNESS-3** (codex)
+opencode), **CRIER-HARNESS-2** (pi-agent), **CRIER-HARNESS-3** (codex), **CRIER-HARNESS-14**
+(docs: the codex provider override `CR_CODEX_BASE_URL` and `HARNESS_PROVIDER_UNREACHABLE`)
 Series: `specs/CRIER-INGRESS.md` (the call that triggers delivery), `specs/CRIER-READS.md`
 (harness sessions read through cursors too).
 
@@ -128,6 +129,55 @@ harness:
 A malformed adapter block disables **that adapter only** and logs `harness adapter disabled`
 with the reason; the daemon still starts.
 
+**codex provider endpoint — `CR_CODEX_BASE_URL` (CRIER-HARNESS-14).** codex resolves its provider
+from `~/.codex/config.toml`, so without this knob the endpoint a delivery talks to is whatever the
+host's user config names — and a router that is down reaches the caller as codex's own retry loop,
+i.e. a bare `HARNESS_TIMEOUT` with no URL and no dial error. `codex.Config.BaseURL` is the adapter's
+field for that endpoint and `CR_CODEX_BASE_URL` is that field's default: the environment value is
+read once, when the adapters are built at startup, so changing it needs a daemon restart, and an
+explicit `Config.BaseURL` wins over it.
+
+It is **not** an adapter block key. There is no `base_url:` field in `adapters.codex` — the block
+refuses unknown keys, so writing one there disables the adapter instead of moving the endpoint —
+and `CR_HARNESS_CODEX_BASE_URL` is not read either; the name is `CR_CODEX_BASE_URL`. `crier harness
+list` reports `base_url` among codex's features while the knob is set, which is how an operator
+confirms the daemon picked it up.
+
+The override is passed as **one complete custom model provider**, because codex 0.166.0 refuses to
+redirect the reserved built-in id `openai` ("model_providers contains reserved built-in provider
+IDs: openai"), so the adapter defines its own provider `crier` instead of editing the built-in one.
+Each `-c` value is TOML-quoted by the adapter (`quoteTOML`), so it travels as exactly one argv
+element; `<…>` below is a placeholder, never a literal:
+
+create (`codex exec`):
+
+```
+codex exec --json -s "<sandbox>" [-m <model>]
+  -c 'model_provider="crier"'
+  -c 'model_providers.crier.name="Crier"'
+  -c 'model_providers.crier.base_url="http://127.0.0.1:8080/v1"'
+  -c 'model_providers.crier.wire_api="responses"'
+  -c 'model_providers.crier.env_key="OPENAI_API_KEY"'
+  [session args] -- "<text>"
+```
+
+resume (`codex exec resume`; the same five provider pairs, and the sandbox moves from `-s` to the
+`-c` override because `codex exec resume` has no `-s`):
+
+```
+codex exec resume --json -c 'sandbox_mode="<sandbox>"' [-m <model>]
+  -c 'model_provider="crier"'
+  -c 'model_providers.crier.name="Crier"'
+  -c 'model_providers.crier.base_url="http://127.0.0.1:8080/v1"'
+  -c 'model_providers.crier.wire_api="responses"'
+  -c 'model_providers.crier.env_key="OPENAI_API_KEY"'
+  [session args] <thread-id> -- "<text>"
+```
+
+The endpoint must speak the OpenAI Responses API (`wire_api "responses"`, codex's own protocol);
+`env_key` keeps reading the credential the host already exports as `OPENAI_API_KEY` rather than
+inventing one. A prompt over 64 KiB replaces `-- "<text>"` with `-`, and the text travels on stdin.
+
 ### 4.2 Route hook
 
 `internal/ingress.Handler` calls `Dispatch` after the message is durably appended:
@@ -185,6 +235,18 @@ fork would split the transcript.
 | `HARNESS_OUTPUT_INVALID` | `failed` | `--format json` output did not parse; the message was still delivered, so `State` is `dispatched` and this only downgrades the receipt to `Error`. |
 | `HARNESS_DISABLED` | `failed` | `harness.enabled: false`. |
 | `HARNESS_CONCURRENCY_FULL` | `failed` | `max_concurrent` saturated and the wait exceeded the timeout. |
+| `HARNESS_PROVIDER_UNREACHABLE` | `failed` | codex only: the provider endpoint the CLI is pointed at refused the connection; `Tail` quotes the target URL and the dial error. |
+
+`HARNESS_PROVIDER_UNREACHABLE` means the provider endpoint refused the connection: no turn reached
+the model, the adapter's own diagnostic TCP connect to that endpoint was refused, and the receipt
+names the cause instead of a context-free timeout. It is **not** a delivery timeout (a turn
+that ran and hit `timeout_seconds` is `HARNESS_TIMEOUT`; this code replaces it only when the
+endpoint also refuses TCP, because codex retries "waiting for network" in silence and the deadline
+is the symptom, not the cause), **not** `HARNESS_UNAVAILABLE` (the binary is there and probed fine),
+and **not** a config error (an unknown or malformed adapter block is `HARNESS_UNKNOWN` or a disabled
+adapter at load). The connect runs only on a failed delivery, is bounded to `providerDialTimeout`
+(2 s), and never on the success path; an exit-non-zero delivery must first show a connection-class
+line in its output, so an auth or sandbox failure is never relabelled.
 
 A `failed` receipt never changes the HTTP status of the ingress call: storage succeeded.
 
