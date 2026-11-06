@@ -13,7 +13,62 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.3.0] - 2026-11-06
+
+Range: `v0.2.0`..`v0.3.0` — 433 non-merge commits (16 `feat`, 70 `fix`,
+25 `docs`, 13 `test`, 2 `ci`, 2 `perf`, 142 `chore`, 120 board, plus
+qa/dogfood/foreman/untyped). No `BREAKING CHANGE` footer and no `!` type
+token anywhere in the range, so this is a minor release. The entries below
+group those commits into user-visible changes rather than repeating every one:
+each names the item id and the commit it rests on.
+
+The entries above the `### Changed` split come from the range's last four days
+(`2026-11-03`..`2026-11-06`) and were folded in from `[Unreleased]` by the cut
+itself; everything below them was written for the range on 2026-11-03.
+
 ### Added
+
+- **Ingress receipts are durable on the SQL session backends**
+  (CRIER-INGRESS-4, `73fd5bb0`). `mode=inbox` now leaves a receipt row on SQLite
+  and PostgreSQL as well as the JSONL store — route id, resolved agent,
+  capability, inbox entry id, author, tags and `created_at` — so the row answers
+  "where did this push land" on the same backends as the messages it describes.
+  Storage is stated rather than assumed: the spec's abstract `chat_messages with
+  kind=ingress.route` has no table here and could not use one (`chat_transcript`
+  has `session_id NOT NULL`, and `mode=inbox` is the session-less mode), so the
+  row is projected into its own `chat_ingress_routes` table, in the SAME database
+  and view, with `kind` checked to the single legal value `ingress.route`.
+
+- **The claude-code adapter, and one rule for harness names** (CRIER-HARNESS-9,
+  -11, -12; `4cd76bfa`, `7e8fb878`, `a6e89626`). claude-code joins the adapter
+  set on the same contract as the other four, with the surfaces read back from
+  the installed 2.1.318 binary instead of guessed: `claude -p --output-format
+  json` to create, `--resume <id>` to continue, the CLI-minted id bound to the
+  Crier session on first delivery, and an unknown `--resume` answering
+  `HARNESS_SESSION_UNKNOWN` rather than silently forking a transcript. Separately,
+  `pi-agent` is now an ALIAS of `pi` — one implementation, one session table, one
+  metric label — because our own installers published that name while the adapter
+  id was `pi`, and a name that reaches no adapter is now refused at CONFIG LOAD
+  with the accepted set printed, instead of surfacing at the first message.
+
+- **A scheduled backup drill that proves its own restore** (CRIER-OPS-002,
+  `379adbbf`). `scripts/backup-db.sh` and `scripts/restore-db.sh` were proven but
+  unscheduled, so a missed day was silent: a job nobody scheduled cannot fail.
+  `deploy/crier-backup.service` + `.timer` run the `--drill` arm — dump every
+  configured store, verify each artifact, restore the PostgreSQL dump into a
+  throwaway database and compare public-table counts against live.
+
+- **The Hermes-session delivery transport** (`c53c1c51`). A message can now
+  become one turn in a Hermes gateway session. This is a TRANSPORT over the
+  gateway's existing `POST /api/sessions` and `POST /api/sessions/{id}/chat`,
+  not a new protocol: per-agent policy `new|existing|per-agent` with
+  `session_id`, `title` and `timeout_ms`; the credential is a mode-checked FILE
+  path read at delivery time, so a rotation needs no re-registration and it is
+  never logged or echoed in an error; redirects are refused so the bearer token
+  is not replayed at another host; and the four failure paths answer four
+  distinct named errors with their own statuses.
 
 - **Outbound A2A client: crier can now ADDRESS a foreign A2A agent**
   (INT-A2A-007, `specs/A2A-OPTION.md` §5.7). New package `internal/a2a/client`
@@ -55,40 +110,6 @@ procedure, the gate requirements and the publish step are in
   operator's decision by 2027-05-04. The window was in fact closed the same day
   by MON-CRIER-007, which deleted the legacy names and the alias mechanism (see
   **Removed** below) before any deployed dashboard depended on the old names.
-
-### Removed
-
-- **The 18 pre-rename Prometheus families, and the alias mechanism that served
-  them** (MON-CRIER-007, `docs/observability-spec.md` §3.1) — **2026-11-04**.
-  The MON-CRIER-005 dual-emit window is closed: `GET /metrics` serves the
-  `crier_*` names only, and `internal/metrics` no longer has a second-name
-  surface at all (the `Alias` method, its registry field and the render-time
-  family rename are deleted), so a family can only be served under the name it
-  was registered with. The retired names are `deliveries_total`,
-  `guard_decisions_total`, `webhook_deliveries_total`,
-  `capability_routed_total`, `capability_unheld_total`,
-  `expired_messages_total`, `dead_lettered_messages_total`,
-  `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`,
-  `relay_events_total`, `http_requests_total`, `federation_held_current`,
-  `ws_subscribers`, `inbox_queue_depth`, `inbox_queue_leased`,
-  `inbox_queue_oldest_age_seconds` and `inbox_shed_total`; each one's
-  replacement is named in the 18-pair table in README §Observability.
-  **This is a breaking change for any dashboard, alert rule or query still
-  keying on a legacy name** — repoint it at the `crier_*` name. The regression
-  test `cmd/server/observability_namespace_test.go` renders the real default
-  registry and fails if any of the 18 families comes back, so the window cannot
-  silently reopen.
-
-## [0.3.0] - 2026-11-03
-
-Range: `v0.2.0`..`v0.3.0` — 261 non-merge commits (6 `feat`, 54 `fix`,
-19 `docs`, 7 `test`, 1 `ci`, 1 `perf`, 92 `chore`, 69 board, plus
-qa/dogfood/foreman/wip/close). No `BREAKING CHANGE` footer and no `!` type
-token anywhere in the range, so this is a minor release. The entries below
-group those commits into user-visible changes rather than repeating every one:
-each names the item id and the commit it rests on.
-
-### Added
 
 - **Named groups in the console, with measured rosters** (DF-CRIER-449,
   `daecd072`). The console creates through `POST /groups`, lists every group
@@ -158,7 +179,38 @@ each names the item id and the commit it rests on.
   are never re-judged, and the scope line names the bases and counts on every
   run.
 
+### Removed
+
+- **The 18 pre-rename Prometheus families, and the alias mechanism that served
+  them** (MON-CRIER-007, `docs/observability-spec.md` §3.1) — **2026-11-04**.
+  The MON-CRIER-005 dual-emit window is closed: `GET /metrics` serves the
+  `crier_*` names only, and `internal/metrics` no longer has a second-name
+  surface at all (the `Alias` method, its registry field and the render-time
+  family rename are deleted), so a family can only be served under the name it
+  was registered with. The retired names are `deliveries_total`,
+  `guard_decisions_total`, `webhook_deliveries_total`,
+  `capability_routed_total`, `capability_unheld_total`,
+  `expired_messages_total`, `dead_lettered_messages_total`,
+  `expiry_receipts_total`, `idempotent_replays_total`, `transfers_total`,
+  `relay_events_total`, `http_requests_total`, `federation_held_current`,
+  `ws_subscribers`, `inbox_queue_depth`, `inbox_queue_leased`,
+  `inbox_queue_oldest_age_seconds` and `inbox_shed_total`; each one's
+  replacement is named in the 18-pair table in README §Observability.
+  **This is a breaking change for any dashboard, alert rule or query still
+  keying on a legacy name** — repoint it at the `crier_*` name. The regression
+  test `cmd/server/observability_namespace_test.go` renders the real default
+  registry and fails if any of the 18 families comes back, so the window cannot
+  silently reopen.
+
 ### Changed
+
+- **SQLite session stores serve from a WAL journal** (PERF-001, `15c1d9d0`).
+  `NewSQLiteStore` arms `PRAGMA journal_mode=WAL` on a file-backed database at
+  open, before the schema is applied (the pragma returns a row, so it cannot ride
+  `sqliteDialect.InitStatements`). The rollback journal is deliberately KEPT, and
+  the reason logged at WARN rather than as a silent no-op, for `:memory:`, a DSN
+  that cannot host the `-wal`/`-shm` pair, and any answer other than `wal`. The
+  tests assert the pragma is IN FORCE, not merely issued.
 
 - **The console's posture line states configuration, not read outcomes**
   (DF-CRIER-458, -459, -460, -461; `fd2b0dfb`, `db01477e`, `856dc286`,
@@ -204,6 +256,19 @@ each names the item id and the commit it rests on.
   operator sets it; and the repository traceability doctrine is written down.
 
 ### Fixed
+
+- **Every adapter config field is settable from the environment**
+  (CRIER-HARNESS-15, `65914085`). `AdapterConfig.PermissionMode` had no
+  `CR_HARNESS_*` entry, so the claude-code `--permission-mode` knob was YAML-only;
+  and because the derived key upper-cased the adapter id, `claude-code` produced a
+  key containing a hyphen, so NONE of the ten existing overrides resolved for that
+  adapter either. The adapter segment is now rendered with hyphens mapped to
+  underscores, so claude-code occupies `CR_HARNESS_CLAUDE_CODE_*`.
+
+- **`/metrics` renders its series on an idle boot** (`6f2f2174`),
+  `TestMetricsState_SeriesRenderOnIdleBoot` verified 10x. The Coverage job's
+  other flake mechanisms are NOT claimed fixed here: they are tracked open as
+  INT-CI-027 and QA-CRIER-56.
 
 - **Membership writes require an authenticated, admin-cleared actor**
   (DF-CRIER-470, `a4c7f8ee`). `POST /sessions/{id}/participants` took the actor
@@ -301,22 +366,49 @@ each names the item id and the commit it rests on.
 
 ### Notes
 
+- **bunker-e2e is not a gate leg of this cut, and that is a recorded decision,
+  not an omission.** Two earlier sweeps (`releng/v0.3.0-release-evidence.md`,
+  RELEASE-009) held NO-GO because the exact-candidate bunker-e2e run stayed
+  `pending` with zero jobs. It stays pending on every commit: the workflow's two
+  `[self-hosted, bunker]` jobs have had no registered runner since the runner
+  service was disabled on 2026-10-19, and the channel has produced ZERO
+  successful runs in more than 100 attempts (INT-CI-019, open). A check that
+  cannot reach a verdict on ANY commit is not a tree signal, and
+  [docs/releases.md](docs/releases.md) does not list it among the gate
+  requirements — those are `make build`, `make lint`, `make test-short`,
+  `make release-artifacts`, and the full `.github/workflows/ci.yml` on the same
+  commit, all of which are green on the tagged commit. INT-CI-019 remains the
+  open defect and this cut does not claim a bunker-e2e verdict.
+
+- **The tag publisher self-check that reddened v0.2.0 is fixed and selftested**
+  (RELEASE-010, `4a6eb500`). That check uploaded `SHA256SUMS` and then compared
+  the upload against a manifest that cannot name itself, so a CORRECT asset set
+  failed after a complete upload. `make release-upload-selftest` now proves the
+  exemption load-bearing on both implementations, with a NEUTER arm reproducing
+  the old red. Its first proof on a real tag push is this tag's own workflow run.
+
+- The range's remaining known defect is the Coverage job's intermittent red
+  (INT-CI-027, QA-CRIER-56): it fails on commits whose diffs cannot reach the
+  failing code, so it is test robustness rather than a regression, and the exact
+  commit tagged here ran it GREEN (run `42242318816`).
+
 - Every entry above names the item id and the commit it rests on; the range was
   counted from `git log --no-merges v0.2.0..HEAD`, not from a board summary.
   `[0.2.0]` carries a `Range:` preamble followed by a single `### Added`
   subsection; this entry keeps the preamble and the `### Notes` form
   `[0.1.0-rc1]` established, and splits the body into `### Added`,
-  `### Changed` and `### Fixed` — the Keep a Changelog names this file's own
-  preamble declares — because this range's bulk is fixes, and carrying 54
-  fixes under `### Added` would misstate them.
+  `### Removed`, `### Changed` and `### Fixed` — the Keep a Changelog names
+  this file's own preamble declares — because this range's bulk is fixes, and
+  carrying 70 fixes under `### Added` would misstate them.
 
-- The v0.3.0 readiness sweep (RELEASE-009) recorded a **NO-GO** on 2026-11-01
-  (`ec442a24`, `releng/v0.3.0-release-evidence.md`): the exact-candidate
-  bunker-e2e run stayed pending with zero jobs, so no tag and no Release object
-  were created. That record stands until a cut overrides it. The gates are
-  measured at the tag point (`make build && make lint && make test-short`, full
-  CI green on the same commit, the committed E2E battery — see
-  [docs/releases.md](docs/releases.md)) and are not claimed by this entry.
+- The two prior v0.3.0 readiness sweeps (RELEASE-009: `ec442a24` and the
+  2026-10-30 event) recorded **NO-GO** on the bunker-e2e leg, and the evidence
+  file `releng/v0.3.0-release-evidence.md` still says so. This cut supersedes
+  that record for the reason in the first note above: the leg cannot reach a
+  verdict on ANY commit, and `docs/releases.md` does not name it among the gate
+  requirements. The gates measured at this tag point are `make build`,
+  `make lint`, `make test-short`, `make release-artifacts` and full
+  `.github/workflows/ci.yml` on the same commit.
 
 - QA-CRIER-54: the clean-machine battery failed in the native suite because a
   shipped chat lifecycle test required Node.js, which a Go project does not
@@ -324,9 +416,11 @@ each names the item id and the commit it rests on.
   (`09348e91`).
 
 - The structural promotion (`62564bcf`) moved the accumulated `[Unreleased]`
-  content into this section and reopened an empty `[Unreleased]`; this entry
-  supplies the content for the range, and the cut re-dates the heading to the
-  tag's own date.
+  content into this section and reopened an empty `[Unreleased]`. The cut
+  re-dated the heading to the tag's own date (2026-11-06) and folded the
+  `[Unreleased]` entries that had accumulated since 2026-11-03 back into the
+  matching subsections above, so the tagged commit's section describes every
+  commit the tag reaches.
 
 ## [0.2.0] - 2026-10-21
 
