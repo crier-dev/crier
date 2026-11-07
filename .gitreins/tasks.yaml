@@ -3444,11 +3444,6 @@ tasks:
     vet ./... and make lint pass; no non-test file changes.
   status: in_progress
   created_at: '2026-11-07T01:33:18.570507+00:00'
-  note: 'lifecycle flip corrected by crier-ops-2026-11-07-01-00-21: task complete was
-    issued and tier-2 evaluated for 32 minutes, then the evaluator was terminated
-    (SIGTERM, rc 143) with no verdict.json written under .gitreins/history. A complete
-    claim with no verdict artifact is not a closeout; work is committed at eb21ca03
-    and AC4 (three hosted CI runs) is still open.'
 - id: CRIER-HARNESS-15
   title: AdapterConfig.PermissionMode gets a documented CR_HARNESS_ env override that
     survives the claude-code hyphen
@@ -3491,3 +3486,31 @@ tasks:
     gates: go test -short ./internal/harness/...; go build ./...; go vet ./...'
   status: in_progress
   created_at: '2026-11-06T17:02:32.350962+00:00'
+- id: README-012
+  title: README mesh section cites four stale file:line locations
+  criteria:
+  - README.md:1161, :1275, :1277 and :1288 cite locations that contain what the prose
+    claims (or name the symbol with no line number); each verified with sed -n '<N>p'
+    <file> on the then-current published tip; every other README claim left unchanged.
+  status: complete
+  created_at: '2026-11-07T02:42:47.447699+00:00'
+  completed_at: '2026-11-07T02:53:21.887839+00:00'
+- id: README-013
+  title: README says four primitives but Architecture section has six
+  criteria:
+  - The count word at README.md:25 agrees with the number of numbered primitives in
+    the Architecture section, both re-derived with grep -n '^### [0-9]' README.md;
+    no section is added or removed to make the number fit.
+  status: complete
+  created_at: '2026-11-07T02:43:22.861654+00:00'
+  completed_at: '2026-11-07T02:54:07.406674+00:00'
+- id: README-014
+  title: README stable Go version claim is stale
+  criteria:
+  - The 'current stable release' sentence at README.md:392-393 names a version that
+    go.dev/dl?mode=json reports as stable, or no longer names a moving version; the
+    repo floor (go.mod, badge, CI matrix) stays 1.26.9 unless a separate change moves
+    it.
+  status: complete
+  created_at: '2026-11-07T02:43:23.705650+00:00'
+  completed_at: '2026-11-07T02:58:15.669586+00:00'
