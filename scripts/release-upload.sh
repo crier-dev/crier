@@ -27,13 +27,37 @@
 #   CRIER_REPO         GitHub repo (default: crier-dev/crier)
 #   CRIER_TARGETS      targets the asset set must carry (default: the three shipped)
 #   PRERELEASE=1       mark the release a prerelease as it is created
-#   CLOBBER=1          pass --clobber (re-upload over existing assets)
+#   CLOBBER=1          deliberately REPLACE an attached asset whose content differs
 #   ALLOW_TAG_DRIFT=1  attach assets built from a commit other than the tag's
 #   --notes-file <f>   use this release-notes file instead of the CHANGELOG section
 #   --dry-run          verify everything and PRINT the gh commands, run none
 #
-# Exit status: 0 only when the asset set verified and the publish command ran (or
-# was printed, under --dry-run).
+# IDEMPOTENCE — re-publishing an IDENTICAL asset set is a NO-OP
+# -------------------------------------------------------------
+# GitHub refuses an upload whose name is already attached ("asset under the same
+# name already exists"), so the pre-fix publisher could only ever run ONCE per
+# tag. One release has TWO publishers — the documented manual `make
+# release-upload` (docs/releases.md §4) and the tag-triggered
+# .github/workflows/release.yml — so whichever ran second died on the collision,
+# and that red run could never be repaired by re-running it.
+# Measured: run 42246232196 (tag v0.3.0, e950fdb1) failed at
+# "Publish the Release object with every asset" with
+#   asset under the same name already exists: [crier_linux_amd64 … SHA256SUMS]
+# while all 8 assets were attached and verified (RELEASE-012).
+#
+# So the publish step RECONCILES before it uploads. It reads the assets the
+# Release already carries (name, sha256 digest, size) and compares each against
+# the local file:
+#   same content  -> skipped; a fully-identical set exits 0 reporting convergence
+#                    (no upload is attempted, so there is no collision to fail on),
+#   name absent   -> uploaded (a half-failed publish is REPAIRED, not re-done),
+#   other content -> REFUSED unless CLOBBER=1 (a published binary is never
+#                    silently replaced — docs/releases.md §4).
+# Content identity is the only thing that converges, and it is always MEASURED: a
+# missing remote digest is downloaded and hashed, never assumed equal.
+#
+# Exit status: 0 only when the asset set verified AND the Release then carries it —
+# created, uploaded, or already converged (or printed, under --dry-run).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +77,14 @@ case "$DRY_RUN" in
   1) DRY_RUN=1 ;;
   *) echo "release-upload: DRY_RUN must be 0 or 1 (got '$DRY_RUN')" >&2; exit 2 ;;
 esac
+# CLOBBER is validated the same way: an empty value is "do not clobber", never an
+# error, because `make release-upload CLOBBER=` would pass one through.
+CLOBBER="${CLOBBER:-0}"
+case "$CLOBBER" in
+  0|"") CLOBBER=0 ;;
+  1) CLOBBER=1 ;;
+  *) echo "release-upload: CLOBBER must be 0 or 1 (got '$CLOBBER')" >&2; exit 2 ;;
+esac
 NOTES_FILE=""
 CHANGELOG="CHANGELOG.md"
 
@@ -69,7 +101,11 @@ Env: VERSION (required), RELEASE_OUTDIR, CRIER_REPO, CRIER_TARGETS,
      PRERELEASE=1, CLOBBER=1, ALLOW_TAG_DRIFT=1.
 
 Requires: gh (authenticated with write access to the repo), sha256sum/shasum.
-Never pushes or moves a git tag — see docs/releases.md §3/§4.
+
+Re-publishing an asset set that the Release already carries IDENTICAL content for
+is a no-op (exit 0, nothing uploaded). Different content under an attached name is
+refused unless CLOBBER=1. Never pushes or moves a git tag — see docs/releases.md
+§3/§4.
 EOF
 }
 
@@ -252,35 +288,125 @@ note "NOTE: a release marked --prerelease is EXCLUDED from /releases/latest, whi
 # ── Publish ─────────────────────────────────────────────────────────────────
 echo
 echo "==> publish"
+
+# Reading the current state of the Release is a READ, so a dry run performs it
+# too: which of the create / upload / converge shapes this publish takes is a
+# property of the Release, not of the flag.
 EXISTS=0
-if [ "$DRY_RUN" = "1" ]; then
-  # The existence probe is a read; a dry run may run it, and prints which of the
-  # two shapes it would take.
-  if gh release view "$VERSION" --repo "$CRIER_REPO" >/dev/null 2>&1; then
-    EXISTS=1
-    note "Release object ${VERSION} exists — assets would be uploaded onto it"
-  else
-    note "no Release object ${VERSION} yet — it would be CREATED with these assets"
+if gh release view "$VERSION" --repo "$CRIER_REPO" >/dev/null 2>&1; then
+  EXISTS=1
+fi
+
+WORK_TMP="$(mktemp -d)"
+trap 'rm -rf "$WORK_TMP"' EXIT
+
+local_sha() {
+  # shellcheck disable=SC2086
+  $SHA_TOOL "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
+}
+
+CONVERGED=""   # names already attached with IDENTICAL content
+DIFFERENT=""   # names attached with DIFFERENT content
+TO_UPLOAD=""   # asset paths this publish still has to upload
+
+if [ "$EXISTS" = "1" ]; then
+  REMOTE_TSV="$WORK_TMP/attached.tsv"
+  # ONE read, through the REST endpoint rather than `gh release view --json
+  # assets`: the release-asset `digest` field is what makes content identity
+  # cheap, and older gh builds do not project it from --json (gh 2.46 answers
+  # `null` for every asset while the same API response carries `sha256:…`).
+  gh api "repos/${CRIER_REPO}/releases/tags/${VERSION}" \
+    --jq '.assets[] | [.name, (.digest // ""), (.size | tostring)] | @tsv' > "$REMOTE_TSV" \
+    || fail "could not read the assets already attached to ${VERSION} in ${CRIER_REPO} — refusing to guess what is published (gh api failed)"
+  note "Release object ${VERSION} exists — reconciling the set against what is attached ($(wc -l < "$REMOTE_TSV" | tr -d '[:space:]') asset(s))"
+
+  for asset in $ASSETS; do
+    name="$(basename "$asset")"
+    lsha="$(local_sha "$asset")"
+    lsize="$(wc -c < "$asset" | tr -d '[:space:]')"
+    rline="$(awk -F'\t' -v n="$name" '$1 == n { print; exit }' "$REMOTE_TSV")"
+    if [ -z "$rline" ]; then
+      note "${name}: not attached — it will be uploaded"
+      TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
+      continue
+    fi
+    rsha="$(printf '%s\n' "$rline" | cut -f2)"
+    rsize="$(printf '%s\n' "$rline" | cut -f3)"
+    # GitHub reports a digest as `sha256:<hex>`; compare against the bare hex.
+    case "$rsha" in
+      sha256:*) rsha="${rsha#sha256:}" ;;
+    esac
+    rsha="$(printf '%s' "$rsha" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$rsha" ]; then
+      # No digest on the attached asset (published before GitHub recorded one, or
+      # projected away by the client). A size mismatch already proves the content
+      # differs; equal sizes prove nothing, so the asset is DOWNLOADED and hashed.
+      # "Identical" is measured here, never assumed from a missing field.
+      if [ "$rsize" != "$lsize" ]; then
+        note "${name}: attached with a different size (${rsize} vs ${lsize}) — DIFFERENT"
+        DIFFERENT="${DIFFERENT}${DIFFERENT:+ }${name}"
+        TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
+        continue
+      fi
+      mkdir -p "$WORK_TMP/download"
+      gh release download "$VERSION" --repo "$CRIER_REPO" --pattern "$name" --dir "$WORK_TMP/download" >/dev/null 2>&1 \
+        || fail "could not download the attached ${name} from ${VERSION} in ${CRIER_REPO} to compare its content — refusing to publish blind (gh release download failed)"
+      rsha="$(local_sha "$WORK_TMP/download/$name")"
+      note "${name}: no digest on the Release — downloaded and hashed to compare"
+    fi
+    # CONVERGENCE-ARM: same content under the same name is already published.
+    if [ "$rsha" = "$lsha" ]; then
+      note "${name}: attached with identical content — skipped"
+      CONVERGED="${CONVERGED}${CONVERGED:+ }${name}"
+    else
+      note "${name}: attached with DIFFERENT content (release sha256 ${rsha})"
+      DIFFERENT="${DIFFERENT}${DIFFERENT:+ }${name}"
+      TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
+    fi
+  done
+
+  # DIVERGENCE-ARM: different content under a published name is a refusal, never a silent overwrite.
+  if [ -n "$DIFFERENT" ] && [ "$CLOBBER" != "1" ]; then
+    fail "${VERSION} already carries asset(s) whose content differs from this build: ${DIFFERENT} — a published asset is never replaced silently (somebody may already have downloaded it, and its SHA256SUMS entry would stop matching). Re-publish the build that produced them, or set CLOBBER=1 to replace them deliberately"
   fi
-else
-  if gh release view "$VERSION" --repo "$CRIER_REPO" >/dev/null 2>&1; then
-    EXISTS=1
+  if [ -n "$DIFFERENT" ] && [ "$CLOBBER" = "1" ]; then
+    note "CLOBBER=1 — replacing deliberately: ${DIFFERENT}"
   fi
 fi
 
 # shellcheck disable=SC2086
-set -- $ASSETS
-if [ "$EXISTS" = "1" ]; then
-  if [ "${CLOBBER:-0}" = "1" ]; then
-    run gh release upload "$VERSION" "$@" --repo "$CRIER_REPO" --clobber
+if [ "$EXISTS" = "1" ] && [ -z "$TO_UPLOAD" ]; then
+  CONVERGED_COUNT="$(printf '%s\n' $CONVERGED | grep -c . || true)"
+  echo
+  echo "release-upload: CONVERGED — ${VERSION} already carries all ${CONVERGED_COUNT} asset(s) with IDENTICAL content:"
+  for name in $CONVERGED; do note "$name"; done
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "release-upload: DRY RUN — a real run would upload nothing (it would converge, exit 0)."
   else
-    run gh release upload "$VERSION" "$@" --repo "$CRIER_REPO"
+    echo "release-upload: nothing was uploaded — re-publishing an identical asset set is a no-op, not a name collision."
+  fi
+elif [ "$EXISTS" = "1" ]; then
+  # shellcheck disable=SC2086
+  TO_UPLOAD_COUNT="$(printf '%s\n' $TO_UPLOAD | grep -c . || true)"
+  # shellcheck disable=SC2086
+  CONVERGED_COUNT="$(printf '%s\n' $CONVERGED | grep -c . || true)"
+  note "uploading ${TO_UPLOAD_COUNT} asset(s) onto the existing Release (${CONVERGED_COUNT} already attached with identical content, skipped):"
+  for asset in $TO_UPLOAD; do note "  $(basename "$asset")"; done
+  # shellcheck disable=SC2086
+  if [ "$CLOBBER" = "1" ]; then
+    run gh release upload "$VERSION" $TO_UPLOAD --repo "$CRIER_REPO" --clobber
+  else
+    run gh release upload "$VERSION" $TO_UPLOAD --repo "$CRIER_REPO"
   fi
 else
+  if [ "$DRY_RUN" = "1" ]; then
+    note "no Release object ${VERSION} yet — it would be CREATED with these assets"
+  fi
+  # shellcheck disable=SC2086
   if [ "${PRERELEASE:-0}" = "1" ]; then
-    run gh release create "$VERSION" "$@" --repo "$CRIER_REPO" --title "$VERSION" --notes-file "$NOTES_FOR_UPLOAD" --prerelease
+    run gh release create "$VERSION" $ASSETS --repo "$CRIER_REPO" --title "$VERSION" --notes-file "$NOTES_FOR_UPLOAD" --prerelease
   else
-    run gh release create "$VERSION" "$@" --repo "$CRIER_REPO" --title "$VERSION" --notes-file "$NOTES_FOR_UPLOAD"
+    run gh release create "$VERSION" $ASSETS --repo "$CRIER_REPO" --title "$VERSION" --notes-file "$NOTES_FOR_UPLOAD"
   fi
 fi
 

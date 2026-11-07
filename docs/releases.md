@@ -119,9 +119,24 @@ Two things it will not decide for you:
   default (unpinned) install. Mark an rc prerelease only if you mean to close
   that default path — a tester then has to pass `--version <tag>` — and note
   that the rc's cut so far are published as ordinary releases.
-- **overwriting an asset**: re-running against an existing Release object
-  without `CLOBBER=1` fails on the name collision rather than silently
-  replacing a binary somebody may already have downloaded.
+- **overwriting an asset**: a re-publish RECONCILES with what the Release already
+  carries (`RELEASE-012`). An asset already attached with **identical** content
+  is skipped, and a set that is entirely identical exits 0 reporting that it
+  converged — so the two publishers of one release (this command and the
+  tag-triggered `release.yml`) no longer collide, and re-running a failed publish
+  is safe. An asset attached with **different** content is refused unless
+  `CLOBBER=1`, because a binary somebody may already have downloaded is never
+  swapped out silently. Names that are absent are uploaded, so a publish that
+  half-failed is repaired by re-running it rather than re-done from scratch.
+
+That reconciliation is why the ORDER of the two publishers no longer matters.
+Before `RELEASE-012` it did: v0.3.0's manual publish landed ~40 s before the tag
+workflow, and the workflow — finding every name already attached — died with
+`asset under the same name already exists` on a release whose 8 assets were all
+present and correct (run `42246232196`), a red tag-CI that re-running could not
+repair. Content identity is always MEASURED, never assumed: when GitHub reports
+no digest for an attached asset, the publisher downloads and hashes it, and a
+size mismatch is already a refusal.
 
 The hand-written form below still works if the notes must be something other
 than the changelog section (pass `--notes-file <path>` to `release-upload` for
@@ -154,11 +169,18 @@ against a `gh` PATH shim there, so the real upload is the one step this
 repo cannot test without publishing something.
 
 The publish-time set check (a correct set carrying `SHA256SUMS` is accepted, an
-unknown asset is still refused, and the exemption is proven load-bearing) is:
+unknown asset is still refused, and the exemption is proven load-bearing) and the
+publish's idempotence (an already-attached identical set converges with zero
+uploads, different content is refused by name unless `CLOBBER=1`, a half-published
+Release is repaired with exactly the missing assets) are one drive:
 
 ```bash
 make release-upload-selftest
 ```
+
+It runs a stateful `gh` double, so no network, no keys and no published release
+are needed, and each rule carries a NEUTER proof: removing the rule makes its
+green arm fail again.
 
 ## Gate requirements
 
