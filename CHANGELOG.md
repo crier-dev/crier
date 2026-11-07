@@ -15,6 +15,24 @@ procedure, the gate requirements and the publish step are in
 
 _Nothing yet._
 
+## [0.4.0] - 2026-11-07
+
+Range: `v0.3.0`..`4d0a6349` — 73 commits (13 merges and 60 non-merge: 1 `feat`, 7 `fix`, with bookkeeping excluded from the release notes). No `BREAKING CHANGE` footer and no `!` type token were found in the range, so this is a minor release. The entries below group the material changes and name the item id and commit they rest on.
+
+### Added
+
+- **Harness diagnostics explain missing opencode v2 model ids** (feat(harness), `86c4c469`).
+
+### Changed
+
+- **Ingress harness binding is explicit and reliable** (DF-CRIER-500, `e695ba2f`, `d31c6f27`).
+- **Build information reports one deduplicated version identity** (DF-CRIER-502, `c7d8d534`).
+- **Release publishing is idempotent** (RELEASE-012, `7860836f`).
+
+### Fixed
+
+- **Harness and integration test execution is deterministic** (INT-CI-027, `c4d3c240`; INT-CI-029, `8b458a99`).
+
 ## [0.3.0] - 2026-11-06
 
 Range: `v0.2.0`..`v0.3.0` — 433 non-merge commits (16 `feat`, 70 `fix`,
