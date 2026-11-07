@@ -454,6 +454,16 @@ type createSessionRequest struct {
 	PrincipalID      string                  `json:"principal_id,omitempty"`
 	AsAgent          string                  `json:"as_agent,omitempty"`
 	Members          []addParticipantRequest `json:"members,omitempty"`
+	// Harness binds the new session to a harness adapter (CRIER-HARNESS §4.3),
+	// which is what makes a later push DELIVER into a live agent session
+	// instead of only appending to the transcript. Absent means store-only —
+	// the shipped default — and a deployment with no adapter serving the name
+	// reports HARNESS_UNKNOWN on delivery rather than refusing the create.
+	//
+	// The harness-SIDE session id is not accepted here: it does not exist until
+	// an adapter has answered once, and it is recorded then
+	// (session.harness.bind), never asserted by a caller.
+	Harness string `json:"harness,omitempty"`
 }
 
 // addParticipantRequest is the POST /sessions/{id}/participants body.
@@ -662,6 +672,12 @@ func (h *Handler) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 		State:            SessionOpen,
 		RetentionSeconds: req.RetentionSeconds,
 		Visibility:       visibility,
+		// CRIER-HARNESS §4.3: a session may be born bound to a harness
+		// adapter. Recording the NAME on the create line is the whole binding
+		// at this point; the harness-side id is minted by the first successful
+		// delivery and appended as session.harness.bind, so a caller can never
+		// assert an id no adapter ever produced.
+		Harness: strings.TrimSpace(req.Harness),
 	}
 	// A create is all-or-nothing up to its first record: every declared member is
 	// composed AND validated — including its context boundary — against the EMPTY

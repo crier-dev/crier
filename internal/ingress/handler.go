@@ -370,6 +370,12 @@ func (h *Handler) createAndPost(ctx context.Context, req *Request, realm string)
 		CreatedAt: now,
 		CreatedBy: req.Author,
 		State:     session.SessionOpen,
+		// CRIER-HARNESS §4.3: the harness binding is part of the session
+		// record, so a new_session call that named one creates a session the
+		// dispatch hook can reach. The harness-SIDE session id is still
+		// recorded only on first successful delivery (session.harness.bind) —
+		// nothing exists to record until the adapter has answered once.
+		Harness: req.Harness,
 	}
 	if err := h.Repo.CreateSession(ctx, sess, 1); err != nil {
 		return Result{}, 0, ErrStoreError.With("create session failed: %v", err)

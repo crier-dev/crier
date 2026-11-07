@@ -19,6 +19,9 @@ func TestSessionUnknownNameListsAccepted(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleCreateSession(w, r)
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), `unknown field \"name\" (accepted: id, title, kind, namespace, visibility, retention_seconds, created_by, principal_id, as_agent, members)`)
+	// DF-CRIER-500 added `harness`: a create may bind the new session to a
+	// harness adapter (CRIER-HARNESS §4.3), so the accepted vocabulary is one
+	// field wider than it was and the refusal names it.
+	require.Contains(t, w.Body.String(), `unknown field \"name\" (accepted: id, title, kind, namespace, visibility, retention_seconds, created_by, principal_id, as_agent, members, harness)`)
 	t.Log(w.Body.String())
 }

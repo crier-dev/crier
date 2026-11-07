@@ -54,6 +54,12 @@ type rawTarget struct {
 	// mode=inbox
 	AgentID    string `json:"agent_id"`
 	Capability string `json:"capability"`
+	// Harness names the harness adapter a NEW session is bound to
+	// (CRIER-HARNESS §4.3). It is accepted here — beside `template`, the way
+	// §4.3 spells `target.harness` — and inside the template as well, because
+	// both readings of "the new session's harness" mean the same thing and one
+	// of them must not be a silent no-op. Absent means store-only, the default.
+	Harness string `json:"harness"`
 }
 
 // rawTemplate is the minimum a new session needs (§2.2). Memory is NOT a step:
@@ -63,6 +69,9 @@ type rawTemplate struct {
 	Kind      string      `json:"kind"`
 	Namespace string      `json:"namespace"`
 	Members   []rawMember `json:"members"`
+	// Harness is the template-local spelling of target.harness (CRIER-HARNESS
+	// §4.3). Naming it in both places is accepted only when the two agree.
+	Harness string `json:"harness"`
 }
 
 // rawMember is one template member. `role` is optional and defaults to member —
@@ -87,6 +96,9 @@ type Request struct {
 	Payload    json.RawMessage
 	ReplyTo    string
 	Key        string // idempotency key, "" allowed
+	// Harness is the adapter a new session is bound to (CRIER-HARNESS §4.3):
+	// target.harness, or the template-local spelling, or "" for store-only.
+	Harness string
 }
 
 // SessionTemplate is the minimum a new session needs (§2.2).
@@ -168,6 +180,14 @@ func (h *Handler) parseRequest(r *http.Request, raw rawRequest) (*Request, error
 			return nil, err
 		}
 		req.Template = tmpl
+		// CRIER-HARNESS §4.3: a new session may name the harness adapter it is
+		// bound to. The binding is recorded on the Crier session, so the FIRST
+		// successful delivery has somewhere to keep the harness-side id.
+		harness, err := resolveHarness(raw.Target.Harness, raw.Target.Template.Harness)
+		if err != nil {
+			return nil, err
+		}
+		req.Harness = harness
 		// §6: a fresh session has no thread to reply into, so a reply target on
 		// this mode is refused rather than silently ignored.
 		if strings.TrimSpace(raw.ReplyToThread) != "" {
@@ -184,6 +204,18 @@ func (h *Handler) parseRequest(r *http.Request, raw rawRequest) (*Request, error
 		}
 		if strings.TrimSpace(raw.ReplyToThread) != "" {
 			return nil, ErrReplyTooDeep.With("reply_to_thread is only valid with mode=session: an inbox entry is not a session thread")
+		}
+	}
+
+	// CRIER-HARNESS §4.3 gives the harness binding to a NEW session only: an
+	// existing session either already carries one (and the dispatch hook reads
+	// it) or would need a rebind record this surface does not own. Accepting
+	// the field here and dropping it would be the silent no-op the strict
+	// decoder exists to prevent, so it is a named refusal on the other two
+	// modes.
+	if mode != ModeNewSession {
+		if named := strings.TrimSpace(raw.Target.Harness); named != "" {
+			return nil, ErrHarnessNotAllowed.With("target.harness %q is only valid with mode=%s: an existing session's harness binding is not rebindable through ingress", named, ModeNewSession)
 		}
 	}
 
@@ -239,6 +271,31 @@ func (h *Handler) parseRequest(r *http.Request, raw rawRequest) (*Request, error
 	}
 
 	return req, nil
+}
+
+// resolveHarness reconciles the two accepted spellings of a new session's
+// harness binding (CRIER-HARNESS §4.3): `target.harness` — the form the spec
+// names — and the same field inside the template. They mean one thing, so
+// naming both is accepted when they agree and refused when they disagree: a
+// request that says "pi" in one place and "opencode" in the other has not named
+// the session's harness at all, and picking one would execute a choice the
+// caller never made.
+//
+// The name is NOT resolved against a registry here. An adapter id is what the
+// session records; whether any adapter serves it is the delivery's answer
+// (HARNESS_UNKNOWN, reported inside the 201 rather than as a rollback of a
+// session that was created correctly).
+func resolveHarness(targetField, templateField string) (string, error) {
+	target := strings.TrimSpace(targetField)
+	tmpl := strings.TrimSpace(templateField)
+	switch {
+	case target == "":
+		return tmpl, nil
+	case tmpl == "" || tmpl == target:
+		return target, nil
+	default:
+		return "", ErrTemplateInvalid.With("target.harness %q and target.template.harness %q disagree: name the harness once", target, tmpl)
+	}
 }
 
 // parseTemplate validates the new-session template (§5 INGRESS_TEMPLATE_*).

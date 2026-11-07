@@ -94,6 +94,11 @@ const (
 	// CodeNamespaceUnauthorized: the realm's token was absent or wrong — the
 	// namespace wall, refused before anything is read from or written to it.
 	CodeNamespaceUnauthorized = "INGRESS_NAMESPACE_UNAUTHORIZED"
+	// CodeHarnessNotAllowed: target.harness was named on a mode that cannot
+	// bind one. CRIER-HARNESS §4.3 gives the binding to a NEW session; on
+	// mode=session/mode=inbox the field would be dropped, so it is refused by
+	// name instead of ignored (the same rule reply_to_thread follows).
+	CodeHarnessNotAllowed = "INGRESS_HARNESS_NOT_ALLOWED"
 	// CodeMethodNotAllowed: the path is POST-only; a GET reaching the handler
 	// (a mux that did not enforce Methods) is refused rather than served.
 	CodeMethodNotAllowed = "INGRESS_METHOD_NOT_ALLOWED"
@@ -176,6 +181,7 @@ var (
 	ErrStoreError            = &Error{Code: CodeStoreError, Status: http.StatusInternalServerError}
 	ErrNamespaceUnknown      = &Error{Code: CodeNamespaceUnknown, Status: http.StatusBadRequest}
 	ErrNamespaceUnauthorized = &Error{Code: CodeNamespaceUnauthorized, Status: http.StatusUnauthorized}
+	ErrHarnessNotAllowed     = &Error{Code: CodeHarnessNotAllowed, Status: http.StatusBadRequest}
 	ErrMethodNotAllowed      = &Error{Code: CodeMethodNotAllowed, Status: http.StatusMethodNotAllowed}
 )
 
@@ -190,7 +196,7 @@ var Catalog = []*Error{
 	ErrBodyTooLarge, ErrTagsInvalid, ErrStoreError,
 	// Additive, each with the spec clause that requires it.
 	ErrEmptyMessage, ErrPayloadTooLarge, ErrSessionClosed, ErrNamespaceUnknown,
-	ErrNamespaceUnauthorized, ErrMethodNotAllowed,
+	ErrNamespaceUnauthorized, ErrHarnessNotAllowed, ErrMethodNotAllowed,
 }
 
 // writeJSON writes one JSON body with its status. It mirrors the session

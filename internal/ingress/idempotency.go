@@ -123,6 +123,7 @@ func requestHash(req *Request, realm string) (string, error) {
 		Template   *SessionTemplate    `json:"template,omitempty"`
 		AgentID    string              `json:"agent_id,omitempty"`
 		Capability string              `json:"capability,omitempty"`
+		Harness    string              `json:"harness,omitempty"`
 		Author     session.AuthorRef   `json:"author"`
 		Kind       session.MessageKind `json:"kind"`
 		Text       string              `json:"text"`
@@ -131,7 +132,8 @@ func requestHash(req *Request, realm string) (string, error) {
 		ReplyTo    string              `json:"reply_to_thread,omitempty"`
 	}{
 		Realm: realm, Mode: req.Mode, SessionID: req.SessionID, Template: req.Template,
-		AgentID: req.AgentID, Capability: req.Capability, Author: req.Author, Kind: req.Kind,
+		AgentID: req.AgentID, Capability: req.Capability, Harness: req.Harness,
+		Author: req.Author, Kind: req.Kind,
 		Text: req.Text, Tags: req.Tags, Payload: req.Payload, ReplyTo: req.ReplyTo,
 	}
 	canonical, err := session.CanonicalJSON(shape)
