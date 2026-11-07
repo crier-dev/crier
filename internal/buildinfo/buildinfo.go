@@ -145,6 +145,13 @@ func Resolve() Info {
 // it reads as a release named "dev" and hides the commit that actually
 // identifies the build (DF-CRIER-171: `go build -o bin/crier ./cmd/server`
 // printed "crier vdev-740ec816-dirty").
+//
+// The commit segment is appended only when the version does not already name
+// it (see versionCarriesCommit): the Makefile's default VERSION is
+// `git describe --tags --always --dirty`, so Version is normally
+// "v0.3.0-25-g1587a03f" while Commit is stamped separately — appending it
+// unconditionally printed the same revision twice,
+// "crier v0.3.0-25-g1587a03f-1587a03f" (DF-CRIER-502).
 func String() string { return Resolve().String() }
 
 // String returns the canonical one-line identity (see the package-level
@@ -153,13 +160,54 @@ func (i Info) String() string {
 	version := strings.TrimPrefix(i.Version, "v")
 	versionDirty := strings.HasSuffix(version, "-dirty")
 	out := prefixedVersion(version)
-	if i.Commit != "" && i.Commit != DefaultCommit {
+	if i.Commit != "" && i.Commit != DefaultCommit && !versionCarriesCommit(version, i.Commit) {
 		out += "-" + i.Commit
 	}
 	if i.Modified && !versionDirty {
 		out += "-dirty"
 	}
 	return out
+}
+
+// minAbbrevLen is the shortest trailing version token read as a git revision
+// abbreviation. git abbreviates to 7+ characters by default; the floor keeps a
+// numeric tag suffix ("1.2.3-1") from being mistaken for a commit.
+const minAbbrevLen = 4
+
+// versionCarriesCommit reports whether the version segment already names the
+// commit, so String never prints the revision twice.
+//
+// Two describe shapes carry it: `git describe --tags` ends in "-g<abbrev>"
+// ("v0.3.0-25-g1587a03f"), and `git describe --always` — no reachable tag —
+// prints the abbreviation alone ("1587a03f"). Either may end in "-dirty",
+// which the match looks past; the dirty marker is still rendered once by
+// String.
+func versionCarriesCommit(version, commit string) bool {
+	commit = strings.TrimSpace(commit)
+	if commit == "" || commit == DefaultCommit {
+		return false
+	}
+	v := strings.TrimSuffix(strings.TrimSpace(version), "-dirty")
+	if isRevisionAbbrev(v, commit) {
+		return true
+	}
+	if i := strings.LastIndex(v, "-"); i >= 0 {
+		// The "g" prefix is git's marker for a describe-supplied revision.
+		return isRevisionAbbrev(strings.TrimPrefix(v[i+1:], "g"), commit)
+	}
+	return false
+}
+
+// isRevisionAbbrev reports whether abbrev is a git revision abbreviation of
+// commit: the same hex string, or a prefix of it in either direction. The two
+// sides are compared as prefixes because git abbreviates (7-8 characters)
+// while a stamped commit is usually 8 or the full 40-character sha.
+func isRevisionAbbrev(abbrev, commit string) bool {
+	if len(abbrev) < minAbbrevLen || len(commit) < minAbbrevLen || !isHex(abbrev) || !isHex(commit) {
+		return false
+	}
+	a, c := strings.ToLower(abbrev), strings.ToLower(commit)
+	return a == c || strings.HasPrefix(c, a) || strings.HasPrefix(a, c)
 }
 
 // prefixedVersion renders the version segment of the identity. A real stamped
