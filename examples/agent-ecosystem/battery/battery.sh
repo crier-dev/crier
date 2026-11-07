@@ -145,6 +145,13 @@ harness_probe() { # agent-id prompt — two distinct prompts, one harness verdic
 #          run: prompt-1 reply delivered) but does not surface the challenge
 #          markers the proof protocol requires, and the turn exceeds the 25s
 #          delivery ceiling on prompt 2. Execution proven; proof protocol unsatisfied.
+#   OFFLINE FIXTURE EXCEPTION (INT-CI-032): execution.test.mjs runs this battery
+#   with BATTERY_FIXTURE=1 against a deterministic fake transport. There the
+#   proof protocol IS satisfiable for every arm, so out_of_scope is bypassed and
+#   all six harnesses are probed — a SKIP in the offline battery would silently
+#   drop arms from the regression net (the whole-battery test asserts no
+#   `SKIP  round-trip` line is printed). BATTERY_FIXTURE is never set by the
+#   compose stack, so the live scope decision above is unchanged.
 out_of_scope() { # agent-id — SKIP with a named reason; never grades PASS
   local id="$1"
   SKIP=$((SKIP+1))
@@ -155,13 +162,22 @@ out_of_scope() { # agent-id — SKIP with a named reason; never grades PASS
 
 harness_probe pi-agent "What is the capital of France?"
 harness_probe opencode "Explain what a message bus is."
-out_of_scope claude-code
-out_of_scope codex
-out_of_scope aider
-# goose: openai-provider -> DeepSeek wiring EXECUTES real turns (run 42417282136:
-# replies delivered through the bus, no provider error) but --text mode never
-# surfaces the challenge markers — same proof-protocol gap as aider.
-out_of_scope goose
+if [[ -n "${BATTERY_FIXTURE:-}" ]]; then
+  # Offline fixture battery: deterministic fakes satisfy the proof protocol,
+  # so every arm is exercised (see the OUT-OF-SCOPE ARMS note above).
+  harness_probe claude-code "What is the capital of France?"
+  harness_probe codex "Explain what a message bus is."
+  harness_probe aider "What is the capital of France?"
+  harness_probe goose "Explain what a message bus is."
+else
+  out_of_scope claude-code
+  out_of_scope codex
+  out_of_scope aider
+  # goose: openai-provider -> DeepSeek wiring EXECUTES real turns (run 42417282136:
+  # replies delivered through the bus, no provider error) but --text mode never
+  # surfaces the challenge markers — same proof-protocol gap as aider.
+  out_of_scope goose
+fi
 probe "round-trip sink echo via crier" 200 "ECHO" POST "/agents/sink/inbox" \
   '{"payload":{"text":"What vegetable is in plot B?"},"sender":"battery","session_id":"eco-sink","delivery_mode":"blocking","timeout_ms":15000}'
 

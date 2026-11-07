@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,8 +26,19 @@ const live = { reply: runtimeText, live: true, exec: "/fixture/opencode", stdout
   stdout_raw_sha256: createHash("sha256").update(runtimeText).digest("hex") };
 const canned = { reply: "canned", live: false, canned: true };
 
-const credentialFor = { "pi-agent": "DEEPSEEK_API_KEY", opencode: "DEEPSEEK_API_KEY",
-  "claude-code": "ANTHROPIC_API_KEY", codex: "OPENAI_API_KEY", aider: "DEEPSEEK_API_KEY", goose: "OPENAI_API_KEY" };
+// One authority for the credential contract: consumer.mjs's KEY_ENV table,
+// parsed from source (importing the module would boot a live consumer). A
+// table that moves or changes shape fails closed here instead of silently
+// encoding a stale credential name.
+const credentialFor = (() => {
+  const table = readFileSync(consumer, "utf8").match(/const KEY_ENV = \{([\s\S]*?)\}\[HARNESS\]/);
+  assert.ok(table, "consumer.mjs KEY_ENV table not found at the expected shape");
+  const parsed = Function(`return {${table[1]}}`)();
+  assert.deepEqual(Object.keys(parsed).sort(),
+    ["aider", "claude-code", "codex", "goose", "opencode", "pi-agent"], "KEY_ENV harness set drifted");
+  for (const [harness, variable] of Object.entries(parsed)) assert.match(variable, /^[A-Z][A-Z_]*$/, harness);
+  return parsed;
+})();
 
 const captures = new WeakMap();
 function check(body, code = "200", requestNonce = nonce, previousDigest = "") {
@@ -85,9 +96,16 @@ async function startConsumer(t, { key = "fixture-only", command, harness = "open
   const env = { ...process.env, PATH: join(dir, "bin"), AGENT_ID: harness, HARNESS: harness,
     RUNTIME_TIMEOUT_MS: budget, PORT: String(port), CRIER_URL: `http://127.0.0.1:${registry.address().port}`,
     OPENCODE_LIVE: liveFlag, CLAUDE_CODE_LIVE: liveFlag, CODEX_LIVE: liveFlag, AIDER_LIVE: liveFlag, GOOSE_LIVE: liveFlag };
-  for (const name of ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY"]) delete env[name];
-  // Leave an unrelated key present to catch the old global DeepSeek gate.
-  if (["codex", "claude-code", "goose"].includes(harness) && !key?.trim()) env.DEEPSEEK_API_KEY = "unrelated-fixture";
+  for (const name of ["DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY"]) delete env[name];
+  // Leave unrelated credentials present for the repointed harnesses: each must
+  // refuse on its OWN missing key (KEY_ENV), never go live on another
+  // provider's credential (INT-CI-032: codex/goose now consume DEEPSEEK_API_KEY,
+  // claude-code consumes ANTHROPIC_AUTH_TOKEN).
+  if (["codex", "claude-code", "goose"].includes(harness) && !key?.trim()) {
+    for (const name of [...new Set(Object.values(credentialFor)), "OPENAI_API_KEY"]) {
+      if (name !== credentialFor[harness]) env[name] = "unrelated-fixture";
+    }
+  }
   if (key !== null) env[credentialFor[harness]] = key;
   const child = spawn(process.execPath, [join(dir, "consumer.mjs")], {
     env, cwd: dir, stdio: ["ignore", "pipe", "pipe"],
@@ -234,7 +252,7 @@ elif url.endswith('/inbox'):
         mode = os.environ['HARNESS_MODE']
         if mode == 'no-key':
             harness = url.split('/agents/')[1].split('/')[0]
-            variable = {'codex': 'OPENAI_API_KEY', 'claude-code': 'ANTHROPIC_API_KEY', 'goose': 'OPENAI_API_KEY'}.get(harness, 'DEEPSEEK_API_KEY')
+            variable = ${JSON.stringify(credentialFor)}.get(harness, 'DEEPSEEK_API_KEY')
             result.update(live=False, status='REFUSED', reason='missing ' + variable)
         if result.get('live'):
             payload = json.loads(data)['payload']
@@ -274,7 +292,7 @@ if '-w' in args: print(args[args.index('-w') + 1].replace('%{http_code}', str(co
     const evidence = join(dir, `${name}.jsonl`);
     const mirror = name === "copy-failure" ? join(dir, "not-a-directory", "ecosystem.jsonl") : join(dir, `repo/${name}.jsonl`);
     const run = spawnSync("bash", [process.env.DF_CRIER_BATTERY || join(here, "battery.sh")], { encoding: "utf8", env: {
-      ...process.env, PATH: `${dir}:${process.env.PATH}`, DEEPSEEK_API_KEY: key,
+      ...process.env, PATH: `${dir}:${process.env.PATH}`, DEEPSEEK_API_KEY: key, BATTERY_FIXTURE: "1",
       EVIDENCE: evidence, EVIDENCE_REPO: mirror, HARNESS_BODY: JSON.stringify(fixture), HARNESS_MODE: name, STATS_FILE: join(dir, `${name}.stats`),
     } });
     assert.equal(run.status, !["live-with-key", "live-without-guard-key"].includes(name) ? 1 : 0, run.stdout + run.stderr);
@@ -402,8 +420,7 @@ for (const [harness, variable] of Object.entries(credentialFor)) {
   }
   if (harness === "pi-agent") continue; // SDK has its own fixture above.
   test(`${harness} executes with its own credential, without unrelated keys`, async (t) => {
-    const extra = harness === "codex" ? '[ "$CODEX_API_KEY" = "$OPENAI_API_KEY" ] || exit 10;' :
-      harness === "goose" ? '[ "$GOOSE_PROVIDER" = openai ] && [ "$GOOSE_MODEL" = gpt-4o-mini ] || exit 11;' : "";
+    const extra = harness === "goose" ? '[ "$GOOSE_PROVIDER" = openai ] && [ "$GOOSE_MODEL" = deepseek-chat ] || exit 11;' : "";
     const { body } = await startConsumer(t, { harness,
       command: `[ "$${variable}" = fixture-only ] || exit 9; ${extra} printf 'credential-attempt-ok\\n${marker}\\n'` });
     assert.equal(body.live, true, JSON.stringify(body));
@@ -423,7 +440,16 @@ test("checker carries consumer refusal/error text even on HTTP failures", () => 
 test("compose forwards only each harness credential, with optional empty defaults", async () => {
   const compose = resolve(here, "../docker-compose.yml");
   const source = await readFile(compose, "utf8");
-  const variables = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
+  const variables = ["DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
+  // Per-service credential surface (INT-CI-032): the consuming credential from
+  // consumer.mjs's KEY_ENV plus only the documented alternates — claude-code's
+  // ANTHROPIC_API_KEY (a native key overrides the DeepSeek-carried token) and
+  // codex/goose's OPENAI_API_KEY (the kept OpenAI-key knob alongside the
+  // repointed DeepSeek credential). Nothing else may silently authenticate a
+  // different provider.
+  const allowed = { "pi-agent": ["DEEPSEEK_API_KEY"], opencode: ["DEEPSEEK_API_KEY"],
+    "claude-code": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"], codex: ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"],
+    aider: ["DEEPSEEK_API_KEY"], goose: ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"] };
   const clean = { PATH: process.env.PATH, HOME: process.env.HOME };
   for (const populated of [false, true]) {
     const env = { ...clean };
@@ -435,12 +461,17 @@ test("compose forwards only each harness credential, with optional empty default
       const received = services[harness].environment;
       assert.equal(received.RUNTIME_TIMEOUT_MS, "20000");
       assert.equal(received[variable], populated ? `fixture-${variable}` : "", `${harness}: ${variable}`);
-      assert.deepEqual(Object.keys(received).filter((key) => variables.includes(key)), [variable], harness);
+      assert.deepEqual(Object.keys(received).filter((key) => variables.includes(key)).sort(), [...allowed[harness]].sort(), harness);
     }
   }
-  for (const line of source.split("\n").filter((line) => /^ +[A-Z_]+_API_KEY:/.test(line))) {
+  for (const line of source.split("\n").filter((line) => /^ +[A-Z_]+_(API_KEY|AUTH_TOKEN):/.test(line))) {
     const variable = line.trim().split(":")[0];
-    assert.equal(line.trim(), `${variable}: \${${variable}:-}`);
+    // A straight empty-defaulted passthrough, or claude-code's documented
+    // chain: a native ANTHROPIC_API_KEY overrides the DeepSeek-carried token.
+    const expected = variable === "ANTHROPIC_API_KEY"
+      ? "ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}"
+      : `${variable}: \${${variable}:-}`;
+    assert.equal(line.trim(), expected);
   }
 });
 
