@@ -110,3 +110,12 @@ __pycache__/
 # dirties the tree after every wave and blocks the next tick's ownership gate.
 .coding-hermes/waves/*.id
 .coding-hermes/waves/*.tmp
+# The manifest is written by EVERY dispatching tick (see the foreman prompt), so
+# leaving it untracked guaranteed the next tick saw a dirty tree and stood down:
+# 6 of 22 dry ticks on 2026-11-07 were this exact self-inflicted barrier.
+.coding-hermes/waves/*.json
+# A stray sqlite file the service creates in the workdir; not source, not evidence.
+crier.db
+# Receipt/scratch dirs written by foreman ticks (.coding-hermes/scratch/<tick-id>/).
+# Same class as the wave manifests above: generated, not evidence, never committed.
+.coding-hermes/scratch/
