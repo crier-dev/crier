@@ -114,8 +114,9 @@ jobs:
       CODEX_LIVE: "1"
       GOOSE_LIVE: "1"
       # The claude-code SDK flow needs more than the 20s default (CLI startup +
-      # tool-use turn); pi-agent completes in ~6s but node CLI startup is heavy.
-      RUNTIME_TIMEOUT_MS: "60000"
+      # tool-use turn). crier's delivery budget is 30s and the consumer rejects
+      # anything above 25000, so this is the max legal value.
+      RUNTIME_TIMEOUT_MS: "25000"
       CRIER_HOST_PORT: "28767"
       SINK_HOST_PORT: "29002"
       PI_HOST_PORT: "29101"
