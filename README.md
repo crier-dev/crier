@@ -329,9 +329,9 @@ WARN fan-out: skipping target (delivery refused) — other targets retain their 
 
 ## Quick Start
 
-### Install prebuilt binaries (v0.2.0 release assets)
+### Install prebuilt binaries (v0.3.0 release assets)
 
-Release `v0.2.0` publishes 8 assets, the complete set: cross-compiled `crier`
+Release `v0.3.0` publishes 8 assets, the complete set: cross-compiled `crier`
 and `crier-mcp` executables for linux/amd64, linux/arm64 and darwin/arm64,
 plus the installer and a `SHA256SUMS` manifest. They are bare static
 executables, not archives — nothing is tarred or zipped. The installer has
@@ -355,8 +355,14 @@ To pin the published release or install somewhere else (`sh -s --` passes the
 flags through the pipe):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.2.0 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/crier-dev/crier/main/scripts/install.sh | sh -s -- --version v0.3.0 --dir "$HOME/bin"
 ```
+
+The `--version` in that example names the current release and is bumped at cut
+time together with the `CHANGELOG.md` entry ([docs/releases.md](docs/releases.md)
+§1), so the pin cannot sit one release back. The unpinned command above needs no
+edit — it asks the installer for whichever release GitHub currently marks
+latest.
 
 The installer REFUSES an unverified download: a missing manifest, a manifest
 with no entry for the binary, a digest that does not match, or a box with neither
