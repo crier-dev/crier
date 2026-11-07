@@ -268,7 +268,9 @@ async function answer(text, batteryId, observation) {
   }
   switch (HARNESS) {
     case "opencode":
-      return runCli("opencode", ["run", nonce === undefined ? `Answer in one sentence, no tools. Question: ${text.slice(0, 400)}` : prompt, "--model", "deepseek/deepseek-v4-flash"], extraEnv, undefined, observation);
+      // deepseek/deepseek-flash is the currently-served model id (the API
+      // rejects the older deepseek-v4-flash alias with a 500 via opencode).
+      return runCli("opencode", ["run", nonce === undefined ? `Answer in one sentence, no tools. Question: ${text.slice(0, 400)}` : prompt, "--model", "deepseek/deepseek-flash"], extraEnv, undefined, observation);
     case "claude-code":
       return runCli("claude", ["-p", prompt, "--output-format", "text"], extraEnv, undefined, observation);
     case "codex":
