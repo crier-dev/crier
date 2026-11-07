@@ -282,9 +282,15 @@ async function answer(text, batteryId, observation) {
     case "aider":
       return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"], extraEnv, undefined, observation);
     case "goose":
-      // DeepSeek via goose's built-in deepseek provider (owner directive
-      // 2026-11-07): the key rides DEEPSEEK_API_KEY, not OPENAI_API_KEY.
-      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { ...extraEnv, GOOSE_PROVIDER: "deepseek", GOOSE_MODEL: "deepseek-chat", DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY }, undefined, observation);
+      // goose has NO built-in deepseek provider ("Unknown provider: deepseek",
+      // run 42415928855). Its openai provider honours OPENAI_BASE_URL, so point
+      // it at DeepSeek's OpenAI-compatible endpoint with the fleet key aliased
+      // into OPENAI_API_KEY (owner directive 2026-11-07).
+      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { ...extraEnv,
+        GOOSE_PROVIDER: "openai",
+        GOOSE_MODEL: "deepseek-chat",
+        OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || "https://api.deepseek.com/v1",
+        OPENAI_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY }, undefined, observation);
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
