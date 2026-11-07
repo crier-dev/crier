@@ -63,26 +63,43 @@ Two consequences that matter for batteries:
 
 ## 3. Per-server isolation support matrix
 
-Probed 2026-11-01 with `bunker status --server <name>` (daemon version and the
-`Net mode:` line) and the gate. **Refresh before trusting this table** — it is a
-snapshot, not a property of the fleet:
+Probed 2026-11-07 from the operator workstation over the configured server set.
+**Refresh before trusting this table and quote the date you probed** — it is a
+snapshot of a moving fleet, not a property of bunker:
 
 ```bash
-bunker status --server <name> | grep -E 'Version|Net mode'
+for s in $(grep '    name:' ~/.bunker/config.yaml | awk '{print $3}'); do
+  out=$(timeout 25 bunker status --server "$s" 2>&1)
+  printf '%s | %s | %s\n' "$s" \
+    "$(printf '%s' "$out" | grep -m1 'Version:' | sed 's/^ *//')" \
+    "$(printf '%s' "$out" | grep -m1 'Net mode:' | sed 's/^ *//')"
+done
+# then for one live agent per host:
 bash scripts/bunker-isolation-gate.sh verify --agent <id> --server <name> --mode systemd
 ```
 
 | server | daemon | reachable | reports a net-isolation surface | `systemd` enforceable for an exec-scoped battery |
 |---|---|---|---|---|
-| `bunker-las-01` | unknown | **no** (connection refused) | unknown | **no** — offline |
-| `bunker-las-02` | 0.1.4 | yes | **no** — "predates network-isolation reporting" | **no** — the flag is silently ignored; spawns additionally fail at `slice-limits` (`memory.swap.max=max`) |
-| `bunker-las-03` | 0.1.4 | yes | **no** — "predates network-isolation reporting" | **no** — measured false cut, §4 |
-| `bunker-las-04` | unknown | **no** (i/o timeout) | unknown | **no** — offline |
-| `bunker-mvp` | 0.2.1 | yes | yes — reports `shared` by default | **no for exec** — with `--network-mode systemd` it reports `systemd` + boundary, but the exec session still has egress (`exec-not-contained`), §4 |
-| `cube-las-00` | unknown | **no** (i/o timeout) | unknown | **no** — offline |
+| `bunker-las-01` | — | **no** (connection refused) | — | **no** — offline |
+| `bunker-las-02` | 0.1.4 | yes | **no** — "predates network-isolation reporting" | **no** — the flag is silently ignored; spawns additionally fail at `slice-limits` (`memory.swap.max=max`, measured 2026-11-01) |
+| `bunker-las-03` | — | **no** (connection refused, 2026-11-07) | — | **no** — offline; this was the 2026-11-01 false-cut host, §4 |
+| `bunker-las-04` | — | **no** (i/o timeout) | — | **no** — offline |
+| `cube-las-00` | — | **no** (i/o timeout) | — | **no** — offline |
+| `hermes-fleet-01` | — | **no** (i/o timeout) | — | **no** — offline |
+| `bunker-mvp` | 0.2.1 | yes | yes — reports `shared` by default | **no for exec** — with `--network-mode systemd` it reports the mode + boundary, but the exec session still has egress (`exec-not-contained`), §4 |
+| `dedi-2` | 0.2.1 | yes | yes — `shared` | **no for exec** — same dockerd-unit scope caveat as `bunker-mvp` |
+| `judgebox` | 0.2.1 | yes | yes — `shared` | **no for exec** — same dockerd-unit scope caveat |
+| `hermes-fleet-02` | 0.1.4 | yes | **no** — "predates network-isolation reporting" | **no** — silent no-op |
+| `hermes-fleet-03` | 0.1.4 | yes | **no** | **no** — silent no-op |
+| `hermes-fleet-04` | 0.1.4 | yes | **no** | **no** — silent no-op |
+| `hermes-fleet-05` | 0.1.4 | yes | **no** | **no** — silent no-op |
+| `hermes4friends` | 0.1.4 | yes | **no** — 4 running agent homes all read "not verified" | **no** — measured refusal, §4 |
 
-Nothing in this snapshot gives a battery loopback-only containment today.
-Treat every `--network-mode systemd` spawn on these hosts as **advisory**.
+Totals on that probe: **3 of 14** configured servers report the surface at all
+(all 0.2.1, all defaulting to `shared`), **6 are 0.1.4** and ignore the flag,
+**5 are unreachable**. Nothing in this snapshot gives a battery loopback-only
+containment for an `exec`-scoped probe. Treat every `--network-mode systemd`
+spawn on these hosts as **advisory**, and prove the boundary with the gate.
 
 ## 4. Live evidence, 2026-11-01 (crier QA, bed for the row)
 
@@ -126,10 +143,39 @@ So the daemon DID stamp the mode; the mode simply does not contain an exec
 session. A battery that proves "no egress" by spawning with the flag and then
 curling from `bunker exec` is measuring the host, not a boundary.
 
+### Re-probe, 2026-11-07 (the row's host is gone; the refusal is not)
+
+`bunker-las-03` now refuses connections, so the original false cut cannot be
+re-run there. The same fail-closed verdict was re-measured on another
+reachable pre-surface daemon, `hermes4friends` (0.1.4, 4 live agent homes):
+
+```
+$ bash scripts/bunker-isolation-gate.sh verify --agent luisa-sossa \
+    --server hermes4friends --mode systemd --no-egress-probe
+BUNKER ISOLATION: UNVERIFIED reason=daemon-predates-surface mode=systemd \
+  agent=luisa-sossa server=hermes4friends                          # rc 1
+
+$ bash scripts/bunker-isolation-gate.sh spawn --agent intci020-refuse-20261107 \
+    --server hermes4friends --mode systemd --ttl 10m
+BUNKER ISOLATION: UNVERIFIED reason=daemon-predates-surface mode=systemd …
+bunker-isolation-gate: refusing to spawn with --network-mode systemd — no agent
+  was created.                                       # rc 1, refused BEFORE spawn
+
+$ bunker info intci020-refuse-20261107 --server hermes4friends
+bunker: get agent: not_found: agent "intci020-refuse-20261107" not found
+```
+
+That is the consumer-side contract intact on today's fleet: the flag is never
+trusted, and a refused spawn leaves no uncontained agent behind. It does **not**
+make `bunker spawn --network-mode systemd` itself safe — see §5.
+
 ## 5. Upstream (bunker repo) work this row cannot do from crier
 
 The producer-side fix belongs to the bunker project; these are the exact seams
-(file:line against `deployBunker/bunker` HEAD `c893dc2b`, 2026-11-01):
+(re-verified 2026-11-07 against bunker HEAD `047afeb9`: `internal/cli/spawn.go`
+and `spawn_egress_probe.go` carry **zero** `NetworkIsolation` references, so the
+post-spawn read-back below is still absent — and the bunker board has no row
+filed for it):
 
 1. **CLI post-spawn read-back** — mirror `internal/cli/spawn_egress_probe.go`
    (DF-BUNKER-82, which refuses a pre-egress daemon before the spawn): after
