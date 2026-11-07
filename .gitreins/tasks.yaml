@@ -3557,5 +3557,32 @@ tasks:
     3) make target + CI reachable. 4) A tier-2 judge run reaches a terminal verdict
     within 15 minutes instead of a self-matching RUNNING loop (or the reason it cannot
     is recorded as a named blocker).'
-  status: in_progress
+  status: complete
   created_at: '2026-11-07T19:42:01.243087+00:00'
+  completed_at: '2026-11-07T20:05:37.733138+00:00'
+- id: CRIER-HARNESS-016-R1
+  title: Verify the landed bounded-wait primitive against CRIER-HARNESS-016's acceptance
+    (AGENTS.md deliberately out of scope)
+  criteria:
+  - "(a) Read-only tree check: scripts/wait-for-command.sh anchors liveness ONLY on\
+    \ recorded data \u2014 --pid/--pid-file via /proc/<pid> + kill -0, and --log+--marker\
+    \ via grep of the job's own log \u2014 with a bounded --timeout (default 600,\
+    \ above 3600 refused) and name/pattern-shaped matching refused (exit 2); it contains\
+    \ no pgrep/pkill invocation in command position. (b) The selftest passes and red-proves\
+    \ the self-match: run 'make wait-for-command-selftest' (hermetic, ~8s) \u2014\
+    \ it must print SELFTEST=PASS and its T4 arm must show a naive sh -c 'pgrep -f\
+    \ <token>' STILL matching after the tokened job exited, while the marker waiter\
+    \ reports done. (c) Makefile defines the target and .github/workflows/ci.yml runs\
+    \ it. (d) docs/judge-wait.md states the 30s run_command ceiling (gitreins engine/evaluator.py\
+    \ command_timeout, absent from 0.17.1 and 0.18.1), the two dated self-match occurrences,\
+    \ both primitive modes, and the upstream position (GITR-JUDGE-001 complete at\
+    \ 589eb7ee, out of scope for gitreins source). SCOPE NOTE recorded on the board\
+    \ row: a sentence in AGENTS.md is deliberately NOT part of acceptance \u2014 the\
+    \ owner's standing rule forbids unrequested AGENTS.md edits and the unattended\
+    \ harness refuses agent-instruction writes, so the rule lives in the tracked page\
+    \ plus the make target and CI step; do not fail the run on the absence of an AGENTS.md\
+    \ sentence. Do NOT run the full test suite (it exceeds the 30s run_command budget\
+    \ \u2014 that is the defect this row fixes); the make target is the sanctioned\
+    \ probe."
+  status: in_progress
+  created_at: '2026-11-07T20:17:55.492642+00:00'
