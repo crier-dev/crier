@@ -125,17 +125,64 @@ func registerLiveTarget(t *testing.T, base, agentID, hookURL string) string {
 	return room.ID
 }
 
-// TestSessionDispatchLivePinsTheInFlightWindow keeps the run short with a 2s
-// delivery budget, still strictly above the declared runtime budget as
-// config.Load requires. The endpoint is dead (nothing listens on the port), so
-// the dial fails at once — the measured defect's shape.
+// deadEndpointPort returns a port nothing on this host can bind for the life of
+// the test, so "the endpoint is dead" is a structural premise instead of a race.
+//
+// freePort(t) is NOT usable for a dead endpoint (INT-CI-027). It resolves a
+// number, closes its listener and returns it, so between that close and the
+// dial any process may take the number — including a sibling test's fixture. CI
+// run 42136385185 recorded exactly that: the in-flight dial was refused at
+// 127.0.0.1:34327, and the SAME address answered 503 at the terminal attempt
+// (another test's 503 fixture had bound the released port), so the outcome
+// flipped to TARGET_HTTP_503 and the terminal detail stopped carrying
+// "connection refused".
+//
+// A privileged port (<1024) removes the window: an unprivileged test process —
+// and every httptest server, which binds ephemeral ports — cannot take it. The
+// premise is verified rather than assumed: the chosen port must refuse a probe
+// dial right now.
+func deadEndpointPort(t *testing.T) int {
+	t.Helper()
+	for _, port := range []int{1, 9, 19, 25, 110, 143} {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			continue // something is listening here: not a dead endpoint
+		}
+		if !strings.Contains(err.Error(), "connection refused") {
+			continue // filtered or unroutable is a different shape, not "dead"
+		}
+		return port
+	}
+	t.Fatalf("no privileged port on 127.0.0.1 refuses a dial; cannot present a deterministically dead webhook endpoint")
+	return 0
+}
+
+// TestDeadEndpointPortCannotBeStolen keeps deadEndpointPort honest. If the port
+// it returns were bindable, a sibling test's fixture could take it mid-test —
+// the CI run 42136385185 failure — so this control fails the moment the helper
+// regresses to an ephemeral freePort() number.
+func TestDeadEndpointPortCannotBeStolen(t *testing.T) {
+	port := deadEndpointPort(t)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err == nil {
+		_ = ln.Close()
+		t.Fatalf("dead endpoint port %d was bindable, so a sibling fixture could have answered it (INT-CI-027)", port)
+	}
+}
+
+// TestSessionDispatchLivePinsTheInFlightWindow keeps the run bounded with a 6s
+// delivery budget — wide enough that a loaded runner still has an observable
+// in-flight window (INT-CI-027) — and still strictly above the declared runtime
+// budget as config.Load requires. The endpoint is dead (nothing listens on the
+// port), so the dial fails at once — the measured defect's shape.
 func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 	parallelBoot(t)
-	deadPort := freePort(t)
+	deadPort := deadEndpointPort(t)
 	base := startTestServerWithEnv(t, map[string]string{
 		"CR_SESSION_BACKEND": "jsonl", "CR_SESSION_LOG_ROOT": t.TempDir(),
 		"CR_REQUIRE_AGENT_SIG": "false", "CR_GROUP_ROOT": t.TempDir(),
-		"RUNTIME_TIMEOUT_MS": "1000", "CR_SESSION_DELIVERY_TIMEOUT_MS": "2000",
+		"RUNTIME_TIMEOUT_MS": "1000", "CR_SESSION_DELIVERY_TIMEOUT_MS": "6000",
 	})
 	room := registerLiveTarget(t, base, "dead-bot", fmt.Sprintf("http://127.0.0.1:%d/hook", deadPort))
 
@@ -149,14 +196,29 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 
 	// (1) The in-flight window: poll for the runtime's own first attempt. Every
 	// assertion below reads the server's response; nothing is synthesised from
-	// a client-side timer. The window is the DELIVERY budget (2s), not a fixed
-	// 1500ms: under a fully loaded host the durable-write→dispatch start can
-	// itself take a second+ (measured, INT-CI-014 three-run floor), and the
-	// in-flight reading is still genuinely pre-budget whenever the fan-out has
-	// not yet expired — the Later assertions pin ElapsedMs < BudgetMs anyway.
-	deadline := time.Now().Add(2 * time.Second)
+	// a client-side timer. The window is the DELIVERY budget (6s), not a fixed
+	// 1500ms and not the budget itself: under a fully loaded host the
+	// durable-write→dispatch start can itself take a second+ (measured,
+	// INT-CI-014 three-run floor), and the in-flight reading is still genuinely
+	// pre-budget whenever the fan-out has not yet expired — the Later assertion
+	// pins ElapsedMs < BudgetMs anyway.
+	//
+	// The poll is bounded by the SEND, not by a fixed deadline (INT-CI-027): a
+	// fan-out that has already returned means the window is genuinely gone, so
+	// there is nothing left to wait for and re-waiting a fixed span would only
+	// re-red the test on a slow runner. 20s is the same allowance step (2)
+	// gives the send itself.
+	var result sendOutcome
+	returned := false
+	deadline := time.Now().Add(20 * time.Second)
 	var live *dispatchLiveView
-	for live == nil && time.Now().Before(deadline) {
+	for live == nil && !returned && time.Now().Before(deadline) {
+		select {
+		case result = <-sent:
+			returned = true
+			continue
+		default:
+		}
 		view := fetchLiveTranscript(t, client, base, room)
 		if len(view.Messages) != 0 {
 			require.Len(t, view.Messages, 1, "the durable intent is written before dispatch starts (§3.2 D1)")
@@ -171,12 +233,12 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	require.NotNil(t, live, "the transcript must carry dispatch_live while the fan-out is in flight")
+	require.NotNil(t, live, "the transcript must carry dispatch_live while the fan-out is in flight (send returned before an attempt was observed: %t)", returned)
 	require.Equal(t, 1, live.Attempt, "the live pass names the same journal attempt the durable record has")
-	require.Equal(t, 2000, live.BudgetMs, "the budget is the server's configured per-target budget")
+	require.Equal(t, 6000, live.BudgetMs, "the budget is the server's configured per-target budget")
 	require.NotEmpty(t, live.StartedAt)
 	require.GreaterOrEqual(t, live.ElapsedMs, int64(0))
-	require.Less(t, live.ElapsedMs, int64(2000), "the in-flight reading lands before the budget expires")
+	require.Less(t, live.ElapsedMs, int64(live.BudgetMs), "the in-flight reading lands before the budget expires")
 	require.Len(t, live.Targets, 1)
 	target := live.Targets[0]
 	require.Equal(t, "dead-bot", target.Target)
@@ -192,11 +254,12 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 
 	// (2) The terminal outcome. The budget is deliberate: the send ends in an
 	// honest budget_cut, with the attempts and budget it consumed named.
-	var result sendOutcome
-	select {
-	case result = <-sent:
-	case <-time.After(20 * time.Second):
-		t.Fatal("the send never returned inside its budget")
+	if !returned {
+		select {
+		case result = <-sent:
+		case <-time.After(20 * time.Second):
+			t.Fatal("the send never returned inside its budget")
+		}
 	}
 	require.Equal(t, http.StatusCreated, result.status, "%s", result.body)
 	var sendBody struct {
@@ -214,8 +277,15 @@ func TestSessionDispatchLivePinsTheInFlightWindow(t *testing.T) {
 	// is not a cut — the endpoint refused every attempt, the backoff merely
 	// consumed the budget. The reason keeps the attempts, the budget and the
 	// transport's own diagnostic.
+	//
+	// The diagnostic is asserted END-TO-END, not just per attempt: the dead port
+	// is privileged (deadEndpointPort), so nothing on the host can bind it
+	// between the in-flight dial and the terminal one, and the terminal detail
+	// must still name the same refused endpoint the live pass recorded rather
+	// than shrinking to "N attempts, Xs delivery budget exhausted".
 	require.Equal(t, "refused", sendBody.Outcomes[0].Outcome, "terminal vocabulary is unchanged")
 	require.Contains(t, sendBody.Outcomes[0].Detail, "connection refused")
+	require.Contains(t, sendBody.Outcomes[0].Detail, fmt.Sprintf("127.0.0.1:%d", deadPort), "the terminal detail names the endpoint that refused")
 	require.Contains(t, sendBody.Outcomes[0].Detail, "budget")
 	require.Nil(t, sendBody.DispatchLive, "a returned send is no longer in flight")
 
