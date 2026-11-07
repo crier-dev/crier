@@ -1252,7 +1252,7 @@ two `websocat` sessions.
 #### The frames
 
 Every frame is one JSON object in one WebSocket **text** frame with a trailing
-newline (`json.Marshal` + `\n`, `internal/mesh/message.go:107`). These nine are
+newline (`json.Marshal` + `\n`, `internal/mesh/message.go:210`). These nine are
 the whole wire contract — the six below every client sees, plus the three that
 appear **only** on a server started with `CR_REQUIRE_MESH_AUTH=true` (see
 [Authentication](#authentication-opt-in) before you build a client); every field
@@ -1366,9 +1366,10 @@ this repo's — still connects. `/status` reports the mode as
 
 **Correlate the reply on `request_id`, never on the frame's own `message_id` and
 never on arrival order.** A responder MUST set `request_id` to the exact
-`message_id` of the REQUEST it is answering (`internal/mesh/message.go:76`). The
-server records `message_id → requester` when it forwards the REQUEST and looks
-the reply up by `request_id` (`internal/mesh/peer.go` `forwardResponse`, `:402`);
+`message_id` of the REQUEST it is answering (`internal/mesh/message.go:179`,
+`Response.RequestID`). The server records `message_id → requester` when it
+forwards the REQUEST and looks the reply up by `request_id`
+(`internal/mesh/peer.go` `forwardResponse`, `:883`);
 a reply that does not echo it is dropped with no error and no log, and the caller
 hangs until its own `timeout_ms`. `ERROR` frames correlate identically — they take
 the same forwarding path, so the server's own `CONTROLLER_OFFLINE` answer also
@@ -1378,8 +1379,8 @@ REQUEST's id matches nothing: `request_id` is the only field that links a reply
 to its request.
 
 **`body` is relayed verbatim, and its JSON type is the responder's choice.** The
-RESPONSE's `body` is held as raw bytes (`json.RawMessage`,
-`internal/mesh/message.go:79`) and the frame is handed back unchanged, so an
+RESPONSE's `body` is held as raw bytes (`json.RawMessage` in `Response.Body`,
+`internal/mesh/message.go:182`) and the frame is handed back unchanged, so an
 object stays an object and a string stays a string — a responder that puts a JSON
 *string* on the wire (Python's `json.dumps({...})` is the classic) sends a string,
 and nothing on the server side rewrites it. `TestResponseBodyRelayedVerbatim` in
