@@ -538,8 +538,17 @@ func (h *Handler) deliverToInbox(ctx context.Context, req *Request) (Result, int
 // best-effort and reported HONESTLY (§6): the message is already durable, so a
 // dispatch failure is a `failed` report on a successful call, never a rolled
 // back write and never a silent "dispatched".
+//
+// CRIER-HARNESS §4.3 also binds a NEW session to an adapter. When the request
+// named one, the delivery object NAMES it (`harness`) on every path, because
+// the binding is a property of the session the response is about — an
+// unanswered adapter does not erase it. mode/state still describe what
+// happened to the MESSAGE and nothing more: with no adapter configured (or
+// none that applies) the message is only in the durable store, so
+// {"mode":"store","state":"stored"} stands unchanged, and an unbound session
+// emits no `harness` key at all (omitempty).
 func (h *Handler) finish(ctx context.Context, req *Request, res Result, status int) (Result, int, error) {
-	res.Delivery = DeliveryReport{Mode: "store", State: "stored"}
+	res.Delivery = DeliveryReport{Mode: "store", State: "stored", Harness: req.Harness}
 	if h.Dispatch == nil {
 		return res, status, nil
 	}
@@ -549,7 +558,7 @@ func (h *Handler) finish(ctx context.Context, req *Request, res Result, status i
 		Kind: req.Kind, Text: req.Text, Payload: req.Payload, Tags: req.Tags,
 	})
 	if err != nil {
-		res.Delivery = DeliveryReport{Mode: "harness", State: "failed", Error: err.Error()}
+		res.Delivery = DeliveryReport{Mode: "harness", State: "failed", Harness: req.Harness, Error: err.Error()}
 		return res, status, nil
 	}
 	if report.Mode == "" {
@@ -557,6 +566,12 @@ func (h *Handler) finish(ctx context.Context, req *Request, res Result, status i
 	}
 	if report.State == "" {
 		report.State = "dispatched"
+	}
+	// An adapter that reports no harness id did not name a DIFFERENT one: the
+	// session's binding is what the caller asked for, so it is what the
+	// response says.
+	if report.Harness == "" {
+		report.Harness = req.Harness
 	}
 	res.Delivery = report
 	return res, status, nil

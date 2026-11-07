@@ -8,6 +8,7 @@ package ingress
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -37,9 +38,10 @@ func newSessionBody(author, title string) map[string]any {
 }
 
 // TestNewSessionIngressBindsHarness is AC1: `target.harness` is accepted by the
-// strict decoder, the session is created, and the binding is recorded on the
-// session (not merely echoed) — the state the dispatch hook needs to reach an
-// adapter at all.
+// strict decoder, the session is created, the binding is recorded on the
+// session (not merely echoed) AND the response's delivery object names the
+// bound adapter — the state the dispatch hook needs to reach an adapter at all,
+// reported back to the caller that asked for it.
 func TestNewSessionIngressBindsHarness(t *testing.T) {
 	env := newTestEnv(t)
 	body := newSessionBody("ci-bot", "harness bound")
@@ -61,10 +63,45 @@ func TestNewSessionIngressBindsHarness(t *testing.T) {
 	if st.Session.HarnessSessionID != "" {
 		t.Fatalf("harness_session_id = %q, want empty: no adapter has answered yet", st.Session.HarnessSessionID)
 	}
-	// No dispatch hook is wired on this fixture, so the honest report is
-	// store/stored — the create must not invent a delivery it cannot make.
+	// No dispatch hook is wired on this fixture, so the honest mode/state is
+	// store/stored — the create must not invent a delivery it cannot make. The
+	// `harness` key is a different fact: it names the adapter the session is
+	// BOUND to, which the 201 is the only answer to.
 	if res.Delivery.Mode != "store" || res.Delivery.State != "stored" {
 		t.Fatalf("delivery = %+v, want store/stored", res.Delivery)
+	}
+	if got := res.Delivery.Harness; got != "pi" {
+		t.Fatalf("delivery.harness = %q, want %q: the 201 for a bound session must name the bound adapter", got, "pi")
+	}
+}
+
+// TestUnboundNewSessionDeliveryNamesNoHarness is the negative arm of AC1: an
+// unbound new_session reports the store/stored delivery it always did and its
+// delivery object carries NO `harness` key at all — the field names a binding,
+// so its absence must be absence, not an empty string a client has to
+// interpret.
+func TestUnboundNewSessionDeliveryNamesNoHarness(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.post(t, newSessionBody("ci-bot", "no harness"), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	res := decodeResult(t, rec)
+	if res.Delivery.Mode != "store" || res.Delivery.State != "stored" {
+		t.Fatalf("delivery = %+v, want store/stored", res.Delivery)
+	}
+	if res.Delivery.Harness != "" {
+		t.Fatalf("delivery.harness = %q, want empty: nothing was bound", res.Delivery.Harness)
+	}
+
+	var raw struct {
+		Delivery map[string]json.RawMessage `json:"delivery"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if _, ok := raw.Delivery["harness"]; ok {
+		t.Fatalf("an unbound delivery emitted a harness key: %s", rec.Body.String())
 	}
 }
 
@@ -91,6 +128,12 @@ func TestNewSessionIngressAcceptsTemplateHarness(t *testing.T) {
 	st := env.loadSession(t, res.SessionID)
 	if st.Session.Harness != "opencode" {
 		t.Fatalf("session harness = %q, want opencode", st.Session.Harness)
+	}
+	// The spelling differs; the binding does not. The delivery object names
+	// the RESOLVED adapter, so a caller using the template form is told the
+	// same thing as one using target.harness.
+	if got := res.Delivery.Harness; got != "opencode" {
+		t.Fatalf("delivery.harness = %q, want opencode", got)
 	}
 }
 
@@ -180,6 +223,9 @@ func TestHarnessFieldIsOptional(t *testing.T) {
 	}
 	if res.Delivery.Mode != "store" || res.Delivery.State != "stored" {
 		t.Fatalf("delivery = %+v, want store/stored", res.Delivery)
+	}
+	if res.Delivery.Harness != "" {
+		t.Fatalf("delivery.harness = %q, want empty: an unbound create binds nothing", res.Delivery.Harness)
 	}
 }
 

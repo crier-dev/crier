@@ -693,7 +693,10 @@ paths:
         `delivery` reports where the message went beyond the durable store.
         With no harness adapter configured (CRIER-HARNESS §4) it is
         `{"mode":"store","state":"stored"}` — the message is in the session (or
-        the inbox) and every reader gets it from there.
+        the inbox) and every reader gets it from there. A `new_session` that
+        named `target.harness` also gets `delivery.harness` naming the bound
+        adapter (CRIER-HARNESS §4.3); mode/state keep describing the MESSAGE, so
+        a bound session with nothing dispatched is still store/stored.
 
         Errors are the §5 catalog. Two codes are additive and named rather than
         folded into a neighbour: INGRESS_EMPTY_MESSAGE (§6: neither text nor
@@ -5853,7 +5856,7 @@ components:
           description: True exactly when THIS call created the session (mode=new_session). A keyed replay of that call answers with the original body, so it stays true.
         delivery:
           type: object
-          description: Where the message went beyond the durable store. With no harness adapter configured (CRIER-HARNESS §4) it is {"mode":"store","state":"stored"}.
+          description: Where the message went beyond the durable store. With no harness adapter configured (CRIER-HARNESS §4) mode/state are {"mode":"store","state":"stored"}; a bound session still names its adapter in `harness`.
           required: [mode, state]
           properties:
             mode:
@@ -5861,6 +5864,14 @@ components:
               enum: [store, harness]
             harness:
               type: string
+              description: |
+                CRIER-HARNESS §4.3 — the adapter the session is BOUND to, when
+                the mode=new_session request named `target.harness` (or the
+                template-local spelling) and it resolved. Present on every
+                delivery path for that session, including mode=store: the
+                binding belongs to the session, so it says which adapter the
+                session belongs to, never that this message was dispatched.
+                Absent entirely for an unbound session.
             state:
               type: string
               enum: [stored, dispatched, failed]
