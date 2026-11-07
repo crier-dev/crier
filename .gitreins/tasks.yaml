@@ -3545,3 +3545,17 @@ tasks:
   status: complete
   created_at: '2026-11-07T18:41:41.926655+00:00'
   completed_at: '2026-11-07T18:44:10.384623+00:00'
+- id: CRIER-HARNESS-016
+  title: 'tier-2 judge wait loop self-match: give the evaluator a PID/marker-anchored
+    bounded wait primitive and prove a judge run terminates'
+  criteria:
+  - '1) A durable, tracked repo-side fix: scripts/wait-for-command.sh anchors liveness
+    to a recorded PID (kill -0 / /proc/<pid>) or to the suite''s own completion marker
+    in its log, bounded by --timeout, never pgrep -f/pkill -f, with a selftest that
+    red-proves the self-match. 2) AGENTS.md names the primitive as the only allowed
+    way to wait for a long command, quoting the exact wrapper body that hung RELEASE-015.
+    3) make target + CI reachable. 4) A tier-2 judge run reaches a terminal verdict
+    within 15 minutes instead of a self-matching RUNNING loop (or the reason it cannot
+    is recorded as a named blocker).'
+  status: in_progress
+  created_at: '2026-11-07T19:42:01.243087+00:00'
