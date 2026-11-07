@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -82,6 +82,7 @@ help:
 	@echo "  mcp-stdout-check  Run the documented MCP launcher(s) and prove their stdout carries only JSON-RPC frames, never make's recipe echo or build output (DF-CRIER-137)"
 	@echo "  mcp-stdout-selftest  Prove that checker still rejects a launcher that contaminates stdout and refuses one that prints nothing, incl. a neuter proof (DF-CRIER-137)"
 	@echo "  judge-diff-class-selftest  Prove the board-only diff classifier that authorizes gitreins --skip-tier2: verdicts, strict gate, empty-diff refusal, unknown flags, and a neuter proof (DF-CRIER-278)"
+	@echo "  wait-for-command-selftest  Prove the bounded PID/marker wait primitive (scripts/wait-for-command.sh) AND the self-match trap it replaces: pid mode, marker mode, bounded timeout, the naive process-table probe still matching an EXITED job from its own argv, the name-shaped refusals, and the no-pattern-search source rule (CRIER-HARNESS-016)"
 	@echo "  install-hooks     Install commit/merge/applypatch hooks in this repository's common Git hooks directory (idempotent)"
 	@echo "  doctor-hooks      Fail closed unless repository-local hooksPath and all three installed hooks match the tracked gate by bytes AND markers AND their board arm is proven to EXECUTE (DF-CRIER-433)"
 	@echo "  doctor-hooks-selftest  Prove hook-health refusals and acceptance on scratch repositories, including probe-verdict and whole-verdict NEUTER controls (DF-CRIER-421/430/433)"
@@ -784,6 +785,35 @@ mcp-stdout-selftest:
 # pass it.
 judge-diff-class-selftest:
 	bash scripts/lib/judge-diff-class-selftest.sh
+
+# CRIER-HARNESS-016: the tier-2 judge waits for long commands with a bounded,
+# PID/marker-anchored primitive instead of inventing a poll loop. The judge's
+# `run_command` tool has a HARD 30s timeout (gitreins engine/evaluator.py
+# command_timeout; no config key in 0.17.1 or 0.18.1), so a suite that takes
+# minutes cannot be run to completion inside one call — it has to be waited on.
+# Twice the invented loop has been a pattern search of the process table from a
+# wrapper whose own argv carried the pattern, which matches ITSELF and can never
+# observe completion: 2026-11-03, and again on RELEASE-015 at 08a54216
+# (2026-11-07), where the suite had logged completion while the loop still said
+# RUNNING and the judge was killed at 28 minutes with verdict=none:judge-hang.
+#
+# scripts/wait-for-command.sh anchors on RECORDED data — a pid you recorded
+# (--pid/--pid-file, polled via /proc + kill -0, zombie-aware, optional
+# /proc/<pid>/cmdline identity check) or the completion line the job itself
+# wrote to its own log (--log + --marker). It never searches the process table
+# by name, and a name-shaped request is refused with the self-match reason. Every
+# wait is bounded (--timeout default 600s; above 3600s refused, never clamped).
+#
+# This target runs the SELFTEST only. It is hermetic (no network, no docker, no
+# server, no fixed port, < 20s) and its load-bearing arm is T4: it launches a job
+# whose argv carries a UNIQUE per-run token, waits for the tokened job to exit,
+# then shows the naive probe `sh -c 'pgrep -f "<token>"'` STILL reporting a
+# match — the probe's own argv, not the dead job — while the marker waiter
+# reports done. T5 proves the refusals (name/pattern, unbounded, above-cap, self
+# pid) and T6 proves the tool contains no pattern-search invocation at all, so
+# the rule cannot rot back in. See docs/judge-wait.md.
+wait-for-command-selftest:
+	bash scripts/wait-for-command-selftest.sh
 
 # DF-CRIER-421: prove installed state without changing it. The selftest runs
 # real installer/doctor fixtures in temporary repositories, never in this one.

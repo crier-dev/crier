@@ -293,6 +293,22 @@ jobs:
       - name: Judge diff classifier selftest
         run: make judge-diff-class-selftest
 
+      # CRIER-HARNESS-016: the tier-2 judge's run_command tool has a HARD 30s
+      # timeout (gitreins engine/evaluator.py command_timeout; no config key in
+      # 0.17.1 or 0.18.1), so a suite that takes minutes has to be WAITED ON —
+      # and twice the invented wait was a pgrep -f loop inside a wrapper whose
+      # own argv carried the pattern, which matches itself and never observes
+      # completion (2026-11-03; RELEASE-015 at 08a54216 on 2026-11-07, where the
+      # judge was killed at 28 minutes with verdict=none:judge-hang).
+      # scripts/wait-for-command.sh anchors on recorded data instead: a pid the
+      # caller recorded, or the completion line the job wrote to its own log.
+      # This step proves both modes, the bounded timeout, the name-shaped
+      # refusals, and — load-bearing — the RED PROOF that the naive probe still
+      # matches an EXITED job from its own argv on this runner. Hermetic: no
+      # network, no docker, no server, no fixed port, ~7s.
+      - name: Bounded wait primitive selftest (pid + marker anchors, self-match red proof)
+        run: make wait-for-command-selftest
+
       # DF-CRIER-209: Tier 1 never reads a Makefile recipe or a Dockerfile, and
       # the shell/YAML step above reads only shell scripts and workflow YAML — so
       # a Makefile-only or Dockerfile-only push used to get a green that verified
