@@ -17,8 +17,8 @@ _Nothing yet._
 
 ## [0.4.0] - 2026-11-07
 
-Range: `v0.3.0`..`v0.4.0` — 93 commits (13 merges and 80 non-merge: 2 `feat`,
-7 `fix`, 13 `docs`, 8 `test`, 5 `chore`, 40 board, 3 foreman, 1 `qa`, 1 `pm`).
+Range: `v0.3.0`..`v0.4.0` — 108 commits (13 merges and 95 non-merge: 2 `feat`,
+7 `fix`, 7 `ci`, 14 `docs`, 9 `test`, 5 `chore`, 46 board, 3 foreman, 1 `qa`, 1 `pm`).
 No `BREAKING CHANGE` footer and no `!` type token were found in the range, so
 this is a minor release. The entries below group the material changes and name
 the item id and commit they rest on; board and bookkeeping commits are excluded

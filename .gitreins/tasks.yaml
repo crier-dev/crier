@@ -3613,5 +3613,6 @@ tasks:
     reports 14 tests OK; git diff -- .github/workflows/ci.yml is empty; consumer.mjs
     KEY_ENV remains the authority (claude-code=ANTHROPIC_AUTH_TOKEN, codex/goose=DEEPSEEK_API_KEY)
     and no arm is silently skipped
-  status: in_progress
+  status: complete
   created_at: '2026-11-07T22:05:14.788799+00:00'
+  completed_at: '2026-11-07T22:25:40.841080+00:00'
