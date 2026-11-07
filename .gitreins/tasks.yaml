@@ -3532,3 +3532,16 @@ tasks:
   status: complete
   created_at: '2026-11-07T07:57:14.297451+00:00'
   completed_at: '2026-11-07T08:12:11.202939+00:00'
+- id: RELEASE-015
+  title: 'v0.4.0 prep: dated [0.4.0] CHANGELOG section + README release pin'
+  criteria:
+  - 'CHANGELOG.md carries a dated [0.4.0] section whose Range line names the actual
+    prep base and whose census matches git rev-list --count for that range; it covers
+    the material feat and all fix commits (86c4c469, e695ba2f, d31c6f27, c7d8d534,
+    7860836f, c4d3c240, 8b458a99, 9a3480ef, 69e0601c) each naming item id and commit;
+    ## [Unreleased] stays _Nothing yet._; README.md pins v0.4.0 in the prebuilt-binaries
+    heading, the 8-asset line and the curl --version example; no tag or version bump
+    is created; make docs-check and make test-short pass.'
+  status: complete
+  created_at: '2026-11-07T18:41:41.926655+00:00'
+  completed_at: '2026-11-07T18:44:10.384623+00:00'
