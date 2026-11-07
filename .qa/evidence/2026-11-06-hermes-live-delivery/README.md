@@ -118,8 +118,11 @@ create path did not run.
 ## What the tests deliberately do not do
 
 * They never delete, rename or mutate an existing transcript. Each leg creates its own
-  fresh Hermes session (via `hermes chat -Q --in <tmp> -q "…SESSION-READY"`, whose
-  answer is the session's title) and only ever appends to it through the adapter.
+  fresh Hermes session (via `hermes chat -Q --in <tmp> -q "…SESSION-READY"`) and only
+  ever appends to it through the adapter. Hermes titles such a session from the seed
+  PROMPT, not from the run marker — measured, both rows say `Crier delivery probe` /
+  `Crier delivery probe #2` in `sessions.title` — so the unique marker rides the
+  delivered message text, which is where it needs to be for the transcript grep.
 * They open `state.db` with `?mode=ro`. No write path exists in the test code.
 * They scrub `HERMES_SESSION_ID` / `HERMES_SESSION_KEY` and friends from the child
   environment for the duration of the run, so the delivery cannot inherit the calling
