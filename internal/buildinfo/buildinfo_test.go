@@ -206,6 +206,103 @@ func TestStringDirtyIsNotDoubled(t *testing.T) {
 	}
 }
 
+// TestStringDoesNotDuplicateDescribeCommit is the DF-CRIER-502 regression: the
+// Makefile's default VERSION is `git describe --tags --always --dirty`, which
+// already ends in the abbreviated revision, while Commit is stamped separately
+// from `git rev-parse HEAD`. Appending the commit unconditionally printed the
+// revision twice — measured on the pre-fix tree, a `make build` binary answered
+//
+//	crier v0.2.0-455-g5dc81b05-5dc81b05
+//
+// while GET /version on the same binary was already correct
+// ({"version":"0.2.0-455-g5dc81b05","commit":"5dc81b05",...}). The
+// operator-facing identity carries the revision once, and only when the
+// version does not already name it.
+func TestStringDoesNotDuplicateDescribeCommit(t *testing.T) {
+	const (
+		describeVersion = "0.3.0-25-g1587a03f"
+		abbrev          = "1587a03f"
+		fullCommit      = "1587a03f6cdd71aa4c902132d7b407bcde58a064"
+	)
+	for _, tc := range []struct {
+		name string
+		info Info
+		want string
+	}{
+		{name: "make build identity", info: Info{Version: describeVersion, Commit: fullCommit}, want: "v" + describeVersion},
+		{name: "make build identity on a dirty tree", info: Info{Version: describeVersion, Commit: fullCommit, Modified: true}, want: "v" + describeVersion + "-dirty"},
+		{name: "describe --dirty version", info: Info{Version: describeVersion + "-dirty", Commit: fullCommit, Modified: true}, want: "v" + describeVersion + "-dirty"},
+		{name: "describe --always, no reachable tag", info: Info{Version: abbrev, Commit: fullCommit}, want: "v" + abbrev},
+		{name: "abbreviation shorter than the stamp", info: Info{Version: "0.3.0-25-g1587a0", Commit: abbrev}, want: "v0.3.0-25-g1587a0"},
+		{name: "uppercase stamp", info: Info{Version: describeVersion, Commit: strings.ToUpper(fullCommit)}, want: "v" + describeVersion},
+		{name: "8-char stamp", info: Info{Version: describeVersion, Commit: abbrev}, want: "v" + describeVersion},
+		// Controls: nothing is suppressed that the version does not carry.
+		{name: "different commit still appended", info: Info{Version: describeVersion, Commit: "deadbeef"}, want: "v" + describeVersion + "-deadbeef"},
+		{name: "numeric tag suffix is not a revision", info: Info{Version: "1.2.3-1", Commit: "1a2b3c4d"}, want: "v1.2.3-1-1a2b3c4d"},
+		{name: "unknown commit adds no segment", info: Info{Version: describeVersion, Commit: DefaultCommit}, want: "v" + describeVersion},
+		{name: "release version unchanged", info: Info{Version: "1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
+		{name: "release version with unrelated suffix", info: Info{Version: "1.2.3-rc1", Commit: "1a2b3c4d"}, want: "v1.2.3-rc1-1a2b3c4d"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.info.String()
+			if got != tc.want {
+				t.Errorf("String() = %q, want %q", got, tc.want)
+			}
+			if n := strings.Count(got, abbrev); n > 1 {
+				t.Errorf("String() = %q carries the revision %q %d times, want at most once (DF-CRIER-502)", got, abbrev, n)
+			}
+		})
+	}
+}
+
+// TestDescribeIdentityAgreesWithVersionRoute pins the two operator surfaces
+// against each other for the shape the Makefile actually produces: GET
+// /version keeps version and commit in separate fields, and the CLI identity is
+// that same version segment with the revision named once.
+func TestDescribeIdentityAgreesWithVersionRoute(t *testing.T) {
+	const (
+		describeVersion = "0.3.0-25-g1587a03f"
+		abbrev          = "1587a03f"
+		fullCommit      = "1587a03f6cdd71aa4c902132d7b407bcde58a064"
+	)
+	stubVars(t, "v"+describeVersion, fullCommit, commitTime)
+	stubBuildInfo(t, vcsBuildInfo("0000000000000000000000000000000000000000", commitTime, false), true)
+
+	resolved := Resolve()
+	if resolved.Version != describeVersion {
+		t.Fatalf("GET /version version = %q, want %q", resolved.Version, describeVersion)
+	}
+	if resolved.Commit != abbrev {
+		t.Fatalf("GET /version commit = %q, want %q", resolved.Commit, abbrev)
+	}
+	if got, want := resolved.String(), "v"+describeVersion; got != want {
+		t.Errorf("identity = %q, want %q (the version segment already names the commit)", got, want)
+	}
+	if n := strings.Count(resolved.String(), abbrev); n != 1 {
+		t.Errorf("identity %q names the commit %q %d times, want exactly once", resolved.String(), abbrev, n)
+	}
+	if seg := VersionSegment(); !strings.Contains(resolved.String(), seg) {
+		t.Errorf("identity %q does not carry the MCP version segment %q", resolved.String(), seg)
+	}
+
+	// The JSON wire shape is untouched: the dedupe lives in String(), not in
+	// the resolved fields the route serves.
+	raw, err := json.Marshal(resolved)
+	if err != nil {
+		t.Fatalf("marshal Info: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal Info JSON: %v", err)
+	}
+	if decoded["version"] != describeVersion {
+		t.Errorf("JSON version = %#v, want %q", decoded["version"], describeVersion)
+	}
+	if decoded["commit"] != abbrev {
+		t.Errorf("JSON commit = %#v, want %q", decoded["commit"], abbrev)
+	}
+}
+
 // TestStringCanonicalFormat covers the formats the CLI and GET /version
 // present, including the leading-"v" normalisation of a version that already
 // carries one.
@@ -221,6 +318,9 @@ func TestStringCanonicalFormat(t *testing.T) {
 		{name: "no version no commit", info: Info{Version: "dev", Commit: "unknown"}, want: "dev"},
 		{name: "no version dirty", info: Info{Version: "dev", Commit: "unknown", Modified: true}, want: "dev-dirty"},
 		{name: "describe string with dirty", info: Info{Version: "e9eb006-dirty", Commit: "1a2b3c4d"}, want: "ve9eb006-dirty-1a2b3c4d"},
+		// A describe string that already carries the commit does not get a
+		// second copy of it (DF-CRIER-502).
+		{name: "describe string carrying the commit", info: Info{Version: "740ec81-dirty", Commit: "740ec816"}, want: "v740ec81-dirty"},
 		{name: "version already prefixed", info: Info{Version: "v1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,7 +351,7 @@ func TestStringSentinelNeverGluesV(t *testing.T) {
 		{name: "sentinel stamped with a v", info: Info{Version: "v" + DefaultVersion, Commit: "1a2b3c4d"}, want: "dev-1a2b3c4d"},
 		// Real versions are untouched: the prefix still belongs to them.
 		{name: "tagged", info: Info{Version: "1.2.3", Commit: "1a2b3c4d"}, want: "v1.2.3-1a2b3c4d"},
-		{name: "describe string", info: Info{Version: "740ec81-dirty", Commit: "740ec816"}, want: "v740ec81-dirty-740ec816"},
+		{name: "describe string", info: Info{Version: "740ec81-dirty", Commit: "deadbeef"}, want: "v740ec81-dirty-deadbeef"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.info.String()
