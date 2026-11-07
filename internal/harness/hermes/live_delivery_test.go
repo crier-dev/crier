@@ -13,8 +13,8 @@ package hermes_test
 //
 // The whole leg is gated on CRIER_TEST_LIVE_HARNESS=1 because it spends two
 // model turns and writes into the live Hermes session store. It creates ONE
-// fresh session per run (its own unique marker names it), never touches an
-// existing session, and never deletes anything.
+// fresh session per run, never touches an existing session, and never deletes
+// anything.
 //
 // Where the transcript lives on this Hermes (v0.22.5): the session store is
 // SQLite, not a per-session .jsonl file. `hermes sessions export` reads the
@@ -196,9 +196,10 @@ func sessionCount(t *testing.T, db *sql.DB, sessionID string) int {
 // createLiveSession makes ONE fresh Hermes session for this run by asking the
 // CLI a harmless question and reading back the id it prints. This is setup, not
 // the delivery under test: an operator hands Crier an existing session id, and
-// that is the state the deliveries below start from. The session's title is the
-// marker, so a human reading `hermes sessions list` later can see where it came
-// from — nothing is renamed or deleted afterwards.
+// that is the state the deliveries below start from. The CLI titles the session
+// from that seed prompt, so it shows up as "Crier delivery probe" in
+// `hermes sessions list`; the run's unique marker rides the delivered text
+// instead. Nothing is renamed or deleted afterwards.
 func createLiveSession(t *testing.T, bin, workdir, marker string) string {
 	t.Helper()
 	const prompt = "This is a Crier delivery probe. Reply with exactly: SESSION-READY"
