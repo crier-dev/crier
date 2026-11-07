@@ -87,9 +87,9 @@ help:
 	@echo "  doctor-hooks-selftest  Prove hook-health refusals and acceptance on scratch repositories, including probe-verdict and whole-verdict NEUTER controls (DF-CRIER-421/430/433)"
 	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
-	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); DRY_RUN=1 prints the gh commands (CR-FEAT-028; never pushes a tag)"
+	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); re-publishing an IDENTICAL set is a no-op that exits 0, different content under an attached name is refused unless CLOBBER=1; DRY_RUN=1 prints the gh commands (CR-FEAT-028 + RELEASE-012; never pushes a tag)"
 	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
-	@echo "  release-upload-selftest  RELEASE-010: prove the tag publisher's set check ACCEPTS a correct asset set (every manifest asset + SHA256SUMS, which the manifest cannot name) and still REFUSES an unknown asset — drives release-upload.sh AND the workflow's own verification block, with a NEUTER proof"
+	@echo "  release-upload-selftest  RELEASE-010 + RELEASE-012: prove the tag publisher ACCEPTS a correct asset set (every manifest asset + SHA256SUMS, which the manifest cannot name) and still REFUSES an unknown asset, AND that it is IDEMPOTENT — an already-attached identical set converges with zero uploads, different content is refused unless CLOBBER=1, a half-published Release is repaired — driving release-upload.sh AND the workflow's own verification block, with a NEUTER proof for each rule"
 	@echo "  chat-ui-browser-selftest  DF-CRIER-335: the real-browser chat panel suite (responsive 390/768/1280) plus its rejection-path controls via scripts/chat-ui-browser-selftest.cjs — rc 0 pass, 1 regression, 77 named skip when playwright/Chromium/the built server are absent"
 	@echo "  clean             Remove built binaries"
 	@echo "  docker-build      Build crier and crier-mcp Docker images"
@@ -1019,19 +1019,35 @@ release-upload:
 install-path-selftest:
 	bash scripts/install-path-selftest.sh
 
-# release-upload-selftest — RELEASE-010: the tag publisher's proof. The workflow
-# uploads SHA256SUMS with the asset set and then compared the two sets for
-# EQUALITY, so a CORRECT release red-ed ("carries asset(s) SHA256SUMS does not
-# know:SHA256SUMS", run 39539975561 / tag v0.2.0) and every future cut would too.
-# SHA256SUMS is the manifest, not one of the files it covers, so the comparison
-# must demand "every manifest asset is attached, SHA256SUMS itself is exempt, and
-# anything else the manifest does not name is still fatal". This drives BOTH
-# implementations of that rule — scripts/release-upload.sh and the verification
-# block extracted from .github/workflows/release.yml (executed with bash -e, the
-# way Actions runs it) — against the same fixtures: a correct set passes, an
-# unknown asset is refused by name, a missing manifest asset is refused by name,
-# and a NEUTER proof (the exemption removed) reproduces the v0.2.0 red, so the
-# green cannot be vacuous. No network, no keys, nothing published.
+# release-upload-selftest — the tag publisher's proof, in two rules.
+#
+# RELEASE-010: the workflow uploads SHA256SUMS with the asset set and then
+# compared the two sets for EQUALITY, so a CORRECT release red-ed ("carries
+# asset(s) SHA256SUMS does not know:SHA256SUMS", run 39539975561 / tag v0.2.0)
+# and every future cut would too. SHA256SUMS is the manifest, not one of the
+# files it covers, so the comparison must demand "every manifest asset is
+# attached, SHA256SUMS itself is exempt, and anything else the manifest does not
+# name is still fatal". This drives BOTH implementations of that rule —
+# scripts/release-upload.sh and the verification block extracted from
+# .github/workflows/release.yml (executed with bash -e, the way Actions runs it) —
+# against the same fixtures: a correct set passes, an unknown asset is refused by
+# name, a missing manifest asset is refused by name, and a NEUTER proof (the
+# exemption removed) reproduces the v0.2.0 red, so the green cannot be vacuous.
+#
+# RELEASE-012: the publish had to become IDEMPOTENT. GitHub refuses an upload
+# whose name is already attached, so whichever of the two publishers of one
+# release ran second died on the collision — and that red tag-CI run could never
+# be repaired by re-running it (run 42246232196, tag v0.3.0). The fixtures drive
+# a stateful `gh` double, so the arms are executed, not described: an
+# already-attached IDENTICAL set exits 0 with zero uploads attempted (with and
+# without GitHub digests, the latter forcing a download-and-hash), DIFFERENT
+# content under the same name is refused by name unless CLOBBER=1 (then only the
+# differing assets are re-uploaded), a half-published Release is repaired with
+# exactly the missing assets and no --clobber, and a NEUTER proof (both
+# reconciliation arms removed, i.e. the pre-fix script) fails the identical-set
+# fixture with GitHub's own collision error.
+#
+# No network, no keys, nothing published.
 release-upload-selftest:
 	bash scripts/release-upload-selftest.sh
 

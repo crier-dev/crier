@@ -1,57 +1,89 @@
 #!/usr/bin/env bash
 #
-# scripts/release-upload-selftest.sh — RELEASE-010: the tag publisher's asset-set
-# check accepts a CORRECT release and still rejects an UNKNOWN asset.
+# scripts/release-upload-selftest.sh — the tag publisher's proof.
 #
 # WHY THIS EXISTS
 # ---------------
-# .github/workflows/release.yml publishes the asset set, then verifies it against
-# dist/SHA256SUMS. Both sides of that comparison are legitimate: SHA256SUMS is
-# uploaded WITH the assets (a release without a manifest cannot be verified by
-# scripts/install.sh), and the manifest never names itself (a manifest that
-# hashed itself could never be verified — scripts/release-artifacts.sh writes it
-# from the output directory and skips the file itself).
+# Two independent rules decide whether a tag publish is correct, and both are
+# proven here by EXECUTION (no network, no keys, nothing published):
 #
-# So a set-comparison that demands EQUALITY rejects a perfectly correct release.
-# Measured: run 39539975561 (tag v0.2.0, commit c0d3142) exited 1 on
-#   ::error::Release v0.2.0 carries asset(s) SHA256SUMS does not know:SHA256SUMS
-# with all 8 assets attached and a fresh download verifying `sha256sum -c`
-# cleanly. That is a red tag-CI on the one commit that must be green, and it
-# would red every future cut. The rule the check must implement is:
+# (A) RELEASE-010 — the asset-set check. GitHub's Release carries the asset set
+#     and the workflow verifies it against dist/SHA256SUMS. Both sides of that
+#     comparison are legitimate: SHA256SUMS is uploaded WITH the assets (a release
+#     without a manifest cannot be verified by scripts/install.sh), and the
+#     manifest never names itself (a manifest that hashed itself could never be
+#     verified — scripts/release-artifacts.sh writes it from the output directory
+#     and skips the file itself).
+#     So a set-comparison that demands EQUALITY rejects a perfectly correct
+#     release. Measured: run 39539975561 (tag v0.2.0, commit c0d3142) exited 1 on
+#       ::error::Release v0.2.0 carries asset(s) SHA256SUMS does not know:SHA256SUMS
+#     with all 8 assets attached and a fresh download verifying `sha256sum -c`
+#     cleanly. The rule the check must implement is:
+#       the set must carry every asset named by SHA256SUMS (MISSING is fatal),
+#       it may — and does — also carry SHA256SUMS itself (exempt from UNKNOWN),
+#       and any OTHER asset the manifest does not name is unknown (fatal).
 #
-#   the set must carry every asset named by SHA256SUMS (MISSING is fatal),
-#   it may — and does — also carry SHA256SUMS itself (exempt from UNKNOWN),
-#   and any OTHER asset the manifest does not name is genuinely unknown (fatal).
+# (B) RELEASE-012 — the publish is IDEMPOTENT. GitHub refuses an upload whose name
+#     is already attached ("asset under the same name already exists"), so the
+#     pre-fix publisher could only ever run once per tag: whichever of the two
+#     publishers ran second (the documented manual `make release-upload`, or the
+#     tag-triggered release.yml) died on the collision, and the red run could
+#     never be repaired by re-running it. Measured: run 42246232196 (tag v0.3.0,
+#     e950fdb1) failed exactly that way with all 8 assets attached and verified.
+#     The rule the publish must implement is:
+#       identical content under the same name -> SKIPPED (a whole identical set
+#                                                exits 0 reporting convergence),
+#       an absent name                        -> uploaded (repairs a half-publish),
+#       different content under that name     -> REFUSED unless CLOBBER=1.
 #
-# WHAT THIS PROVES, with no network, no docker, no keys and no published release:
-#
-#   [1/5] scripts/release-upload.sh ACCEPTS a correct fixture — every required
+# WHAT THIS PROVES
+# ----------------
+#   [1/9] scripts/release-upload.sh ACCEPTS a correct fixture — every required
 #         release asset for every target, install.sh, and SHA256SUMS — exiting 0
 #         and printing the set/manifest match. (`--dry-run`, so nothing is
 #         published; `gh` is a PATH shim, so no network and no auth.)
-#   [2/5] scripts/release-upload.sh REJECTS a fixture whose set carries an asset
+#   [2/9] scripts/release-upload.sh REJECTS a fixture whose set carries an asset
 #         SHA256SUMS does not know (a manifest written before that asset was
 #         added): nonzero exit, FAIL naming the asset.
-#   [3/5] the WORKFLOW's own verification block — extracted from
+#   [3/9] the WORKFLOW's own verification block — extracted from
 #         .github/workflows/release.yml and executed with `bash -e`, exactly as
 #         Actions runs it, against a `gh` shim reporting the attached names —
 #         accepts a Release carrying every manifest asset plus SHA256SUMS, and
 #         rejects BOTH a Release carrying an unknown asset and a Release missing
 #         a manifest asset. This is the arm that actually red-ed v0.2.0, so it is
 #         proven by execution, not by reading the YAML.
-#   [4/5] NEUTER proof: the same extracted block with the SHA256SUMS exemption
-#         removed REJECTS the correct fixture, reproducing the historical error
-#         text. The exemption is therefore load-bearing, not decoration — a green
-#         [3/5] cannot be vacuous.
-#   [5/5] `bash -n` on both scripts and a YAML parse of the workflow, so the
+#   [4/9] NEUTER proof (RELEASE-010): the same extracted block with the SHA256SUMS
+#         exemption removed REJECTS the correct fixture, reproducing the
+#         historical error text. The exemption is therefore load-bearing.
+#   [5/9] CONVERGENCE (RELEASE-012): against a Release that already carries the
+#         EXACT asset set, the publisher exits 0, says it converged, and issues
+#         NO upload at all (the shim log is empty of `release upload`) — the
+#         v0.3.0 failure cannot happen. Proven twice: with the assets carrying
+#         GitHub digests, and with NO digests, where the publisher must download
+#         each attached asset and hash it rather than assume "equal".
+#   [6/9] DIVERGENCE (RELEASE-012): the same names with DIFFERENT content still
+#         exit nonzero by name, with no upload attempted; with CLOBBER=1 the run
+#         exits 0 and uploads ONLY the differing assets, replacing them
+#         deliberately (the identical ones are still skipped, and the double's
+#         stored digest changes).
+#   [7/9] REPAIR (RELEASE-012): a Release carrying only part of the set (a publish
+#         that half-failed) converges the rest — exit 0, ONE upload carrying
+#         exactly the missing assets and no `--clobber`, so no release is left
+#         half-published and nothing is replaced.
+#   [8/9] NEUTER proof (RELEASE-012): a copy of the publisher with the convergence
+#         and divergence arms removed (the pre-fix shape) fails [5/9]'s fixture
+#         again with the historical `asset under the same name already exists`.
+#         The convergence is therefore load-bearing, not decoration.
+#   [9/9] `bash -n` on the scripts and a YAML parse of the workflow, so the
 #         fixtures above are driving scripts that are syntactically sound.
 #
-# The two implementations are the same rule in two places (a workflow cannot
-# source a shell function); this drive runs BOTH against the same fixtures, which
-# is what keeps them from drifting apart.
+# The two implementations of rule (A) are the same rule in two places (a workflow
+# cannot source a shell function); this drive runs BOTH against the same fixtures,
+# which is what keeps them from drifting apart.
 #
-# Requirements: bash, awk, sort, comm, sed, grep, wc, python3 (to extract the
-# workflow step — stdlib only), sha256sum/shasum.
+# Requirements: bash, awk, sort, comm, sed, grep, wc, cp, python3 (to extract the
+# workflow step and to build the neutered copies — stdlib only),
+# sha256sum/shasum.
 #
 # Env:
 #   RELEASE_UPLOAD_SELFTEST_VERSION  version tag the fixture set is published as
@@ -84,35 +116,146 @@ elif command -v shasum >/dev/null 2>&1; then
 else
   fail "neither 'sha256sum' nor 'shasum' is on PATH — the fixtures cannot carry a real manifest"
 fi
-command -v python3 >/dev/null 2>&1 || fail "'python3' is required to extract the verification step out of ${WORKFLOW}"
+command -v python3 >/dev/null 2>&1 || fail "'python3' is required to extract the verification step and build the neutered copies"
 [ -f "$WORKFLOW" ] || fail "${WORKFLOW} is missing — the workflow arm has nothing to drive"
 
-echo "==> release-upload-selftest (RELEASE-010)"
+echo "==> release-upload-selftest (RELEASE-010 + RELEASE-012)"
 echo "    version : ${SELFTEST_VERSION}"
 echo "    targets : ${SELFTEST_TARGETS}"
 echo "    workflow: ${WORKFLOW#"$REPO_ROOT"/}"
 
-# ── The gh shim ─────────────────────────────────────────────────────────────
-# The publish half is a `gh` call. Both arms below drive it against a PATH shim,
-# so nothing here needs a network, a token, or a published Release. `release
-# view` reports the asset names in GH_ASSETS_FILE when it is set (the shape the
-# workflow's verification step consumes) and "no such release" when it is not
-# (the shape release-upload.sh's create-vs-upload probe wants).
+# ── The gh double ───────────────────────────────────────────────────────────
+# Both halves under test are `gh` callers, so neither needs a network, a token or
+# a published Release: the shim below is a PATH `gh` that MODELS a Release object.
+#
+#   GH_STATE_DIR — directory holding the simulated Release:
+#                    release.tsv   one line per attached asset,
+#                                  <name>\t<sha256:…|empty>\t<size>
+#                                  (absent file = the Release does not exist)
+#                    files/<name>  the attached bytes, served to
+#                                  `gh release download`
+#   GH_ASSETS_FILE — optional pre-rendered name list that `gh release view`
+#                    prints, which is the shape the workflow's verification step
+#                    consumes.
+#
+# `gh release upload` reproduces GitHub's OWN behaviour, including the error the
+# v0.3.0 run died on: a name that is already attached is refused with
+# `asset under the same name already exists: [...]` unless --clobber is passed.
+# A double that quietly accepted a duplicate upload would make arm [8/9] unable
+# to fail, i.e. it would make the neuter proof vacuous.
 GH_SHIM_DIR="$WORKDIR/gh-path"
 GH_LOG="$GH_SHIM_DIR/gh-invocations.log"
+SHIM_STATE="$WORKDIR/release-state"
 mkdir -p "$GH_SHIM_DIR"
 cat > "$GH_SHIM_DIR/gh" <<'SHIM'
 #!/bin/sh
-# RELEASE-010 test double: records every invocation, and answers `release view`
-# with the asset names the fixture says GitHub reports. No network, no auth.
+# RELEASE-010 / RELEASE-012 test double: records every invocation and models a
+# Release object (GH_STATE_DIR) closely enough that a duplicate upload fails the
+# way GitHub fails it. No network, no auth.
 log="$(dirname "$0")/gh-invocations.log"
 printf 'gh %s\n' "$*" >> "$log"
-case "$*" in
-  *"release view"*)
-    if [ -n "${GH_ASSETS_FILE:-}" ] && [ -f "${GH_ASSETS_FILE}" ]; then
-      cat "$GH_ASSETS_FILE"
-      exit 0
-    fi
+
+state="${GH_STATE_DIR:-}"
+remote="${state:+$state/release.tsv}"
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  api)
+    # `gh api repos/<repo>/releases/tags/<tag> --jq …` — the caller renders what
+    # it needs from the response, so the double answers with the rendered rows.
+    [ -n "$remote" ] && [ -f "$remote" ] || exit 1
+    cat "$remote"
+    exit 0
+    ;;
+  release)
+    sub="${1:-}"
+    [ $# -gt 0 ] && shift
+    case "$sub" in
+      view)
+        if [ -n "${GH_ASSETS_FILE:-}" ] && [ -f "${GH_ASSETS_FILE}" ]; then
+          cat "$GH_ASSETS_FILE"
+          exit 0
+        fi
+        [ -n "$remote" ] && [ -f "$remote" ] || exit 1
+        awk -F'\t' '{print $1}' "$remote"
+        exit 0
+        ;;
+      download)
+        pattern=""; dir=""; expect=""
+        for a in "$@"; do
+          case "$a" in
+            --pattern) expect="pattern" ;;
+            --dir) expect="dir" ;;
+            --repo) expect="skip" ;;
+            --*) expect="" ;;
+            *)
+              case "$expect" in
+                pattern) pattern="$a" ;;
+                dir) dir="$a" ;;
+              esac
+              expect=""
+              ;;
+          esac
+        done
+        [ -n "$pattern" ] && [ -n "$dir" ] || exit 1
+        [ -f "$state/files/$pattern" ] || exit 1
+        cp "$state/files/$pattern" "$dir/$pattern" || exit 1
+        exit 0
+        ;;
+      upload)
+        clobber=0; tag=""; files=""; expect=""
+        for a in "$@"; do
+          if [ "$expect" = "skip" ]; then expect=""; continue; fi
+          case "$a" in
+            --clobber) clobber=1; expect="" ;;
+            --repo) expect="skip" ;;
+            --*) expect="" ;;
+            *)
+              if [ -z "$tag" ]; then tag="$a"; else files="${files}${files:+ }$a"; fi
+              ;;
+          esac
+        done
+        [ -n "$remote" ] && [ -f "$remote" ] || exit 1
+        exists=""
+        for f in $files; do
+          n="$(basename "$f")"
+          if awk -F'\t' -v n="$n" '$1 == n { found = 1 } END { exit !found }' "$remote"; then
+            exists="${exists}${exists:+ }${n}"
+          fi
+        done
+        if [ -n "$exists" ] && [ "$clobber" != "1" ]; then
+          # GitHub's own message, verbatim — the one run 42246232196 died on.
+          printf 'asset under the same name already exists: [%s]\n' "$exists" >&2
+          exit 1
+        fi
+        for f in $files; do
+          n="$(basename "$f")"
+          [ -f "$f" ] || {
+            printf 'no such file: %s\n' "$f" >&2
+            exit 1
+          }
+          if command -v sha256sum >/dev/null 2>&1; then
+            hex="$(sha256sum "$f" | awk '{print $1}')"
+          else
+            hex="$(shasum -a 256 "$f" | awk '{print $1}')"
+          fi
+          d="sha256:${hex}"
+          s="$(wc -c < "$f" | tr -d '[:space:]')"
+          awk -F'\t' -v n="$n" '$1 != n' "$remote" > "$remote.tmp"
+          printf '%s\t%s\t%s\n' "$n" "$d" "$s" >> "$remote.tmp"
+          LC_ALL=C sort -o "$remote" "$remote.tmp"
+          rm -f "$remote.tmp"
+        done
+        exit 0
+        ;;
+      create)
+        [ -n "$remote" ] || exit 1
+        : > "$remote"
+        exit 0
+        ;;
+    esac
     exit 1
     ;;
 esac
@@ -126,18 +269,8 @@ chmod 0755 "$GH_SHIM_DIR/gh"
 # exactly what scripts/release-artifacts.sh writes. `omit` drops one asset from
 # the MANIFEST while leaving the file in the set: the "genuinely unknown asset"
 # shape (a manifest written before that asset existed).
-make_fixture() { # <dir> [asset the manifest must not know]
-  local dir="$1" omit="${2:-}" name target os arch names=""
-  mkdir -p "$dir"
-  for target in $SELFTEST_TARGETS; do
-    os="${target%%/*}"
-    arch="${target##*/}"
-    names="${names} crier_${os}_${arch} crier-mcp_${os}_${arch}"
-  done
-  names="${names} install.sh"
-  for name in $names; do
-    printf 'release-upload-selftest fixture payload: %s\n' "$name" > "$dir/$name"
-  done
+write_manifest() { # <dir> [asset the manifest must not know]
+  local dir="$1" omit="${2:-}" name
   (
     cd "$dir"
     for name in *; do
@@ -157,6 +290,21 @@ make_fixture() { # <dir> [asset the manifest must not know]
   )
 }
 
+make_fixture() { # <dir> [asset the manifest must not know]
+  local dir="$1" omit="${2:-}" name target os arch names=""
+  mkdir -p "$dir"
+  for target in $SELFTEST_TARGETS; do
+    os="${target%%/*}"
+    arch="${target##*/}"
+    names="${names} crier_${os}_${arch} crier-mcp_${os}_${arch}"
+  done
+  names="${names} install.sh"
+  for name in $names; do
+    printf 'release-upload-selftest fixture payload: %s\n' "$name" > "$dir/$name"
+  done
+  write_manifest "$dir" "$omit"
+}
+
 # The names GitHub would report for a Release built from <dir>, plus SHA256SUMS
 # (uploaded with the set) and any extra names a negative arm wants carried.
 write_assets_file() { # <out-file> <dist-dir> [extra name…]
@@ -167,6 +315,52 @@ write_assets_file() { # <out-file> <dist-dir> [extra name…]
   local extra
   for extra in "$@"; do printf '%s\n' "$extra" >> "$out"; done
   LC_ALL=C sort -u -o "$out" "$out"
+}
+
+# ── The simulated Release object ────────────────────────────────────────────
+# publish_to_shim <dist-dir> [digest-mode]
+#   real (default) — every attached asset carries its `sha256:…` digest, which is
+#                    what GitHub reports for an asset it hashed at upload time.
+#   none           — every attached asset reports NO digest, the shape of a
+#                    Release published before GitHub recorded digests. The
+#                    publisher may not assume "identical" from a missing field,
+#                    so this mode is what forces the download-and-hash arm.
+publish_to_shim() { # <dist-dir> [real|none]
+  local dist="$1" mode="${2:-real}" name digest size f
+  rm -rf "$SHIM_STATE"
+  mkdir -p "$SHIM_STATE/files"
+  : > "$SHIM_STATE/release.tsv"
+  for f in "$dist"/*; do
+    [ -f "$f" ] || continue
+    name="$(basename "$f")"
+    cp "$f" "$SHIM_STATE/files/$name"
+    if [ "$mode" = "none" ]; then
+      digest=""
+    else
+      # shellcheck disable=SC2086
+      digest="sha256:$($SHA_TOOL "$f" | awk '{print $1}')"
+    fi
+    size="$(wc -c < "$f" | tr -d '[:space:]')"
+    printf '%s\t%s\t%s\n' "$name" "$digest" "$size" >> "$SHIM_STATE/release.tsv"
+  done
+}
+
+# Keep only the named assets attached — the shape of a publish that half-failed.
+keep_only_attached() { # <name>…
+  local keep="$*" tmp="$SHIM_STATE/release.tsv.new" want
+  : > "$tmp"
+  for want in $keep; do
+    awk -F'\t' -v n="$want" '$1 == n' "$SHIM_STATE/release.tsv" >> "$tmp"
+  done
+  mv "$tmp" "$SHIM_STATE/release.tsv"
+}
+
+shim_log_reset() { : > "$GH_LOG"; }
+shim_calls() { grep -c -- "$1" "$GH_LOG" 2>/dev/null || true; }
+shim_upload_line() { grep -- 'release upload' "$GH_LOG" 2>/dev/null | head -1 || true; }
+shim_attached_count() { wc -l < "$SHIM_STATE/release.tsv" | tr -d '[:space:]'; }
+shim_attached_digest() { # <name>
+  awk -F'\t' -v n="$1" '$1 == n { print $2 }' "$SHIM_STATE/release.tsv"
 }
 
 # The last target's server asset is the one the "unknown" fixtures leave out of
@@ -180,9 +374,9 @@ make_fixture "$CORRECT"
 make_fixture "$UNKNOWN" "$OMITTED_ASSET"
 printf 'RELEASE-010 selftest release notes\n' > "$WORKDIR/notes.md"
 
-# ── [1/5] release-upload.sh accepts the correct set ────────────────────────
+# ── [1/9] release-upload.sh accepts the correct set ────────────────────────
 echo
-echo "==> [1/5] release-upload.sh accepts a CORRECT set (every manifest asset + SHA256SUMS)"
+echo "==> [1/9] release-upload.sh accepts a CORRECT set (every manifest asset + SHA256SUMS)"
 set +e
 OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
   ALLOW_TAG_DRIFT=1 bash "$SCRIPT_DIR/release-upload.sh" --dry-run --notes-file "$WORKDIR/notes.md" 2>&1)"
@@ -197,9 +391,9 @@ printf '%s\n' "$OUT" | grep -q "carries asset(s) SHA256SUMS does not know" \
 CORRECT_COUNT="$(awk '{n=split($2, a, "/"); print a[n]}' "$CORRECT/SHA256SUMS" | wc -l)"
 echo "    PASS: correct set accepted — ${CORRECT_COUNT} manifest asset(s) + SHA256SUMS itself (exit 0)"
 
-# ── [2/5] release-upload.sh rejects a genuinely unknown asset ──────────────
+# ── [2/9] release-upload.sh rejects a genuinely unknown asset ──────────────
 echo
-echo "==> [2/5] release-upload.sh rejects an asset SHA256SUMS does not know (${OMITTED_ASSET})"
+echo "==> [2/9] release-upload.sh rejects an asset SHA256SUMS does not know (${OMITTED_ASSET})"
 set +e
 OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$UNKNOWN" \
   ALLOW_TAG_DRIFT=1 bash "$SCRIPT_DIR/release-upload.sh" --dry-run --notes-file "$WORKDIR/notes.md" 2>&1)"
@@ -212,8 +406,8 @@ printf '%s\n' "$OUT" | grep -q "${OMITTED_ASSET}" || fail "release-upload.sh ref
 echo "    FAIL (expected): the unknown asset '${OMITTED_ASSET}' was refused by name — exit ${RC}"
 echo "    PASS: a genuinely unknown asset is still fatal"
 
-# ── [3/5] the WORKFLOW's verification block, executed ──────────────────────
-# The defect lived in the workflow step, so the workflow step is what gets
+# ── [3/9] the WORKFLOW's verification block, executed ──────────────────────
+# The v0.2.0 defect lived in the workflow step, so the workflow step is what gets
 # driven. It is extracted verbatim from the YAML and run with `bash -e`, the way
 # Actions runs a `run:` block, against a dist/ tree and a gh shim.
 cat > "$WORKDIR/extract.py" <<'PY'
@@ -275,7 +469,7 @@ NEUTERED_BLOCK="$WORKDIR/verify-release-assets-neutered.sh"
 python3 "$WORKDIR/extract.py" "$WORKFLOW" "$VERIFY_BLOCK" keep
 python3 "$WORKDIR/extract.py" "$WORKFLOW" "$NEUTERED_BLOCK" neuter
 echo
-echo "==> [3/5] the workflow's own verification block, executed (bash -e, gh is a shim)"
+echo "==> [3/9] the workflow's own verification block, executed (bash -e, gh is a shim)"
 echo "    extracted $(wc -l < "$VERIFY_BLOCK") line(s) from $(basename "$WORKFLOW")"
 
 # The block reads `dist/SHA256SUMS`, so each arm runs from a work dir whose dist/
@@ -324,9 +518,9 @@ printf '%s\n' "$WF_OUT" | grep -q 'is missing manifest asset' || fail "the workf
 echo "    FAIL (expected): a missing manifest asset was refused by name"
 echo "    PASS: a partial release is still fatal in the workflow arm"
 
-# ── [4/5] NEUTER proof ─────────────────────────────────────────────────────
+# ── [4/9] NEUTER proof ─────────────────────────────────────────────────────
 echo
-echo "==> [4/5] NEUTER proof: without the SHA256SUMS exemption the correct fixture reds"
+echo "==> [4/9] NEUTER proof: without the SHA256SUMS exemption the correct fixture reds"
 if run_workflow_block "$NEUTERED_BLOCK" "$WORKDIR/attached-correct.txt"; then
   fail "the NEUTERED workflow block (exemption removed) ACCEPTED the correct Release — the exemption is not load-bearing and the green above is vacuous"
 fi
@@ -335,9 +529,189 @@ printf '%s\n' "$WF_OUT" | grep -q 'carries asset(s) SHA256SUMS does not know:SHA
 echo "    FAIL (expected): the neutered block reproduced the v0.2.0 error verbatim"
 echo "    PASS: the SHA256SUMS exemption is load-bearing"
 
-# ── [5/5] the scripts under test are syntactically sound ───────────────────
+# ── [5/9] CONVERGENCE: an already-attached identical set is a NO-OP ───────
+# The v0.3.0 defect, driven for real (no --dry-run): the Release already carries
+# every asset this publish would upload, byte for byte. GitHub would refuse all
+# eight uploads; the publisher must therefore NOT attempt any of them.
 echo
-echo "==> [5/5] syntax: bash -n on both scripts, YAML parse of the workflow"
+echo "==> [5/9] CONVERGED: the Release already carries the EXACT asset set (no upload may be attempted)"
+publish_to_shim "$CORRECT" real
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -eq 0 ] || fail "release-upload.sh exited ${RC} against a Release that already carries the identical set — this is the v0.3.0 defect (RELEASE-012)"
+printf '%s\n' "$OUT" | grep -qi 'converged' \
+  || fail "release-upload.sh exited 0 but never reported convergence — the arm is not proven"
+[ "$(shim_calls 'release upload')" = "0" ] \
+  || fail "release-upload.sh CONVERGED but still issued an upload (log: $(shim_upload_line)) — the collision would still happen"
+[ "$(shim_attached_count)" = "$((CORRECT_COUNT + 1))" ] \
+  || fail "the simulated Release no longer carries $((CORRECT_COUNT + 1)) asset(s) — the arm mutated state it should not have"
+echo "    PASS: exit 0, reported converged, zero uploads attempted ($(shim_attached_count) asset(s) untouched)"
+
+# 5b — the same, with NO digests on the Release. The publisher may not read
+# "no digest" as "identical": it must download and hash each attached asset.
+echo
+echo "==> [5b/9] CONVERGED without GitHub digests: content is measured, not assumed"
+publish_to_shim "$CORRECT" none
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -eq 0 ] || fail "release-upload.sh exited ${RC} against a digest-less Release carrying the identical set"
+printf '%s\n' "$OUT" | grep -qi 'converged' || fail "release-upload.sh exited 0 without reporting convergence"
+[ "$(shim_calls 'release download')" -gt 0 ] \
+  || fail "the release carries no digests, yet release-upload.sh never downloaded an asset to compare — it assumed identity it never measured"
+[ "$(shim_calls 'release upload')" = "0" ] || fail "release-upload.sh uploaded against a digest-less but identical Release"
+echo "    PASS: $(shim_calls 'release download') asset(s) downloaded and hashed, zero uploads, converged"
+
+# ── [6/9] DIVERGENCE: different content under the same name is REFUSED ─────
+# The same names as the attached set, but one binary and therefore the manifest
+# carry different bytes: a re-publish that would swap a published binary.
+echo
+echo "==> [6/9] DIFFERENT content under an attached name is refused unless CLOBBER=1"
+DIVERGENT="$WORKDIR/fixture-divergent"
+make_fixture "$DIVERGENT"
+printf 'this build is NOT the one the Release already carries\n' >> "$DIVERGENT/crier_linux_amd64"
+write_manifest "$DIVERGENT"
+publish_to_shim "$CORRECT" real
+ORIGINAL_DIGEST="$(shim_attached_digest crier_linux_amd64)"
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$DIVERGENT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -ne 0 ] || fail "release-upload.sh ACCEPTED a set whose crier_linux_amd64 differs from the attached one (exit 0) — a published binary would be replaced silently"
+printf '%s\n' "$OUT" | grep -q 'crier_linux_amd64' || fail "release-upload.sh refused the set but never named the differing asset"
+printf '%s\n' "$OUT" | grep -q 'SHA256SUMS' || fail "release-upload.sh refused the set but never named the manifest that differs with it"
+[ "$(shim_calls 'release upload')" = "0" ] || fail "release-upload.sh refused the set AND still issued an upload"
+[ "$(shim_attached_digest crier_linux_amd64)" = "$ORIGINAL_DIGEST" ] || fail "the refused publish mutated the attached asset anyway"
+echo "    FAIL (expected): the differing asset was refused by name — exit ${RC}"
+echo "    PASS: different content under a published name is fatal without CLOBBER=1"
+
+# 6b — CLOBBER=1 replaces ONLY the differing assets; identical ones stay skipped.
+echo
+echo "==> [6b/9] CLOBBER=1 replaces the differing assets deliberately (identical ones still skipped)"
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$DIVERGENT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 CLOBBER=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -eq 0 ] || fail "release-upload.sh exited ${RC} with CLOBBER=1 — the deliberate replacement path is broken"
+UPLOAD_LINE="$(shim_upload_line)"
+[ -n "$UPLOAD_LINE" ] || fail "CLOBBER=1 exited 0 but issued no upload — nothing was replaced"
+printf '%s\n' "$UPLOAD_LINE" | grep -q -- '--clobber' || fail "CLOBBER=1 uploaded without --clobber (log: ${UPLOAD_LINE})"
+printf '%s\n' "$UPLOAD_LINE" | grep -q 'crier_linux_amd64' || fail "CLOBBER=1 did not upload the asset that differs (log: ${UPLOAD_LINE})"
+printf '%s\n' "$UPLOAD_LINE" | grep -q 'install.sh' \
+  && fail "CLOBBER=1 re-uploaded install.sh, which is byte-identical — identical assets must still be skipped (log: ${UPLOAD_LINE})"
+NEW_DIGEST="$(shim_attached_digest crier_linux_amd64)"
+[ "$NEW_DIGEST" != "$ORIGINAL_DIGEST" ] || fail "the simulated Release still carries the old digest — the upload never landed"
+[ "$(shim_attached_count)" = "$((CORRECT_COUNT + 1))" ] || fail "CLOBBER=1 changed the number of attached assets"
+echo "    PASS: only the differing assets were uploaded with --clobber and the attached digest changed"
+
+# ── [7/9] REPAIR: a half-failed publish converges the rest ─────────────────
+# A publish that died after two uploads leaves a Release carrying part of the
+# set. Re-running must upload exactly the rest — no collision, no --clobber, and
+# no re-upload of what already landed.
+echo
+echo "==> [7/9] REPAIR: a half-published Release gets exactly the missing assets"
+publish_to_shim "$CORRECT" real
+keep_only_attached install.sh SHA256SUMS
+ATTACHED_BEFORE="$(shim_attached_count)"
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -eq 0 ] || fail "release-upload.sh exited ${RC} repairing a half-published Release carrying ${ATTACHED_BEFORE} of $((CORRECT_COUNT + 1)) asset(s)"
+UPLOAD_LINE="$(shim_upload_line)"
+[ -n "$UPLOAD_LINE" ] || fail "the repair exited 0 without uploading the missing assets"
+printf '%s\n' "$UPLOAD_LINE" | grep -q -- '--clobber' && fail "the repair used --clobber, which would replace assets that are already correct (log: ${UPLOAD_LINE})"
+printf '%s\n' "$UPLOAD_LINE" | grep -q 'install.sh' && fail "the repair re-uploaded install.sh, which was already attached (log: ${UPLOAD_LINE})"
+printf '%s\n' "$UPLOAD_LINE" | grep -q 'crier_linux_amd64' || fail "the repair never uploaded the missing crier_linux_amd64 (log: ${UPLOAD_LINE})"
+[ "$(shim_attached_count)" = "$((CORRECT_COUNT + 1))" ] \
+  || fail "after the repair the Release carries $(shim_attached_count) asset(s), want $((CORRECT_COUNT + 1))"
+echo "    PASS: ${ATTACHED_BEFORE} attached + the missing ones uploaded = $(shim_attached_count) asset(s), no --clobber"
+
+# ── [8/9] NEUTER proof: without the reconciliation the collision returns ───
+# The neutered copy is the PRE-FIX shape of the publisher: it treats every asset
+# as needing an upload and refuses nothing, so the shim's GitHub behaviour (a
+# duplicate name is an error) rejects it exactly as run 42246232196 was rejected.
+# Both arms under test here are new in RELEASE-012, so removing BOTH restores the
+# script that failed on v0.3.0.
+cat > "$WORKDIR/neuter-upload.py" <<'PY'
+import sys
+
+src, out = sys.argv[1], sys.argv[2]
+lines = open(src, encoding="utf-8").read().split("\n")
+
+# Each arm is anchored on its own sentinel comment, and the DECISION LINE that
+# follows it is neutralised. A sentinel that disappears (a refactor) must break
+# this proof loudly: silently proving nothing is worse than a red selftest.
+SENTINELS = ("# CONVERGENCE-ARM:", "# DIVERGENCE-ARM:")
+found = {}
+for i, line in enumerate(lines):
+    for s in SENTINELS:
+        if s not in line:
+            continue
+        nxt = i + 1
+        while nxt < len(lines) and lines[nxt].strip() == "":
+            nxt += 1
+        if nxt >= len(lines) or not lines[nxt].strip().startswith("if "):
+            sys.exit(f"neuter: the line after {s!r} is not an `if` — cannot neutralise it")
+        found[s] = nxt
+
+missing = [s for s in SENTINELS if s not in found]
+if missing:
+    sys.exit("neuter: sentinel(s) not found: " + ", ".join(missing) + " — the proof would be vacuous")
+
+for s, nxt in found.items():
+    indent = lines[nxt][: len(lines[nxt]) - len(lines[nxt].lstrip())]
+    lines[nxt] = indent + "if false; then   # NEUTERED: " + s.lstrip("# ")
+
+open(out, "w", encoding="utf-8").write("\n".join(lines))
+PY
+NEUTERED_UPLOAD="$WORKDIR/release-upload-neutered.sh"
+python3 "$WORKDIR/neuter-upload.py" "$SCRIPT_DIR/release-upload.sh" "$NEUTERED_UPLOAD"
+chmod 0755 "$NEUTERED_UPLOAD"
+echo
+echo "==> [8/9] NEUTER proof: without the reconciliation, [5/9]'s fixture fails on the name collision"
+publish_to_shim "$CORRECT" real
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$NEUTERED_UPLOAD" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -ne 0 ] || fail "the NEUTERED publisher (reconciliation removed) ACCEPTED the identical set — the convergence is not load-bearing and [5/9] proves nothing"
+printf '%s\n' "$OUT" | grep -q 'asset under the same name already exists' \
+  || fail "the neutered publisher failed, but not with GitHub's collision error — the reproduction does not match the v0.3.0 red"
+[ "$(shim_calls 'release upload')" -gt 0 ] || fail "the neutered publisher never attempted an upload — the double is not exercising GitHub's behaviour"
+echo "    FAIL (expected): the pre-fix shape reproduced the v0.3.0 collision verbatim"
+echo "    PASS: the same-set convergence is load-bearing"
+
+# ── [9/9] the scripts under test are syntactically sound ───────────────────
+echo
+echo "==> [9/9] syntax: bash -n on the scripts, YAML parse of the workflow"
 bash -n "$SCRIPT_DIR/release-upload.sh" || fail "bash -n rejected scripts/release-upload.sh"
 bash -n "$SCRIPT_DIR/release-upload-selftest.sh" || fail "bash -n rejected scripts/release-upload-selftest.sh"
 python3 - "$WORKFLOW" <<'PY'
@@ -361,4 +735,7 @@ echo
 echo "release-upload-selftest: PASS — a correct asset set (every manifest asset + SHA256SUMS)"
 echo "                         is accepted by BOTH the publish script and the workflow's"
 echo "                         self-check, a genuinely unknown asset is still refused by name,"
-echo "                         and the SHA256SUMS exemption is proven load-bearing."
+echo "                         the SHA256SUMS exemption is proven load-bearing,"
+echo "                         re-publishing an IDENTICAL set converges with no upload,"
+echo "                         different content is refused unless CLOBBER=1, a half-published"
+echo "                         Release is repaired, and the convergence is proven load-bearing."
