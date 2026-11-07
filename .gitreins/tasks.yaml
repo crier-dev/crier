@@ -3600,5 +3600,6 @@ tasks:
     \ row INT-CI-030 is status=complete with a note citing run 42412680393 and the\
     \ runner config path /home/ghrunner/.bunker/config.yaml. Do NOT run the full test\
     \ suite (exceeds the 30s run_command ceiling)."
-  status: in_progress
+  status: complete
   created_at: '2026-11-07T21:02:49.138932+00:00'
+  completed_at: '2026-11-07T21:18:30.250662+00:00'
