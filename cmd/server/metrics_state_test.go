@@ -113,8 +113,6 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 		{"crier_webhook_queue_oldest_age_seconds", 0, "an empty queue has no oldest item"},
 		{"crier_federation_held_age_seconds", 0, "no federation links, so nothing is held"},
 		{`crier_store_queue_depth_read_errors_total{backend="memory"}`, 0, "the memory store answers every depth read"},
-		{`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`, 0, "detection is disabled and the bounded pairs are seeded"},
-		{`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`, 0, "every bounded (signal,severity) pair exists before the first alert"},
 		{"crier_detect_quarantined_current", 0, "no agent is contained"},
 	}
 	for _, w := range want {
@@ -143,6 +141,45 @@ func TestMetricsState_SeriesRenderOnIdleBoot(t *testing.T) {
 	} {
 		if got, ok := sampleValue(body, prefix); !ok || math.IsNaN(got) {
 			t.Errorf("%s is absent or NaN — every bounded attempt ordinal must be seeded\nbody:\n%s", prefix, body)
+		}
+	}
+
+	// The detect ALERT pairs are seeded, not necessarily 0 — same mechanism, and
+	// the reason the whole suite used to go red between 01:00 and 05:00 UTC
+	// (QA-CRIER-56). metrics.Default is process-wide, so an earlier test in this
+	// binary that drives real detection traffic during the default quiet window
+	// (CR_DETECT_QUIET_HOURS, default 1-5 UTC) legitimately raises
+	// odd_hour_volume and leaves the counter at 1 before this boot exists:
+	// TestDetectionCatchesAndContainsACompromisedAgent (crfeat030_test.go:152)
+	// does exactly that — pairing it with this test reproduces the old red,
+	// while this test alone and paired with any other sibling stays green. So
+	// the contract asserted here is presence of every bounded (signal,severity)
+	// pair, plus a monotonic delta of 0 across a bounded settle window on THIS
+	// boot: an idle boot raises no alert of its own. An absolute 0 only ever
+	// held on a pristine process.
+	detectPairs := []string{
+		`crier_detect_alerts_total{signal="canary_trip",severity="critical"}`,
+		`crier_detect_alerts_total{signal="odd_hour_volume",severity="warning"}`,
+	}
+	before := make(map[string]float64, len(detectPairs))
+	for _, prefix := range detectPairs {
+		got, ok := sampleValue(body, prefix)
+		if !ok || math.IsNaN(got) {
+			t.Errorf("%s is absent or NaN — every bounded (signal,severity) pair must be seeded\nbody:\n%s", prefix, body)
+			continue
+		}
+		before[prefix] = got
+	}
+	time.Sleep(250 * time.Millisecond)
+	after := scrapeMetrics(t, baseURL)
+	for _, prefix := range detectPairs {
+		got, ok := sampleValue(after, prefix)
+		if !ok || math.IsNaN(got) {
+			t.Errorf("%s disappeared from a second scrape of the same boot", prefix)
+			continue
+		}
+		if prev, seen := before[prefix]; seen && got != prev {
+			t.Errorf("%s moved from %v to %v on an idle boot — an idle server raises no alert", prefix, prev, got)
 		}
 	}
 
