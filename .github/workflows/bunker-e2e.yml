@@ -101,6 +101,12 @@ jobs:
       cancel-in-progress: false
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      # claude-code cell rides DeepSeek's Anthropic-compatible endpoint (owner
+      # directive 2026-11-07: no Anthropic key needed to prove the harness —
+      # repoint to DeepSeek). The compose service defaults ANTHROPIC_BASE_URL to
+      # that endpoint and consumes ANTHROPIC_AUTH_TOKEN as the credential.
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
+      CLAUDE_CODE_LIVE: "1"
       CRIER_HOST_PORT: "28767"
       SINK_HOST_PORT: "29002"
       PI_HOST_PORT: "29101"

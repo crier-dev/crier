@@ -35,7 +35,13 @@ const CRIER = process.env.CRIER_URL || "http://crier:8767";
 const KEY_ENV = {
   "pi-agent": "DEEPSEEK_API_KEY",
   opencode: "DEEPSEEK_API_KEY",
-  "claude-code": "ANTHROPIC_API_KEY",
+  // claude-code is pointed at DeepSeek's official Anthropic-compatible endpoint
+  // (ANTHROPIC_BASE_URL defaults to https://api.deepseek.com/anthropic in the
+  // compose service), so the credential it actually consumes is the DeepSeek
+  // key carried as ANTHROPIC_AUTH_TOKEN. A native Anthropic key still works:
+  // the compose service maps ANTHROPIC_API_KEY through unchanged and the CLI
+  // honours whichever auth pair is present.
+  "claude-code": "ANTHROPIC_AUTH_TOKEN",
   codex: "OPENAI_API_KEY",
   aider: "DEEPSEEK_API_KEY",
   goose: "OPENAI_API_KEY",
