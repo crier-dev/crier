@@ -158,7 +158,10 @@ harness_probe opencode "Explain what a message bus is."
 out_of_scope claude-code
 out_of_scope codex
 out_of_scope aider
-harness_probe goose "What does a message bus do?"
+# goose: openai-provider -> DeepSeek wiring EXECUTES real turns (run 42417282136:
+# replies delivered through the bus, no provider error) but --text mode never
+# surfaces the challenge markers — same proof-protocol gap as aider.
+out_of_scope goose
 probe "round-trip sink echo via crier" 200 "ECHO" POST "/agents/sink/inbox" \
   '{"payload":{"text":"What vegetable is in plot B?"},"sender":"battery","session_id":"eco-sink","delivery_mode":"blocking","timeout_ms":15000}'
 
