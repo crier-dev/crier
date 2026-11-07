@@ -1,0 +1,12 @@
+=== RUN   TestLiveHermesDeliveryLandsInTheRealSession
+    live_delivery_test.go:253: setup: created live hermes session "local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155" (marker crier-live-hermes-1794026957533208286) via `hermes chat -Q --in <workdir> -q <prompt>`
+    live_delivery_test.go:307: delivery m_live_hermes_1: receipt={Harness:hermes SessionID:local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155 Created:false State:dispatched ExitCode:0 DurationMS:15821 StdoutBytes:42 Tail: Error: At:2026-11-07 04:49:53.780423148 +0000 UTC} elapsed=15.822s
+    live_delivery_test.go:321: transcript evidence: file=/home/kara/.hermes/state.db table=messages session_id=local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155 row_id=6812447 role=user token=crier-live-hermes-1794026957533208286-one
+    live_delivery_test.go:339: delivery m_live_hermes_2: receipt={Harness:hermes SessionID:local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155 Created:false State:dispatched ExitCode:0 DurationMS:16703 StdoutBytes:42 Tail: Error: At:2026-11-07 04:50:10.484473195 +0000 UTC} elapsed=16.704s
+    live_delivery_test.go:360: continuation proven: one session "local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155", 4 rows before the second push, 6 after; both tokens in /home/kara/.hermes/state.db
+    live_delivery_test.go:362: transport: CLI resume — `hermes chat -Q --resume local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155 -q <text>` (adapter continue path; the gateway POST /v1/responses create path was NOT used)
+    live_delivery_test.go:364: evidence: transcript file=/home/kara/.hermes/state.db session_id=local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155 token_one_row=6812447 token_two_row=6812481
+--- PASS: TestLiveHermesDeliveryLandsInTheRealSession (52.95s)
+PASS
+ok  	github.com/crier-dev/crier/internal/harness/hermes	52.976s
+EXIT=0
