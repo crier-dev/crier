@@ -444,11 +444,11 @@ go version                                               # go version go1.26.10 
 ```
 
 The archive is named `go<version>.linux-<arch>.tar.gz` and always unpacks one
-`go/` directory. `go1.26.10` is this repo's minimum; the current stable release is
-`go1.27.2`, and any later version works the same way — download the one you want
-and pass that same file name to `tar`. `export PATH` lasts for one shell, so make
-it permanent in your shell rc (`$HOME/.bashrc` for bash, `$HOME/.profile`, or
-`$HOME/.zshrc` for zsh):
+`go/` directory. `go1.26.10` is this repo's minimum; any newer stable release
+works the same way — check <https://go.dev/dl/> for the current one, download
+that tarball, and pass its file name to `tar`. `export PATH` lasts for one
+shell, so make it permanent in your shell rc (`$HOME/.bashrc` for bash,
+`$HOME/.profile`, or `$HOME/.zshrc` for zsh):
 
 ```bash
 echo 'export PATH="$HOME/sdk/go/bin:$PATH"' >> "$HOME/.bashrc"
