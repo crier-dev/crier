@@ -132,6 +132,11 @@ jobs:
         run: |
           cd examples/agent-ecosystem
           docker compose up -d --build
+          # `run` never rebuilds an existing battery image (see the battery
+          # service comment), so edits to battery.sh silently never shipped —
+          # every dispatch ran the copy baked in at first build. Rebuild it
+          # explicitly each run.
+          docker compose --profile battery build battery
           docker compose --profile battery run --rm battery
       - name: Capture battery evidence
         if: always()
