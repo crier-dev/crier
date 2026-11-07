@@ -3514,3 +3514,21 @@ tasks:
   status: complete
   created_at: '2026-11-07T02:43:23.705650+00:00'
   completed_at: '2026-11-07T02:58:15.669586+00:00'
+- id: CRIER-HARNESS-6
+  title: live hermes delivery proof
+  criteria:
+  - env-gated test pushes a token through POST /ingress/messages into a session bound
+    to harness=hermes and asserts delivery state=dispatched; token found in Hermes
+    session transcript on disk; second push proves continuation; transport named
+  status: complete
+  created_at: '2026-11-07T07:57:13.229668+00:00'
+  completed_at: '2026-11-07T08:01:51.380122+00:00'
+- id: CRIER-HARNESS-7
+  title: live opencode delivery proof
+  criteria:
+  - env-gated test pushes a token through POST /ingress/messages into a session bound
+    to harness=opencode and asserts delivery state=dispatched; token found in opencode
+    session storage; second push proves continuation; opencode version recorded
+  status: complete
+  created_at: '2026-11-07T07:57:14.297451+00:00'
+  completed_at: '2026-11-07T08:12:11.202939+00:00'
