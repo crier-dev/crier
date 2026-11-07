@@ -18,7 +18,23 @@ contain its own changelog entry. So, before tagging:
    `## [0.1.0-rc2] - 2026-09-21`.
 2. Leave a fresh, empty `## [Unreleased]` heading at the top.
 3. Update the link references at the bottom of the file.
-4. Commit that (with whatever else the release contains) — `make release`
+4. **Update the README Quick Start pin to this version.** `README.md` names the
+   release three times in its Quick Start install section, and all three move
+   together: the heading (`### Install prebuilt binaries (vX.Y.Z release
+   assets)`), the sentence `Release \`vX.Y.Z\` publishes 8 assets, the complete
+   set: ...`, and the pinned install example (`sh -s -- --version vX.Y.Z`). The
+   unpinned example needs no edit — the installer resolves
+   `/releases/latest` — but the PIN is hand-maintained prose, so it drifts the
+   moment a tag is cut. It did: after the v0.3.0 cut the front door still
+   pointed at v0.2.0 (RELEASE-013), which sends a reader who wants a fixed
+   version to the previous release. This step is a CUT-TIME duty rather than a
+   gate: `make docs-check` cannot assert "README pin == newest tag" on a real
+   clone — the CI checkout is shallow and fetches no tags, so the assertion
+   would either pass vacuously or fail on every run — and a doc claim anchored
+   on the version string alone would just have to be edited in the same commit.
+   Moving it with the changelog entry is the lock: one commit carries both, and
+   the tag point can never contain one without the other.
+5. Commit that (with whatever else the release contains) — `make release`
    refuses a dirty tree, and this is the reason it does.
 
 ## 2. Cut the tag
