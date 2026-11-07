@@ -4,12 +4,16 @@ One page. What `bunker spawn --network-mode` does and does not prove, which
 servers can enforce what, and the gate every crier QA battery must run before
 it claims containment.
 
-**The law: a flag is not a boundary.** `--network-mode systemd` is validated by
-the bunker CLI as a MODE NAME only. It rides the spawn RPC as a proto field, so
-a daemon that predates the network-isolation surface ignores the unknown field,
-returns success and creates an agent in the host network namespace. Nothing in
-the CLI's exit code, its output, or the connection bundle distinguishes that
-from real containment.
+**The law: a flag is not a boundary.** Bunker CLI builds that predate INT-CI-020
+validate `--network-mode systemd` as a MODE NAME only. The flag rides the spawn
+RPC as a proto field, so a daemon that predates the network-isolation surface
+ignores the unknown field, returns success and creates an agent in the host
+network namespace. On those builds nothing in the CLI's exit code, its output, or
+the connection bundle distinguishes that from real containment. (A build with
+INT-CI-020 refuses BEFORE the RPC when the daemon cannot report the mode, and
+destroys the agent when the daemon's own record does not come back verified — see
+§5. Deployed hosts still run 0.1.4/0.2.x daemons, so the gate below remains the
+contract for now.)
 
 Gate: **`bash scripts/bunker-isolation-gate.sh`** (`verify` / `spawn`), proven
 by `bash scripts/bunker-isolation-gate-selftest.sh` (24 hermetic arms, stub
@@ -167,33 +171,63 @@ bunker: get agent: not_found: agent "intci020-refuse-20261107" not found
 
 That is the consumer-side contract intact on today's fleet: the flag is never
 trusted, and a refused spawn leaves no uncontained agent behind. It does **not**
-make `bunker spawn --network-mode systemd` itself safe — see §5.
+make `bunker spawn --network-mode systemd` itself safe on a deployed host — the
+producer-side fix landed on bunker branch `wt/INT-CI-020` and is not deployed
+yet; see §5.
 
-## 5. Upstream (bunker repo) work this row cannot do from crier
+## 5. Upstream (bunker repo) work — landed, plus what is still missing
 
-The producer-side fix belongs to the bunker project; these are the exact seams
-(re-verified 2026-11-07 against bunker HEAD `047afeb9`: `internal/cli/spawn.go`
-and `spawn_egress_probe.go` carry **zero** `NetworkIsolation` references, so the
-post-spawn read-back below is still absent — and the bunker board has no row
-filed for it):
+The producer-side fix belongs to the bunker project. Seams 1–2 were re-verified
+against bunker HEAD `047afeb9` on 2026-11-07 (`internal/cli/spawn.go` and
+`spawn_egress_probe.go` carried **zero** `NetworkIsolation` references and there
+was no capability field), and the fix has since LANDED on bunker branch
+`wt/INT-CI-020`:
 
-1. **CLI post-spawn read-back** — mirror `internal/cli/spawn_egress_probe.go`
-   (DF-BUNKER-82, which refuses a pre-egress daemon before the spawn): after
-   `SpawnAgent`, read `GetAgent().NetworkIsolation` and refuse/destroy when the
-   requested mode is not what came back. There is no `network_modes_supported`
-   capability field on `ServerInfoResponse` today (`proto/bunker/v1/bunker.proto`
-   fields 1–13: `default_network_mode`/`default_network_boundary` are the only
-   signals) — adding one is the clean capability probe.
-2. **Scope-aware reporting** — `netmode.BoundaryFor(systemd)` already says
-   "covers only processes in the agent's dockerd unit"; `bunker info` should
-   state the exec-session caveat on the same line so no reader assumes the
-   agent's shell is contained.
-3. **Daemon coverage** — `bunker-las-01..04` run 0.1.4 (or are offline); the
-   network-isolation surface is NET-BUNKER-010, and `bunker-las-02` still fails
-   spawns at `slice-limits` (`memory.swap.max=max` vs required `0`).
+- `44881051` `fix(bunker): enforce --network-mode systemd or reject clearly (INT-CI-020)`
+- `fceb1080` `docs(changelog): record the INT-CI-020 network-mode enforcement`
 
-Until (1) lands, **the crier gate is the only thing standing between a battery
-and a false cut** — that is why it is wired in below rather than left optional.
+What that branch does (each layer fails closed):
+
+1. **Capability probe, BEFORE the spawn** — `ServerInfoResponse` gains
+   `repeated string network_modes_supported = 14` (re-exported from
+   `internal/netmode`; empty = the daemon predates enforcement, never "all
+   supported"). `ensureDaemonSupportsNetworkMode` refuses an enforced
+   `--network-mode` against a daemon that does not report it, with an error
+   naming the consequence (agent created in the host network namespace) and the
+   upgrade path. This is the arm that protects today's fleet: it works against
+   an already-deployed 0.1.x daemon without touching the host. `shared` and an
+   unset flag stay inert so pre-existing invocations are byte-identical.
+2. **Post-spawn read-back** — the spawn response carries no agent summary, so
+   the CLI reads `GetAgent().NetworkIsolation` and requires the canonical
+   requested mode (hidepid→procvis via `config.CanonicalNetworkMode`), a
+   boundary line and `verified`; otherwise it DESTROYS the agent and fails
+   (`spawn_netmode_probe.go`).
+3. **Daemon read-back** — after the dockerd unit is up the daemon reads
+   `PrivateNetwork=yes` / `ProtectProc=invisible` back from the RUNNING unit
+   with a detached, bounded `systemctl show` and fails the spawn at
+   `StageNetworkReadback` on a mismatch, so only a verified boundary is
+   recorded (`network_verified`) or reported. `bunker info` renders
+   `[verified: …]` / `[NOT verified: …]` on the existing
+   `Network Isolation: <mode> — <boundary>` line (the prefix this repo's gate
+   parses is unchanged).
+
+Still open:
+
+- **Deploy** — no host runs the branch yet; today's fleet is 0.1.4/0.2.x
+  daemons with older CLIs, so §1–§4 (this repo's gate) remain the contract.
+- **Scope-aware reporting (was seam 2)** — `netmode.BoundaryFor(systemd)`
+  already says "covers only processes in the agent's dockerd unit", but
+  `bunker info` still does not print the exec-session caveat on the same line
+  as the verification clause. A battery reading `info` alone can still assume
+  the agent's shell is contained; the gate's `exec-not-contained` verdict is
+  what states it today.
+- **Host coverage** — `bunker-las-01..04` run 0.1.4 (or are offline), and
+  `bunker-las-02` still fails spawns at `slice-limits`
+  (`memory.swap.max=max` vs required `0`).
+
+Until a host runs a daemon and CLI with these layers, **the crier gate is the
+only thing standing between a battery and a false cut** — that is why it is
+wired in below rather than left optional.
 
 ## 6. Wiring (already in the repo)
 
