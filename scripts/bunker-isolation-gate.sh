@@ -22,9 +22,15 @@
 #     bunker exec … -- ip route                      -> default via 192.168.123.1
 #
 # That is a FALSE CUT: a QA battery that proves its containment by the flag
-# value runs with full egress. This gate is the consumer-side half of the fix
-# (the producer-side half — a post-spawn read-back inside the bunker CLI — is
-# recorded in docs/bunker-runbook.md §5 as the upstream row to file):
+# value runs with full egress. This gate is the consumer-side half of the fix.
+# The producer-side half LANDED in the bunker repo (INT-CI-020, branch
+# wt/INT-CI-020): ServerInfoResponse.network_modes_supported lets the spawn CLI
+# refuse a daemon that cannot enforce the mode BEFORE any agent exists, the
+# post-spawn read-back destroys an agent whose record does not come back
+# verified, and the daemon itself reads the enforced unit property back from the
+# running unit before it records the boundary. None of that is deployed on
+# today's hosts yet (they run 0.1.4/0.2.x daemons and older CLIs), so this gate
+# stays mandatory until every server runs a daemon+CLI with it:
 #
 #   verify  read the agent's REPORTED isolation (bunker info) and, for modes
 #           that are a network boundary, probe the agent from the inside
