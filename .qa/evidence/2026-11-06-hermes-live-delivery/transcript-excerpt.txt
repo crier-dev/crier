@@ -1,0 +1,22 @@
+# Hermes session transcript rows (read-only) — crier live delivery evidence
+# store: /home/kara/.hermes/state.db  table: messages  columns: id, session_id, role, content
+
+## session local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155  (adapter-level leg, internal/harness/hermes)
+6812419|user|This is a Crier delivery probe. Reply with exactly: SESSION-READY
+6812425|assistant|SESSION-READY
+6812447|user|Reply with exactly this token and nothing else: crier-live-hermes-1794026957533208286-one
+6812461|assistant|crier-live-hermes-1794026957533208286-one
+6812481|user|Reply with exactly this token and nothing else: crier-live-hermes-1794026957533208286-two
+6812485|assistant|crier-live-hermes-1794026957533208286-two
+
+## session local-0537438f7d7261e3ead948f55321fed566f02e29c3d78cd7faee127e16740d88  (served-route leg, POST /ingress/messages)
+6812618|user|This is a Crier delivery probe. Reply with exactly: SESSION-READY
+6812624|assistant|SESSION-READY
+6812647|user|Reply with exactly this token and nothing else: crier-live-hermes-ingress-1794027075862845196-one
+6812652|assistant|crier-live-hermes-ingress-1794027075862845196-one
+6812668|user|Reply with exactly this token and nothing else: crier-live-hermes-ingress-1794027075862845196-two
+6812671|assistant|crier-live-hermes-ingress-1794027075862845196-two
+
+## session rows (count per id; one row each = no second session was minted)
+local-0537438f7d7261e3ead948f55321fed566f02e29c3d78cd7faee127e16740d88|source=oneshot|messages=6|started=2026-11-06 23:51:05
+local-c8aad6a6205aff2462e5532f1cbb77719c6b25602e922d9a19fb88486b628155|source=oneshot|messages=6|started=2026-11-06 23:49:21

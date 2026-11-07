@@ -1,0 +1,53 @@
+### RUN 1: adapter leg — CRIER_TEST_LIVE_HARNESS=1 go test -count=1 -timeout 600s -v -run 'LiveHermes' ./internal/harness/hermes/
+### host: karaHermes-mde-7840hs hermes: Hermes Agent v0.22.5+3030.g770a952 (2026.9.24) · stable · local 770a952c1245
+### started: 2026-11-06T23:56:11-05:00
+
+=== RUN   TestLiveHermesDeliveryLandsInTheRealSession
+    live_delivery_test.go:253: setup: created live hermes session "local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f" (marker crier-live-hermes-1794027201677028949) via `hermes chat -Q --in <workdir> -q <prompt>`
+    live_delivery_test.go:307: delivery m_live_hermes_1: receipt={Harness:hermes SessionID:local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f Created:false State:dispatched ExitCode:0 DurationMS:24440 StdoutBytes:42 Tail: Error: At:2026-11-07 04:53:59.834419358 +0000 UTC} elapsed=24.441s
+    live_delivery_test.go:321: transcript evidence: file=/home/kara/.hermes/state.db table=messages session_id=local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f row_id=6812994 role=user token=crier-live-hermes-1794027201677028949-one
+    live_delivery_test.go:339: delivery m_live_hermes_2: receipt={Harness:hermes SessionID:local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f Created:false State:dispatched ExitCode:0 DurationMS:12812 StdoutBytes:42 Tail: Error: At:2026-11-07 04:54:12.647305553 +0000 UTC} elapsed=12.813s
+    live_delivery_test.go:360: continuation proven: one session "local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f", 4 rows before the second push, 6 after; both tokens in /home/kara/.hermes/state.db
+    live_delivery_test.go:362: transport: CLI resume — `hermes chat -Q --resume local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f -q <text>` (adapter continue path; the gateway POST /v1/responses create path was NOT used)
+    live_delivery_test.go:364: evidence: transcript file=/home/kara/.hermes/state.db session_id=local-2eb69303ed6dc7d9bb998391a77b06c27d4300ff79d324cb3fe0cfc3bd6e692f token_one_row=6812994 token_two_row=6813058
+--- PASS: TestLiveHermesDeliveryLandsInTheRealSession (50.97s)
+PASS
+ok  	github.com/crier-dev/crier/internal/harness/hermes	50.976s
+
+
+### RUN 2: served-route leg — CRIER_TEST_LIVE_HARNESS=1 go test -count=1 -timeout 900s -v -run 'TestIngressDispatchesIntoARealHermesSession' ./cmd/server/
+### started: 2026-11-06T23:56:11-05:00
+
+=== RUN   TestIngressDispatchesIntoARealHermesSession
+    hermes_live_delivery_test.go:190: child boot plan: attempt=16.671875s attempts=3 envelope=1m40.03125s child-timeout=1m55.03125s parent-ctx=2m10.03125s request=16.671875s (measured 500ms cold boot x10, loadavg=53.35 over 16 CPUs, factor 3.33, attempt floor 5s, cap 20s)
+time=2026-11-06T23:55:19.731-05:00 level=WARN msg="auth disabled, all requests pass through (development mode)"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="namespaces: none declared — the implicit default namespace serves every agent"
+time=2026-11-06T23:55:19.731-05:00 level=WARN msg="registry backend is the in-memory store — DEMO-ONLY and non-durable: agents and undelivered inbox messages are lost when this process exits. Set CR_REGISTRY_BACKEND=sqlite with CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL (docker compose up -d postgres), for durable agents and inboxes" type=memory durable=false hint="set CR_REGISTRY_BACKEND=sqlite and CR_REGISTRY_SQLITE_PATH, or CR_DATABASE_URL for PostgreSQL"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="inbox ingest budget" global_per_minute=0 detail="no global budget: the per-agent publish cap (CR_RATE_LIMIT_PER_MINUTE) remains the only backpressure, exactly as before CR-FEAT-035"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="delivery acl" enabled=false detail="no ACL deployed: deliveries are authorized exactly as before CR-CHAT-003"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg=presence stale_after=1m30s evidence="mesh connect + KEEPALIVE heartbeat + signed PATCH; stored status is never rewritten (stale is derived per read)"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="mesh authentication" required=false origin_policy=allow-all detail="the agent id in /mesh/connect/{agentID} is taken at face value: any client that can reach this port can speak as any registered agent. Set CR_REQUIRE_MESH_AUTH=true to require the ed25519 connect challenge (docs/mesh-protocol.md §Authentication)"
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="message guard" enabled=false
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="federation inbound posture" require_peer_configured=false require_peer_effective=false peers=0 token_only_accepted=true
+time=2026-11-06T23:55:19.731-05:00 level=INFO msg="webhook delivery" enabled=true timeout=30s retries=5 signing=false
+time=2026-11-06T23:55:19.732-05:00 level=INFO msg="signing trust tree enabled" registry_backend=memory detail="anchors and delegations supported on memory, sqlite and postgres; management requires a distinct CR_PERMISSIONS_ADMIN_TOKEN"
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="session api enabled" backend=jsonl detail="GET/POST /sessions, GET/POST /sessions/{id}/messages, POST /sessions/{id}/tasks, POST /sessions/{id}/tasks/{task_id}/claim|complete, GET/POST /sessions/{id}/participants, GET/PUT /sessions/{id}/participants/{member_type}/{member_id}/context, POST /sessions/{id}/compile, GET /sessions/{id}/messages/{mid}/expand"
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="named group api enabled" store_dir=/var/tmp/hermes-go-tmp/TestIngressDispatchesIntoARealHermesSession289258644/003 detail="POST/GET /groups, GET /groups/{name}, PATCH /groups/{name}/members — a curated roster (@team:x) ONE message fans out to; capability (@cap:y) stays the dynamic pool (D8)"
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="A2A option disabled" detail="no A2A route is registered; set CR_A2A_ENABLED=true to publish the Agent Card discovery route and the JSON-RPC binding"
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="observability: metrics enabled" path=/metrics format="prometheus text 0.0.4" auth="not exempt (requires Bearer when CR_AUTH_TOKEN is set)"
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="crier starting" port=0 services=relay+mesh+registry version=dev
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="ephemeral port bound" port=45697
+time=2026-11-06T23:55:19.733-05:00 level=INFO msg="pidfile written" path=/var/tmp/hermes-go-tmp/TestIngressDispatchesIntoARealHermesSession289258644/004/boot-attempt-1.pid
+time=2026-11-06T23:55:19.742-05:00 level=INFO msg=request method=GET path=/health status=200 duration=3.045µs request_id=cb59408152f4e80ba0fefd54
+time=2026-11-06T23:55:49.847-05:00 level=INFO msg=request method=POST path=/ingress/messages status=200 duration=30.1045199s request_id=09322da1ec5d24ae60152af6
+    hermes_live_delivery_test.go:235: push m_ingress_live_1: http=200 elapsed=30.105s delivery={Mode:harness Harness:hermes State:dispatched Error:}
+    hermes_live_delivery_test.go:249: transcript evidence: file=/home/kara/.hermes/state.db table=messages session_id=local-71f0f2dbc5bfbea2176b4ed02b93f2a60404c20bf05991ef951b1e1b75bbd0eb (4 rows) carries crier-live-hermes-ingress-1794027319742441604-one
+time=2026-11-06T23:56:01.681-05:00 level=INFO msg=request method=POST path=/ingress/messages status=200 duration=11.832145733s request_id=7ef7d74e06d437d437910b16
+    hermes_live_delivery_test.go:253: push m_ingress_live_2: http=200 elapsed=11.833s delivery={Mode:harness Harness:hermes State:dispatched Error:}
+    hermes_live_delivery_test.go:261: continuation proven through the served route: one hermes session "local-71f0f2dbc5bfbea2176b4ed02b93f2a60404c20bf05991ef951b1e1b75bbd0eb", 4 -> 6 rows in /home/kara/.hermes/state.db
+    hermes_live_delivery_test.go:263: transport: CLI resume — the adapter ran `hermes chat -Q --resume local-71f0f2dbc5bfbea2176b4ed02b93f2a60404c20bf05991ef951b1e1b75bbd0eb -q <text>`; the gateway POST /v1/responses create path was NOT used (the binding was pre-recorded, as a deployment records it)
+    hermes_live_delivery_test.go:266: board rows: crier=s_live_hermes harness=hermes harness_session_id=local-71f0f2dbc5bfbea2176b4ed02b93f2a60404c20bf05991ef951b1e1b75bbd0eb
+time=2026-11-06T23:56:01.683-05:00 level=INFO msg="shutdown signal received" signal=terminated port=45697 version=dev
+--- PASS: TestIngressDispatchesIntoARealHermesSession (104.55s)
+PASS
+ok  	github.com/crier-dev/crier/cmd/server	104.601s
