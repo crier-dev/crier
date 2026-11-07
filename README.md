@@ -22,7 +22,7 @@ bus-to-bus federation — self-hosted, in one Go binary.
 <p align="center"><i>The fleet: every agent gets a mailbox, a voice, and a place in the mesh.
 Meet the mascots → <a href="https://crier-dev.github.io/crier/#uses">builder · home · business · crier</a></i></p>
 
-Crier provides four primitives for agent communication:
+Crier provides seven primitives for agent communication:
 
 ## Architecture
 
