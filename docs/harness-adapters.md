@@ -19,7 +19,7 @@ absent every existing code path behaves exactly as before.
 
 ## What ships
 
-`crier harness list` on this build (`bin/crier`, `v0.3.0-25-g1587a03f`):
+`crier harness list` on this build (`bin/crier` built from this tree):
 
 | Name | Available | Version | Features |
 |---|---|---|---|
@@ -30,7 +30,9 @@ absent every existing code path behaves exactly as before.
 | claude-code | false | — | `continue,create,json,print,resume,stdin` |
 
 Five adapter ids, five rows, no placeholder: every row is an adapter that
-probes its own binary. `claude-code` is registered and probed too; it reports
+probes its own binary. Versions and features are what that probe printed on
+the control host; a host with a different CLI version prints its own.
+`claude-code` is registered and probed too; it reports
 `available:false` **only** because this host has no `claude` binary
 (`reason: binary not found: claude`) — install the CLI and the same row turns
 true. `pi-agent` is accepted as an alias of `pi` in a config block, a session
@@ -226,7 +228,7 @@ ingress with the harness named on the target:
 ```
 
 **The request surface for that key is not landed in this build (DF-CRIER-500).**
-Measured against `bin/crier` at `v0.3.0-25-g1587a03f`, the target object accepts
+Measured against `bin/crier` built from this tree, the target object accepts
 exactly four keys and strict JSON refuses the rest — both spellings, and
 `POST /sessions` too:
 
@@ -238,8 +240,9 @@ target.template.harness   -> 400 INGRESS_INVALID_JSON
 POST /sessions {harness}  -> 400 INVALID_REQUEST
 ```
 
-The same push without the key answers `200` with
-`"delivery":{"mode":"store","state":"stored"}` and `created_session:true` — the
+The same `new_session` push without the key answers `201` with
+`"delivery":{"mode":"store","state":"stored"}` and `created_session:true` (the
+same message sent to an existing `target.session_id` answers `200`) — the
 dispatch joint is reached and declines because the session names no harness, and
 nothing in this build can name one. So today every session created through the
 API is store-only and harness delivery runs only in-process (the Go suite). That
