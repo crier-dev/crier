@@ -17,7 +17,12 @@ _Nothing yet._
 
 ## [0.4.0] - 2026-11-07
 
-Range: `v0.3.0`..`4d0a6349` — 73 commits (13 merges and 60 non-merge: 1 `feat`, 7 `fix`, with bookkeeping excluded from the release notes). No `BREAKING CHANGE` footer and no `!` type token were found in the range, so this is a minor release. The entries below group the material changes and name the item id and commit they rest on.
+Range: `v0.3.0`..`4d0a6349` — 81 commits (13 merges and 68 non-merge: 1 `feat`,
+7 `fix`, 9 `docs`, 8 `test`, 5 `chore`, 33 board, 3 foreman, 1 `qa`, 1 `pm`).
+No `BREAKING CHANGE` footer and no `!` type token were found in the range, so
+this is a minor release. The entries below group the material changes and name
+the item id and commit they rest on; board and bookkeeping commits are excluded
+from the notes but remain in the tagged tree.
 
 ### Added
 
@@ -32,6 +37,8 @@ Range: `v0.3.0`..`4d0a6349` — 73 commits (13 merges and 60 non-merge: 1 `feat`
 ### Fixed
 
 - **Harness and integration test execution is deterministic** (INT-CI-027, `c4d3c240`; INT-CI-029, `8b458a99`).
+- **Bunker isolation matrix is refreshed and its doc gate re-proved fail-closed** (INT-CI-020, `69e0601c`, docs `dda58953`, `5c93d9e2`).
+- **The foreman's three self-inflicted dry-tick loops are stopped** (`9a3480ef`).
 
 ## [0.3.0] - 2026-11-06
 
