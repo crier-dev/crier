@@ -211,6 +211,37 @@ What that branch does (each layer fails closed):
    `Network Isolation: <mode> — <boundary>` line (the prefix this repo's gate
    parses is unchanged).
 
+### Live proof of the refuse arm (2026-11-07: new CLI, pre-surface daemon)
+
+Built from branch `wt/INT-CI-020` and run against `hermes4friends` (0.1.4, four
+live agents), the enforced mode is now refused before anything is created:
+
+```
+$ bunker status --server hermes4friends | grep 'Net mode'
+  Net mode: not reported by this daemon — it predates network-isolation reporting
+
+$ bunker spawn intci020-live-refuse-20261107 --server hermes4friends \
+    --network-mode systemd --ttl 10m
+bunker: refusing to spawn with --network-mode "systemd": the daemon at this
+server predates network-isolation enforcement (ServerInfo carries no
+network-mode capability) and would silently ignore the flag — the agent would
+be created in the HOST network namespace with full egress while this command
+reported success. Upgrade bunkerd … or drop the flag          # rc 1
+
+$ bunker info intci020-live-refuse-20261107 --server hermes4friends
+bunker: get agent: not_found: agent "intci020-live-refuse-20261107" not found
+
+$ bunker list --server hermes4friends | tail -1
+Total: 4 agents (server: hermes4friends)      # 4 before, 4 after — nothing created
+```
+
+**Deploy order:** a CLI and a daemon from this branch refuse on a mixed pair.
+Upgrade `bunkerd` and `bunker` together (`/opt/bunker` + `/usr/local/bin`, the
+redeploy recipe): a new CLI against an older daemon refuses every enforced
+`--network-mode`, while an older CLI against a newer daemon behaves as before.
+The positive arm (mode applied and read back) needs a daemon from this branch;
+it is proven in-tree, not yet on a host.
+
 Still open:
 
 - **Deploy** — no host runs the branch yet; today's fleet is 0.1.4/0.2.x
