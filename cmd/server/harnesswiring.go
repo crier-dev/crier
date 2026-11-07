@@ -19,14 +19,14 @@
 //
 // LIFECYCLE NOTE, stated rather than hidden: the first delivery to a session
 // that names a harness but has no HarnessSessionID yet CREATES the harness
-// session, and the adapter's receipt carries the id it minted. Recording that
-// id back onto the Crier session is a store write this file does not do
-// (it would need the session store's append path and a new record kind), so a
-// session created this way re-uses the id only for the lifetime of the
-// process: the registry's receipt is returned to the caller, and persisting
-// the binding is the follow-up row this comment names. A session that ALREADY
-// carries HarnessSessionID — the state a deployment reaches by recording the
-// binding once — continues correctly with no ambiguity.
+// session, and the adapter's receipt carries the id it minted. That id is
+// recorded back onto the Crier session as a session.harness.bind record, so
+// every later message continues THAT harness session.
+//
+// The NAME comes from the session's own create record: an ingress
+// `target.harness` (CRIER-INGRESS §2.1) or `harness` on POST /sessions writes
+// Session.Harness, which is what this hook reads below. A session with no name
+// stays store-only and never claims a dispatch.
 package main
 
 import (

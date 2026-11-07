@@ -6,6 +6,7 @@ package session
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"testing"
 	"time"
@@ -85,4 +86,73 @@ func TestSQLite_StoreOnlySessionHasEmptyBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, loaded.Harness, "a store-only session must not acquire a harness")
 	require.Empty(t, loaded.HarnessSessionID)
+}
+
+// TestCreateSessionRecordsHarnessBinding is the create half of CRIER-HARNESS
+// §4.3 on the HTTP surface: POST /sessions accepts `harness`, and the binding
+// is on the SESSION (readable through the same API a client uses), not just in
+// the request body. Without it nothing in the product could produce a bound
+// session through a public route.
+func TestCreateSessionRecordsHarnessBinding(t *testing.T) {
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			t.Cleanup(func() { _ = store.Close() })
+			h := newAPIHarness(t, store)
+
+			var created sessionView
+			code := h.do(t, http.MethodPost, "/sessions", createSessionRequest{
+				Title:     "harness bound",
+				CreatedBy: &AuthorRef{Principal: fixCreator},
+				Harness:   "pi",
+			}, &created, nil)
+			require.Equal(t, http.StatusCreated, code)
+			require.Equal(t, "pi", created.Harness, "the create response must echo the RECORDED binding")
+			require.Empty(t, created.HarnessSessionID,
+				"a create can never assert a harness-side id: none exists until an adapter answers")
+
+			st, err := store.Load(context.Background(), created.ID)
+			require.NoError(t, err)
+			require.Equal(t, "pi", st.Session.Harness)
+			require.Empty(t, st.Session.HarnessSessionID)
+
+			// The list read is the surface a client actually consults, so the
+			// binding has to survive the projection, not only the response.
+			var list sessionsResponse
+			require.Equal(t, http.StatusOK, h.do(t, http.MethodGet, "/sessions", nil, &list, nil))
+			found := false
+			for _, s := range list.Sessions {
+				if s.ID == created.ID {
+					found = true
+					require.Equal(t, "pi", s.Harness, "the list drops the binding")
+				}
+			}
+			require.True(t, found, "the created session is not in the list")
+		})
+	}
+}
+
+// TestCreateSessionWithoutHarnessStaysStoreOnly is the backward-compatibility
+// half: the field is optional and an absent one changes nothing.
+func TestCreateSessionWithoutHarnessStaysStoreOnly(t *testing.T) {
+	for _, be := range localBackends() {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.open(t, be.pathFn(t))
+			t.Cleanup(func() { _ = store.Close() })
+			h := newAPIHarness(t, store)
+
+			var created sessionView
+			code := h.do(t, http.MethodPost, "/sessions", createSessionRequest{
+				Title:     "plain",
+				CreatedBy: &AuthorRef{Principal: fixCreator},
+			}, &created, nil)
+			require.Equal(t, http.StatusCreated, code)
+			require.Empty(t, created.Harness)
+
+			st, err := store.Load(context.Background(), created.ID)
+			require.NoError(t, err)
+			require.Empty(t, st.Session.Harness)
+			require.Empty(t, st.Session.HarnessSessionID)
+		})
+	}
 }
