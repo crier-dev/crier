@@ -3586,3 +3586,19 @@ tasks:
     \ probe."
   status: in_progress
   created_at: '2026-11-07T20:17:55.492642+00:00'
+- id: INT-CI-030-R1
+  title: 'Verify INT-CI-030 acceptance on tip db6bb9f9: bunker-e2e config-matrix job
+    green, runner config present, workflow guard steps unchanged'
+  criteria:
+  - "1) gh run view 42412680393 --repo crier-dev/crier --json jobs shows job 'Bunker\
+    \ config-matrix E2E' conclusion=success with steps 'Ensure bunker agent exists\
+    \ + heartbeat'=success, 'Deploy container to bunker + run config-matrix battery'=success,\
+    \ 'Attach evidence'=success \u2014 no continue-on-error and no skip. 2) The guard\
+    \ steps were not weakened: git rev-parse HEAD:.github/workflows/bunker-e2e.yml\
+    \ equals git rev-parse 150b226c:.github/workflows/bunker-e2e.yml (blob 042281d157f83941264a0f990c77d7a6632a981a);\
+    \ the only '|| true' in the file is the unrelated evidence-copy line. 3) The board\
+    \ row INT-CI-030 is status=complete with a note citing run 42412680393 and the\
+    \ runner config path /home/ghrunner/.bunker/config.yaml. Do NOT run the full test\
+    \ suite (exceeds the 30s run_command ceiling)."
+  status: in_progress
+  created_at: '2026-11-07T21:02:49.138932+00:00'
