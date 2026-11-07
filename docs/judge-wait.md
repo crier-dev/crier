@@ -139,8 +139,16 @@ does keep tier 2 should expect the judge to read the tree, not to run the world.
 ## 5. Upstream handoff — not fixed in 0.18.1
 
 The durable crier-side fix is what shipped here: a blessed, tested wait primitive
-plus the written rule in `AGENTS.md`. What crier cannot fix from inside its own
+plus the written rule in this page. What crier cannot fix from inside its own
 tree is the general case.
+
+**The upstream lane has already adjudicated this class.** GitReins' own board
+carries `GITR-JUDGE-001` — "Tier-2 judge suite watcher hangs forever: pgrep -f
+pattern matches the watcher's own command line (observed 2x on scheduler repo,
+45-52min each)" — closed **complete** at commit `589eb7ee` as a
+verification-only closure: the pattern is absent from the GitReins source, and
+the finding targets an external watcher. So there is no defect to file against
+`engine/` for the loop itself; what remains is a policy/product ask below.
 
 Measured 2026-11-07: gitreins `engine/command_hygiene.py` refuses CPU busy-waits,
 fork bombs, unbounded `yes`, `/dev/zero` burns and `dd` burns — its refusal policy
@@ -157,6 +165,16 @@ The upstream ask is therefore two changes in gitreins, and neither is made here:
 2. a configurable `command_timeout` (or a first-class bounded-wait tool), so a
    judge can wait on a real suite without inventing a loop.
 
-Until that lands, the rule in `AGENTS.md` and `scripts/wait-for-command.sh` are
+Until that lands, the rule in this page and `scripts/wait-for-command.sh` are
 the crier-side answer, and they only bind judges that read this repository's
 instructions.
+
+**Why the rule is documented here and not in `AGENTS.md`.** The board row's
+original wording assumed an `AGENTS.md` sentence. Two things stopped it: the
+unattended harness refuses writes to agent-instruction files (the approval
+prompt timed out — silence is not consent), and the owner's standing rule is
+that `AGENTS.md` is edited only when the owner asks for it. This page plus the
+`Makefile` target and the CI step carry the same rule by executable means, which
+is the stronger form anyway: a judge that runs `make wait-for-command-selftest`
+sees the red proof, whereas a sentence can be skimmed.
+
