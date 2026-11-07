@@ -106,7 +106,16 @@ jobs:
       # repoint to DeepSeek). The compose service defaults ANTHROPIC_BASE_URL to
       # that endpoint and consumes ANTHROPIC_AUTH_TOKEN as the credential.
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
+      # Opt every live cell in — all of them ride DeepSeek now (owner directive
+      # 2026-11-07: no Anthropic/OpenAI keys needed to prove the harness).
       CLAUDE_CODE_LIVE: "1"
+      OPENCODE_LIVE: "1"
+      AIDER_LIVE: "1"
+      CODEX_LIVE: "1"
+      GOOSE_LIVE: "1"
+      # The claude-code SDK flow needs more than the 20s default (CLI startup +
+      # tool-use turn); pi-agent completes in ~6s but node CLI startup is heavy.
+      RUNTIME_TIMEOUT_MS: "60000"
       CRIER_HOST_PORT: "28767"
       SINK_HOST_PORT: "29002"
       PI_HOST_PORT: "29101"

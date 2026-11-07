@@ -123,6 +123,8 @@ services:
       PORT: 9104
       RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Live cells ride DeepSeek's OpenAI-compatible endpoint (see consumer.mjs).
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       CODEX_LIVE: ${CODEX_LIVE:-}
     ports: ["${CODEX_HOST_PORT:-19104}:9104"]
     depends_on:
@@ -155,6 +157,8 @@ services:
       PORT: 9106
       RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-20000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # goose live cell rides its deepseek provider (see consumer.mjs).
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GOOSE_LIVE: ${GOOSE_LIVE:-}
     ports: ["${GOOSE_HOST_PORT:-19106}:9106"]
     depends_on:

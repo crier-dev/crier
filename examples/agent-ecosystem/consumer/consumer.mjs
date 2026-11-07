@@ -42,9 +42,14 @@ const KEY_ENV = {
   // the compose service maps ANTHROPIC_API_KEY through unchanged and the CLI
   // honours whichever auth pair is present.
   "claude-code": "ANTHROPIC_AUTH_TOKEN",
-  codex: "OPENAI_API_KEY",
+  // codex + goose are repointed at DeepSeek's OpenAI-compatible endpoint
+  // (https://api.deepseek.com) per owner directive: no OpenAI key is needed to
+  // prove the harness — the fleet's existing DeepSeek key covers every cell.
+  // codex reads the deepseek provider from the image's /root/.codex/config.toml
+  // (wire_api = "chat"); goose takes GOOSE_PROVIDER=deepseek.
+  codex: "DEEPSEEK_API_KEY",
   aider: "DEEPSEEK_API_KEY",
-  goose: "OPENAI_API_KEY",
+  goose: "DEEPSEEK_API_KEY",
 }[HARNESS];
 const HAS_KEY = KEY_ENV && !!process.env[KEY_ENV]?.trim();
 
@@ -267,13 +272,17 @@ async function answer(text, batteryId, observation) {
     case "claude-code":
       return runCli("claude", ["-p", prompt, "--output-format", "text"], extraEnv, undefined, observation);
     case "codex":
-      // Noninteractive Codex reads CODEX_API_KEY; keep the public stack
-      // credential OPENAI_API_KEY and pass the alias only in the child env.
-      return runCli("codex", ["exec", "--skip-git-repo-check", prompt], { ...extraEnv, CODEX_API_KEY: process.env.OPENAI_API_KEY }, undefined, observation);
+      // Repointed to DeepSeek's OpenAI-compatible endpoint (owner directive
+      // 2026-11-07). The image's /root/.codex/config.toml defines the deepseek
+      // provider (wire_api = "chat", env_key = DEEPSEEK_API_KEY) and sets
+      // model/model_provider, so a plain exec runs on DeepSeek.
+      return runCli("codex", ["exec", "--skip-git-repo-check", prompt], { ...extraEnv, DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY }, undefined, observation);
     case "aider":
       return runCli("aider", ["--model", "deepseek/deepseek-v4-flash", "--message", prompt, "--no-auto-commits", "--yes-always"], extraEnv, undefined, observation);
     case "goose":
-      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { ...extraEnv, GOOSE_PROVIDER: "openai", GOOSE_MODEL: "gpt-4o-mini" }, undefined, observation);
+      // DeepSeek via goose's built-in deepseek provider (owner directive
+      // 2026-11-07): the key rides DEEPSEEK_API_KEY, not OPENAI_API_KEY.
+      return runCli("goose", ["run", "--no-session", "--no-profile", "--quiet", "--text", prompt], { ...extraEnv, GOOSE_PROVIDER: "deepseek", GOOSE_MODEL: "deepseek-chat", DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY }, undefined, observation);
     default:
       throw new Error(`${HARNESS}: no live runner configured`);
   }
