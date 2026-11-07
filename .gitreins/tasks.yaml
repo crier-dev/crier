@@ -3603,3 +3603,15 @@ tasks:
   status: complete
   created_at: '2026-11-07T21:02:49.138932+00:00'
   completed_at: '2026-11-07T21:18:30.250662+00:00'
+- id: INT-CI-032
+  title: Fix the offline execution battery's credential expectation table so CI's
+    'Agent-ecosystem offline execution binding' step is green at the DeepSeek-repointed
+    tip
+  criteria:
+  - node --test examples/agent-ecosystem/battery/execution.test.mjs reports 83 tests
+    83 pass 0 fail; /usr/bin/python3 examples/agent-ecosystem/battery/test_binding.py
+    reports 14 tests OK; git diff -- .github/workflows/ci.yml is empty; consumer.mjs
+    KEY_ENV remains the authority (claude-code=ANTHROPIC_AUTH_TOKEN, codex/goose=DEEPSEEK_API_KEY)
+    and no arm is silently skipped
+  status: in_progress
+  created_at: '2026-11-07T22:05:14.788799+00:00'
