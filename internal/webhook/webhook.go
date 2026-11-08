@@ -22,6 +22,9 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // AuthType enumerates supported outbound authentication schemes.
@@ -333,6 +336,15 @@ func batchGuardMeta(envs []*Envelope) *guard.Meta {
 // blank X-Crier-Agent reads downstream as a real-but-empty identity rather
 // than as "unknown".
 func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, sender, target, session string, retry int, gm *guard.Meta) Result {
+	ctx, span := tracing.Start(ctx, "webhook.deliver")
+	outcome := "error"
+	defer func() {
+		span.SetAttributes(attribute.String("crier.webhook.outcome", outcome))
+		if outcome == "error" {
+			span.SetStatus(codes.Error, "webhook delivery failed")
+		}
+		span.End()
+	}()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, strings.NewReader(string(body)))
 	if err != nil {
 		return Result{Err: fmt.Errorf("build request: %w", err)}
@@ -385,6 +397,7 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 		}
 	}
 
+	tracing.Inject(ctx, req.Header)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return Result{Err: fmt.Errorf("post %s: %w", cfg.URL, err), Retryable: true}
@@ -399,12 +412,16 @@ func (c *Client) postBody(ctx context.Context, cfg *Config, body []byte, event, 
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		outcome = "delivered"
 		return Result{StatusCode: resp.StatusCode, Body: respBody}
 	case resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests:
+		outcome = "retryable"
 		return Result{StatusCode: resp.StatusCode, Retryable: true}
 	case resp.StatusCode >= 500:
+		outcome = "retryable"
 		return Result{StatusCode: resp.StatusCode, Retryable: true}
 	default:
+		outcome = "rejected"
 		return Result{StatusCode: resp.StatusCode}
 	}
 }

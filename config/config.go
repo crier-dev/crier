@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -242,11 +243,9 @@ type Config struct {
 	// Guard holds LLM message-guard tuning (specs/LLM-MESSAGE-GUARD.md
 	// §9.1, CR-FEAT-010).
 	Guard GuardConfig
-	// Observability holds the opt-in live-inspection surfaces
-	// (DF-CRIER-142). Both default to false: with the flags unset the
-	// server registers neither /metrics nor /debug/pprof and both answer
-	// 404 like any unregistered path.
+	// Observability holds live-inspection and tracing settings.
 	Observability ObservabilityConfig
+	Tracing       TracingConfig
 	// A2AEnabled is the server-side half of the OPT-IN A2A interoperability
 	// gate (CR_A2A_ENABLED, INT-A2A-001, specs/A2A-OPTION.md §4.1). Default
 	// false: with the flag unset the option is OFF and NOTHING A2A-related is
@@ -502,6 +501,15 @@ type DetectionConfig struct {
 	CanaryTokens []string
 }
 
+// TracingConfig controls opt-in OpenTelemetry trace export.
+type TracingConfig struct {
+	Enabled      bool
+	Exporter     string
+	OTLPEndpoint string
+	SampleRatio  float64
+	ServiceName  string
+}
+
 // ObservabilityConfig holds the live-inspection surfaces
 // (DF-CRIER-142): pprof is opt-in, metrics is on by default. Neither
 // surface is auth-exempt: with CR_AUTH_TOKEN set
@@ -698,6 +706,7 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		// told apart from a broken endpoint. CR_ENABLE_METRICS=false remains
 		// the operator override (§2.4 G1).
 		Observability: ObservabilityConfig{EnableMetrics: true},
+		Tracing:       TracingConfig{Exporter: "otlp", OTLPEndpoint: "http://localhost:4318", SampleRatio: 1, ServiceName: "crier"},
 	}
 
 	if v := getenv("CR_LOG_LEVEL"); v != "" {
@@ -1310,6 +1319,33 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			return cfg, err
 		}
 		cfg.Observability.EnableMetrics = parsed
+	}
+
+	if v := strings.TrimSpace(getenv("CR_TRACING_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_TRACING_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Tracing.Enabled = parsed
+	}
+	if v := strings.TrimSpace(getenv("CR_TRACING_EXPORTER")); v != "" {
+		if v != "otlp" && v != "stdout" {
+			return cfg, fmt.Errorf("invalid CR_TRACING_EXPORTER: %q (want otlp/stdout)", v)
+		}
+		cfg.Tracing.Exporter = v
+	}
+	if v := strings.TrimSpace(getenv("CR_TRACING_OTLP_ENDPOINT")); v != "" {
+		cfg.Tracing.OTLPEndpoint = v
+	}
+	if v := strings.TrimSpace(getenv("CR_TRACING_SAMPLE_RATIO")); v != "" {
+		ratio, err := strconv.ParseFloat(v, 64)
+		if err != nil || math.IsNaN(ratio) || ratio <= 0 || ratio > 1 {
+			return cfg, fmt.Errorf("invalid CR_TRACING_SAMPLE_RATIO: %q (want a number in (0,1])", v)
+		}
+		cfg.Tracing.SampleRatio = ratio
+	}
+	if v := strings.TrimSpace(getenv("CR_TRACING_SERVICE_NAME")); v != "" {
+		cfg.Tracing.ServiceName = v
 	}
 
 	// Opt-in A2A interoperability (INT-A2A-001, specs/A2A-OPTION.md §4.1).

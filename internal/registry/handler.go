@@ -29,7 +29,9 @@ import (
 	"github.com/crier-dev/crier/internal/metrics"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/namespace"
+	"github.com/crier-dev/crier/internal/tracing"
 	"github.com/crier-dev/crier/internal/webhook"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // deliveriesTotal counts accepted inbox deliveries (DF-CRIER-142): one Inc
@@ -1039,7 +1041,9 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 // capability is named, which is exactly the behaviour this endpoint has always
 // had (CR-FEAT-026 added a second TARGET, not a second deliver).
 func (h *Handler) HandleDeliver(w http.ResponseWriter, r *http.Request) {
-	h.deliver(w, r, mux.Vars(r)["id"], "")
+	ctx, span := tracing.Start(r.Context(), "registry.deliver", attribute.String("crier.agent_id", mux.Vars(r)["id"]))
+	defer span.End()
+	h.deliver(w, r.WithContext(ctx), mux.Vars(r)["id"], "")
 }
 
 // HandleDeliverByCapability handles POST /capabilities/{capability}/inbox — a
@@ -1740,6 +1744,9 @@ func parseWaitSeconds(r *http.Request) (time.Duration, error) {
 // both paths, because a long-poll is a sequence of ordinary store retrieves.
 func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	ctx, span := tracing.Start(r.Context(), "registry.retrieve", attribute.String("crier.agent_id", id))
+	defer span.End()
+	r = r.WithContext(ctx)
 	if !h.requireAgent(w, r, id) {
 		return
 	}
@@ -1841,6 +1848,7 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 	// counted as leased, not queued-free). A Stats failure must not fail a
 	// successful retrieve: the counters degrade to 0 and the error is
 	// logged, mirroring writeStoreError's degradation posture.
+	span.SetAttributes(attribute.Int("crier.message_count", len(messages)))
 	depth, leased, _, err := h.store.Stats(id)
 	if err != nil {
 		slog.Error("registry stats after retrieve", "error", err)
@@ -1862,6 +1870,9 @@ func (h *Handler) HandleRetrieve(w http.ResponseWriter, r *http.Request) {
 // different lease, 400 for a malformed request.
 func (h *Handler) HandleAck(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	ctx, span := tracing.Start(r.Context(), "registry.ack", attribute.String("crier.agent_id", id))
+	defer span.End()
+	r = r.WithContext(ctx)
 	if !h.requireAgent(w, r, id) {
 		return
 	}

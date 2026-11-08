@@ -19,6 +19,8 @@ import (
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/namespace"
 	"github.com/crier-dev/crier/internal/ratelimit"
+	"github.com/crier-dev/crier/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // relayEventsTotal counts accepted relay publishes (DF-CRIER-142): one Inc
@@ -223,6 +225,9 @@ func (r *Relay) HandlePublish(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	verified := false
+	ctx, span := tracing.Start(req.Context(), "relay.publish", attribute.String("crier.topic", body.Topic))
+	defer span.End()
+	req = req.WithContext(ctx)
 	if authorizer != nil {
 		original := req.Body
 		req.Body = struct {
@@ -327,6 +332,9 @@ func (r *Relay) HandleSubscribe(w http.ResponseWriter, req *http.Request) {
 	if !nsOK {
 		return
 	}
+	ctx, span := tracing.Start(req.Context(), "relay.subscribe", attribute.String("crier.topic", topic))
+	defer span.End()
+	req = req.WithContext(ctx)
 
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {

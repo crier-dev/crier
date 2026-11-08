@@ -14,6 +14,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crier-dev/crier/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Federation (CR-FEAT-006): relay-to-relay links. A relay configured with
@@ -478,6 +481,8 @@ func (c *Client) ForwardToURLReceiptWithNamespaceToken(ctx context.Context, url,
 }
 
 func (c *Client) forwardDeliverReceipt(ctx context.Context, link Link, agentID string, body []byte, receipt *ForwardReceipt) (int, []byte, error) {
+	ctx, span := tracing.Start(ctx, "federation.forward", attribute.String("crier.agent_id", agentID))
+	defer span.End()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		link.URL+"/agents/"+url.PathEscape(agentID)+"/inbox", bytes.NewReader(body))
 	if err != nil {
@@ -510,12 +515,14 @@ func (c *Client) forwardDeliverReceipt(ctx context.Context, link Link, agentID s
 	if req.Header.Get("X-Fed-Body-Sig") == "" {
 		c.authorize(req)
 	}
+	tracing.Inject(ctx, req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("federation: forward to %s: %w", link.URL, err)
 	}
 	defer resp.Body.Close()
+	span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return 0, nil, fmt.Errorf("federation: read response from %s: %w", link.URL, err)

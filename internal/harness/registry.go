@@ -6,6 +6,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/crier-dev/crier/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // DefaultTimeout bounds one delivery when config does not say (900s, §4.1).
@@ -220,6 +223,11 @@ func (r *Registry) Probe(ctx context.Context, name string) (Capability, error) {
 // returned Receipt is untouched either way, and the observation reads the
 // registry's own clock so an injected clock stays deterministic.
 func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) (receipt Receipt) {
+	ctx, span := tracing.Start(ctx, "harness.dispatch", attribute.String("crier.harness.adapter", req.Harness))
+	defer func() {
+		span.SetAttributes(attribute.String("crier.harness.state", receipt.State))
+		span.End()
+	}()
 	start := r.now()
 	defer func() { observeDispatchMetrics(r.now().Sub(start), receipt) }()
 	if !r.enabled {
@@ -232,6 +240,7 @@ func (r *Registry) Deliver(ctx context.Context, req DispatchRequest) (receipt Re
 	if name == "" {
 		return FailedReceipt("", CodeUnknown, "no harness named and no harness.default configured").withTime(r.now())
 	}
+	span.SetAttributes(attribute.String("crier.harness.adapter", name))
 	adapter, ok := r.Get(name)
 	if !ok {
 		detail := "no adapter registered for " + name

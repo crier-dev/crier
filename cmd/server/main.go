@@ -38,6 +38,7 @@ import (
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
 	"github.com/crier-dev/crier/internal/session"
+	"github.com/crier-dev/crier/internal/tracing"
 	"github.com/crier-dev/crier/internal/webhook"
 	"github.com/gorilla/mux"
 )
@@ -264,6 +265,22 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		slog.Error("load configuration", "error", err)
 		return 1
 	}
+	traceShutdown, err := tracing.Setup(context.Background(), tracing.Config{
+		Enabled: cfg.Tracing.Enabled, Exporter: cfg.Tracing.Exporter,
+		OTLPEndpoint: cfg.Tracing.OTLPEndpoint, SampleRatio: cfg.Tracing.SampleRatio,
+		ServiceName: cfg.Tracing.ServiceName,
+	})
+	if err != nil {
+		slog.Error("initialize tracing", "error", err)
+		return 1
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := traceShutdown(shutdownCtx); err != nil {
+			slog.Error("shutdown tracing", "error", err)
+		}
+	}()
 
 	if cfg.Archive.Enabled {
 		if err := archive.ValidateConfig(archive.Config{BaseURL: cfg.Archive.URL, KeyFile: cfg.Archive.KeyFile}); err != nil {
@@ -319,6 +336,20 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 
 	r := mux.NewRouter()
 
+	// Tracing is the outermost matched-route middleware so the request context
+	// carries the remote trace parent into all downstream work.
+	r.Use(tracing.HTTPMiddleware(func(req *http.Request) string {
+		route := mux.CurrentRoute(req)
+		if route == nil {
+			return "unrouted"
+		}
+		template, err := route.GetPathTemplate()
+		if err != nil || template == "" {
+			return "unrouted"
+		}
+		return template
+	}))
+	r.NotFoundHandler = tracing.HTTPMiddleware(func(*http.Request) string { return "unrouted" })(http.NotFoundHandler())
 	// Middleware. RequestID is registered FIRST so it is the outermost
 	// wrapper (gorilla/mux applies the first Use on the outside): every
 	// request — including 401s and the public /health and /version routes —
