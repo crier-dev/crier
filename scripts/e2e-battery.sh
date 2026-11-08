@@ -56,6 +56,28 @@
 #   by byte (the routes that carry no generated value), plus the registry row's
 #   pre-A2A key set, the deliberate absence of an a2a key in /status, and the
 #   A2A route table per switch position.
+#   federation handshake (INT-004A): TWO more real crier servers run in peer-
+#   records mode (CR_FED_RECORDS_FILE + a CR_FED_SELF_KEY_FILE instance key +
+#   CR_FED_NAME), so the operator-gated /fed/peers + /fed/handshake surface is
+#   live. The cell proves the operator gate fails closed (a bearer-
+#   authenticated caller presenting no operator credential -> 403
+#   FED_OPERATOR_REQUIRED), pins trust the documented way (the operator
+#   creates each peer record on the OPPOSITE relay: state=pending, key_id
+#   derived from the pinned public_key), proves a pending record refuses a
+#   keyed delivery carrying a REAL ed25519 proof (403 FED_NO_LINK), runs the
+#   mutual handshake in BOTH directions — /fed/handshake/start, the initiator
+#   VERIFIES the responder's proof against the pinned key, countersigns the
+#   canonical transcript and finishes; a tampered initiator proof on its own
+#   challenge is refused with the documented FED_BAD_SIGNATURE and the real
+#   proof after it still links — asserts both listings report state=linked
+#   with linked_at set, asserts auth verifies end to end with a real ed25519
+#   proof (the linked delivery is admitted WITHOUT a bearer, the
+#   X-Crier-Fed-Verdict header reads FED_ALLOWED, the payload round-trips)
+#   and a BAD proof is refused with the documented error (one flipped nibble
+#   -> 401 FED_BAD_SIGNATURE, nothing stored), and drives the shipped forward
+#   path (a delivery on A for an agent only B knows relays THROUGH the link
+#   with A's real key proof, and B's 201 rides back). Teardown reaps both
+#   relays by the exact pids the port guard asserted (never a pattern match).
 #
 # Usage: scripts/e2e-battery.sh [port]     (default 18782; falls back if taken)
 set -uo pipefail
@@ -81,9 +103,9 @@ SERVER_PID=""
 # CR-FEAT-032 chaos-cell processes (declared before the trap so `set -u` cannot
 # trip on an early exit): the two linked relays, the link proxy and the guard
 # relay. Every one of them is reaped by the EXIT trap and by the teardown cell.
-FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; PROXY_PID=""; A2A_PID=""
+FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; PROXY_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""
 WORKDIR="$(mktemp -d)"
-trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; [ -n "$FEDA_PID" ] && kill "$FEDA_PID" 2>/dev/null; [ -n "$FEDB_PID" ] && kill "$FEDB_PID" 2>/dev/null; [ -n "$GUARD_PID" ] && kill "$GUARD_PID" 2>/dev/null; [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; [ -n "$A2A_PID" ] && kill "$A2A_PID" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
+trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; [ -n "$FEDA_PID" ] && kill "$FEDA_PID" 2>/dev/null; [ -n "$FEDB_PID" ] && kill "$FEDB_PID" 2>/dev/null; [ -n "$GUARD_PID" ] && kill "$GUARD_PID" 2>/dev/null; [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; [ -n "$A2A_PID" ] && kill "$A2A_PID" 2>/dev/null; [ -n "$FEDHS_A_PID" ] && kill "$FEDHS_A_PID" 2>/dev/null; [ -n "$FEDHS_B_PID" ] && kill "$FEDHS_B_PID" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
 
 say() { echo "== $*"; }
 ev() { printf '{"ts":"%s","probe":"%s","http":%s,"want":%s,"ok":%s}\n' \
@@ -955,6 +977,302 @@ else
   ev "guard chaos provider attempted" 0 0 false
 fi
 
+say "federation handshake — peer records, mutual key proof, both directions (INT-004A)"
+# CR-CHAT-024 / DF-CRIER-363, specs/FEDERATION-AUTH.md. Two more REAL crier
+# servers run in peer-records mode (CR_FED_RECORDS_FILE + a CR_FED_SELF_KEY_FILE
+# instance key + CR_FED_NAME), so the operator-gated /fed/peers and
+# /fed/handshake surface is live:
+#
+#   1. the operator gate FAILS CLOSED: a bearer-authenticated caller that
+#      presents no operator credential is refused 403 FED_OPERATOR_REQUIRED
+#      (management is never public, even for a caller holding the relay's
+#      deployment token);
+#   2. trust is pinned the documented way: the operator creates each peer
+#      record on the OPPOSITE relay — state=pending, key_id derived from the
+#      pinned public_key — never TOFU;
+#   3. a pending record is linkable-but-NOT-linked: a keyed delivery carrying
+#      a REAL ed25519 proof is refused 403 FED_NO_LINK while it is pending;
+#   4. the handshake runs in BOTH directions (each relay initiates against
+#      the other): /fed/handshake/start, the initiator VERIFIES the
+#      responder's proof against the pinned key, countersigns the canonical
+#      transcript and finishes. A tampered initiator proof on its own
+#      challenge is refused with the documented FED_BAD_SIGNATURE, and the
+#      REAL proof after it still links;
+#   5. both /fed/peers listings report state=linked with linked_at set;
+#   6. auth verifies END TO END with a real ed25519 proof: the same keyed
+#      delivery is now admitted 201 WITHOUT any bearer (the linked instance
+#      key is the deployment credential on inbox POST), the
+#      X-Crier-Fed-Verdict header reads FED_ALLOWED, the message is
+#      retrievable on the peer and the payload round-trips;
+#   7. a BAD proof is refused with the documented error: one flipped hex
+#      nibble in X-Fed-Body-Sig is 401 FED_BAD_SIGNATURE and stores nothing;
+#   8. the shipped FORWARD path carries the identity: a delivery on relay A
+#      for an agent only B knows relays THROUGH the link with A's real key
+#      proof, and B's 201 rides back to A's request.
+#
+# FAIL CLOSED: both relays start behind require_free_port + assert_port_owned
+# (QA-CRIER-9), the handshake transcript is re-serialized in the exact key
+# order Go's encoder emits (a transcript the responder would not recognize
+# fails the signature gate, never a silent pass), and teardown reaps both
+# relays by the exact pids recorded here (never a pattern match).
+select_scratch_port "" 18901 "federation handshake relay A (INT-004A)" 8
+FEDHS_A_PORT="$PORT_GUARD_SELECTED"
+select_scratch_port "" 18921 "federation handshake relay B (INT-004A)" 8
+FEDHS_B_PORT="$PORT_GUARD_SELECTED"
+FEDHSA="http://127.0.0.1:$FEDHS_A_PORT"
+FEDHSB="http://127.0.0.1:$FEDHS_B_PORT"
+FEDHS_STAMP="$(date +%s)"
+HS_A="fed-hs-a-$FEDHS_STAMP"              # CR_FED_NAME = the handshake instance id
+HS_B="fed-hs-b-$FEDHS_STAMP"
+FEDHS_AGENT="fed-hs-remote-$FEDHS_STAMP"  # hosted on B only — deliveries to it must federate
+FEDHS_SENDER="fed-hs-sender-$FEDHS_STAMP" # hosted on A
+echo "      federation handshake ports: relay A :$FEDHS_A_PORT  relay B :$FEDHS_B_PORT"
+
+# ── the two instance keys: PKCS#8 ed25519 (the crier keygen shape) ───────────
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fedhs-a.key" 2>/dev/null
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fedhs-b.key" 2>/dev/null
+openssl pkey -in "$WORKDIR/fedhs-a.key" -pubout -out "$WORKDIR/fedhs-a.pub.pem" 2>/dev/null
+openssl pkey -in "$WORKDIR/fedhs-b.key" -pubout -out "$WORKDIR/fedhs-b.pub.pem" 2>/dev/null
+HS_A_PUBHEX="$(openssl pkey -in "$WORKDIR/fedhs-a.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+HS_B_PUBHEX="$(openssl pkey -in "$WORKDIR/fedhs-b.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+# KeyID is the detect signer's convention: hex(sha256(raw public key)[:8]).
+fedhs_keyid() { printf '%s' "$1" | xxd -r -p | sha256sum | cut -c1-16; }
+HS_A_KEYID="$(fedhs_keyid "$HS_A_PUBHEX")"
+HS_B_KEYID="$(fedhs_keyid "$HS_B_PUBHEX")"
+rsign() { openssl pkeyutl -sign -rawin -inkey "$1" -in "$2" 2>/dev/null | xxd -p -c 128; }
+rverify() { # PUBPEM MSGFILE SIGHEX -> 0 when SIGHEX verifies over the message bytes
+  printf '%s' "$3" | xxd -r -p > "$WORKDIR/fedhs-verify-sig.bin"
+  openssl pkeyutl -verify -rawin -pubin -inkey "$1" -in "$2" -sigfile "$WORKDIR/fedhs-verify-sig.bin" >/dev/null 2>&1
+}
+# fedhs_canon <proof-file> — re-emit the transcript in the exact key order Go's
+# encoder produces (the signatures cover THOSE bytes, not the wire object).
+fedhs_canon() {
+  python3 - "$1" <<'PYEOF'
+import json, sys
+try:
+    t = json.load(open(sys.argv[1]))["transcript"]
+except Exception:
+    raise SystemExit(1)
+ordered = ("method", "path", "timestamp", "initiator_id", "initiator_key_id",
+           "initiator_nonce", "responder_id", "responder_key_id", "responder_nonce")
+if not isinstance(t, dict) or set(t) != set(ordered):
+    raise SystemExit(1)
+sys.stdout.write(json.dumps({k: t[k] for k in ordered}, separators=(",", ":")))
+PYEOF
+}
+# fedhs_finish_body <proof-file> <initiator-sig-hex> — the finish request body.
+fedhs_finish_body() {
+  python3 - "$1" "$2" <<'PYEOF'
+import json, sys
+proof = json.load(open(sys.argv[1]))
+proof["initiator_signature"] = sys.argv[2]
+sys.stdout.write(json.dumps(proof, separators=(",", ":")))
+PYEOF
+}
+# fedhs_keyed <peer-name> <peer-key> <peer-pubhex> <base> <agent> <body>
+#             [corrupt-body-sig:0|1] — POST the keyed inbox delivery with a
+#             REAL ed25519 proof and NO bearer header: the legacy X-Fed-Ts /
+#             X-Fed-Sig transcript plus the X-Fed-Body-Sig binding over the
+#             complete payload. Whether the call is admitted must therefore be
+#             the linked-instance-key credential, never the shared secret.
+fedhs_keyed() {
+  local peer="$1" key="$2" pubhex="$3" base="$4" agent="$5" body="$6" corrupt="${7:-0}"
+  local keyid ts len out bodysig
+  keyid="$(fedhs_keyid "$pubhex")"
+  ts="$(date +%s)"
+  local path="/agents/$agent/inbox"
+  len="$(printf '%s' "$body" | wc -c | tr -d ' ')"
+  printf '%s\n%s\n%s' "POST" "$path" "$ts" > "$WORKDIR/fedhs-legacy.msg"
+  printf 'crier-fed-delivery-v1\n%s\n%s\nPOST\n%s\n%s\n%s\n%s' \
+    "$peer" "$keyid" "$path" "$ts" "$len" "$body" > "$WORKDIR/fedhs-body.msg"
+  bodysig="$(rsign "$key" "$WORKDIR/fedhs-body.msg")"
+  if [ "$corrupt" = 1 ]; then
+    case "${bodysig: -1}" in # flip the LAST hex nibble deterministically
+      0) bodysig="${bodysig%?}1" ;;
+      *) bodysig="${bodysig%?}0" ;;
+    esac
+  fi
+  out="$(curl -s -w '\n%{http_code}' -X POST "$base$path" -H 'Content-Type: application/json' \
+    -H "X-Crier-Fed-Peer: $peer" -H "X-Fed-Key-Id: $keyid" \
+    -H "X-Fed-Ts: $ts" -H "X-Fed-Sig: $(rsign "$key" "$WORKDIR/fedhs-legacy.msg")" \
+    -H "X-Fed-Body-Sig: $bodysig" \
+    -D "$WORKDIR/fedhs-keyed.hdr" -d "$body")"
+  CCODE="${out##*$'\n'}"; CBODY="${out%$'\n'*}"
+}
+fedhs_verdict() { # the ingress verdict the last keyed delivery carried on the wire
+  tr -d '\r' < "$WORKDIR/fedhs-keyed.hdr" 2>/dev/null | sed -n 's/^[Xx]-[Cc]rier-[Ff]ed-[Vv]erdict: //p' | head -1
+}
+# fedhs_handshake <init-name> <init-key> <init-pubhex> <resp-base> <resp-name>
+#                 <resp-pubpem> <tamper-first:0|1> — one full direction. The
+#                 initiator verifies the responder's proof BEFORE countersigning.
+fedhs_handshake() {
+  local init_name="$1" init_key="$2" init_pub="$3" resp_base="$4" resp_name="$5" resp_pem="$6" tamper="$7"
+  local nonce ts init_keyid canon finish_body init_sig resp_sig real_sig tampered
+  init_keyid="$(fedhs_keyid "$init_pub")"
+  if [ "$tamper" = 1 ]; then
+    # a corrupted proof on its OWN challenge: refused with the documented error
+    nonce="$(openssl rand -hex 32)"; ts="$(date +%s)"
+    creq "$resp_base" POST /fed/handshake/start \
+      "{\"instance_id\":\"$init_name\",\"public_key\":\"$init_pub\",\"key_id\":\"$init_keyid\",\"nonce\":\"$nonce\",\"timestamp\":$ts}"
+    ccheck "$resp_name handshake: start answers a responder proof (200)" 200 '"responder_signature"' || return 1
+    printf '%s' "$CBODY" > "$WORKDIR/fedhs-tamper-proof.json"
+    canon="$(fedhs_canon "$WORKDIR/fedhs-tamper-proof.json")"
+    if [ -z "$canon" ]; then
+      FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: the transcript could not be canonicalized"; ev "fedhs transcript canon" 0 0 false; return 1
+    fi
+    printf '%s' "$canon" > "$WORKDIR/fedhs-tamper-transcript.json"
+    real_sig="$(rsign "$init_key" "$WORKDIR/fedhs-tamper-transcript.json")"
+    if [ -z "$real_sig" ]; then
+      FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: could not sign the transcript (openssl)"; ev "fedhs tampered proof" 0 0 false; return 1
+    fi
+    case "${real_sig: -1}" in # flip the LAST hex nibble deterministically
+      0) tampered="${real_sig%?}1" ;;
+      *) tampered="${real_sig%?}0" ;;
+    esac
+    finish_body="$(fedhs_finish_body "$WORKDIR/fedhs-tamper-proof.json" "$tampered")"
+    creq "$resp_base" POST /fed/handshake/finish "$finish_body"
+    ccheck "$resp_name handshake: a TAMPERED initiator proof is refused with the documented error (403 FED_BAD_SIGNATURE)" 403 '"error":"FED_BAD_SIGNATURE"' || return 1
+  fi
+  # the REAL exchange, on a fresh challenge
+  nonce="$(openssl rand -hex 32)"; ts="$(date +%s)"
+  creq "$resp_base" POST /fed/handshake/start \
+    "{\"instance_id\":\"$init_name\",\"public_key\":\"$init_pub\",\"key_id\":\"$init_keyid\",\"nonce\":\"$nonce\",\"timestamp\":$ts}"
+  ccheck "$resp_name handshake: start answers a responder proof (200)" 200 '"responder_signature"' || return 1
+  printf '%s' "$CBODY" > "$WORKDIR/fedhs-proof.json"
+  canon="$(fedhs_canon "$WORKDIR/fedhs-proof.json")"
+  if [ -z "$canon" ]; then
+    FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: the transcript could not be canonicalized"; ev "fedhs transcript canon" 0 0 false; return 1
+  fi
+  printf '%s' "$canon" > "$WORKDIR/fedhs-transcript.json"
+  resp_sig="$(jfield "$WORKDIR/fedhs-proof.json" responder_signature)"
+  if rverify "$resp_pem" "$WORKDIR/fedhs-transcript.json" "$resp_sig"; then
+    PASS=$((PASS+1)); echo "PASS  $resp_name handshake: the initiator VERIFIED the responder's proof against the pinned key (real ed25519)"; ev "fedhs responder proof verified" 0 0 true
+  else
+    FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: the responder's proof did NOT verify against the pinned key"; ev "fedhs responder proof verified" 0 0 false; return 1
+  fi
+  init_sig="$(rsign "$init_key" "$WORKDIR/fedhs-transcript.json")"
+  if [ -z "$init_sig" ]; then
+    FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: could not countersign the transcript (openssl)"; ev "fedhs initiator proof" 0 0 false; return 1
+  fi
+  finish_body="$(fedhs_finish_body "$WORKDIR/fedhs-proof.json" "$init_sig")"
+  creq "$resp_base" POST /fed/handshake/finish "$finish_body"
+  ccheck "$resp_name handshake: the REAL proof finishes and LINKS the peer (200 state=linked)" 200 '"state":"linked"' || return 1
+  printf '%s' "$CBODY" > "$WORKDIR/fedhs-finish.json"
+  ceq "$resp_name handshake: the linked record is $init_name" "$init_name" "$(jfield "$WORKDIR/fedhs-finish.json" id)"
+  if [ -n "$(jfield "$WORKDIR/fedhs-finish.json" linked_at)" ]; then
+    PASS=$((PASS+1)); echo "PASS  $resp_name handshake: the linked record carries linked_at"; ev "fedhs linked_at" 0 0 true
+  else
+    FAIL=$((FAIL+1)); echo "FAIL  $resp_name handshake: the linked record carries no linked_at"; ev "fedhs linked_at" 0 0 false
+  fi
+}
+
+# ── the relays: A links to B (the shipped forward path), B owns the target ───
+require_free_port "$FEDHS_A_PORT" "federation handshake relay A"
+env -i PATH="$PATH" HOME="$HOME" \
+  CRIER_PORT="$FEDHS_A_PORT" CR_AUTH_TOKEN="$CHAOS_TOKEN" CR_REQUIRE_AGENT_SIG=false \
+  CR_GUARD_ENABLED=false CR_RATE_LIMIT_PER_MINUTE=600 \
+  CR_FED_NAME="$HS_A" CR_FED_RECORDS_FILE="$WORKDIR/fedhs-peers-a.json" \
+  CR_FED_SELF_KEY_FILE="$WORKDIR/fedhs-a.key" \
+  CR_FED_LINKS="http://127.0.0.1:$FEDHS_B_PORT" \
+  ./bin/crier > "$WORKDIR/fedhs-a.log" 2>&1 &
+FEDHS_A_PID=$!
+wait_http_or_die "http://127.0.0.1:$FEDHS_A_PORT/health" "$FEDHS_A_PID" "$WORKDIR/fedhs-a.log" "federation handshake relay A"
+assert_port_owned "$FEDHS_A_PORT" "$FEDHS_A_PID" "federation handshake relay A"
+require_free_port "$FEDHS_B_PORT" "federation handshake relay B"
+env -i PATH="$PATH" HOME="$HOME" \
+  CRIER_PORT="$FEDHS_B_PORT" CR_AUTH_TOKEN="$CHAOS_TOKEN" CR_REQUIRE_AGENT_SIG=false \
+  CR_GUARD_ENABLED=false CR_RATE_LIMIT_PER_MINUTE=600 \
+  CR_FED_NAME="$HS_B" CR_FED_RECORDS_FILE="$WORKDIR/fedhs-peers-b.json" \
+  CR_FED_SELF_KEY_FILE="$WORKDIR/fedhs-b.key" \
+  ./bin/crier > "$WORKDIR/fedhs-b.log" 2>&1 &
+FEDHS_B_PID=$!
+wait_http_or_die "http://127.0.0.1:$FEDHS_B_PORT/health" "$FEDHS_B_PID" "$WORKDIR/fedhs-b.log" "federation handshake relay B"
+assert_port_owned "$FEDHS_B_PORT" "$FEDHS_B_PID" "federation handshake relay B"
+PASS=$((PASS+1)); echo "PASS  federation handshake relays up: A :$FEDHS_A_PORT ($HS_A, links to B, records mode + instance key), B :$FEDHS_B_PORT ($HS_B, records mode + instance key) — ownership asserted"
+ev "fedhs relays up" 0 0 true
+
+creq "$FEDHSA" POST /agents "{\"id\":\"$FEDHS_SENDER\",\"public_key\":\"$PUBHEX\"}"
+ccheck "federation handshake: the sender agent registered on relay A (201)" 201
+creq "$FEDHSB" POST /agents "{\"id\":\"$FEDHS_AGENT\",\"public_key\":\"$PUBHEX\",\"capabilities\":[\"fed-hs\"]}"
+ccheck "federation handshake: the remote agent registered on relay B (201)" 201
+creq "$FEDHSA" GET "/agents/$FEDHS_AGENT"
+ccheck "federation handshake: the target is UNKNOWN on A (404) — any delivery to it must federate" 404
+
+# ── 1. the operator gate fails closed ────────────────────────────────────────
+# The deployment bearer (creq's own credential) is accepted by the auth
+# middleware, but /fed/peers management is operator-gated: presenting the
+# X-Crier-Fed-Operator header with anything else than the operator secret
+# (here: the same deployment token, per the gate's fallback) is the named
+# 403 — an authenticated non-operator must never reach the peer store.
+creq "$FEDHSB" POST /fed/peers \
+  "{\"id\":\"noplace-$FEDHS_STAMP\",\"public_key\":\"$HS_A_PUBHEX\",\"url\":\"$FEDHSA\",\"direction\":\"both\"}" \
+  -H "X-Crier-Fed-Operator: not-the-operator-$FEDHS_STAMP"
+ccheck "federation handshake: a bearer-authenticated NON-operator is refused (403 FED_OPERATOR_REQUIRED) — management is never public" 403 '"error":"FED_OPERATOR_REQUIRED"'
+
+# ── 2. trust is pinned by operator Create, never TOFU ────────────────────────
+creq "$FEDHSB" POST /fed/peers "{\"id\":\"$HS_A\",\"public_key\":\"$HS_A_PUBHEX\",\"url\":\"$FEDHSA\",\"direction\":\"both\"}"
+ccheck "federation handshake: relay B pins relay A's identity (201 pending)" 201 '"state":"pending"'
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-pin-a.json"
+ceq "federation handshake: B's pinned record for A carries the product KeyID of A's public key" "$HS_A_KEYID" "$(jfield "$WORKDIR/fedhs-pin-a.json" key_id)"
+creq "$FEDHSA" POST /fed/peers "{\"id\":\"$HS_B\",\"public_key\":\"$HS_B_PUBHEX\",\"url\":\"$FEDHSB\",\"direction\":\"both\"}"
+ccheck "federation handshake: relay A pins relay B's identity (201 pending)" 201 '"state":"pending"'
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-pin-b.json"
+ceq "federation handshake: A's pinned record for B carries the product KeyID of B's public key" "$HS_B_KEYID" "$(jfield "$WORKDIR/fedhs-pin-b.json" key_id)"
+
+# ── 3. pinned but NOT yet proven: a real ed25519 proof is still refused ──────
+FEDHS_PENDING_BODY="{\"payload\":{\"fed\":\"pending-refused\"},\"sender\":\"$FEDHS_SENDER\"}"
+fedhs_keyed "$HS_A" "$WORKDIR/fedhs-a.key" "$HS_A_PUBHEX" "$FEDHSB" "$FEDHS_AGENT" "$FEDHS_PENDING_BODY"
+ccheck "federation handshake: a keyed delivery while the record is PENDING is refused (403 FED_NO_LINK) — pinned is not proven" 403 '"error":"FED_NO_LINK"'
+ceq "federation handshake: the pending refusal carries the ingress verdict on the wire" "FED_NO_LINK" "$(fedhs_verdict)"
+
+# ── 4. the handshake, BOTH directions ────────────────────────────────────────
+fedhs_handshake "$HS_A" "$WORKDIR/fedhs-a.key" "$HS_A_PUBHEX" "$FEDHSB" "$HS_B" "$WORKDIR/fedhs-b.pub.pem" 1
+fedhs_handshake "$HS_B" "$WORKDIR/fedhs-b.key" "$HS_B_PUBHEX" "$FEDHSA" "$HS_A" "$WORKDIR/fedhs-a.pub.pem" 0
+
+# ── 5. both listings report the link ─────────────────────────────────────────
+creq "$FEDHSA" GET /fed/peers
+ccheck "federation handshake: relay A's operator listing serves the peer set (200)" 200 '"peers"'
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-listing-a.json"
+ceq "federation handshake: relay A lists exactly ONE peer ($HS_B)" 1 "$(jlen "$WORKDIR/fedhs-listing-a.json" peers)"
+ceq "federation handshake: relay A's peer is linked" "linked" "$(jfield "$WORKDIR/fedhs-listing-a.json" peers.0.state)"
+creq "$FEDHSB" GET /fed/peers
+ccheck "federation handshake: relay B's operator listing serves the peer set (200)" 200 '"peers"'
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-listing-b.json"
+ceq "federation handshake: relay B lists exactly ONE peer ($HS_A)" 1 "$(jlen "$WORKDIR/fedhs-listing-b.json" peers)"
+ceq "federation handshake: relay B's peer is linked" "linked" "$(jfield "$WORKDIR/fedhs-listing-b.json" peers.0.state)"
+
+# ── 6. auth verifies with a real ed25519 proof — and NO bearer ───────────────
+FEDHS_GOOD_BODY="{\"payload\":{\"fed\":\"hs-proof\"},\"sender\":\"$FEDHS_SENDER\"}"
+fedhs_keyed "$HS_A" "$WORKDIR/fedhs-a.key" "$HS_A_PUBHEX" "$FEDHSB" "$FEDHS_AGENT" "$FEDHS_GOOD_BODY"
+ccheck "federation handshake: the LINKED peer's real proof is admitted (201) — with NO bearer on the request" 201 '"transport":"inbox"'
+ceq "federation handshake: the admitted delivery carries FED_ALLOWED on the wire" "FED_ALLOWED" "$(fedhs_verdict)"
+creq "$FEDHSB" GET "/agents/$FEDHS_AGENT/inbox"
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-good-inbox.json"
+ccheck "federation handshake: the proven message is retrievable on the peer (200)" 200 '"lease_id"'
+ceq "federation handshake: the proven payload round-trips intact" '{"fed":"hs-proof"}' "$(first_payload "$WORKDIR/fedhs-good-inbox.json")"
+creq "$FEDHSB" POST "/agents/$FEDHS_AGENT/inbox/ack" \
+  "{\"lease_id\":\"$(jfield "$WORKDIR/fedhs-good-inbox.json" lease_id)\",\"message_ids\":[\"$(jfield "$WORKDIR/fedhs-good-inbox.json" messages.0.id)\"]}"
+ccheck "federation handshake: the proven delivery acks clean (204)" 204
+
+# ── 7. a BAD proof is refused with the documented error ──────────────────────
+FEDHS_BAD_BODY="{\"payload\":{\"fed\":\"tampered-body-sig\"},\"sender\":\"$FEDHS_SENDER\"}"
+fedhs_keyed "$HS_A" "$WORKDIR/fedhs-a.key" "$HS_A_PUBHEX" "$FEDHSB" "$FEDHS_AGENT" "$FEDHS_BAD_BODY" 1
+ccheck "federation handshake: a BAD proof is refused with the documented error (401 FED_BAD_SIGNATURE)" 401 '"error":"FED_BAD_SIGNATURE"'
+ceq "federation handshake: the bad-proof refusal carries FED_BAD_SIGNATURE on the wire" "FED_BAD_SIGNATURE" "$(fedhs_verdict)"
+creq "$FEDHSB" GET "/agents/$FEDHS_AGENT/inbox/stats"
+ccheck "federation handshake: the bad proof stored NOTHING (queue_depth 0)" 200 '"queue_depth":0'
+
+# ── 8. the shipped FORWARD path carries A's real key proof ───────────────────
+creq "$FEDHSA" POST "/agents/$FEDHS_AGENT/inbox" \
+  "{\"payload\":{\"fed\":\"relayed-proof\"},\"sender\":\"$FEDHS_SENDER\",\"request_id\":\"fedhs-forward\"}"
+ccheck "federation handshake: a delivery on A for an agent only B knows RELAYS THROUGH the link (the peer's 201 rides back)" 201 '"transport":"inbox"'
+creq "$FEDHSB" GET "/agents/$FEDHS_AGENT/inbox/stats"
+ccheck "federation handshake: the forwarded message was stored at B (queue_depth 1)" 200 '"queue_depth":1'
+creq "$FEDHSB" GET "/agents/$FEDHS_AGENT/inbox"
+printf '%s' "$CBODY" > "$WORKDIR/fedhs-fwd-inbox.json"
+ccheck "federation handshake: the forwarded message is retrievable at B (200)" 200 '"lease_id"'
+ceq "federation handshake: the forwarded payload round-trips intact" '{"fed":"relayed-proof"}' "$(first_payload "$WORKDIR/fedhs-fwd-inbox.json")"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INT-A2A-006 — the two cells that keep the A2A option honest.
 #
@@ -1467,15 +1785,15 @@ fi
 # too, and every port they bound is asserted free — a listener left behind is
 # exactly the leak class DF-CRIER-206/CR-GAP-069 exist for.
 kill_link_proxy
-for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID"; do
+for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID"; do
   [ -n "$chaos_pid" ] && kill "$chaos_pid" 2>/dev/null
 done
-for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID"; do
+for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID"; do
   [ -n "$chaos_pid" ] && wait "$chaos_pid" 2>/dev/null
 done
-FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; A2A_PID=""
+FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""
 sleep 1
-for chaos_port in "$FEDPROXY_PORT" "$FEDA_PORT" "$FEDB_PORT" "$GUARD_PORT" "$A2A_PORT"; do
+for chaos_port in "$FEDPROXY_PORT" "$FEDA_PORT" "$FEDB_PORT" "$GUARD_PORT" "$A2A_PORT" "$FEDHS_A_PORT" "$FEDHS_B_PORT"; do
   if ss -tln 2>/dev/null | grep -q ":${chaos_port} "; then
     FAIL=$((FAIL+1)); echo "FAIL  chaos port :${chaos_port} still held after kill"
   else
