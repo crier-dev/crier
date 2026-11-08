@@ -80,6 +80,7 @@ else
 fi
 
 command -v jq >/dev/null 2>&1 || { printf '%s: ERROR: jq is required to parse /version JSON\n' "$PROG" >&2; exit 2; }
+VERSION="$(jq -er '.version | select(type == "string" and length > 0 and . != "dev" and (gsub("[[:space:]]"; "") | length > 0))' <<<"$VERSION_JSON")" || { printf '%s: ERROR: /version has missing or invalid version evidence\n' "$PROG" >&2; exit 2; }
 COMMIT="$(jq -er '.commit | select(type == "string" and length > 0)' <<<"$VERSION_JSON")" || { printf '%s: ERROR: /version has missing or invalid commit data\n' "$PROG" >&2; exit 2; }
 
 EXE="$PROC_ROOT/$PID/exe"
