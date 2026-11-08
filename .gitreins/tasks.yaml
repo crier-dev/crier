@@ -3863,5 +3863,25 @@ tasks:
     prints 0; (g) the package exposes an envelope validator: ''grep -rln "version"
     internal/boardbridge/*.go | wc -l'' is at least 1 and ''grep -rn "AllowedOps\|allowed_ops"
     internal/boardbridge/*.go | wc -l'' is at least 1.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T10:01:01.407343+00:00'
+  completed_at: '2026-11-08T10:40:11.766988+00:00'
+- id: INT-014-R1
+  title: 'Crier boardctl bridge (re-judge): behaviour-only criterion for internal/boardbridge
+    transport'
+  criteria:
+  - 'In the graded tree, all of: (a) ''go test ./internal/boardbridge/ -count=1 -p
+    1'' exits 0 and its output contains ''ok'' for that package; (b) ''grep -rn t.Skip
+    internal/boardbridge/ | wc -l'' prints 0; (c) ''grep -rn "sh\", \"-c" internal/boardbridge/
+    cmd/ | wc -l'' prints 0; (d) the spec section 5/6 reply catalog is present in
+    internal/boardbridge/bridge.go - each of the literals ''empty command'', ''board
+    files commit via your board flow'', ''bytes truncated; use a narrower filter'',
+    ''board header unparsable'', ''no longer executable'' occurs at least once; (e)
+    the startup doctor is wired - ''grep -c doctor internal/boardbridge/bridge.go''
+    is at least 1; (f) the transport is reachable from the server entrypoint - ''grep
+    -c boardbridge.New cmd/server/main.go'' is at least 1; (g) the registry consumes
+    the transport - ''grep -rl internal/boardbridge internal/registry/*.go | wc -l''
+    is at least 1; (h) the tracked spec carries the quorum amendment - ''grep -ci
+    "typed command envelope" specs/CRIER-BOARDCTL-BRIDGE.md'' is at least 1.'
+  status: in_progress
+  created_at: '2026-11-08T10:42:41.301996+00:00'
