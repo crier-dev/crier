@@ -3636,3 +3636,21 @@ tasks:
   status: complete
   created_at: '2026-11-07T23:28:18.123983+00:00'
   completed_at: '2026-11-08T00:08:31.492993+00:00'
+- id: INT-CI-034
+  title: 'release-upload.sh: bound byte divergence so adoption stays provable (vcs.modified
+    vacuous on go1.26.10)'
+  criteria:
+  - AC1 scripts/release-upload.sh refuses ADOPTION (keeps RELEASE-012 refusal) when
+    the attached bytes diverge from this build beyond a documented metadata bound
+    (size delta AND differing-offset count both bounded, bound derived from measured
+    same-commit spread 63/63/153 with headroom, refusal text quotes measured size
+    delta and offset count). AC2 scripts/release-upload-selftest.sh gains an arm proving
+    a same-Version+Commit fixture differing materially beyond the bound is REFUSED,
+    existing identity-adoption arm still passes on metadata-only diff, and a NEUTER
+    proof shows the bound is load-bearing. AC3 docs/releases.md and the release.yml
+    header comment state the bound is a metadata-only heuristic (not a proof), name
+    the measured spread, and say vcs.modified is vacuous on go1.26.10. AC4 bash -n
+    on both scripts and make release-upload-selftest exit 0 with every arm green.
+  status: complete
+  created_at: '2026-11-08T01:07:32.045467+00:00'
+  completed_at: '2026-11-08T01:28:26.425713+00:00'
