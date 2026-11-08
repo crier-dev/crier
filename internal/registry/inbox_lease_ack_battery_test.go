@@ -79,9 +79,12 @@ func TestInboxLeaseAckBattery(t *testing.T) {
 	})
 
 	t.Run("federation_hold_caps_exponential_backoff_and_reports_exhaustion", func(t *testing.T) {
-		// Retry/backoff/exhaustion coverage is new. The hold manager's configured
-		// terminal sink writes a FEDERATION_FAILED inbox receipt; it does not put
-		// this failure in registry's TTL dead-letter archive (see residual below).
+		// Federation exhaustion -> FEDERATION_FAILED receipt is new coverage.
+		// Archive expiry is consolidated with TestPurgeExpired_ExpiredMessageIsDeadLetteredAndReceipted
+		// and TestPurgeExpired_IsExactlyOnceEvenIfTheStoreReportsTwice; append/list
+		// ordering with TestMemoryStore_DeadLetterAppendIsIdempotent and
+		// TestDeadLetters_NewestFirstAndBounded; capacity eviction with
+		// TestMemoryStore_DeadLetterCapacityEvictsOldest.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
@@ -115,7 +118,38 @@ func TestInboxLeaseAckBattery(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, receipts, 1, "the terminal failure receipt reaches the sender")
 
-		t.Skip("hold exhaustion currently writes a sender inbox receipt, not a registry dead-letter archive record")
+		// The archive's public store API is the destination; capacity eviction is
+		// consolidated in TestMemoryStore_DeadLetterCapacityEvictsOldest.
+		archive := registry.NewMemoryStore()
+		require.NoError(t, archive.Register(&registry.Agent{ID: "dead-target"}))
+		firstLetter := &registry.DeadLetter{
+			MessageID: "dead-message-1", AgentID: "dead-target", Reason: registry.DeadLetterReasonExpired,
+			DeadLetteredAt: time.Now(),
+		}
+		secondLetter := &registry.DeadLetter{
+			MessageID: "dead-message-2", AgentID: "dead-target", Reason: registry.DeadLetterReasonExpired,
+			DeadLetteredAt: time.Now().Add(time.Millisecond),
+		}
+		added, err := archive.AppendDeadLetter(firstLetter)
+		require.NoError(t, err)
+		require.True(t, added)
+		added, err = archive.AppendDeadLetter(secondLetter)
+		require.NoError(t, err)
+		require.True(t, added)
+		added, err = archive.AppendDeadLetter(firstLetter)
+		require.NoError(t, err)
+		require.False(t, added, "TestMemoryStore_DeadLetterAppendIsIdempotent: duplicate message is not added")
+
+		letters, err := archive.ListDeadLetters("dead-target", 10)
+		require.NoError(t, err)
+		require.Len(t, letters, 2)
+		require.Equal(t, "dead-message-2", letters[0].MessageID, "TestDeadLetters_NewestFirstAndBounded")
+		require.Equal(t, "dead-message-1", letters[1].MessageID, "TestDeadLetters_NewestFirstAndBounded")
+		page, err := archive.ListDeadLetters("dead-target", 1)
+		require.NoError(t, err)
+		require.Len(t, page, 1)
+		_, err = archive.ListDeadLetters("dead-target", registry.MaxDeadLetterListLimit+1)
+		require.ErrorIs(t, err, registry.ErrInvalidStoreInput)
 	})
 
 	t.Run("authentication_refusal_is_never_retried", func(t *testing.T) {
