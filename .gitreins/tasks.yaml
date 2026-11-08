@@ -3706,3 +3706,69 @@ tasks:
   status: complete
   created_at: '2026-11-08T04:44:57.619307+00:00'
   completed_at: '2026-11-08T04:45:28.489334+00:00'
+- id: INT-002
+  title: 'Bakeoff C06 (IMPROVE OURS): JWS-sign registry capability cards'
+  criteria:
+  - 'PROOF: internal/registry contains a new test where an agent signs its capability
+    card with its own ed25519 private key, the relay verifies it against that agent''s
+    REGISTERED public key, and GET /agents/{id} returns the card with its signature;
+    a second new test proves a tampered card is refused with a 4xx status and a named
+    UPPER_SNAKE error code (never 500); docs/openapi.yaml documents the signature
+    field. FAILIF: the relay signs cards itself or the card verifies with no registered
+    key; FAILIF: a tampered card yields 200 or 500; FAILIF: go build ./... or go vet
+    ./... exits non-zero; FAILIF: go test ./internal/registry/ -count=1 does not exit
+    0.'
+  status: in_progress
+  created_at: '2026-11-08T05:32:27.088601+00:00'
+- id: INT-004
+  title: 'Bakeoff C07 (KEEP OURS guard): federation interop evidence battery'
+  criteria:
+  - 'PROOF: scripts/e2e-battery.sh contains a new federation interop cell that (a)
+    starts a SECOND real server and completes the instance-key handshake with POST
+    /fed/handshake/start then POST /fed/handshake/finish, asserts the peer is linked
+    in GET /fed/peers and that a bad proof is refused, (b) forwards one message across
+    a transient link failure so the hold queue carries it and the recovery drain lands
+    a forward receipt in the origin inbox, (c) asserts a cross-namespace forward is
+    refused with the documented error code; the new cell is named in the script header
+    comment. FAILIF: the new cell re-implements the existing relay-partition chaos
+    cell instead of adding the handshake/peerauth leg; FAILIF: the battery accepts
+    a bad handshake proof; FAILIF: bash -n scripts/e2e-battery.sh exits non-zero;
+    FAILIF: the running full battery exit code (its FAIL count) was not measured and
+    reported by the foreman.'
+  status: in_progress
+  created_at: '2026-11-08T05:32:30.781352+00:00'
+- id: INT-012
+  title: 'Spec CRIER-WEBHOOK-RSS-INPUT Part A: webhook ingest input'
+  criteria:
+  - 'PROOF: internal/ingest implements the webhook input per specs/CRIER-WEBHOOK-RSS-INPUT.md
+    Part A; PROOF: `go test ./internal/ingest/ -count=1` exits 0 with cases for the
+    401 tamper, 409 stale-timestamp, single-delivery replay and 413 oversized arms;
+    PROOF: `go build ./...` and `go vet ./...` exit 0; PROOF: `git grep -n CR_INGEST_WEBHOOK_ENABLED
+    -- cmd internal` shows the default-off gate. FAILIF: ingest routes exist while
+    CR_INGEST_WEBHOOK_ENABLED is unset; FAILIF: an identical replay yields two inbox
+    messages; FAILIF: the spec path is absent.'
+  status: in_progress
+  created_at: '2026-11-08T06:43:09.769847+00:00'
+- id: INT-006
+  title: 'Bakeoff C09 (SKIP): record memory/recall ownership policy in README'
+  criteria:
+  - 'PROOF: `grep -n harness-owned README.md` prints at least one line and exits 0;
+    PROOF: the paragraph states durable agent memory and semantic recall are harness-owned
+    while crier is durable message transport only, citing the 2026-11-08 owner decision;
+    PROOF: `make docs-check` exits 0; PROOF: the commit diff names README.md and no
+    Go source file. FAILIF: any .go file is modified; FAILIF: docs-check fails.'
+  status: in_progress
+  created_at: '2026-11-08T06:43:14.670277+00:00'
+- id: INT-008
+  title: 'Spec DUCKBRAIN-ARCHIVE: archive-then-delete cold tier for dead letters'
+  criteria:
+  - 'PROOF: internal/archive ships Archiver + DuckBrainArchiver and a PurgeExpiredDeadLetters
+    hook wired into the dead-letter sweep per specs/DUCKBRAIN-ARCHIVE.md; PROOF: a
+    test proves a 500 from DuckBrain RETAINS the dead-letter row and increments crier_archive_attempts_total{outcome=failed};
+    PROOF: a test proves the POST body keys are key/domain/content and the key scheme
+    is crier/dead-letter/{agent_id}/{message_id}; PROOF: with CR_ARCHIVE_ENABLED unset
+    the sweep is unchanged (table-diff test passes); PROOF: go build ./... and go
+    vet ./... exit 0. FAILIF: a row is deleted before a 2xx archive response; FAILIF:
+    the API key value appears in a log line or the repo.'
+  status: in_progress
+  created_at: '2026-11-08T06:43:18.919618+00:00'
