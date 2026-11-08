@@ -22,6 +22,7 @@ import (
 
 	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/addressing"
+	"github.com/crier-dev/crier/internal/boardbridge"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/hermesession"
@@ -53,8 +54,9 @@ type registerRequest struct {
 	// Hermes is the optional Hermes-session delivery target
 	// (specs/HERMES-SESSION-DELIVERY.md). Absent keeps a registration
 	// byte-identical to one that predates the transport.
-	Hermes *hermesession.Config    `json:"hermes_session,omitempty"`
-	Guard  *guard.AgentGuardConfig `json:"guard,omitempty"`
+	Hermes   *hermesession.Config    `json:"hermes_session,omitempty"`
+	Boardctl *boardbridge.Config     `json:"boardctl,omitempty"`
+	Guard    *guard.AgentGuardConfig `json:"guard,omitempty"`
 	// A2A is the optional per-agent half of the A2A gate (INT-A2A-001).
 	// Absent is the default and keeps every existing registration byte-
 	// identical; present is strictly decoded by strictA2AMember.
@@ -330,8 +332,9 @@ type patchRequest struct {
 	Webhook      *webhook.Config `json:"webhook,omitempty"`
 	// Hermes mirrors the registration field: present replaces the block,
 	// absent or explicit null removes it — the same contract webhook uses.
-	Hermes *hermesession.Config `json:"hermes_session,omitempty"`
-	Guard  json.RawMessage      `json:"guard,omitempty"`
+	Hermes   *hermesession.Config `json:"hermes_session,omitempty"`
+	Boardctl json.RawMessage      `json:"boardctl,omitempty"`
+	Guard    json.RawMessage      `json:"guard,omitempty"`
 	// A2A mirrors the registration field (INT-A2A-001): present replaces the
 	// block, explicit null clears it, absent leaves it unchanged — the same
 	// three-state contract the webhook object uses, so an agent that opted in
@@ -554,6 +557,23 @@ func strictA2AMember(body []byte) (cfg *a2a.Config, present bool, err error) {
 	return cfg, true, nil
 }
 
+func strictBoardctlMember(body []byte) (cfg *boardbridge.Config, present bool, err error) {
+	raw, ok := topLevelMemberRaw(body, "boardctl")
+	if !ok {
+		return nil, false, nil
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return nil, true, nil
+	}
+	cfg = &boardbridge.Config{}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(cfg); err != nil {
+		return nil, true, fmt.Errorf("invalid boardctl config: %w", err)
+	}
+	return cfg, true, nil
+}
+
 // topLevelMemberRaw returns the raw JSON of one top-level member of an agent
 // body, matched case-insensitively like encoding/json matches the struct field
 // it will decode into. ok=false when the body carries no such member (or is not
@@ -652,6 +672,12 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 	} else if present {
 		req.A2A = cfg
 	}
+	if cfg, present, err := strictBoardctlMember(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	} else if present {
+		req.Boardctl = cfg
+	}
 	// ID resolution (DF-CRIER-302): whichever spelling supplied the id, it is
 	// resolved BEFORE anything is validated or registered, so both routes
 	// answer identically for the same request. A path id and a body id that
@@ -710,6 +736,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 		Capabilities: req.Capabilities,
 		Webhook:      req.Webhook,
 		Hermes:       req.Hermes,
+		Boardctl:     req.Boardctl,
 		Guard:        req.Guard,
 		A2A:          req.A2A,
 		Namespace:    namespaceName,
@@ -736,6 +763,12 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request, pathID string
 		// yet, and a missing file surfaces as HERMES_CREDENTIAL_UNAVAILABLE
 		// rather than as a registration nobody can act on today.
 		if err := agent.Hermes.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if agent.Boardctl != nil {
+		if err := agent.Boardctl.Validate(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -908,6 +941,24 @@ func (h *Handler) HandleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	if req.Capabilities != nil {
 		agent.Capabilities = req.Capabilities
+	}
+	if len(req.Boardctl) > 0 {
+		if string(bytes.TrimSpace(req.Boardctl)) == "null" {
+			agent.Boardctl = nil
+		} else {
+			var bc boardbridge.Config
+			dec := json.NewDecoder(bytes.NewReader(req.Boardctl))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&bc); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid boardctl config: " + err.Error()})
+				return
+			}
+			if err := bc.Validate(); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			agent.Boardctl = &bc
+		}
 	}
 	if req.Hermes == nil {
 		// Same contract as webhook: absent or null removes the block, present

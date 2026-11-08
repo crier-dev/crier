@@ -1,6 +1,9 @@
 package registry
 
-import "github.com/crier-dev/crier/internal/hermesession"
+import (
+	"github.com/crier-dev/crier/internal/boardbridge"
+	"github.com/crier-dev/crier/internal/hermesession"
+)
 
 // Hermes-session delivery (specs/HERMES-SESSION-DELIVERY.md).
 //
@@ -32,6 +35,9 @@ type hermesDeliveryFailure struct {
 // silently falling back to the inbox would deliver a message somewhere the
 // agent's configuration does not name.
 const hermesTransportUnavailable = "HERMES_SESSION_TRANSPORT_UNAVAILABLE"
+
+// SetBoardctlBridge installs the optional boardctl command transport.
+func (h *Handler) SetBoardctlBridge(b *boardbridge.Bridge) { h.boardctl = b }
 
 // SetHermesSessionClient installs the Hermes-session delivery transport. Nil
 // (the default) leaves every delivery byte-identical to a relay without it,

@@ -44,10 +44,11 @@ format.
 ```go
 // internal/boardbridge — a delivery transport, mirroring internal/hermesession.
 type Config struct {
-    BoardDir       string `json:"board_dir"`                  // required; must contain a parsable board header
-    BinPath        string `json:"bin_path,omitempty"`         // default "boardctl" resolved on PATH at startup
-    AllowedOps     string `json:"allowed_ops,omitempty"`      // comma list; default "show,list,next-id,create,update,event"
-    TimeoutSecs    int    `json:"timeout_secs,omitempty"`     // per invocation, default 30, max 120
+    BoardDir       string   `json:"board_dir"`                  // required
+    BinPath        string   `json:"bin_path,omitempty"`         // default "boardctl", pinned on PATH at startup
+    AllowedOps     string   `json:"allowed_ops,omitempty"`      // default "show,list,next-id,create,update,event"
+    TimeoutSecs    int      `json:"timeout_secs,omitempty"`     // default 30, range 5..120
+    SenderAllowlist []string `json:"sender_allowlist,omitempty"` // default empty; execution fails closed
 }
 ```
 
@@ -61,39 +62,29 @@ type Config struct {
   `hermes_session` outranks webhook outranks inbox (one transport executes per message;
   this order is the spec's answer).
 
-### 3.2 Command grammar
+### 3.2 Typed command envelope
 
-The message TEXT is the command line, parsed by shlex-style splitting (never a shell):
+The delivered payload MUST be a versioned JSON object. Raw text is never tokenized or used as argv:
 
-```
-show INT-007              →  boardctl show INT-007 --json
-list --status pending     →  boardctl list --json --status pending
-next-id --family INT      →  boardctl next-id --family INT --json
-create --id INT-012 --title "…" --acceptance-criteria "…" [--priority P1] …
-update INT-012 --status complete --evidence-run-id RUN …
-event --type audit --detail-text "…"
+```json
+{"v":1,"op":"show","args":{"id":"INT-007"}}
 ```
 
-- **R5** Token 0 must be a verb in the agent's `allowed_ops` (closed set, R3 default). Any
-  other verb — including `serve`, `render`, `import`, `install`, `init` — is REFUSED with the
-  named reply `refused: op "<verb>" not allowed for this agent` and NO subprocess spawn.
-- **R6** The `--json` flag is appended by the bridge to every invocation (machine-readable
-  reply) and is refused-if-supplied by the caller (the bridge formats, not the caller).
-- **R7** Every invocation is serialized: a single worker goroutine per board_dir (per-session
-  serialisation discipline of CRIER-HARNESS §cross-process). boardctl's own file locking stays
-  the last line of defense, not the first.
-- **R8** Timeout: `timeout.WithTimeout` around the exec; on timeout the process GROUP is
-  killed (CRIER-HARNESS process-group rule) and the reply is the named failure of §5.
+`v` must be 1; `op` must be in the agent's `allowed_ops`; and `args` must satisfy the closed, typed schema for that operation. Unknown keys, wrong value types, empty required values, and any user-controlled value beginning with `-` are refused before spawn. The bridge constructs the argument vector from the validated fields only, appends `--json`, and uses `exec` directly (never a shell). Positional arguments are passed only after the operation's fixed verb; option values are passed as individual argv elements.
+
+The default allowed operations remain `show,list,next-id,create,update,event`. Each board-manager agent also carries `sender_allowlist`; it defaults empty, and a delivery from a sender not explicitly listed is stored in the inbox unchanged as inert text. This sender ACL is separate from transport selection.
+
+- **R5** An unsupported envelope version, op outside `allowed_ops`, or invalid per-op args is refused with a named error and NO subprocess spawn.
+- **R6** `--json` is appended by the bridge to every invocation and is not caller-controlled.
+- **R7** Every invocation is serialized per agent; boardctl's own file locking stays the last line of defense, not the first.
+- **R8** Timeout kills the subprocess process group and returns the named timeout failure.
 
 ### 3.3 Reply contract
 
 - **R9** Exit 0 → reply message with boardctl's JSON output verbatim in `payload`, plus a
   one-line human summary in `text` (row id + resulting status for `create`/`update`; row
   count for `list`).
-- **R10** Non-zero exit → reply message whose text is boardctl's own refusal text, prefixed
-  `boardctl refused:` — the CLI's refusals (duplicate id, TR-251 evidence-run requirement,
-  off-vocabulary status) are passed through VERBATIM, never reinterpreted, never retried by
-  the bridge. The foreman discipline lives in boardctl; the bridge is a pass-through.
+- **R10** Non-zero exit → reply carries the structured error mapping of §10; `boardctl_text` contains boardctl's own refusal text verbatim. CLI refusals (duplicate id, TR-251 evidence-run requirement, off-vocabulary status) are passed through, never reinterpreted or retried.
 - **R11** Every executed command appends a board event for audit:
   `boardctl event --type audit --actor board-manager --detail-text "<verb> <args…>"` —
   run by the bridge after each successful mutation (create/update/event), skipped for
@@ -156,8 +147,7 @@ event --type audit --detail-text "…"
 
 ## 8. Non-goals
 
-- No natural-language command parsing (no LLM in crier's delivery path — the message IS the
-  argv, or it is refused).
+- No natural-language command parsing. Messages are typed JSON envelopes; crier never parses prose into argv.
 - No multi-board routing (one `board_dir` per agent; register two agents for two boards).
 - No closing rows without evidence, no status aliasing, no board repair — `boardctl` owns all
   of it and the bridge forwards its refusals (R10).

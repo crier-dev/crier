@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/internal/a2a"
+	"github.com/crier-dev/crier/internal/boardbridge"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/webhook"
@@ -77,6 +78,8 @@ type Agent struct {
 	// registration that predates the transport, and the inbox (or the webhook,
 	// if one is also configured) is used exactly as before.
 	Hermes *hermesession.Config `json:"hermes_session,omitempty"`
+	// Boardctl is an optional, sender-allowlisted boardctl delivery transport.
+	Boardctl *boardbridge.Config `json:"boardctl,omitempty"`
 	// Guard is the optional LLM message-guard policy config (CR-FEAT-010).
 	// API keys are never part of it — only env: refs (spec §4.1/§9.2).
 	Guard *guard.AgentGuardConfig `json:"guard,omitempty"`

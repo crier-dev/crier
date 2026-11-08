@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/crier-dev/crier/internal/boardbridge"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/hermesession"
 	"github.com/crier-dev/crier/internal/middleware"
@@ -345,7 +347,25 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 		}
 	}
 
-	if target != nil && target.Hermes != nil {
+	if target != nil && target.Boardctl != nil && h.boardctl != nil && target.Boardctl.AllowsSender(req.Sender) {
+		result.Transport, result.DeliveryMode = "boardctl", "blocking"
+		res, berr := h.boardctl.Deliver(ctx, target.Boardctl, req.Sender, payload)
+		if berr != nil {
+			failure, ok := berr.(*boardbridge.Error)
+			if !ok {
+				failure = &boardbridge.Error{ErrorKind: "refused", ExitCode: -1, BoardctlText: berr.Error()}
+			}
+			respond(http.StatusBadRequest, failure)
+			dispatchErr.(*DispatchError).Code = "BOARDCTL_" + strings.ToUpper(failure.ErrorKind)
+			return
+		}
+		result.Reply = res.Payload
+		respond(http.StatusOK, map[string]any{"id": entry.ID, "transport": "boardctl", "reply": res.Payload})
+		deliveriesTotal.Inc()
+		return
+	}
+
+	if target != nil && target.Boardctl == nil && target.Hermes != nil {
 		// The transport must be wired, or this delivery would silently land
 		// in an inbox the agent's own configuration does not name.
 		if h.hermes == nil {
@@ -434,7 +454,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 		return
 	}
 
-	if h.webhooks != nil && target != nil && target.Webhook != nil {
+	if h.webhooks != nil && target != nil && target.Boardctl == nil && target.Webhook != nil {
 		mode := req.DeliveryMode
 		if mode == "" {
 			mode = target.Webhook.DeliveryMode

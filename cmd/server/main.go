@@ -15,12 +15,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/archive"
+	"github.com/crier-dev/crier/internal/boardbridge"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/detect"
@@ -819,6 +821,25 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// credential of its own — each agent's token is read from its own file at
 	// delivery time — so wiring it unconditionally costs nothing.
 	hermesClient := hermesession.NewClient(hermesession.DefaultTimeoutMs * time.Millisecond)
+	bridgeEnabled := false
+	if raw := strings.ToLower(getenv("CR_BOARDCTL_BRIDGE_ENABLED")); raw != "" {
+		switch raw {
+		case "true", "1", "yes":
+			bridgeEnabled = true
+		case "false", "0", "no":
+		default:
+			slog.Error("invalid CR_BOARDCTL_BRIDGE_ENABLED", "value", raw)
+			return 1
+		}
+	}
+	if bridgeEnabled {
+		bridge, bridgeErr := boardbridge.New(&boardbridge.Config{BoardDir: "."}, getenv("CR_BOARDCTL_BIN"))
+		if bridgeErr != nil {
+			slog.Error("boardctl startup failed", "error", bridgeErr)
+			return 1
+		}
+		registryHandler.SetBoardctlBridge(bridge)
+	}
 
 	whClient := webhook.NewClient(cfg.Webhook.Timeout, secret)
 	whDriver := webhook.NewDriver(whClient, webhook.NewMemoryQueue(), webhook.DriverConfig{

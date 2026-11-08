@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crier-dev/crier/internal/boardbridge"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/hermesession"
@@ -207,7 +208,8 @@ type Handler struct {
 	// Nil disables the transport: a session-configured agent is then refused
 	// with HERMES_SESSION_TRANSPORT_UNAVAILABLE instead of being delivered to
 	// the inbox or a webhook it did not configure.
-	hermes *hermesession.Client
+	hermes   *hermesession.Client
+	boardctl *boardbridge.Bridge
 	// fed forwards deliveries for agents unknown on this relay to linked
 	// relays (CR-FEAT-006). Nil disables federation.
 	fed *federation.Client
