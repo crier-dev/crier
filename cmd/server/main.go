@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -925,6 +928,46 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		return 1
 	}
 	var webhookIngest *ingest.Handler
+	var rssCancel context.CancelFunc
+	var rssDone <-chan struct{}
+	// CR_INGEST_RSS_ENABLED is parsed by config.LoadFrom; false leaves the poller unstarted.
+	if cfg.RSS.Enabled {
+		feeds, feedErr := ingest.LoadFeeds(cfg.RSS.ConfigFile, func(id string) bool {
+			_, getErr := regStore.Get(id)
+			return getErr == nil
+		})
+		if feedErr != nil {
+			slog.Error("initialize RSS feeds", "error", feedErr)
+			return 1
+		}
+		for _, feed := range feeds {
+			id := "feed-" + feed.ID
+			if _, getErr := regStore.Get(id); getErr != nil {
+				pub, _, keyErr := ed25519.GenerateKey(rand.Reader)
+				if keyErr != nil {
+					slog.Error("generate RSS agent key", "feed", feed.ID, "error", keyErr)
+					return 1
+				}
+				if regErr := regStore.Register(&registry.Agent{ID: id, PublicKey: registry.HexKey(pub), Capabilities: []string{}}); regErr != nil {
+					slog.Error("register RSS feed identity", "feed", feed.ID, "error", regErr)
+					return 1
+				}
+			}
+		}
+		store, openErr := ingest.OpenStore(filepath.Join(cfg.Session.LogRoot, "rss-state.sqlite"))
+		if openErr != nil {
+			slog.Error("initialize RSS state store", "error", openErr)
+			return 1
+		}
+		defer func() { _ = store.Close() }()
+		rssPoller := &ingest.RSSPoller{Feeds: feeds, Store: store, Inbox: registryInbox{handler: registryHandler}, MaxItemBytes: cfg.RSS.MaxItemBytes}
+		var pollCtx context.Context
+		pollCtx, rssCancel = context.WithCancel(context.Background())
+		defer rssCancel()
+		done := make(chan struct{})
+		rssDone = done
+		go func() { rssPoller.Run(pollCtx); close(done) }()
+	}
 	if cfg.Ingest.Enabled {
 		store, openErr := ingest.OpenStore(cfg.Ingest.StoreFile)
 		if openErr != nil {
@@ -1309,6 +1352,12 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		defer cancel()
 
 		purgeCancel()
+		if rssCancel != nil {
+			rssCancel()
+			if rssDone != nil {
+				<-rssDone
+			}
+		}
 		meshSvc.Stop()
 		if fedHold != nil {
 			// Stop the federation retry worker before the store closes: it

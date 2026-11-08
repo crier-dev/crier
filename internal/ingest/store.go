@@ -45,6 +45,7 @@ func OpenStore(path string) (*Store, error) {
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS ingest_sources (id TEXT PRIMARY KEY, secret BLOB NOT NULL, mapping TEXT NOT NULL, deliver_to TEXT NOT NULL DEFAULT '', tags BLOB NOT NULL, created_at INTEGER NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ingest_dedup (source_id TEXT NOT NULL, event_key TEXT NOT NULL, nonce TEXT NOT NULL, message_id TEXT NOT NULL, payload BLOB NOT NULL, created_at INTEGER NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(source_id,event_key,nonce))`,
+		`CREATE TABLE IF NOT EXISTS feed_state (feed_id TEXT PRIMARY KEY, state_json BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			_ = db.Close()
@@ -83,6 +84,40 @@ func ensureDeliverToColumn(db *sql.DB) error {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) LoadFeedState(ctx context.Context, id string) (FeedState, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT state_json FROM feed_state WHERE feed_id=?`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FeedState{FeedID: id, Seen: map[string]time.Time{}}, nil
+	}
+	if err != nil {
+		return FeedState{}, err
+	}
+	var state FeedState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return FeedState{}, err
+	}
+	if state.Seen == nil {
+		state.Seen = map[string]time.Time{}
+	}
+	return state, nil
+}
+
+func (s *Store) SaveFeedState(ctx context.Context, state FeedState) error {
+	pruneSeen(state.Seen, time.Now().UTC())
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO feed_state(feed_id,state_json,updated_at) VALUES(?,?,?) ON CONFLICT(feed_id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at`, state.FeedID, raw, time.Now().UTC().UnixNano())
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM feed_state WHERE updated_at < ?`, time.Now().UTC().Add(-feedStateTTL).UnixNano())
+	return err
+}
+
 func (s *Store) CreateSource(ctx context.Context, source Source) error {
 	tags, err := json.Marshal(source.Tags)
 	if err != nil {

@@ -294,6 +294,8 @@ type Config struct {
 	Ingress IngressConfig
 	// Ingest is the opt-in webhook-input posture (CRIER-WEBHOOK-RSS-INPUT §3).
 	Ingest IngestConfig
+	// RSS is the default-off RSS/Atom poll-input posture (CRIER-WEBHOOK-RSS-INPUT §4).
+	RSS RSSConfig
 	// MCP holds the crier-mcp bridge's nudge posture (CRIER-MCP-NUDGE,
 	// specs/CRIER-MCP-NUDGE.md §4). The nudge informs, it never reads:
 	// these settings only decide whether the surface is offered at all and
@@ -358,6 +360,12 @@ type IngestConfig struct {
 	ReplayWindow        time.Duration
 	MaxBodyBytes        int
 	SourceRatePerMinute int
+}
+
+type RSSConfig struct {
+	Enabled      bool
+	ConfigFile   string
+	MaxItemBytes int
 }
 
 // DaggerConfig is the dagger control surface's posture (CR-CHAT-033).
@@ -951,6 +959,23 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_INGEST_SOURCE_RATE_PER_MINUTE: %q", v)
 		}
 		cfg.Ingest.SourceRatePerMinute = n
+	}
+
+	if v := strings.TrimSpace(getenv("CR_INGEST_RSS_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_INGEST_RSS_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.RSS.Enabled = parsed
+	}
+	cfg.RSS.ConfigFile = strings.TrimSpace(getenv("CR_INGEST_RSS_CONFIG_FILE"))
+	cfg.RSS.MaxItemBytes = 4096
+	if v := strings.TrimSpace(getenv("CR_INGEST_RSS_MAX_ITEM_BYTES")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INGEST_RSS_MAX_ITEM_BYTES: %q", v)
+		}
+		cfg.RSS.MaxItemBytes = n
 	}
 
 	// Per-backend defaults, so the one switch is enough to run: a deployment

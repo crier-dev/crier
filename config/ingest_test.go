@@ -14,6 +14,9 @@ func TestWebhookIngestDisabledByDefaultAndRequiresStoreWhenEnabled(t *testing.T)
 	if cfg.Ingest.Enabled {
 		t.Fatal("webhook ingest must default off")
 	}
+	if cfg.RSS.Enabled || cfg.RSS.MaxItemBytes != 4096 {
+		t.Fatalf("RSS defaults must be disabled with 4096-byte item limit: %#v", cfg.RSS)
+	}
 	_, err = LoadFrom(func(key string) string {
 		if key == "CR_INGEST_WEBHOOK_ENABLED" {
 			return "true"
