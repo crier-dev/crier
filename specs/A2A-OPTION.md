@@ -1203,12 +1203,13 @@ non-regression gate and every crier route test are untouched.
   that could disagree with it.
 - **Promoting A2A into the default path.** No A2A code runs unless the operator turned the switch on
   *and* the target agent opted in (§1.1, §4).
-- **Signing Agent Cards (§8.4).** `AgentCardSignature` is a JWS over an RFC 8785-canonicalized card,
-  and crier computes none: it would have to canonicalize with RFC 8785 and sign with an agent's
-  ed25519 key, and a signature produced without a verifiable canonicalization path is worse than no
-  signature at all — it looks verifiable and is not. The card therefore carries no `signatures`
-  member. Crier's registry rows keep their ed25519 public keys (readable, authenticated, from
-  `GET /agents/{id}`); publishing them in the card is a separate decision nobody has asked for.
+- **Signing Agent Cards (§8.4).** AgentCards are unsigned by construction: `AgentCardSignature` is a
+  JWS over an RFC 8785-canonicalized card, and crier computes none. Crier has only agents' registered
+  public keys and never holds their private keys, so it cannot produce an agent signature. The card
+  therefore carries no `signatures` member. Crier's registry rows keep their ed25519 public keys
+  (readable, authenticated, from `GET /agents/{id}`); publishing them in the card is a separate
+  decision nobody has asked for. Decision INT-016 withdraws bakeoff claim C06 that crier should
+  JWS-sign AgentCards; the claim conflicts with this binding non-goal.
 - **A provider identity.** `AgentCard.provider` is omitted: the service provider of a crier relay is
   its OPERATOR, crier has no field for that, and a constant organization string would be a claim
   about someone else's deployment.
