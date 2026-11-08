@@ -119,3 +119,4 @@ crier.db
 # Receipt/scratch dirs written by foreman ticks (.coding-hermes/scratch/<tick-id>/).
 # Same class as the wave manifests above: generated, not evidence, never committed.
 .coding-hermes/scratch/
+crier-agent.key
