@@ -5,6 +5,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKER="$SCRIPT_DIR/verify-live-release.sh"
 PROG=verify-live-release-selftest
+# ch:trace row=REVIEW-001 spec=none:board-acceptance wave=crier-foreman-2026-11-08-21-33-49 test=make-verify-live-release-selftest doc=none:repo-verifier prompt=/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-08-21-33-49/brief-REVIEW-001-rework.txt evidence=stdout:valid-fixture-and-altered-hash-arms witness=scripts/verify-live-release-selftest.sh verdict=none:foreman-judges-after-merge commit=none:worker-commit memory=none:foreman-closeout
+# STATUS: partial
+# TIER: T1
+# EVIDENCE: make verify-live-release-selftest
 command -v git >/dev/null 2>&1 || { echo "$PROG: ERROR: git is required" >&2; exit 2; }
 command -v mktemp >/dev/null 2>&1 || { echo "$PROG: ERROR: mktemp is required" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "$PROG: ERROR: jq is required" >&2; exit 2; }
