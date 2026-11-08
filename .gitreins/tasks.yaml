@@ -3757,8 +3757,9 @@ tasks:
     while crier is durable message transport only, citing the 2026-11-08 owner decision;
     PROOF: `make docs-check` exits 0; PROOF: the commit diff names README.md and no
     Go source file. FAILIF: any .go file is modified; FAILIF: docs-check fails.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T06:43:14.670277+00:00'
+  completed_at: '2026-11-08T06:50:50.904176+00:00'
 - id: INT-008
   title: 'Spec DUCKBRAIN-ARCHIVE: archive-then-delete cold tier for dead letters'
   criteria:
