@@ -166,9 +166,12 @@ func TestBunkerWorkflowConcurrencyBoundaries(t *testing.T) {
 	if matrix.Concurrency.Group != "bunker-e2e-target" {
 		t.Errorf("bunker-matrix concurrency group = %q, want shared bunker target group", matrix.Concurrency.Group)
 	}
-	cancelExpr, ok := matrix.Concurrency.CancelInProgress.(string)
-	if !ok || !strings.Contains(cancelExpr, "github.event_name == 'push'") {
-		t.Errorf("bunker-matrix cancel-in-progress = %#v, want push-only cancellation expression", matrix.Concurrency.CancelInProgress)
+	// INT-CI-031/AC4: the matrix leg must NEVER cancel a peer — foreman pushes
+	// land every few minutes, and push-only cancel-in-progress kept killing the
+	// queued matrix legs of dispatch runs, so no run ever reached all-terminal
+	// jobs. The runner consumes a matrix run in ~90s; peers queue instead.
+	if cancel, ok := matrix.Concurrency.CancelInProgress.(bool); !ok || cancel {
+		t.Errorf("bunker-matrix cancel-in-progress = %#v, want false (peers queue; see INT-CI-031)", matrix.Concurrency.CancelInProgress)
 	}
 	if battery.Concurrency.Group != "bunker-e2e-ecosystem" {
 		t.Errorf("ecosystem-battery concurrency group = %q, want isolated ecosystem group", battery.Concurrency.Group)

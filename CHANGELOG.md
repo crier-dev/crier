@@ -11,7 +11,7 @@ contains them — a tag cut first can never contain its own changelog entry. The
 procedure, the gate requirements and the publish step are in
 [docs/releases.md](docs/releases.md).
 
-## [Unreleased]
+## [0.4.1] - 2026-11-08
 
 ### Fixed
 
