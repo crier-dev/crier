@@ -3771,5 +3771,6 @@ tasks:
     the sweep is unchanged (table-diff test passes); PROOF: go build ./... and go
     vet ./... exit 0. FAILIF: a row is deleted before a 2xx archive response; FAILIF:
     the API key value appears in a log line or the repo.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T06:43:18.919618+00:00'
+  completed_at: '2026-11-08T07:12:48.635894+00:00'
