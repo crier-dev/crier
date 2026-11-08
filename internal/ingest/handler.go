@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,9 +69,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type sourceRequest struct {
-	ID      string   `json:"id"`
-	Mapping string   `json:"mapping"`
-	Tags    []string `json:"tags"`
+	ID        string   `json:"id"`
+	Mapping   string   `json:"mapping"`
+	DeliverTo string   `json:"deliver_to"`
+	Tags      []string `json:"tags"`
 }
 
 func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +97,7 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": "secret generation failed"})
 		return
 	}
-	source := Source{ID: req.ID, Secret: secret, Mapping: req.Mapping, Tags: req.Tags, CreatedAt: h.now()}
+	source := Source{ID: req.ID, Secret: secret, Mapping: req.Mapping, DeliverTo: req.DeliverTo, Tags: req.Tags, CreatedAt: h.now()}
 	if err := h.Store.CreateSource(r.Context(), source); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			writeJSON(w, 409, map[string]string{"error": "source already exists"})
@@ -210,35 +212,44 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if duplicate {
-		pendingPayload, delivered, readErr := h.Store.Outbox(r.Context(), id, key, nonce)
-		if readErr != nil {
-			writeJSON(w, 500, map[string]string{"error": "durable outbox read failed"})
-			return
-		}
-		if delivered {
-			writeJSON(w, 200, map[string]any{"duplicate": true, "message_id": acceptedID})
-			return
-		}
-		body = pendingPayload
+		writeJSON(w, http.StatusOK, map[string]any{"duplicate": true, "message_id": acceptedID})
+		return
 	}
+	if err := h.deliver(r.Context(), source, acceptedID, key, body); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "message delivery pending"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"message_id": acceptedID})
+}
+
+func (h *Handler) deliver(ctx context.Context, source Source, messageID, key string, body []byte) error {
 	if h.Inbox == nil {
-		writeJSON(w, 202, map[string]string{"message_id": acceptedID})
-		return
+		return fmt.Errorf("inbox writer is unavailable")
 	}
-	_, err = h.Inbox.Deliver(r.Context(), "", "", ingress.InboxMessage{Author: session.AuthorRef{System: "webhook/" + id}, Kind: session.MessageKind("text"), Text: "webhook event from " + id, Payload: json.RawMessage(body), Tags: source.Tags, IdempotencyKey: key})
+	_, err := h.Inbox.Deliver(ctx, source.DeliverTo, "", ingress.InboxMessage{
+		Author: session.AuthorRef{System: "webhook/" + source.ID},
+		Kind:   session.MessageKind("text"), Text: "webhook event from " + source.ID,
+		Payload: json.RawMessage(body), Tags: source.Tags, IdempotencyKey: key,
+	})
 	if err != nil {
-		writeJSON(w, 202, map[string]string{"message_id": acceptedID})
-		return
+		return err
 	}
-	if err := h.Store.MarkDelivered(r.Context(), id, key, nonce); err != nil {
-		writeJSON(w, 500, map[string]string{"error": "acceptance receipt update failed"})
-		return
+	return h.Store.MarkDelivered(ctx, source.ID, key, messageID)
+}
+
+// Drain retries every durable outbox row still awaiting inbox delivery.
+func (h *Handler) Drain(ctx context.Context) error {
+	rows, err := h.Store.PendingRows(ctx)
+	if err != nil {
+		return err
 	}
-	if duplicate {
-		writeJSON(w, 200, map[string]any{"duplicate": true, "message_id": acceptedID})
-		return
+	var failures []error
+	for _, row := range rows {
+		if err := h.deliver(ctx, row.Source, row.MessageID, row.Key, row.Payload); err != nil {
+			failures = append(failures, fmt.Errorf("deliver %s: %w", row.MessageID, err))
+		}
 	}
-	writeJSON(w, 202, map[string]string{"message_id": acceptedID})
+	return errors.Join(failures...)
 }
 func (h *Handler) RatePerMinuteOrDefault() int {
 	if h.RatePerMinute <= 0 {

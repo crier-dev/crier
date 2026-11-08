@@ -19,9 +19,23 @@ import (
 	"github.com/crier-dev/crier/internal/session"
 )
 
-type captureInbox struct{ messages []ingress.InboxMessage }
+type captureInbox struct {
+	messages []ingress.InboxMessage
+	agents   []string
+	failures int
+	store    *Store
+}
 
-func (c *captureInbox) Deliver(_ context.Context, _ string, _ string, m ingress.InboxMessage) ([]session.DeliveryOutcome, error) {
+func (c *captureInbox) Deliver(_ context.Context, agentID string, _ string, m ingress.InboxMessage) ([]session.DeliveryOutcome, error) {
+	c.agents = append(c.agents, agentID)
+	pending, err := c.store.PendingRows(context.Background())
+	if err != nil || len(pending) == 0 {
+		return nil, fmt.Errorf("outbox row was not durable before inbox delivery: pending=%d err=%v", len(pending), err)
+	}
+	if c.failures > 0 {
+		c.failures--
+		return nil, fmt.Errorf("simulated inbox failure")
+	}
 	c.messages = append(c.messages, m)
 	return []session.DeliveryOutcome{{InboxEntryID: fmt.Sprintf("entry-%d", len(c.messages))}}, nil
 }
@@ -34,9 +48,9 @@ func setup(t *testing.T) (*Handler, *Store, *captureInbox, string, []byte) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Unix(1762627200, 0).UTC()
-	cap := &captureInbox{}
+	cap := &captureInbox{store: store}
 	h := &Handler{Store: store, Inbox: cap, ReplayWindow: 300 * time.Second, RatePerMinute: 60, Now: func() time.Time { return now }}
-	req := httptest.NewRequest(http.MethodPost, "/ingress/sources", strings.NewReader(`{"id":"build-bot","mapping":"passthrough","tags":["webhook","ci"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/ingress/sources", strings.NewReader(`{"id":"build-bot","mapping":"passthrough","deliver_to":"builder-agent","tags":["webhook","ci"]}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != 201 {
@@ -86,7 +100,11 @@ func nonce(n int) string {
 }
 
 func TestSourceSecretIsShownOnceAndPayloadDelivered(t *testing.T) {
-	h, _, cap, id, secret := setup(t)
+	h, store, cap, id, secret := setup(t)
+	configured, err := store.Source(t.Context(), id)
+	if err != nil || configured.Mapping != "passthrough" || configured.DeliverTo != "builder-agent" || strings.Join(configured.Tags, ",") != "webhook,ci" {
+		t.Fatalf("source config=%#v err=%v", configured, err)
+	}
 	list := httptest.NewRecorder()
 	h.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/ingress/sources", nil))
 	if list.Code != 200 || strings.Contains(list.Body.String(), hex.EncodeToString(secret)) {
@@ -103,6 +121,13 @@ func TestSourceSecretIsShownOnceAndPayloadDelivered(t *testing.T) {
 	m := cap.messages[0]
 	if m.Author.System != "webhook/"+id || m.Text != "webhook event from "+id || string(m.Payload) != string(body) || strings.Join(m.Tags, ",") != "webhook,ci" {
 		t.Fatalf("bad mapped message: %#v", m)
+	}
+	if len(cap.agents) != 1 || cap.agents[0] != "builder-agent" {
+		t.Fatalf("delivery target=%v, want [builder-agent]", cap.agents)
+	}
+	replay := signedRequest(t, h, id, secret, body, 1762627200, nonce(1))
+	if replay.Code != http.StatusOK || len(cap.messages) != 1 || len(cap.agents) != 1 {
+		t.Fatalf("replay status=%d deliveries=%d attempts=%d body=%s", replay.Code, len(cap.messages), len(cap.agents), replay.Body.String())
 	}
 }
 func TestSignatureReplayWindowAndPersistentDedup(t *testing.T) {
@@ -142,6 +167,46 @@ func TestSignatureReplayWindowAndPersistentDedup(t *testing.T) {
 		t.Fatalf("message count=%d", len(cap.messages))
 	}
 }
+func TestFailedDeliveryRemainsPendingAndDrainDeliversOnce(t *testing.T) {
+	h, store, cap, id, secret := setup(t)
+	cap.failures = 1
+	body := []byte(`{"run":"retry"}`)
+	n := nonce(77)
+	first := signedRequest(t, h, id, secret, body, 1762627200, n)
+	if first.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed enqueue status=%d body=%s", first.Code, first.Body.String())
+	}
+	keyHash := sha256.Sum256(body)
+	key := hex.EncodeToString(keyHash[:])
+	pending, err := store.Pending(t.Context(), id, key, n)
+	if err != nil || !pending {
+		t.Fatalf("outbox pending=%v err=%v", pending, err)
+	}
+	if len(cap.messages) != 0 || len(cap.agents) != 1 {
+		t.Fatalf("failed request messages=%d attempts=%d", len(cap.messages), len(cap.agents))
+	}
+	replay := signedRequest(t, h, id, secret, body, 1762627200, n)
+	if replay.Code != http.StatusOK || len(cap.messages) != 0 || len(cap.agents) != 1 {
+		t.Fatalf("pending replay status=%d messages=%d attempts=%d", replay.Code, len(cap.messages), len(cap.agents))
+	}
+	if err := h.Drain(t.Context()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	pending, err = store.Pending(t.Context(), id, key, n)
+	if err != nil || pending {
+		t.Fatalf("after drain pending=%v err=%v", pending, err)
+	}
+	if len(cap.messages) != 1 || len(cap.agents) != 2 {
+		t.Fatalf("after drain messages=%d attempts=%d", len(cap.messages), len(cap.agents))
+	}
+	if err := h.Drain(t.Context()); err != nil {
+		t.Fatalf("second drain: %v", err)
+	}
+	if len(cap.messages) != 1 || len(cap.agents) != 2 {
+		t.Fatalf("second drain duplicated delivery: messages=%d attempts=%d", len(cap.messages), len(cap.agents))
+	}
+}
+
 func TestOversizeAndDuplicateJSONRefusedBeforeHMAC(t *testing.T) {
 	h, _, _, id, secret := setup(t)
 	oversized := signedRequest(t, h, id, secret, []byte(`{"x":"`+strings.Repeat("a", DefaultMaxBodyBytes)+`"}`), 1762627200, nonce(4))
