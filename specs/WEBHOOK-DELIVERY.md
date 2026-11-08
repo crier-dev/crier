@@ -351,6 +351,12 @@ source relay classifies a failed forward attempt into exactly three outcomes:
 - Retry runs until delivery succeeds or the hold budget (`CR_FED_MAX_HOLD_S`) expires. A retry re-POSTs the
   **same bytes** as the original attempt (same hop header, same link auth) and the delivery is removed from
   the queue the moment a 2xx is seen, so a recovery forwards it exactly once.
+- **INT-011 decision — receipt-only; dead-letter archive remains TTL-only.** Hold-budget exhaustion emits the
+  terminal `FEDERATION_FAILED` receipt described below and removes the exhausted item from the federation
+  hold queue. It does not append a registry dead-letter record for either sender or target, and it does not
+  invoke the dead-letter archive hook. Registry dead-letter rows continue to originate from inbox TTL expiry;
+  the archive hook processes those rows at dead-letter retention expiry. The bakeoff claim that federation
+  hold exhaustion archives a dead letter is false for the shipped behavior.
 - **A recovered delivery's reply is dropped, by design** (DF-CRIER-282). The successful retry has no
   synchronous reply path: the original request completed with `202` and its caller is gone, so the source
   relay logs the linked relay's answer (`message_id`, `target`, `sender`, `attempts`, `status`, response

@@ -285,8 +285,10 @@ func TestHandleDeliverFederationRecoveryDeliversOnceAndReportsNothing(t *testing
 
 // TestHandleDeliverFederationExhaustionNotifiesSenderExactlyOnce is the
 // terminal contract: the hold budget expires and the sender gets exactly one
-// durable FEDERATION_FAILED entry carrying the correlation context.
-func TestHandleDeliverFederationExhaustionNotifiesSenderExactlyOnce(t *testing.T) {
+// durable FEDERATION_FAILED entry carrying the correlation context. INT-011
+// pins the chosen receipt-only arm: exhaustion creates no dead-letter record
+// for either sender or target (the archive hook is retention-sweep-only).
+func TestHandleDeliverFederationExhaustionIsReceiptOnlyNoDeadLetter(t *testing.T) {
 	t.Parallel()
 	relay := newHoldRelay(t, http.StatusServiceUnavailable, "")
 	srv := httptest.NewServer(relay.handler())
@@ -332,6 +334,19 @@ func TestHandleDeliverFederationExhaustionNotifiesSenderExactlyOnce(t *testing.T
 	msgs := inboxMessages(t, store, "agent-1")
 	if len(msgs) != 1 {
 		t.Fatalf("sender inbox = %d notifications, want exactly 1", len(msgs))
+	}
+	deadLetterStore, ok := store.(DeadLetterStore)
+	if !ok {
+		t.Fatal("test store does not expose the dead-letter capability")
+	}
+	for _, agentID := range []string{"agent-1", "agent-remote"} {
+		deadLetters, err := deadLetterStore.ListDeadLetters(agentID, 10)
+		if err != nil {
+			t.Fatalf("list %s dead letters: %v", agentID, err)
+		}
+		if len(deadLetters) != 0 {
+			t.Errorf("%s dead letters = %d, want 0: federation exhaustion is receipt-only", agentID, len(deadLetters))
+		}
 	}
 	entry := msgs[0]
 	if entry.AgentID != "agent-1" {
