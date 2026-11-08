@@ -1890,7 +1890,12 @@ func countSharedDeliverPath(repoRoot string) (any, error) {
 	if n := strings.Count(src, "func (h *Handler) deliver("); n != 1 {
 		return nil, fmt.Errorf("internal/registry/handler.go declares %d `func (h *Handler) deliver(` — CR-FEAT-026 relies on a SINGLE shared deliver implementation", n)
 	}
-	callers := strings.Count(src, "h.deliver(w, r, ")
+	// Pattern matches BOTH call shapes: `h.deliver(w, r, …)` (capability
+	// wrapper) and `h.deliver(w, r.WithContext(ctx), …)` (by-id wrapper, which
+	// binds a tracing context since 3bd01f5b). Counting the literal `w, r, `
+	// broke the count 2->1 when tracing arrived — an instrument bug, not a
+	// lost path; the by-id delivery is unchanged.
+	callers := strings.Count(src, "h.deliver(w, r")
 	if callers == 0 {
 		return nil, fmt.Errorf("no `h.deliver(w, r, …)` call site found in internal/registry/handler.go — the shared deliver path is unreachable")
 	}
