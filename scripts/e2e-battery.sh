@@ -78,6 +78,30 @@
 #   path (a delivery on A for an agent only B knows relays THROUGH the link
 #   with A's real key proof, and B's 201 rides back). Teardown reaps both
 #   relays by the exact pids the port guard asserted (never a pattern match).
+#   federation forward hold/drain (INT-004B): the PEERED pair's forward leg
+#   across a TRANSIENT link failure. Two more relays run in peer-records mode
+#   with INT-004A's helpers (operator pin + mutual handshake in both
+#   directions, linked instance keys), and the source links THROUGH its own
+#   link proxy — the same lever the chaos cell uses, pointed at this cell's
+#   peer, so the hold/drain machinery is reused and only the peer-to-peer
+#   forward leg is new. The link is proven up first (a real forward rides
+#   back 201 and acks clean — never partition an unproven link), then cut:
+#   ONE forward during the outage is HELD at the source — 202
+#   {"status":"held"} naming the target and CR_FED_MAX_HOLD_S, with the hold
+#   queue carrying exactly it (crier_federation_held_current = 1). Recovery
+#   IS the proxy coming back: the queue drains to 0, the forward lands at the
+#   peer EXACTLY ONCE with the payload round-tripping intact and acks clean,
+#   and the ORIGIN sender's inbox is measured receipt-free — the documented
+#   recovery contract (specs/WEBHOOK-DELIVERY.md §8.1, DF-CRIER-282: a
+#   recovered delivery's reply routes nowhere BY DESIGN; the only inbox
+#   receipt the hold machinery writes is the terminal FEDERATION_FAILED, and
+#   a recovery is not a failure). Then a CROSS-NAMESPACE forward is refused
+#   with the documented error (specs/NAMESPACES.md §5): the deliver names a
+#   namespace the target's row does not carry, the claim rides the forward to
+#   the peer, and the peer's 403 NAMESPACE_MISMATCH — nothing stored — rides
+#   back to the caller carrying the linked peer's FED_ALLOWED verdict on the
+#   wire. Teardown reaps the pair and its proxy by the exact pids the port
+#   guard asserted (never a pattern match).
 #
 # Usage: scripts/e2e-battery.sh [port]     (default 18782; falls back if taken)
 set -uo pipefail
@@ -103,9 +127,9 @@ SERVER_PID=""
 # CR-FEAT-032 chaos-cell processes (declared before the trap so `set -u` cannot
 # trip on an early exit): the two linked relays, the link proxy and the guard
 # relay. Every one of them is reaped by the EXIT trap and by the teardown cell.
-FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; PROXY_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""
+FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; PROXY_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""; FEDFW_A_PID=""; FEDFW_B_PID=""; FEDFW_PROXY_PID=""
 WORKDIR="$(mktemp -d)"
-trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; [ -n "$FEDA_PID" ] && kill "$FEDA_PID" 2>/dev/null; [ -n "$FEDB_PID" ] && kill "$FEDB_PID" 2>/dev/null; [ -n "$GUARD_PID" ] && kill "$GUARD_PID" 2>/dev/null; [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; [ -n "$A2A_PID" ] && kill "$A2A_PID" 2>/dev/null; [ -n "$FEDHS_A_PID" ] && kill "$FEDHS_A_PID" 2>/dev/null; [ -n "$FEDHS_B_PID" ] && kill "$FEDHS_B_PID" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
+trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; [ -n "$FEDA_PID" ] && kill "$FEDA_PID" 2>/dev/null; [ -n "$FEDB_PID" ] && kill "$FEDB_PID" 2>/dev/null; [ -n "$GUARD_PID" ] && kill "$GUARD_PID" 2>/dev/null; [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null; [ -n "$A2A_PID" ] && kill "$A2A_PID" 2>/dev/null; [ -n "$FEDHS_A_PID" ] && kill "$FEDHS_A_PID" 2>/dev/null; [ -n "$FEDHS_B_PID" ] && kill "$FEDHS_B_PID" 2>/dev/null; [ -n "$FEDFW_A_PID" ] && kill "$FEDFW_A_PID" 2>/dev/null; [ -n "$FEDFW_B_PID" ] && kill "$FEDFW_B_PID" 2>/dev/null; [ -n "$FEDFW_PROXY_PID" ] && kill "$FEDFW_PROXY_PID" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
 
 say() { echo "== $*"; }
 ev() { printf '{"ts":"%s","probe":"%s","http":%s,"want":%s,"ok":%s}\n' \
@@ -1274,6 +1298,232 @@ ccheck "federation handshake: the forwarded message is retrievable at B (200)" 2
 ceq "federation handshake: the forwarded payload round-trips intact" '{"fed":"relayed-proof"}' "$(first_payload "$WORKDIR/fedhs-fwd-inbox.json")"
 
 # ══════════════════════════════════════════════════════════════════════════════
+say "federation forward hold/drain — the peered pair's forward across a transient link failure (INT-004B)"
+# INT-004B. INT-004A proved the peer-linked forward on a healthy link; this
+# cell drives that SAME forward through an outage and back, reusing INT-004A's
+# handshake helpers (fedhs_keyid / fedhs_handshake / the operator pin) and the
+# relay-partition chaos cell's hold/drain machinery (the same link-proxy lever
+# script, the same 202-held classification, the same hold-queue metric) with
+# only the peer-to-peer forward leg added:
+#
+#   1. two instances in peer-records mode are LINKED (operator pin pending ->
+#      mutual handshake in both directions) — the forward's trust is the
+#      linked instance keys, never the shared deployment token;
+#   2. the link is PROVEN up: a real forward rides back 201 and acks clean
+#      (never partition an unproven link);
+#   3. the partition is PROVEN: the link proxy stops answering while the peer
+#      stays healthy;
+#   4. ONE forward during the outage is HELD: 202 {"status":"held"} naming the
+#      target and CR_FED_MAX_HOLD_S, and the source's hold queue carries
+#      exactly it (crier_federation_held_current = 1);
+#   5. recovery IS the proxy coming back: the queue drains to 0, the forward
+#      lands at the peer EXACTLY ONCE with the payload intact, acks clean,
+#      and the ORIGIN sender's inbox is measured receipt-free — the documented
+#      recovery contract (specs/WEBHOOK-DELIVERY.md §8.1, DF-CRIER-282: a
+#      recovered delivery's reply routes nowhere BY DESIGN; the only inbox
+#      receipt the hold machinery writes is the terminal FEDERATION_FAILED,
+#      and a recovery is not a failure);
+#   6. a CROSS-NAMESPACE forward is REFUSED with the documented error
+#      (specs/NAMESPACES.md §5): the deliver names a namespace the target's
+#      row does not carry, the claim rides the forward to the peer, and the
+#      peer's 403 NAMESPACE_MISMATCH — nothing stored — rides back to the
+#      caller carrying the linked peer's FED_ALLOWED verdict on the wire.
+#
+# FAIL CLOSED: the chaos cell's own discipline — require_free_port +
+# assert_port_owned on both relays, the proxy must report itself bound, the
+# baseline must relay BEFORE anything is partitioned, and teardown reaps the
+# pair and its proxy by the exact pids recorded here (never a pattern match).
+#
+# ch:trace row=INT-004B spec=specs/WEBHOOK-DELIVERY.md#8-federation-cr-feat-006-p2 spec=specs/NAMESPACES.md#5-where-a-realm-is-decided-and-why-that-is-the-crossing-defence wave=none:single-serial-cell test=scripts/e2e-battery.sh::federation-forward-hold-drain evidence=scripts/e2e-battery.sh witness=none:live-battery-run-output-is-ephemeral-and-quoted-in-the-closeout verdict=none:open-finding commit=none:open memory=none:no-project-namespace-key-resolves-for-this-row
+select_scratch_port "" 18941 "federation forward peer relay B (INT-004B)" 8
+FEDFW_B_PORT="$PORT_GUARD_SELECTED"
+select_scratch_port "" 18961 "federation forward link proxy (INT-004B)" 8
+FEDFW_PROXY_PORT="$PORT_GUARD_SELECTED"
+select_scratch_port "" 18981 "federation forward source relay A (INT-004B)" 8
+FEDFW_A_PORT="$PORT_GUARD_SELECTED"
+FEDFWA="http://127.0.0.1:$FEDFW_A_PORT"
+FEDFWB="http://127.0.0.1:$FEDFW_B_PORT"
+FEDFW_STAMP="$(date +%s)"
+FW_A="fed-fw-a-$FEDFW_STAMP"              # CR_FED_NAME = the forward pair's source instance id
+FW_B="fed-fw-b-$FEDFW_STAMP"              # ...and the peer instance id
+FEDFW_AGENT="fed-fw-remote-$FEDFW_STAMP"  # hosted on B only — deliveries to it must federate
+FEDFW_SENDER="fed-fw-sender-$FEDFW_STAMP" # hosted on A — the address a terminal outcome is reported to
+FEDFW_NS="fw-ns-$FEDFW_STAMP"             # the cross-namespace claim: a realm the target's row does NOT carry
+echo "      federation forward ports: source A :$FEDFW_A_PORT  peer B :$FEDFW_B_PORT  link proxy :$FEDFW_PROXY_PORT (CR_FED_MAX_HOLD_S=$CHAOS_HOLD_S)"
+
+# ── this cell's own link lever: the SAME link-proxy.py the chaos cell wrote,
+#    pointed at THIS cell's peer. start/kill mirror the chaos cell's
+#    start_link_proxy / kill_link_proxy without touching their globals, so
+#    killing this proxy is a real mid-flight partition of a live linked pair
+#    and restarting it is real recovery. ─────────────────────────────────────
+start_fw_proxy() { # returns 1 when the lever never bound (the caller aborts)
+  python3 "$WORKDIR/link-proxy.py" "$FEDFW_PROXY_PORT" "$FEDFW_B_PORT" > "$WORKDIR/fedfw-proxy.log" 2>&1 &
+  FEDFW_PROXY_PID=$!
+  local i=0
+  while [ "$i" -lt 50 ]; do
+    grep -q "PROXY READY" "$WORKDIR/fedfw-proxy.log" 2>/dev/null && return 0
+    kill -0 "$FEDFW_PROXY_PID" 2>/dev/null || return 1
+    sleep 0.1; i=$((i+1))
+  done
+  return 1
+}
+kill_fw_proxy() { # drop the link; the peer keeps running
+  if [ -n "${FEDFW_PROXY_PID:-}" ]; then
+    kill "$FEDFW_PROXY_PID" 2>/dev/null
+    wait "$FEDFW_PROXY_PID" 2>/dev/null
+  fi
+  FEDFW_PROXY_PID=""
+}
+
+# ── the pair's instance keys (INT-004A's PKCS#8 ed25519 shape) ───────────────
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fedfw-a.key" 2>/dev/null
+openssl genpkey -algorithm ED25519 -out "$WORKDIR/fedfw-b.key" 2>/dev/null
+openssl pkey -in "$WORKDIR/fedfw-a.key" -pubout -out "$WORKDIR/fedfw-a.pub.pem" 2>/dev/null
+openssl pkey -in "$WORKDIR/fedfw-b.key" -pubout -out "$WORKDIR/fedfw-b.pub.pem" 2>/dev/null
+FW_A_PUBHEX="$(openssl pkey -in "$WORKDIR/fedfw-a.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+FW_B_PUBHEX="$(openssl pkey -in "$WORKDIR/fedfw-b.key" -pubout -outform DER 2>/dev/null | tail -c 32 | xxd -p -c 64)"
+
+# ── peer relay B: owns the remote agent ──────────────────────────────────────
+require_free_port "$FEDFW_B_PORT" "federation forward peer relay B"
+env -i PATH="$PATH" HOME="$HOME" \
+  CRIER_PORT="$FEDFW_B_PORT" CR_AUTH_TOKEN="$CHAOS_TOKEN" CR_REQUIRE_AGENT_SIG=false \
+  CR_GUARD_ENABLED=false CR_RATE_LIMIT_PER_MINUTE=600 \
+  CR_FED_NAME="$FW_B" CR_FED_RECORDS_FILE="$WORKDIR/fedfw-peers-b.json" \
+  CR_FED_SELF_KEY_FILE="$WORKDIR/fedfw-b.key" \
+  ./bin/crier > "$WORKDIR/fedfw-b.log" 2>&1 &
+FEDFW_B_PID=$!
+wait_http_or_die "http://127.0.0.1:$FEDFW_B_PORT/health" "$FEDFW_B_PID" "$WORKDIR/fedfw-b.log" "federation forward peer relay B"
+assert_port_owned "$FEDFW_B_PORT" "$FEDFW_B_PID" "federation forward peer relay B"
+
+if ! start_fw_proxy; then
+  echo "      proxy log: $(head -c 300 "$WORKDIR/fedfw-proxy.log" 2>/dev/null | tr -d '\n')"
+  cfatal "federation forward link proxy bound" "the forward cell's link proxy never bound :$FEDFW_PROXY_PORT — no link, no cell"
+fi
+PASS=$((PASS+1)); echo "PASS  federation forward hold/drain: link proxy bound :$FEDFW_PROXY_PORT -> peer B :$FEDFW_B_PORT (pid $FEDFW_PROXY_PID, asserted)"
+ev "fedfw link proxy bound" 0 0 true
+
+# ── source relay A: links THROUGH the proxy, holds for CR_FED_MAX_HOLD_S ─────
+require_free_port "$FEDFW_A_PORT" "federation forward source relay A"
+env -i PATH="$PATH" HOME="$HOME" \
+  CRIER_PORT="$FEDFW_A_PORT" CR_AUTH_TOKEN="$CHAOS_TOKEN" CR_REQUIRE_AGENT_SIG=false \
+  CR_GUARD_ENABLED=false CR_RATE_LIMIT_PER_MINUTE=600 CR_ENABLE_METRICS=true \
+  CR_FED_NAME="$FW_A" CR_FED_RECORDS_FILE="$WORKDIR/fedfw-peers-a.json" \
+  CR_FED_SELF_KEY_FILE="$WORKDIR/fedfw-a.key" \
+  CR_FED_LINKS="http://127.0.0.1:$FEDFW_PROXY_PORT" \
+  CR_FED_MAX_HOLD_S="$CHAOS_HOLD_S" \
+  ./bin/crier > "$WORKDIR/fedfw-a.log" 2>&1 &
+FEDFW_A_PID=$!
+wait_http_or_die "http://127.0.0.1:$FEDFW_A_PORT/health" "$FEDFW_A_PID" "$WORKDIR/fedfw-a.log" "federation forward source relay A"
+assert_port_owned "$FEDFW_A_PORT" "$FEDFW_A_PID" "federation forward source relay A"
+PASS=$((PASS+1)); echo "PASS  federation forward hold/drain: pair up — source A :$FEDFW_A_PORT ($FW_A, links through the proxy, CR_FED_MAX_HOLD_S=$CHAOS_HOLD_S, metrics on), peer B :$FEDFW_B_PORT ($FW_B, owns the remote agent) — ownership asserted"
+ev "fedfw relays up" 0 0 true
+
+creq "$FEDFWA" POST /agents "{\"id\":\"$FEDFW_SENDER\",\"public_key\":\"$PUBHEX\"}"
+ccheck "federation forward hold/drain: the sender agent registered on the source relay A (201)" 201
+creq "$FEDFWB" POST /agents "{\"id\":\"$FEDFW_AGENT\",\"public_key\":\"$PUBHEX\",\"capabilities\":[\"fed-fw\"]}"
+ccheck "federation forward hold/drain: the remote agent registered on the peer relay B (201)" 201
+creq "$FEDFWA" GET "/agents/$FEDFW_AGENT"
+ccheck "federation forward hold/drain: the target is UNKNOWN on A (404) — any delivery to it must federate" 404
+
+# ── 1. the pair is LINKED: operator pin, then INT-004A's mutual handshake ────
+creq "$FEDFWB" POST /fed/peers "{\"id\":\"$FW_A\",\"public_key\":\"$FW_A_PUBHEX\",\"url\":\"$FEDFWA\",\"direction\":\"both\"}"
+ccheck "federation forward hold/drain: relay B pins relay A's identity (201 pending)" 201 '"state":"pending"'
+creq "$FEDFWA" POST /fed/peers "{\"id\":\"$FW_B\",\"public_key\":\"$FW_B_PUBHEX\",\"url\":\"http://127.0.0.1:$FEDFW_PROXY_PORT\",\"direction\":\"both\"}"
+ccheck "federation forward hold/drain: relay A pins relay B's identity (201 pending)" 201 '"state":"pending"'
+fedhs_handshake "$FW_A" "$WORKDIR/fedfw-a.key" "$FW_A_PUBHEX" "$FEDFWB" "$FW_B" "$WORKDIR/fedfw-b.pub.pem" 0
+fedhs_handshake "$FW_B" "$WORKDIR/fedfw-b.key" "$FW_B_PUBHEX" "$FEDFWA" "$FW_A" "$WORKDIR/fedfw-a.pub.pem" 0
+creq "$FEDFWA" GET /fed/peers
+ccheck "federation forward hold/drain: relay A's listing serves the linked peer set (200)" 200 '"peers"'
+printf '%s' "$CBODY" > "$WORKDIR/fedfw-listing-a.json"
+ceq "federation forward hold/drain: relay A lists exactly ONE peer ($FW_B) and it is LINKED" "linked" "$(jfield "$WORKDIR/fedfw-listing-a.json" peers.0.state)"
+creq "$FEDFWB" GET /fed/peers
+ccheck "federation forward hold/drain: relay B's listing serves the linked peer set (200)" 200 '"peers"'
+printf '%s' "$CBODY" > "$WORKDIR/fedfw-listing-b.json"
+ceq "federation forward hold/drain: relay B lists exactly ONE peer ($FW_A) and it is LINKED" "linked" "$(jfield "$WORKDIR/fedfw-listing-b.json" peers.0.state)"
+
+# ── 2. the link is PROVEN up before anything is partitioned ──────────────────
+creq "$FEDFWA" POST "/agents/$FEDFW_AGENT/inbox" \
+  "{\"payload\":{\"fed-fw\":\"baseline\",\"phase\":\"link-up\"},\"sender\":\"$FEDFW_SENDER\",\"request_id\":\"fedfw-baseline\"}"
+ccheck "federation forward hold/drain: the link is PROVEN up — the baseline forward RELAYS over the linked pair (the peer's 201 rides back)" 201 '"transport":"inbox"'
+creq "$FEDFWB" GET "/agents/$FEDFW_AGENT/inbox/stats"
+ccheck "federation forward hold/drain: the baseline was stored at the peer (queue_depth 1)" 200 '"queue_depth":1'
+creq "$FEDFWB" GET "/agents/$FEDFW_AGENT/inbox"
+printf '%s' "$CBODY" > "$WORKDIR/fedfw-base-inbox.json"
+ccheck "federation forward hold/drain: the baseline is retrievable at the peer (200, leased)" 200 '"lease_id"'
+creq "$FEDFWB" POST "/agents/$FEDFW_AGENT/inbox/ack" \
+  "{\"lease_id\":\"$(jfield "$WORKDIR/fedfw-base-inbox.json" lease_id)\",\"message_ids\":[\"$(jfield "$WORKDIR/fedfw-base-inbox.json" messages.0.id)\"]}"
+ccheck "federation forward hold/drain: the baseline acks clean (204) — the peer inbox is empty for the hold leg" 204
+
+# ── 3. the partition, mid-flight ─────────────────────────────────────────────
+kill_fw_proxy
+if ss -tln 2>/dev/null | grep -q ":${FEDFW_PROXY_PORT} "; then
+  cfatal "federation forward partition established" "the link lever still listens on :$FEDFW_PROXY_PORT"
+fi
+FW_PART_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$FEDFW_PROXY_PORT/health" 2>/dev/null || true)"
+[ "$FW_PART_CODE" = "000" ] || cfatal "federation forward partition established" ":$FEDFW_PROXY_PORT still answers (HTTP ${FW_PART_CODE:-none}) after the lever was killed"
+if ! curl -sf -m 2 "http://127.0.0.1:$FEDFW_B_PORT/health" >/dev/null 2>&1; then
+  cfatal "federation forward partition established" "the PEER B :$FEDFW_B_PORT is unhealthy — that is not a link partition"
+fi
+PASS=$((PASS+1)); echo "PASS  federation forward hold/drain: partition established — the link :$FEDFW_PROXY_PORT refuses connections while the peer :$FEDFW_B_PORT stays healthy"
+ev "fedfw partition established" 0 0 true
+
+# ── 4. ONE forward during the outage is HELD at the source ───────────────────
+FEDFW_HELD_PAYLOAD='{"fed-fw":"held-then-recovered","phase":"partitioned"}'
+creq "$FEDFWA" POST "/agents/$FEDFW_AGENT/inbox" \
+  "{\"payload\":$FEDFW_HELD_PAYLOAD,\"sender\":\"$FEDFW_SENDER\",\"request_id\":\"fedfw-hold-1\"}"
+ccheck "federation forward hold/drain: the forward during the partition is HELD at the source (202 held), never a 404" 202 '"status":"held"'
+printf '%s' "$CBODY" > "$WORKDIR/fedfw-held.json"
+FEDFW_HELD_ID="$(jfield "$WORKDIR/fedfw-held.json" id)"
+ceq "federation forward hold/drain: the held response names the target agent" "$FEDFW_AGENT" "$(jfield "$WORKDIR/fedfw-held.json" target)"
+ceq "federation forward hold/drain: the held response names the configured CR_FED_MAX_HOLD_S" "$CHAOS_HOLD_S" "$(jfield "$WORKDIR/fedfw-held.json" max_hold_s)"
+[ -n "$FEDFW_HELD_ID" ] || cfatal "federation forward held id" "the 202 held body carried no message id"
+creq "$FEDFWA" GET /metrics
+FW_MET_HELD="$(printf '%s' "$CBODY" | awk '/^crier_federation_held_current /{print $2; exit}')"
+ceq "federation forward hold/drain: the hold queue carries exactly the one partitioned forward (crier_federation_held_current)" 1 "$FW_MET_HELD"
+
+# ── 5. recovery: the link comes back and the held forward drains ─────────────
+if ! start_fw_proxy; then
+  cfatal "federation forward recovery drain" "the link proxy never came back on :$FEDFW_PROXY_PORT"
+fi
+echo "      link restored (proxy pid $FEDFW_PROXY_PID) — waiting for the retry worker to drain the held forward"
+FW_DRAINED=0
+for _ in $(seq 1 30); do # ≤ 15s, the same drain window the chaos cell uses
+  creq "$FEDFWA" GET /metrics
+  [ "$(printf '%s' "$CBODY" | awk '/^crier_federation_held_current /{print $2; exit}')" = "0" ] && { FW_DRAINED=1; break; }
+  sleep 0.5
+done
+ceq "federation forward hold/drain: the held forward was RETRIED and drained on recovery (crier_federation_held_current -> 0)" 1 "$FW_DRAINED"
+creq "$FEDFWB" GET "/agents/$FEDFW_AGENT/inbox"
+printf '%s' "$CBODY" > "$WORKDIR/fedfw-recovered.json"
+ccheck "federation forward hold/drain: the drained forward landed at the peer and is retrievable (200)" 200 '"lease_id"'
+ceq "federation forward hold/drain: the drained forward arrived EXACTLY ONCE (one message at the peer)" 1 "$(jlen "$WORKDIR/fedfw-recovered.json" messages)"
+ceq "federation forward hold/drain: the drained bytes are the delivered bytes (payload round-trip intact)" "$FEDFW_HELD_PAYLOAD" "$(first_payload "$WORKDIR/fedfw-recovered.json")"
+creq "$FEDFWB" POST "/agents/$FEDFW_AGENT/inbox/ack" \
+  "{\"lease_id\":\"$(jfield "$WORKDIR/fedfw-recovered.json" lease_id)\",\"message_ids\":[\"$(jfield "$WORKDIR/fedfw-recovered.json" messages.0.id)\"]}"
+ccheck "federation forward hold/drain: the recovered forward acks clean (204)" 204
+creq "$FEDFWA" GET "/agents/$FEDFW_SENDER/inbox"
+ccheck "federation forward hold/drain: the ORIGIN inbox carries NO receipt after the recovery (spec §8.1 DF-CRIER-282: a recovered reply routes nowhere BY DESIGN — the only inbox receipt is the terminal FEDERATION_FAILED, and a recovery is not a failure)" 200 '"messages":[]'
+ceq "federation forward hold/drain: exactly ONE recovery drain logged on the source relay" 1 "$(grep -c 'held delivery recovered' "$WORKDIR/fedfw-a.log" 2>/dev/null || true)"
+
+# ── 6. a CROSS-NAMESPACE forward is REFUSED with the documented error ────────
+# The claim is only ever CHECKED against the target's stored row, never
+# believed (specs/NAMESPACES.md §5): the source has no target row, so the
+# claim rides the forward to the peer, whose target sits in the default realm
+# — the mismatched claim is refused 403 NAMESPACE_MISMATCH with nothing
+# stored, and that refusal rides back to the caller verbatim (the Relayed
+# outcome of §8.1's table) carrying the peer's FED_ALLOWED ingress verdict,
+# which is what proves the refusal came FROM THE LINKED PEER and not from the
+# source (the source never had a row to check the claim against).
+creq "$FEDFWA" POST "/agents/$FEDFW_AGENT/inbox" \
+  "{\"payload\":{\"fed-fw\":\"cross-ns\"},\"sender\":\"$FEDFW_SENDER\",\"namespace\":\"$FEDFW_NS\",\"request_id\":\"fedfw-cross-ns\"}" \
+  -D "$WORKDIR/fedfw-xns.hdr"
+ccheck "federation forward hold/drain: a CROSS-NAMESPACE forward is REFUSED with the documented error (403 NAMESPACE_MISMATCH)" 403 '"error":"NAMESPACE_MISMATCH"'
+FW_XNS_VERDICT="$(tr -d '\r' < "$WORKDIR/fedfw-xns.hdr" 2>/dev/null | sed -n 's/^[Xx]-[Cc]rier-[Ff]ed-[Vv]erdict: //p' | head -1)"
+ceq "federation forward hold/drain: the refusal rode back FROM THE LINKED PEER (X-Crier-Fed-Verdict: FED_ALLOWED on the wire — the peer's registry refused the claim, not the source)" "FED_ALLOWED" "$FW_XNS_VERDICT"
+creq "$FEDFWB" GET "/agents/$FEDFW_AGENT/inbox/stats"
+ccheck "federation forward hold/drain: the refused forward stored NOTHING at the peer (queue_depth 0)" 200 '"queue_depth":0'
+
+# ══════════════════════════════════════════════════════════════════════════════
 # INT-A2A-006 — the two cells that keep the A2A option honest.
 #
 # The standing constraint (Bane, 2026-09-25, restated into every row of the
@@ -1785,15 +2035,16 @@ fi
 # too, and every port they bound is asserted free — a listener left behind is
 # exactly the leak class DF-CRIER-206/CR-GAP-069 exist for.
 kill_link_proxy
-for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID"; do
+kill_fw_proxy # INT-004B's lever: its proxy is left RUNNING by the recovery drain, so teardown reaps it by exact pid
+for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID" "$FEDFW_A_PID" "$FEDFW_B_PID"; do
   [ -n "$chaos_pid" ] && kill "$chaos_pid" 2>/dev/null
 done
-for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID"; do
+for chaos_pid in "$FEDA_PID" "$FEDB_PID" "$GUARD_PID" "$A2A_PID" "$FEDHS_A_PID" "$FEDHS_B_PID" "$FEDFW_A_PID" "$FEDFW_B_PID"; do
   [ -n "$chaos_pid" ] && wait "$chaos_pid" 2>/dev/null
 done
-FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""
+FEDA_PID=""; FEDB_PID=""; GUARD_PID=""; A2A_PID=""; FEDHS_A_PID=""; FEDHS_B_PID=""; FEDFW_A_PID=""; FEDFW_B_PID=""; FEDFW_PROXY_PID=""
 sleep 1
-for chaos_port in "$FEDPROXY_PORT" "$FEDA_PORT" "$FEDB_PORT" "$GUARD_PORT" "$A2A_PORT" "$FEDHS_A_PORT" "$FEDHS_B_PORT"; do
+for chaos_port in "$FEDPROXY_PORT" "$FEDA_PORT" "$FEDB_PORT" "$GUARD_PORT" "$A2A_PORT" "$FEDHS_A_PORT" "$FEDHS_B_PORT" "$FEDFW_PROXY_PORT" "$FEDFW_A_PORT" "$FEDFW_B_PORT"; do
   if ss -tln 2>/dev/null | grep -q ":${chaos_port} "; then
     FAIL=$((FAIL+1)); echo "FAIL  chaos port :${chaos_port} still held after kill"
   else
