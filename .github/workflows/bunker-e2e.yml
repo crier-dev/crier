@@ -44,11 +44,15 @@ jobs:
     runs-on: [self-hosted, bunker]
     needs: docker-image
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && needs.docker-image.result == 'success'))
-    # Every event deploys to crier-lab:30011. New pushes still supersede stale
-    # matrix work; schedule/dispatch runs queue rather than cancelling a peer.
+    # Every event deploys to crier-lab:30011. Serialize the bunker target across
+    # ALL events: the runner consumes a matrix run in ~90s, so queueing is cheap,
+    # and cancel-in-progress here is what kept cancelling the queued matrix legs
+    # of dispatch runs (INT-CI-031/AC4) every time a foreman push landed mid-queue.
+    # A dead runner stacking runs forever is the failure this guards against —
+    # watch runner liveness instead of cancelling peers.
     concurrency:
       group: bunker-e2e-target
-      cancel-in-progress: ${{ github.event_name == 'push' }}
+      cancel-in-progress: false
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       EVIDENCE: /tmp/bunker-matrix-ci.jsonl
