@@ -3907,3 +3907,12 @@ tasks:
   status: complete
   created_at: '2026-11-08T13:38:39.576822+00:00'
   completed_at: '2026-11-08T14:14:17.002769+00:00'
+- id: INT-004B
+  title: Federation forward hold/drain battery cell
+  criteria:
+  - 'FAILIF: scripts/e2e-battery.sh does not add and pass the federation forward hold/drain
+    cell with cross-namespace refusal. PROOF: bash scripts/e2e-battery.sh exits 0
+    and prints the named cell, receipt, and documented refusal.'
+  status: complete
+  created_at: '2026-11-08T16:33:59.670933+00:00'
+  completed_at: '2026-11-08T17:36:21.961464+00:00'
