@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,9 +100,12 @@ type Result struct {
 
 // Bridge serializes invocations per agent and never interprets message text as argv.
 type Bridge struct {
-	bin string
-	mu  sync.Mutex
+	bin        string
+	startupErr string
+	mu         sync.Mutex
 }
+
+const maxReplyBytes = 64 * 1024
 
 func New(c *Config, globalBin string) (*Bridge, error) {
 	if err := c.Validate(); err != nil {
@@ -126,9 +130,37 @@ func New(c *Config, globalBin string) (*Bridge, error) {
 	if err != nil || st.Mode()&0111 == 0 {
 		return nil, fmt.Errorf("CR_BOARDCTL_BIN %q is missing or not executable", abs)
 	}
-	return &Bridge{bin: abs}, nil
+	bridge := &Bridge{bin: abs}
+	bridge.startupProbe(c.BoardDir)
+	return bridge, nil
 }
+
+func (b *Bridge) startupProbe(boardDir string) {
+	doctor := exec.Command(b.bin, "-C", boardDir, "doctor")
+	if err := doctor.Run(); err != nil {
+		code := -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
+		}
+		slog.Error("boardctl doctor exit=" + fmt.Sprint(code))
+	}
+	version := exec.Command(b.bin, "version", "--json")
+	_ = version.Run()
+	header := exec.Command(b.bin, "-C", boardDir, "header", "--json")
+	out, err := header.Output()
+	if err != nil || !json.Valid(bytes.TrimSpace(out)) {
+		b.startupErr = fmt.Sprintf("boardctl refused: board header unparsable at %s", boardDir)
+	}
+}
+
 func (b *Bridge) Deliver(ctx context.Context, c *Config, sender string, raw []byte) (*Result, error) {
+	if b.startupErr != "" {
+		return nil, &Error{ErrorKind: "refused", ExitCode: -1, BoardctlText: b.startupErr}
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, &Error{ErrorKind: "refused", ExitCode: -1, BoardctlText: "empty command"}
+	}
 	if !c.AllowsSender(sender) {
 		return nil, errors.New("sender not allowlisted")
 	}
@@ -142,6 +174,10 @@ func (b *Bridge) Deliver(ctx context.Context, c *Config, sender string, raw []by
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	st, statErr := os.Stat(b.bin)
+	if statErr != nil || st.Mode()&0111 == 0 {
+		return nil, &Error{ErrorKind: "unavailable", ExitCode: -1, BoardctlText: "pinned binary " + b.bin + " no longer executable"}
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 	cmd := exec.Command(b.bin, argv...)
@@ -192,7 +228,58 @@ func (b *Bridge) Deliver(ctx context.Context, c *Config, sender string, raw []by
 	if !json.Valid(payload) {
 		return nil, &Error{ErrorKind: "crash", ExitCode: 0, BoardctlText: "boardctl returned invalid JSON"}
 	}
-	return &Result{Payload: append(json.RawMessage(nil), payload...)}, nil
+	text := replySummary(env, payload)
+	if env.Op == "create" || env.Op == "update" {
+		text += " … (uncommitted; board files commit via your board flow)"
+	}
+	if len(payload) > maxReplyBytes {
+		truncated := len(payload) - (maxReplyBytes - 256)
+		note := fmt.Sprintf("… (%d bytes truncated; use a narrower filter)", truncated)
+		encoded, _ := json.Marshal(string(payload[:maxReplyBytes-256]) + note)
+		payload = encoded
+	}
+	return &Result{Payload: append(json.RawMessage(nil), payload...), Text: text}, nil
+}
+
+func replySummary(env Envelope, payload []byte) string {
+	var value any
+	_ = json.Unmarshal(payload, &value)
+	if env.Op == "list" {
+		count := 0
+		switch v := value.(type) {
+		case []any:
+			count = len(v)
+		case map[string]any:
+			if rows, ok := v["rows"].([]any); ok {
+				count = len(rows)
+			} else {
+				count = len(v)
+			}
+		}
+		return fmt.Sprintf("Listed %d rows", count)
+	}
+	if env.Op == "create" || env.Op == "update" {
+		id, _ := env.Args["id"].(string)
+		status := ""
+		if requested, ok := env.Args["status"].(string); ok {
+			status = requested
+		}
+		if row, ok := value.(map[string]any); ok {
+			if v, ok := row["id"].(string); ok && v != "" {
+				id = v
+			}
+			if v, ok := row["status"].(string); ok && v != "" {
+				status = v
+			}
+			if nested, ok := row["row"].(map[string]any); ok {
+				if v, ok := nested["status"].(string); ok {
+					status = v
+				}
+			}
+		}
+		return fmt.Sprintf("Row %s status %s", strings.Join(strings.Fields(id), " "), strings.Join(strings.Fields(status), " "))
+	}
+	return "Boardctl command completed"
 }
 
 func Parse(c *Config, raw []byte) (Envelope, error) {

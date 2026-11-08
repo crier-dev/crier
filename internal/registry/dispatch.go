@@ -360,7 +360,7 @@ func (h *Handler) Dispatch(ctx context.Context, target *Agent, delivery Delivery
 			return
 		}
 		result.Reply = res.Payload
-		respond(http.StatusOK, map[string]any{"id": entry.ID, "transport": "boardctl", "reply": res.Payload})
+		respond(http.StatusOK, map[string]any{"id": entry.ID, "transport": "boardctl", "reply": res.Payload, "text": res.Text})
 		deliveriesTotal.Inc()
 		return
 	}

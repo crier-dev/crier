@@ -1,20 +1,27 @@
 package boardbridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
 
 func fakeBoardctl(t *testing.T, body string) string {
 	t.Helper()
+	t.Setenv("LOG", filepath.Join(t.TempDir(), "argv.log"))
+	t.Setenv("TIMING_LOG", filepath.Join(t.TempDir(), "timing.log"))
 	path := filepath.Join(t.TempDir(), "boardctl")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LOG\"\n" + body + "\n"
+	script := "#!/bin/sh\n: \"${TIMING_LOG:=$LOG}\"\nif [ \"$3\" = doctor ]; then exit \"${DOCTOR_EXIT:-0}\"; fi\nif [ \"$1 $2\" = 'version --json' ]; then printf '{}\\n'; exit 0; fi\nif [ \"$3\" = header ]; then if [ \"${INVALID_HEADER:-0}\" = 1 ]; then printf 'not-json\\n'; else printf '{}\\n'; fi; exit 0; fi\nprintf '%s\\n' \"$*\" >> \"$LOG\"\nprintf 'start %s\\n' \"$(date +%s%N)\" >> \"$TIMING_LOG\"\n" + body + "\nprintf 'end %s\\n' \"$(date +%s%N)\" >> \"$TIMING_LOG\"\n"
 	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +146,10 @@ func TestConcurrentDeliveriesSerialize(t *testing.T) {
 
 func TestTimeoutKillsProcessGroup(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "argv.log")
+	pidFile := filepath.Join(t.TempDir(), "pid")
 	t.Setenv("LOG", log)
-	bin := fakeBoardctl(t, `sleep 20; printf '{"ok":true}'`)
+	t.Setenv("PID_FILE", pidFile)
+	bin := fakeBoardctl(t, `echo $$ > "$PID_FILE"; sleep 20; printf '{"ok":true}'`)
 	cfg := &Config{BoardDir: t.TempDir(), TimeoutSecs: 5, SenderAllowlist: []string{"s"}}
 	bridge, err := New(cfg, bin)
 	if err != nil {
@@ -154,6 +163,172 @@ func TestTimeoutKillsProcessGroup(t *testing.T) {
 	}
 	if time.Since(start) > 7*time.Second {
 		t.Fatalf("timeout took %s", time.Since(start))
+	}
+	pidBytes, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("child pid marker: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		err = syscall.Kill(-pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process group %d still exists after timeout (probe error %v)", pid, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestReplyCatalogSummariesAndMutationNote(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, output, want string
+	}{
+		{"create", `{"v":1,"op":"create","args":{"id":"INT-101","title":"new"}}`, `{"id":"INT-101","status":"ready"}`, "Row INT-101 status ready … (uncommitted; board files commit via your board flow)"},
+		{"update", `{"v":1,"op":"update","args":{"id":"INT-102","status":"blocked"}}`, `{"id":"INT-102","status":"blocked"}`, "Row INT-102 status blocked … (uncommitted; board files commit via your board flow)"},
+		{"list", `{"v":1,"op":"list","args":{}}`, `{"rows":[{},{}]}`, "Listed 2 rows"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := fakeBoardctl(t, `case "$3" in create) printf '`+tc.output+`' ;; update) printf '`+tc.output+`' ;; list) printf '`+tc.output+`' ;; *) printf '{"ok":true}' ;; esac`)
+			cfg := &Config{BoardDir: t.TempDir(), SenderAllowlist: []string{"s"}}
+			bridge, err := New(cfg, bin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := bridge.Deliver(context.Background(), cfg, "s", []byte(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Text != tc.want {
+				t.Fatalf("text=%q want %q", got.Text, tc.want)
+			}
+			if string(got.Payload) != tc.output {
+				t.Fatalf("payload=%s want verbatim %s", got.Payload, tc.output)
+			}
+		})
+	}
+}
+
+func TestStartupDoctorFailureLogsAndHeaderFailureRefuses(t *testing.T) {
+	bin := fakeBoardctl(t, `printf '{"ok":true}'`)
+	cfg := &Config{BoardDir: t.TempDir(), SenderAllowlist: []string{"s"}}
+	t.Setenv("DOCTOR_EXIT", "3")
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	bridge, err := New(cfg, bin)
+	if err != nil {
+		t.Fatalf("doctor failure blocked startup: %v", err)
+	}
+	if !strings.Contains(logs.String(), "boardctl doctor exit=3") {
+		t.Fatalf("doctor log=%q", logs.String())
+	}
+	t.Setenv("INVALID_HEADER", "1")
+	bridge, err = New(cfg, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []string{"show", "list"} {
+		arg := `{"v":1,"op":"` + op + `","args":{"id":"INT-1"}}`
+		if op == "list" {
+			arg = `{"v":1,"op":"list","args":{}}`
+		}
+		_, err := bridge.Deliver(context.Background(), cfg, "s", []byte(arg))
+		failure, ok := err.(*Error)
+		want := "boardctl refused: board header unparsable at " + cfg.BoardDir
+		if !ok || failure.BoardctlText != want {
+			t.Fatalf("%s refusal=%#v want text %q", op, err, want)
+		}
+	}
+	if data, readErr := os.ReadFile(os.Getenv("LOG")); readErr == nil && len(data) != 0 {
+		t.Fatalf("delivery spawned boardctl: %s", data)
+	}
+}
+
+func TestEmptyCommandAndPinnedBinaryLoss(t *testing.T) {
+	bin := fakeBoardctl(t, `printf '{"ok":true}'`)
+	cfg := &Config{BoardDir: t.TempDir(), SenderAllowlist: []string{"s"}}
+	bridge, err := New(cfg, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bridge.Deliver(context.Background(), cfg, "s", []byte(" \n\t"))
+	if err == nil || err.Error() != "refused: empty command" {
+		t.Fatalf("empty command error=%v", err)
+	}
+	if data, readErr := os.ReadFile(os.Getenv("LOG")); readErr == nil && len(data) != 0 {
+		t.Fatalf("empty command spawned boardctl: %s", data)
+	}
+	if err := os.Chmod(bin, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = bridge.Deliver(context.Background(), cfg, "s", []byte(`{"v":1,"op":"list","args":{}}`))
+	failure, ok := err.(*Error)
+	want := "pinned binary " + bin + " no longer executable"
+	if !ok || failure.BoardctlText != want {
+		t.Fatalf("binary-loss error=%#v want %q", err, want)
+	}
+}
+
+func TestOutputTruncatesAt64KiBWithGuidance(t *testing.T) {
+	bin := fakeBoardctl(t, `printf '{"rows":"'; head -c 70000 /dev/zero | tr '\000' x; printf '"}'`)
+	cfg := &Config{BoardDir: t.TempDir(), SenderAllowlist: []string{"s"}}
+	bridge, err := New(cfg, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := bridge.Deliver(context.Background(), cfg, "s", []byte(`{"v":1,"op":"list","args":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Payload) > maxReplyBytes || !strings.Contains(string(got.Payload), "bytes truncated; use a narrower filter") {
+		t.Fatalf("truncated payload len=%d tail=%q", len(got.Payload), got.Payload[len(got.Payload)-80:])
+	}
+}
+
+func TestConcurrentDeliveriesSerializeWithNonOverlappingTimestamps(t *testing.T) {
+	bin := fakeBoardctl(t, `sleep 0.12; printf '{"ok":true}'`)
+	cfg := &Config{BoardDir: t.TempDir(), SenderAllowlist: []string{"s"}}
+	bridge, err := New(cfg, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"v":1,"op":"list","args":{}}`)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, e := bridge.Deliver(context.Background(), cfg, "s", payload); e != nil {
+				t.Error(e)
+			}
+		}()
+	}
+	wg.Wait()
+	data, err := os.ReadFile(os.Getenv("TIMING_LOG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Fields(string(data))
+	if len(lines) != 8 || lines[0] != "start" || lines[2] != "end" || lines[4] != "start" || lines[6] != "end" {
+		t.Fatalf("timestamp markers=%q", data)
+	}
+	endFirst, err := strconv.ParseInt(lines[3], 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startSecond, err := strconv.ParseInt(lines[5], 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endFirst > startSecond {
+		t.Fatalf("serialized spans overlap: end1=%d start2=%d", endFirst, startSecond)
 	}
 }
 
