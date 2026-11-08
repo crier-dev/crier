@@ -3665,3 +3665,43 @@ tasks:
   status: complete
   created_at: '2026-11-08T03:28:54.971918+00:00'
   completed_at: '2026-11-08T03:34:39.747659+00:00'
+- id: INT-003
+  title: 'Bakeoff C03+C04 KEEP OURS guard: one battery pinning lease/ACK and federation
+    dead-letter semantics'
+  criteria:
+  - 'AC1 exactly one new test file under internal/ holds a battery whose five named
+    subtests map 1:1 to the row AC items: (1) Retrieve mints no lease for an empty
+    or fully-leased inbox, (2) an expired lease becomes claimable again, (3) ACK removes
+    an entry exactly once and a second ACK follows the documented ErrMessageNotFound/ErrLeaseConflict
+    contract, (4) federation hold retries with capped exponential backoff and lands
+    the delivery in the dead-letter store after capacity exhaustion, (5) an auth refusal
+    is never retried. AC2 every subtest asserts behaviour and fails if the property
+    is removed; for any property already pinned by an existing test the battery must
+    reuse or explicitly cross-reference that test rather than duplicating it silently,
+    and the commit message must state which properties were new coverage and which
+    were consolidated. AC3 go test -count=1 -run <BatteryName> on the touched packages
+    exits 0 and the commit message quotes the real summary lines. AC4 go build ./...
+    and go vet ./... results are quoted in the commit message. Judge from the tree
+    and the commit message: no single command needs more than 30 seconds, and existing
+    tests must not be weakened or deleted.'
+  status: complete
+  created_at: '2026-11-08T03:50:15.765644+00:00'
+  completed_at: '2026-11-08T04:31:09.226395+00:00'
+- id: INT-003-R1
+  title: Re-judge INT-003 battery against the corrected shipped-contract criterion
+  criteria:
+  - 'internal/registry/inbox_lease_ack_battery_test.go defines TestInboxLeaseAckBattery
+    with exactly five subtests: (1) Retrieve mints no lease for an empty or fully-leased
+    inbox; (2) an expired lease becomes claimable again and the stale lease is rejected
+    with ErrLeaseConflict; (3) a second ACK returns ErrMessageNotFound or ErrLeaseConflict;
+    (4) federation hold backoff grows to and stays at MaxRetryInterval, exhaustion
+    removes the held item and delivers exactly one FEDERATION_FAILED receipt to the
+    sender, while registry AppendDeadLetter is idempotent and ListDeadLetters is newest-first
+    and limit-bounded; (5) a 403 refusal is forwarded once and reported once. The
+    file contains no t.Skip, and the graded commits add no product code and modify
+    no existing test or doc. Verify by running, in the repository root: go test -count=1
+    -v -run TestInboxLeaseAckBattery ./internal/registry (five PASS subtests, zero
+    SKIP), then go build ./... and go vet ./... (both exit 0). Graded commit b08a8ad6,
+    the shipped-contract correction of row INT-003 after verdict 23b3d07d.'
+  status: in_progress
+  created_at: '2026-11-08T04:44:57.619307+00:00'
