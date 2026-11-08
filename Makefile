@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest verify-live-release-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -34,6 +34,7 @@ help:
 	@echo "  build             Compile the main server binary into bin/crier"
 	@echo "  toolchain-check   Compare the running Go toolchain with the floor READ from go.mod's \`go\` directive — OK, or an actionable FAIL naming both versions and the bootstrap that must install at or above the floor (DF-CRIER-496)"
 	@echo "  toolchain-selftest  Prove that check still rejects a simulated go1.26.5 against today's floor, accepts a toolchain at/above it, derives the floor from go.mod, and fails closed on unreadable input — PATH shims only, no network (DF-CRIER-496)"
+	@echo "  verify-live-release-selftest Verify offline release ancestry and process-executable hash checks, including altered-hash rejection (REVIEW-001)"
 	@echo "  build-mcp         Compile the MCP server binary into bin/crier-mcp"
 	@echo "  build-front       Compile the authenticating front into bin/crier-front (DF-CRIER-333)"
 	@echo "  front-e2e         Prove the shipped front makes /chat usable: direct 401, fronted panel, real send, token absent from page source/storage (DF-CRIER-333)"
@@ -199,6 +200,9 @@ toolchain-check:
 
 toolchain-selftest:
 	@bash scripts/toolchain-check-selftest.sh
+
+verify-live-release-selftest:
+	@bash scripts/verify-live-release-selftest.sh
 
 # QA-CRIER-46: verify module metadata is tidy without mutating the developer
 # tree. The archive contains the current tracked source, while the explicit
