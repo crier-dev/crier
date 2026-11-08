@@ -3903,5 +3903,6 @@ tasks:
     and operator-gated /fed/peers, assert real proof verification and documented bad-proof
     refusal, with exact-pid teardown; bash scripts/e2e-battery.sh exits 0 and prints
     the named PASS cell.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T13:38:39.576822+00:00'
+  completed_at: '2026-11-08T14:14:17.002769+00:00'
