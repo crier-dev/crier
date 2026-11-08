@@ -3883,5 +3883,6 @@ tasks:
     the transport - ''grep -rl internal/boardbridge internal/registry/*.go | wc -l''
     is at least 1; (h) the tracked spec carries the quorum amendment - ''grep -ci
     "typed command envelope" specs/CRIER-BOARDCTL-BRIDGE.md'' is at least 1.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T10:42:41.301996+00:00'
+  completed_at: '2026-11-08T10:43:05.386201+00:00'
