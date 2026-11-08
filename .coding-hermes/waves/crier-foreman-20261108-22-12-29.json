@@ -1,0 +1,11 @@
+{
+  "tick": "crier-foreman-2026-11-08-22-12-29",
+  "block": "REVIEW-001",
+  "mode": "serial-fallback-rework",
+  "wave_size": 1,
+  "wave_budget": 12,
+  "slots": 6,
+  "sizing": "nproc=16, loadavg=3.73, slots=max(1,min(6,16-ceil(3.73)))=6; only one ready implementation row in the selected block, so serial fallback",
+  "rows": [{"id":"REVIEW-001","worktree":"/home/kara/worktrees/crier-REVIEW-001","branch":"wt/REVIEW-001","base":"8a1ae1d1d0d7f35874a5116fb0678c97033d5aac","worker_commit":"15b8eb21378a6b405b8021bfd9061f054ad7df1a","status":"merged","brief":"Add a non-descendant/orphan fixture arm to verify-live-release-selftest.sh so disabling the ancestry guard fails the selftest; preserve existing evidence arms; do not modify board files."}],
+  "manifest_note": "Written during closeout because the dispatch manifest was not persisted before the serial rework dispatch; the board event records this as a closeout/reconciliation manifest, not as evidence that it existed pre-dispatch."
+}
