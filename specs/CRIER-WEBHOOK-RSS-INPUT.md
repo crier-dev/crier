@@ -263,3 +263,39 @@ poller tick (per feed, interval + jitter)
 4. **Q-B2** Replay window 300s: too tight for batched/queued senders (CI retries after network
    partition can exceed 5 min)? The persistent dedup ledger (R9) already absorbs re-fires, so
    the window can stay tight. Default: 300s.
+
+## 8. Quorum amendments (2026-11-08)
+
+A chimera quorum adversarial review of this spec returned **BUILD WITH CHANGES**.
+Seats: redteam `gpt-5.6-sol`, architect `grok-4.5`, challenger `kimi-k2.7-code`,
+merge (aggregator) `qwen3.7-max` — total cost $0.33. Full verdict:
+`/home/kara/.hermes/cache/spillover/chatcmpl-tool-9efc3d70c8fcf76d.txt`.
+The amendments below are BINDING and supersede any conflicting R-item in §§1–7.
+
+1. **Envelope HMAC (amends R7/R8/R9 — kills cross-source impersonation and
+   representation divergence).** The signature input is the FULL request envelope:
+   `HMAC(secret, method + "\n" + canonical_path + "\n" + authenticated_source_id +
+   "\n" + timestamp + "\n" + nonce + "\n" + sha256(rawBody))`, where the
+   `source_id` bound inside the MAC must equal the URL-path source (the path
+   parameter alone no longer identifies the caller) and the nonce is a
+   caller-supplied random value (≥ 16 bytes entropy) that is part of the
+   persistent dedup key. A body containing duplicate JSON keys, or an encoding
+   that is ambiguous (stacked/conflicting transfer or content encodings, charset
+   disagreement, or any transformation the verifier would normalize differently
+   from the downstream parser), is refused 400 BEFORE HMAC verification — the
+   bytes signed and the bytes parsed must be provably the same representation.
+2. **Atomic accept (amends R9 — kills the double-delivery / silent-loss pivot).**
+   Dedup-ledger consume and inbox enqueue are ONE durable transaction
+   (transactional outbox): the ledger row and the inbox message commit atomically
+   or not at all, and no 2xx (202, or 200 duplicate) is returned before durable
+   acceptance is committed. A crash between verification and enqueue leaves the
+   request re-playable (no ledger row) — never double-delivered (message without
+   ledger row) and never silently lost (ledger row without message).
+3. **RSS hardening (amends R17/R19/R22).** (a) HTTPS-only is re-affirmed and the
+   fetch client enforces an SSRF guard that rejects loopback, private/link-local
+   (RFC 1918, 169.16/12-adjacent link-local, fe80::/10), and cloud-metadata
+   addresses — re-validated on EVERY redirect hop, not only the configured URL.
+   (b) Messages derived from external feed content are marked UNTRUSTED end to
+   end: guard lanes treat them as untrusted input, never as instructions to
+   crier itself. (c) The dedup/guid ledger and the per-feed seen-id state gain
+   TTL pruning so the persistent ledgers stay bounded.

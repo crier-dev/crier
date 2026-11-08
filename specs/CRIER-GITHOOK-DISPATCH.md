@@ -175,3 +175,34 @@ pushed (R9), crier down during 3-5 (R13 spool), crier up but the agent's transpo
    `CR_INGEST_WEBHOOK_ENABLED` (saves one manual step, but creates a secret nobody recorded)?
    Default: manual registration — the once-shown secret discipline (WEBHOOK-RSS-INPUT R4)
    requires a human to store it in the 0600 file anyway.
+
+## 10. Quorum amendments (2026-11-08)
+
+A chimera quorum adversarial review returned **RECONSIDER** for this spec, with a
+fatal flaw: hooks as change-data-capture miss fast-forward pulls and rebases (no
+post-commit fires), and the bounded drop-after-3 spool silently loses rows —
+visibility restricted to hook stderr (swallowed by git) or local logs, silent to
+operators. Seats: redteam `gpt-5.6-sol`, architect `grok-4.5`, challenger
+`kimi-k2.7-code`, merge (aggregator) `qwen3.7-max` — total cost $0.33. Full
+verdict: `/home/kara/.hermes/cache/spillover/chatcmpl-tool-9efc3d70c8fcf76d.txt`.
+The amendments below REPLACE the v1 failure posture (§4 R13/R14) and the
+idempotency rule (R11); the hook's role is demoted, crier's is promoted.
+
+1. **Hooks are BEST-EFFORT intake only (amends R8/R12).** Hook discovery is an
+   optimization, never the delivery guarantee. The DURABLE path is a crier-side
+   RECONCILIATION SWEEP: on a cadence (default 10m) crier diffs its delivery
+   queue against the board's row set and enqueues any row present on the board
+   but absent from its queue. This catch-all makes every hook miss — fast-forward
+   pulls, rebases, spool loss, crashed hooks — non-fatal: every row is
+   eventually seen even if hooks never fire.
+2. **Dead-letter instead of drop-with-log (replaces R13/R14).** After the bounded
+   retry budget the batch is written to a PERSISTENT dead-letter store with
+   operator-visible telemetry (count, last failure reason, row ids) — never
+   silently dropped. **"Drop-with-log" is REMOVED from the contract.**
+3. **One logical event key per row (replaces R11).** SEEN and ADDED for the same
+   row MUST map to ONE logical event key: `boardctl:<row-id>:<content-hash>` —
+   the event verb is no longer part of the key, so the double-queue
+   (SEEN-during-pull then ADDED-by-commit) collapses. Rows whose row-id changes
+   through rebase/cherry-pick dedupe on the CONTENT hash: a re-queued clone is
+   absorbed, and an edit keeping the same row-id with new content is a NEW
+   logical event (delivered) instead of being silently suppressed.

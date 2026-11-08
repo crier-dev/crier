@@ -174,3 +174,34 @@ event --type audit --detail-text "…"
    already.
 3. **Q-3** Response latency: `list` on a 900-row board via CLI is ~100ms; is a per-agent
    response cache worth it? Default: no cache until measured slow.
+
+## 10. Quorum amendments (2026-11-08)
+
+A chimera quorum adversarial review returned **RECONSIDER** for this spec, with a
+fatal flaw: parsing message TEXT as argv is unpatchable at a trust boundary — flag
+injection through allowlisted subcommands (`add --config=/tmp/evil.json`,
+`show --output /tmp/exfil`) and positional values beginning with `-` parsed as
+flags, both due to unspecified text-to-argv tokenization (whitespace splitting
+also breaks quoted paths). Seats: redteam `gpt-5.6-sol`, architect `grok-4.5`,
+challenger `kimi-k2.7-code`, merge (aggregator) `qwen3.7-max` — total cost $0.33.
+Full verdict: `/home/kara/.hermes/cache/spillover/chatcmpl-tool-9efc3d70c8fcf76d.txt`.
+The v1 §3.2 text-as-argv grammar is REPLACED by the contract below.
+
+1. **Typed command envelope (replaces R5/R6).** The delivered message MUST be a
+   versioned JSON/CBOR command envelope: `{"v":1,"op":"show","args":{"id":"INT-007"}}`.
+   An envelope with an unknown `v`, an `op` outside the agent's `allowed_ops`, or
+   args failing the strict per-op schema ALLOWLIST (closed key set, typed values,
+   no embedded flag syntax — an args value beginning with `-` is a refusal, never
+   a token; `--` is forced before any user-controlled value) is refused with a
+   named error BEFORE any subprocess spawns. The bridge alone constructs argv
+   from validated fields: no invocation token originates from raw message text.
+2. **Sender-command ACL (new).** Inbox delivery does NOT imply execution
+   permission: each board-manager agent carries an explicit allowlist of senders
+   whose command envelopes it executes. Deliveries from senders not on the
+   allowlist inbox-land as inert text. Default: EMPTY allowlist (fail-closed —
+   nobody may execute until explicitly granted at registration).
+3. **Structured error mapping (extends R10).** boardctl exit codes map to typed
+   structured errors in the reply — `{"error_kind":"refused"|"timeout"|"crash"|
+   "unavailable","exit_code":N,"boardctl_text":"…"}` — instead of free-text
+   passthrough only; boardctl's verbatim refusal text is carried inside the
+   structure, never lost.
