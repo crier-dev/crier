@@ -1,0 +1,33 @@
+{
+  "tick": "crier-foreman-2026-11-08-20-28-10",
+  "project": "crier",
+  "block": "INT-004B",
+  "base": "144521ccbd7721f18be9bd49e691b80f1dc1a4e8",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 1,
+  "mode": "reconciliation",
+  "rows": [
+    {
+      "id": "INT-004A",
+      "worktree": "/home/kara/worktrees/crier-INT-004A",
+      "branch": "wt/INT-004A",
+      "commit": "144521ccbd7721f18be9bd49e691b80f1dc1a4e8",
+      "independence": "Already landed; independently verified against the published tip."
+    },
+    {
+      "id": "INT-004B",
+      "worktree": "/home/kara/worktrees/crier-INT-004B",
+      "branch": "wt/INT-004B",
+      "commit": "144521ccbd7721f18be9bd49e691b80f1dc1a4e8",
+      "independence": "Only actionable implementation row in the selected block after reconciling INT-004A."
+    }
+  ],
+  "dispatch": "reconciliation-only; no new worker",
+  "evidence": {
+    "block_drive": "REVIEW-001, RELEASE-018, and INT-004B ranked as DRIVE. INT-004A and INT-004B were already landed on main but had stale pending board rows; INT-010 is a coordinator contract, INT-015 is cross-repo, and REVIEW-001 is host-gated.",
+    "local_gate": "bash scripts/e2e-battery.sh -> BATTERY RESULT: 281 pass / 0 fail; go build ./... && go vet ./... -> PASS; go test ./... -count=1 -> PASS",
+    "remote_ci": "gh run list --repo crier-dev/crier --limit 3 -> all three completed success",
+    "remote_parity_before_closeout": "origin/main and gitlab/main matched HEAD"
+  }
+}
