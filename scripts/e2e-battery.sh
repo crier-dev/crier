@@ -1299,6 +1299,7 @@ ceq "federation handshake: the forwarded payload round-trips intact" '{"fed":"re
 
 # ══════════════════════════════════════════════════════════════════════════════
 say "federation forward hold/drain — the peered pair's forward across a transient link failure (INT-004B)"
+# ch:trace row=INT-004B spec=specs/WEBHOOK-DELIVERY.md#8-federation-cr-feat-006-p2 spec=specs/NAMESPACES.md#5-where-a-realm-is-decided-and-why-that-is-the-crossing-defence test=scripts/e2e-battery.sh::federation-forward-hold-drain evidence=scripts/e2e-battery.sh witness=none:live-battery-run-output-is-ephemeral-and-quoted-in-the-closeout verdict=none:open-finding commit=none:open memory=none:no-project-namespace-key-resolves-for-this-row
 # INT-004B. INT-004A proved the peer-linked forward on a healthy link; this
 # cell drives that SAME forward through an outage and back, reusing INT-004A's
 # handshake helpers (fedhs_keyid / fedhs_handshake / the operator pin) and the
