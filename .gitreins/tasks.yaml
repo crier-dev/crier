@@ -3784,8 +3784,9 @@ tasks:
     prints rc=0 (the retention test is unmodified). FAILIF: the retention test is
     edited, skipped or deleted to go green. FAILIF: the purge predicate is weakened
     without a matching assertion.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T08:00:06.955039+00:00'
+  completed_at: '2026-11-08T08:21:07.240202+00:00'
 - id: INT-011
   title: 'Federation hold exhaustion: decide wire-vs-document for dead-letter archive'
   criteria:
@@ -3799,8 +3800,9 @@ tasks:
     vet ./... and go test ./internal/federation/ -count=1 exit 0. FAILIF: both arms
     are claimed or neither arm is recorded. FAILIF: a dead-letter record is written
     more than once for one exhaustion.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T08:00:13.402126+00:00'
+  completed_at: '2026-11-08T08:31:21.454491+00:00'
 - id: INT-016
   title: Decide the AgentCard signature contract (bakeoff C06 vs A2A-OPTION section
     7)
