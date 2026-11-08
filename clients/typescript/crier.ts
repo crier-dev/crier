@@ -53,7 +53,10 @@
  *    per-agent signed. Registration carries the public key in the body;
  *    delivery is open to any sender.
  *  - POST /relay/publish needs the X-Agent-ID header (the relay's rate limiter
- *    keys on it); the signature is not verified there.
+ *    keys on it). This client sends that header only, so its publishes offer no
+ *    proof; the relay verifies the signature trio whenever a publisher DOES
+ *    offer it (a bogus signature is 401 "signature verification failed") and
+ *    accepts a publish that carries no proof at all.
  *  - If the server was started with CR_AUTH_TOKEN, every request except the five
  *    exempt paths (/health, /version, /openapi.json, /openapi.yaml, /docs) needs
  *    `Authorization: Bearer <token>` — including the WebSocket upgrade, which is

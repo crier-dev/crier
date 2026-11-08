@@ -279,9 +279,12 @@ async function main(): Promise<number> {
     else fail(`expected 401 for a foreign signature, got ${(exc as Error).message}`);
   }
 
-  // -- [11] informational: the relay does not verify the publish signature --
-  step("informational: does the relay verify the publish signature? (README says no)");
+  // -- [11] informational: is an OFFERED publish signature verified? ------
+  step("informational: does the relay verify an offered publish signature? (README: signing is optional, but offered proof is checked)");
   try {
+    // This client's publish sends X-Agent-ID only, so this arm offers NO proof
+    // and the relay accepts it ("signing is optional on ordinary topics"). The
+    // offered-proof arm is measured by the Python client, which does sign.
     const forged = new Crier(args.server, {
       agentId: args.id,
       key: SigningKey.fromHex("22".repeat(32)),
@@ -289,9 +292,9 @@ async function main(): Promise<number> {
       timeoutMs: args.timeoutMs,
     });
     await forged.publish(topic, { forged: true });
-    note("a publish signed with the WRONG key was still accepted — measured here, matching the README: the relay enforces X-Agent-ID, not the signature");
+    note("this client's publish carries no signature, so the relay accepted it with no proof offered — matching the README: signing is optional on ordinary topics, and offered proof is what gets checked");
   } catch (exc) {
-    note(`the relay refused a wrongly-signed publish: ${(exc as Error).message} (the README's claim needs revisiting)`);
+    note(`the relay refused this publish: ${(exc as Error).message} — this client offers no publish proof, so a refusal here is about X-Agent-ID or rate limiting, not the signature`);
   }
 
   // -- done ---------------------------------------------------------------

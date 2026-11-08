@@ -227,14 +227,14 @@ def main(argv=None) -> int:
     else:
         note("a foreign signature was ACCEPTED — this server does not verify per-agent signatures")
 
-    # -- [11] informational: the relay does not verify the trio -----------
-    step("informational: does the relay verify the publish signature? (README says no)")
+    # -- [11] informational: is an OFFERED publish signature verified? -----
+    step("informational: does the relay verify an offered publish signature? (README: signing is optional, but offered proof is checked)")
     try:
         forged = Crier(args.server, agent_id=args.id, key=SigningKey.from_hex("22" * 32), token=args.token, timeout=args.timeout)
         forged.publish(topic, {"forged": True})
-        note("a publish signed with the WRONG key was still accepted (202/204) — measured here, matching the README: the relay enforces X-Agent-ID, not the signature")
+        note("a publish signed with the WRONG key was still accepted (202/204) — measured here: this server is NOT verifying an offered publish proof, which contradicts the README's 'offered proof is checked: stale or bogus agent signature proof is refused with 401'")
     except CrierError as exc:
-        note("the relay refused a wrongly-signed publish: HTTP %d %s (the README's claim needs revisiting)" % (exc.status, exc.message))
+        note("a publish signed with the WRONG key was refused: HTTP %d %s — matching the README: signing is optional, but offered proof is checked and bogus proof is refused" % (exc.status, exc.message))
 
     # -- done --------------------------------------------------------------
     if not args.keep:

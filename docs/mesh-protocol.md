@@ -471,8 +471,11 @@ the WHOLE replay defence on those routes.** The server keeps no per-signature st
 cannot tell a replay from the original, and does not pretend to. Measured (DF-CRIER-294): one signed
 `GET /agents/{id}/inbox` presented twice in a row with the SAME timestamp and signature was
 authorized twice (`200` both times, on the authorization path); the same signature carrying a
-10-minute-old timestamp was refused `401` naming the window. `POST /relay/publish` is outside this
-lane entirely — the trio is not verified there at all (README § Try it; measured).
+10-minute-old timestamp was refused `401` naming the window. `POST /relay/publish` uses the same
+authorizer for a narrower purpose: a publisher that OFFERS proof has it verified — a wrong-key
+publish is refused `401 signature verification failed` — while a publish carrying no proof at all is
+accepted, because signing is optional on ordinary topics (`cmd/server/main.go` installs the
+publisher authorizer; measured 2026-11-08 on a plain server).
 
 A nonce/signature cache that would close the gap is deliberately NOT implemented (DF-CRIER-294
 judged it out of scope): a shared cache on the auth path is a new availability dependency, i.e. a

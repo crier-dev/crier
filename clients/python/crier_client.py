@@ -47,9 +47,10 @@ WHAT IT DOES ON THE WIRE (nothing is hidden)
     CR_SERVICE_DELIVERY_ALLOWLIST mandates that proof for listed recipients;
     see docs/service-delivery-auth.md (including bounded replay limitations).
 *   POST /relay/publish and GET /relay/subscribe/{topic} need the X-Agent-ID
-    header (the relay's rate limiter keys on it); the signature trio is sent on
-    publish because it is harmless and matches the README, but the relay does
-    not verify it.
+    header (the relay's rate limiter keys on it). The signature trio is sent on
+    publish too: signing is optional on ordinary topics, but offered proof IS
+    checked — a wrong-key publish is refused 401 "signature verification
+    failed", while a publish carrying no proof is still accepted.
 *   If the server was started with CR_AUTH_TOKEN, every request except the five
     exempt paths (/health, /version, /openapi.json, /openapi.yaml, /docs) needs
     "Authorization: Bearer <token>". Pass token=... or set CR_AUTH_TOKEN.
@@ -1097,9 +1098,10 @@ class Crier:
         X-Agent-ID is REQUIRED by the relay (its per-agent rate limiter keys on
         it; without the header a publish is 401), so this call needs a client
         agent_id. The signature trio is sent too — matching the README's own
-        publish example — but the relay does not verify it: only the header's
-        presence is enforced there (internal/relay/handler.go, and the
-        round-trip transcript re-measures that).
+        publish example — and the relay verifies it when it is present: signing
+        is optional on ordinary topics, but bogus proof is refused 401
+        "signature verification failed" (AuthorizePublisher in
+        internal/registry/agentsig.go, installed by cmd/server/main.go).
         """
         extra: Dict[str, str] = {}
         if self.agent_id:
