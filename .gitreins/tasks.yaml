@@ -3747,8 +3747,9 @@ tasks:
     -- cmd internal` shows the default-off gate. FAILIF: ingest routes exist while
     CR_INGEST_WEBHOOK_ENABLED is unset; FAILIF: an identical replay yields two inbox
     messages; FAILIF: the spec path is absent.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T06:43:09.769847+00:00'
+  completed_at: '2026-11-08T09:33:20.694745+00:00'
 - id: INT-006
   title: 'Bakeoff C09 (SKIP): record memory/recall ownership policy in README'
   criteria:
@@ -3847,5 +3848,6 @@ tasks:
     \ C06 bakeoff row records the withdrawal. PROOF: go build ./... and go vet ./...\
     \ exit 0. FAILIF: internal/registry signs an AgentCard or stores a card signature\
     \ (a grep for signing in agentsig.go finds only verification)."
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T09:26:46.791657+00:00'
+  completed_at: '2026-11-08T09:27:12.716948+00:00'
