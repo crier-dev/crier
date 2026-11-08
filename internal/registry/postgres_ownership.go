@@ -44,7 +44,9 @@ func scanDeadLetter(scan func(dest ...any) error) (*DeadLetter, error) {
 // removes dead letters past their retention window. Returns the number of
 // deleted TTL-expired messages.
 func (s *PostgresStore) PurgeExpired() int {
-	return s.PurgeExpiredReport(nil)
+	removed := s.PurgeExpiredReport(nil)
+	s.PurgeExpiredDeadLetters(nil)
+	return removed
 }
 
 // PurgeExpiredReport is PurgeExpired plus a report of what was removed
