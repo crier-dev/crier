@@ -1,0 +1,16 @@
+{
+  "tick": "crier-foreman-2026-11-08-22-59-04",
+  "block": "REVIEW-001",
+  "mode": "verification-only-owner-gated",
+  "wave_size": 0,
+  "eligible_independent": 0,
+  "workers": [],
+  "base_sha": "4c393d4c1c6b38c4610783d92fd5f7c4d667543c",
+  "selection": "block_drive.py ranked REVIEW-001 first; its repository verifier is already landed, while the remaining live hash-sidecar and live verifier legs are host-owned and owner-gated. RELEASE-017 and RELEASE-018 were held out by one-block-per-tick selection.",
+  "blocker": "Host owner must publish /home/kara/crier-fleet/crier.sha256 beside the deployed unit, then the verifier must be run against the live bus.",
+  "local_evidence": "make verify-live-release-selftest PASS: valid fixture, orphan ancestry rejection, missing/empty/dev version rejection, altered recorded hash rejection.",
+  "live_evidence": "GET /version returned 0.4.1-53-g8f193922 commit 8f193922 modified:false; pidfile resolves pid 2482078 and port 8767; live verifier could not run because /home/kara/crier-fleet/crier.sha256 is absent.",
+  "next_owner_action": "Owner/Kara records the sha256 of /home/kara/crier/bin/crier at /home/kara/crier-fleet/crier.sha256, then reruns make verify-live-release with the live env, pidfile, and sidecar.",
+  "gitreins": "none:verification-only-owner-gated-no-new-repository-work",
+  "ci": "Recent crier-dev/crier main runs: success, success, and in_progress; no completed failure observed in the three-row listing."
+}
