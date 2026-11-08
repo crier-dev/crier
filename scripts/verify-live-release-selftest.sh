@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Prove verify-live-release accepts valid offline evidence and rejects hash drift.
+# Prove verify-live-release accepts valid offline evidence and rejects invalid ancestry/version/hash evidence.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKER="$SCRIPT_DIR/verify-live-release.sh"
 PROG=verify-live-release-selftest
-# ch:trace row=REVIEW-001 spec=none:board-acceptance wave=crier-foreman-2026-11-08-21-33-49 test=make-verify-live-release-selftest doc=none:repo-verifier prompt=/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-08-21-33-49/brief-REVIEW-001-rework.txt evidence=stdout:valid-fixture-altered-version-and-altered-hash-arms witness=scripts/verify-live-release-selftest.sh verdict=none:foreman-judges-after-merge commit=none:worker-commit memory=none:foreman-closeout
+# ch:trace row=REVIEW-001 spec=none:board-acceptance wave=crier-foreman-2026-11-08-21-33-49 test=make:verify-live-release-selftest doc=scripts/verify-live-release-selftest.sh prompt=/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-08-21-33-49/brief-REVIEW-001-rework.txt evidence=stdout:valid-orphan-altered-version-and-altered-hash-arms witness=path@scripts/verify-live-release-selftest.sh verdict=none:foreman-judges-after-merge commit=self memory=none:foreman-closeout
 # STATUS: partial
 # TIER: T1
-# EVIDENCE: make verify-live-release-selftest
+# EVIDENCE: bash -n scripts/verify-live-release.sh scripts/verify-live-release-selftest.sh; make verify-live-release-selftest; neutered-ancestry selftest failed at orphan arm
 command -v git >/dev/null 2>&1 || { echo "$PROG: ERROR: git is required" >&2; exit 2; }
 command -v mktemp >/dev/null 2>&1 || { echo "$PROG: ERROR: mktemp is required" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "$PROG: ERROR: jq is required" >&2; exit 2; }
@@ -43,9 +43,28 @@ else
   exit 1
 fi
 
-# Prove missing and default-sentinel versions fail before ancestry/hash PASS.
+# A valid hash must not mask a served commit unrelated to the tagged history.
 VERSION_VALID="$WORK/version.valid.json"
 cp "$FIXTURE/version.json" "$VERSION_VALID"
+EMPTY_TREE="$(git -C "$REPO" mktree </dev/null)"
+ORPHAN_COMMIT="$(git -C "$REPO" -c user.name=verify-selftest -c user.email=verify-selftest@example.invalid -c commit.gpgsign=false commit-tree "$EMPTY_TREE" -m orphan)"
+jq -c --arg commit "$ORPHAN_COMMIT" '.commit = $commit' "$FIXTURE/version.json" > "$WORK/version.orphan.json"
+cp "$WORK/version.orphan.json" "$FIXTURE/version.json"
+OUT="$WORK/orphan.out"
+if "$CHECKER" --fixture "$FIXTURE" >"$OUT" 2>&1; then
+  cat "$OUT" >&2
+  echo 'FAIL  orphan-served-commit was accepted' >&2
+  exit 1
+fi
+grep -q '^FAIL  ancestry ' "$OUT" || { cat "$OUT" >&2; echo "$PROG: FAIL: orphan fixture lacked the named ancestry rejection" >&2; exit 1; }
+if grep -q '^PASS  ancestry ' "$OUT"; then
+  cat "$OUT" >&2
+  echo "$PROG: FAIL: orphan fixture passed ancestry before rejection" >&2
+  exit 1
+fi
+echo 'PASS  orphan-served-commit rejected as non-descendant'
+
+# Prove missing and default-sentinel versions fail before ancestry/hash PASS.
 for VERSION_CASE in missing empty dev; do
   if [[ "$VERSION_CASE" == missing ]]; then
     jq -c 'del(.version)' "$VERSION_VALID" > "$FIXTURE/version.json"
