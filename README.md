@@ -26,6 +26,8 @@ Crier provides seven primitives for agent communication:
 
 ## Architecture
 
+Decision (2026-11-08; memory search rejected): durable agent memory and semantic recall are harness-owned capabilities. Crier provides durable message transport only: it stores messages, receipts and dead letters, but neither stores nor recalls agent memory.
+
 ### 1. Relay (Pub/Sub)
 
 Central message relay. Agents publish events to topics; subscribers receive them over WebSocket.
