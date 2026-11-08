@@ -11,6 +11,117 @@ contains them — a tag cut first can never contain its own changelog entry. The
 procedure, the gate requirements and the publish step are in
 [docs/releases.md](docs/releases.md).
 
+## [0.5.0] - 2026-11-08
+
+Range: `v0.4.1`..`v0.5.0` — 56 commits (1 merge, 55 non-merge: 7 `feat`,
+3 `fix`, 4 `docs`, 3 `test`, 3 `specs`, 1 `chore`, 27 board, 6 foreman, and
+1 untyped bakeoff row filing). No `BREAKING CHANGE` footer and no `!` type
+token were found in the range, so this is a minor release. The entries below
+group the material changes and name the item id and the commit they rest on;
+board, spec and foreman bookkeeping is excluded from the notes but remains in
+the tagged tree.
+
+The range is the INT-007/008/009/012/014/017 hardening wave: five new
+default-OFF capability surfaces (protocol adapters, DuckBrain dead-letter
+archival, OpenTelemetry tracing, webhook/RSS ingest, a boardctl delivery
+bridge) land together behind their own gates, with the retention regression
+the archive hook introduced repaired inside the same wave.
+
+### Added
+
+- **A first-class protocol adapter layer: one `Protocol` contract, one
+  registration loop** (INT-007, `8969ea93`, spec `CRIER-PROTOCOLS` at
+  `7c1d5ea9`). Every HTTP protocol surface crier mounts — relay, mesh, a2a,
+  dagger, federation — is now one adapter (`Name`/`Enabled`/`RegisterRoutes`
+  from the closed `KnownProtocols` set) mounted through the single
+  `registerProtocols` loop in `cmd/server/protocols.go`; `cmd/server/main.go`
+  registers no protocol route directly. An unknown, duplicate or missing
+  protocol name is a hard failure at config load, and a census test pins the
+  mounted surface to the spec's per-protocol route table in both directions.
+
+- **DuckBrain cold tier: dead letters are archived before they are deleted**
+  (INT-008, `a98203ad`, spec `DUCKBRAIN-ARCHIVE`). New `internal/archive`
+  (`Archiver` + `DuckBrainArchiver`) and the `PurgeExpiredDeadLetters`
+  `ArchiveHook` on both the SQLite and the Postgres store delete a dead letter
+  only after its DuckBrain POST returns 2xx; failures and oversized rows are
+  retained and counted in `crier_archive_attempts_total`. Default-OFF via
+  `CR_ARCHIVE_ENABLED`, so an unconfigured bus keeps its previous TTL-only
+  behaviour.
+
+- **Opt-in OpenTelemetry tracing** (INT-009, `3bd01f5b`, spec
+  `OBSERVABILITY-TRACING`). Tracing spans the delivery path and is default-OFF:
+  with no OTLP exporter configured the bus emits nothing and the existing
+  access log, metrics and `/health` surfaces are unchanged.
+
+- **Inbound webhook ingest with envelope HMAC, a replay window and durable
+  dedup** (INT-012 part A, `06fde195`, spec `CRIER-WEBHOOK-RSS-INPUT`). Signed
+  source registration, full-envelope HMAC verification (method + canonical
+  path + `source_id` + timestamp + nonce + body hash), a replay window, and a
+  transactional outbox with persistent dedup before the 2xx. Gate:
+  `CR_INGEST_WEBHOOK_ENABLED` unset registers zero ingest routes.
+
+- **RSS/Atom polling with conditional GET and guid dedup** (INT-012 part B,
+  `ba8a2868`). A default-OFF poller strictly validates feed configuration,
+  checks public HTTPS destinations across redirects and dials, persists
+  conditional-fetch and bounded seen-id state, delivers feed-authored
+  untrusted messages through the inbox path, and backs off per feed on
+  failure.
+
+- **An allowlisted typed-envelope `boardctl` delivery bridge for board-manager
+  agents** (INT-014, `661f84b2`, `079a3da1`, spec `CRIER-BOARDCTL-BRIDGE`).
+  A per-agent `boardctl` config block turns message delivery into an
+  allowlisted `boardctl` invocation: command envelopes are versioned JSON with
+  a closed per-operation argument schema, argv is built only from validated
+  fields (no `sh -c`, no flag smuggling), the sender ACL defaults empty,
+  concurrent deliveries serialize, and `boardctl` exit codes map to structured
+  errors that preserve its verbatim refusal text. `079a3da1` completes the
+  reply catalog (R9 summary, R16 empty command, R19 64 KiB truncation, R14
+  delivery-time binary loss, R20 uncommitted note), adds the R13 startup
+  doctor and the board-header transport gate, and proves the remaining
+  measurements including non-overlapping serialized spans and no orphan after
+  a timeout. Default-OFF via `CR_BOARDCTL_BRIDGE_ENABLED`.
+
+### Changed
+
+- **A2A AgentCards are documented as unsigned by construction** (`fd5a0b5a`).
+  The bakeoff claim that a card could be verified is withdrawn: the card has
+  no signature field, so nothing about it is authenticated and the docs now
+  say so instead of implying a check that cannot be performed.
+
+- **Federation hold exhaustion is a receipt, the archive stays TTL-only**
+  (`7eae6264`). Two client-facing claims were narrowed to what the code does.
+
+- **The memory/recall ownership boundary is documented** (`cd901c9d`): memory
+  and recall are harness-owned and crier is a transport, not a memory store.
+
+### Fixed
+
+- **Retention purge works again for direct Postgres sweeps** (INT-017,
+  `cbb2bbed`). INT-008 moved dead-letter retention cleanup out of the inbox
+  transaction into the `ArchiveHook`, which left a direct
+  `PostgresStore.PurgeExpired` call without that cleanup; the default
+  no-archiver retention sweep is restored after the inbox purge while the
+  handler's report path still invokes the configured hook.
+
+- **Outbox acceptance is durable, with a drain path and proven inbox
+  delivery** (INT-012 rework, `a097e8f3`). The outbox row now commits before
+  any enqueue attempt and before any 2xx, is marked delivered only after the
+  inbox writer succeeds, and a drain path re-enqueues pending rows exactly
+  once — proven against a real `InboxWriter` with one delivery per accepted
+  request and zero deliveries on replay.
+
+- **The docsclaims API-count probe matches both deliver call shapes**
+  (`3f781c73`). The tracing context wrapper changed the literal the probe
+  matched, so the doc-claim gate had stopped reading the delivery call sites;
+  the probe now matches both shapes.
+
+### Tests
+
+- **The federation handshake cell** (INT-004A, `0a54b80c`) drives the
+  handshake end to end, and **the dead-letter archive battery** (INT-003,
+  `b08a8ad6`) plus **pinned lease-ACK and federation-hold contracts**
+  (`ca70d642`) pin the inbox differentiators the wave rewrote.
+
 ## [0.4.1] - 2026-11-08
 
 ### Fixed
