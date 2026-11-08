@@ -2344,3 +2344,4 @@
 {"id":1794115926888324235,"event_type":"task_created","task_id":"RELEASE-017","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T17:38:49Z","detail":"{\"id\":\"RELEASE-017\",\"status\":\"pending\"}"}
 {"id":1794115926888324236,"event_type":"task_completed","task_id":"RELEASE-016","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T17:38:54Z","detail":"{\"status\":\"complete\"}"}
 {"id":1794115926888324237,"event_type":"task_updated","task_id":"REVIEW-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T17:39:04Z","detail":"{\"title\":\"Live bus identity drift: crier-fleet serves 0.4.1-53-g8f193922 (3 commits behind pre-cut tip 9a09d093, product code identical); running binary hash still not recorded next to the unit\"}"}
+{"id":1794115926888324238,"event_type":"task_created","task_id":"RELEASE-018","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T18:13:52Z","detail":"{\"id\":\"RELEASE-018\",\"status\":\"pending\"}"}
