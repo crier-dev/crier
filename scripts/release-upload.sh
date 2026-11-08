@@ -87,14 +87,39 @@
 #   - `vcs.modified=<true|false>` appears in the build settings of toolchains
 #     that record VCS status (go1.26.10 does not; the check is kept for those
 #     that do — a build from a modified tree must not be adopted).
+#
+# THE METADATA BOUND (INT-CI-034) — adoption is bounded, not unconditional
+# ---------------------------------------------------------------------------
+# The identity stamps above are a HEURISTIC, and on the toolchain this repo
+# builds with they are the only one: go1.26.10 records NO vcs.revision and NO
+# vcs.modified at all (measured), so the clean-tree gate is wired but VACUOUS
+# there — a rebuild from a DIRTY tree at the same commit would carry the same
+# Version token, the same single commit candidate and no `vcs.modified=true`.
+# Adoption therefore also measures the byte divergence between the local asset
+# and the attached copy (both are on disk by then) and tolerates only what
+# build metadata explains. MEASURED spread of two builds of the SAME commit
+# differing only in BUILD_TIME: size-identical, exactly 63 differing byte
+# offsets on linux/amd64, 63 on linux/arm64 and 153 on darwin/arm64 (the
+# Mach-O ad-hoc signature covers the stamped bytes). The bounds
+# RELEASE_ADOPT_MAX_SIZE_DELTA (default 0 — the measured rebuild is
+# size-identical) and RELEASE_ADOPT_MAX_DIFF_OFFSETS (default 4096 — >10x the
+# largest measured spread) accept that with headroom; a body that diverges
+# beyond them keeps the RELEASE-012 refusal, with the measured numbers quoted.
+# The bound is a metadata-only heuristic, NOT a proof: a body crafted to
+# differ within it would still be adopted. The honest claim is "same identity
+# stamps AND a metadata-scale byte difference" — what a rebuild produces and
+# what a different build does not.
+#
 # We READ BYTES and never execute the artifact: a downloaded release binary is
 # compared, not run. A differing binary is ADOPTED (skipped: no upload, no
 # replacement) only when BOTH sides carry the same Version token AND the same
 # single commit candidate, and the ATTACHED side does not report
-# `vcs.modified=true`. Anything else keeps the refusal, with the deciding fact
+# `vcs.modified=true`, and the byte divergence stays within the metadata
+# bound above. Anything else keeps the refusal, with the deciding fact
 # named in the log: identity differs / identity unreadable or ambiguous (fail
 # closed — adoption never rests on a missing field, and a binary whose commit
-# stamp is ambiguous is refused, never guessed) / non-binary drift. Two special
+# stamp is ambiguous is refused, never guessed) / non-binary drift / divergence
+# beyond the metadata bound. Two special
 # members: SHA256SUMS is the manifest OF the set and is adopted only when every
 # differing binary in the same run was adopted (it is the manifest of the
 # adopted set; if any binary is refused, it is refused too); install.sh carries
@@ -116,6 +141,34 @@ VERSION="${VERSION:-}"
 RELEASE_OUTDIR="${RELEASE_OUTDIR:-dist}"
 CRIER_REPO="${CRIER_REPO:-crier-dev/crier}"
 CRIER_TARGETS="${CRIER_TARGETS:-linux/amd64 linux/arm64 darwin/arm64}"
+# INT-CI-034 — the byte divergence BUILD-IDENTITY ADOPTION tolerates. A
+# same-commit rebuild stamps a fresh BUILD_TIME and (on go1.26.10) nothing
+# else, and what that buys is measured and SMALL: two builds of the SAME
+# commit differing only in BUILD_TIME are size-identical and differ in exactly
+# 63 byte offsets (linux/amd64), 63 (linux/arm64) and 153 (darwin/arm64 — the
+# Mach-O ad-hoc signature covers the stamped bytes). The bound below must
+# accept that spread with headroom and refuse a materially different body (a
+# dirty-tree rebuild at the same commit): on go1.26.10 the toolchain records
+# NO vcs.revision / vcs.modified at all, so the `vcs.modified=true` gate in
+# identity_refusal_reason is wired but VACUOUS on this toolchain and this
+# bound is the only discriminator there. Both knobs are env-tunable so a
+# future toolchain that stamps more metadata can widen them deliberately,
+# never silently.
+#   RELEASE_ADOPT_MAX_SIZE_DELTA   default 0: the measured metadata-only
+#                  rebuild is size-identical, so ANY size difference is
+#                  outside the measured spread — the conservative choice.
+#   RELEASE_ADOPT_MAX_DIFF_OFFSETS default 4096: >10x the largest measured
+#                  spread (153), so the metadata-only rebuild passes with
+#                  more than an order of magnitude of headroom while a body
+#                  that differs beyond build metadata is caught.
+RELEASE_ADOPT_MAX_SIZE_DELTA="${RELEASE_ADOPT_MAX_SIZE_DELTA:-0}"
+RELEASE_ADOPT_MAX_DIFF_OFFSETS="${RELEASE_ADOPT_MAX_DIFF_OFFSETS:-4096}"
+case "$RELEASE_ADOPT_MAX_SIZE_DELTA" in
+  ''|*[!0-9]*) echo "release-upload: RELEASE_ADOPT_MAX_SIZE_DELTA must be a non-negative integer (got '$RELEASE_ADOPT_MAX_SIZE_DELTA')" >&2; exit 2 ;;
+esac
+case "$RELEASE_ADOPT_MAX_DIFF_OFFSETS" in
+  ''|*[!0-9]*) echo "release-upload: RELEASE_ADOPT_MAX_DIFF_OFFSETS must be a non-negative integer (got '$RELEASE_ADOPT_MAX_DIFF_OFFSETS')" >&2; exit 2 ;;
+esac
 # DRY_RUN is settable as an env var too, because `make release-upload VERSION=vX
 # DRY_RUN=1` passes the make variable through: an empty value (the Makefile's
 # default) is "not a dry run", never an error.
@@ -146,19 +199,22 @@ Usage: VERSION=v0.1.0-rc3 bash scripts/release-upload.sh [--dry-run] [--notes-fi
   --notes-file <p>   release notes to use instead of the CHANGELOG section
 
 Env: VERSION (required), RELEASE_OUTDIR, CRIER_REPO, CRIER_TARGETS,
-     PRERELEASE=1, CLOBBER=1, ALLOW_TAG_DRIFT=1.
+     PRERELEASE=1, CLOBBER=1, ALLOW_TAG_DRIFT=1,
+     RELEASE_ADOPT_MAX_SIZE_DELTA, RELEASE_ADOPT_MAX_DIFF_OFFSETS.
 
-Requires: gh (authenticated with write access to the repo), sha256sum/shasum.
+Requires: gh (authenticated with write access to the repo), sha256sum/shasum, cmp.
 
 Re-publishing an asset set that the Release already carries IDENTICAL content for
 is a no-op (exit 0, nothing uploaded). A same-commit rebuild is ADOPTED by build
 identity: binaries carrying the same embedded Version and Commit (read from the
-artifact bytes; the attached tree must be clean) differ only in the BUILD_TIME a
-rebuild stamps in, so they are skipped and the difference is reported as expected
-metadata — nothing is uploaded. Content that genuinely differs (another commit,
-another tree, an unreadable identity, a non-binary like install.sh) is refused
-unless CLOBBER=1. Never pushes or moves a git tag — see docs/releases.md
-§3/§4.
+artifact bytes; the attached tree must be clean) whose byte divergence stays
+within the metadata bound (RELEASE_ADOPT_MAX_SIZE_DELTA /
+RELEASE_ADOPT_MAX_DIFF_OFFSETS) differ only in the BUILD_TIME a rebuild stamps
+in, so they are skipped and the difference is reported as expected metadata —
+nothing is uploaded. Content that genuinely differs (another commit, another
+tree, an unreadable identity, divergence beyond the metadata bound, a
+non-binary like install.sh) is refused unless CLOBBER=1. Never pushes or moves
+a git tag — see docs/releases.md §3/§4.
 EOF
 }
 
@@ -421,6 +477,25 @@ identity_of() {
   I_VCSMOD="$(identity_field "$file" "$RE_IDENT_VCSMOD")"
 }
 
+# byte_divergence <local-file> <attached-file>
+# Sets D_SIZE_DELTA (|local size - attached size| in bytes) and D_DIFF_OFFSETS
+# (the count of differing byte offsets `cmp -l` reports — one record per
+# differing byte). MEASURED, never assumed: cmp's nonzero exit when the files
+# differ is expected, and the record count is the datum — the exit status is
+# not the gate. Used ONLY on the build-identity adoption path, after
+# identity_refusal_reason has proven both copies carry the same Version+Commit
+# identity and both are on disk; a metadata-only rebuild's ~63-153 differing
+# offsets over ~24 MB cost one cmp well under a second (no per-byte shell
+# loop).
+byte_divergence() { # <local-file> <attached-file>
+  local lsize asize records
+  lsize="$(wc -c < "$1" | tr -d '[:space:]')"
+  asize="$(wc -c < "$2" | tr -d '[:space:]')"
+  D_SIZE_DELTA=$(( lsize > asize ? lsize - asize : asize - lsize ))
+  records="$(cmp -l "$1" "$2" 2>/dev/null | wc -l | tr -d '[:space:]' || true)"
+  D_DIFF_OFFSETS="${records:-0}"
+}
+
 is_release_binary() { # <name> — the build-stamped members of the set; anything else (install.sh) carries no stamp
   case "$1" in
     crier_*|crier-mcp_*) return 0 ;;
@@ -439,6 +514,7 @@ is_release_binary() { # <name> — the build-stamped members of the set; anythin
 identity_refusal_reason() {
   local asset="$1" name="$2" attached_copy=""
   ADOPT_REASON=""
+  D_SIZE_DELTA="" D_DIFF_OFFSETS=""
   I_LOCAL_COMMIT="" I_LOCAL_COMMIT_CANDIDATES=0 I_LOCAL_VERSION_STAMPED=0
   I_ATTACH_COMMIT="" I_ATTACH_COMMIT_CANDIDATES=0 I_ATTACH_VERSION_STAMPED=0 I_ATTACH_VCSMOD=""
   if ! is_release_binary "$name"; then
@@ -493,10 +569,27 @@ identity_refusal_reason() {
     ADOPT_REASON="build identity differs — the attached ${name} was built from commit ${I_ATTACH_COMMIT}, this build from commit ${I_LOCAL_COMMIT}"
     return 0
   fi
+  # ── The metadata bound (INT-CI-034) ────────────────────────────────────────
+  # Every identity ground above is answered, but on go1.26.10 they are not
+  # enough: the toolchain stamps no vcs.revision / vcs.modified, so the
+  # clean-tree gate above is VACUOUS on it and a rebuild from a DIRTY tree at
+  # the same commit would pass every check so far. Measure the remaining byte
+  # difference — both copies are on disk — and adopt only within the metadata
+  # bound (the knobs and their measured derivation are declared at the top of
+  # this script): anything beyond it is a different body wearing a copied
+  # identity stamp, and keeps the RELEASE-012 refusal with the measured
+  # numbers quoted.
+  byte_divergence "$asset" "$attached_copy"
+  # ADOPT-BOUND-ARM:
+  if [ "$D_SIZE_DELTA" -gt "$RELEASE_ADOPT_MAX_SIZE_DELTA" ] || [ "$D_DIFF_OFFSETS" -gt "$RELEASE_ADOPT_MAX_DIFF_OFFSETS" ]; then
+    ADOPT_REASON="same build identity but the bytes diverge beyond the metadata bound (size delta ${D_SIZE_DELTA} byte(s), ${D_DIFF_OFFSETS} differing byte offset(s); bound: size <= ${RELEASE_ADOPT_MAX_SIZE_DELTA}, offsets <= ${RELEASE_ADOPT_MAX_DIFF_OFFSETS}) — a rebuild from a modified tree is not the published build"
+    return 0
+  fi
   # Every refusal ground is answered: same single commit candidate on both
-  # sides, this publish's VERSION token in both, the attached tree was clean.
-  # The remaining byte difference is the build metadata (BUILD_TIME) a rebuild
-  # always stamps in. -> adoptable.
+  # sides, this publish's VERSION token in both, the attached tree was clean
+  # (or the toolchain stamps no VCS status), and the remaining byte difference
+  # is within the metadata bound — the build metadata (BUILD_TIME) a rebuild
+  # always stamps in. -> adoptable, with the divergence measured above.
   return 0
 }
 
@@ -568,15 +661,18 @@ if [ "$EXISTS" = "1" ]; then
         identity_refusal_reason "$asset" "$name"   # sets ADOPT_REASON ("" = adoptable) + I_LOCAL_*/I_ATTACH_*
         # IDENTITY-ARM:
         if [ -z "$ADOPT_REASON" ]; then
-          # Empty reason = a same-build rebuild: same VERSION token, same single
-          # commit candidate, clean attached tree. The remaining byte difference
-          # is the BUILD_TIME metadata a rebuild always stamps in, so the asset
-          # is ADOPTED — skipped, nothing uploaded, the difference reported as
-          # expected metadata, never as a conflict. Anything else keeps the
-          # RELEASE-012 refusal. Neutering this decision (selftest arm [11/13])
-          # re-creates the historical refusal on a same-commit rebuild (run
-          # 42422236749, tag v0.4.0).
-          note "${name}: ADOPTED by build identity — both sides carry Version=${VERSION} Commit=${I_LOCAL_COMMIT} (the remaining byte difference is build metadata — BUILD_TIME — expected on a rebuild); nothing is uploaded"
+          # Empty reason = a same-build rebuild: same VERSION token, same
+          # single commit candidate, no attached vcs.modified=true, and the
+          # measured byte divergence within the metadata bound (INT-CI-034).
+          # The remaining byte difference is the BUILD_TIME metadata a rebuild
+          # always stamps in, so the asset is ADOPTED — skipped, nothing
+          # uploaded, the difference reported as expected metadata WITH its
+          # measured numbers (a converged run carries its own evidence), never
+          # as a conflict. Anything else keeps the RELEASE-012 refusal.
+          # Neutering this decision (selftest arm [11/15]) re-creates the
+          # historical refusal on a same-commit rebuild (run 42422236749, tag
+          # v0.4.0).
+          note "${name}: ADOPTED by build identity — both sides carry Version=${VERSION} Commit=${I_LOCAL_COMMIT} (the remaining byte difference is build metadata — BUILD_TIME — expected on a rebuild; measured divergence: size delta ${D_SIZE_DELTA} byte(s), ${D_DIFF_OFFSETS} differing byte offset(s), within the metadata bound size <= ${RELEASE_ADOPT_MAX_SIZE_DELTA}, offsets <= ${RELEASE_ADOPT_MAX_DIFF_OFFSETS}); nothing is uploaded"
           ADOPTED="${ADOPTED}${ADOPTED:+ }${name}"
           if is_release_binary "$name"; then
             ADOPTED_BINARIES="${ADOPTED_BINARIES}${ADOPTED_BINARIES:+ }${name}"

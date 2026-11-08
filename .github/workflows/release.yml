@@ -45,9 +45,21 @@
 #   embedded identity as this build (the same VERSION token and the same single
 #   commit candidate, read from the artifact bytes, with no vcs.modified=true
 #   on the attached side), the publisher ADOPTS them: skipped, nothing
-#   uploaded, the BUILD_TIME difference reported as expected metadata. Content
-#   that genuinely DIFFERS — a different commit, a vcs.modified=true build, an
-#   unreadable or ambiguous identity stamp, or a non-binary like install.sh —
+#   uploaded, the BUILD_TIME difference reported as expected metadata.
+#   The adoption is bounded by a metadata-only heuristic (INT-CI-034), not a
+#   proof: after the identity grounds pass, the publisher measures the byte
+#   divergence between the two copies and refuses the adoption beyond
+#   RELEASE_ADOPT_MAX_SIZE_DELTA (default 0) / RELEASE_ADOPT_MAX_DIFF_OFFSETS
+#   (default 4096), quoting the measured numbers. The measured same-commit
+#   rebuild spread — sizes identical, 63 (linux/amd64), 63 (linux/arm64) and
+#   153 (darwin/arm64) differing offsets — passes with headroom. The bound is
+#   the discriminator on THIS toolchain: go1.26.10 records no vcs.revision /
+#   vcs.modified, so the vcs.modified gate is vacuous here and a dirty-tree
+#   rebuild at the same commit differs from a clean one by nothing the
+#   identity stamps can see — only the byte bound separates the two.
+#   Content that genuinely DIFFERS — a different commit, a vcs.modified=true
+#   build, an unreadable or ambiguous identity stamp, a body diverging beyond
+#   the metadata bound, or a non-binary like install.sh —
 #   is still refused, and no run reaches for --clobber to get past it.
 # - The run ends by diffing the Release's attached assets against
 #   dist/SHA256SUMS — `assets: []` (the exact defect CR-FEAT-028 set out to

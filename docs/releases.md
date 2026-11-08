@@ -154,17 +154,41 @@ Two things it will not decide for you:
   reporting that it converged — so re-running a failed publish is safe. A
   differing BINARY whose bytes carry the same build identity as this build (the
   same embedded VERSION token and the same single 40-hex commit candidate, read
-  from the artifact bytes, with no `vcs.modified=true` on the attached side) is
+  from the artifact bytes, with no `vcs.modified=true` on the attached side) and
+  whose byte divergence stays within the metadata bound (below) is
   **adopted**: the published set is kept exactly as it is, nothing is uploaded,
   and the difference is reported as the BUILD_TIME metadata a rebuild always
   stamps in — never as a conflict. `SHA256SUMS` is adopted only as the manifest
   of a fully-adopted set; `install.sh` carries no stamp and must converge
   byte-identically. Anything else — a different commit, a dirty-tree build, an
-  unreadable or ambiguous stamp, a differing non-binary — is refused unless
-  `CLOBBER=1`, because a binary somebody may already have downloaded is never
-  swapped out silently (and adoption never swaps anything at all). Names that
+  unreadable or ambiguous stamp, a differing non-binary, a body diverging
+  beyond the metadata bound — is refused unless `CLOBBER=1`, because a binary
+  somebody may already have downloaded is never swapped out silently (and
+  adoption never swaps anything at all). Names that
   are absent are uploaded, so a publish that half-failed is repaired by
   re-running it rather than re-done from scratch.
+
+The adoption is bounded by a metadata-only heuristic, not a proof of sameness
+(INT-CI-034). After the identity grounds pass, the publisher measures the
+divergence between the local asset and the attached copy — the size delta and
+the number of differing byte offsets — and refuses the adoption beyond
+`RELEASE_ADOPT_MAX_SIZE_DELTA` (default `0`) or
+`RELEASE_ADOPT_MAX_DIFF_OFFSETS` (default `4096`), quoting the measured
+numbers in the refusal; a converged (adopted) run reports its own measured
+divergence on every `ADOPTED` line. The defaults derive from the measured
+spread of two builds of the SAME commit differing only in `BUILD_TIME`:
+sizes identical, and exactly 63 differing byte offsets on linux/amd64, 63 on
+linux/arm64 and 153 on darwin/arm64 (the Mach-O ad-hoc signature covers the
+stamped bytes) — the offsets bound is more than ten times the largest
+measured value, and the size bound is zero because the measured rebuild is
+size-identical. The bound is the discriminator that matters on the toolchain
+crier builds with: go1.26.10 records no `vcs.revision` and no `vcs.modified`
+at all, so the `vcs.modified=true` dirty-tree gate cannot fire there and a
+rebuild from a modified tree carries the same stamps as a clean one — only
+the byte bound separates the two on that toolchain. It is a heuristic, not a
+proof: a body crafted to diverge by less than the bound would still be
+adopted, and `CLOBBER=1` remains the only deliberate replacement path either
+way.
 
 That reconciliation is why the ORDER of the two publishers no longer matters —
 and why, since INT-CI-033, neither does the rebuild the second publisher does.
@@ -231,7 +255,10 @@ make release-upload-selftest
 
 It runs a stateful `gh` double, so no network, no keys and no published release
 are needed, and each rule carries a NEUTER proof: removing the rule makes its
-green arm fail again.
+green arm fail again. That includes the INT-CI-034 metadata bound: a fixture
+whose binaries carry a copied identity stamp over a materially different body
+is refused with its measured size delta and differing-offset count, and a copy
+of the publisher with the bound removed adopts the same fixture.
 
 ## Gate requirements
 

@@ -60,75 +60,103 @@
 #     below carry. A NEUTER proof removes the adoption decision and shows the
 #     same fixture red-ing again.
 #
+# (D) INT-CI-034 — the adoption is BOUNDED by a metadata-only byte-divergence
+#     bound. The (C) identity stamps cannot do the whole job on the toolchain
+#     crier builds with: go1.26.10 records no vcs.revision / vcs.modified at
+#     all, so the clean-tree gate is vacuous there and a rebuild from a DIRTY
+#     tree at the same commit carries the same Version token, the same single
+#     commit candidate and no vcs.modified=true. What separates a rebuild from
+#     a different body is SCALE: two builds of the SAME commit differing only
+#     in BUILD_TIME measure size-identical with exactly 63 (linux/amd64), 63
+#     (linux/arm64) and 153 (darwin/arm64) differing byte offsets — a
+#     materially different body diverges far beyond that. The publisher
+#     therefore measures the divergence on the adoption path and refuses
+#     beyond RELEASE_ADOPT_MAX_SIZE_DELTA (default 0) /
+#     RELEASE_ADOPT_MAX_DIFF_OFFSETS (default 4096), quoting the measured
+#     numbers in the refusal; the bound is a metadata-only heuristic, not a
+#     proof, and is documented as such.
+#
 # WHAT THIS PROVES
 # ----------------
-#   [1/13] scripts/release-upload.sh ACCEPTS a correct fixture — every required
+#   [1/15] scripts/release-upload.sh ACCEPTS a correct fixture — every required
 #         release asset for every target, install.sh, and SHA256SUMS — exiting 0
 #         and printing the set/manifest match. (`--dry-run`, so nothing is
 #         published; `gh` is a PATH shim, so no network and no auth.)
-#   [2/13] scripts/release-upload.sh REJECTS a fixture whose set carries an asset
+#   [2/15] scripts/release-upload.sh REJECTS a fixture whose set carries an asset
 #         SHA256SUMS does not know (a manifest written before that asset was
 #         added): nonzero exit, FAIL naming the asset.
-#   [3/13] the WORKFLOW's own verification block — extracted from
+#   [3/15] the WORKFLOW's own verification block — extracted from
 #         .github/workflows/release.yml and executed with `bash -e`, exactly as
 #         Actions runs it, against a `gh` shim reporting the attached names —
 #         accepts a Release carrying every manifest asset plus SHA256SUMS, and
 #         rejects BOTH a Release carrying an unknown asset and a Release missing
 #         a manifest asset. This is the arm that actually red-ed v0.2.0, so it is
 #         proven by execution, not by reading the YAML.
-#   [4/13] NEUTER proof (RELEASE-010): the same extracted block with the SHA256SUMS
+#   [4/15] NEUTER proof (RELEASE-010): the same extracted block with the SHA256SUMS
 #         exemption removed REJECTS the correct fixture, reproducing the
 #         historical error text. The exemption is therefore load-bearing.
-#   [5/13] CONVERGENCE (RELEASE-012): against a Release that already carries the
+#   [5/15] CONVERGENCE (RELEASE-012): against a Release that already carries the
 #         EXACT asset set, the publisher exits 0, says it converged, and issues
 #         NO upload at all (the shim log is empty of `release upload`) — the
 #         v0.3.0 failure cannot happen. Proven twice: with the assets carrying
 #         GitHub digests, and with NO digests, where the publisher must download
 #         each attached asset and hash it rather than assume "equal".
-#   [6/13] DIVERGENCE (RELEASE-012): the same names with DIFFERENT content still
+#   [6/15] DIVERGENCE (RELEASE-012): the same names with DIFFERENT content still
 #         exit nonzero by name, with no upload attempted; with CLOBBER=1 the run
 #         exits 0 and uploads ONLY the differing assets, replacing them
 #         deliberately (the identical ones are still skipped, and the double's
 #         stored digest changes). These fixtures carry NO build stamp, so the
 #         differing binary is identity-UNREADABLE — refused, the fail-closed
 #         default.
-#   [7/13] REPAIR (RELEASE-012): a Release carrying only part of the set (a publish
+#   [7/15] REPAIR (RELEASE-012): a Release carrying only part of the set (a publish
 #         that half-failed) converges the rest — exit 0, ONE upload carrying
 #         exactly the missing assets and no `--clobber`, so no release is left
 #         half-published and nothing is replaced.
-#   [8/13] NEUTER proof (RELEASE-012): a copy of the publisher with the convergence
-#         and divergence arms removed (the pre-fix shape) fails [5/13]'s fixture
+#   [8/15] NEUTER proof (RELEASE-012): a copy of the publisher with the convergence
+#         and divergence arms removed (the pre-fix shape) fails [5/15]'s fixture
 #         again with the historical `asset under the same name already exists`.
 #         The convergence is therefore load-bearing, not decoration.
-#   [9/13] IDENTITY ADOPTION (INT-CI-033): against a Release whose binaries were
+#   [9/15] IDENTITY ADOPTION (INT-CI-033): against a Release whose binaries were
 #         built from the SAME Version+Commit but stamped with a LATER BUILD_TIME,
 #         the publisher exits 0, reports the adoption (BUILD_TIME named as
 #         expected metadata, never as a conflict), downloads the attached bytes
 #         to read the identity — and issues ZERO uploads: the published set is
 #         kept exactly as it is. SHA256SUMS (the manifest of the adopted set) is
 #         adopted with the binaries.
-#   [10/13] IDENTITY REFUSAL (RELEASE-012 kept, INT-CI-033's AC3): the same
+#   [10/15] IDENTITY REFUSAL (RELEASE-012 kept, INT-CI-033's AC3): the same
 #         fixture shape with the attached binaries carrying a DIFFERENT commit
 #         exits nonzero naming the asset and the two commits; a fixture whose
 #         binaries report `vcs.modified=true` is refused too. No upload is
 #         attempted in either shape.
-#   [11/13] NEUTER proof (INT-CI-033): a copy of the publisher with ONLY the
-#         adoption decision removed reds [9/13]'s same-commit-rebuild fixture
+#   [11/15] NEUTER proof (INT-CI-033): a copy of the publisher with ONLY the
+#         adoption decision removed reds [9/15]'s same-commit-rebuild fixture
 #         with the RELEASE-012 refusal — the adoption arm is load-bearing, not
 #         decoration.
-#   [12/13] NON-BINARY DRIFT: install.sh differs between the two builds (it
+#   [12/15] NON-BINARY DRIFT: install.sh differs between the two builds (it
 #         carries no stamp and cannot be adopted) — the run refuses, naming
 #         install.sh AND the SHA256SUMS that covers it, with no upload.
-#   [13/13] `bash -n` on the scripts and a YAML parse of the workflow, so the
+#   [13/15] `bash -n` on the scripts and a YAML parse of the workflow, so the
 #         fixtures above are driving scripts that are syntactically sound.
+#   [14/15] METADATA BOUND (INT-CI-034): a fixture whose binaries carry the
+#         SAME Version token and the SAME single 40-hex commit but a
+#         materially different BODY (a 16 KiB filler run that differs between
+#         the two builds, plus an appended line — thousands of differing byte
+#         offsets and a real size delta, far beyond the measured metadata-only
+#         spread) is REFUSED as a different build: the refusal quotes the
+#         MEASURED size delta and differing-offset count. The metadata-only
+#         [9/15] adoption arm still passes on a BUILD_TIME-only diff.
+#   [15/15] NEUTER proof (INT-CI-034): a copy of the publisher with ONLY the
+#         metadata bound removed ADOPTS [14/15]'s material-divergence fixture
+#         — the bound is what separates that refusal from the [9/15]
+#         adoption, so it is load-bearing.
 #
 # The two implementations of rule (A) are the same rule in two places (a workflow
 # cannot source a shell function); this drive runs BOTH against the same fixtures,
 # which is what keeps them from drifting apart.
 #
-# Requirements: bash, awk, sort, comm, sed, grep, wc, cp, python3 (to extract the
-# workflow step and to build the neutered copies — stdlib only),
-# sha256sum/shasum.
+# Requirements: bash, awk, sort, comm, sed, grep, wc, cp, head, tr, cmp,
+# python3 (to extract the workflow step and to build the neutered copies —
+# stdlib only), sha256sum/shasum.
 #
 # Env:
 #   RELEASE_UPLOAD_SELFTEST_VERSION  version tag the fixture set is published as
@@ -186,7 +214,7 @@ echo "    workflow: ${WORKFLOW#"$REPO_ROOT"/}"
 # `gh release upload` reproduces GitHub's OWN behaviour, including the error the
 # v0.3.0 run died on: a name that is already attached is refused with
 # `asset under the same name already exists: [...]` unless --clobber is passed.
-# A double that quietly accepted a duplicate upload would make arm [8/13] unable
+# A double that quietly accepted a duplicate upload would make arm [8/15] unable
 # to fail, i.e. it would make the neuter proof vacuous.
 GH_SHIM_DIR="$WORKDIR/gh-path"
 GH_LOG="$GH_SHIM_DIR/gh-invocations.log"
@@ -383,6 +411,40 @@ make_stamped_fixture() { # <dir> <commit> <build-time> [vcs-modified]
   write_manifest "$dir"
 }
 
+# The MATERIAL-DIVERGENCE fixture (INT-CI-034): the same identity stamps as
+# make_stamped_fixture — same ${SELFTEST_VERSION} token, same single 40-hex
+# commit, no vcs.modified — but the BODY is a different build's: a 16 KiB
+# filler run whose CONTENT differs between the two builds (thousands of
+# differing byte offsets, orders of magnitude beyond the measured 63/63/153 a
+# metadata-only rebuild stamps), plus, when <extra> is given, an appended line
+# the other build does not carry (a real size delta, beyond the
+# size-identical metadata-only spread). This is the shape a dirty-tree
+# rebuild at the same commit could produce on go1.26.10, where no
+# vcs.modified is stamped to catch it — exactly what the publisher's metadata
+# bound must refuse.
+make_material_fixture() { # <dir> <commit> <build-time> <filler-char> [extra line]
+  local dir="$1" com="$2" ts="$3" fill="$4" extra="${5:-}" name target os arch names=""
+  mkdir -p "$dir"
+  for target in $SELFTEST_TARGETS; do
+    os="${target%%/*}"
+    arch="${target##*/}"
+    names="${names} crier_${os}_${arch} crier-mcp_${os}_${arch}"
+  done
+  for name in $names; do
+    {
+      printf 'release-upload-selftest stamped fixture payload: %s\n' "$name"
+      printf 'stamped-version: %s\n' "$SELFTEST_VERSION"
+      printf 'stamped-commit: %s\n' "$com"
+      printf 'stamped-build-time: %s (build metadata — differs on a rebuild)\n' "$ts"
+      head -c 16384 /dev/zero | tr '\0' "$fill"
+      printf '\n'
+      if [ -n "$extra" ]; then printf '%s\n' "$extra"; fi
+    } > "$dir/$name"
+  done
+  printf 'release-upload-selftest fixture payload: install.sh (carries no build stamp)\n' > "$dir/install.sh"
+  write_manifest "$dir"
+}
+
 # The names GitHub would report for a Release built from <dir>, plus SHA256SUMS
 # (uploaded with the set) and any extra names a negative arm wants carried.
 write_assets_file() { # <out-file> <dist-dir> [extra name…]
@@ -462,9 +524,9 @@ make_fixture "$CORRECT"
 make_fixture "$UNKNOWN" "$OMITTED_ASSET"
 printf 'RELEASE-010 selftest release notes\n' > "$WORKDIR/notes.md"
 
-# ── [1/13] release-upload.sh accepts the correct set ────────────────────────
+# ── [1/15] release-upload.sh accepts the correct set ────────────────────────
 echo
-echo "==> [1/13] release-upload.sh accepts a CORRECT set (every manifest asset + SHA256SUMS)"
+echo "==> [1/15] release-upload.sh accepts a CORRECT set (every manifest asset + SHA256SUMS)"
 set +e
 OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CORRECT" \
   ALLOW_TAG_DRIFT=1 bash "$SCRIPT_DIR/release-upload.sh" --dry-run --notes-file "$WORKDIR/notes.md" 2>&1)"
@@ -479,9 +541,9 @@ printf '%s\n' "$OUT" | grep -q "carries asset(s) SHA256SUMS does not know" \
 CORRECT_COUNT="$(awk '{n=split($2, a, "/"); print a[n]}' "$CORRECT/SHA256SUMS" | wc -l)"
 echo "    PASS: correct set accepted — ${CORRECT_COUNT} manifest asset(s) + SHA256SUMS itself (exit 0)"
 
-# ── [2/13] release-upload.sh rejects a genuinely unknown asset ──────────────
+# ── [2/15] release-upload.sh rejects a genuinely unknown asset ──────────────
 echo
-echo "==> [2/13] release-upload.sh rejects an asset SHA256SUMS does not know (${OMITTED_ASSET})"
+echo "==> [2/15] release-upload.sh rejects an asset SHA256SUMS does not know (${OMITTED_ASSET})"
 set +e
 OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$UNKNOWN" \
   ALLOW_TAG_DRIFT=1 bash "$SCRIPT_DIR/release-upload.sh" --dry-run --notes-file "$WORKDIR/notes.md" 2>&1)"
@@ -494,7 +556,7 @@ printf '%s\n' "$OUT" | grep -q "${OMITTED_ASSET}" || fail "release-upload.sh ref
 echo "    FAIL (expected): the unknown asset '${OMITTED_ASSET}' was refused by name — exit ${RC}"
 echo "    PASS: a genuinely unknown asset is still fatal"
 
-# ── [3/13] the WORKFLOW's verification block, executed ──────────────────────
+# ── [3/15] the WORKFLOW's verification block, executed ──────────────────────
 # The v0.2.0 defect lived in the workflow step, so the workflow step is what gets
 # driven. It is extracted verbatim from the YAML and run with `bash -e`, the way
 # Actions runs a `run:` block, against a dist/ tree and a gh shim.
@@ -557,7 +619,7 @@ NEUTERED_BLOCK="$WORKDIR/verify-release-assets-neutered.sh"
 python3 "$WORKDIR/extract.py" "$WORKFLOW" "$VERIFY_BLOCK" keep
 python3 "$WORKDIR/extract.py" "$WORKFLOW" "$NEUTERED_BLOCK" neuter
 echo
-echo "==> [3/13] the workflow's own verification block, executed (bash -e, gh is a shim)"
+echo "==> [3/15] the workflow's own verification block, executed (bash -e, gh is a shim)"
 echo "    extracted $(wc -l < "$VERIFY_BLOCK") line(s) from $(basename "$WORKFLOW")"
 
 # The block reads `dist/SHA256SUMS`, so each arm runs from a work dir whose dist/
@@ -606,9 +668,9 @@ printf '%s\n' "$WF_OUT" | grep -q 'is missing manifest asset' || fail "the workf
 echo "    FAIL (expected): a missing manifest asset was refused by name"
 echo "    PASS: a partial release is still fatal in the workflow arm"
 
-# ── [4/13] NEUTER proof ─────────────────────────────────────────────────────
+# ── [4/15] NEUTER proof ─────────────────────────────────────────────────────
 echo
-echo "==> [4/13] NEUTER proof: without the SHA256SUMS exemption the correct fixture reds"
+echo "==> [4/15] NEUTER proof: without the SHA256SUMS exemption the correct fixture reds"
 if run_workflow_block "$NEUTERED_BLOCK" "$WORKDIR/attached-correct.txt"; then
   fail "the NEUTERED workflow block (exemption removed) ACCEPTED the correct Release — the exemption is not load-bearing and the green above is vacuous"
 fi
@@ -617,12 +679,12 @@ printf '%s\n' "$WF_OUT" | grep -q 'carries asset(s) SHA256SUMS does not know:SHA
 echo "    FAIL (expected): the neutered block reproduced the v0.2.0 error verbatim"
 echo "    PASS: the SHA256SUMS exemption is load-bearing"
 
-# ── [5/13] CONVERGENCE: an already-attached identical set is a NO-OP ───────
+# ── [5/15] CONVERGENCE: an already-attached identical set is a NO-OP ───────
 # The v0.3.0 defect, driven for real (no --dry-run): the Release already carries
 # every asset this publish would upload, byte for byte. GitHub would refuse all
 # eight uploads; the publisher must therefore NOT attempt any of them.
 echo
-echo "==> [5/13] CONVERGED: the Release already carries the EXACT asset set (no upload may be attempted)"
+echo "==> [5/15] CONVERGED: the Release already carries the EXACT asset set (no upload may be attempted)"
 publish_to_shim "$CORRECT" real
 shim_log_reset
 set +e
@@ -644,7 +706,7 @@ echo "    PASS: exit 0, reported converged, zero uploads attempted ($(shim_attac
 # 5b — the same, with NO digests on the Release. The publisher may not read
 # "no digest" as "identical": it must download and hash each attached asset.
 echo
-echo "==> [5b/13] CONVERGED without GitHub digests: content is measured, not assumed"
+echo "==> [5b/15] CONVERGED without GitHub digests: content is measured, not assumed"
 publish_to_shim "$CORRECT" none
 shim_log_reset
 set +e
@@ -661,11 +723,11 @@ printf '%s\n' "$OUT" | grep -qi 'converged' || fail "release-upload.sh exited 0 
 [ "$(shim_calls 'release upload')" = "0" ] || fail "release-upload.sh uploaded against a digest-less but identical Release"
 echo "    PASS: $(shim_calls 'release download') asset(s) downloaded and hashed, zero uploads, converged"
 
-# ── [6/13] DIVERGENCE: different content under the same name is REFUSED ─────
+# ── [6/15] DIVERGENCE: different content under the same name is REFUSED ─────
 # The same names as the attached set, but one binary and therefore the manifest
 # carry different bytes: a re-publish that would swap a published binary.
 echo
-echo "==> [6/13] DIFFERENT content under an attached name is refused unless CLOBBER=1"
+echo "==> [6/15] DIFFERENT content under an attached name is refused unless CLOBBER=1"
 DIVERGENT="$WORKDIR/fixture-divergent"
 make_fixture "$DIVERGENT"
 printf 'this build is NOT the one the Release already carries\n' >> "$DIVERGENT/crier_linux_amd64"
@@ -690,7 +752,7 @@ echo "    PASS: different content under a published name is fatal without CLOBBE
 
 # 6b — CLOBBER=1 replaces ONLY the differing assets; identical ones stay skipped.
 echo
-echo "==> [6b/13] CLOBBER=1 replaces the differing assets deliberately (identical ones still skipped)"
+echo "==> [6b/15] CLOBBER=1 replaces the differing assets deliberately (identical ones still skipped)"
 shim_log_reset
 set +e
 OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$DIVERGENT" \
@@ -711,12 +773,12 @@ NEW_DIGEST="$(shim_attached_digest crier_linux_amd64)"
 [ "$(shim_attached_count)" = "$((CORRECT_COUNT + 1))" ] || fail "CLOBBER=1 changed the number of attached assets"
 echo "    PASS: only the differing assets were uploaded with --clobber and the attached digest changed"
 
-# ── [7/13] REPAIR: a half-failed publish converges the rest ─────────────────
+# ── [7/15] REPAIR: a half-failed publish converges the rest ─────────────────
 # A publish that died after two uploads leaves a Release carrying part of the
 # set. Re-running must upload exactly the rest — no collision, no --clobber, and
 # no re-upload of what already landed.
 echo
-echo "==> [7/13] REPAIR: a half-published Release gets exactly the missing assets"
+echo "==> [7/15] REPAIR: a half-published Release gets exactly the missing assets"
 publish_to_shim "$CORRECT" real
 keep_only_attached install.sh SHA256SUMS
 ATTACHED_BEFORE="$(shim_attached_count)"
@@ -738,7 +800,7 @@ printf '%s\n' "$UPLOAD_LINE" | grep -q 'crier_linux_amd64' || fail "the repair n
   || fail "after the repair the Release carries $(shim_attached_count) asset(s), want $((CORRECT_COUNT + 1))"
 echo "    PASS: ${ATTACHED_BEFORE} attached + the missing ones uploaded = $(shim_attached_count) asset(s), no --clobber"
 
-# ── [8/13] NEUTER proof: without the reconciliation the collision returns ───
+# ── [8/15] NEUTER proof: without the reconciliation the collision returns ───
 # The neutered copy is the PRE-FIX shape of the publisher: it treats every asset
 # as needing an upload and refuses nothing, so the shim's GitHub behaviour (a
 # duplicate name is an error) rejects it exactly as run 42246232196 was rejected.
@@ -781,7 +843,7 @@ python3 "$WORKDIR/neuter-upload.py" "$SCRIPT_DIR/release-upload.sh" "$NEUTERED_U
   "# CONVERGENCE-ARM:" "# DIVERGENCE-ARM:"
 chmod 0755 "$NEUTERED_UPLOAD"
 echo
-echo "==> [8/13] NEUTER proof: without the reconciliation, [5/13]'s fixture fails on the name collision"
+echo "==> [8/15] NEUTER proof: without the reconciliation, [5/15]'s fixture fails on the name collision"
 publish_to_shim "$CORRECT" real
 shim_log_reset
 set +e
@@ -791,21 +853,21 @@ OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$CO
 RC=$?
 set -e
 printf '%s\n' "$OUT" | indent
-[ "$RC" -ne 0 ] || fail "the NEUTERED publisher (reconciliation removed) ACCEPTED the identical set — the convergence is not load-bearing and [5/13] proves nothing"
+[ "$RC" -ne 0 ] || fail "the NEUTERED publisher (reconciliation removed) ACCEPTED the identical set — the convergence is not load-bearing and [5/15] proves nothing"
 printf '%s\n' "$OUT" | grep -q 'asset under the same name already exists' \
   || fail "the neutered publisher failed, but not with GitHub's collision error — the reproduction does not match the v0.3.0 red"
 [ "$(shim_calls 'release upload')" -gt 0 ] || fail "the neutered publisher never attempted an upload — the double is not exercising GitHub's behaviour"
 echo "    FAIL (expected): the pre-fix shape reproduced the v0.3.0 collision verbatim"
 echo "    PASS: the same-set convergence is load-bearing"
 
-# ── [9/13] IDENTITY ADOPTION: a same-commit rebuild is adopted, not refused ─
+# ── [9/15] IDENTITY ADOPTION: a same-commit rebuild is adopted, not refused ─
 # The v0.4.0 shape (run 42422236749): the Release already carries every asset,
 # but each binary was stamped with a LATER BUILD_TIME than this build's, so
 # every byte differs. The publisher must download the attached bytes, read the
 # identity from them, adopt all six binaries AND their manifest — and upload
 # nothing: the published set is kept exactly as it is.
 echo
-echo "==> [9/13] IDENTITY ADOPTION: same Version+Commit, later BUILD_TIME — adopted, zero uploads"
+echo "==> [9/15] IDENTITY ADOPTION: same Version+Commit, later BUILD_TIME — adopted, zero uploads"
 STAMPED_LOCAL="$WORKDIR/fixture-stamped-local"
 STAMPED_ATTACHED="$WORKDIR/fixture-stamped-attached"
 make_stamped_fixture "$STAMPED_LOCAL" "$IDENT_COMMIT_A" "$IDENT_TS_LOCAL"
@@ -832,16 +894,25 @@ printf '%s\n' "$OUT" | grep -qi 'converged' \
   || fail "the adopt run never downloaded an attached asset — the identity was not read from the bytes"
 [ "$(shim_attached_count)" = "$((CORRECT_COUNT + 1))" ] \
   || fail "the adopt run mutated the Release ($(shim_attached_count) asset(s), want $((CORRECT_COUNT + 1)))"
-echo "    PASS: exit 0, adoption reported with BUILD_TIME as expected metadata, zero uploads ($(shim_attached_count) asset(s) untouched)"
+# INT-CI-034: the ADOPTED line must report the MEASURED divergence (size delta
+# + differing-offset count), computed here independently of the publisher, so
+# a converged run carries its own evidence.
+EXP9_LSIZE="$(wc -c < "$STAMPED_LOCAL/crier_linux_amd64" | tr -d '[:space:]')"
+EXP9_ASIZE="$(wc -c < "$STAMPED_ATTACHED/crier_linux_amd64" | tr -d '[:space:]')"
+EXP9_DELTA="$(( EXP9_LSIZE > EXP9_ASIZE ? EXP9_LSIZE - EXP9_ASIZE : EXP9_ASIZE - EXP9_LSIZE ))"
+EXP9_OFFSETS="$(cmp -l "$STAMPED_LOCAL/crier_linux_amd64" "$STAMPED_ATTACHED/crier_linux_amd64" 2>/dev/null | wc -l | tr -d '[:space:]' || true)"
+printf '%s\n' "$OUT" | grep -Fq "measured divergence: size delta ${EXP9_DELTA} byte(s), ${EXP9_OFFSETS} differing byte offset(s)" \
+  || fail "the ADOPTED line did not report the measured divergence (want size delta ${EXP9_DELTA} byte(s), ${EXP9_OFFSETS} differing byte offset(s)) — a converged run must carry its own evidence (INT-CI-034)"
+echo "    PASS: exit 0, adoption reported with BUILD_TIME as expected metadata, zero uploads ($(shim_attached_count) asset(s) untouched; measured divergence: size delta ${EXP9_DELTA} byte(s), ${EXP9_OFFSETS} differing byte offset(s))"
 
-# ── [10/13] IDENTITY REFUSAL: a different commit / a dirty tree still refuses ─
+# ── [10/15] IDENTITY REFUSAL: a different commit / a dirty tree still refuses ─
 # RELEASE-012 kept (INT-CI-033's AC3). Two shapes, both nonzero with no upload:
 # 10a — the attached binaries carry a DIFFERENT commit (another tree's build):
 #       refused, naming the asset, the manifest, and both commits.
 # 10b — the attached binaries report vcs.modified=true: the commit they name
 #       does not describe their bytes, so the identity cannot be trusted.
 echo
-echo "==> [10/13] IDENTITY REFUSAL: a different commit (10a) and vcs.modified=true (10b) still refuse"
+echo "==> [10/15] IDENTITY REFUSAL: a different commit (10a) and vcs.modified=true (10b) still refuse"
 STAMPED_FOREIGN="$WORKDIR/fixture-stamped-foreign-commit"
 make_stamped_fixture "$STAMPED_FOREIGN" "$IDENT_COMMIT_B" "$IDENT_TS_ATTACHED"
 publish_to_shim "$STAMPED_FOREIGN" real
@@ -880,13 +951,13 @@ printf '%s\n' "$OUT" | grep -q 'vcs.modified=true' || fail "the refusal never na
 echo "    FAIL (expected): the modified-tree build was refused"
 echo "    PASS: an attached vcs.modified=true is fatal (10b)"
 
-# ── [11/13] NEUTER proof: without the adoption decision the rebuild reds ────
+# ── [11/15] NEUTER proof: without the adoption decision the rebuild reds ────
 # A copy of the publisher with ONLY the IDENTITY-ARM decision neutralised must
-# fail [9/13]'s same-commit-rebuild fixture with the RELEASE-012 refusal —
+# fail [9/15]'s same-commit-rebuild fixture with the RELEASE-012 refusal —
 # i.e. the exact run 42422236749 red. If the neutered copy still exits 0, the
-# adoption arm is decoration and [9/13] proves nothing.
+# adoption arm is decoration and [9/15] proves nothing.
 echo
-echo "==> [11/13] NEUTER proof: with ONLY the adoption decision removed, [9/13]'s fixture reds"
+echo "==> [11/15] NEUTER proof: with ONLY the adoption decision removed, [9/15]'s fixture reds"
 NEUTERED_IDENTITY="$WORKDIR/release-upload-neutered-identity.sh"
 python3 "$WORKDIR/neuter-upload.py" "$SCRIPT_DIR/release-upload.sh" "$NEUTERED_IDENTITY" "# IDENTITY-ARM:"
 chmod 0755 "$NEUTERED_IDENTITY"
@@ -899,7 +970,7 @@ OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$ST
 RC=$?
 set -e
 printf '%s\n' "$OUT" | indent
-[ "$RC" -ne 0 ] || fail "the NEUTERED publisher (adoption removed) ACCEPTED the same-commit rebuild — the adoption arm is not load-bearing and [9/13] proves nothing"
+[ "$RC" -ne 0 ] || fail "the NEUTERED publisher (adoption removed) ACCEPTED the same-commit rebuild — the adoption arm is not load-bearing and [9/15] proves nothing"
 printf '%s\n' "$OUT" | grep -q 'a published asset is never replaced silently' \
   || fail "the neutered publisher failed, but not with the RELEASE-012 refusal — the reproduction does not match the v0.4.0 red"
 printf '%s\n' "$OUT" | grep -q 'ADOPTED by build identity — both sides carry' \
@@ -908,12 +979,12 @@ printf '%s\n' "$OUT" | grep -q 'ADOPTED by build identity — both sides carry' 
 echo "    FAIL (expected): the pre-INT-CI-033 shape reproduced the v0.4.0 refusal verbatim"
 echo "    PASS: the adoption decision is load-bearing"
 
-# ── [12/13] NON-BINARY DRIFT: a differing install.sh still refuses ──────────
+# ── [12/15] NON-BINARY DRIFT: a differing install.sh still refuses ──────────
 # install.sh carries no build stamp, so it can never be adopted: it must
 # converge byte-identically as it always has. Its SHA256SUMS entry changes with
 # it, so the manifest is refused with it (the manifest of a refused set).
 echo
-echo "==> [12/13] NON-BINARY DRIFT: install.sh (no build stamp) differing still refuses"
+echo "==> [12/15] NON-BINARY DRIFT: install.sh (no build stamp) differing still refuses"
 STAMPED_ATTACHED_DRIFT="$WORKDIR/fixture-stamped-installdrift"
 make_stamped_fixture "$STAMPED_ATTACHED_DRIFT" "$IDENT_COMMIT_A" "$IDENT_TS_ATTACHED"
 printf 'this installer is NOT the one the Release already carries\n' >> "$STAMPED_ATTACHED_DRIFT/install.sh"
@@ -935,9 +1006,9 @@ printf '%s\n' "$OUT" | grep -q 'SHA256SUMS' || fail "the refusal never named the
 echo "    FAIL (expected): install.sh drift was refused as non-binary drift, manifest with it"
 echo "    PASS: a non-binary asset is never adopted — content drift keeps the refusal"
 
-# ── [13/13] the scripts under test are syntactically sound ───────────────────
+# ── [13/15] the scripts under test are syntactically sound ───────────────────
 echo
-echo "==> [13/13] syntax: bash -n on the scripts, YAML parse of the workflow"
+echo "==> [13/15] syntax: bash -n on the scripts, YAML parse of the workflow"
 bash -n "$SCRIPT_DIR/release-upload.sh" || fail "bash -n rejected scripts/release-upload.sh"
 bash -n "$SCRIPT_DIR/release-upload-selftest.sh" || fail "bash -n rejected scripts/release-upload-selftest.sh"
 python3 - "$WORKFLOW" <<'PY'
@@ -957,6 +1028,78 @@ else:
 PY
 echo "    PASS: both scripts parse and the workflow is well-formed"
 
+# ── [14/15] METADATA BOUND: a copied identity stamp on a different body refuses ─
+# The INT-CI-034 shape: the attached binaries carry the SAME Version token and
+# the SAME single 40-hex commit as this build (every identity ground passes)
+# but their bodies are a different build's — a 16 KiB filler run that differs
+# between the builds plus an appended line, so the divergence is thousands of
+# offsets and a real size delta, far beyond the measured metadata-only spread
+# (size-identical, 63/63/153 offsets). The publisher must refuse, quoting the
+# MEASURED numbers, with no upload and nothing replaced.
+echo
+echo "==> [14/15] METADATA BOUND: same Version+Commit, materially different body — refused with measured numbers"
+MATERIAL_LOCAL="$WORKDIR/fixture-material-local"
+MATERIAL_ATTACHED="$WORKDIR/fixture-material-attached"
+make_material_fixture "$MATERIAL_LOCAL" "$IDENT_COMMIT_A" "$IDENT_TS_LOCAL" L
+make_material_fixture "$MATERIAL_ATTACHED" "$IDENT_COMMIT_A" "$IDENT_TS_ATTACHED" M \
+  "material drift: appended body the published build does not carry"
+# What the bound must see, measured HERE independently of the publisher:
+MAT_LSIZE="$(wc -c < "$MATERIAL_LOCAL/crier_linux_amd64" | tr -d '[:space:]')"
+MAT_ASIZE="$(wc -c < "$MATERIAL_ATTACHED/crier_linux_amd64" | tr -d '[:space:]')"
+MAT_DELTA="$(( MAT_LSIZE > MAT_ASIZE ? MAT_LSIZE - MAT_ASIZE : MAT_ASIZE - MAT_LSIZE ))"
+MAT_OFFSETS="$(cmp -l "$MATERIAL_LOCAL/crier_linux_amd64" "$MATERIAL_ATTACHED/crier_linux_amd64" 2>/dev/null | wc -l | tr -d '[:space:]' || true)"
+[ "$MAT_DELTA" -gt 0 ] || fail "the material fixture has no size delta — the fixture is broken"
+[ "$MAT_OFFSETS" -gt 4096 ] || fail "the material fixture diverges in only ${MAT_OFFSETS} offset(s) — it does not breach the default offsets bound and proves nothing"
+publish_to_shim "$MATERIAL_ATTACHED" real
+ORIGINAL_DIGEST="$(shim_attached_digest crier_linux_amd64)"
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$MATERIAL_LOCAL" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$SCRIPT_DIR/release-upload.sh" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -ne 0 ] || fail "release-upload.sh ADOPTED a materially different body wearing a copied identity stamp (exit 0) — the metadata bound is not enforced (INT-CI-034)"
+printf '%s\n' "$OUT" | grep -q 'crier_linux_amd64' || fail "the refusal never named the diverging asset"
+printf '%s\n' "$OUT" | grep -q 'SHA256SUMS' || fail "the refusal never named the manifest of the refused set"
+printf '%s\n' "$OUT" | grep -q 'diverge beyond the metadata bound' || fail "the refusal never said WHY (beyond the metadata bound)"
+printf '%s\n' "$OUT" | grep -Fq "size delta ${MAT_DELTA} byte(s), ${MAT_OFFSETS} differing byte offset(s)" \
+  || fail "the refusal did not quote the MEASURED divergence (want size delta ${MAT_DELTA} byte(s), ${MAT_OFFSETS} differing byte offset(s))"
+[ "$(shim_calls 'release upload')" = "0" ] || fail "the bound-breach refusal still issued an upload"
+[ "$(shim_attached_digest crier_linux_amd64)" = "$ORIGINAL_DIGEST" ] || fail "the bound-breach refusal mutated the attached asset anyway"
+echo "    FAIL (expected): the copied-identity build was refused — measured size delta ${MAT_DELTA} byte(s), ${MAT_OFFSETS} differing byte offset(s)"
+echo "    PASS: a body beyond the metadata bound is refused even with identical identity stamps"
+
+# ── [15/15] NEUTER proof: without the metadata bound the material fixture is adopted ─
+# A copy of the publisher with ONLY the ADOPT-BOUND-ARM decision neutralised
+# must ADOPT [14/15]'s fixture — every identity ground passes for it, so the
+# bound is the ONLY thing standing between [14/15]'s refusal and an adoption.
+# If the neutered copy still refuses, the bound is not load-bearing and
+# [14/15] proves nothing.
+echo
+echo "==> [15/15] NEUTER proof: with ONLY the metadata bound removed, [14/15]'s fixture is ADOPTED"
+NEUTERED_BOUND="$WORKDIR/release-upload-neutered-bound.sh"
+python3 "$WORKDIR/neuter-upload.py" "$SCRIPT_DIR/release-upload.sh" "$NEUTERED_BOUND" "# ADOPT-BOUND-ARM:"
+chmod 0755 "$NEUTERED_BOUND"
+publish_to_shim "$MATERIAL_ATTACHED" real
+shim_log_reset
+set +e
+OUT="$(PATH="$GH_SHIM_DIR:$PATH" VERSION="$SELFTEST_VERSION" RELEASE_OUTDIR="$MATERIAL_LOCAL" \
+  GH_STATE_DIR="$SHIM_STATE" ALLOW_TAG_DRIFT=1 \
+  bash "$NEUTERED_BOUND" --notes-file "$WORKDIR/notes.md" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT" | indent
+[ "$RC" -eq 0 ] || fail "the NEUTERED publisher (bound removed) REFUSED the material-divergence fixture — the bound is not load-bearing and [14/15] proves nothing"
+printf '%s\n' "$OUT" | grep -q 'ADOPTED by build identity' \
+  || fail "the neutered publisher exited 0 but never reported an adoption — the neuter did not exercise the adoption path"
+printf '%s\n' "$OUT" | grep -q 'diverge beyond the metadata bound' \
+  && fail "the neutered publisher still reported the bound refusal — the neuter did not remove the bound"
+[ "$(shim_calls 'release upload')" = "0" ] || fail "the neutered publisher uploaded while adopting"
+echo "    FAIL (expected): the pre-INT-CI-034 shape ADOPTED the material-divergence fixture"
+echo "    PASS: the metadata bound is load-bearing"
+
 echo
 echo "release-upload-selftest: PASS — a correct asset set (every manifest asset + SHA256SUMS)"
 echo "                         is accepted by BOTH the publish script and the workflow's"
@@ -965,6 +1108,9 @@ echo "                         the SHA256SUMS exemption is proven load-bearing,"
 echo "                         re-publishing an IDENTICAL set converges with no upload,"
 echo "                         a same-commit REBUILD is adopted by build identity with zero"
 echo "                         uploads (INT-CI-033) and the adoption is proven load-bearing,"
+echo "                         a materially different body wearing a copied identity stamp is"
+echo "                         refused by the metadata bound with its measured numbers"
+echo "                         (INT-CI-034) and the bound is proven load-bearing,"
 echo "                         a different commit, a vcs.modified=true build and a differing"
 echo "                         install.sh are still refused, CLOBBER=1 stays the only"
 echo "                         replacement path, and a half-published Release is repaired."
