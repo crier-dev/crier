@@ -38,9 +38,17 @@
 #   RECONCILES first (RELEASE-012): an asset the Release already carries with
 #   IDENTICAL content is skipped, so re-running this workflow against a tag whose
 #   assets are already attached converges (exit 0, nothing uploaded) instead of
-#   dying on GitHub's "asset under the same name already exists"; content that
-#   DIFFERS under an attached name is still refused, and no run reaches for
-#   --clobber to get past it.
+#   dying on GitHub's "asset under the same name already exists". A REBUILD of
+#   the SAME commit (INT-CI-033) is ADOPTED, not refused: a second build of the
+#   tagged commit is never byte-identical — the builder stamps the wall-clock
+#   BUILD_TIME into every binary — so when the attached binaries carry the same
+#   embedded identity as this build (the same VERSION token and the same single
+#   commit candidate, read from the artifact bytes, with no vcs.modified=true
+#   on the attached side), the publisher ADOPTS them: skipped, nothing
+#   uploaded, the BUILD_TIME difference reported as expected metadata. Content
+#   that genuinely DIFFERS — a different commit, a vcs.modified=true build, an
+#   unreadable or ambiguous identity stamp, or a non-binary like install.sh —
+#   is still refused, and no run reaches for --clobber to get past it.
 # - The run ends by diffing the Release's attached assets against
 #   dist/SHA256SUMS — `assets: []` (the exact defect CR-FEAT-028 set out to
 #   close) or a partial upload is a RED run, never a silent one. SHA256SUMS is

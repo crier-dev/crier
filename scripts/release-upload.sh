@@ -51,13 +51,61 @@
 #   same content  -> skipped; a fully-identical set exits 0 reporting convergence
 #                    (no upload is attempted, so there is no collision to fail on),
 #   name absent   -> uploaded (a half-failed publish is REPAIRED, not re-done),
-#   other content -> REFUSED unless CLOBBER=1 (a published binary is never
-#                    silently replaced — docs/releases.md §4).
+#   other content -> ADOPTED by BUILD IDENTITY when both sides provably carry the
+#                    same build (see below) — the difference is the BUILD_TIME a
+#                    rebuild always stamps in, so it is reported as expected
+#                    metadata, never as a conflict, and nothing is uploaded;
+#                    otherwise REFUSED unless CLOBBER=1 (a published asset is
+#                    never silently replaced — docs/releases.md §4).
+#
+# BUILD IDENTITY — why a same-commit rebuild is ADOPTED, not refused
+# ------------------------------------------------------------------
+# Both publishers of one release build the SAME tagged commit: the hand `make
+# release-upload` (docs/releases.md §4) and the tag-triggered release.yml. But
+# release-artifacts.sh stamps the wall-clock BUILD_TIME into every binary, so
+# the second publisher's build is never byte-identical to the first — and the
+# byte comparison above correctly reports DIFFERENT for a set that is in every
+# meaningful way the same build. That is what red-ed run 42422236749 (tag
+# v0.4.0): the manual publish landed first, the workflow rebuilt with a later
+# BUILD_TIME, and RELEASE-012 correctly refused to swap the published binaries.
+# A release that shipped correctly wore a red run on its own tag.
+#
+# The remedy reads IDENTITY out of the artifact bytes, never out of the tag
+# name. The obvious anchor — the -ldflags string, which older Go toolchains
+# record verbatim in the binary's build settings — is NOT available on the
+# toolchain this repo builds with: go1.26.10 records no -ldflags build setting
+# at all (measured: `go version -m` lists none, and the byte string "ldflags"
+# does not appear anywhere in a release binary), so the reader greps the
+# stamped VALUES, not a flag blob. Measured shapes of a release binary's
+# bytes (crier and crier-mcp, linux and darwin alike):
+#   - the ${VERSION} token appears exactly once, standalone;
+#   - the commit stamp is one exactly-40-character hex run — the ONLY one once
+#     decimal-float mantissa runs are excluded (the server binaries carry
+#     277555756156289135105907917022705078125e in their rodata: 39 digits and
+#     an exponent marker, which length-40 hex matching alone cannot tell from
+#     a commit);
+#   - `vcs.modified=<true|false>` appears in the build settings of toolchains
+#     that record VCS status (go1.26.10 does not; the check is kept for those
+#     that do — a build from a modified tree must not be adopted).
+# We READ BYTES and never execute the artifact: a downloaded release binary is
+# compared, not run. A differing binary is ADOPTED (skipped: no upload, no
+# replacement) only when BOTH sides carry the same Version token AND the same
+# single commit candidate, and the ATTACHED side does not report
+# `vcs.modified=true`. Anything else keeps the refusal, with the deciding fact
+# named in the log: identity differs / identity unreadable or ambiguous (fail
+# closed — adoption never rests on a missing field, and a binary whose commit
+# stamp is ambiguous is refused, never guessed) / non-binary drift. Two special
+# members: SHA256SUMS is the manifest OF the set and is adopted only when every
+# differing binary in the same run was adopted (it is the manifest of the
+# adopted set; if any binary is refused, it is refused too); install.sh carries
+# no stamp and must converge byte-identically as before.
+#
 # Content identity is the only thing that converges, and it is always MEASURED: a
 # missing remote digest is downloaded and hashed, never assumed equal.
 #
 # Exit status: 0 only when the asset set verified AND the Release then carries it —
-# created, uploaded, or already converged (or printed, under --dry-run).
+# created, uploaded, already converged, or converged with build-identity
+# adoptions (or printed, under --dry-run).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,8 +151,13 @@ Env: VERSION (required), RELEASE_OUTDIR, CRIER_REPO, CRIER_TARGETS,
 Requires: gh (authenticated with write access to the repo), sha256sum/shasum.
 
 Re-publishing an asset set that the Release already carries IDENTICAL content for
-is a no-op (exit 0, nothing uploaded). Different content under an attached name is
-refused unless CLOBBER=1. Never pushes or moves a git tag — see docs/releases.md
+is a no-op (exit 0, nothing uploaded). A same-commit rebuild is ADOPTED by build
+identity: binaries carrying the same embedded Version and Commit (read from the
+artifact bytes; the attached tree must be clean) differ only in the BUILD_TIME a
+rebuild stamps in, so they are skipped and the difference is reported as expected
+metadata — nothing is uploaded. Content that genuinely differs (another commit,
+another tree, an unreadable identity, a non-binary like install.sh) is refused
+unless CLOBBER=1. Never pushes or moves a git tag — see docs/releases.md
 §3/§4.
 EOF
 }
@@ -305,9 +358,147 @@ local_sha() {
   $SHA_TOOL "$1" | awk '{print $1}' | tr '[:upper:]' '[:lower:]'
 }
 
-CONVERGED=""   # names already attached with IDENTICAL content
-DIFFERENT=""   # names attached with DIFFERENT content
-TO_UPLOAD=""   # asset paths this publish still has to upload
+CONVERGED=""         # names already attached with IDENTICAL content
+ADOPTED=""           # names attached with DIFFERENT content but the SAME build identity (adopted: skipped, never uploaded)
+ADOPTED_BINARIES=""  # the build-stamped subset of ADOPTED (gates the SHA256SUMS adoption)
+DIFFERENT=""         # names attached with DIFFERENT content, refused
+DIFFERENT_REASONS="" # one "<name>: <fact>" line per refused asset, printed with the refusal
+MANIFEST_DIFFERENT=0 # SHA256SUMS differs — its decision waits for the binaries (manifest arm)
+TO_UPLOAD=""         # asset paths this publish still has to upload
+
+# ── Build identity, read from the artifact bytes ────────────────────────────
+# The release binaries are stamped at link time: `-ldflags "-X
+# github.com/crier-dev/crier/internal/buildinfo.Version=<v> …Commit=<40-hex sha>
+# …BuildTime=<RFC3339>"`. go1.26.10 does NOT record that flag string in the
+# binary (see the header comment), so the reader greps the stamped VALUE
+# shapes out of the file bytes — the same bytes on linux/amd64, linux/arm64
+# and darwin/arm64, and the same shapes the selftest's synthetic fixtures
+# carry. We READ BYTES and never execute the artifact: a downloaded release
+# binary is compared, not run.
+RE_IDENT_VCSMOD='vcs\.modified=(true|false)'
+
+identity_field() { # <file> <ERE> -> the value after the first '=' of the first match (empty when absent)
+  local hit=""
+  hit="$(grep -aom1 -E -- "$2" "$1" 2>/dev/null | head -n1 || true)"
+  printf '%s' "${hit#*=}"
+}
+
+# identity_of <file> -> sets I_COMMIT / I_COMMIT_CANDIDATES / I_VERSION_STAMPED /
+# I_VCSMOD for the file's bytes.
+#
+# Commit stamp: the exactly-40-character hex runs of the file (grep the MAXIMAL
+# runs, then keep length==40, so a commit is never carved out of a longer hex
+# blob), minus decimal-float mantissa runs (measured: go1.26.10's server
+# rodata carries 277555756156289135105907917022705078125e — digits and an
+# exponent marker — which length-40 hex matching alone cannot tell from a
+# commit). Exactly one survivor = the commit stamp; zero or several = unreadable
+# / ambiguous, and the caller refuses (fail closed: an ambiguous stamp is never
+# guessed).
+identity_of() {
+  local file="$1" runs="" c=""
+  I_COMMIT=""
+  I_COMMIT_CANDIDATES=0
+  runs="$(grep -aoE '[0-9a-f]{40,}' "$file" 2>/dev/null | LC_ALL=C sort -u || true)"
+  for c in $runs; do
+    [ "${#c}" -eq 40 ] || continue
+    case "$c" in
+      *[!0-9e]*) ;;     # carries a hex letter beyond digits/e -> a commit shape
+      *) continue ;;    # only digits (+ trailing e): a decimal-float mantissa
+    esac
+    I_COMMIT_CANDIDATES=$((I_COMMIT_CANDIDATES + 1))
+    I_COMMIT="$c"
+  done
+  # Version stamp: the publisher's own VERSION token, standalone in the bytes
+  # (bounded by non-alphanumerics). Measured unique in every binary of the set;
+  # a rebuild of the same tag carries the same token.
+  I_VERSION_STAMPED=0
+  if [ -n "${VERSION:-}" ] && grep -aqE "(^|[^0-9A-Za-z])${VERSION//./\\.}([^0-9A-Za-z]|$)" "$file" 2>/dev/null; then
+    I_VERSION_STAMPED=1
+  fi
+  # VCS status: recorded only by toolchains that stamp build settings (go1.26.10
+  # does not). When present, vcs.modified=true means the bytes are NOT the
+  # commit they name — the caller refuses.
+  I_VCSMOD="$(identity_field "$file" "$RE_IDENT_VCSMOD")"
+}
+
+is_release_binary() { # <name> — the build-stamped members of the set; anything else (install.sh) carries no stamp
+  case "$1" in
+    crier_*|crier-mcp_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# identity_refusal_reason <local-asset-path> <attached-name>
+# Sets ADOPT_REASON: EMPTY when the differing asset may be ADOPTED by build
+# identity, otherwise a one-line fact explaining the refusal. Also leaves the
+# I_LOCAL_* / I_ATTACH_* fields set for the caller's report. Fail closed: an
+# unreadable or ambiguous stamp (no commit candidate, several, or the VERSION
+# token absent), a Version/Commit mismatch, an attached `vcs.modified=true`,
+# and any non-binary asset -> a non-empty reason (DIFFERENT, refused). Adoption
+# never rests on a missing or multi-candidate field.
+identity_refusal_reason() {
+  local asset="$1" name="$2" attached_copy=""
+  ADOPT_REASON=""
+  I_LOCAL_COMMIT="" I_LOCAL_COMMIT_CANDIDATES=0 I_LOCAL_VERSION_STAMPED=0
+  I_ATTACH_COMMIT="" I_ATTACH_COMMIT_CANDIDATES=0 I_ATTACH_VERSION_STAMPED=0 I_ATTACH_VCSMOD=""
+  if ! is_release_binary "$name"; then
+    ADOPT_REASON="carries no build stamp (non-binary asset) — real content drift; a published non-binary asset is never replaced silently"
+    return 0
+  fi
+  # Both sides must read as: exactly one commit candidate, and this publish's
+  # own VERSION token present. Read the LOCAL side first, so a local fixture or
+  # stale build that carries no identity refuses before anything is downloaded.
+  identity_of "$asset"
+  I_LOCAL_COMMIT="$I_COMMIT" I_LOCAL_COMMIT_CANDIDATES="$I_COMMIT_CANDIDATES" \
+    I_LOCAL_VERSION_STAMPED="$I_VERSION_STAMPED"
+  if [ "$I_LOCAL_COMMIT_CANDIDATES" -ne 1 ]; then
+    ADOPT_REASON="build identity unreadable in the LOCAL ${name} (commit stamp: ${I_LOCAL_COMMIT_CANDIDATES} exactly-40-hex candidate(s) after the mantissa filter, want exactly 1) — refusing on an unreadable identity"
+    return 0
+  fi
+  if [ "$I_LOCAL_VERSION_STAMPED" -ne 1 ]; then
+    ADOPT_REASON="build identity unreadable in the LOCAL ${name} (the VERSION token ${VERSION} is not in the bytes) — refusing on an unreadable identity"
+    return 0
+  fi
+  # The attached bytes: reuse the copy the digest-less compare already fetched,
+  # otherwise download them now. A digest on the asset proves its content hash,
+  # not its build identity — the stamp has to be read from the bytes.
+  mkdir -p "$WORK_TMP/download/identity"
+  attached_copy="$WORK_TMP/download/identity/$name"
+  if [ -f "$WORK_TMP/download/$name" ]; then
+    cp "$WORK_TMP/download/$name" "$attached_copy"
+  elif ! gh release download "$VERSION" --repo "$CRIER_REPO" --pattern "$name" --dir "$WORK_TMP/download/identity" >/dev/null 2>&1; then
+    ADOPT_REASON="the attached ${name} could not be fetched to read its build identity (gh release download failed) — refusing on an unreadable identity"
+    return 0
+  fi
+  if [ ! -s "$attached_copy" ]; then
+    ADOPT_REASON="the attached ${name} fetched for the identity compare is empty or truncated — refusing on an unreadable identity"
+    return 0
+  fi
+  identity_of "$attached_copy"
+  I_ATTACH_COMMIT="$I_COMMIT" I_ATTACH_COMMIT_CANDIDATES="$I_COMMIT_CANDIDATES" \
+    I_ATTACH_VERSION_STAMPED="$I_VERSION_STAMPED" I_ATTACH_VCSMOD="$I_VCSMOD"
+  if [ "$I_ATTACH_COMMIT_CANDIDATES" -ne 1 ]; then
+    ADOPT_REASON="build identity unreadable in the ATTACHED ${name} (commit stamp: ${I_ATTACH_COMMIT_CANDIDATES} exactly-40-hex candidate(s) after the mantissa filter, want exactly 1) — refusing on an unreadable identity"
+    return 0
+  fi
+  if [ "$I_ATTACH_VERSION_STAMPED" -ne 1 ]; then
+    ADOPT_REASON="build identity unreadable in the ATTACHED ${name} (the VERSION token ${VERSION} is not in the bytes) — refusing on an unreadable identity"
+    return 0
+  fi
+  if [ "$I_ATTACH_VCSMOD" = "true" ]; then
+    ADOPT_REASON="the attached ${name} reports vcs.modified=true — it was built from a modified working tree, so the commit it names does not describe its bytes"
+    return 0
+  fi
+  if [ "$I_ATTACH_COMMIT" != "$I_LOCAL_COMMIT" ]; then
+    ADOPT_REASON="build identity differs — the attached ${name} was built from commit ${I_ATTACH_COMMIT}, this build from commit ${I_LOCAL_COMMIT}"
+    return 0
+  fi
+  # Every refusal ground is answered: same single commit candidate on both
+  # sides, this publish's VERSION token in both, the attached tree was clean.
+  # The remaining byte difference is the build metadata (BUILD_TIME) a rebuild
+  # always stamps in. -> adoptable.
+  return 0
+}
 
 if [ "$EXISTS" = "1" ]; then
   REMOTE_TSV="$WORK_TMP/attached.tsv"
@@ -344,6 +535,7 @@ if [ "$EXISTS" = "1" ]; then
       # "Identical" is measured here, never assumed from a missing field.
       if [ "$rsize" != "$lsize" ]; then
         note "${name}: attached with a different size (${rsize} vs ${lsize}) — DIFFERENT"
+        DIFFERENT_REASONS="${DIFFERENT_REASONS}${DIFFERENT_REASONS:+$'\n'}${name}: size differs (attached ${rsize} vs local ${lsize} bytes)"
         DIFFERENT="${DIFFERENT}${DIFFERENT:+ }${name}"
         TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
         continue
@@ -359,15 +551,87 @@ if [ "$EXISTS" = "1" ]; then
       note "${name}: attached with identical content — skipped"
       CONVERGED="${CONVERGED}${CONVERGED:+ }${name}"
     else
-      note "${name}: attached with DIFFERENT content (release sha256 ${rsha})"
-      DIFFERENT="${DIFFERENT}${DIFFERENT:+ }${name}"
-      TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
+      # MANIFEST DEFERRAL: SHA256SUMS is the manifest OF the set, so its own
+      # content always changes when any covered binary's bytes change. Its
+      # decision waits until every binary in this run is classified — see the
+      # manifest arm below. (Under CLOBBER=1 it simply rides with the rest of
+      # the replaced set, exactly as before the identity rule existed.)
+      if [ "$name" = "SHA256SUMS" ]; then
+        note "${name}: attached with DIFFERENT content — decision deferred until every binary in this run is classified (it is the set's manifest)"
+        MANIFEST_DIFFERENT=1
+      else
+        note "${name}: attached with DIFFERENT content (release sha256 ${rsha})"
+        # A differing binary gets one second chance before the refusal: classify
+        # WHY the content differs — when BOTH sides provably carry the same
+        # build identity, the difference is the BUILD_TIME metadata a rebuild
+        # always stamps in. The decision itself is the IDENTITY-ARM below.
+        identity_refusal_reason "$asset" "$name"   # sets ADOPT_REASON ("" = adoptable) + I_LOCAL_*/I_ATTACH_*
+        # IDENTITY-ARM:
+        if [ -z "$ADOPT_REASON" ]; then
+          # Empty reason = a same-build rebuild: same VERSION token, same single
+          # commit candidate, clean attached tree. The remaining byte difference
+          # is the BUILD_TIME metadata a rebuild always stamps in, so the asset
+          # is ADOPTED — skipped, nothing uploaded, the difference reported as
+          # expected metadata, never as a conflict. Anything else keeps the
+          # RELEASE-012 refusal. Neutering this decision (selftest arm [11/13])
+          # re-creates the historical refusal on a same-commit rebuild (run
+          # 42422236749, tag v0.4.0).
+          note "${name}: ADOPTED by build identity — both sides carry Version=${VERSION} Commit=${I_LOCAL_COMMIT} (the remaining byte difference is build metadata — BUILD_TIME — expected on a rebuild); nothing is uploaded"
+          ADOPTED="${ADOPTED}${ADOPTED:+ }${name}"
+          if is_release_binary "$name"; then
+            ADOPTED_BINARIES="${ADOPTED_BINARIES}${ADOPTED_BINARIES:+ }${name}"
+          fi
+        else
+          ADOPT_REASON="${ADOPT_REASON:-identity adoption was not evaluated}"
+          note "${name}: REFUSED — ${ADOPT_REASON}"
+          DIFFERENT_REASONS="${DIFFERENT_REASONS}${DIFFERENT_REASONS:+$'\n'}${name}: ${ADOPT_REASON}"
+          DIFFERENT="${DIFFERENT}${DIFFERENT:+ }${name}"
+          TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${asset}"
+        fi
+      fi
     fi
   done
 
-  # DIVERGENCE-ARM: different content under a published name is a refusal, never a silent overwrite.
+  # MANIFEST-ARM: the deferred SHA256SUMS decision. It may be ADOPTED only when
+  # every differing binary in this run was adopted by identity — its hashes
+  # changed because those builds' bytes changed, so it IS the manifest of the
+  # adopted set. If any binary was refused, the manifest is refused with them
+  # (a manifest pointing at a set that was never published). Under CLOBBER=1 it
+  # is replaced with the rest of the differing set, exactly as before. And a
+  # manifest that differs while NOTHING else does (and no binary was adopted)
+  # describes an internally inconsistent Release — refused, fail closed.
+  if [ "$MANIFEST_DIFFERENT" = "1" ]; then
+    if [ "$CLOBBER" = "1" ]; then
+      note "SHA256SUMS: CLOBBER=1 — replacing the manifest with the rest of the differing set"
+      DIFFERENT="${DIFFERENT}${DIFFERENT:+ }SHA256SUMS"
+      TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${RELEASE_OUTDIR}/SHA256SUMS"
+    elif [ -z "$DIFFERENT" ] && [ -n "$ADOPTED_BINARIES" ]; then
+      note "SHA256SUMS: adopted — it is the manifest of the adopted binaries (every differing binary in this run was adopted by build identity); nothing is uploaded"
+      ADOPTED="${ADOPTED}${ADOPTED:+ }SHA256SUMS"
+    else
+      if [ -n "$DIFFERENT" ]; then
+        MANIFEST_REASON="it is the manifest of a REFUSED set — its hashes describe binaries whose identity was refused above"
+      else
+        MANIFEST_REASON="it differs while every asset it covers is byte-identical and no binary was adopted — the attached manifest is inconsistent with its own set"
+      fi
+      note "SHA256SUMS: REFUSED — ${MANIFEST_REASON}"
+      DIFFERENT_REASONS="${DIFFERENT_REASONS}${DIFFERENT_REASONS:+$'\n'}SHA256SUMS: ${MANIFEST_REASON}"
+      DIFFERENT="${DIFFERENT}${DIFFERENT:+ }SHA256SUMS"
+      TO_UPLOAD="${TO_UPLOAD}${TO_UPLOAD:+ }${RELEASE_OUTDIR}/SHA256SUMS"
+    fi
+  fi
+
+  # DIVERGENCE-ARM:
   if [ -n "$DIFFERENT" ] && [ "$CLOBBER" != "1" ]; then
-    fail "${VERSION} already carries asset(s) whose content differs from this build: ${DIFFERENT} — a published asset is never replaced silently (somebody may already have downloaded it, and its SHA256SUMS entry would stop matching). Re-publish the build that produced them, or set CLOBBER=1 to replace them deliberately"
+    # Different content under a published name is a refusal, never a silent
+    # overwrite (RELEASE-012). Same-commit rebuilds whose binaries carry the
+    # same Version+Commit were already ADOPTED above, so a refusal here means
+    # the content genuinely differs — and the reasons above say which fact made
+    # each name a refusal, so the next red run is diagnosable from the log alone.
+    if [ -n "$DIFFERENT_REASONS" ]; then
+      printf '%s\n' "$DIFFERENT_REASONS" | sed 's/^/release-upload:     - /' >&2
+    fi
+    fail "${VERSION} already carries asset(s) whose content differs from this build: ${DIFFERENT} — a published asset is never replaced silently (somebody may already have downloaded it, and its SHA256SUMS entry would stop matching). A same-commit rebuild is ADOPTED by build identity, so this refusal means the identity genuinely differs (see the reasons above). Re-publish the build that produced them, or set CLOBBER=1 to replace them deliberately"
   fi
   if [ -n "$DIFFERENT" ] && [ "$CLOBBER" = "1" ]; then
     note "CLOBBER=1 — replacing deliberately: ${DIFFERENT}"
@@ -377,20 +641,35 @@ fi
 # shellcheck disable=SC2086
 if [ "$EXISTS" = "1" ] && [ -z "$TO_UPLOAD" ]; then
   CONVERGED_COUNT="$(printf '%s\n' $CONVERGED | grep -c . || true)"
+  # shellcheck disable=SC2086
+  ADOPTED_COUNT="$(printf '%s\n' $ADOPTED | grep -c . || true)"
   echo
-  echo "release-upload: CONVERGED — ${VERSION} already carries all ${CONVERGED_COUNT} asset(s) with IDENTICAL content:"
-  for name in $CONVERGED; do note "$name"; done
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "release-upload: DRY RUN — a real run would upload nothing (it would converge, exit 0)."
+  if [ -n "$ADOPTED" ]; then
+    echo "release-upload: CONVERGED — ${VERSION} already carries the full set: ${CONVERGED_COUNT} asset(s) with IDENTICAL content + ${ADOPTED_COUNT} adopted by build identity (BUILD_TIME differs — expected on a rebuild):"
+    for name in $CONVERGED; do note "${name}: attached with identical content"; done
+    for name in $ADOPTED; do note "${name}: adopted by build identity — same Version+Commit, metadata (BUILD_TIME) differs, nothing uploaded"; done
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "release-upload: DRY RUN — a real run would upload nothing (it would converge with the adoptions above, exit 0)."
+    else
+      echo "release-upload: nothing was uploaded — a same-commit rebuild is adopted by build identity, not treated as a conflict."
+    fi
   else
-    echo "release-upload: nothing was uploaded — re-publishing an identical asset set is a no-op, not a name collision."
+    echo "release-upload: CONVERGED — ${VERSION} already carries all ${CONVERGED_COUNT} asset(s) with IDENTICAL content:"
+    for name in $CONVERGED; do note "$name"; done
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "release-upload: DRY RUN — a real run would upload nothing (it would converge, exit 0)."
+    else
+      echo "release-upload: nothing was uploaded — re-publishing an identical asset set is a no-op, not a name collision."
+    fi
   fi
 elif [ "$EXISTS" = "1" ]; then
   # shellcheck disable=SC2086
   TO_UPLOAD_COUNT="$(printf '%s\n' $TO_UPLOAD | grep -c . || true)"
   # shellcheck disable=SC2086
   CONVERGED_COUNT="$(printf '%s\n' $CONVERGED | grep -c . || true)"
-  note "uploading ${TO_UPLOAD_COUNT} asset(s) onto the existing Release (${CONVERGED_COUNT} already attached with identical content, skipped):"
+  # shellcheck disable=SC2086
+  ADOPTED_COUNT="$(printf '%s\n' $ADOPTED | grep -c . || true)"
+  note "uploading ${TO_UPLOAD_COUNT} asset(s) onto the existing Release (${CONVERGED_COUNT} already attached with identical content, ${ADOPTED_COUNT} adopted by build identity, skipped):"
   for asset in $TO_UPLOAD; do note "  $(basename "$asset")"; done
   # shellcheck disable=SC2086
   if [ "$CLOBBER" = "1" ]; then

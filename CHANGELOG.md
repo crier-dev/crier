@@ -13,7 +13,22 @@ procedure, the gate requirements and the publish step are in
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **A same-commit rebuild is adopted by build identity instead of failing the
+  Release publish on BUILD_TIME drift** (INT-CI-033). The tag-triggered
+  `release.yml` and the hand `make release-upload` both build the tagged
+  commit, and the wall-clock `BUILD_TIME` stamp made every rebuild's bytes
+  differ, so whichever publisher ran second was refused on releases that had
+  already shipped correctly (runs `42422236749`/v0.4.0, `42246232196`/v0.3.0,
+  `39539975561`/v0.2.0). `scripts/release-upload.sh` now reads the build
+  identity out of the artifact bytes (the embedded VERSION token and the
+  single 40-hex commit candidate) and ADOPTS an attached asset whose identity
+  matches this build, reporting BUILD_TIME as expected metadata — nothing is
+  uploaded and the published set is kept as-is. A different commit, a
+  `vcs.modified=true` build, an unreadable/ambiguous stamp, and any
+  non-binary drift are still refused without `CLOBBER=1` (RELEASE-012
+  unchanged).
 
 ## [0.4.0] - 2026-11-07
 

@@ -91,8 +91,19 @@ the commit it tagged is not an ancestor of `origin/main` (as of the last
 The pushed tag is not the whole release surface: GitHub renders the Releases
 page from Release objects, not tags. A tag with no Release object is invisible
 on the Releases page, has no release notes, and does not appear in
-`gh release list`. `make release` creates only the tag, so this half of the
-publish step is done by hand, right after the tag push.
+`gh release list`.
+
+**The tag push publishes by itself.** Pushing the tag triggers
+`.github/workflows/release.yml`, which builds the asset set from the tagged
+commit and attaches it to the Release object — the publish step is no longer
+a hand duty that can be forgotten (that is exactly how v0.1.0-rc2 shipped with
+`assets: []`). The command below is the SAME publisher run by hand: use it to
+publish before pushing the tag, to repair a half-failed publish, or to
+re-verify what landed. Order no longer matters: whichever of the two
+publishers runs first creates the Release with its assets, and the second one
+converges against it — an identical set is a no-op, and a rebuild of the same
+commit is ADOPTED by build identity rather than red-ing on byte drift (see
+the reconciliation notes at the end of this section).
 
 **Attach the asset set in the same command (CR-FEAT-028).** This is what puts
 the binaries on the page. v0.1.0-rc2 shipped with `assets: []` — the Release
@@ -116,8 +127,10 @@ first, refuses a set that is missing any release target or the installer,
 refuses assets built from a commit other than the tag's (pin `ALLOW_TAG_DRIFT=1`
 only when you know why they differ), and then either CREATES the Release object
 — title, release notes from the version's own `CHANGELOG.md` section, compare
-link against the previous tag — or uploads onto the one that already exists. It
-never pushes or moves a git tag: §3 is still a hand command.
+link against the previous tag — or reconciles against the one that already
+exists: identical content is skipped, a same-commit rebuild is adopted by
+build identity, absent names are uploaded, and genuinely different content is
+refused. It never pushes or moves a git tag: §3 is still a hand command.
 
 `SHA256SUMS` is uploaded **with** the set but is never listed **inside** it (a
 manifest that hashed itself could never be verified), so the set/manifest
@@ -136,23 +149,45 @@ Two things it will not decide for you:
   that default path — a tester then has to pass `--version <tag>` — and note
   that the rc's cut so far are published as ordinary releases.
 - **overwriting an asset**: a re-publish RECONCILES with what the Release already
-  carries (`RELEASE-012`). An asset already attached with **identical** content
-  is skipped, and a set that is entirely identical exits 0 reporting that it
-  converged — so the two publishers of one release (this command and the
-  tag-triggered `release.yml`) no longer collide, and re-running a failed publish
-  is safe. An asset attached with **different** content is refused unless
+  carries (`RELEASE-012`, extended by INT-CI-033). An asset already attached with
+  **identical** content is skipped, and a set that is entirely identical exits 0
+  reporting that it converged — so re-running a failed publish is safe. A
+  differing BINARY whose bytes carry the same build identity as this build (the
+  same embedded VERSION token and the same single 40-hex commit candidate, read
+  from the artifact bytes, with no `vcs.modified=true` on the attached side) is
+  **adopted**: the published set is kept exactly as it is, nothing is uploaded,
+  and the difference is reported as the BUILD_TIME metadata a rebuild always
+  stamps in — never as a conflict. `SHA256SUMS` is adopted only as the manifest
+  of a fully-adopted set; `install.sh` carries no stamp and must converge
+  byte-identically. Anything else — a different commit, a dirty-tree build, an
+  unreadable or ambiguous stamp, a differing non-binary — is refused unless
   `CLOBBER=1`, because a binary somebody may already have downloaded is never
-  swapped out silently. Names that are absent are uploaded, so a publish that
-  half-failed is repaired by re-running it rather than re-done from scratch.
+  swapped out silently (and adoption never swaps anything at all). Names that
+  are absent are uploaded, so a publish that half-failed is repaired by
+  re-running it rather than re-done from scratch.
 
-That reconciliation is why the ORDER of the two publishers no longer matters.
-Before `RELEASE-012` it did: v0.3.0's manual publish landed ~40 s before the tag
-workflow, and the workflow — finding every name already attached — died with
-`asset under the same name already exists` on a release whose 8 assets were all
-present and correct (run `42246232196`), a red tag-CI that re-running could not
-repair. Content identity is always MEASURED, never assumed: when GitHub reports
-no digest for an attached asset, the publisher downloads and hashes it, and a
-size mismatch is already a refusal.
+That reconciliation is why the ORDER of the two publishers no longer matters —
+and why, since INT-CI-033, neither does the rebuild the second publisher does.
+Before `RELEASE-012` the order mattered outright: v0.3.0's manual publish landed
+~40 s before the tag workflow, and the workflow — finding every name already
+attached — died with `asset under the same name already exists` on a release
+whose 8 assets were all present and correct (run `42246232196`). RELEASE-012
+turned that collision into a convergence. The three historical reds on releases
+that had actually shipped correctly are the evidence this section's rules close:
+
+- run `42246232196` (v0.3.0) — the name collision above, closed by measuring
+  content and skipping what is identical;
+- run `39539975561` (v0.2.0) — `Release v0.2.0 carries asset(s) SHA256SUMS does
+  not know:SHA256SUMS`, the set-comparison bug (the manifest cannot name
+  itself), closed by the SHA256SUMS exemption (`RELEASE-010`);
+- run `42422236749` (v0.4.0) — every asset "attached with DIFFERENT content"
+  because the workflow's rebuild carried a later BUILD_TIME stamp than the
+  manual publish's build, closed by the build-identity adoption above.
+
+Content identity is always MEASURED, never assumed: when GitHub reports no
+digest for an attached asset, the publisher downloads and hashes it, and a
+size mismatch is already a refusal. Build identity is measured the same way —
+from the artifact bytes, never inferred from the tag name.
 
 The hand-written form below still works if the notes must be something other
 than the changelog section (pass `--notes-file <path>` to `release-upload` for
