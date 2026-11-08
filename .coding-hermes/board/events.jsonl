@@ -2290,3 +2290,4 @@
 {"id":2273,"event_type":"task_created","task_id":"INT-008","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T03:33:56Z","detail":"{\"id\":\"INT-008\",\"status\":\"pending\"}"}
 {"id":2274,"event_type":"task_created","task_id":"INT-009","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T03:33:56Z","detail":"{\"id\":\"INT-009\",\"status\":\"pending\"}"}
 {"id":2275,"event_type":"task_created","task_id":"INT-010","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T03:34:32Z","detail":"{\"id\":\"INT-010\",\"status\":\"pending\"}"}
+{"id":2276,"event_type":"task_completed","task_id":"DOC-007","actor":"foreman","tick_number":null,"timestamp":"2026-11-08T03:49:22Z","detail":"{\"status\":\"complete\"}"}
