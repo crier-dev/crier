@@ -292,6 +292,8 @@ type Config struct {
 	// specs/CRIER-INGRESS.md §4). Nothing here is required: the defaults are
 	// the spec's — a 1 MiB body and all three modes.
 	Ingress IngressConfig
+	// Ingest is the opt-in webhook-input posture (CRIER-WEBHOOK-RSS-INPUT §3).
+	Ingest IngestConfig
 	// MCP holds the crier-mcp bridge's nudge posture (CRIER-MCP-NUDGE,
 	// specs/CRIER-MCP-NUDGE.md §4). The nudge informs, it never reads:
 	// these settings only decide whether the surface is offered at all and
@@ -348,6 +350,14 @@ type IngressConfig struct {
 	// excluded here is refused 403 INGRESS_MODE_DISABLED, never defaulted to
 	// another destination.
 	AllowedModes []string
+}
+
+type IngestConfig struct {
+	Enabled             bool
+	StoreFile           string
+	ReplayWindow        time.Duration
+	MaxBodyBytes        int
+	SourceRatePerMinute int
 }
 
 // DaggerConfig is the dagger control surface's posture (CR-CHAT-033).
@@ -905,6 +915,42 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_INGRESS_ALLOWED_MODES: %q names no mode (want session, new_session, inbox)", v)
 		}
 		cfg.Ingress.AllowedModes = modes
+	}
+
+	if v := strings.TrimSpace(getenv("CR_INGEST_WEBHOOK_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_INGEST_WEBHOOK_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Ingest.Enabled = parsed
+	}
+	cfg.Ingest.StoreFile = strings.TrimSpace(getenv("CR_INGEST_STORE_FILE"))
+	cfg.Ingest.ReplayWindow = 300 * time.Second
+	cfg.Ingest.MaxBodyBytes = 65536
+	cfg.Ingest.SourceRatePerMinute = 60
+	if cfg.Ingest.Enabled && cfg.Ingest.StoreFile == "" {
+		return cfg, fmt.Errorf("CR_INGEST_STORE_FILE is required when CR_INGEST_WEBHOOK_ENABLED is enabled")
+	}
+	if v := strings.TrimSpace(getenv("CR_INGEST_REPLAY_WINDOW_SECS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INGEST_REPLAY_WINDOW_SECS: %q", v)
+		}
+		cfg.Ingest.ReplayWindow = time.Duration(n) * time.Second
+	}
+	if v := strings.TrimSpace(getenv("CR_INGEST_MAX_BODY_BYTES")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INGEST_MAX_BODY_BYTES: %q", v)
+		}
+		cfg.Ingest.MaxBodyBytes = n
+	}
+	if v := strings.TrimSpace(getenv("CR_INGEST_SOURCE_RATE_PER_MINUTE")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INGEST_SOURCE_RATE_PER_MINUTE: %q", v)
+		}
+		cfg.Ingest.SourceRatePerMinute = n
 	}
 
 	// Per-backend defaults, so the one switch is enough to run: a deployment

@@ -65,9 +65,13 @@ func (r registryInbox) Deliver(ctx context.Context, agentID, capability string, 
 	if r.handler == nil {
 		return nil, fmt.Errorf("no registry handler is wired")
 	}
+	sender := msg.Author.AgentID()
+	if sender == "" {
+		sender = msg.Author.System
+	}
 	entry := &registry.InboxEntry{
 		Payload:        msg.Payload,
-		Sender:         msg.Author.AgentID(),
+		Sender:         sender,
 		IdempotencyKey: msg.IdempotencyKey,
 		CreatedAt:      time.Now().UTC(),
 		Tags:           msg.Tags,

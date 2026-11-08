@@ -25,6 +25,7 @@ import (
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
 	"github.com/crier-dev/crier/internal/hermesession"
+	"github.com/crier-dev/crier/internal/ingest"
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/pidfile"
@@ -45,6 +46,14 @@ import (
 
 func main() {
 	os.Exit(run(os.Args[1:]))
+}
+
+func registerWebhookIngestRoutes(r *mux.Router, handler http.Handler) {
+	if handler == nil {
+		return
+	}
+	r.Handle("/ingress/sources", handler).Methods(http.MethodGet, http.MethodPost)
+	r.Handle("/ingress/webhooks/{source_id}", handler).Methods(http.MethodPost)
 }
 
 // The process-wide signal guard (CI-018 + QA-CRIER-17).
@@ -915,6 +924,16 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		slog.Error("initialize ingress api", "error", err)
 		return 1
 	}
+	var webhookIngest *ingest.Handler
+	if cfg.Ingest.Enabled {
+		store, openErr := ingest.OpenStore(cfg.Ingest.StoreFile)
+		if openErr != nil {
+			slog.Error("initialize webhook ingest store", "error", openErr)
+			return 1
+		}
+		defer func() { _ = store.Close() }()
+		webhookIngest = &ingest.Handler{Store: store, Inbox: registryInbox{handler: registryHandler}, ReplayWindow: cfg.Ingest.ReplayWindow, MaxBodyBytes: cfg.Ingest.MaxBodyBytes, RatePerMinute: cfg.Ingest.SourceRatePerMinute}
+	}
 
 	// DF-CRIER-414: feed the session handler's in-flight view from the webhook
 	// driver's own per-attempt observations, so a composer can say "delivery in
@@ -993,6 +1012,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// part of the public path list. Its writes go through the same session
 	// repository and the same inbox delivery path the routes above use.
 	r.HandleFunc("/ingress/messages", ingressHandler.ServeHTTP).Methods("POST")
+	registerWebhookIngestRoutes(r, webhookIngest)
 	// Read cursors (CRIER-READS-1, specs/CRIER-READS.md §3.1): who has read
 	// what, and what is unread for a member. A cursor is per (session, member)
 	// and monotonic; `reads` is a read receipt, never a delivery guarantee and
