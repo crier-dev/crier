@@ -3774,3 +3774,61 @@ tasks:
   status: complete
   created_at: '2026-11-08T06:43:18.919618+00:00'
   completed_at: '2026-11-08T07:12:48.635894+00:00'
+- id: INT-017
+  title: Fix Postgres dead-letter retention purge regression (archive-hook landing)
+  criteria:
+  - 'PROOF: go build ./... and go vet ./... exit 0 in the worker tree. PROOF: the
+    retention predicate is fixed in internal/registry/postgres_ownership.go so PurgeExpiredDeadLetters
+    still removes a dead letter older than DefaultDeadLetterRetention when no archiver
+    is configured, and a test proves it. PROOF: git diff --quiet origin/main -- internal/registry/postgres_ownership_integration_test.go
+    prints rc=0 (the retention test is unmodified). FAILIF: the retention test is
+    edited, skipped or deleted to go green. FAILIF: the purge predicate is weakened
+    without a matching assertion.'
+  status: in_progress
+  created_at: '2026-11-08T08:00:06.955039+00:00'
+- id: INT-011
+  title: 'Federation hold exhaustion: decide wire-vs-document for dead-letter archive'
+  criteria:
+  - 'PROOF: exactly ONE arm is shipped and named in the commit message and in the
+    owning spec. ARM(a) WIRE: a registry dead-letter record is appended exactly once
+    on the federation hold budget-exhausted branch of internal/federation/hold.go
+    and specs/WEBHOOK-DELIVERY.md section 8.1 says so, with a Go test covering it.
+    ARM(b) DOCUMENT: specs/WEBHOOK-DELIVERY.md section 8.1 states hold failures are
+    receipt-only, the dead-letter archive stays TTL-only, and the bakeoff claim that
+    exhaustion archives is corrected in the same commit. PROOF: go build ./... , go
+    vet ./... and go test ./internal/federation/ -count=1 exit 0. FAILIF: both arms
+    are claimed or neither arm is recorded. FAILIF: a dead-letter record is written
+    more than once for one exhaustion.'
+  status: in_progress
+  created_at: '2026-11-08T08:00:13.402126+00:00'
+- id: INT-016
+  title: Decide the AgentCard signature contract (bakeoff C06 vs A2A-OPTION section
+    7)
+  criteria:
+  - 'PROOF: ONE arm is chosen and recorded with evidence at the merged tip. ARM(a)
+    SHIP AGENT-SUPPLIED SIGNATURE: specs/A2A-OPTION.md defines canonicalization, storage
+    and key id for an agent-supplied JWS over its card; internal/registry stores and
+    verifies it on the detail read; a tampered card is refused with a named 4xx and
+    docs/openapi.yaml is updated; go test ./internal/registry/ -run AgentSig -count=1
+    exits 0. ARM(b) CORRECT THE CLAIM: specs/A2A-OPTION.md section 7 and the C06 bakeoff
+    line both state cards are unsigned by construction and the bakeoff claim is withdrawn.
+    PROOF: go build ./... and go vet ./... exit 0. FAILIF: a tampered card answers
+    500 instead of a named 4xx. FAILIF: arm (a) is not implemented while the C06 claim
+    is left uncorrected.'
+  status: in_progress
+  created_at: '2026-11-08T08:00:14.469586+00:00'
+- id: INT-013
+  title: 'Spec CRIER-WEBHOOK-RSS-INPUT Part B: RSS/Atom poll input'
+  criteria:
+  - 'PROOF: go build ./... , go vet ./... and go test ./internal/ingest/ -count=1
+    exit 0 in the worker tree. PROOF: git grep -n CR_INGEST_RSS_ENABLED -- cmd internal
+    shows a default-off gate, and git grep -n ''If-None-Match'' -- internal shows
+    conditional-GET state persisted across restarts. PROOF: config validation refuses
+    an http (non-https) feed URL, an interval_secs below 60, and an unknown deliver_to
+    agent, each naming the offending feed. PROOF: guid dedup delivers exactly one
+    message for a repeated item and nothing after a restart with persisted etag/seen-ids.
+    FAILIF: a poller goroutine starts with CR_INGEST_RSS_ENABLED unset. FAILIF: the
+    Part A webhook routes change shape or the route census grows while the webhook
+    gate is unset.'
+  status: in_progress
+  created_at: '2026-11-08T08:00:19.477046+00:00'
