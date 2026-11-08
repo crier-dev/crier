@@ -3851,3 +3851,17 @@ tasks:
   status: complete
   created_at: '2026-11-08T09:26:46.791657+00:00'
   completed_at: '2026-11-08T09:27:12.716948+00:00'
+- id: INT-014
+  title: 'Crier boardctl bridge: allowlisted typed-envelope boardctl transport (internal/boardbridge)'
+  criteria:
+  - 'In the graded tree, all of: (a) internal/boardbridge/ exists with at least 2
+    non-test .go files plus at least 1 _test.go; (b) ''go build ./internal/boardbridge/''
+    exits 0; (c) ''go vet ./internal/boardbridge/'' exits 0; (d) ''go test ./internal/boardbridge/
+    -count=1 -p 1'' exits 0 and its output contains ''ok'' for that package; (e) no
+    test skip: ''grep -rn t.Skip internal/boardbridge/ | wc -l'' prints 0; (f) no
+    shell invocation: ''grep -rn "sh\", \"-c" internal/boardbridge/*.go | wc -l''
+    prints 0; (g) the package exposes an envelope validator: ''grep -rln "version"
+    internal/boardbridge/*.go | wc -l'' is at least 1 and ''grep -rn "AllowedOps\|allowed_ops"
+    internal/boardbridge/*.go | wc -l'' is at least 1.'
+  status: in_progress
+  created_at: '2026-11-08T10:01:01.407343+00:00'
