@@ -3616,3 +3616,23 @@ tasks:
   status: complete
   created_at: '2026-11-07T22:05:14.788799+00:00'
   completed_at: '2026-11-07T22:25:40.841080+00:00'
+- id: INT-CI-033
+  title: 'Tag-triggered Release workflow reds on every tag: second publisher refuses
+    a same-commit rebuild (BUILD_TIME drift) instead of adopting it'
+  criteria:
+  - 'AC1: bash scripts/release-upload-selftest.sh exits 0 and its output names a NEW
+    identity-adoption arm proving a set attached with the SAME Version+Commit but
+    a DIFFERENT embedded BUILD_TIME converges (exit 0, zero uploads) instead of failing.
+    AC2: the same selftest still proves the RELEASE-012 refusing arm: attached content
+    from a DIFFERENT commit (or a rebuild marked modified) is refused without CLOBBER=1,
+    with a NEUTER proof showing the arm is load-bearing. AC3: scripts/release-upload.sh
+    and .github/workflows/release.yml carry the documented rule (byte difference that
+    is build-metadata only, proven from the artifact''s embedded build identity, is
+    ADOPTED and never uploaded; anything else still refuses) and bash -n passes on
+    the touched shell scripts. AC4: docs/releases.md and the Makefile help text describe
+    the single authoritative ordering and say a same-commit rebuild converges rather
+    than conflicts, citing tag runs 42422236749 (v0.4.0), 42246232196 (v0.3.0) and
+    39539975561 (v0.2.0).'
+  status: complete
+  created_at: '2026-11-07T23:28:18.123983+00:00'
+  completed_at: '2026-11-08T00:08:31.492993+00:00'
