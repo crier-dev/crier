@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/crier-dev/crier/config"
-	"github.com/crier-dev/crier/internal/a2a"
 	"github.com/crier-dev/crier/internal/archive"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
@@ -29,6 +28,7 @@ import (
 	"github.com/crier-dev/crier/internal/mesh"
 	"github.com/crier-dev/crier/internal/middleware"
 	"github.com/crier-dev/crier/internal/pidfile"
+	"github.com/crier-dev/crier/internal/protocol"
 	"github.com/crier-dev/crier/internal/registry"
 	"github.com/crier-dev/crier/internal/relay"
 	"github.com/crier-dev/crier/internal/session"
@@ -417,9 +417,8 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	}
 	nsReg.LogPolicies()
 	relaySvc.SetNamespacePolicies(nsReg)
-	r.HandleFunc("/relay/publish", relaySvc.HandlePublish).Methods("POST")
-	r.HandleFunc("/relay/subscribe/{topic}", relaySvc.HandleSubscribe)
-	r.HandleFunc("/relay/topics", relaySvc.HandleTopics).Methods("GET")
+	// The relay's routes are mounted by the relay protocol adapter
+	// (cmd/server/protocols.go, the ONE registerProtocols loop — INT-007).
 
 	// P2P mesh
 	meshCfg := mesh.DefaultMeshConfig("crier")
@@ -432,8 +431,8 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		Timeout:  cfg.MeshAuthTimeout,
 	}
 	meshSvc := mesh.NewMesh(meshCfg)
-	r.HandleFunc("/mesh/connect/{agentID}", mesh.HandleConnect(meshSvc))
-	r.HandleFunc("/mesh/peers", mesh.HandlePeers(meshSvc)).Methods("GET")
+	// The mesh's routes are mounted by the mesh protocol adapter
+	// (cmd/server/protocols.go, the ONE registerProtocols loop — INT-007).
 
 	// Agent registry + inboxes
 	var regStore registry.Store
@@ -791,9 +790,11 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 			Agents: agents,
 		}
 	}
-	if peerService == nil {
-		r.HandleFunc("/fed/peers", federation.HandlePeers(fedClient, localPeer)).Methods("GET")
-	}
+	// The /fed/peers listing is mounted by the federation protocol adapter
+	// (cmd/server/protocols.go, the ONE registerProtocols loop — INT-007);
+	// fedClient and localPeer travel to it through protocol.Deps. In
+	// records mode (CR_FED_RECORDS_FILE set) the peer-records management
+	// surface above owns /fed/* and the adapter mounts nothing.
 
 	// Webhook push delivery (CR-FEAT-001) — active only for agents that
 	// register a webhook endpoint.
@@ -1037,9 +1038,9 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	// a CLIENT of a surface crier does not own (decision D18), never a second
 	// executor, and a terminal run is delivered to its requester through the
 	// shipped inbox path (see cmd/server/daggerctl.go). With the variable
-	// unset registerDaggerRoutes returns (nil, nil) and registers nothing, so
-	// the served surface is unchanged.
-	daggerSvc, _, err := registerDaggerRoutes(r, cfg.Dagger, registryHandler)
+	// unset buildDaggerService returns (nil, nil) and the adapter mounts
+	// nothing, so the served surface is unchanged.
+	daggerSvc, err := buildDaggerService(cfg.Dagger, registryHandler)
 	if err != nil {
 		slog.Error("initialize dagger control", "error", err)
 		return 1
@@ -1074,6 +1075,33 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 			"note", "crier holds run records only; the DAG runs on the dagger surface it calls")
 	}
 
+	// Protocol adapter layer (INT-007, specs/CRIER-PROTOCOLS.md): every wire
+	// surface crier exposes — relay, mesh, a2a, dagger, federation — is
+	// mounted through the ONE registerProtocols loop, after
+	// registerRegistryRoutes and before the observability mount (§4). Core
+	// surfaces (registry/inbox, ingress, trust, sessions, status, detection)
+	// are NOT protocols (decision D-P1) and stay direct. An unknown protocol
+	// name, a duplicate, or a RegisterRoutes error is a load-time hard
+	// failure: the boot exits and the partial mux is never served (§5).
+	protoDeps := protocol.Deps{
+		RegistryHandler: registryHandler,
+		Store:           regStore,
+		Relay:           relaySvc,
+		Config:          &cfg,
+		Logger:          slog.Default(),
+		Mesh:            meshSvc,
+		Dagger:          daggerSvc,
+		FedClient:       fedClient,
+		LocalPeer:       localPeer,
+		// The peer-records management surface (CR-CHAT-023) above owns
+		// /fed/* in records mode; the federation adapter then mounts nothing.
+		FederationRecords: peerService != nil,
+	}
+	if err := registerProtocols(r, protoDeps, getenv); err != nil {
+		slog.Error("register protocols", "error", err)
+		return 1
+	}
+
 	// Effective runtime posture + the LIVE queue depth (DF-CRIER-113,
 	// CR-FEAT-035). Registered here rather than with /health, /version and the
 	// spec-hosting routes above because its body now carries a measurement of
@@ -1101,61 +1129,11 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
 		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture)).Methods("GET")
 
-	// A2A Agent Card discovery (INT-A2A-002, specs/A2A-OPTION.md §5.2) — the
-	// OPT-IN extra, and the only A2A surface any row of this series has
-	// registered so far. It exists ONLY while CR_A2A_ENABLED is true, so with
-	// the switch unset the path is unregistered and answers exactly what it
-	// answered before the A2A option existed (the router's JSON 404). With it
-	// set, the route serves a card for an agent whose registry row opted in
-	// (`a2a.enabled`) and refuses every other id with 404 — an agent that did
-	// not opt in is never advertised.
-	//
-	// Nothing existing moves: the route is registered by registerA2ACardRoute
-	// (cmd/server/a2acard.go) rather than here, and it inherits the middleware
-	// chain unchanged — the auth-exempt list is untouched, so with
-	// CR_AUTH_TOKEN set it requires the same Bearer header as every other route.
-	if cfg.A2AEnabled {
-		registerA2ACardRoute(r, regStore, a2aCardOptions{
-			replayWindow:           cfg.IdempotencyWindow,
-			port:                   cfg.Port,
-			authTokenSet:           cfg.AuthToken != "",
-			agentSignatureEnforced: cfg.RequireAgentSig,
-		})
-		// The JSON-RPC binding (INT-A2A-003 §5.4, extended by INT-A2A-004 §5.5 and
-		// INT-A2A-005): SendMessage, SendStreamingMessage, the task lifecycle —
-		// GetTask, ListTasks, CancelTask, SubscribeToTask — and the four
-		// push-notification configuration methods, at the path the card above
-		// advertises. A send and a lifecycle operation reuse the registry
-		// handler's own HandleDeliver — the very function POST /agents/{id}/inbox
-		// is registered with — so an A2A send is an ordinary crier delivery
-		// through the guard, idempotency, detection, federation, webhook and inbox
-		// paths; the lifecycle reads and closes the SAME inbox entry through the
-		// store's read-only and close capabilities; and a push configuration is an
-		// ordinary crier webhook update (HandleUpdateAgent). Nothing about
-		// delivery or configuration is re-implemented for A2A.
-		registerA2ARoute(r, regStore, registryHandler.HandleDeliver, registryHandler.HandleUpdateAgent, relaySvc, a2aOptions{
-			replayWindow:           cfg.IdempotencyWindow,
-			port:                   cfg.Port,
-			authTokenSet:           cfg.AuthToken != "",
-			agentSignatureEnforced: cfg.RequireAgentSig,
-		})
-		slog.Info("A2A option enabled", "route", a2a.AgentCardPath,
-			"serves", "an AgentCard for agents whose registry row opted in (\"a2a\":{\"enabled\":true}); every other id answers 404",
-			"json_rpc_route", a2a.JSONRPCBindingPath,
-			"methods", a2a.MethodSendMessage+" (a Task or a direct Message), "+
-				a2a.MethodSendStreamingMessage+" (text/event-stream), "+
-				a2a.MethodGetTask+", "+a2a.MethodListTasks+", "+
-				a2a.MethodCancelTask+", "+a2a.MethodSubscribeToTask+
-				" and the push-notification configuration methods "+
-				a2a.MethodCreateTaskPushNotificationConfig+"/"+a2a.MethodGetTaskPushNotificationConfig+"/"+
-				a2a.MethodListTaskPushNotificationConfigs+"/"+a2a.MethodDeleteTaskPushNotificationConfig+
-				" (a view over the agent's existing webhook config)",
-			"not_registered", "GetExtendedAgentCard (INT-A2A-006)")
-	} else {
-		slog.Info("A2A option disabled", "detail",
-			"no A2A route is registered; set CR_A2A_ENABLED=true to publish the Agent Card discovery route and the JSON-RPC binding")
-
-	}
+	// The A2A surfaces (Agent Card discovery, INT-A2A-002 + JSON-RPC binding,
+	// INT-A2A-003..005) are mounted by the a2a protocol adapter inside the
+	// registerProtocols loop above — gated by the unchanged two-half opt-in
+	// (CR_A2A_ENABLED default false + the per-agent `a2a` registry block,
+	// A2A-OPTION §1): with the switch unset zero A2A routes exist.
 
 	// Detection & containment (CR-FEAT-030, specs/DETECTION.md) — OPT-IN.
 	//

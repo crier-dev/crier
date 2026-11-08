@@ -583,9 +583,15 @@ claims:
     # CRIER-TAGS-1 added GET /tags; CRIER-READS-1 added /sessions/<built-in function id>/reads and
     # its /unread sibling (CRIER-READS §3). CRIER-INGRESS-1 registered
     # POST /ingress/messages in main.go's authenticated subrouter, so the count
-    # is 59 (54 always-on: the ingress path is always on, not opt-in).
-    quote: "59 router paths"
-    expect: 59
+    # was 59 (54 always-on: the ingress path is always on, not opt-in).
+    # INT-007 (specs/CRIER-PROTOCOLS.md) moved the five protocol surfaces out
+    # of main.go: the relay (3), mesh (2) and federation (1) HandleFunc paths
+    # now mount through the ONE registerProtocols loop in
+    # cmd/server/protocols.go (which also mounts the 9 dagger routes that
+    # always lived in daggerctl.go, and the 2 A2A paths when CR_A2A_ENABLED).
+    # The probe measures main.go, so the count is 53.
+    quote: "53 core router paths"
+    expect: 53
     xfail: null
   - id: COUNT-COVERAGE-THRESHOLD
     kind: count

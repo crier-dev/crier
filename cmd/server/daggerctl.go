@@ -18,8 +18,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gorilla/mux"
-
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/registry"
@@ -96,12 +94,14 @@ func daggerStoreUnusable(dir, what string, cause error) error {
 		daggerStoreEnv, dir, os.Geteuid(), what, cause, daggerURLEnv, daggerStoreEnv)
 }
 
-// registerDaggerRoutes builds the control service and registers its routes.
-// It returns (nil, nil) when the surface is switched off — no bridge, no store,
-// no routes — and never a half-wired surface: a bad CR_DAGGER_URL or an
-// unusable store directory is an error the caller turns into a boot failure.
+// buildDaggerService builds the dagger control service. It returns (nil, nil)
+// when the surface is switched off — no bridge, no store, no routes — and
+// never a half-wired surface: a bad CR_DAGGER_URL or an unusable store
+// directory is an error the caller turns into a boot failure.
 //
-// The routes:
+// It mounts NO routes: the nine /dagger routes are mounted by the dagger
+// protocol adapter's RegisterRoutes (cmd/server/protocols.go, the ONE
+// registerProtocols loop — INT-007, specs/CRIER-PROTOCOLS.md §3). The routes:
 //
 //	POST /dagger/runs                   create a prompt-driven run
 //	GET  /dagger/runs/{id}              read a run's record
@@ -116,9 +116,9 @@ func daggerStoreUnusable(dir, what string, cause error) error {
 // Everything is additive: no existing route, body or auth requirement moves,
 // and the terminal outcome travels the guarded registry dispatch path rather
 // than a side channel.
-func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *registry.Handler) (*daggerctl.Service, *registry.Handler, error) {
+func buildDaggerService(cfg config.DaggerConfig, dispatcher *registry.Handler) (*daggerctl.Service, error) {
 	if cfg.URL == "" {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	// DF-CRIER-303: the run-record store is settled FIRST — before the bridge,
@@ -127,7 +127,7 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *re
 	// `mkdir <first-failing-ancestor>: permission denied` that names neither
 	// the configured path nor the variable that selects it.
 	if err := ensureDaggerStoreDir(cfg.StoreDir); err != nil {
-		return nil, nil, fmt.Errorf("dagger control: %w", err)
+		return nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	opts := []daggerctl.HTTPBridgeOption{daggerctl.WithBearerToken(cfg.Token)}
@@ -136,12 +136,12 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *re
 	}
 	bridge, err := daggerctl.NewHTTPBridge(cfg.URL, opts...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dagger control: %w", err)
+		return nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	runStore, err := daggerctl.NewJSONLStore(cfg.StoreDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dagger control: %w", err)
+		return nil, fmt.Errorf("dagger control: %w", err)
 	}
 
 	// Both terminal notifications and wait requests use the live handler's
@@ -157,7 +157,7 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *re
 	// delivery waiting to happen.
 	waits, err := daggerctl.NewWaiterRegistry(cfg.StoreDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dagger control: %w", err)
+		return nil, fmt.Errorf("dagger control: %w", err)
 	}
 	svc.SetWaitRegistry(waits)
 	svc.SetInboxStore(dispatcher)
@@ -170,20 +170,10 @@ func registerDaggerRoutes(r *mux.Router, cfg config.DaggerConfig, dispatcher *re
 	// as a bad CR_DAGGER_URL does.
 	targets, err := daggerctl.NewTargetTable(cfg.URL, cfg.Targets)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dagger control: %w", err)
+		return nil, fmt.Errorf("dagger control: %w", err)
 	}
 	svc.SetTargetTable(targets)
 
-	h := daggerctl.NewHandler(svc)
-	r.HandleFunc("/dagger/runs", h.HandleCreateRun).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/runs/{id}", h.HandleGetRun).Methods(http.MethodGet)
-	r.HandleFunc("/dagger/runs/{id}/cancel", h.HandleCancel).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/runs/{id}/resume", h.HandleResume).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/runs/{id}/rewind", h.HandleRewind).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/skills/{skill}/run", h.HandleRunSkill).Methods(http.MethodPost)
-	// Delivery waits (CR-CHAT-034): deliver-and-wait, resolve, and status.
-	r.HandleFunc("/dagger/wait", h.HandleDeliverAndWait).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/waits/{key}/resolve", h.HandleResolveWait).Methods(http.MethodPost)
-	r.HandleFunc("/dagger/waits/{key}", h.HandleWaitStatus).Methods(http.MethodGet)
-	return svc, nil, nil
+	// Routes are mounted by the dagger protocol adapter (cmd/server/protocols.go).
+	return svc, nil
 }
