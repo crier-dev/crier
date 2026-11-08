@@ -1,0 +1,16 @@
+{
+  "tick": "crier-foreman-2026-11-08-23-17-08",
+  "block": "REVIEW-001",
+  "mode": "verification-only-owner-gated",
+  "wave_size": 0,
+  "eligible_independent": 0,
+  "workers": [],
+  "base_sha": "24a4c4dc33c79efc56960db30188784670875f4f",
+  "selection": "block_drive.py ranked REVIEW-001 first; repository verifier and offline selftest are already landed and passing. The remaining hash-sidecar and live-verifier legs are host-owned, owner-gated work, so no implementation worker is dispatchable this tick.",
+  "blocker": "Owner/Kara must publish the SHA-256 of /home/kara/crier/bin/crier at /home/kara/crier-fleet/crier.sha256 beside the deployed unit, then rerun the live verifier.",
+  "local_evidence": "make verify-live-release-selftest PASS: valid descendant fixture, orphan ancestry rejection, version identity rejection, and altered recorded-hash rejection.",
+  "live_evidence": "GET /version returned 0.4.1-53-g8f193922 with modified:false; pidfile JSON resolves pid 2482078 and binary /home/kara/crier/bin/crier; live verifier exits 2 because /home/kara/crier-fleet/crier.sha256 is absent. Direct sha256 probe returned dbec1fc631cd71eb439fdb241bb3138eb91c8c040f514002d08fae70be2a16b2, but recording it is owner-gated and was not performed.",
+  "gitreins": "none:verification-only-owner-gated-no-new-repository-work",
+  "ci": "Recent crier-dev/crier main runs for exact published HEAD: completed success, success, success.",
+  "memory": "unverified:receipt transport not completed"
+}
