@@ -1348,10 +1348,6 @@ func TestPostgresStoreUnit_PurgeExpired_RemovesTTLExpired(t *testing.T) {
 	mock.ExpectExec(`UPDATE inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 2))
-	// Retention housekeeping runs in the same transaction.
-	mock.ExpectExec(`DELETE FROM dead_letters`).
-		WithArgs(pgxmock.AnyArg()).
-		WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectCommit()
 
 	reported := make(map[string]string)
@@ -1377,9 +1373,6 @@ func TestPostgresStoreUnit_PurgeExpired_ReportsAfterCommit(t *testing.T) {
 	mock.ExpectExec(`UPDATE inbox_entries`).
 		WithArgs(pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 0))
-	mock.ExpectExec(`DELETE FROM dead_letters`).
-		WithArgs(pgxmock.AnyArg()).
-		WillReturnResult(pgxmock.NewResult("DELETE", 0))
 	mock.ExpectCommit()
 
 	// The report runs after the commit: with a commit failure (the previous

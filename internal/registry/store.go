@@ -145,6 +145,12 @@ type DeadLetterStore interface {
 	ListDeadLetters(agentID string, limit int) ([]*DeadLetter, error)
 }
 
+// ArchiveHook lets a caller observe dead letters immediately before their
+// retention DELETE. A row is deleted only when archive returns true.
+type ArchiveHook interface {
+	PurgeExpiredDeadLetters(archive func(dl *DeadLetter) bool) int
+}
+
 // Transferrer is an optional Store capability: moving messages out of one
 // inbox and into another's (CR-FEAT-025). This is the operator's answer to a
 // STUCK lease — a holder that took a message and never acked it, where the
@@ -282,6 +288,7 @@ type Handler struct {
 	// (CR_PERMISSIONS_ADMIN_TOKEN): every write must present it as Bearer,
 	// constant-time compared. Empty keeps the gate closed even with a store.
 	permissionsAdminToken string
+	archiveDeadLetter     func(*DeadLetter) bool
 	// instanceName is this relay's name for the delivery LOCATION (CR-CHAT-029).
 	// Set from main (CR_FED_NAME / host:port, the same name /fed/peers
 	// announces); the zero value leaves the instance field absent on entries

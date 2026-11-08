@@ -281,7 +281,8 @@ type Config struct {
 	// Opt-in: with CR_DAGGER_URL unset the six /dagger routes are not
 	// registered at all, so a deployment that does not control DAGs serves
 	// exactly the surface it served before this feature existed.
-	Dagger DaggerConfig
+	Dagger  DaggerConfig
+	Archive ArchiveConfig
 	// Harness holds the harness-delivery block (CRIER-HARNESS §4.1). Delivery
 	// is OFF by default, and nothing in this block can fail startup: a
 	// malformed adapter block disables that adapter and records the reason in
@@ -598,6 +599,14 @@ type WebhookConfig struct {
 	CircuitThreshold   int           // CR_WEBHOOK_CIRCUIT_THRESHOLD
 	BatchMaxMessages   int           // CR_WEBHOOK_BATCH_MAX — batch flush size default
 	BatchFlushInterval time.Duration // CR_WEBHOOK_BATCH_FLUSH_S — batch flush interval default
+}
+
+type ArchiveConfig struct {
+	Enabled      bool
+	URL          string
+	KeyFile      string
+	Namespace    string
+	MaxBodyBytes int
 }
 
 // Getenv is the environment-lookup seam config.Load reads through. Load()
@@ -1412,6 +1421,28 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			cfg.Dagger.Targets = map[string]string{}
 		}
 		cfg.Dagger.Targets[name] = url
+	}
+
+	if v := getenv("CR_ARCHIVE_ENABLED"); v != "" {
+		parsed, err := parseTolerantBool("CR_ARCHIVE_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Archive.Enabled = parsed
+	}
+	cfg.Archive.URL = strings.TrimSpace(getenv("CR_DUCKBRAIN_URL"))
+	cfg.Archive.KeyFile = strings.TrimSpace(getenv("CR_DUCKBRAIN_API_KEY_FILE"))
+	cfg.Archive.Namespace = strings.TrimSpace(getenv("CR_DUCKBRAIN_NAMESPACE"))
+	if cfg.Archive.Namespace == "" {
+		cfg.Archive.Namespace = "crier"
+	}
+	cfg.Archive.MaxBodyBytes = 96000
+	if v := getenv("CR_ARCHIVE_MAX_BODY_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_ARCHIVE_MAX_BODY_BYTES: %q (want a positive integer)", v)
+		}
+		cfg.Archive.MaxBodyBytes = n
 	}
 
 	return cfg, nil

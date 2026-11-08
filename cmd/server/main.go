@@ -18,6 +18,7 @@ import (
 
 	"github.com/crier-dev/crier/config"
 	"github.com/crier-dev/crier/internal/a2a"
+	"github.com/crier-dev/crier/internal/archive"
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/daggerctl"
 	"github.com/crier-dev/crier/internal/detect"
@@ -250,6 +251,17 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		return 1
 	}
 
+	if cfg.Archive.Enabled {
+		if err := archive.ValidateConfig(archive.Config{BaseURL: cfg.Archive.URL, KeyFile: cfg.Archive.KeyFile}); err != nil {
+			slog.Error("DuckBrain archive configuration refused", "error", err)
+			return 1
+		}
+	}
+	var deadLetterArchiver archive.Archiver
+	if cfg.Archive.Enabled {
+		deadLetterArchiver = archive.NewDuckBrainArchiver(archive.Config{BaseURL: cfg.Archive.URL, Namespace: cfg.Archive.Namespace, KeyFile: cfg.Archive.KeyFile, MaxBodyBytes: cfg.Archive.MaxBodyBytes}, &http.Client{Timeout: 10 * time.Second})
+	}
+
 	// Re-install the logger now that we know the user's level/format.
 	initLogger(cfg)
 
@@ -465,6 +477,14 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		slog.Error("configure service delivery authorization", "error", err)
 		return 1
 	}
+	registryHandler.SetArchiveHook(func(dl *registry.DeadLetter) bool {
+		if deadLetterArchiver == nil {
+			return true
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return archive.ArchiveDeadLetter(ctx, deadLetterArchiver, dl, cfg.Archive.MaxBodyBytes)
+	})
 	registryHandler.SetMaxInboxBodyBytes(cfg.InboxMaxBodyBytes)
 	registryHandler.SetRequireAgentSig(cfg.RequireAgentSig)
 	// Supplied relay signatures are checked even when A2A is disabled. Ordinary

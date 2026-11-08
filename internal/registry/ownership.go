@@ -77,6 +77,8 @@ type deadLettersResponse struct {
 	Count int `json:"count"`
 }
 
+func (h *Handler) SetArchiveHook(fn func(*DeadLetter) bool) { h.archiveDeadLetter = fn }
+
 // PurgeExpired runs the store's expiry sweep and turns each removed message
 // into (a) a dead-letter record and (b) exactly one expiry receipt to its
 // sender (CR-FEAT-025). It is what the server's periodic sweep calls; the
@@ -95,7 +97,11 @@ func (h *Handler) PurgeExpired() int {
 		// contract for an embedding store, stated rather than hidden.
 		return h.store.PurgeExpired()
 	}
-	return rep.PurgeExpiredReport(h.expireMessage)
+	removed := rep.PurgeExpiredReport(h.expireMessage)
+	if hook, ok := h.store.(ArchiveHook); ok {
+		hook.PurgeExpiredDeadLetters(h.archiveDeadLetter)
+	}
+	return removed
 }
 
 // expireMessage is the sweep's report sink: one removed message becomes a dead

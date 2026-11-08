@@ -582,8 +582,7 @@ func (s *SQLiteStore) PurgeExpiredReport(report func(string, *InboxEntry)) int {
 		if _, err = q.ExecContext(ctx, `UPDATE inbox_entries SET leased_at=NULL,lease_id=NULL,lease_expires_at=NULL WHERE lease_expires_at<?`, now.UnixNano()); err != nil {
 			return err
 		}
-		_, err = q.ExecContext(ctx, `DELETE FROM dead_letters WHERE dead_lettered_at<?`, now.Add(-DefaultDeadLetterRetention).UnixNano())
-		return err
+		return nil
 	})
 	if err != nil {
 		slog.Error("SQLite registry purge", "error", err)

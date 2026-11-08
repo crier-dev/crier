@@ -116,15 +116,8 @@ WHERE expires_at > $1
 		return 0
 	}
 
-	// Retention housekeeping: the dead-letter destination is bounded by TIME,
-	// because it has no natural end — an operator that never reads it would
-	// otherwise accumulate every message the relay ever dropped.
-	if _, err := tx.Exec(ctx, `
-DELETE FROM dead_letters
-WHERE dead_lettered_at <= $1;`, now.Add(-DefaultDeadLetterRetention)); err != nil {
-		slog.Error("postgres purge expired: dead-letter retention", "error", err)
-		return 0
-	}
+	// Retention is applied after the transaction so the external archive callback
+	// never runs while the inbox purge transaction is open.
 
 	if err := tx.Commit(ctx); err != nil {
 		slog.Error("postgres purge expired", "error", err)
