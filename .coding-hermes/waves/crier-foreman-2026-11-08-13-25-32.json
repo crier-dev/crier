@@ -1,0 +1,34 @@
+{
+  "tick": "crier-foreman-2026-11-08-13-25-32",
+  "project": "crier",
+  "block": "INT-004B",
+  "base": "0247b57b2a68d56e48f0e983f7dffcf428868e21",
+  "wave_budget": 12,
+  "slots": 6,
+  "wave_size": 2,
+  "rows": [
+    {
+      "id": "INT-009",
+      "worktree": "/home/kara/worktrees/crier-INT-009",
+      "branch": "wt/INT-009",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-08-13-25-32/brief-INT-009.txt",
+      "depends_on": [],
+      "surface": ["internal/tracing", "config", "cmd/server", "internal/registry", "internal/harness", "internal/relay", "docs/openapi", "go.mod", "go.sum"]
+    },
+    {
+      "id": "INT-004A",
+      "worktree": "/home/kara/worktrees/crier-INT-004A",
+      "branch": "wt/INT-004A",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-08-13-25-32/brief-INT-004A.txt",
+      "depends_on": [],
+      "surface": ["scripts/e2e-battery.sh"],
+      "independence": "INT-004A is a standalone battery script cell; INT-009 is Go tracing/config instrumentation with no script edit. No depends_on edge and no shared seam."
+    }
+  ],
+  "dispatch": "pending",
+  "evidence": {
+    "block_drive": "REVIEW-001 then INT-004B; resumed INT block had four ready rows. REVIEW-001 is host-owner gated and INT-015 is cross-repo, so the two independent implementation rows INT-009 and INT-004A were selected from the INT block.",
+    "local_gate_baseline": "go test ./... -count=1 -short -p 1 reached all packages through internal/trust but timed out at 180s; no failure output. A prior exact-head hosted Full test suite run succeeded.",
+    "remote_ci": "gh run list --repo crier-dev/crier --limit 3: all three recent runs completed success."
+  }
+}

@@ -3886,3 +3886,22 @@ tasks:
   status: complete
   created_at: '2026-11-08T10:42:41.301996+00:00'
   completed_at: '2026-11-08T10:43:05.386201+00:00'
+- id: INT-009
+  title: Implement OpenTelemetry tracing
+  criteria:
+  - 'Implement specs/OBSERVABILITY-TRACING.md: opt-in tracing with default-off noop
+    behavior, config refusal tests, HTTP/registry/harness/relay spans, traceparent
+    propagation, payload-free attributes, docs/openapi mention, and go test ./...
+    green.'
+  status: in_progress
+  created_at: '2026-11-08T13:34:31.656476+00:00'
+- id: INT-004A
+  title: Implement federation handshake battery cell
+  criteria:
+  - 'Extend scripts/e2e-battery.sh with one federation handshake cell: start a second
+    real server, complete bidirectional ed25519 peer handshake using CR_FED_RECORDS_FILE
+    and operator-gated /fed/peers, assert real proof verification and documented bad-proof
+    refusal, with exact-pid teardown; bash scripts/e2e-battery.sh exits 0 and prints
+    the named PASS cell.'
+  status: in_progress
+  created_at: '2026-11-08T13:38:39.576822+00:00'
