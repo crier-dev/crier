@@ -3703,5 +3703,6 @@ tasks:
     -v -run TestInboxLeaseAckBattery ./internal/registry (five PASS subtests, zero
     SKIP), then go build ./... and go vet ./... (both exit 0). Graded commit b08a8ad6,
     the shipped-contract correction of row INT-003 after verdict 23b3d07d.'
-  status: in_progress
+  status: complete
   created_at: '2026-11-08T04:44:57.619307+00:00'
+  completed_at: '2026-11-08T04:45:28.489334+00:00'
