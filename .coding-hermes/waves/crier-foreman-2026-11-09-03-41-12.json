@@ -1,0 +1,1 @@
+{"tick":"crier-foreman-2026-11-09-03-41-12","block":"QA-CRIER-8-R2","mode":"verification-only","wave_size":0,"reason":"REVIEW-001 is owner-gated; QA-CRIER-8-R2 is a QA/harness row whose implementation surface is outside the crier repository; RELEASE-017 is already landed and awaits bookkeeping evidence; no in-repo implementation row is dispatchable."}
