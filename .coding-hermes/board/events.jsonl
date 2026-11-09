@@ -2380,3 +2380,4 @@
 {"id":1794115926888324270,"event_type":"task_created","task_id":"CR-DOG-R2-RELAY-PUBLISH","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:33:26Z","detail":"{\"id\":\"CR-DOG-R2-RELAY-PUBLISH\",\"status\":\"pending\"}"}
 {"id":1794115926888324271,"event_type":"task_created","task_id":"HARDEN-LOOP-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:45:32Z","detail":"{\"id\":\"HARDEN-LOOP-001\",\"status\":\"pending\"}"}
 {"id":1794115926888324272,"event_type":"task_updated","task_id":"DOCS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:56:34Z","detail":"{\"status\":\"pending\"}"}
+{"id":1794115926888324273,"event_type":"task_created","task_id":"INGRESS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T07:06:57Z","detail":"{\"id\":\"INGRESS-CRIER-001\",\"status\":\"pending\"}"}
