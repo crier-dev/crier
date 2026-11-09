@@ -1,0 +1,37 @@
+{
+  "tick_id": "crier-foreman-2026-11-09-15-55-51",
+  "block": "HARDEN-LOOP-001",
+  "wave_size": 2,
+  "mode": "wave",
+  "budget": 12,
+  "slots": 2,
+  "selection_reason": "Two independent ready rows in the selected block; each has no depends_on edges and distinct file seams. Slots formula: nproc=16, ceil(loadavg=10.06)=11, min(6,5)=5, capped by selected independent rows to 2.",
+  "rows": [
+    {
+      "id": "UI-CRIER-001",
+      "depends_on": [],
+      "dependency_proof": "No dependency edges; UI/auth/docs/test seam is distinct from RSS/config/poller seam.",
+      "worktree": "/home/kara/worktrees/crier-UI-CRIER-001",
+      "branch": "wt/UI-CRIER-001",
+      "base_sha": "712eeeb8e9d4c3d6f2cc3333d7ac3ef75501bd0d",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-09-15-55-51/brief-UI-CRIER-001.txt",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro"
+    },
+    {
+      "id": "RSS-CRIER-001",
+      "depends_on": [],
+      "dependency_proof": "No dependency edges; RSS/config/status/docs seam is distinct from UI/auth seam.",
+      "worktree": "/home/kara/worktrees/crier-RSS-CRIER-001",
+      "branch": "wt/RSS-CRIER-001",
+      "base_sha": "712eeeb8e9d4c3d6f2cc3333d7ac3ef75501bd0d",
+      "brief": "/home/kara/.hermes/cache/scratch/crier-foreman-2026-11-09-15-55-51/brief-RSS-CRIER-001.txt",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro"
+    }
+  ],
+  "pre_dispatch_lifecycle": {
+    "UI-CRIER-001": "in_progress",
+    "RSS-CRIER-001": "in_progress"
+  }
+}
