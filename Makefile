@@ -1,4 +1,4 @@
-.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest verify-live-release-selftest
+.PHONY: help build build-mcp build-front front-e2e mcp test test-short test-integration lint go-mod-tidy-check run stop clean docker-build coverage coverage-html coverage-check coverage-selftest docs-check readme-api-check readme-api-selftest release-pin-check release-pin-selftest generate port-guard-selftest orphan-guard-selftest scratch-port-rotation-selftest client-roundtrip-check transport-retry-selftest load-repro-selftest load-soak load-soak-baseline load-soak-under-load load-soak-selftest bunker-matrix-selftest bunker-isolation-gate-selftest bunker-matrix-verdict-check bunker-matrix-verdict-selftest shell-yaml-check shell-yaml-selftest install-hooks doctor-hooks doctor-hooks-selftest make-docker-check make-docker-selftest gofmt-check gofmt-selftest chat-js-check chat-js-selftest chat-identity-suggestion-check demo-cleanup-check demo-cleanup-selftest orphan-sweep-check heredoc-lint heredoc-lint-selftest mcp-stdout-check mcp-stdout-selftest judge-diff-class-selftest wait-for-command-selftest parity-check parity-selftest release release-artifacts release-upload release-upload-selftest install-path-selftest chat-ui-browser-selftest toolchain-check toolchain-selftest verify-live-release-selftest
 
 # Default pidfile pairing `make run` with `make stop` (DF-CRIER-194). It
 # lives at the repo root, is written only after the port is bound, and is
@@ -90,6 +90,8 @@ help:
 	@echo "  release           Cut a release: check clean tree + main, run the gates, BUILD THE RELEASE ASSETS (CR-FEAT-028: prebuilt binaries for 3 platforms + installer + SHA256SUMS), create the annotated tag VERSION — never pushes (RELEASE-001; make release VERSION=v0.1.0-rc2, see docs/releases.md)"
 	@echo "  release-artifacts  Build the release asset set into RELEASE_OUTDIR (default dist/): cross-compiled crier + crier-mcp for linux/amd64, linux/arm64, darwin/arm64, plus the installer and a re-verified SHA256SUMS (CR-FEAT-028)"
 	@echo "  release-upload    Attach that asset set to the GitHub Release object (creating it from the CHANGELOG section when needed); re-publishing an IDENTICAL set is a no-op that exits 0, a same-commit REBUILD is ADOPTED by build identity (same embedded Version+Commit read from the artifact bytes; the BUILD_TIME it restamps is expected metadata), genuinely different content under an attached name is refused unless CLOBBER=1; DRY_RUN=1 prints the gh commands (CR-FEAT-028 + RELEASE-012 + INT-CI-033; never pushes a tag)"
+	@echo "  release-pin-check  FAIL when README.md's release pins (the '### Install prebuilt binaries (vX.Y.Z release assets)' heading, the 'Release vX.Y.Z publishes N assets' sentence, the 'sh -s -- --version vX.Y.Z' example) disagree with VERSION — make release-pin-check VERSION=v0.5.0 (RELEASE-017)"
+	@echo "  release-pin-selftest  Prove that check still rejects one-release-old pins (naming all three lines), refuses a missing README / zero matches / a missing pin shape / no VERSION, and carries a NEUTER proof (RELEASE-017)"
 	@echo "  install-path-selftest  CR-FEAT-028 acceptance drive: install the built asset set into a clean box with a FAILING go shim on PATH, run the installed binary, and prove the tampered/missing-manifest downloads are refused"
 	@echo "  release-upload-selftest  RELEASE-010 + RELEASE-012: prove the tag publisher ACCEPTS a correct asset set (every manifest asset + SHA256SUMS, which the manifest cannot name) and still REFUSES an unknown asset, AND that it is IDEMPOTENT — an already-attached identical set converges with zero uploads, different content is refused unless CLOBBER=1, a half-published Release is repaired — driving release-upload.sh AND the workflow's own verification block, with a NEUTER proof for each rule"
 	@echo "  chat-ui-browser-selftest  DF-CRIER-335: the real-browser chat panel suite (responsive 390/768/1280) plus its rejection-path controls via scripts/chat-ui-browser-selftest.cjs — rc 0 pass, 1 regression, 77 named skip when playwright/Chromium/the built server are absent"
@@ -297,6 +299,35 @@ readme-api-check:
 
 readme-api-selftest:
 	bash scripts/check-readme-api-count.sh --selftest
+
+# RELEASE-017: README.md's Quick Start carries the release identity in THREE
+# hand-editable places — the `### Install prebuilt binaries (vX.Y.Z release
+# assets)` heading, the `Release vX.Y.Z publishes N assets` sentence, and the
+# `sh -s -- --version vX.Y.Z` install example — all bumped BY HAND at cut time
+# together with the CHANGELOG entry (docs/releases.md), with nothing keeping
+# them honest against the tag actually being cut. `make release
+# VERSION=v0.6.0` validated the grammar, the tree, the branch and the gates,
+# then tagged — and could have published a release whose own README still told
+# every new visitor to install the previous one.
+#
+# scripts/check-release-pin.sh refuses exactly that: exit 0 only when EVERY
+# pinned occurrence of the three shapes names VERSION (the first argument,
+# else $VERSION, else the nearest tag via `git describe --tags --abbrev=0` —
+# no network anywhere), exit 1 printing `README.md:<line>:<pinned> !=
+# <VERSION>` per offender, exit 2 fail-closed on a missing/unreadable README,
+# a pin shape with zero occurrences, or no VERSION. The check is wired into
+# `make release` and `make release-upload` immediately after VERSION grammar
+# validation — BEFORE the dirty-tree checks and the gates — so a one-release-
+# old pin stops the cut before anything is tagged or published. A named CI
+# step in .github/workflows/release.yml runs the same check against the pushed
+# tag. release-pin-selftest proves all of it on fixtures under
+# ${TMPDIR:-/tmp} (drift naming all three lines, refusals, a NEUTER proof);
+# it never writes the tracked README.
+release-pin-check:
+	bash scripts/check-release-pin.sh '$(VERSION)'
+
+release-pin-selftest:
+	bash scripts/check-release-pin.sh --selftest
 
 # QA-CRIER-9: the example harnesses refuse to run while their scratch port is
 # occupied and assert that the process answering /health is the one they started.
@@ -958,6 +989,8 @@ release:
 	case "$$v" in \
 	  *-[0-9]*-g[0-9a-f][0-9a-f]*) echo "release: ERROR: VERSION '$$v' looks like git describe output, not a tag"; exit 1 ;; \
 	esac; \
+	echo "release: checking the README release pins match $$v (RELEASE-017)"; \
+	bash scripts/check-release-pin.sh "$$v"; \
 	echo "release: version ......... $$v"; \
 	echo "release: repository ...... $$(git rev-parse --show-toplevel)"; \
 	echo "release: ensuring the working tree is clean"; \
@@ -1033,13 +1066,26 @@ release-artifacts:
 # the publish step docs/releases.md §4 documents; it NEVER pushes or moves a git
 # tag (that half stays a hand command, see §3). DRY_RUN=1 prints the gh commands
 # and publishes nothing.
+#
+# RELEASE-017: the same README release-pin gate `make release` runs is wired
+# here too, immediately after VERSION grammar validation (the grammar case
+# mirrors the release target's — scripts/release-upload.sh re-validates it as
+# well, so the publisher's own behaviour is unchanged) and before the
+# publisher's provenance checks: a one-release-old pin cannot be published
+# under either entry point.
 release-upload:
 	@case "$(origin VERSION)" in \
 	  'command line'|'environment'|'override') ;; \
 	  *) echo "release-upload: ERROR: refusing the default VERSION '$(VERSION)' (that is git describe output, not a release)"; \
 	     echo "release-upload: ERROR: pass the tag explicitly: make release-upload VERSION=v0.1.0-rc2"; \
 	     exit 1 ;; \
-	esac
+	esac; \
+	case "$(VERSION)" in \
+	  v[0-9]*.[0-9]*.[0-9]*) ;; \
+	  *) echo "release-upload: ERROR: VERSION '$(VERSION)' is not a vX.Y.Z tag (example: v0.1.0-rc2)"; exit 1 ;; \
+	esac; \
+	echo "release-upload: checking the README release pins match $(VERSION) (RELEASE-017)"; \
+	bash scripts/check-release-pin.sh '$(VERSION)'
 	VERSION='$(VERSION)' RELEASE_OUTDIR='$(RELEASE_OUTDIR)' DRY_RUN='$(DRY_RUN)' bash scripts/release-upload.sh
 
 # install-path-selftest — the CR-FEAT-028 acceptance drive. Builds the asset set

@@ -129,6 +129,17 @@ jobs:
             exit 1
           fi
 
+      # RELEASE-017: the README's three release pins (the "Install prebuilt
+      # binaries (vX.Y.Z release assets)" heading, the "Release vX.Y.Z
+      # publishes N assets" sentence, and the `sh -s -- --version vX.Y.Z`
+      # example) must name the tag being PUBLISHED — a one-release-old pin
+      # would hand every new visitor the previous release's install command.
+      # The check is offline (README.md + local git, no network) and fails
+      # closed; it runs after VERSION is pinned and the checkout is proven,
+      # before anything is built or published.
+      - name: Verify the README release pins match the tag (RELEASE-017)
+        run: bash scripts/check-release-pin.sh "${VERSION}"
+
       - name: Build the release asset set for the tag
         run: make release-artifacts VERSION="${VERSION}"
 
