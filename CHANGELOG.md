@@ -13,9 +13,9 @@ procedure, the gate requirements and the publish step are in
 
 ## [0.6.0] - 2026-11-09
 
-Range: `v0.5.0`..`v0.6.0` — 63 commits (2 merges, 61 non-merge: 5 `feat`,
-3 `fix`, 3 `test`, 2 `docs`, 2 `chore`, 1 `ingest`, 1 `guards`, 1 `qa`,
-22 board, 21 foreman). No `BREAKING CHANGE` footer and no `!` type token were
+Range: `v0.5.0`..`v0.6.0` — 68 commits including this release commit (3 merges,
+65 non-merge: 6 `feat`, 3 `fix`, 3 `test`, 4 `docs`, 2 `chore`, 1 `ingest`,
+1 `guards`, 1 `qa`, 23 board, 21 foreman). No `BREAKING CHANGE` footer and no `!` type token were
 found in the range, so this is a minor release. Every item below is additive,
 and every one that can change behaviour is default-OFF: the registry migration
 is a nullable column, the new tables are new, and the ingest sweep refuses to
@@ -47,6 +47,15 @@ that refuses a cut whose own Quick Start names another version.
   whose oldest unacked message outlived its contract, and
   `GET /agents/{id}/inbox/stats` gains the exact fields `oldest_unacked`,
   `contract_ttl_secs`, `stale` and `unacked_count`.
+
+- **RSS polling health and feed deduplication** (RSS-CRIER-001, `82cfa828`).
+  `GET /status` now reports the poller as an operator can act on: `rss_poll_enabled`,
+  `rss_poll_status` (`disabled` / `starting` / `ok` — disabled is explicit so an
+  unarmed poller is never mistaken for a healthy one), `rss_last_poll_at`,
+  `rss_items_seen`, `rss_dedupe_hits` and a per-feed `rss_feed_status` map. The
+  poller dedupes on conditional fetch plus feed GUID, so a restart or a
+  re-fetch does not re-deliver items, and `config/rss-feeds.json` is the seeded
+  feed list (`CR_RSS_CONFIG_FILE` overrides it).
 
 - **Ingest reconciliation sweep and a durable dead-letter store**
   (INT-015, `7f1b64e2`). `internal/ingest/sweep.go` reads the registered board's
