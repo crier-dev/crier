@@ -3925,3 +3925,13 @@ tasks:
   status: complete
   created_at: '2026-11-09T00:46:36.252661+00:00'
   completed_at: '2026-11-09T01:07:50.747942+00:00'
+- id: INGRESS-CRIER-001
+  title: Fix crier ingress route posture and hook delivery
+  criteria:
+  - 'PROOF: route posture tests show disabled ingest returns 404 naming CR_INGEST_WEBHOOK_ENABLED,
+    enabled/no-source returns 401 naming required auth, enabled/source returns 202;
+    fresh-store migration passes; FAILIF: any required route posture arm or fresh-store
+    migration fails'
+  status: in_progress
+  created_at: '2026-11-09T12:58:27.693122+00:00'
+  completed_at: '2026-11-09T13:04:00.472239+00:00'
