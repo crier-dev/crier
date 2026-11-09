@@ -293,7 +293,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, registry_store_path, registry_store_ignored, session_backend, session_store_path, session_store_mount, session_store_ignored, rate_limit_per_minute, global_rate_limit_per_minute, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, presence_stale_after_s, registry_backend, registry_durable, registry_store_path, registry_store_ignored, session_backend, session_store_path, session_store_mount, session_store_ignored, rate_limit_per_minute, global_rate_limit_per_minute, ingest_sweep_enabled, ingest_sweep_interval_secs, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   management_surface:
                     type: string
@@ -427,6 +427,25 @@ paths:
                       the per-agent publish cap because the two are different
                       lanes: this one is what refuses POST /agents/{id}/inbox
                       with 429 RATE_LIMITED_GLOBAL.
+                    example: 0
+                  ingest_sweep_enabled:
+                    type: boolean
+                    description: >-
+                      Reconciliation-sweep posture (CRIER-GITHOOK-DISPATCH §10
+                      amendment 1, INT-015). False — the default, with
+                      CR_INGEST_SWEEP_ENABLED unset — means the server never
+                      diffs its delivery queue against the registered board and
+                      hook-less rows are never delivered; true means the sweep
+                      runs on ingest_sweep_interval_secs. Fail-closed: enabling
+                      the sweep without the webhook ingest surface refuses
+                      startup.
+                    example: false
+                  ingest_sweep_interval_secs:
+                    type: integer
+                    description: >-
+                      Sweep cadence in seconds (CR_INGEST_SWEEP_INTERVAL_SECS,
+                      default 600). 0 when the sweep is off — an off posture
+                      reports no cadence rather than the one it would use.
                     example: 0
                   queue_depth:
                     type: object

@@ -88,6 +88,12 @@ var statusTopLevelKeys = []string{
 	// docs/openapi.yaml's /status schema; adding one here without adding it
 	// there (or vice versa) is what this exact comparison exists to catch.
 	"global_rate_limit_per_minute",
+	// INT-015: the reconciliation-sweep posture (CRIER-GITHOOK-DISPATCH §10).
+	// Fail-closed and named in both positions; the interval is 0 when the
+	// sweep is off. Documented in docs/openapi.yaml's /status schema — update
+	// both together.
+	"ingest_sweep_enabled",
+	"ingest_sweep_interval_secs",
 	"guard_enabled",
 	// CR-CHAT-020: the graded health word, and the fleet presence aggregate
 	// counted with the same Presence rule GET /agents reports with.
@@ -683,4 +689,34 @@ func TestStatusLiveNeverExposesGuardBaseURL(t *testing.T) {
 			t.Errorf("GET /status leaked %q; body:\n%s", forbidden, body)
 		}
 	}
+}
+
+// TestStatusIngestSweepPosture pins the INT-015 reconciliation-sweep posture
+// (CRIER-GITHOOK-DISPATCH §10 amendment 1): the /status payload names the
+// sweep in BOTH positions — false/0 with the switch unset (the fail-closed
+// default), true + the resolved cadence with it on — so an operator can tell
+// a server that will never reconcile the board from one that sweeps.
+func TestStatusIngestSweepPosture(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		got := assertStatusSchema(t, httptestRecorder(t, config.Config{}, registryBackendMemory))
+		if enabled, ok := got["ingest_sweep_enabled"].(bool); !ok || enabled {
+			t.Fatalf("ingest_sweep_enabled = %#v, want false (the fail-closed default)", got["ingest_sweep_enabled"])
+		}
+		if secs, ok := got["ingest_sweep_interval_secs"].(float64); !ok || secs != 0 {
+			t.Fatalf("ingest_sweep_interval_secs = %#v, want 0 while the sweep is off", got["ingest_sweep_interval_secs"])
+		}
+	})
+	t.Run("on with cadence", func(t *testing.T) {
+		cfg := config.Config{}
+		cfg.Ingest.Enabled = true
+		cfg.Ingest.SweepEnabled = true
+		cfg.Ingest.SweepInterval = 90 * time.Second
+		got := assertStatusSchema(t, httptestRecorder(t, cfg, registryBackendMemory))
+		if enabled, ok := got["ingest_sweep_enabled"].(bool); !ok || !enabled {
+			t.Fatalf("ingest_sweep_enabled = %#v, want true", got["ingest_sweep_enabled"])
+		}
+		if secs, ok := got["ingest_sweep_interval_secs"].(float64); !ok || secs != 90 {
+			t.Fatalf("ingest_sweep_interval_secs = %#v, want 90", got["ingest_sweep_interval_secs"])
+		}
+	})
 }

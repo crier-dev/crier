@@ -26,6 +26,20 @@ import (
 
 const DefaultMaxBodyBytes = 65536
 
+// DefaultDeadLetterBudget is the delivery retry budget after which an intake
+// batch is parked in the dead-letter store (CRIER-GITHOOK-DISPATCH §10
+// amendment 2). The count stays operator-visible and re-drivable — the v1
+// drop-with-log posture is removed from the contract.
+const DefaultDeadLetterBudget = 3
+
+// SweepFunc is the reconciliation-sweep entry point (CRIER-GITHOOK-DISPATCH
+// §10 amendment 1 — the durable, hook-less intake path). The sweep
+// implementation arms this seam from its own file's init so a build without
+// it — exactly the pre-INT-015 state — leaves it nil and nothing delivers
+// hook-less rows. The falsifier test pins that: with the seam nil (hooks never
+// fire) no row can arrive within a sweep interval, and the test times out.
+var SweepFunc func(ctx context.Context, h *Handler, boardDir, sourceID string) (int, error)
+
 var sourceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 type InboxWriter interface {
@@ -38,9 +52,13 @@ type Handler struct {
 	ReplayWindow  time.Duration
 	MaxBodyBytes  int
 	RatePerMinute int
-	Now           func() time.Time
-	NewID         func() (string, error)
-	limiter       *ratelimit.Window
+	// DeadLetterBudget is the number of failed delivery attempts after which a
+	// batch parks in the dead-letter store and Drain stops retrying it. Zero
+	// resolves to DefaultDeadLetterBudget.
+	DeadLetterBudget int
+	Now              func() time.Time
+	NewID            func() (string, error)
+	limiter          *ratelimit.Window
 }
 
 func (h *Handler) init() {
@@ -232,12 +250,57 @@ func (h *Handler) deliver(ctx context.Context, source Source, messageID, key str
 		Payload: json.RawMessage(body), Tags: source.Tags, IdempotencyKey: key,
 	})
 	if err != nil {
+		// Dead-letter bookkeeping (CRIER-GITHOOK-DISPATCH §10 amendment 2):
+		// every failed attempt is recorded with an accumulating count, the
+		// last failure and the payload's row ids. Nothing is dropped here.
+		if _, dlErr := h.Store.RecordDeadLetter(ctx, source.ID, key, messageID, payloadRowIDs(body), err, h.now()); dlErr != nil {
+			return fmt.Errorf("dead-letter record failed: %v (delivery error: %w)", dlErr, err)
+		}
+		return err
+	}
+	// A batch that recovers stops reading as dead.
+	if err := h.Store.ClearDeadLetter(ctx, source.ID, key); err != nil {
 		return err
 	}
 	return h.Store.MarkDelivered(ctx, source.ID, key, messageID)
 }
 
+// payloadRowIDs extracts the board row ids a webhook payload carried, for the
+// dead-letter store's row_ids. It accepts the boardctl batch shape (a top-level
+// "rows" array of row objects), the single-row shape (a top-level "id") and
+// falls back to the message id for payloads with neither — the ids name the
+// lost work; the full payload stays in the ledger either way.
+func payloadRowIDs(body []byte) []string {
+	var probe struct {
+		ID   string `json:"id"`
+		Rows []struct {
+			ID string `json:"id"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &probe); err == nil {
+		if len(probe.Rows) > 0 {
+			ids := make([]string, 0, len(probe.Rows))
+			for _, r := range probe.Rows {
+				if r.ID != "" {
+					ids = append(ids, r.ID)
+				}
+			}
+			if len(ids) > 0 {
+				return ids
+			}
+		}
+		if probe.ID != "" {
+			return []string{probe.ID}
+		}
+	}
+	return nil
+}
+
 // Drain retries every durable outbox row still awaiting inbox delivery.
+// Rows whose dead-letter count has exhausted the budget are SKIPPED, not
+// dropped: they stay in the ledger and stay queryable in the dead-letter
+// store until an operator re-drives them (the store entry clears on the next
+// successful delivery).
 func (h *Handler) Drain(ctx context.Context) error {
 	rows, err := h.Store.PendingRows(ctx)
 	if err != nil {
@@ -245,11 +308,21 @@ func (h *Handler) Drain(ctx context.Context) error {
 	}
 	var failures []error
 	for _, row := range rows {
+		if row.Attempts >= h.deadLetterBudget() {
+			continue
+		}
 		if err := h.deliver(ctx, row.Source, row.MessageID, row.Key, row.Payload); err != nil {
 			failures = append(failures, fmt.Errorf("deliver %s: %w", row.MessageID, err))
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (h *Handler) deadLetterBudget() int {
+	if h.DeadLetterBudget <= 0 {
+		return DefaultDeadLetterBudget
+	}
+	return h.DeadLetterBudget
 }
 func (h *Handler) RatePerMinuteOrDefault() int {
 	if h.RatePerMinute <= 0 {

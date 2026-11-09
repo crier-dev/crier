@@ -1029,6 +1029,21 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		defer func() { _ = store.Close() }()
 		webhookIngest = &ingest.Handler{Store: store, Inbox: registryInbox{handler: registryHandler}, ReplayWindow: cfg.Ingest.ReplayWindow, MaxBodyBytes: cfg.Ingest.MaxBodyBytes, RatePerMinute: cfg.Ingest.SourceRatePerMinute}
 	}
+	// Reconciliation sweep (CRIER-GITHOOK-DISPATCH §10 amendment 1, INT-015):
+	// the durable, hook-less intake path. CR_INGEST_SWEEP_ENABLED is parsed by
+	// config.LoadFrom (fail-closed, requires the ingest surface above); false
+	// leaves the sweep unstarted and the server behavior unchanged.
+	var sweepCancel context.CancelFunc
+	var sweepDone <-chan struct{}
+	if cfg.Ingest.SweepEnabled {
+		reconciler := &ingest.Reconciler{Handler: webhookIngest, BoardDir: cfg.Ingest.SweepBoardDir, SourceID: ingest.DefaultBoardctlSourceID, Interval: cfg.Ingest.SweepInterval}
+		var sweepCtx context.Context
+		sweepCtx, sweepCancel = context.WithCancel(context.Background())
+		defer sweepCancel()
+		done := make(chan struct{})
+		sweepDone = done
+		go func() { reconciler.Run(sweepCtx); close(done) }()
+	}
 
 	// DF-CRIER-414: feed the session handler's in-flight view from the webhook
 	// driver's own per-attempt observations, so a composer can say "delivery in
@@ -1408,6 +1423,14 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 			rssCancel()
 			if rssDone != nil {
 				<-rssDone
+			}
+		}
+		// The reconciliation sweep (INT-015) joins the same graceful path:
+		// cancel first, then wait for the tick loop to observe it.
+		if sweepCancel != nil {
+			sweepCancel()
+			if sweepDone != nil {
+				<-sweepDone
 			}
 		}
 		meshSvc.Stop()

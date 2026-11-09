@@ -359,6 +359,13 @@ type IngestConfig struct {
 	ReplayWindow        time.Duration
 	MaxBodyBytes        int
 	SourceRatePerMinute int
+	// Sweep is the reconciliation sweep posture (CRIER-GITHOOK-DISPATCH §10
+	// amendment 1). OPT-IN and fail-closed: an unset CR_INGEST_SWEEP_ENABLED
+	// leaves the sweep OFF — no board is read, nothing is enqueued, and the
+	// /status payload names the off posture (ingest_sweep_enabled=false).
+	SweepEnabled  bool
+	SweepBoardDir string
+	SweepInterval time.Duration
 }
 
 type RSSConfig struct {
@@ -968,6 +975,43 @@ func LoadFrom(getenv Getenv) (Config, error) {
 			return cfg, fmt.Errorf("invalid CR_INGEST_SOURCE_RATE_PER_MINUTE: %q", v)
 		}
 		cfg.Ingest.SourceRatePerMinute = n
+	}
+
+	// Reconciliation sweep (CRIER-GITHOOK-DISPATCH §10 amendment 1, INT-015).
+	// OPT-IN and fail-closed in the DUCKBRAIN-ARCHIVE posture: an unset
+	// CR_INGEST_SWEEP_ENABLED leaves the sweep OFF and the server behavior
+	// unchanged; the posture is named in the /status payload either way.
+	// The same tolerant bool dialect as CR_TRACING_ENABLED / CR_A2A_ENABLED.
+	if v := strings.TrimSpace(getenv("CR_INGEST_SWEEP_ENABLED")); v != "" {
+		parsed, err := parseTolerantBool("CR_INGEST_SWEEP_ENABLED", v)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Ingest.SweepEnabled = parsed
+	}
+	// The board path follows the boardbridge convention: boardctl is pointed
+	// at a board_dir (CR_BOARDCTL_BRIDGE_ENABLED wiring uses "."), and the
+	// board's rows live under <board_dir>/.coding-hermes/board/. The sweep
+	// reads that board; it never writes it.
+	cfg.Ingest.SweepBoardDir = strings.TrimSpace(getenv("CR_INGEST_SWEEP_BOARD_DIR"))
+	if cfg.Ingest.SweepBoardDir == "" {
+		cfg.Ingest.SweepBoardDir = "."
+	}
+	if v := strings.TrimSpace(getenv("CR_INGEST_SWEEP_INTERVAL_SECS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid CR_INGEST_SWEEP_INTERVAL_SECS: %q (want positive seconds)", v)
+		}
+		cfg.Ingest.SweepInterval = time.Duration(n) * time.Second
+	}
+	if cfg.Ingest.SweepInterval == 0 {
+		cfg.Ingest.SweepInterval = 10 * time.Minute
+	}
+	// Fail-closed: the sweep drains the ingest store's delivery ledger, so it
+	// cannot exist without the webhook ingest surface enabled — enabling the
+	// sweep alone would read as armed while nothing could ever deliver.
+	if cfg.Ingest.SweepEnabled && !cfg.Ingest.Enabled {
+		return cfg, fmt.Errorf("CR_INGEST_SWEEP_ENABLED requires CR_INGEST_WEBHOOK_ENABLED: the sweep drains the same ingest store")
 	}
 
 	if v := strings.TrimSpace(getenv("CR_INGEST_RSS_ENABLED")); v != "" {

@@ -400,6 +400,16 @@ type statusResponse struct {
 	// 404, which is a different posture from "registered but empty".
 	MetricsEnabled bool `json:"metrics_enabled"`
 	PProfEnabled   bool `json:"pprof_enabled"`
+	// IngestSweepEnabled reports the reconciliation-sweep posture
+	// (CRIER-GITHOOK-DISPATCH §10 amendment 1, INT-015). It is fail-closed
+	// and named here in BOTH positions: false — the default, with
+	// CR_INGEST_SWEEP_ENABLED unset — must be distinguishable from true, so
+	// an operator can tell a server that will never reconcile the board from
+	// one that sweeps on the reported cadence. The interval is reported only
+	// for the enabled posture; off reports 0 rather than the resolved default
+	// it would have if switched on.
+	IngestSweepEnabled      bool `json:"ingest_sweep_enabled"`
+	IngestSweepIntervalSecs int  `json:"ingest_sweep_interval_secs"`
 	// Build is the running binary's identity — byte-for-byte the object
 	// GET /version serves.
 	Build buildinfo.Info `json:"build"`
@@ -475,6 +485,8 @@ func buildStatusResponse(cfg config.Config, registryBackend string) statusRespon
 		GlobalRateLimitPerMinute: cfg.GlobalRateLimitPerMinute,
 		MetricsEnabled:           cfg.Observability.EnableMetrics,
 		PProfEnabled:             cfg.Observability.EnablePProf,
+		IngestSweepEnabled:       cfg.Ingest.SweepEnabled,
+		IngestSweepIntervalSecs:  ingestSweepIntervalSecs(cfg),
 		Build:                    buildinfo.Resolve(),
 	}
 }
@@ -590,4 +602,15 @@ func statusQueueDepthValue(read queueDepthReader) (*statusQueueDepth, bool) {
 		Leased:     depth.Leased,
 		OldestAgeS: int(depth.OldestAge.Seconds()),
 	}, true
+}
+
+// ingestSweepIntervalSecs resolves the sweep cadence for the posture payload:
+// the documented default (10m, CRIER-GITHOOK-DISPATCH §10) when the config
+// resolved none, reported only for the enabled posture — off reports 0 rather
+// than the interval it WOULD sweep at, so the payload cannot read as armed.
+func ingestSweepIntervalSecs(cfg config.Config) int {
+	if !cfg.Ingest.SweepEnabled {
+		return 0
+	}
+	return int(cfg.Ingest.SweepInterval.Seconds())
 }
