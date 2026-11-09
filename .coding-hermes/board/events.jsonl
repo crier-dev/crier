@@ -2382,3 +2382,4 @@
 {"id":1794115926888324272,"event_type":"task_updated","task_id":"DOCS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:56:34Z","detail":"{\"status\":\"pending\"}"}
 {"id":1794115926888324273,"event_type":"task_created","task_id":"INGRESS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T07:06:57Z","detail":"{\"id\":\"INGRESS-CRIER-001\",\"status\":\"pending\"}"}
 {"id":1794115926888324274,"event_type":"task_created","task_id":"BOARDCTL-HOOK-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T07:08:34Z","detail":"{\"id\":\"BOARDCTL-HOOK-001\",\"status\":\"pending\"}"}
+{"id":1794115926888324275,"event_type":"task_completed","task_id":"GUARD-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T10:08:18Z","detail":"{\"status\":\"complete\"}"}
