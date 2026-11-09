@@ -1,6 +1,6 @@
 # INT-CI-035 — GitHub Actions CI and release-bookkeeping evidence
 
-Status: partial/open. No product or workflow source change is warranted. The
+Status: complete for exact-head CI evidence; release bookkeeping remains open. No product or workflow source change is warranted. The
 historical failures are classified; the release asset mismatch remains an open
 release-bookkeeping obligation owned by the release process.
 
@@ -30,13 +30,17 @@ The live failed log reports that `v0.6.0` already carried assets with different 
 ## Current exact-head CI
 
 The current canonical refs are `origin/main` and `gitlab/main`, both at
-`a656956b61a2b0de9997ecd8dd10ee87220cea30`. The exact-head GitHub runs are
-`42690155956` (CI), `42690155584` (bunker-e2e), and `42690156060` (pages).
-A fresh readback still shows CI run `42690155956` in progress: its completed
-jobs are successful, but `Coverage (Go 1.26.10)` remains in progress at
-`Check coverage threshold`. The companion bunker-e2e and pages runs are
-terminal success. This record remains explicitly pending and does not claim
-terminal green exact-head CI for `a656956b`.
+`a656956b61a2b0de9997ecd8dd10ee87220cea30`. Exact-head GitHub CI run
+`42690155956` completed successfully with these six successful jobs: Whole-board
+validation (fail closed), Build & Test (1.26.10), Coverage (Go 1.26.10),
+OpenAPI Spec Validator, Release acceptance matrix (built artifacts), and
+Integration Tests (registry / PostgresStore). Companion run `42690155584`
+(bunker-e2e) completed successfully for Build & publish image (ghcr) and Bunker
+config-matrix E2E; its Agent-ecosystem battery job was intentionally skipped
+with zero steps. Run `42690156060` (pages) completed successfully with its
+deploy job. Exact-head CI is terminal green for `a656956b`. The
+release-bookkeeping refusal described above remains open and is separate from
+this exact-head CI result.
 
 ## Local verification
 
@@ -51,4 +55,4 @@ The bare host Go cache paths are broken symlinks into unavailable storage; the f
 
 The workflow source was also validated: `.github/workflows/bunker-e2e.yml` gates `docker-image` on push events and `bunker-matrix` on `needs: docker-image`; the relevant workflow syntax check passed. No workflow source edit was necessary.
 
-ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-09-20-07-49.json test=make shell-yaml-check && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go build ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go vet ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=none:42690155956-in-progress verdict=none:foreman-pending commit=<worker-sha> memory=none:final-ci-pending
+ch:trace row=INT-CI-035 spec=none:ci-investigation wave=.coding-hermes/waves/crier-foreman-2026-11-09-20-07-49.json test=make shell-yaml-check && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go build ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go vet ./... && GOMODCACHE=/home/kara/go-mod-cache GOCACHE=/home/kara/go-build-cache go test ./... -count=1 evidence=docs/INT-CI-035-ci-evidence.md witness=run:42690155956 verdict=none:foreman-pending commit=2ac2fa40b651a3e578fc3c447e372cb97d48bfd7 memory=none:final-ci-pending
