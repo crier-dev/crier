@@ -1,0 +1,21 @@
+{
+  "tick": "crier-foreman-2026-11-09-12-54-05",
+  "block": "INGRESS-CRIER-001",
+  "mode": "serial-fallback",
+  "wave_size": 0,
+  "reason": "Only one ready row in selected block; existing task worktree already contains a landed implementation commit, so no worker dispatch.",
+  "rows": [
+    {
+      "id": "INGRESS-CRIER-001",
+      "dependency_proof": {"depends_on": [], "ready": true},
+      "worktree": "/home/kara/worktrees/crier-INGRESS-CRIER-001",
+      "branch": "wt/INGRESS-CRIER-001",
+      "base_sha": "756a1bab05268e4142c0ace74bb1ffda9a5044ef",
+      "brief": null,
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "disposition": "reconciled landed work; worker not launched"
+    }
+  ],
+  "manifest_status": "reconciliation-only"
+}
