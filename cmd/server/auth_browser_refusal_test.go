@@ -8,8 +8,7 @@ package main
 // and middleware chain), asserting the exact contract a browser reads:
 //
 //   Accept: text/html → 401 with a readable text/html page that names the
-//   fronting requirement (DF-CRIER-333 holds the mechanism decision) and
-//   carries NO token material of any kind;
+//   API-only posture (UI-CRIER-001, decision (c)) and carries NO token material;
 //
 //   no Accept (agent curl) → byte-identical {"error":"missing Authorization header"};
 //   CR_AUTH_TOKEN unset → the page is served, unchanged.
@@ -69,9 +68,10 @@ func TestBrowserChatNavigationUnderAuthTokenIsALegibleRefusal(t *testing.T) {
 		t.Fatalf("browser GET /chat Content-Type = %q, want text/html (got: %s)", ct, body)
 	}
 	for _, want := range []string{
-		"fronting",
+		"API-only",
+		"UI-CRIER-001",
+		"decision",
 		"CR_AUTH_TOKEN",
-		"DF-CRIER-333",
 		"Bearer",
 		"401",
 	} {
@@ -167,8 +167,8 @@ func TestBrowserRefusalPageMatchesEmbeddedTemplate(t *testing.T) {
 }
 
 // TestBrowserRefusalDocLineHasNoTokenMaterial pins the README paragraph
-// (AC 2 + AC 5): the browser-fronting statement exists, points at
-// DF-CRIER-333, and carries no token material on the doc line.
+// (UI-CRIER-001): the API-only decision is present in the README and
+// carries no token material on the doc line.
 func TestBrowserRefusalDocLineHasNoTokenMaterial(t *testing.T) {
 	raw, err := os.ReadFile("../../README.md")
 	if err != nil {
@@ -181,7 +181,7 @@ func TestBrowserRefusalDocLineHasNoTokenMaterial(t *testing.T) {
 	var para string
 	found := false
 	for _, p := range strings.Split(string(raw), "\n\n") {
-		if strings.Contains(p, "DF-CRIER-333") {
+		if strings.Contains(p, "UI-CRIER-001") {
 			para = p
 			found = true
 			break
@@ -190,8 +190,8 @@ func TestBrowserRefusalDocLineHasNoTokenMaterial(t *testing.T) {
 	if !found {
 		t.Fatal("README.md has no paragraph naming DF-CRIER-333")
 	}
-	if !strings.Contains(para, "front") || !strings.Contains(para, "Bearer") {
-		t.Fatal("README DF-CRIER-333 paragraph does not state the browser-fronting requirement (fronting + Bearer)")
+	if !strings.Contains(para, "API-only") || !strings.Contains(para, "Bearer") || !strings.Contains(para, "decision (c)") {
+		t.Fatal("README UI-CRIER-001 paragraph does not state the API-only posture (API-only + Bearer + decision (c))")
 	}
 	for _, banned := range []string{"Bearer df444", "curl -H", "Authorization:", "***"} {
 		if strings.Contains(para, banned) {

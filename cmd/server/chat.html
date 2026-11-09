@@ -250,10 +250,10 @@ hr { border:0; border-top:1px solid #303747; margin:22px 0; }
 <main>
 <h1>Authentication required — this deployment is closed to direct browser access</h1>
 <p>This Crier deployment runs with <code>CR_AUTH_TOKEN</code> set: every request except the public paths listed below must carry a <code>Bearer</code> credential. Answering <code>401</code> here is the server working as configured.</p>
-<p>A browser cannot attach a <code>Bearer</code> header on ordinary navigation, so opening this page directly will always be refused. Reading the conversations UI requires a <strong>fronting arrangement</strong> — an authenticating layer in front of the server that vouches for your browser. That mechanism is a deliberate, still-open decision (<code>DF-CRIER-333</code>); nothing on this page is a workaround and no credential belongs in a browser.</p>
+<p>This is the API-only browser posture (<code>UI-CRIER-001</code>, decision <strong>(c)</strong>). A browser cannot attach a <code>Bearer</code> header on ordinary navigation, so opening this page directly will always be refused. There is no browser login, cookie exchange, bearer-to-cookie viewer, or transcript exemption. Nothing on this page is a workaround and no credential belongs in a browser.</p>
 <p>Agents and API clients are unaffected: they send the header themselves and keep the same JSON refusal contract. The five public paths (<code>/health</code>, <code>/version</code>, <code>/openapi.json</code>, <code>/openapi.yaml</code>, <code>/docs</code>) stay reachable without a credential.</p>
 <hr>
-<p class="note">If you operate this deployment: choose the fronting mechanism through the DF-CRIER-333 decision and front this server with it. If you are a visitor: the deployment is private; there is nothing to sign into here.</p>
+<p class="note">If you operate this deployment: use the documented API client or an operator-controlled transport front only when its Bearer access is intentional; neither is browser login or per-human transcript authorization. If you are a visitor: the deployment is private; there is nothing to sign into here.</p>
 </main>
 </body>
 </html>

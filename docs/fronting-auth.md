@@ -1,15 +1,18 @@
-# Browser access to an auth-enabled relay (`crier-front`)
+# Controlled Bearer transport (`crier-front`)
 
+The chat surface uses the documented API-only posture (UI-CRIER-001, decision (c)).
 When a relay runs with `CR_AUTH_TOKEN` set, every request except the public paths
 (`/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs`) must carry
-`Authorization: Bearer <token>`. That includes ordinary navigation, so a browser
-opening `GET /chat` is refused `401`: a browser cannot attach that header on its
-own.
+`Authorization: Bearer <deployment-token>`. Ordinary browser navigation to `GET /chat` is refused
+`401`; there is no browser login, cookie exchange, bearer-to-cookie viewer, or
+unauthenticated transcript read.
 
-The shipped arrangement is an authenticating **front**: a process that holds the
-credential and injects it on the wire, so `GET /chat` and every API call work in a
-browser while the shared token never reaches page source, cookies, localStorage or
-sessionStorage. `crier-front` is that process, built from this repo.
+`crier-front` is an optional operator-controlled **Bearer transport** for callers
+that are intentionally allowed to use the deployment credential. It injects the
+credential on the upstream wire, but it is not browser authentication, a per-human
+viewer session, or a waiver of the API-only contract. The front does not change the
+relay's auth boundary: direct unauthenticated `/chat`, session-list and transcript
+requests remain refused and return no transcript data.
 
 ```sh
 make build-front
@@ -22,9 +25,11 @@ CR_AUTH_TOKEN="$(cat /run/secrets/crier-token)" \
   ./bin/crier-front -listen 127.0.0.1:8770 -upstream http://127.0.0.1:8765
 ```
 
-Then browse `http://127.0.0.1:8770/chat`. `http://127.0.0.1:8765/chat` keeps
-answering `401` with the fronting-requirement page, which is the intended signal
-for anyone who lands on the relay directly.
+Use the front only from an intentionally authorized API client. Direct
+unauthenticated requests to `http://127.0.0.1:8765/chat` keep answering `401`
+with the API-only refusal page, and direct session-list/transcript requests remain
+closed. The front is a transport boundary, not browser login or per-human
+transcript authorization.
 
 ## What the front guarantees
 
@@ -83,16 +88,16 @@ Keep `/etc/crier/front.env` at mode `0600` and owned by the service user.
 # the relay must stay closed
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/chat      # 401
 
-# the front must carry the credential
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8770/chat      # 200
+# an authorized API client may use the front for the protected API
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8770/sessions   # 200
 
 # a wrong credential must still be refused at the relay
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer wrong' \
   http://127.0.0.1:8765/sessions                                        # 401
 ```
 
-Measured on a scratch relay at `1fda6419`: `401`, `200`, `401`, and
-`GET /sessions` through the front `200`. In a real headless Chromium session the
-panel loaded through the front, an agent registered `201`, a message was recorded
-`accepted: 1`, and the token appeared in neither page source, `localStorage`,
-`sessionStorage` nor cookies.
+The relevant verification is the protected API boundary: an unauthenticated
+relay request is `401`, an authorized API request through the controlled front is
+`200`, and a wrong credential at the relay is `401`. The UI posture test also
+proves that an unauthenticated `/chat`, session-list, or transcript response
+contains no transcript data.

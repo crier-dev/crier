@@ -829,19 +829,17 @@ what the docs gate executes on every build, so they stay true. If you are here t
 *use* crier rather than to inspect it, use `crier keygen` and a client and read
 the rest later.
 
-A note for humans, not clients: a browser cannot attach a Bearer header on
+A note for humans, not clients: the chat surface uses the documented **API-only
+posture** (UI-CRIER-001, decision (c)). A browser cannot attach a Bearer header on
 ordinary navigation, so when `CR_AUTH_TOKEN` is set, opening `GET /chat` (or any
 non-exempt path) directly in a browser is refused `401` — `/chat` answers with a
-readable page explaining the refusal, everything else with the bare JSON. That is
-the server working as configured, not a bug: an unauthenticated browser
-deployment must be **fronted** by an authenticating layer that supplies the
-credential for it. That layer ships with this repo: `make build-front` produces
-`bin/crier-front`, which holds `CR_AUTH_TOKEN` and injects the Bearer on the wire
-so a browser can use `/chat` without the token ever reaching page source,
-cookies or storage — the arrangement DF-CRIER-333 asked the owner to decide.
-See [`docs/fronting-auth.md`](docs/fronting-auth.md) for the run line, the
-systemd unit, and the three commands that verify a deployment. Drive crier from
-its API clients instead when you want the header sent by the caller itself.
+readable page explaining the refusal, everything else with the bare JSON. There is
+no browser login, cookie exchange, bearer-to-cookie viewer, or unauthenticated
+transcript read. This is the server working as configured, not a bug: use crier's
+API clients when you want the header sent by the caller itself. An operator may
+still use `crier-front` as a deliberately controlled Bearer transport, but it is
+not browser authentication or per-human viewer authorization; see
+[`docs/fronting-auth.md`](docs/fronting-auth.md) for that boundary.
 
 A minimal register → deliver → retrieve round-trip with the default signed configuration. If you started the server with `CR_AUTH_TOKEN` set (auth enabled), every request except the **five exempt paths** — `/health`, `/version`, `/openapi.json`, `/openapi.yaml`, `/docs` (the list is the switch in `internal/middleware/auth.go`) — needs the Bearer header shown below; if `CR_AUTH_TOKEN` is unset, auth is disabled and the header can be dropped. Measured on a running server: all five answer `200` with no token, and `GET /agents` answers `401`:
 
