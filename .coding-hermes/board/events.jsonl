@@ -2363,3 +2363,5 @@
 {"id":1794115926888324253,"event_type":"task_completed","task_id":"REVIEW-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T04:56:56Z","detail":"{\"status\":\"complete\"}"}
 {"id":1794115926888324254,"event_type":"task_completed","task_id":"INT-015","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T05:29:59Z","detail":"{\"status\":\"complete\"}"}
 {"id":1794115926888324255,"event_type":"task_completed","task_id":"RELEASE-017","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T05:50:01Z","detail":"{\"status\":\"complete\"}"}
+{"id":1794115926888324256,"event_type":"task_created","task_id":"DOCS-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:29:31Z","detail":"{\"id\":\"DOCS-CRIER-001\",\"status\":\"pending\"}"}
+{"id":1794115926888324257,"event_type":"task_created","task_id":"UI-CRIER-001","actor":"foreman","tick_number":null,"timestamp":"2026-11-09T06:29:32Z","detail":"{\"id\":\"UI-CRIER-001\",\"status\":\"pending\"}"}
