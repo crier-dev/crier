@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,18 @@ type FeedStateStore interface {
 	LoadFeedState(context.Context, string) (FeedState, error)
 	SaveFeedState(context.Context, FeedState) error
 }
+
+// PollHealth is the operator-facing RSS poller projection used by GET /status.
+// FeedStatus values are HTTP status codes or a stable error class; they never
+// contain feed payloads or URLs.
+type PollHealth struct {
+	Enabled    bool
+	LastPollAt time.Time
+	ItemsSeen  int
+	DedupeHits int
+	FeedStatus map[string]string
+}
+
 type RSSPoller struct {
 	Feeds        []Feed
 	Store        FeedStateStore
@@ -54,7 +67,44 @@ type RSSPoller struct {
 	Client       *http.Client
 	Now          func() time.Time
 	Jitter       func(time.Duration) time.Duration
+
+	mu     sync.Mutex
+	health PollHealth
 }
+
+func (p *RSSPoller) MarkEnabled() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.health.Enabled = true
+	if p.health.FeedStatus == nil {
+		p.health.FeedStatus = make(map[string]string)
+	}
+}
+
+func (p *RSSPoller) Health() PollHealth {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.health
+	out.FeedStatus = make(map[string]string, len(p.health.FeedStatus))
+	for id, status := range p.health.FeedStatus {
+		out.FeedStatus[id] = status
+	}
+	return out
+}
+
+func (p *RSSPoller) recordHealth(feedID, status string, items, dedupes int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.health.FeedStatus == nil {
+		p.health.FeedStatus = make(map[string]string)
+	}
+	p.health.Enabled = true
+	p.health.LastPollAt = p.now()
+	p.health.ItemsSeen += items
+	p.health.DedupeHits += dedupes
+	p.health.FeedStatus[feedID] = status
+}
+
 type rssDocument struct {
 	Channel struct {
 		Items []rssItem `xml:"item"`
@@ -229,39 +279,59 @@ func (p *RSSPoller) PollOnce(ctx context.Context, f Feed) error {
 	if fetchErr != nil {
 		s.ConsecutiveFailures++
 		p.setNext(&s, f)
-		_ = p.Store.SaveFeedState(ctx, s)
+		saveErr := p.Store.SaveFeedState(ctx, s)
+		p.recordHealth(f.ID, "fetch_error", 0, 0)
+		if saveErr != nil {
+			return fmt.Errorf("%w (persist state: %v)", fetchErr, saveErr)
+		}
 		return fetchErr
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
 		s.ConsecutiveFailures = 0
 		p.setNext(&s, f)
-		return p.Store.SaveFeedState(ctx, s)
+		err := p.Store.SaveFeedState(ctx, s)
+		p.recordHealth(f.ID, strconv.Itoa(resp.StatusCode), 0, 0)
+		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.ConsecutiveFailures++
 		p.setNext(&s, f)
-		_ = p.Store.SaveFeedState(ctx, s)
+		saveErr := p.Store.SaveFeedState(ctx, s)
+		p.recordHealth(f.ID, strconv.Itoa(resp.StatusCode), 0, 0)
+		if saveErr != nil {
+			return fmt.Errorf("feed %s returned HTTP %d (persist state: %v)", f.ID, resp.StatusCode, saveErr)
+		}
 		return fmt.Errorf("feed %s returned HTTP %d", f.ID, resp.StatusCode)
 	}
 	body, e := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if e != nil {
 		s.ConsecutiveFailures++
 		p.setNext(&s, f)
-		_ = p.Store.SaveFeedState(ctx, s)
+		saveErr := p.Store.SaveFeedState(ctx, s)
+		p.recordHealth(f.ID, "read_error", 0, 0)
+		if saveErr != nil {
+			return fmt.Errorf("%w (persist state: %v)", e, saveErr)
+		}
 		return e
 	}
 	items, e := parseFeed(body)
 	if e != nil {
 		s.ConsecutiveFailures++
 		p.setNext(&s, f)
-		_ = p.Store.SaveFeedState(ctx, s)
+		saveErr := p.Store.SaveFeedState(ctx, s)
+		p.recordHealth(f.ID, "parse_error", 0, 0)
+		if saveErr != nil {
+			return fmt.Errorf("parse_error: %w (persist state: %v)", e, saveErr)
+		}
 		return fmt.Errorf("parse_error: %w", e)
 	}
 	s.ETag = resp.Header.Get("ETag")
 	s.LastModified = resp.Header.Get("Last-Modified")
 	s.ConsecutiveFailures = 0
+	itemCount, dedupeCount := 0, 0
 	for _, it := range items {
+		itemCount++
 		id := it.Link
 		if id == "" {
 			id = it.GUID
@@ -274,10 +344,11 @@ func (p *RSSPoller) PollOnce(ctx context.Context, f Feed) error {
 			continue
 		}
 		if _, ok := s.Seen[id]; ok {
+			dedupeCount++
 			continue
 		}
 		text := truncateUTF8(cleanFeedText(strings.Join([]string{it.Title, it.Link, it.Summary}, " ")), p.MaxItemBytes)
-		payload, _ := json.Marshal(map[string]string{"text": text})
+		payload, _ := json.Marshal(map[string]string{"text": text, "url": it.Link})
 		if p.Inbox != nil {
 			_, e = p.Inbox.Deliver(ctx, f.DeliverTo, "", ingress.InboxMessage{Author: session.AuthorRef{System: "feed-" + f.ID}, Kind: session.MessageKind("text"), Text: text, Payload: payload, Tags: append(append([]string{}, f.Tags...), "untrusted:feed"), IdempotencyKey: "rss:" + f.ID + ":" + id})
 			if e != nil {
@@ -288,7 +359,9 @@ func (p *RSSPoller) PollOnce(ctx context.Context, f Feed) error {
 	}
 	pruneSeen(s.Seen, now)
 	p.setNext(&s, f)
-	return p.Store.SaveFeedState(ctx, s)
+	saveErr := p.Store.SaveFeedState(ctx, s)
+	p.recordHealth(f.ID, strconv.Itoa(resp.StatusCode), itemCount, dedupeCount)
+	return saveErr
 }
 func (p *RSSPoller) setNext(s *FeedState, f Feed) {
 	mult := 1 << min(max(s.ConsecutiveFailures-1, 0), 5)

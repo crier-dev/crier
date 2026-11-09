@@ -1,0 +1,16 @@
+[
+  {
+    "id": "crier-blog",
+    "url": "https://go.dev/blog/feed.atom",
+    "interval_secs": 300,
+    "deliver_to": "board-manager",
+    "tags": ["rss", "feed:crier-blog"]
+  },
+  {
+    "id": "crier-releases",
+    "url": "https://github.com/crier-dev/crier/releases.atom",
+    "interval_secs": 300,
+    "deliver_to": "board-manager",
+    "tags": ["rss", "feed:crier-releases"]
+  }
+]

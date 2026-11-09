@@ -56,6 +56,7 @@ var statusScrubbedEnv = []string{
 	"CR_WEBHOOK_SECRET",
 	"CR_FED_LINKS", "CR_FED_TOKEN", "CR_FED_QUEUE_FILE", "CR_FED_REQUIRE_PEER",
 	"CR_ENABLE_METRICS", "CR_ENABLE_PPROF",
+	"CR_INGEST_RSS_ENABLED", "CR_INGEST_RSS_CONFIG_FILE", "CR_INGEST_RSS_MAX_ITEM_BYTES",
 	"CR_LOG_LEVEL", "CR_LOG_FORMAT", "CR_RATE_LIMIT_PER_MINUTE",
 	// CR-FEAT-035: the global inbox-ingest budget is read from this one, for
 	// the same reason — a case must see the budget it asked for (or none), not
@@ -94,6 +95,12 @@ var statusTopLevelKeys = []string{
 	// both together.
 	"ingest_sweep_enabled",
 	"ingest_sweep_interval_secs",
+	"rss_poll_enabled",
+	"rss_poll_status",
+	"rss_last_poll_at",
+	"rss_items_seen",
+	"rss_dedupe_hits",
+	"rss_feed_status",
 	"guard_enabled",
 	"guard_provider_health",
 	"guard_provider_last_error",

@@ -1033,6 +1033,9 @@ func LoadFrom(getenv Getenv) (Config, error) {
 		cfg.RSS.Enabled = parsed
 	}
 	cfg.RSS.ConfigFile = strings.TrimSpace(getenv("CR_INGEST_RSS_CONFIG_FILE"))
+	if cfg.RSS.ConfigFile == "" {
+		cfg.RSS.ConfigFile = "config/rss-feeds.json"
+	}
 	cfg.RSS.MaxItemBytes = 4096
 	if v := strings.TrimSpace(getenv("CR_INGEST_RSS_MAX_ITEM_BYTES")); v != "" {
 		n, err := strconv.Atoi(v)
