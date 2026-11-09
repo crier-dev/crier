@@ -293,7 +293,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, guard_provider_health, guard_provider_last_error, presence_stale_after_s, registry_backend, registry_durable, registry_store_path, registry_store_ignored, session_backend, session_store_path, session_store_mount, session_store_ignored, rate_limit_per_minute, global_rate_limit_per_minute, ingest_sweep_enabled, ingest_sweep_interval_secs, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
+                required: [auth_enabled, management_surface, service_delivery_auth_enabled, service_delivery_audience_present, service_delivery_protected_recipient_count, service_delivery_directed_pair_count, service_delivery_durable_idempotency_ready, require_agent_signature, mesh_auth_required, mesh_origin_policy, guard_enabled, guard_provider_health, guard_provider_last_error, presence_stale_after_s, registry_backend, registry_durable, registry_store_path, registry_store_ignored, session_backend, session_store_path, session_store_mount, session_store_ignored, rate_limit_per_minute, global_rate_limit_per_minute, ingest_sweep_enabled, ingest_sweep_interval_secs, rss_poll_enabled, rss_poll_status, rss_last_poll_at, rss_items_seen, rss_dedupe_hits, rss_feed_status, queue_depth, queue_depth_history, health, agents_online, agents_total, log_level, log_format, webhook_signing, federation_enabled, federation_require_peer, federation_require_peer_configured, federation_require_peer_effective, federation_peer_count, federation_token_only_accepted, federation_hold_queue, metrics_enabled, pprof_enabled, build]
                 properties:
                   management_surface:
                     type: string
@@ -454,6 +454,29 @@ paths:
                       default 600). 0 when the sweep is off — an off posture
                       reports no cadence rather than the one it would use.
                     example: 0
+                  rss_poll_enabled:
+                    type: boolean
+                    description: RSS/Atom polling gate; false is disabled, not healthy.
+                  rss_poll_status:
+                    type: string
+                    enum: [disabled, starting, ok]
+                    description: Poller health projection; disabled is explicit when polling is not armed.
+                  rss_last_poll_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Time of the most recently completed feed request, or null before the first poll.
+                  rss_items_seen:
+                    type: integer
+                    description: Number of feed items observed across completed successful polls.
+                  rss_dedupe_hits:
+                    type: integer
+                    description: Number of feed items skipped because their per-feed stable id was already seen.
+                  rss_feed_status:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: Per-feed last HTTP status or stable poll error class.
                   queue_depth:
                     type: object
                     nullable: true

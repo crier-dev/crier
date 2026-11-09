@@ -11,6 +11,7 @@ import (
 	"github.com/crier-dev/crier/internal/buildinfo"
 	"github.com/crier-dev/crier/internal/federation"
 	"github.com/crier-dev/crier/internal/guard"
+	"github.com/crier-dev/crier/internal/ingest"
 	"github.com/crier-dev/crier/internal/registry"
 )
 
@@ -415,6 +416,14 @@ type statusResponse struct {
 	// it would have if switched on.
 	IngestSweepEnabled      bool `json:"ingest_sweep_enabled"`
 	IngestSweepIntervalSecs int  `json:"ingest_sweep_interval_secs"`
+	// RSSPoll reports the live RSS/Atom poller health. Disabled is explicit so
+	// operators do not mistake an unarmed poller for a healthy one.
+	RSSPollEnabled bool              `json:"rss_poll_enabled"`
+	RSSPollStatus  string            `json:"rss_poll_status"`
+	RSSLastPollAt  *time.Time        `json:"rss_last_poll_at"`
+	RSSItemsSeen   int               `json:"rss_items_seen"`
+	RSSDedupeHits  int               `json:"rss_dedupe_hits"`
+	RSSFeedStatus  map[string]string `json:"rss_feed_status"`
 	// Build is the running binary's identity — byte-for-byte the object
 	// GET /version serves.
 	Build buildinfo.Info `json:"build"`
@@ -543,6 +552,26 @@ func newQueueHistory() *queueHistory { return &queueHistory{} }
 func newStatusHandlerFull(cfg config.Config, registryBackend string, read queueDepthReader, history *queueHistory, probe healthProbe, aggregator statusAggregator, extras ...any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := buildStatusResponse(cfg, registryBackend)
+		for _, extra := range extras {
+			if health, ok := extra.(func() ingest.PollHealth); ok && health != nil {
+				poll := health()
+				resp.RSSPollEnabled = poll.Enabled
+				if !poll.Enabled {
+					resp.RSSPollStatus = "disabled"
+				} else if poll.LastPollAt.IsZero() {
+					resp.RSSPollStatus = "starting"
+				} else {
+					resp.RSSPollStatus = "ok"
+				}
+				if !poll.LastPollAt.IsZero() {
+					last := poll.LastPollAt
+					resp.RSSLastPollAt = &last
+				}
+				resp.RSSItemsSeen = poll.ItemsSeen
+				resp.RSSDedupeHits = poll.DedupeHits
+				resp.RSSFeedStatus = poll.FeedStatus
+			}
+		}
 		if cfg.Permissions.Enabled {
 			// Production passes the live registry handler as the aggregator.
 			// Reuse its actual gate; an unwired handler stays fail-closed.

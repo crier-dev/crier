@@ -1005,6 +1005,9 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 	var webhookIngest *ingest.Handler
 	var rssCancel context.CancelFunc
 	var rssDone <-chan struct{}
+	rssHealth := func() ingest.PollHealth {
+		return ingest.PollHealth{Enabled: false, FeedStatus: map[string]string{}}
+	}
 	// CR_INGEST_RSS_ENABLED is parsed by config.LoadFrom; false leaves the poller unstarted.
 	if cfg.RSS.Enabled {
 		feeds, feedErr := ingest.LoadFeeds(cfg.RSS.ConfigFile, func(id string) bool {
@@ -1036,6 +1039,8 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		}
 		defer func() { _ = store.Close() }()
 		rssPoller := &ingest.RSSPoller{Feeds: feeds, Store: store, Inbox: registryInbox{handler: registryHandler}, MaxItemBytes: cfg.RSS.MaxItemBytes}
+		rssPoller.MarkEnabled()
+		rssHealth = rssPoller.Health
 		var pollCtx context.Context
 		pollCtx, rssCancel = context.WithCancel(context.Background())
 		defer rssCancel()
@@ -1280,7 +1285,7 @@ func runWithEnv(args []string, sigCh <-chan os.Signal, getenv config.Getenv) int
 		return false, false
 	}
 	r.HandleFunc("/status", newStatusHandlerFull(cfg, regBackend,
-		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture, guardHealth)).Methods("GET")
+		newQueueDepthReader(regStore), newQueueHistory(), statusHealthProbe, registryHandler, readFedPosture, guardHealth, rssHealth)).Methods("GET")
 
 	// The A2A surfaces (Agent Card discovery, INT-A2A-002 + JSON-RPC binding,
 	// INT-A2A-003..005) are mounted by the a2a protocol adapter inside the

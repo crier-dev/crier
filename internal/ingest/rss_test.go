@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,13 +28,14 @@ func TestRSSPollConditionalDedupRestartAndTrustMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	body := `<rss version="2.0"><channel><item><title>one</title><guid>guid-1</guid></item><item><title>two</title><guid>guid-2</guid></item></channel></rss>`
+	body := `<rss version="2.0"><channel><item><title>one</title><link>https://example.com/one</link><guid>guid-1</guid></item><item><title>two</title><guid>guid-2</guid></item></channel></rss>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == "v1" {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		w.Header().Set("ETag", "v1")
+		w.Header().Set("Last-Modified", "Mon, 02 Jan 2006 15:04:05 GMT")
 		_, _ = w.Write([]byte(body))
 	}))
 	defer server.Close()
@@ -47,11 +49,17 @@ func TestRSSPollConditionalDedupRestartAndTrustMark(t *testing.T) {
 	if len(cap.messages) != 2 {
 		t.Fatalf("first poll got %d messages", len(cap.messages))
 	}
+	var firstPayload struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(cap.messages[0].Payload, &firstPayload); err != nil || firstPayload.URL != "https://example.com/one" {
+		t.Fatalf("first payload URL = %q, err=%v", firstPayload.URL, err)
+	}
 	for _, m := range cap.messages {
 		if m.Author.System != "feed-releases" || !strings.Contains(strings.Join(m.Tags, ","), "untrusted:feed") {
 			t.Fatalf("identity/trust marker missing: %#v", m)
 		}
-		if !strings.HasPrefix(m.IdempotencyKey, "rss:releases:guid-") {
+		if !strings.HasPrefix(m.IdempotencyKey, "rss:releases:") {
 			t.Fatalf("idempotency key %q", m.IdempotencyKey)
 		}
 	}
@@ -61,12 +69,15 @@ func TestRSSPollConditionalDedupRestartAndTrustMark(t *testing.T) {
 	if len(cap.messages) != 2 {
 		t.Fatalf("304 redelivered, total=%d", len(cap.messages))
 	}
-	body = `<rss version="2.0"><channel><item><title>one</title><guid>guid-1</guid></item><item><title>two</title><guid>guid-2</guid></item><item><title>three</title><guid>guid-3</guid></item></channel></rss>`
+	body = `<rss version="2.0"><channel><item><title>one</title><link>https://example.com/one</link><guid>guid-1</guid></item><item><title>two</title><guid>guid-2</guid></item><item><title>three</title><link>https://example.com/three</link><guid>guid-3</guid></item></channel></rss>`
 	// The fixture omits a 304 after its initial conditional response to simulate a changed feed.
 	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == "v2" {
 			w.WriteHeader(http.StatusNotModified)
 			return
+		}
+		if r.Header.Get("If-Modified-Since") != "Mon, 02 Jan 2006 15:04:05 GMT" {
+			t.Errorf("missing If-Modified-Since validator: %q", r.Header.Get("If-Modified-Since"))
 		}
 		w.Header().Set("ETag", "v2")
 		_, _ = w.Write([]byte(body))
@@ -83,6 +94,10 @@ func TestRSSPollConditionalDedupRestartAndTrustMark(t *testing.T) {
 	}
 	if state.ETag != "v2" || len(state.Seen) != 3 {
 		t.Fatalf("state not persisted: %#v", state)
+	}
+	health := p.Health()
+	if health.ItemsSeen != 5 || health.DedupeHits != 2 || health.FeedStatus[f.ID] != "200" || health.LastPollAt.IsZero() {
+		t.Fatalf("poll health = %#v", health)
 	}
 	_ = store.Close()
 	reopened, err := OpenStore(filepath.Join(filepath.Dir(store.path), "rss.sqlite"))
