@@ -3932,6 +3932,6 @@ tasks:
     enabled/no-source returns 401 naming required auth, enabled/source returns 202;
     fresh-store migration passes; FAILIF: any required route posture arm or fresh-store
     migration fails'
-  status: in_progress
+  status: complete
   created_at: '2026-11-09T12:58:27.693122+00:00'
-  completed_at: '2026-11-09T13:04:00.472239+00:00'
+  completed_at: '2026-11-09T14:06:03.015470+00:00'
