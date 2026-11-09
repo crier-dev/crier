@@ -140,6 +140,24 @@ there is no separate reply store or rendering path. This implements D1 without l
 answer and preserves D11's same-thread attribution and D12's distinction between a plain reply and
 an explicit task. Async/batch modes, A2A, guard ordering and delivery idempotency are unchanged.
 
+### Browser/auth posture decision (UI-CRIER-001)
+
+**Decision: (c) documented API-only posture.** An auth-enabled deployment does not provide a
+browser login, cookie/session exchange, bearer-to-cookie viewer, or browser transcript exemption.
+`GET /chat` without the deployment Bearer is refused with HTTP 401, and the protected session list
+and transcript routes are refused by the same middleware; no transcript data is returned on those
+unauthenticated requests. The embedded page is therefore a public-API client for deployments where
+the caller already has the documented access path (or for the explicitly unauthenticated local-dev
+posture), not an authentication surface. It must not promise that ordinary browser navigation can
+read an auth-enabled deployment. Agent-signed writes remain a separate requirement: this browser
+cannot sign them and must display the named refusal rather than bypassing it.
+
+The shared-bearer reverse proxy remains an operator/API transport option, but it is not a browser
+login or a per-human viewer session and is not part of the browser UI contract. The authoritative
+user-facing guidance is `README.md` and `docs/fronting-auth.md`; both must preserve this API-only
+boundary. `cmd/server/ui_auth_posture_test.go` checks the documentation/page agreement and proves
+that a token-created transcript is absent from every unauthenticated response.
+
 ### Session send authority and task completion controls (DF-CRIER-376, DF-CRIER-379)
 
 2026-10-19 — The chosen option is signature enforcement, not a browser exemption.
